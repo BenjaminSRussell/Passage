@@ -1,0 +1,700 @@
+{
+ "B01": {
+  "billableTotal": "190.00",
+  "entitlementConsumed": "1",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "1"
+   ],
+   [
+    "labor",
+    "BILLABLE",
+    "2",
+    "190.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "WARRANTY",
+    "1",
+    "0",
+    "180.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "180.00"
+ },
+ "B02": {
+  "billableTotal": "480.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "fee",
+    "BILLABLE",
+    "1",
+    "25.00",
+    "0",
+    "0"
+   ],
+   [
+    "labor",
+    "BILLABLE",
+    "2",
+    "190.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "1",
+    "220.00",
+    "0",
+    "0"
+   ],
+   [
+    "travel",
+    "BILLABLE",
+    "1",
+    "45.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B03": {
+  "billableTotal": "220.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "part",
+    "BILLABLE",
+    "1",
+    "220.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B04": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "part",
+    "WARRANTY",
+    "1",
+    "0",
+    "180.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "180.00"
+ },
+ "B05": {
+  "billableTotal": "126.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "95.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "2",
+    "31.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B06": {
+  "billableTotal": "220.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "part",
+    "BILLABLE",
+    "1",
+    "220.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B07": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "part",
+    "WARRANTY",
+    "1",
+    "0",
+    "180.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "180.00"
+ },
+ "B08": {
+  "billableTotal": "125.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "WARRANTY",
+    "2",
+    "0",
+    "85.00",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "1",
+    "80.00",
+    "0",
+    "0"
+   ],
+   [
+    "travel",
+    "BILLABLE",
+    "1",
+    "45.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "85.00"
+ },
+ "B09": {
+  "billableTotal": "25.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "fee",
+    "BILLABLE",
+    "1",
+    "25.00",
+    "0",
+    "0"
+   ],
+   [
+    "labor",
+    "WARRANTY",
+    "2",
+    "0",
+    "85.00",
+    "0"
+   ],
+   [
+    "part",
+    "WARRANTY",
+    "1",
+    "0",
+    "50.00",
+    "0"
+   ],
+   [
+    "travel",
+    "WARRANTY",
+    "1",
+    "0",
+    "20.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "155.00"
+ },
+ "B10": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "part",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B11": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "WARRANTY",
+    "3",
+    "0",
+    "120.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "120.00"
+ },
+ "B12": {
+  "billableTotal": "95.00",
+  "entitlementConsumed": "2",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "2",
+    "0",
+    "0",
+    "2"
+   ],
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "95.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B13": {
+  "billableTotal": "190.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "2",
+    "190.00",
+    "0",
+    "0"
+   ],
+   [
+    "travel",
+    "AGREEMENT",
+    "1.5",
+    "0",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B14": {
+  "billableTotal": "230.00",
+  "entitlementConsumed": "3",
+  "lines": [
+   [
+    "l1",
+    "AGREEMENT",
+    "2",
+    "0",
+    "0",
+    "2"
+   ],
+   [
+    "l2",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "1"
+   ],
+   [
+    "l2",
+    "BILLABLE",
+    "1",
+    "110.00",
+    "0",
+    "0"
+   ],
+   [
+    "l3",
+    "BILLABLE",
+    "1",
+    "120.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B15": {
+  "billableTotal": "60.00",
+  "entitlementConsumed": "1.5",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "1.5",
+    "0",
+    "0",
+    "1.5"
+   ],
+   [
+    "labor",
+    "BILLABLE",
+    "0.75",
+    "60.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B16": {
+  "billableTotal": "25.46",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "fee",
+    "BILLABLE",
+    "1",
+    "10.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "3",
+    "3.34",
+    "0",
+    "0"
+   ],
+   [
+    "travel",
+    "BILLABLE",
+    "0.5",
+    "12.12",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B17": {
+  "billableTotal": "7502",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1.5",
+    "5000",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "2.5",
+    "2502",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B18": {
+  "billableTotal": "22.431",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1.25",
+    "15.431",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "1",
+    "7.000",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B19": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "WARRANTY",
+    "1.5",
+    "0",
+    "60.19",
+    "0"
+   ],
+   [
+    "part",
+    "WARRANTY",
+    "3",
+    "0",
+    "1.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "61.19"
+ },
+ "B20": {
+  "billableTotal": "0",
+  "entitlementConsumed": "3",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "3",
+    "0",
+    "0",
+    "3"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B21": {
+  "billableTotal": "100.00",
+  "entitlementConsumed": "1",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "1"
+   ],
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "100.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B22": {
+  "billableTotal": "100.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "100.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B23": {
+  "billableTotal": "190.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "2",
+    "190.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B24": {
+  "billableTotal": "190.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "2",
+    "190.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B25": {
+  "billableTotal": "35.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "fee",
+    "BILLABLE",
+    "1",
+    "35.00",
+    "0",
+    "0"
+   ],
+   [
+    "labor",
+    "WARRANTY",
+    "2",
+    "0",
+    "80.00",
+    "0"
+   ],
+   [
+    "part",
+    "WARRANTY",
+    "1",
+    "0",
+    "50.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "130.00"
+ },
+ "B26": {
+  "billableTotal": "0.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "0.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B27": {
+  "billableTotal": "95.00",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "1",
+    "95.00",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "AGREEMENT",
+    "1",
+    "0",
+    "0",
+    "0"
+   ],
+   [
+    "travel",
+    "WARRANTY",
+    "1",
+    "0",
+    "15.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "15.00"
+ },
+ "B28": {
+  "billableTotal": "246915454.91",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "labor",
+    "BILLABLE",
+    "7.5",
+    "1874.92",
+    "0",
+    "0"
+   ],
+   [
+    "part",
+    "BILLABLE",
+    "2",
+    "246913579.99",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ },
+ "B29": {
+  "billableTotal": "0",
+  "entitlementConsumed": "0",
+  "lines": [
+   [
+    "pa",
+    "WARRANTY",
+    "1",
+    "0",
+    "0.00",
+    "0"
+   ],
+   [
+    "pb",
+    "WARRANTY",
+    "2",
+    "0",
+    "25.00",
+    "0"
+   ]
+  ],
+  "warrantyCost": "25.00"
+ },
+ "B30": {
+  "billableTotal": "30.00",
+  "entitlementConsumed": "0.25",
+  "lines": [
+   [
+    "labor",
+    "AGREEMENT",
+    "0.25",
+    "0",
+    "0",
+    "0.25"
+   ],
+   [
+    "travel",
+    "BILLABLE",
+    "1",
+    "30.00",
+    "0",
+    "0"
+   ]
+  ],
+  "warrantyCost": "0"
+ }
+}

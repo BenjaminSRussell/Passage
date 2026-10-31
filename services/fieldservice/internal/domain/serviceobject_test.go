@@ -102,3 +102,39 @@ func TestWarrantyEnd(t *testing.T) {
 		t.Fatal("a warranty that has not started has no end day")
 	}
 }
+
+// Regression: a term that starts on a day the end month does not have ends on
+// that month's last day (31 Aug + 6 months = 28 Feb, as Postgres
+// date + interval and the repo's AddMonthsClamped compute it). time.AddDate
+// overflowed into the next month (3 Mar), so the warranty covered work done
+// on 28 Feb, 1 Mar and 2 Mar after its term.
+func TestWarrantyEnd_ClampsToTheEndOfAShortMonth(t *testing.T) {
+	day := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+	tests := []struct {
+		start  time.Time
+		months int
+		end    time.Time
+	}{
+		{day(2025, 8, 31), 6, day(2026, 2, 28)},
+		{day(2027, 8, 31), 6, day(2028, 2, 29)}, // leap year
+		{day(2026, 1, 31), 1, day(2026, 2, 28)},
+		{day(2026, 3, 31), 1, day(2026, 4, 30)},
+		{day(2028, 2, 29), 12, day(2029, 2, 28)},
+		{day(2026, 1, 30), 13, day(2027, 2, 28)},
+		{day(2026, 10, 23), 12, day(2027, 10, 23)}, // no clamping needed
+	}
+	for _, tc := range tests {
+		term := WarrantyTerm{StartTrigger: StartShip, Months: tc.months, PartsCovered: true}
+		start := tc.start
+		if end := WarrantyEnd(term, &start); end == nil || !end.Equal(tc.end) {
+			t.Errorf("%s + %d months: end = %v, want %s", tc.start.Format(DateLayout), tc.months, end, tc.end.Format(DateLayout))
+		}
+		lastCovered := tc.end.AddDate(0, 0, -1)
+		if !WarrantyCoverOn(term, &start, lastCovered).Active {
+			t.Errorf("%s + %d months: %s must still be covered", tc.start.Format(DateLayout), tc.months, lastCovered.Format(DateLayout))
+		}
+		if WarrantyCoverOn(term, &start, tc.end).Active || WarrantyActive(start, tc.months, tc.end, false) {
+			t.Errorf("%s + %d months: %s is past the term", tc.start.Format(DateLayout), tc.months, tc.end.Format(DateLayout))
+		}
+	}
+}

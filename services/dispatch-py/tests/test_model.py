@@ -99,3 +99,18 @@ def test_consecutive_stops_need_travel_and_buffer():
 def test_problem_rejects_non_square_matrix():
     with pytest.raises(ValueError):
         Problem(technicians=(tech(),), work_orders=(wo(),), travel=((0, 1), (1,)))
+
+
+# Regression: with a repeated work order id the greedy solver scheduled it twice,
+# and with a repeated technician id it merged two routes into one, so its plan
+# failed plan_violations ("assigned more than once", "duplicate sequence numbers").
+@pytest.mark.parametrize(
+    ("techs", "wos"),
+    [
+        ((tech(),), (wo(), wo())),
+        ((tech(), tech(skills=frozenset({"elec"}))), (wo(),)),
+    ],
+)
+def test_problem_rejects_duplicate_ids(techs, wos):
+    with pytest.raises(ValueError, match="duplicate"):
+        Problem(technicians=techs, work_orders=wos, travel=TRAVEL)

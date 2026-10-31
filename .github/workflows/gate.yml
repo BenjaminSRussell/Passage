@@ -43,6 +43,7 @@ jobs:
             py:
               - 'services/configurator-py/**'
               - 'services/scheduler-py/**'
+              - 'services/dispatch-py/**'
               - '.github/workflows/**'
             charts:
               - 'services/**/charts/**'
