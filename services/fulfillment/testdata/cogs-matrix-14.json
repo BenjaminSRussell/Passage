@@ -1,0 +1,1286 @@
+{
+ "cells": [
+  {
+   "cogsAtShipment": false,
+   "currency": "USD",
+   "id": "stocked-running-average/physical",
+   "journal": [
+    {
+     "account": "1405",
+     "amount": "125.00",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-125.00",
+     "orderLineId": "L1"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "1405",
+     "amount": "125.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "1405",
+     "amount": "125.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerTotal": "125.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "10",
+     "unitCost": "12.50"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "1405",
+     "amount": "-125.00",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "orderLineId": "L1"
+    }
+   ],
+   "note": "AC-28.1: 10 units at the running-average snapshot 12.50 USD",
+   "policy": "physical",
+   "scenario": "stocked-running-average",
+   "totalCost": "125.00"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "USD",
+   "id": "stocked-running-average/cogs-at-shipment",
+   "journal": [
+    {
+     "account": "5000",
+     "amount": "125.00",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-125.00",
+     "orderLineId": "L1"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "5000",
+     "amount": "125.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "5000",
+     "amount": "125.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerTotal": "125.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "10",
+     "unitCost": "12.50"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "5000",
+     "amount": "-125.00",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "125.00",
+     "orderLineId": "L1"
+    }
+   ],
+   "note": "AC-28.1: 10 units at the running-average snapshot 12.50 USD",
+   "policy": "cogs-at-shipment",
+   "scenario": "stocked-running-average",
+   "totalCost": "125.00"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "USD",
+   "id": "stocked-fifo-estimate/physical",
+   "journal": [
+    {
+     "account": "1405",
+     "amount": "11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "-2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1405",
+     "amount": "10.00",
+     "orderLineId": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "-10.00",
+     "orderLineId": "L3"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "1405",
+     "amount": "11.50",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "2.51",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1405",
+     "amount": "10.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L3"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "1405",
+     "amount": "11.50",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "2.51",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1405",
+     "amount": "10.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L3"
+    }
+   ],
+   "ledgerTotal": "24.01",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "7",
+     "unitCost": "1.642857"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L2",
+     "qty": "3",
+     "unitCost": "0.835"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L3",
+     "qty": "0.5",
+     "unitCost": "19.99"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "1405",
+     "amount": "-11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "-2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1405",
+     "amount": "-10.00",
+     "orderLineId": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "orderLineId": "L3"
+    }
+   ],
+   "note": "FIFO estimate snapshots with six decimals; 3 x 0.835 = 2.505 rounds to 2.51 (half away from zero; half-even would give 2.50)",
+   "policy": "physical",
+   "scenario": "stocked-fifo-estimate",
+   "totalCost": "24.01"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "USD",
+   "id": "stocked-fifo-estimate/cogs-at-shipment",
+   "journal": [
+    {
+     "account": "5000",
+     "amount": "11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "-2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "5000",
+     "amount": "10.00",
+     "orderLineId": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "-10.00",
+     "orderLineId": "L3"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "5000",
+     "amount": "11.50",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "2.51",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "5000",
+     "amount": "10.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L3"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "5000",
+     "amount": "11.50",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "2.51",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "5000",
+     "amount": "10.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L3"
+    }
+   ],
+   "ledgerTotal": "24.01",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "7",
+     "unitCost": "1.642857"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L2",
+     "qty": "3",
+     "unitCost": "0.835"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L3",
+     "qty": "0.5",
+     "unitCost": "19.99"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "5000",
+     "amount": "-11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "11.50",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "-2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "2.51",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "5000",
+     "amount": "-10.00",
+     "orderLineId": "L3"
+    },
+    {
+     "account": "1400",
+     "amount": "10.00",
+     "orderLineId": "L3"
+    }
+   ],
+   "note": "FIFO estimate snapshots with six decimals; 3 x 0.835 = 2.505 rounds to 2.51 (half away from zero; half-even would give 2.50)",
+   "policy": "cogs-at-shipment",
+   "scenario": "stocked-fifo-estimate",
+   "totalCost": "24.01"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "EUR",
+   "id": "standard-cost/physical",
+   "journal": [
+    {
+     "account": "1405",
+     "amount": "13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "20.00",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "-20.00",
+     "orderLineId": "L2"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "1405",
+     "amount": "13.33",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "20.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "1405",
+     "amount": "13.33",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "20.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    }
+   ],
+   "ledgerTotal": "33.33",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "4",
+     "unitCost": "3.333"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L2",
+     "qty": "6",
+     "unitCost": "3.333"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "1405",
+     "amount": "-13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "-20.00",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "orderLineId": "L2"
+    }
+   ],
+   "note": "Standard-cost item at its standard 3.333 EUR; no variance at shipment",
+   "policy": "physical",
+   "scenario": "standard-cost",
+   "totalCost": "33.33"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "EUR",
+   "id": "standard-cost/cogs-at-shipment",
+   "journal": [
+    {
+     "account": "5000",
+     "amount": "13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "20.00",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "-20.00",
+     "orderLineId": "L2"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "5000",
+     "amount": "13.33",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "20.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "5000",
+     "amount": "13.33",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "20.00",
+     "debitCredit": "D",
+     "sourceLineRef": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "debitCredit": "C",
+     "sourceLineRef": "L2"
+    }
+   ],
+   "ledgerTotal": "33.33",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "4",
+     "unitCost": "3.333"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L2",
+     "qty": "6",
+     "unitCost": "3.333"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "5000",
+     "amount": "-13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "13.33",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "-20.00",
+     "orderLineId": "L2"
+    },
+    {
+     "account": "1400",
+     "amount": "20.00",
+     "orderLineId": "L2"
+    }
+   ],
+   "note": "Standard-cost item at its standard 3.333 EUR; no variance at shipment",
+   "policy": "cogs-at-shipment",
+   "scenario": "standard-cost",
+   "totalCost": "33.33"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "USD",
+   "id": "drop-ship/physical",
+   "journal": [],
+   "ledgerCancel": [],
+   "ledgerPost": [],
+   "ledgerTotal": "0.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "DROP_SHIP",
+     "orderLineId": "L1",
+     "qty": "5",
+     "unitCost": "9.00"
+    }
+   ],
+   "mirror": [],
+   "note": "Drop-ship line: no posting at the packing slip (COGS at vendor confirmation)",
+   "policy": "physical",
+   "scenario": "drop-ship",
+   "totalCost": "0.00"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "USD",
+   "id": "drop-ship/cogs-at-shipment",
+   "journal": [],
+   "ledgerCancel": [],
+   "ledgerPost": [],
+   "ledgerTotal": "0.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "DROP_SHIP",
+     "orderLineId": "L1",
+     "qty": "5",
+     "unitCost": "9.00"
+    }
+   ],
+   "mirror": [],
+   "note": "Drop-ship line: no posting at the packing slip (COGS at vendor confirmation)",
+   "policy": "cogs-at-shipment",
+   "scenario": "drop-ship",
+   "totalCost": "0.00"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "USD",
+   "id": "non-stocked-service/physical",
+   "journal": [],
+   "ledgerCancel": [],
+   "ledgerPost": [],
+   "ledgerTotal": "0.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L1",
+     "qty": "1",
+     "unitCost": "100.00"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L2",
+     "qty": "2.5",
+     "unitCost": "40.00"
+    }
+   ],
+   "mirror": [],
+   "note": "Non-stocked and service lines: no posting",
+   "policy": "physical",
+   "scenario": "non-stocked-service",
+   "totalCost": "0.00"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "USD",
+   "id": "non-stocked-service/cogs-at-shipment",
+   "journal": [],
+   "ledgerCancel": [],
+   "ledgerPost": [],
+   "ledgerTotal": "0.00",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L1",
+     "qty": "1",
+     "unitCost": "100.00"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L2",
+     "qty": "2.5",
+     "unitCost": "40.00"
+    }
+   ],
+   "mirror": [],
+   "note": "Non-stocked and service lines: no posting",
+   "policy": "cogs-at-shipment",
+   "scenario": "non-stocked-service",
+   "totalCost": "0.00"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "KWD",
+   "id": "catch-weight/physical",
+   "journal": [
+    {
+     "account": "1405",
+     "amount": "49.481",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-49.481",
+     "orderLineId": "L1"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "1405",
+     "amount": "49.481",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "1405",
+     "amount": "49.481",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerTotal": "49.481",
+   "lines": [
+    {
+     "catchWeightKg": "13.7",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "12",
+     "unitCost": "4.12345"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "1405",
+     "amount": "-49.481",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "orderLineId": "L1"
+    }
+   ],
+   "note": "Catch-weight item: 12 EA weighing 13.7 kg costs 12 x 4.12345 KWD on the inventory quantity (49.481), not on the weight",
+   "policy": "physical",
+   "scenario": "catch-weight",
+   "totalCost": "49.481"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "KWD",
+   "id": "catch-weight/cogs-at-shipment",
+   "journal": [
+    {
+     "account": "5000",
+     "amount": "49.481",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-49.481",
+     "orderLineId": "L1"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "5000",
+     "amount": "49.481",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "5000",
+     "amount": "49.481",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    }
+   ],
+   "ledgerTotal": "49.481",
+   "lines": [
+    {
+     "catchWeightKg": "13.7",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "12",
+     "unitCost": "4.12345"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "5000",
+     "amount": "-49.481",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "49.481",
+     "orderLineId": "L1"
+    }
+   ],
+   "note": "Catch-weight item: 12 EA weighing 13.7 kg costs 12 x 4.12345 KWD on the inventory quantity (49.481), not on the weight",
+   "policy": "cogs-at-shipment",
+   "scenario": "catch-weight",
+   "totalCost": "49.481"
+  },
+  {
+   "cogsAtShipment": false,
+   "currency": "JPY",
+   "id": "mixed-slip-zero-decimals/physical",
+   "journal": [
+    {
+     "account": "1405",
+     "amount": "1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "1",
+     "orderLineId": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "-1",
+     "orderLineId": "L6"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "1405",
+     "amount": "1001",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "1",
+     "debitCredit": "C",
+     "sourceLineRef": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "debitCredit": "D",
+     "sourceLineRef": "L6"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "1405",
+     "amount": "1001",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "1",
+     "debitCredit": "D",
+     "sourceLineRef": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "debitCredit": "C",
+     "sourceLineRef": "L6"
+    }
+   ],
+   "ledgerTotal": "1002",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "3",
+     "unitCost": "333.5"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "DROP_SHIP",
+     "orderLineId": "L2",
+     "qty": "2",
+     "unitCost": "500"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L3",
+     "qty": "1",
+     "unitCost": "1200"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L4",
+     "qty": "4",
+     "unitCost": "0"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L5",
+     "qty": "1",
+     "unitCost": "0.4"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L6",
+     "qty": "2",
+     "unitCost": "0.5"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "1405",
+     "amount": "-1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1405",
+     "amount": "-1",
+     "orderLineId": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "orderLineId": "L6"
+    }
+   ],
+   "note": "One slip in JPY mixing stocked, drop-ship, service and zero-cost lines; 1 x 0.4 JPY rounds to 0 and posts nothing, 3 x 333.5 = 1000.5 rounds to 1001",
+   "policy": "physical",
+   "scenario": "mixed-slip-zero-decimals",
+   "totalCost": "1002"
+  },
+  {
+   "cogsAtShipment": true,
+   "currency": "JPY",
+   "id": "mixed-slip-zero-decimals/cogs-at-shipment",
+   "journal": [
+    {
+     "account": "5000",
+     "amount": "1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "-1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "1",
+     "orderLineId": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "-1",
+     "orderLineId": "L6"
+    }
+   ],
+   "ledgerCancel": [
+    {
+     "account": "5000",
+     "amount": "1001",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "1",
+     "debitCredit": "C",
+     "sourceLineRef": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "debitCredit": "D",
+     "sourceLineRef": "L6"
+    }
+   ],
+   "ledgerPost": [
+    {
+     "account": "5000",
+     "amount": "1001",
+     "debitCredit": "D",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "debitCredit": "C",
+     "sourceLineRef": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "1",
+     "debitCredit": "D",
+     "sourceLineRef": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "debitCredit": "C",
+     "sourceLineRef": "L6"
+    }
+   ],
+   "ledgerTotal": "1002",
+   "lines": [
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L1",
+     "qty": "3",
+     "unitCost": "333.5"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "DROP_SHIP",
+     "orderLineId": "L2",
+     "qty": "2",
+     "unitCost": "500"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "NON_STOCKED",
+     "orderLineId": "L3",
+     "qty": "1",
+     "unitCost": "1200"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L4",
+     "qty": "4",
+     "unitCost": "0"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L5",
+     "qty": "1",
+     "unitCost": "0.4"
+    },
+    {
+     "catchWeightKg": "",
+     "kind": "STOCKED",
+     "orderLineId": "L6",
+     "qty": "2",
+     "unitCost": "0.5"
+    }
+   ],
+   "mirror": [
+    {
+     "account": "5000",
+     "amount": "-1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "1400",
+     "amount": "1001",
+     "orderLineId": "L1"
+    },
+    {
+     "account": "5000",
+     "amount": "-1",
+     "orderLineId": "L6"
+    },
+    {
+     "account": "1400",
+     "amount": "1",
+     "orderLineId": "L6"
+    }
+   ],
+   "note": "One slip in JPY mixing stocked, drop-ship, service and zero-cost lines; 1 x 0.4 JPY rounds to 0 and posts nothing, 3 x 333.5 = 1000.5 rounds to 1001",
+   "policy": "cogs-at-shipment",
+   "scenario": "mixed-slip-zero-decimals",
+   "totalCost": "1002"
+  }
+ ],
+ "fixture": "cogs-matrix-14",
+ "source": "testdata/gen_cogs_matrix14.py (python3 -I), independent of the Go engine"
+}
