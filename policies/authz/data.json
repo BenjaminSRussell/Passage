@@ -215,7 +215,7 @@
       {"resource": "/v1/inventory/blockings", "methods": ["POST"]},
       {"resource": "/v1/inventory/blockings/*:release", "methods": ["POST"]}
     ]},
-    "inventory.transaction.apply": {"permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
+    "inventory.transaction.apply": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
     "inventory.transaction.step": {"permissions": [
       {"resource": "/v1/inventory/transactions/*:unpick", "methods": ["POST"]},
       {"resource": "/v1/inventory/transactions/*:unregister", "methods": ["POST"]},
@@ -636,7 +636,7 @@
       {"resource": "/v1/costing/versions/*/transition", "methods": ["POST"]},
       {"resource": "/v1/costing/versions:transition", "methods": ["POST"]}
     ]},
-    "CostingSystem": {"permissions": [{"resource": "/v1/costing/variances/compute", "methods": ["POST"]}]},
+    "CostingSystem": {"service_only": true, "permissions": [{"resource": "/v1/costing/variances/compute", "methods": ["POST"]}]},
     "CostingView": {"permissions": [
       {"resource": "/v1/costing/comparisons", "methods": ["POST"]},
       {"resource": "/v1/costing/cost-components", "methods": ["GET"]},
@@ -1148,7 +1148,7 @@
       {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders:expire", "methods": ["POST"]}
     ]},
-    "TMS_TRACK_INGEST": {"permissions": [{"resource": "/v1/transport/tracking-events", "methods": ["POST"]}]},
+    "TMS_TRACK_INGEST": {"service_only": true, "permissions": [{"resource": "/v1/transport/tracking-events", "methods": ["POST"]}]},
     "TMS_VIEW": {"permissions": [
       {"resource": "/v1/transport/freight-bills", "methods": ["GET"]},
       {"resource": "/v1/transport/freight-bills/*", "methods": ["GET"]},
@@ -1339,8 +1339,8 @@
       {"resource": "/v1/costing/aging/bucket-sets", "methods": ["POST"]},
       {"resource": "/v1/costing/aging/snapshots", "methods": ["POST"]}
     ]},
-    "costing.cost-transaction.post": {"permissions": [{"resource": "/internal/v1/costing/cost-transactions", "methods": ["POST"]}]},
-    "costing.ppv.post": {"permissions": [{"resource": "/internal/v1/costing/ppv", "methods": ["POST"]}]},
+    "costing.cost-transaction.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/costing/cost-transactions", "methods": ["POST"]}]},
+    "costing.ppv.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/costing/ppv", "methods": ["POST"]}]},
     "costing.read": {"permissions": [
       {"resource": "/v1/costing/adjustments", "methods": ["GET"]},
       {"resource": "/v1/costing/adjustments/*", "methods": ["GET"]},
@@ -1946,7 +1946,7 @@
       {"resource": "/v1/sales/backorder-runs/*:commit", "methods": ["POST"]},
       {"resource": "/v1/sales/backorder-runs:preview", "methods": ["POST"]}
     ]},
-    "sales.channel.intake": {"permissions": [
+    "sales.channel.intake": {"service_only": true, "permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
       {"resource": "/v1/sales/product-proposals:respond", "methods": ["POST"]}
     ]},
@@ -2074,7 +2074,7 @@
     "shopfloor.check.override": {"flag": true, "permissions": []},
     "shopfloor.job.schedule": {"permissions": [{"resource": "/v1/shopfloor/jobs", "methods": ["POST"]}]},
     "shopfloor.kiosk.login": {"permissions": [{"resource": "/v1/shopfloor/sessions:badge", "methods": ["POST"]}]},
-    "shopfloor.machine.ingest": {"permissions": [{"resource": "/v1/shopfloor/machine-events", "methods": ["POST"]}]},
+    "shopfloor.machine.ingest": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/machine-events", "methods": ["POST"]}]},
     "shopfloor.oee.rollup": {"permissions": [{"resource": "/v1/shopfloor/oee:rollup", "methods": ["POST"]}]},
     "shopfloor.pay.approve": {"permissions": [{"resource": "/v1/shopfloor/pay:approve", "methods": ["POST"]}]},
     "shopfloor.pay.calculate": {"permissions": [{"resource": "/v1/shopfloor/pay:calculate", "methods": ["POST"]}]},
@@ -2102,7 +2102,7 @@
       {"resource": "/v1/shopfloor/workers", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/workers/*:assign-setup", "methods": ["POST"]}
     ]},
-    "shopfloor.time.autoclockout": {"permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
+    "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
     "shopfloor.time.register": {"permissions": [
       {"resource": "/v1/shopfloor/downtimes/*:code", "methods": ["POST"]},

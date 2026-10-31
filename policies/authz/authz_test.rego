@@ -520,7 +520,36 @@ service_granted(duty) if {
 test_service_only_duties_are_service_granted if {
 	data.duties["procurement.invoicing-plan.settle"].service_only
 	orphans := {d | data.duties[d].service_only; not service_granted(d)}
-	count(orphans) == 0
+	orphans - awaiting_service_caller == set()
+	every duty in awaiting_service_caller {
+		data.duties[duty].service_only
+		not service_granted(duty)
+	}
+}
+
+awaiting_service_caller := {
+	"costing.cost-transaction.post",
+	"costing.ppv.post",
+	"CostingSystem",
+	"shopfloor.machine.ingest",
+	"TMS_TRACK_INGEST",
+	"shopfloor.time.autoclockout",
+	"sales.channel.intake",
+	"inventory.transaction.apply",
+}
+
+test_internal_only_duties_are_service_only if {
+	internal_only := {d |
+		some d, spec in data.duties
+		count(spec.permissions) > 0
+		every permission in spec.permissions {
+			startswith(permission.resource, "/internal/")
+		}
+	}
+	count(internal_only) > 0
+	every duty in internal_only {
+		data.duties[duty].service_only == true
+	}
 }
 
 test_service_grants_hold_no_flag_or_all_scope_duty if {

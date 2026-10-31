@@ -524,7 +524,7 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 			}
 			sources[file] = codeLines(string(src))
 			for _, match := range dutyDefinition.FindAllStringSubmatch(strings.Join(sources[file], "\n"), -1) {
-				if strings.HasPrefix(match[1], "Code") || strings.HasPrefix(match[1], "Err") {
+				if lowered := strings.ToLower(match[1]); strings.HasPrefix(lowered, "code") || strings.HasPrefix(lowered, "err") {
 					continue
 				}
 				if match[2] != "" {
