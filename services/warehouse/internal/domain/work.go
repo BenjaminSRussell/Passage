@@ -13,6 +13,7 @@ const (
 	WorkPartiallyComplete WorkStatus = "PARTIALLY_COMPLETED"
 	WorkCancelled         WorkStatus = "CANCELLED"
 	WorkBlockedNoLocation WorkStatus = "BLOCKED_NO_LOCATION"
+	WorkWaiting           WorkStatus = "WAITING"
 )
 
 // allowedNext lists the legal targets from a status. COMPLETED,
@@ -21,7 +22,8 @@ const (
 // BLOCKED_NO_LOCATION only at creation (BR-31.1 step 6), never from OPEN.
 // BLOCKED_NO_LOCATION → CANCELLED is not named by BR-31.3 but is allowed: a
 // blocked work has no confirmed line, and without it a wave could never drop
-// a line no directive can place.
+// a line no directive can place. WAITING work has a place for every line but
+// depends on open refill work; it becomes OPEN when the last of them completes.
 func allowedNext(from WorkStatus) []WorkStatus {
 	switch from {
 	case WorkOpen:
@@ -30,7 +32,7 @@ func allowedNext(from WorkStatus) []WorkStatus {
 		return []WorkStatus{WorkInProgress, WorkOpen, WorkCancelled}
 	case WorkInProgress:
 		return []WorkStatus{WorkCompleted, WorkPartiallyComplete}
-	case WorkBlockedNoLocation:
+	case WorkBlockedNoLocation, WorkWaiting:
 		return []WorkStatus{WorkOpen, WorkCancelled}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,6 +86,9 @@ type WorkLine struct {
 	Status         LineStatus        `json:"status"`
 	Reason         string            `json:"reason,omitempty"`
 	Attributes     map[string]string `json:"attributes,omitempty"`
+	// WorkID and Refill tell Reserve which work an open line came from and whether it is replenishment.
+	WorkID string `json:"-"`
+	Refill bool   `json:"-"`
 	// ConfirmKey is the Idempotency-Key of the confirmation (BR-31.8).
 	ConfirmKey string `json:"-"`
 }
@@ -101,6 +105,7 @@ type Work struct {
 	AssignedUser string     `json:"assignedUser,omitempty"`
 	AssignedAt   *time.Time `json:"assignedAt,omitempty"`
 	Version      int        `json:"version"`
+	DependsOn    []string   `json:"dependsOn,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 	Lines        []WorkLine `json:"lines"`
@@ -157,6 +162,8 @@ func CloneLocations(locs []Location) []Location {
 	for i, l := range locs {
 		l.Stock = maps.Clone(l.Stock)
 		l.inbound = maps.Clone(l.inbound)
+		l.incoming = maps.Clone(l.incoming)
+		l.incomingFrom = maps.Clone(l.incomingFrom)
 		out[i] = l
 	}
 	return out
@@ -189,6 +196,16 @@ func Reserve(locs []Location, lines []WorkLine) {
 				loc.inbound = map[string]bool{}
 			}
 			loc.inbound[l.ItemID] = true
+			if loc.incoming == nil {
+				loc.incoming = map[string]decimal.Decimal{}
+			}
+			loc.incoming[l.ItemID] = loc.incoming[l.ItemID].Add(l.Qty)
+			if l.Refill && l.WorkID != "" {
+				if loc.incomingFrom == nil {
+					loc.incomingFrom = map[string][]string{}
+				}
+				loc.incomingFrom[l.ItemID] = append(slices.Clone(loc.incomingFrom[l.ItemID]), l.WorkID)
+			}
 			continue
 		}
 		rest := loc.Stock[l.ItemID].Sub(l.Qty)
