@@ -44,6 +44,25 @@ type Release struct {
 
 	RecordedByTenant string `json:"-"`
 	Replayed         bool   `json:"-"`
+	ChainBreak       bool   `json:"-"`
+}
+
+func replayRelease(ctx context.Context, tx pgx.Tx, callerTenant string, key *string, in Release, r *Release) (bool, error) {
+	if key == nil {
+		return false, nil
+	}
+	err := scanRelease(tx.QueryRow(ctx, `select `+releaseColumns+` from platform_release where recorded_by_tenant = $1 and idempotency_key = $2`, callerTenant, *key), r)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !r.samePayload(in) {
+		return false, ErrIdempotencyConflict
+	}
+	r.Replayed = true
+	return true, nil
 }
 
 func (r Release) samePayload(o Release) bool {
@@ -90,6 +109,17 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 	}
 	var r Release
 	err := dbx.WithTenantTx(platformScope(ctx), s.pool, func(tx pgx.Tx) error {
+		replayed, err := replayRelease(ctx, tx, caller.TenantID, key, in, &r)
+		if replayed || err != nil {
+			return err
+		}
+		var known bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from platform_environment where name = $1)`, in.Environment).Scan(&known); err != nil {
+			return err
+		}
+		if !known {
+			return ErrUnknownEnvironment
+		}
 		if in.Action == ActionRollback {
 			var promoted bool
 			if err := tx.QueryRow(ctx, `select exists (select 1 from platform_release where service = $1 and environment = $2 and ((action = 'promote' and image_digest = $3) or previous_digest = $3))`,
@@ -100,28 +130,30 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 				return ErrRollbackTargetUnseen
 			}
 		}
+		var latest string
+		err = tx.QueryRow(ctx, `select image_digest from platform_release where service = $1 and environment = $2 order by created_at desc, id desc limit 1`,
+			in.Service, in.Environment).Scan(&latest)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		chainBreak := err == nil && latest != in.PreviousDigest
 		var reason *string
 		if in.Reason != "" {
 			reason = &in.Reason
 		}
-		err := scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant, recorded_by_user, reason, idempotency_key)
+		err = scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant, recorded_by_user, reason, idempotency_key)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			on conflict (recorded_by_tenant, idempotency_key) do nothing
 			returning `+releaseColumns,
 			ids.Nil, ids.New(), in.Service, in.Environment, in.Action, in.ImageDigest, in.PreviousDigest, in.GitSHA, in.Signed, caller.TenantID, actor, reason, key), &r)
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err := scanRelease(tx.QueryRow(ctx, `select `+releaseColumns+` from platform_release where recorded_by_tenant = $1 and idempotency_key = $2`, caller.TenantID, key), &r); err != nil {
-				return err
-			}
-			if !r.samePayload(in) {
-				return ErrIdempotencyConflict
-			}
-			r.Replayed = true
-			return nil
+			_, err = replayRelease(ctx, tx, caller.TenantID, key, in, &r)
+			return err
 		}
 		if err != nil {
 			return err
 		}
+		r.ChainBreak = chainBreak
 		evt, err := events.New(typ, eventSource, r.ID, ids.Nil, releaseEventData{
 			ReleaseID: r.ID, Service: r.Service, Environment: r.Environment, ImageDigest: r.ImageDigest,
 			PreviousDigest: r.PreviousDigest, GitSHA: r.GitSHA, Actor: r.Actor, Reason: r.Reason,

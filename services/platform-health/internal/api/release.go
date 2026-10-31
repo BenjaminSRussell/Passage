@@ -85,6 +85,10 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 		a.releasesReplayed.Add(1)
 	} else {
 		a.releasesRecorded.Add(1)
+		if release.ChainBreak {
+			a.chainBreaks.Add(1)
+			slog.Warn("release chain break", "service", release.Service, "environment", release.Environment, "previousDigest", release.PreviousDigest, "releaseId", release.ID, "correlationId", middleware.GetReqID(r.Context()))
+		}
 	}
 	httpx.JSON(w, http.StatusCreated, release)
 }

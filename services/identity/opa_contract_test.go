@@ -407,7 +407,6 @@ var dynamicDutyArguments = map[string]string{
 	"sales/internal/api/api.go duties":                      "requireAny forwards the duty constants its callers list",
 	"batch/internal/jobs/productclient.go duty":             "loops over the product duties the handler declares",
 	"consolidation/internal/api/api.go rt.duty":             "route table of duty constants",
-	"platform-health/internal/api/api.go duty":              "anyDutyPolicy loops over the release duty constants the route lists",
 	"platform-health/internal/api/release.go duty":          "requiredReleaseDuty returns one of the release duty constants",
 	"eam/internal/api/api.go d":                             "anyDuty loops over caller-listed duty constants",
 	"fieldservice/internal/store/generic.go accessDuty":     "category access duty read from catalogue rows",

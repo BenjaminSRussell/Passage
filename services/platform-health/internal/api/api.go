@@ -42,6 +42,7 @@ type API struct {
 	releasesRecorded atomic.Int64
 	releasesReplayed atomic.Int64
 	releasesFailed   atomic.Int64
+	chainBreaks      atomic.Int64
 }
 
 type createRequest struct {
@@ -52,22 +53,11 @@ func New(s store.Store, operatorTenant string) *API {
 	return &API{store: s, operatorTenant: operatorTenant, http: newRequestMetrics()}
 }
 
-type anyDutyPolicy []string
-
-func (d anyDutyPolicy) Allow(_ context.Context, p tenant.Principal, _, _ string) (bool, error) {
-	for _, duty := range d {
-		if p.HasDuty(duty) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/hello-ledger/entries", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/hello-ledger/entries", a.list)
-	r.With(authz.Require(anyDutyPolicy{dutyReleaseWrite, dutyApproveProd, dutyRollback}, dutyReleaseWrite, "")).Post("/v1/platform/releases", a.recordRelease)
+	r.With(authz.RequireAnyDuty(dutyReleaseWrite, dutyApproveProd, dutyRollback)).Post("/v1/platform/releases", a.recordRelease)
 	r.With(authz.RequireDuty(dutyReleaseRead)).Get("/v1/platform/releases", a.listReleases)
 }
 
@@ -79,6 +69,7 @@ func (a *API) Metrics() http.Handler {
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_recorded_total Release rows recorded.\n# TYPE hello_ledger_releases_recorded_total counter\nhello_ledger_releases_recorded_total %d\n", a.releasesRecorded.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_replayed_total Idempotent release replays answered without a new row.\n# TYPE hello_ledger_releases_replayed_total counter\nhello_ledger_releases_replayed_total %d\n", a.releasesReplayed.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_failed_total Release recordings that failed in the store.\n# TYPE hello_ledger_releases_failed_total counter\nhello_ledger_releases_failed_total %d\n", a.releasesFailed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_release_chain_breaks_total Recorded releases whose previousDigest differed from the newest recorded image for the service and environment.\n# TYPE hello_ledger_release_chain_breaks_total counter\nhello_ledger_release_chain_breaks_total %d\n", a.chainBreaks.Load())
 		a.http.write(w)
 	})
 }

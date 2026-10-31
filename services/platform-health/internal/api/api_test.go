@@ -19,18 +19,20 @@ import (
 )
 
 type fakeStore struct {
-	err      error
-	pingErr  error
-	entries  []store.Entry
-	releases []store.Release
-	lastKey  string
-	seenKeys map[string]bool
+	err        error
+	pingErr    error
+	entries    []store.Entry
+	releases   []store.Release
+	lastKey    string
+	seenKeys   map[string]bool
+	chainBreak bool
 }
 
 func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key string) (store.Release, error) {
 	if f.err != nil {
 		return store.Release{}, f.err
 	}
+	in.ChainBreak = f.chainBreak
 	in.ID, in.Actor, in.CreatedAt, f.lastKey = "rel-1", "anonymous", time.Unix(0, 0).UTC(), key
 	if key != "" && f.seenKeys[key] {
 		in.Replayed = true

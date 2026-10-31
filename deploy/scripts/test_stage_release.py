@@ -301,7 +301,7 @@ class StageReleaseTests(unittest.TestCase):
 
     @staticmethod
     def with_digest(text, digest):
-        return stage_release.DIGEST_LINE.sub(lambda m: m.group(1) + digest + m.group(3), text)
+        return stage_release.DIGEST_LINE.sub(lambda m: m.group(1) + m.group(2) + digest + m.group(2) + m.group(4), text)
 
     def prod_digest(self):
         return stage_release.read_digest((self.root / PROD_MANIFEST).read_text(encoding="utf-8"))
@@ -614,9 +614,12 @@ class StageReleaseTests(unittest.TestCase):
         self.assertEqual(len(self.cosign_calls()), 2)
 
     def test_record_classifies_a_return_to_an_earlier_digest_as_rollback(self):
-        received = self.start_release_api()
         self.publish_main(stage=PROMOTED_DIGEST)
+        promoted = self.run_git("rev-parse", "HEAD")
         self.publish_main(stage=INITIAL_DIGEST)
+        received = self.start_release_api(
+            registry=[{"gitSha": promoted, "action": "promote", "imageDigest": PROMOTED_DIGEST, "previousDigest": INITIAL_DIGEST}]
+        )
 
         self.record()
 
@@ -740,6 +743,79 @@ class StageReleaseTests(unittest.TestCase):
         self.assertIn(shas[1], errors)
         self.assertEqual([item["body"]["gitSha"] for item in received], [shas[0], shas[2]])
         self.assertEqual(received[1]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
+
+    def publish_unreadable_stage_then(self, digest):
+        template = self.manifest.read_text(encoding="utf-8")
+        self.run_git("checkout", "-q", "main")
+        self.manifest.write_text("digest: latest\n", encoding="utf-8")
+        self.run_git("add", str(STAGE_MANIFEST))
+        self.run_git("commit", "-q", "-m", "Break the stage manifest")
+        broken = self.run_git("rev-parse", "HEAD")
+        self.manifest.write_text(self.with_digest(template, digest), encoding="utf-8")
+        self.run_git("add", str(STAGE_MANIFEST))
+        self.run_git("commit", "-q", "-m", "Repair the stage manifest")
+        return broken, self.run_git("rev-parse", "HEAD")
+
+    def test_record_records_the_rest_and_exits_3_around_an_unreadable_commit(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        first, = self.publish_digests(PROMOTED_DIGEST)
+        broken, last = self.publish_unreadable_stage_then(third)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn(broken, errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [first, last])
+        self.assertEqual(received[1]["body"]["previousDigest"], PROMOTED_DIGEST)
+
+    def test_record_exits_3_when_the_only_new_digest_change_is_an_unreadable_commit(self):
+        cursor = self.run_git("rev-parse", "HEAD")
+        broken, _ = self.publish_unreadable_stage_then(INITIAL_DIGEST)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn(broken, errors)
+        self.assertEqual(received, [])
+
+    def test_quoted_digests_are_read_and_rewritten_in_place(self):
+        for quote in ('"', "'"):
+            manifest = f"image:\n  digest: {quote}{INITIAL_DIGEST}{quote}\n"
+            self.assertEqual(stage_release.read_digest(manifest), INITIAL_DIGEST)
+            path = self.root / "quoted.yaml"
+            stage_release._write_digest(path, manifest, PROMOTED_DIGEST)
+            self.assertEqual(path.read_text(encoding="utf-8"), f"image:\n  digest: {quote}{PROMOTED_DIGEST}{quote}\n")
+        with self.assertRaises(stage_release.ReleaseError):
+            stage_release.read_digest(f"digest: \"{INITIAL_DIGEST}'\n")
+
+    def test_record_classifies_a_return_to_a_pre_registry_digest_as_promote(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third)
+        registry = [{"gitSha": shas[1], "action": "promote", "imageDigest": third, "previousDigest": PROMOTED_DIGEST}]
+        self.publish_main(stage=INITIAL_DIGEST)
+        received = self.start_release_api(registry=registry)
+
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        body = received[0]["body"]
+        self.assertEqual((body["action"], body["imageDigest"], body["previousDigest"]), ("promote", INITIAL_DIGEST, third))
+
+    def test_record_classifies_a_return_to_a_registry_digest_as_rollback(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third)
+        registry = [{"gitSha": shas[1], "action": "promote", "imageDigest": third, "previousDigest": PROMOTED_DIGEST}]
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=registry)
+
+        self.record(since=cursor)
+
+        self.assertEqual(received[0]["body"]["action"], "rollback")
 
     def test_record_exits_3_on_a_422_and_the_cursor_stays_on_the_rejected_commit(self):
         cursor = self.run_git("rev-parse", "HEAD")
