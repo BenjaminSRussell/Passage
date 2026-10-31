@@ -95,9 +95,9 @@ owner's work, or a change outside this wave's paths).
 
 | AC | Status | Reason |
 |---|---|---|
-| AC1 Solomon VRP benchmarks C101, R101, RC101, C201, R201 within 110 % of best known | later slice of PSG-34 | Solomon instance files are not in the repo; the solver is covered by feasibility tests only (routing-py) |
-| AC2 200-shipment rating fixture (`rating-200.json`) matched to the cent | later slice of PSG-34 | Fixture and hand-verified spreadsheet not committed; rating unit and property tests cover the lane, minimum, dimensional, accessorial, fuel, weight-break deficit, distance and card-selection rules |
-| AC3 Match tolerance on 50 invoices and landed-cost sums | partial | Match rules and landed-cost sums are unit and property tested, and a posted voyage's allocations equal its cost total in the store test; the 50-invoice fixture (`carrier-invoices-50.json`) is not committed |
+| AC1 Solomon VRP benchmarks C101, R101, RC101, C201, R201 within 110 % of best known | met (routing-py, run locally) | `services/routing-py/tests/test_solomon.py`: all five feasible and within 10 % at 60 s. routing-py has no pipeline check kind yet, so CI does not run it |
+| AC2 200-shipment rating fixture (`rating-200.json`) matched to the cent | met | `TestRating200_RatesToExpectedCharges`: 200 shipments, 12 cards (all seven bases), 2,005 quotes in rank order with every charge, the total and the trace steps; expected values from the exact-fraction reference `internal/domain/testdata/gen_rating_200.py` (`TestRating200_FixtureMatchesReference`), which reproduces hand-worked cases first. The PRD's hand-verified spreadsheet is replaced by that reference. Miles are rounded to 0.01 before the band lookup and chargeable weight to 0.01 kg (the quantities the trace shows), so 402.33 km (249.997 mi) rates in the 250-mile band |
+| AC3 Match tolerance on 50 invoices and landed-cost sums | met | `TestCarrierInvoices50_ReconcileAsExpected` (Postgres): 50 invoices, 27 MATCHED, 17 VARIANCE, 2 UNEXPECTED_INVOICE, 4 refused (TMS-0108, TMS-0111, TMS-0112 ×2); the PRD asks for 10 variance cases, the fixture has 17 because its edge cases sit on both sides of every limit. `TestVoyage3_AllocationSumsToInvoicesExactly` (Postgres): three voyages, every share and residual line per BR-34.6, each cost line's shares sum to its invoice amount exactly. References: `internal/store/testdata/gen_carrier_invoices_50.py`, `gen_voyage_3.py` |
 | AC4 Tender cascade with timeouts on a test clock | met for the cascade | AC-34.3 is tested on a test clock in the domain, through the API and against Postgres (expired, declined, accepted events); the Temporal time-skip test waits for the workflow |
 | AC5 Each deliverable has code or a line here | met by this file | |
 | AC-34.16 screening hold, release and tender | met | `TestScreeningHold_AC3416` against Postgres: the POTENTIAL_MATCH hold refuses the tender with TMS-0133 and stores none; after a release with a reason by an officer the tender is stored and the hold shows user, time and reason. API and web tests cover the same path. "When the load is released" is the screening call until loads have a release step (D10) |
@@ -112,9 +112,9 @@ owner's work, or a change outside this wave's paths).
 
 | Item | Status | Reason |
 |---|---|---|
-| Carrier invoice fixture `carrier-invoices-50.json` with 10 variance cases | later slice of PSG-34 | Match tolerance is covered by table tests and the AC-34.4 store test |
+| Carrier invoice fixture `carrier-invoices-50.json` with 10 variance cases | met (17 variance cases) | See AC3 |
 | Reconciliation: accrued freight = account 2150; shipped loads in wms = DISPATCHED+ in tms | later slice of PSG-34 / handoff (ledger, wms) | Needs the accrual and wms data. "Landed cost posted = voyage costs" is tested for estimated costs (`TestVoyage_AllocateAC346AndReconcile`); actual costs come with D6 |
-| Fixture `voyage-3.json` | later slice of PSG-34 | The AC-34.6 voyage is built inline in the domain and store tests |
+| Fixture `voyage-3.json` | met | See AC3; estimated costs only, actual cost invoices come with D6. BR-34.6 gives a negative share when the residual line's own share is 0.00 and the residual is negative (a zero-basis line with the highest value); the PRD does not say what should happen, so the fixture does not include that case |
 
 ## Platform and contract gaps
 

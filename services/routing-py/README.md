@@ -11,6 +11,9 @@ tms_optimizer/vrp.py      solve(Problem) -> Solution; pure function, no I/O
 tms_optimizer/stacking.py plan_load(Trailer, pallets) -> LoadPlan; layer-based stacking (FR-34.18)
 tms_optimizer/api.py      FastAPI app: POST /v1/routes:solve, POST /v1/load-plans:stack, GET /healthz
 tests/test_vrp.py         feasibility tests against testdata/small-6.json and random instances
+tests/test_solomon.py     AC-34.1: Solomon C101, R101, RC101, C201, R201 at 60 s each (run side by side,
+                          about a minute), re-checked with real travel times, within 10 % of best known
+testdata/solomon/      the five Solomon 100-customer instances, unchanged from the SINTEF VRPTW page
 tests/test_stacking.py    AC-34.18 fixture, stop order, axle estimate, property tests
 tests/test_api.py         camelCase wire contract used by services/transport
 testdata/small-6.json  hand-checkable fixture: 6 stops (2,100 kg), 2 vehicles of 1,100 kg, 1 km = 1 minute

@@ -198,7 +198,8 @@ go test ./internal/store/
   lane and zone lookup with `*` wildcards and the most specific row winning; break bands in
   kg, pallets, containers, per shipment, km or miles (DISTANCE basis); the next-break
   deficit rule on WEIGHT_BREAK cards; dimensional weight (divisor per card, default 5000
-  cm³/kg); minimum charge; flat or percent accessorials; fuel surcharge percent of base;
+  cm³/kg); chargeable weight and miles are rounded to 0.01 before the band lookup, as the
+  trace shows them; minimum charge; flat or percent accessorials; fuel surcharge percent of base;
   each charge rounded to cents half-up; total = Σ charges; explain trace with the
   chargeable weight, base, weight-break, minimum, accessorial and fuel steps.
 - BR-34.10: a service with no card valid on the ship date yields one `NO_VALID_RATE_CARD`
@@ -209,7 +210,8 @@ go test ./internal/store/
   invoice numbers per carrier are TMS-0108; a bill takes one invoice (TMS-0111) from its
   own carrier in its own currency (TMS-0112). Tolerance per charge: the smaller of $5.00
   and 2 % of the expected amount, so a charge must pass both limits (this is what makes
-  AC-34.4's $5.50 on $412.50 a variance).
+  AC-34.4's $5.50 on $412.50 a variance). The 2 % is exact, not rounded to cents: on
+  $123.45 it is $2.469, so $2.47 over is a variance.
 - BR-34.6 landed-cost allocation by weight, volume, value, quantity or equal split per
   voyage cost line, shares rounded to cents with the residual on the highest-value line
   (ties: lowest line number); the receipt-line totals equal the voyage cost total to the

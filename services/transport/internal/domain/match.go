@@ -63,7 +63,9 @@ func MatchInvoice(expected, invoiced []Line, tol Tolerance) MatchResult {
 		inv := sumCode(invoiced, code)
 		variance := inv.Sub(exp)
 		allowed := tol.Abs
-		if pct := exp.Mul(tol.Pct).Div(decimal.NewFromInt(100)).Round(2); pct.LessThan(allowed) {
+		// The percent limit is exact (2 % of 123.45 is 2.469): rounding it to cents
+		// first would let a 2.47 overage, 2.0008 %, through.
+		if pct := exp.Mul(tol.Pct).Shift(-2); pct.LessThan(allowed) {
 			allowed = pct
 		}
 		within := variance.Abs().LessThanOrEqual(allowed)
