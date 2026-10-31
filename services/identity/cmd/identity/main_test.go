@@ -37,11 +37,14 @@ func TestConfigFromRejectsIncompleteOrMalformedSettings(t *testing.T) {
 		set  map[string]string
 		want string
 	}{
-		"no database":         {map[string]string{"IDENTITY_DUTY_CATALOGUE_PATH": "/data.json"}, "DATABASE_URL"},
-		"no catalogue":        {map[string]string{"DATABASE_URL": "postgres://x"}, "IDENTITY_DUTY_CATALOGUE_PATH"},
-		"bad operator":        {with(map[string]string{"IDENTITY_OPERATOR_TENANT_ID": "urn:uuid:" + operatorID}), "IDENTITY_OPERATOR_TENANT_ID"},
-		"scim without opa":    {with(map[string]string{"IDENTITY_SCIM_ISSUER_BASE": "https://sso.test/realms", "IDENTITY_SCIM_AUDIENCE": "passage"}), "IDENTITY_OPA_URL"},
-		"scim without issuer": {with(map[string]string{"IDENTITY_OPA_URL": "http://127.0.0.1:8181"}), "IDENTITY_SCIM_ISSUER_BASE"},
+		"no database":              {map[string]string{"IDENTITY_DUTY_CATALOGUE_PATH": "/data.json"}, "DATABASE_URL"},
+		"no catalogue":             {map[string]string{"DATABASE_URL": "postgres://x"}, "IDENTITY_DUTY_CATALOGUE_PATH"},
+		"bad operator":             {with(map[string]string{"IDENTITY_OPERATOR_TENANT_ID": "urn:uuid:" + operatorID}), "IDENTITY_OPERATOR_TENANT_ID"},
+		"scim without opa":         {with(map[string]string{"IDENTITY_SCIM_ISSUER_BASE": "https://sso.test/realms", "IDENTITY_SCIM_AUDIENCE": "passage"}), "IDENTITY_OPA_URL"},
+		"bundle without key":       {with(map[string]string{"IDENTITY_BUNDLE_TOKEN": "t", "IDENTITY_OPERATOR_TENANT_ID": operatorID}), "IDENTITY_BUNDLE_SIGNING_KEY_PATH"},
+		"bundle without operator":  {with(map[string]string{"IDENTITY_BUNDLE_TOKEN": "t", "IDENTITY_BUNDLE_SIGNING_KEY_PATH": "/k.pem", "IDENTITY_BUNDLE_KEY_ID": "k"}), "IDENTITY_OPERATOR_TENANT_ID"},
+		"bundle key without token": {with(map[string]string{"IDENTITY_BUNDLE_KEY_ID": "k"}), "IDENTITY_BUNDLE_TOKEN"},
+		"scim without issuer":      {with(map[string]string{"IDENTITY_OPA_URL": "http://127.0.0.1:8181"}), "IDENTITY_SCIM_ISSUER_BASE"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := configFrom(env(tc.set)); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -90,7 +93,7 @@ func testRouter(t *testing.T, withSCIM bool) http.Handler {
 		}
 		scim = identity.NewSCIMAPI(nil, verifiers, opa)
 	}
-	return newRouter(nil, cat, operatorID, scim)
+	return newRouter(nil, cat, operatorID, scim, nil)
 }
 
 func get(router http.Handler, path string, headers map[string]string) *httptest.ResponseRecorder {

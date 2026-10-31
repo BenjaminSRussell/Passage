@@ -132,6 +132,11 @@ func LoadCatalogue(raw []byte) (*Catalogue, error) {
 // HasDuty reports whether name is a seeded duty.
 func (c *Catalogue) HasDuty(name string) bool { _, ok := c.duties[name]; return ok }
 
+func (c *Catalogue) PersonAssignable(name string) bool {
+	d, ok := c.duties[name]
+	return ok && !d.serviceOnly
+}
+
 // ServiceOnly reports whether the duty is held only through a service grant
 // and must never be assigned to a person.
 func (c *Catalogue) ServiceOnly(name string) bool {
