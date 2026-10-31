@@ -84,7 +84,7 @@ A data template (`domain.DataTemplate`, FR-10.18) is `{name, entity, version, de
 | MIG-MAP-TEST-FAIL | one or more mapping tests failed; the failed names are in `errors` (422) |
 | MIG-MAP-ENUM-DEFAULT | warning: unmatched enum value mapped to `enumDefault`; the row is loaded |
 | MAP-PRECISION-LOSS | warning: decimal rounded to `scale`; the detail carries the absolute delta; the row is loaded |
-| MIG-ROW-DUPLICATE-KEY | source key repeated within one extract |
+| MIG-ROW-DUPLICATE-KEY | source key repeated within one extract; exact repeats load once, repeats with different values reject every occurrence so extract order cannot decide the load |
 | MIG-LOAD-FAILED | target loader error for the batch |
 | MIG-BACKEND-NOT-CONFIGURED | no extract and load backend wired (501) |
 | MIG-PKG-SIGNATURE | package signature or a file sha256 does not match the manifest (422) |

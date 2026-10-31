@@ -1,0 +1,101 @@
+DataAreaId,RouteId,Name,Approved,ModifiedDateTime
+demf,R000000,Prüfung QA 0,0,2012-07-29 11:35:07
+usmf,R000001,Machining  cell 2 1,1,2021-05-28 01:19:42
+usmf,R000002,Assemble “A” line 2,1,2015-11-19 19:10:53
+usmf,R000003,Weld – paint – pack 3,No,2014-07-25 09:04:00
+usmf,R000004,Prüfung QA 4,1,2018-02-24 08:50:23
+demf,R000005,Machining  cell 2 5,Yes,2015-01-22 13:39:14
+demf,R000006,Assemble “A” line 6,1,2022-11-13 04:27:29
+demf,R000007,Weld – paint – pack 7,0,2013-03-27 00:26:28
+usmf,R000008,Prüfung QA 8,1,2013-01-16 13:19:15
+demf,R000009,Machining  cell 2 9,1,2017-12-11 21:07:02
+usmf,R000010,Weld – paint – pack 10,Yes,2022-06-30 08:34:48
+usmf,R000011,Assemble “A” line 11,0,2018-10-22 05:22:13
+usmf,R000012,Machining  cell 2 12,1,2012-04-30 16:10:30
+usmf,R000013,Prüfung QA 13,1,2015-05-01 01:54:27
+usmf,R000014,Weld – paint – pack 14,1,2016-02-24 20:54:20
+usmf,R000015,Assemble “A” line 15,0,2014-12-11 13:35:21
+usmf,R000016,Machining  cell 2 16,No,2022-12-31 02:53:30
+demf,R000017,Prüfung QA 17,Yes,2014-01-29 03:41:43
+gbsi,R000018,Weld – paint – pack 18,0,2020-12-12 04:07:28
+demf,R000019,Assemble “A” line 19,1,2022-04-08 14:14:21
+usmf,R000020,Assemble “A” line 20,0,2023-07-01 07:07:45
+usmf,R000021,Weld – paint – pack 21,1,2013-11-10 22:27:16
+usmf,R000022,Prüfung QA 22,1,2012-03-11 18:24:31
+usmf,R000023,Machining  cell 2 23,1,2015-09-09 16:19:30
+usmf,R000024,Assemble “A” line 24,0,2017-11-01 12:00:13
+demf,R000025,Weld – paint – pack 25,1,2015-03-12 11:44:16
+usmf,R000026,Prüfung QA 26,1,2013-03-16 14:15:23
+demf,R000027,Machining  cell 2 27,1,2022-01-11 23:20:30
+usmf,R000028,Assemble “A” line 28,0,2021-03-10 21:12:09
+demf,R000029,Weld – paint – pack 29,0,2014-06-30 10:59:24
+usmf,R000030,Machining  cell 2 30,1,2017-05-12 23:14:22
+demf,R000031,Prüfung QA 31,1,2012-08-17 02:14:35
+usmf,R000032,Weld – paint – pack 32,0,2013-04-19 23:17:52
+demf,R000033,Assemble “A” line 33,0,2015-12-10 23:33:49
+gbsi,R000034,Machining  cell 2 34,1,2013-10-16 23:13:38
+usmf,R000035,Prüfung QA 35,1,2018-03-14 23:29:51
+usmf,R000036,Weld – paint – pack 36,1,2013-04-14 15:05:56
+demf,R000037,Assemble “A” line 37,1,2018-10-29 02:22:09
+usmf,R000038,Machining  cell 2 38,0,2017-12-30 11:46:30
+demf,R000039,Prüfung QA 39,0,2013-02-06 17:42:11
+usmf,R000040,Prüfung QA 40,0,2020-06-24 14:15:11
+usmf,R000041,Machining  cell 2 41,0,2023-12-22 07:30:42
+demf,R000042,Assemble “A” line 42,1,2021-02-07 17:07:29
+usmf,R000043,Weld – paint – pack 43,1,2015-07-26 05:51:16
+demf,R000044,Prüfung QA 44,0,2014-11-27 16:59:55
+usmf,R000045,Machining  cell 2 45,Yes,2019-08-23 13:59:42
+usmf,R000046,Assemble “A” line 46,1,2014-02-14 07:50:53
+usmf,R000047,Weld – paint – pack 47,1,2015-07-31 14:03:12
+demf,R000048,Prüfung QA 48,1,2022-01-13 08:25:59
+usmf,R000049,Machining  cell 2 49,Yes,2018-12-11 13:14:50
+gbsi,R000050,Weld – paint – pack 50,0,2013-11-27 15:16:52
+demf,R000051,Assemble “A” line 51,0,2019-06-14 07:12:33
+usmf,R000052,Machining  cell 2 52,0,2023-08-23 16:24:18
+usmf,R000053,Prüfung QA 53,0,2018-10-29 04:20:15
+usmf,R000054,Weld – paint – pack 54,1,2015-03-29 04:33:52
+demf,R000055,Assemble “A” line 55,1,2012-06-19 21:55:57
+usmf,R000056,Machining  cell 2 56,Yes,2017-12-27 04:04:46
+demf,R000057,Prüfung QA 57,0,2022-06-23 19:25:15
+usmf,R000058,Weld – paint – pack 58,1,2022-06-13 11:04:12
+demf,R000059,Assemble “A” line 59,Yes,2017-02-21 21:16:57
+demf,R000060,Assemble “A” line 60,1,2022-10-23 07:21:33
+usmf,R000061,,0,2022-10-23 06:59:12
+usmf,R000062,Prüfung QA 62,0,2020-10-26 04:50:51
+usmf,R000063,Machining  cell 2 63,0,2016-04-30 13:30:22
+demf,R000064,Assemble “A” line 64,Yes,2017-10-17 21:17:37
+usmf,R000065,Weld – paint – pack 65,1,2021-06-23 17:42:12
+demf,R000066,,1,2014-05-24 02:06:07
+usmf,R000067,Machining  cell 2 67,1,2021-12-27 06:29:22
+usmf,R000068,Assemble “A” line 68,1,2012-10-07 14:42:13
+usmf,R000069,Weld – paint – pack 69,1,2015-02-20 12:49:44
+gbsi,R000070,Machining  cell 2 70,1,2012-12-25 03:54:50
+demf,R000071,Prüfung QA 71,0,2021-06-28 10:39:19
+demf,R000072,Weld – paint – pack 72,1,2023-07-25 03:51:56
+demf,R000073,Assemble “A” line 73,Yes,2015-08-13 14:11:05
+usmf,R000074,Machining  cell 2 74,No,2014-04-25 17:11:50
+usmf,R000075,Prüfung QA 75,1,2022-09-28 08:52:03
+usmf,R000076,Weld – paint – pack 76,0,2012-06-28 03:59:04
+usmf,R000077,Assemble “A” line 77,1,2022-02-13 05:51:33
+usmf,R000078,Machining  cell 2 78,0,2023-06-07 14:23:30
+usmf,R000079,Prüfung QA 79,1,2014-07-10 09:34:39
+demf,R000080,Prüfung QA 80,Yes,2017-05-06 03:12:59
+gbsi,R000081,Machining  cell 2 81,1,2012-11-08 11:52:30
+usmf,R000082,Assemble “A” line 82,1,2020-08-29 00:32:13
+usmf,R000083,Weld – paint – pack 83,1,2019-05-03 05:21:20
+usmf,R000084,Prüfung QA 84,1,2022-12-02 00:28:15
+gbsi,R000085,Machining  cell 2 85,0,2019-10-30 05:17:06
+demf,R000086,Assemble “A” line 86,1,2015-08-20 20:05:21
+demf,R000087,Weld – paint – pack 87,1,2018-01-01 16:04:20
+usmf,R000088,Prüfung QA 88,1,2019-02-19 23:45:39
+demf,R000089,Machining  cell 2 89,1,2022-09-18 12:44:54
+usmf,R000090,Weld – paint – pack 90,1,2017-06-09 12:15:28
+demf,R000091,Assemble “A” line 91,1,2018-10-06 07:26:21
+demf,R000092,Machining  cell 2 92,0,2021-07-03 16:51:26
+demf,R000093,Prüfung QA 93,1,2015-06-14 14:46:35
+usmf,R000094,Weld – paint – pack 94,1,2016-02-08 22:58:28
+usmf,R000095,Assemble “A” line 95,0,2022-12-19 19:59:13
+usmf,R000096,Machining  cell 2 96,1,2017-12-07 16:50:42
+usmf,R000097,Prüfung QA 97,1,2021-01-09 12:01:51
+usmf,R000098,Weld – paint – pack 98,0,2023-02-03 12:54:32
+usmf,R000099,Assemble “A” line 99,1,2016-08-15 08:18:45

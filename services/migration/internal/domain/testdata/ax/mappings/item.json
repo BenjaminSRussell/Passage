@@ -1,0 +1,7 @@
+{"entity":"item","version":1,"fields":[
+ {"source":"ItemId","target":"sku","type":"string","required":true},
+ {"source":"DataAreaId","target":"legalEntity","type":"string","required":true,"enum":{"usmf":"USMF","demf":"DEMF","gbsi":"GBSI"}},
+ {"source":"ItemType","target":"itemType","type":"string","required":true,"enum":{"0":"item","1":"bom","2":"service"}},
+ {"source":"Product","target":"productRecId","type":"int","required":true},
+ {"source":"NetWeight","target":"netWeight","type":"decimal","default":"0"},
+ {"source":"ModifiedDateTime","target":"modifiedAt","type":"timestamp","fn":"ax_datetime"}]}

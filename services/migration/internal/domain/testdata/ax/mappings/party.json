@@ -1,0 +1,5 @@
+{"entity":"party","version":1,"fields":[
+ {"source":"PartyNumber","target":"partyNumber","type":"string","required":true},
+ {"source":"Name","target":"name","type":"string","required":true,"fn":"codepage_normalize"},
+ {"source":"RecId","target":"recId","type":"int","required":true},
+ {"source":"ModifiedDateTime","target":"modifiedAt","type":"timestamp","fn":"ax_datetime"}]}

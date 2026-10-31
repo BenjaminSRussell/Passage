@@ -154,8 +154,14 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	seen := make(map[string]bool, len(rows))
 	var mapped []Record
 	templated := map[string][]string{}
+	conflicting := conflictingKeys(rows, spec.OnlyKeys)
 	for _, r := range rows {
 		if spec.OnlyKeys != nil && !spec.OnlyKeys[r.Key] {
+			continue
+		}
+		if conflicting[r.Key] {
+			seen[r.Key] = true
+			rep.Rejects = append(rep.Rejects, RowReject{r.Key, []Reject{{"", CodeDuplicate, "source key repeated in extract with different values"}}})
 			continue
 		}
 		if seen[r.Key] {
@@ -249,6 +255,32 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		rep.Status = StatusSucceeded
 	}
 	return rep, nil
+}
+
+// conflictingKeys returns the source keys that repeat in the extract with different field values. No occurrence of
+// such a key loads: keeping the first would make the target depend on extract order, so re-running the same rows in
+// another order would change it. Exact repeats still load once and only the extra occurrences are rejected.
+func conflictingKeys(rows []Record, only map[string]bool) map[string]bool {
+	count := make(map[string]int, len(rows))
+	for _, r := range rows {
+		if only == nil || only[r.Key] {
+			count[r.Key]++
+		}
+	}
+	first := map[string]string{}
+	conflicting := map[string]bool{}
+	for _, r := range rows {
+		if count[r.Key] < 2 {
+			continue
+		}
+		h := ContentHash(r.Fields)
+		if prev, ok := first[r.Key]; !ok {
+			first[r.Key] = h
+		} else if prev != h {
+			conflicting[r.Key] = true
+		}
+	}
+	return conflicting
 }
 
 func (p *Pipeline) knownXrefs(ctx context.Context, spec RunSpec, rows []Record) (map[string]XrefEntry, error) {
