@@ -289,7 +289,7 @@ paths:
       x-passage-duty: payment-proposal.write
       description: |
         Selects the legal entity's open items with due_date on or before dueBy (default runDate) that are not on payment hold, whose vendor is not blocked and that are not already on a proposal. A cash discount is taken when runDate is on or before the item's discount date, the item is still OPEN (not partially settled) and the discount is smaller than the open amount. Items are grouped per vendor, currency and payment method (vendorPaymentMethods overrides paymentMethod per vendor) and valued in legalEntityCurrency at the spot rate of runDate (today when runDate is in the future) from the fx service. The proposal is saved as DRAFT with the caller as creator.
-        runDate is the payment date and may not be earlier than today (UTC; 400 on the runDate field); cash-discount eligibility is decided against it, so a backdated date cannot revive an expired discount. Replaying an existing run is still allowed after its day has passed. Creation is idempotent per (legal entity, runDate, runId): repeating the same request returns the stored proposal with 200 and Idempotent-Replayed: true; the same key with a different request is a 409 (AP-PRP-001). A 409 with the same code also reports that items changed, were held or were taken by another proposal while it was built; retry. Withholding tax is not applied (wave 13). A run with nothing due after the filters is a 422 (AP-PRP-005) and nothing is stored. Null and an empty vendorPaymentMethods are the same request for replay.
+        runDate is the payment date and may not be earlier than today (UTC; 400 on the runDate field); cash-discount eligibility is decided against it, so a backdated date cannot revive an expired discount. Replaying an existing run is still allowed after its day has passed. Creation is idempotent per (legal entity, runDate, runId): repeating the same request returns the stored proposal with 200 and Idempotent-Replayed: true; the same key with a different request is a 409 (AP-PRP-001). A 409 with the same code also reports that items changed, were held or were taken by another proposal while it was built; retry. Withholding: withholdingCodes maps vendor ids to a code from the legal entity's posting profile (withholdingCodes); payables calls the tax service (POST /v1/tax/withholding/calculate, signed token) once per line of those vendors with the vendor's year-to-date paid amount (lines of APPROVED, EXECUTING and EXECUTED proposals of the same vendor and currency) and records withheld per line and group; a code missing from the profile or a tax rule rejection is a 422 AP-PRP-006, tax unreachable is a retryable 502 COM-0502 (a tax refusal such as 403 is a non-retryable 500 COM-0500), tax not configured a 503 COM-0503. If a vendor's year-to-date payments changed between proposal and approval (a concurrent draft was approved first) the approval is a 409 AP-PRP-001 and a new proposal is needed. With payment runs enabled, approval also needs the party service (503 COM-0503 otherwise) and field encryption keys, because it binds each group's bank account. Bank details are never part of a proposal. A run with nothing due after the filters is a 422 (AP-PRP-005) and nothing is stored. Null and an empty vendorPaymentMethods are the same request for replay.
       requestBody:
         required: true
         content:
@@ -378,7 +378,7 @@ paths:
       operationId: startPaymentRun
       x-passage-duty: payment-run.execute
       description: |
-        Starts the payment run of an APPROVED proposal (duty payment-run.execute, distinct from payment-proposal.approve). The body names only the legal entity and the proposal: the ledger, GL accounts and paying bank account come from the server-side posting profile of the legal entity (PAYABLES_POSTING_PROFILES; none is a 422 AP-RUN-013) and the payee bank details are the ones approved with the proposal (encrypted at rest), so any other field is a 400 and a request can redirect nothing. The executor must be neither the proposal's creator nor its approver (403 AP-PRP-003; the database refuses it too, and a replay by the creator or approver is refused the same way instead of returning the run). A caller without an identified user is a 403 AP-RUN-016. Idempotent per (legal entity, proposal): repeating returns the stored run with 200 and Idempotent-Replayed: true, also after the run date. The call verifies the profile's ledger belongs to the legal entity, that every group is TRANSFER or WIRE, in the legal-entity currency (foreign-currency groups are a 422 until realized FX exists) and has approved bank details, and that the profile has a discount account when the proposal takes a discount (422 AP-RUN-013); a run date before today (UTC) is a 409 AP-PRP-004. It then locks the proposal, moves it APPROVED to EXECUTING and re-checks every line like approval does. If a line changed (hold, vendor block, version, amount) the run is created FAILED, the proposal becomes FAILED and its lines are released, and the response is 201 with status FAILED. A proposal that is not APPROVED is a 409 (AP-PRP-002). The activity calls below are driven by the workflow in services/workflow-ts with a signed service token and are each safe to repeat.
+        Starts the payment run of an APPROVED proposal (duty payment-run.execute, distinct from payment-proposal.approve). The body names only the legal entity and the proposal: the ledger, GL accounts and paying bank account come from the server-side posting profile of the legal entity (PAYABLES_POSTING_PROFILES; none is a 422 AP-RUN-013) and the payee bank details are fetched from the party vendor master at file generation, so any other field is a 400 and a request can redirect nothing. The executor must be neither the proposal's creator nor its approver (403 AP-PRP-003; the database refuses it too, and a replay by the creator or approver is refused the same way instead of returning the run). A caller without an identified user is a 403 AP-RUN-016. Idempotent per (legal entity, proposal): repeating returns the stored run with 200 and Idempotent-Replayed: true, also after the run date. The call verifies the profile's ledger belongs to the legal entity, that every group is TRANSFER or WIRE, in the legal-entity currency (foreign-currency groups are a 422 until realized FX exists) and that the profile has a discount account when the proposal takes a discount and a withholding account when it withholds tax (422 AP-RUN-013); the party service must be configured (422 AP-RUN-013); a run date before today (UTC) is a 409 AP-PRP-004. It then locks the proposal, moves it APPROVED to EXECUTING and re-checks every line like approval does. If a line changed (hold, vendor block, version, amount) the run is created FAILED, the proposal becomes FAILED and its lines are released, and the response is 201 with status FAILED. A proposal that is not APPROVED is a 409 (AP-PRP-002). The activity calls below are driven by the workflow in services/workflow-ts with a signed service token and are each safe to repeat.
       requestBody:
         required: true
         content:
@@ -446,7 +446,7 @@ paths:
       operationId: generatePaymentRunFile
       x-passage-duty: payment-run.execute
       description: |
-        Builds one pain.001.001.09 payment per proposal group from the stored bank details, validates it against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
+        Builds one pain.001.001.09 payment per proposal group (a bank account whose id or fingerprint differs from the one bound at approval is a terminal 422 AP-RUN-017), paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor_bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable (transport failure or 5xx) is a retryable 502 COM-0502, while a party refusal (400, 401, 403, a missing signing key or scope) is a terminal 422 AP-RUN-013 configuration fault. The file is then validated against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -742,11 +742,11 @@ components:
           maxProperties: 500
           description: Vendor id to payment method, overriding paymentMethod.
           additionalProperties: { type: string, enum: [TRANSFER, ACH, CHECK, CARD, WIRE] }
-        creditors:
+        withholdingCodes:
           type: object
           maxProperties: 500
-          description: Vendor id to the vendor's bank details (name, address, iban or otherId, bic or routingNumber). Part of the proposal, so part of the request hash (a replay with different details is a 409 AP-PRP-001) and of what the approver reviews. Stored encrypted (platform fieldcrypt); a service without field encryption keys answers 503 COM-0503. Never accepted at run start.
-          additionalProperties: { type: object }
+          description: Vendor id to a withholding code defined in the legal entity's posting profile. Part of the request hash.
+          additionalProperties: { type: string, minLength: 1, maxLength: 40 }
     PaymentProposal:
       type: object
       required: [id, legalEntityId, runDate, runId, dueBy, rateDate, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, groups, totalValued]
@@ -769,16 +769,7 @@ components:
         executedAt: { type: string, format: date-time }
         failedAt: { type: string, format: date-time }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
-        payees:
-          type: array
-          description: The bank details the approver approves, with the bank identifier in full and the account number masked to its last four characters.
-          items:
-            type: object
-            properties:
-              vendorId: { type: string, format: uuid }
-              name: { type: string }
-              account: { type: string }
-              bank: { type: string }
+        totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
         groups:
           type: array
           items:
@@ -791,7 +782,10 @@ components:
               paymentMethod: { type: string }
               gross: { type: string, description: Sum of open amounts in the group currency. }
               discount: { type: string }
-              net: { type: string, description: Gross minus discount; the amount to pay in the group currency. }
+              withheld: { type: string, description: Tax withheld in the group currency. }
+              bankAccountId: { type: string, description: Party bank account id bound at approval; absent on a draft. }
+              bankLast4: { type: string, description: Last four digits of the bound account number. }
+              net: { type: string, description: Gross minus discount minus withheld; the amount paid to the vendor in the group currency. }
               valued: { type: string, description: Sum of line valued amounts in legalEntityCurrency. }
               lines:
                 type: array
@@ -802,9 +796,11 @@ components:
                     openItemId: { type: string, format: uuid }
                     openAmount: { type: string }
                     discount: { type: string }
-                    pay: { type: string }
+                    pay: { type: string, description: Open amount minus discount, before withholding. }
+                    withheld: { type: string }
+                    withholdingCode: { type: string }
                     rate: { type: string, description: Group currency to legalEntityCurrency; 1 for the same currency. }
-                    valued: { type: string, description: pay times rate rounded to the minor unit of legalEntityCurrency. }
+                    valued: { type: string, description: (pay minus withheld) times rate rounded to the minor unit of legalEntityCurrency. }
     PaymentRunRequest:
       type: object
       additionalProperties: false
@@ -825,6 +821,7 @@ components:
         bankAccount: { type: string }
         controlAccount: { type: string }
         discountAccount: { type: string }
+        withholdingAccount: { type: string }
         fileNumber: { type: string }
         fileSha256: { type: string }
         paymentCount: { type: integer }

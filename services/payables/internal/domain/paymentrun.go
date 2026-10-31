@@ -6,7 +6,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
@@ -17,6 +16,7 @@ const (
 	CodeRunLedger      = "AP-RUN-014"
 	CodeRunItemChanged = "AP-RUN-015"
 	CodeRunIdentity    = "AP-RUN-016"
+	CodeRunPayee       = "AP-RUN-017"
 
 	RunRunning   = "RUNNING"
 	RunCompleted = "COMPLETED"
@@ -39,13 +39,6 @@ type RunFileConfig struct {
 	Profile       BankProfileDTO `json:"profile"`
 }
 
-type PayeeSummary struct {
-	VendorID string `json:"vendorId"`
-	Name     string `json:"name"`
-	Account  string `json:"account"`
-	Bank     string `json:"bank"`
-}
-
 type RunPayment struct {
 	ID         string          `json:"id,omitempty"`
 	GroupID    string          `json:"groupId"`
@@ -66,7 +59,7 @@ type RunJournalLine struct {
 
 func RunSupportsMethod(method string) bool { return method == MethodTransfer || method == MethodWire }
 
-func CheckRunnable(currency string, groups []ProposalGroup, creditors map[string]CreditorDTO) error {
+func CheckRunnable(currency string, groups []ProposalGroup) error {
 	for _, g := range groups {
 		switch {
 		case !RunSupportsMethod(g.Method):
@@ -74,46 +67,8 @@ func CheckRunnable(currency string, groups []ProposalGroup, creditors map[string
 		case g.Currency != currency:
 			return &Error{Code: CodeRunConfig, Detail: "group " + g.ID + " is in " + g.Currency + " but the legal entity currency is " + currency + "; foreign-currency payments need realized FX, which is not built"}
 		}
-		if _, ok := creditors[g.VendorID]; !ok {
-			return &Error{Code: CodeRunConfig, Detail: "the proposal has no bank details for vendor " + g.VendorID}
-		}
 	}
 	return nil
-}
-
-func ValidateCreditors(creditors map[string]CreditorDTO) map[string]string {
-	fields := map[string]string{}
-	if len(creditors) > 500 {
-		fields["creditors"] = "at most 500 entries"
-	}
-	for vendor, c := range creditors {
-		if !ids.Valid(vendor) {
-			fields["creditors"] = "keys must be vendor UUIDs"
-		} else if strings.TrimSpace(c.Name) == "" || (c.IBAN == "" && c.OtherID == "") {
-			fields["creditors."+vendor] = "needs a name and an iban or otherId"
-		}
-	}
-	return fields
-}
-
-func SummarizePayee(vendorID string, c CreditorDTO) PayeeSummary {
-	account := c.IBAN
-	if account == "" {
-		account = c.OtherID
-	}
-	bank := c.BIC
-	if bank == "" {
-		bank = c.RoutingNumber
-	}
-	return PayeeSummary{VendorID: vendorID, Name: c.Name, Account: MaskBank(account), Bank: bank}
-}
-
-func MaskBank(v string) string {
-	v = strings.TrimSpace(v)
-	if len(v) < 4 {
-		return "****"
-	}
-	return "****" + v[len(v)-4:]
 }
 
 func PaymentNumber(groupID string) string {
@@ -127,8 +82,11 @@ func RunFileNumber(runID string) string {
 
 func BuildRunFile(cfg RunFileConfig, creditors map[string]CreditorDTO, runID string, runDate, created time.Time, groups []ProposalGroup, invoiceNumbers map[string]string) (PaymentFile, []RunPayment, error) {
 	for _, g := range groups {
-		if _, ok := creditors[g.VendorID]; !ok || !RunSupportsMethod(g.Method) {
-			return PaymentFile{}, nil, &Error{Code: CodeRunConfig, Detail: "group " + g.ID + " cannot be sent: no bank details or unsupported method"}
+		if _, ok := creditors[g.VendorID]; !ok {
+			return PaymentFile{}, nil, &Error{Code: CodeRunPayee, Detail: "vendor " + g.VendorID + " has no bank details"}
+		}
+		if !RunSupportsMethod(g.Method) {
+			return PaymentFile{}, nil, &Error{Code: CodeRunConfig, Detail: "group " + g.ID + " cannot be sent: unsupported method"}
 		}
 	}
 	fileNumber := cfg.FileNumber
@@ -147,7 +105,7 @@ func BuildRunFile(cfg RunFileConfig, creditors map[string]CreditorDTO, runID str
 			Amount: g.Net.String(), Currency: g.Currency, Creditor: creditors[g.VendorID],
 		}
 		for _, l := range g.Lines {
-			payment.Invoices = append(payment.Invoices, RemittanceInvoiceDTO{Number: invoiceNumbers[l.OpenItemID], Amount: l.Pay.String()})
+			payment.Invoices = append(payment.Invoices, RemittanceInvoiceDTO{Number: invoiceNumbers[l.OpenItemID], Amount: l.Pay.Sub(l.Withheld).String()})
 		}
 		dto.Payments = append(dto.Payments, payment)
 		payments = append(payments, RunPayment{GroupID: g.ID, VendorID: g.VendorID, Currency: g.Currency, Method: g.Method, EndToEndID: number, Amount: g.Net, Valued: g.Valued})
@@ -160,20 +118,25 @@ func BuildRunFile(cfg RunFileConfig, creditors map[string]CreditorDTO, runID str
 	return file, payments, err
 }
 
-func RunJournal(currency string, groups []ProposalGroup, controlAccount, bankAccount, discountAccount string) []RunJournalLine {
+func RunJournal(currency string, groups []ProposalGroup, controlAccount, bankAccount, discountAccount, withholdingAccount string) []RunJournalLine {
 	minor := money.MinorUnits(currency)
 	var lines []RunJournalLine
-	paid, discount := decimal.Zero, decimal.Zero
+	paid, withheld, discount := decimal.Zero, decimal.Zero, decimal.Zero
 	for _, g := range groups {
-		gross := decimal.Zero
+		gross, groupWithheld := decimal.Zero, decimal.Zero
 		for _, l := range g.Lines {
 			gross = gross.Add(l.OpenAmount.Mul(l.Rate).Round(minor))
+			groupWithheld = groupWithheld.Add(l.Withheld.Mul(l.Rate).Round(minor))
 		}
 		lines = append(lines, RunJournalLine{Account: controlAccount, Amount: gross, Text: "vendor " + g.VendorID})
 		paid = paid.Add(g.Valued)
-		discount = discount.Add(gross.Sub(g.Valued))
+		withheld = withheld.Add(groupWithheld)
+		discount = discount.Add(gross.Sub(g.Valued).Sub(groupWithheld))
 	}
 	lines = append(lines, RunJournalLine{Account: bankAccount, Credit: true, Amount: paid, Text: "payment run"})
+	if withheld.IsPositive() {
+		lines = append(lines, RunJournalLine{Account: withholdingAccount, Credit: true, Amount: withheld, Text: "tax withheld"})
+	}
 	if discount.IsPositive() {
 		lines = append(lines, RunJournalLine{Account: discountAccount, Credit: true, Amount: discount, Text: "cash discount taken"})
 	}

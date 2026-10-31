@@ -221,4 +221,5 @@ components:
         status: { type: string, enum: [DRAFT, APPROVED, CANCELLED] }
         actor: { type: string, description: "creator on created, approver on approved, canceller on cancelled" }
         currency: { type: string, pattern: "^[A-Z]{3}$", description: "legal entity currency; created events only" }
-        total_valued: { type: string, description: "decimal string, proposal total in the legal entity currency; created events only" }
+        total_valued: { type: string, description: "decimal string, proposal total in the legal entity currency, net of withheld tax; created events only" }
+        total_withheld: { type: object, additionalProperties: { type: string }, description: "currency to decimal string, tax withheld per group currency, absent when nothing is withheld; created events only" }

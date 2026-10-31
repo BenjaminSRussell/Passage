@@ -80,6 +80,8 @@ spec:
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
             - { name: AP_CONTROL_ACCOUNT, value: {{ .Values.controlAccount | quote }} }
             - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
+            - { name: PARTY_URL, value: {{ .Values.partyUrl | quote }} }
+            - { name: TAX_URL, value: {{ .Values.taxUrl | quote }} }
             - { name: FX_RATE_TYPE, value: {{ .Values.fxRateType | quote }} }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }

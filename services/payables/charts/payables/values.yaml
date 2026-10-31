@@ -7,6 +7,8 @@ databaseSecret: payables-db
 ledgerUrl: ""
 controlAccount: "2000"
 fxUrl: ""
+partyUrl: ""
+taxUrl: ""
 fxRateType: "spot"
 replicaCount: 1
 resources:

@@ -146,7 +146,7 @@ func (f *fakeStore) CancelProposal(_ context.Context, id, user string) (store.Pr
 	return p, err
 }
 
-func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today string) (store.Proposal, error) {
+func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today string, _ ...store.GroupBank) (store.Proposal, error) {
 	f.approver, f.approveDay = approver, today
 	if f.approveErr != nil {
 		return store.Proposal{}, f.approveErr

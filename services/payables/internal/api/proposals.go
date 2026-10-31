@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -32,20 +31,21 @@ import (
 )
 
 const (
-	dutyOpenItemRead     = "open-item.read"
-	dutyProposalWrite    = "payment-proposal.write"
-	dutyProposalRead     = "payment-proposal.read"
-	dutyProposalApprove  = "payment-proposal.approve"
-	pathOpenItems        = "/v1/payables/open-items"
-	pathProposals        = "/v1/payables/payment-proposals"
-	maxVendorMethods     = 500
-	maxRunIDLength       = 64
-	defaultPageSize      = 50
-	maxPageSize          = 200
-	codeNotFound         = "COM-0404"
-	codeValidationFailed = "COM-0001"
-	codeNotConfigured    = "COM-0503"
-	currencyMessage      = "must be a 3-letter upper-case ISO 4217 code"
+	dutyOpenItemRead      = "open-item.read"
+	dutyProposalWrite     = "payment-proposal.write"
+	dutyProposalRead      = "payment-proposal.read"
+	dutyProposalApprove   = "payment-proposal.approve"
+	pathOpenItems         = "/v1/payables/open-items"
+	pathProposals         = "/v1/payables/payment-proposals"
+	maxVendorMethods      = 500
+	maxRunIDLength        = 64
+	maxWithholdingCodeLen = 40
+	defaultPageSize       = 50
+	maxPageSize           = 200
+	codeNotFound          = "COM-0404"
+	codeValidationFailed  = "COM-0001"
+	codeNotConfigured     = "COM-0503"
+	currencyMessage       = "must be a 3-letter upper-case ISO 4217 code"
 )
 
 var (
@@ -61,7 +61,7 @@ type PayablesStore interface {
 	FindProposal(ctx context.Context, legalEntityID, runDate, runID string) (store.Proposal, error)
 	CreateProposal(ctx context.Context, in store.NewProposal) (store.Proposal, bool, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
-	ApproveProposal(ctx context.Context, id, approver, today string) (store.Proposal, error)
+	ApproveProposal(ctx context.Context, id, approver, today string, banks ...store.GroupBank) (store.Proposal, error)
 	CancelProposal(ctx context.Context, id, user string) (store.Proposal, error)
 	ListProposals(ctx context.Context, f store.ProposalFilter, limit int) ([]store.ProposalSummary, error)
 	SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error)
@@ -329,14 +329,14 @@ func (a *API) rateFailure(w http.ResponseWriter, r *http.Request, from, to strin
 }
 
 type proposalRequest struct {
-	LegalEntityID        string                        `json:"legalEntityId"`
-	LegalEntityCurrency  string                        `json:"legalEntityCurrency"`
-	RunDate              string                        `json:"runDate"`
-	RunID                string                        `json:"runId"`
-	DueBy                string                        `json:"dueBy"`
-	PaymentMethod        string                        `json:"paymentMethod"`
-	VendorPaymentMethods map[string]string             `json:"vendorPaymentMethods"`
-	Creditors            map[string]domain.CreditorDTO `json:"creditors,omitempty"`
+	LegalEntityID        string            `json:"legalEntityId"`
+	LegalEntityCurrency  string            `json:"legalEntityCurrency"`
+	RunDate              string            `json:"runDate"`
+	RunID                string            `json:"runId"`
+	DueBy                string            `json:"dueBy"`
+	PaymentMethod        string            `json:"paymentMethod"`
+	VendorPaymentMethods map[string]string `json:"vendorPaymentMethods"`
+	WithholdingCodes     map[string]string `json:"withholdingCodes,omitempty"`
 }
 
 func (p proposalRequest) validate() (runDate time.Time, fields map[string]string) {
@@ -362,7 +362,14 @@ func (p proposalRequest) validate() (runDate time.Time, fields map[string]string
 			fields["vendorPaymentMethods"] = "keys must be vendor UUIDs and values payment methods"
 		}
 	}
-	maps.Copy(fields, domain.ValidateCreditors(p.Creditors))
+	if len(p.WithholdingCodes) > maxVendorMethods {
+		fields["withholdingCodes"] = fmt.Sprintf("at most %d entries", maxVendorMethods)
+	}
+	for vendor, code := range p.WithholdingCodes {
+		if !ids.Valid(vendor) || code == "" || len(code) > maxWithholdingCodeLen {
+			fields["withholdingCodes"] = fmt.Sprintf("keys must be vendor UUIDs and values withholding codes of at most %d characters", maxWithholdingCodeLen)
+		}
+	}
 	return runDate, fields
 }
 
@@ -449,9 +456,12 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeNothingDue, "no open items are due for payment on or before "+req.DueBy)
 		return
 	}
+	if !a.applyWithholding(w, r, le, runDate, req, groups) {
+		return
+	}
 	proposal, created, err := a.proposals.store.CreateProposal(ctx, store.NewProposal{
 		LegalEntityID: le, RunDate: req.RunDate, RunID: req.RunID, DueBy: req.DueBy, RateDate: rateDate.Format(time.DateOnly),
-		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups, Payees: req.Creditors,
+		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups,
 	})
 	if errors.Is(err, store.ErrItemsChanged) {
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; retry the request")
@@ -568,13 +578,40 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
 		return
 	}
-	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly))
+	var binds []store.GroupBank
+	if a.runs != nil && a.runs.ledger != nil {
+		if a.runs.banks == nil {
+			a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "payment runs are enabled but the party service is not configured; an approved proposal could not be paid")
+			return
+		}
+		draft, err := a.proposals.store.GetProposal(r.Context(), id)
+		switch {
+		case errors.Is(err, store.ErrProposalNotFound):
+			a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+			return
+		case err != nil:
+			a.fault(w, r, "payment proposal get failed", err)
+			return
+		case draft.Status != domain.ProposalDraft:
+			a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
+			return
+		}
+		var ok bool
+		if draft.CreatedBy != caller.UserID {
+			if binds, ok = a.bankBindings(w, r, draft); !ok {
+				return
+			}
+		}
+	}
+	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly), binds...)
 	var changed *store.LinesChangedError
 	switch {
 	case errors.As(err, &changed):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, changed.Error())
 	case errors.Is(err, store.ErrProposalNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+	case errors.Is(err, store.ErrPaidChanged):
+		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; create a new proposal")
 	case errors.Is(err, store.ErrNotDraft):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
 	case errors.Is(err, store.ErrRunDateElapsed):

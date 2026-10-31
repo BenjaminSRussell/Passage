@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -311,67 +313,109 @@ func TestPaymentRun_StartAfterTheRunDateIsRefused(t *testing.T) {
 	}
 }
 
-func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.T) {
-	s := setup(t)
+var zeroBase = decimal.Zero
+
+func withheldProposal(t *testing.T, s *Postgres) (Proposal, context.Context) {
+	t.Helper()
 	alice := ctxAs(1, leA, "alice")
-	seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	threeItems(t, s)(alice)
 	in := proposalFor(t, s, alice, leA, "run-1")
-	in.Payees = map[string]domain.CreditorDTO{vendor1: {PartyDTO: domain.PartyDTO{Name: "Acme Supply Co"}, AccountDTO: domain.AccountDTO{IBAN: "DE89370400440532013000"}, BIC: "COBADEFF"}}
+	for gi := range in.Groups {
+		g := &in.Groups[gi]
+		if g.VendorID != vendor1 {
+			continue
+		}
+		g.PaidBase = &zeroBase
+		for li := range g.Lines {
+			g.Withhold(li, "WHT30", g.Lines[li].Pay.Mul(dec("0.3")).Round(2), 2)
+		}
+	}
 	created, _, err := s.CreateProposal(alice, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.Payees) != 1 || created.Payees[0].Account != "****3000" || created.Payees[0].Bank != "COBADEFF" || created.Payees[0].Name != "Acme Supply Co" {
-		t.Fatalf("payees = %+v, want the masked summary the approver sees", created.Payees)
+	return created, alice
+}
+
+func TestProposalWithholding_IsStoredPerLineAndGroupAndEmitted(t *testing.T) {
+	s := setup(t)
+	created, alice := withheldProposal(t, s)
+	var group domain.ProposalGroup
+	for _, g := range created.Groups {
+		if g.VendorID == vendor1 {
+			group = g
+		}
 	}
-	var sealed []byte
-	_ = dbx.WithTenantTx(alice, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(alice, `select sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, created.ID).Scan(&sealed)
-	})
-	if len(sealed) == 0 || bytes.Contains(sealed, []byte("DE89")) || bytes.Contains(sealed, []byte("Acme")) {
-		t.Fatalf("bank details must be encrypted at rest: %q", sealed)
+	if !group.Withheld.Equal(dec("44.40")) || !group.Net.Equal(dec("103.60")) || !created.TotalWithheld["USD"].Equal(dec("44.40")) || len(created.TotalWithheld) != 1 {
+		t.Fatalf("group %+v total withheld %s, want 30%% of 98 and 50 withheld", group, created.TotalWithheld)
 	}
-	if _, err := s.crypt.Open(testkit.TenantID(1), "ap_payment_proposal_payee:"+"00000000-0000-0000-0000-000000000000:"+vendor1, sealed); err == nil {
-		t.Fatal("the ciphertext must be bound to its proposal id")
+	for _, l := range group.Lines {
+		if l.WithholdingCode != "WHT30" || !l.Withheld.Equal(l.Pay.Mul(dec("0.3")).Round(2)) {
+			t.Errorf("line %+v lacks its withheld amount and code", l)
+		}
 	}
-	full, err := s.ProposalPayees(alice, created.ID)
-	if err != nil || full[vendor1].IBAN != "DE89370400440532013000" {
-		t.Fatalf("decrypted = %+v err %v", full, err)
-	}
-	if _, err := s.ProposalPayees(ctxAs(2, leA, "x"), created.ID); err != nil {
-		t.Fatalf("another tenant sees no rows: %v", err)
-	}
-	exec := func(sql string) error {
-		return dbx.WithTenantTx(alice, s.pool, func(tx pgx.Tx) error {
-			_, err := tx.Exec(alice, sql, created.ID)
-			return err
-		})
-	}
-	if err := s.rawApprove(alice, created.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := exec(`insert into ap_payment_proposal_payee (tenant_id, proposal_id, vendor_id, legal_entity_id, sealed)
-		select tenant_id, proposal_id, '00000000-0000-0000-0000-0000000000c9', legal_entity_id, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`); err == nil {
-		t.Fatal("payee bank details must not be insertable once the proposal left DRAFT")
-	}
-	if err := exec(`update ap_payment_proposal_payee set sealed = '\x00' where proposal_id = $1::uuid`); err == nil {
-		t.Fatal("the application role must not be able to rewrite payee bank details")
-	}
-	if err := exec(`delete from ap_payment_proposal_payee where proposal_id = $1::uuid`); err == nil {
-		t.Fatal("the application role must not be able to delete payee bank details")
-	}
-	bare := setup(t).WithFieldCrypt(nil)
-	bareCtx := ctxAs(1, leA, "alice")
-	seed(t, bare, bareCtx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
-	if _, _, err := bare.CreateProposal(bareCtx, withPayees(proposalFor(t, bare, bareCtx, leA, "run-1"), in.Payees)); !errors.Is(err, ErrNoFieldCrypt) {
-		t.Fatalf("without keys = %v, want ErrNoFieldCrypt", err)
+	events := outboxPayloads(t, s, alice, ProposalCreatedType)
+	if len(events) != 1 || fmt.Sprint(events[0]["total_withheld"]) != "map[USD:44.4]" {
+		t.Fatalf("created events = %v, want total_withheld 44.4", events)
 	}
 }
 
-func withPayees(in NewProposal, payees map[string]domain.CreditorDTO) NewProposal {
-	in.Payees = payees
-	return in
+func TestPaidToDate_CountsApprovedAndExecutedLinesOfTheVendorYearAndCurrency(t *testing.T) {
+	s := setup(t)
+	created, alice := withheldProposal(t, s)
+	paid := func(vendor, currency string, year int) string {
+		t.Helper()
+		got, err := s.PaidToDate(alice, leA, vendor, currency, year)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.String()
+	}
+	if got := paid(vendor1, "USD", 2027); got != "0" {
+		t.Fatalf("a draft proposal counts %s, want 0", got)
+	}
+	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	if got := paid(vendor1, "USD", 2027); got != "148" {
+		t.Fatalf("approved proposal counts %s, want 148 gross of withholding", got)
+	}
+	for name, got := range map[string]string{"other year": paid(vendor1, "USD", 2026), "other currency": paid(vendor1, "EUR", 2027), "other vendor": paid(vendor2, "USD", 2027)} {
+		if got != "0" {
+			t.Errorf("%s counts %s, want 0", name, got)
+		}
+	}
 }
+
+func TestPaymentRun_WithheldProposalNeedsAWithholdingAccountAndSnapshotsIt(t *testing.T) {
+	s := setup(t)
+	created, _ := withheldProposal(t, s)
+	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	erin := ctxAs(1, leA, "erin")
+	if _, _, err := s.StartRun(erin, runInput(created.ID, leA)); !errors.Is(err, ErrWithholdingAccount) {
+		t.Fatalf("start without a withholding account = %v, want ErrWithholdingAccount", err)
+	}
+	in := runInput(created.ID, leA)
+	in.WithholdingAccount = "2300"
+	run, _, err := s.StartRun(erin, in)
+	if err != nil || run.WithholdingAccount == nil || *run.WithholdingAccount != "2300" {
+		t.Fatalf("run %+v err %v, want the withholding account snapshotted", run, err)
+	}
+}
+
+func TestProposalPayeeTable_IsGone(t *testing.T) {
+	s := setup(t)
+	var exists bool
+	err := dbx.WithTenantTx(ctxAs(1, leA, "alice"), s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `select to_regclass('ap_payment_proposal_payee') is not null`).Scan(&exists)
+	})
+	if err != nil || exists {
+		t.Fatalf("exists=%v err=%v: bank details are fetched from party at file generation and never stored", exists, err)
+	}
+}
+
 func TestPaymentRun_HoldPlacedAfterApprovalFailsTheRunAndReleasesLines(t *testing.T) {
 	s := setup(t)
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
@@ -804,5 +848,102 @@ func TestProposalParties_ReadsMetadataWithoutFieldKeys(t *testing.T) {
 	}
 	if _, err := s.ProposalParties(ctxAs(2, leA, "x"), proposal.ID); !errors.Is(err, ErrProposalNotFound) {
 		t.Fatalf("another tenant = %v", err)
+	}
+}
+
+func TestApproval_RefusesWhenAConcurrentDraftOfTheSameVendorWasApprovedFirst(t *testing.T) {
+	s := setup(t)
+	first, alice := withheldProposal(t, s)
+	seed(t, s, alice, leA, vendor1, 4, "2027-03-13", "USD", "40.00")
+	in := proposalFor(t, s, alice, leA, "run-2")
+	for gi := range in.Groups {
+		if in.Groups[gi].VendorID == vendor1 {
+			in.Groups[gi].PaidBase = &zeroBase
+		}
+	}
+	second, _, err := s.CreateProposal(alice, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob := ctxAs(1, leA, "bob")
+	if _, err := s.ApproveProposal(bob, first.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(bob, second.ID, "bob", runDay); !errors.Is(err, ErrPaidChanged) {
+		t.Fatalf("second approval = %v, want ErrPaidChanged: its threshold base ignored the first proposal's 148", err)
+	}
+	if p, _ := s.GetProposal(bob, second.ID); p.Status != domain.ProposalDraft {
+		t.Fatalf("status = %s", p.Status)
+	}
+}
+
+func TestVerifyPaidBases_RefusesAGroupWithAWithholdingLineButNoBase(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	in := proposalFor(t, s, alice, leA, "run-1")
+	for gi := range in.Groups {
+		g := &in.Groups[gi]
+		if g.VendorID == vendor1 {
+			g.Lines[0].WithholdingCode = "WHT30"
+		}
+	}
+	created, _, err := s.CreateProposal(alice, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); !errors.Is(err, ErrPaidChanged) {
+		t.Fatalf("approval = %v, want ErrPaidChanged for a withholding line without a base", err)
+	}
+}
+
+func TestGroupInsert_RefusesWithheldAmountWithoutBase(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	in := proposalFor(t, s, alice, leA, "run-1")
+	for gi := range in.Groups {
+		g := &in.Groups[gi]
+		if g.VendorID == vendor1 {
+			g.Withhold(0, "WHT30", dec("1.00"), 2)
+		}
+	}
+	if _, _, err := s.CreateProposal(alice, in); err == nil {
+		t.Fatal("a group that withholds tax without a stored base must be refused by the database")
+	}
+}
+
+func TestApproval_TakesTheVendorLockEvenForAProposalWithoutWithholding(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	created, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := s.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	key := "ap-withholding:" + leA + ":" + vendor1 + ":USD:2027"
+	if _, err := holder.Exec(context.Background(), `select pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("approval finished (%v) while another transaction held the vendor lock", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := holder.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("approval after the lock was released: %v", err)
 	}
 }
