@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"container/heap"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -39,11 +41,14 @@ const (
 	serviceClockSkew     = 5 * time.Second
 	defaultReplayEntries = 100_000
 	maxServiceTokenSize  = 4096
+	sharedReplayTimeout  = 2 * time.Second
 )
 
 var (
 	ErrServiceToken   = errors.New("invalid service token")
 	ErrNoServiceGrant = errors.New("no service grant")
+
+	ErrReplayStoreUnavailable = errors.New("service token replay store unavailable")
 )
 
 // serviceGrants is the static per-service duty table: caller -> target -> duties.
@@ -266,6 +271,7 @@ type ServiceVerifier struct {
 	mu       sync.Mutex
 	seen     map[string]struct{}
 	expiries expiryHeap
+	shared   ReplayStore
 }
 
 type expiry struct {
@@ -304,14 +310,23 @@ func NewServiceVerifierKids(self string, keys map[string]map[string]ed25519.Publ
 // WithReplayCapacity returns a verifier remembering at most n unexpired token ids.
 func (v *ServiceVerifier) WithReplayCapacity(n int) *ServiceVerifier {
 	c := NewServiceVerifierKids(v.self, v.keys)
-	c.now, c.capacity = v.now, n
+	c.now, c.capacity, c.shared = v.now, n, v.shared
 	return c
 }
 
 // WithClock returns a verifier sharing keys but with its own clock and replay cache.
 func (v *ServiceVerifier) WithClock(now func() time.Time) *ServiceVerifier {
 	c := NewServiceVerifierKids(v.self, v.keys)
-	c.now, c.capacity = now, v.capacity
+	c.now, c.capacity, c.shared = now, v.capacity, v.shared
+	return c
+}
+
+// WithReplayStore returns a verifier that also records every accepted token id
+// in store, which all replicas of the target share, so a token replayed on
+// another pod is refused too. The per-process cache stays in front of it.
+func (v *ServiceVerifier) WithReplayStore(store ReplayStore) *ServiceVerifier {
+	c := v.WithClock(v.now)
+	c.shared = store
 	return c
 }
 
@@ -367,6 +382,11 @@ func ConfigureServiceVerifier(getenv func(string) string) error {
 // Verify returns the claims of a token that is signed by a known service,
 // addressed to this service, fresh, within the issuer's grant and not replayed.
 func (v *ServiceVerifier) Verify(token string) (ServiceClaims, error) {
+	return v.VerifyContext(context.Background(), token)
+}
+
+// VerifyContext is Verify with ctx bounding the shared replay store call.
+func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (ServiceClaims, error) {
 	var c ServiceClaims
 	if v == nil || len(token) > maxServiceTokenSize {
 		return c, ErrServiceToken
@@ -402,12 +422,38 @@ func (v *ServiceVerifier) Verify(token string) (ServiceClaims, error) {
 	if !v.remember(c.Jti, c.Exp, now) {
 		return ServiceClaims{}, ErrServiceToken
 	}
+	if v.shared != nil {
+		if err := v.rememberShared(ctx, c); err != nil {
+			return ServiceClaims{}, err
+		}
+	}
 	return c, nil
+}
+
+// rememberShared returns ErrServiceToken for a token id another replica already
+// accepted, and fails closed: a store error returns ErrReplayStoreUnavailable
+// (logged and counted, and answered 503 so callers retry), since
+// the store is the service's own database and a token that cannot be recorded
+// cannot be proven fresh.
+func (v *ServiceVerifier) rememberShared(ctx context.Context, c ServiceClaims) error {
+	ctx, cancel := context.WithTimeout(ctx, sharedReplayTimeout)
+	defer cancel()
+	fresh, err := v.shared.Remember(ctx, c.Tid, c.Iss+":"+c.Jti, time.Unix(c.Exp, 0))
+	if err != nil {
+		replayStoreFailures.Add(1)
+		slog.ErrorContext(ctx, "shared service token replay store failed; token refused", "err", err, "service", c.Iss)
+		return ErrReplayStoreUnavailable
+	}
+	if !fresh {
+		replaysRefused.Add(1)
+		return ErrServiceToken
+	}
+	return nil
 }
 
 // remember records jti until exp and reports false on a replay or a full cache.
 // Eviction pops the expiry min-heap, so each token is evicted once (amortized O(log n)).
-// ponytail: memory is per process, so a token can be replayed once per other replica inside its 60s life; a shared store closes that.
+// ponytail: this heap is per process; a token can be replayed once per other replica inside its 60s life unless WithReplayStore adds the shared check.
 func (v *ServiceVerifier) remember(jti string, exp int64, now time.Time) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -436,6 +482,30 @@ var (
 	activeVerifier  atomic.Pointer[ServiceVerifier]
 	envVerifierOnce sync.Once
 )
+
+// ShareReplayCache makes the process-wide verifier record accepted token ids in
+// the Postgres table service_token_replay (dbx.ServiceTokenReplayDDL) of pool.
+// It does nothing when no verifier is configured, and otherwise fails when pool
+// is nil or the table or its purge function is missing, so a service never
+// starts with service tokens enabled and no shared replay protection.
+func ShareReplayCache(ctx context.Context, pool *pgxpool.Pool) error {
+	v := currentServiceVerifier()
+	if v == nil {
+		return nil
+	}
+	if pool == nil {
+		return errors.New("service tokens are enabled but there is no database for the shared replay cache")
+	}
+	var present bool
+	if err := pool.QueryRow(ctx, `select to_regclass('service_token_replay') is not null and to_regprocedure('service_token_replay_purge()') is not null`).Scan(&present); err != nil {
+		return fmt.Errorf("check service_token_replay: %w", err)
+	}
+	if !present {
+		return errors.New("service tokens are enabled but table service_token_replay or function service_token_replay_purge() is missing; apply the service_token_replay migration first")
+	}
+	SetServiceVerifier(v.WithReplayStore(NewPostgresReplayStore(pool)))
+	return nil
+}
 
 // SetServiceVerifier replaces the verifier Middleware uses; nil makes every
 // service token fail. Tests and explicit wiring use it instead of the environment.

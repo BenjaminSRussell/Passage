@@ -109,6 +109,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	s := store.New(pool).WithRules(cfg.rules)
 	a := api.New(s, cfg.post)
 	router := httpx.NewRouter()

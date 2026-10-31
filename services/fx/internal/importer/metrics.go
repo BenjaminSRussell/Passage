@@ -108,6 +108,7 @@ func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		keys, agg := m.snapshot()
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprint(w, "# HELP fx_provider_degraded 1 when the latest import for the provider and rate type ended in an outage for any tenant.\n# TYPE fx_provider_degraded gauge\n")
 		for _, k := range keys {
 			v := 0

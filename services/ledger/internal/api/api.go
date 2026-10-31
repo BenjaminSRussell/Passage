@@ -143,6 +143,7 @@ func (a *API) Admin() http.Handler {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprintf(w, "# HELP ledger_entries_posted_total Journal entries posted (not counting replays).\n# TYPE ledger_entries_posted_total counter\nledger_entries_posted_total %d\n", a.posted.Load())
 		fmt.Fprintf(w, "# HELP ledger_idempotent_replays_total Keyed requests answered from the stored response.\n# TYPE ledger_idempotent_replays_total counter\nledger_idempotent_replays_total %d\n", a.replayed.Load())
 		fmt.Fprintf(w, "# HELP ledger_entries_reversed_total Reversing entries posted.\n# TYPE ledger_entries_reversed_total counter\nledger_entries_reversed_total %d\n", a.reversed.Load())

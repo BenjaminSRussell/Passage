@@ -217,6 +217,7 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		for _, c := range []struct {
 			name, help string
 			value      int64

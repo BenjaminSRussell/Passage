@@ -113,6 +113,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	a := api.New(store.New(pool))
 	router := httpx.NewRouter()
 	a.Register(router)

@@ -237,6 +237,7 @@ type lineRequest struct {
 
 type evaluateRequest struct {
 	PurchaseOrderID string         `json:"purchaseOrderId"`
+	LegalEntityID   string         `json:"legalEntityId"`
 	Policy          *policyRequest `json:"policy"`
 	Currency        string         `json:"currency"`
 	HeaderTotal     *wireDecimal   `json:"headerTotal"`
@@ -292,6 +293,11 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 		a.rejectEvaluation(w, r, fields)
 		return
 	}
+	if req.LegalEntityID != "" && !tenant.InLegalEntityScope(p, req.LegalEntityID) {
+		a.rejected.Add(1)
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's access"))
+		return
+	}
 	poFields, err := a.fillFromPurchaseOrder(r.Context(), &req)
 	if err != nil {
 		a.rejected.Add(1)
@@ -336,6 +342,9 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	add := func(key, message string) { addField(fields, key, message) }
 	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
 		add("purchaseOrderId", "must be a UUID")
+	}
+	if req.LegalEntityID != "" && !ids.Valid(req.LegalEntityID) {
+		add("legalEntityId", "must be a UUID")
 	}
 	lineIndexes := map[int]int{}
 	for i, l := range req.Lines {
@@ -389,9 +398,17 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 	if !slices.ContainsFunc(req.Lines, func(l lineRequest) bool { return l.POLineNo != nil }) {
 		return fields, nil
 	}
-	po, err := a.loadPurchaseOrder(ctx, "", req.PurchaseOrderID)
+	po, err := a.loadPurchaseOrder(ctx, req.LegalEntityID, req.PurchaseOrderID)
 	if err != nil {
 		return nil, err
+	}
+	if req.LegalEntityID != "" {
+		named, _ := ids.Canonical(req.LegalEntityID)
+		owner, _ := ids.Canonical(po.LegalEntityID)
+		if named != owner {
+			fields["legalEntityId"] = "does not match the purchase order's legal entity"
+			return fields, nil
+		}
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {

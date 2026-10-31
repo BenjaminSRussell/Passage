@@ -109,6 +109,7 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		_, _ = fmt.Fprintf(w, "# HELP product_created_total Products created.\n# TYPE product_created_total counter\nproduct_created_total %d\n", a.created.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_exploded_total Variant explosion jobs.\n# TYPE product_exploded_total counter\nproduct_exploded_total %d\n", a.exploded.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_released_total Products released.\n# TYPE product_released_total counter\nproduct_released_total %d\n", a.released.Load())

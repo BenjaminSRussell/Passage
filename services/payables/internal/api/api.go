@@ -184,6 +184,7 @@ func (a *API) validTenant(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprintf(w, "# HELP payables_settlement_previews_total Successful settlement previews.\n# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
 		fmt.Fprintf(w, "# HELP payables_settlement_preview_client_errors_total Previews rejected as invalid input (4xx).\n# TYPE payables_settlement_preview_client_errors_total counter\npayables_settlement_preview_client_errors_total %d\n", a.clientErrors.Load())
 		fmt.Fprintf(w, "# HELP payables_settlement_preview_server_faults_total Previews that failed on a server fault (5xx).\n# TYPE payables_settlement_preview_server_faults_total counter\npayables_settlement_preview_server_faults_total %d\n", a.serverFaults.Load())

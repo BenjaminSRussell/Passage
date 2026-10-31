@@ -9,6 +9,7 @@ package tenant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -205,7 +206,12 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 			return
 		}
 		if tokens := r.Header.Values(HeaderServiceToken); len(tokens) > 0 {
-			claims, err := verifier().Verify(tokens[0])
+			claims, err := verifier().VerifyContext(r.Context(), tokens[0])
+			if errors.Is(err, ErrReplayStoreUnavailable) {
+				w.Header().Set("Retry-After", "1")
+				reject(w, r, http.StatusServiceUnavailable, "COM-0503", "Service Unavailable", "service token check unavailable; retry")
+				return
+			}
 			if err != nil || len(tokens) > 1 {
 				slog.WarnContext(r.Context(), "service token rejected", "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 				reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid service token")

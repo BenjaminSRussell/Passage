@@ -60,6 +60,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	st := store.New(pool)
 	metrics := importer.NewMetrics()
 	imports, err := newImportSchedule(ctx, getenv, st, metrics)
