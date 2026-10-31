@@ -19,6 +19,7 @@ const E2E_DUTIES = [
   "product.read",
   "product.released.write",
   "settlement.read",
+  "tenant.administer",
   "View effective permissions",
   "workflow.approve",
   "workflow.read",

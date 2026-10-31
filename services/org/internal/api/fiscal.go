@@ -138,11 +138,16 @@ func fiscalCalendarRoute(next func(http.ResponseWriter, *http.Request, string)) 
 // rejectScopedCaller guards tenant-level writes (fiscal calendars, units,
 // hierarchies, teams, rounding rules, reference status, new legal entities):
 // these are tenant-wide reference data, not legal-entity data, so the writer is
-// the tenant administrator with no legal-entity claim. The all-scope duty
-// cannot stand in, as it never survives on a write.
+// the tenant administrator: no legal-entity claim and the tenant.administer duty.
+// The all-scope duty cannot stand in, as it never survives on a write.
 func rejectScopedCaller(w http.ResponseWriter, r *http.Request, action string) bool {
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
+	p, _ := tenant.FromContext(r.Context())
+	if p.LegalEntityID != "" {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot "+action))
+		return true
+	}
+	if !p.HasDuty(tenant.DutyTenantAdmin) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the "+tenant.DutyTenantAdmin+" duty is required to "+action))
 		return true
 	}
 	return false

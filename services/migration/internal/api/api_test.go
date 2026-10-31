@@ -33,7 +33,7 @@ func (failingExtractor) Extract(context.Context, string) ([]domain.Record, error
 
 const (
 	runsPath = "/v1/integration/migration-runs"
-	duties   = "migration.run"
+	duties   = "migration.run,tenant.administer"
 	mapping  = `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true},{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}]}`
 	body     = `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":` + mapping + `}`
 )
@@ -126,6 +126,14 @@ func TestCreateRun_LegalEntityScopedCallerForbidden(t *testing.T) {
 	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
 	rec := do(r, http.MethodPost, runsPath, body, duties, true, "X-Passage-Legal-Entity", testkit.TenantID(7))
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateRun_WithoutTenantAdministerForbidden(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
+	rec := do(r, http.MethodPost, runsPath, body, "migration.run", true)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || !strings.Contains(rec.Body.String(), "tenant.administer") {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
@@ -412,7 +420,7 @@ func TestCreateRun_ClientDisconnectStillRecordsRunAndLogsLifecycle(t *testing.T)
 
 const (
 	specsPath = "/v1/integration/mapping-specs"
-	writeDuty = "migration.spec.write"
+	writeDuty = "migration.spec.write,tenant.administer"
 	// specMapping is the shared mapping plus the one test case a published spec must carry.
 	specMapping = `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true},{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}],"tests":[{"name":"retail","input":{"Name":"Acme","Group":"10"},"expect":{"name":"Acme","segment":"retail"}}]}`
 )

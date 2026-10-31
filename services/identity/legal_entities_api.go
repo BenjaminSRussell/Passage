@@ -65,7 +65,7 @@ func (a *LegalEntitiesAPI) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !dbx.TenantWide(p, dutyMaintainLegalEntities) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "creating a legal entity requires a tenant-level request without a legal-entity scope"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "creating a legal entity requires the tenant.administer duty and a request without a legal-entity scope"))
 		return
 	}
 	var req createLegalEntityRequest

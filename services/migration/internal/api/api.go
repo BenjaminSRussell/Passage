@@ -593,8 +593,8 @@ func tenantWide(w http.ResponseWriter, r *http.Request) bool {
 		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
-	if p.LegalEntityID != "" {
-		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot run migrations"))
+	if !tenant.IsTenantAdmin(p) {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "migrations need the "+tenant.DutyTenantAdmin+" duty and a request without a legal-entity scope"))
 		return false
 	}
 	return true

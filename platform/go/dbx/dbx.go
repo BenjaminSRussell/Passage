@@ -111,12 +111,12 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 	return tx.Commit(ctx)
 }
 
-var ErrNotTenantWide = errors.New("dbx: a tenant-wide transaction needs a principal with no legal-entity claim and the named duty")
+var ErrNotTenantWide = errors.New("dbx: a tenant-wide transaction needs a principal with no legal-entity claim, the tenant.administer duty and the named duty")
 
 // TenantWide reports whether p may run a transaction spanning every legal entity of its tenant:
-// no legal-entity claim AND the named duty.
+// no legal-entity claim AND tenant.administer AND the named duty.
 func TenantWide(p tenant.Principal, duty string) bool {
-	return p.LegalEntityID == "" && p.HasDuty(duty)
+	return tenant.IsTenantAdmin(p) && p.HasDuty(duty)
 }
 
 // WithTenantWideAdminTx runs fn with passage.legal_entity_scopes set to '*' for p's tenant, or
