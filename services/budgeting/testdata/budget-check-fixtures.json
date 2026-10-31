@@ -1,0 +1,86 @@
+{
+  "_comment": "Wave 38 proof (AC-38.1 to AC-38.4): budget check outcomes per policy and encumbrance liquidation on invoice. Every expected value is derived by hand from the FR-38.4 / FR-38.5 rules: available = budget - actuals - encumbrances - preEncumbrances - reservations; net = max(amount, relieved) - prior; overPct = (net - available) / available x 100; pass when net <= available or overPct <= warnPct, warn when overPct <= blockPct, else fail; available <= 0 fails any increase with overPct 100; the budget.override duty turns fail into warn; reserve = net unless fail. Relief = min(invoice qty x PO price, open reservation); excess = invoice amount - relief, floored at 0. An empty overPct is not asserted (repeating decimal).",
+  "policies": {
+    "strict": {"warnPct": "0", "blockPct": "0"},
+    "dept": {"warnPct": "0", "blockPct": "5"},
+    "tolerant": {"warnPct": "5", "blockPct": "10"}
+  },
+  "balances": {
+    "B1": {"budget": "100000.00", "actuals": "60000.00", "encumbrances": "30000.00", "preEncumbrances": "0", "reservations": "0", "available": "10000.00"},
+    "B2": {"budget": "50000.00", "actuals": "10000.00", "encumbrances": "15000.00", "preEncumbrances": "5000.00", "reservations": "5000.00", "available": "15000.00"},
+    "B3": {"budget": "1000.00", "actuals": "1000.00", "encumbrances": "0", "preEncumbrances": "0", "reservations": "0", "available": "0"},
+    "B4": {"budget": "1000.00", "actuals": "900.00", "encumbrances": "200.00", "preEncumbrances": "0", "reservations": "0", "available": "-100.00"},
+    "B5": {"budget": "1234.56", "actuals": "234.56", "encumbrances": "0", "preEncumbrances": "0", "reservations": "0", "available": "1000.00"},
+    "B6": {"budget": "10000000.00", "actuals": "2500000.00", "encumbrances": "7000000.00", "preEncumbrances": "0", "reservations": "0", "available": "500000.00"}
+  },
+  "checks": [
+    {"id": "C01", "policy": "dept", "balance": "B1", "amount": "9999.99", "want": {"result": "pass", "net": "9999.99", "overPct": "0", "reserve": "9999.99"}},
+    {"id": "C02", "policy": "dept", "balance": "B1", "amount": "10000.00", "want": {"result": "pass", "net": "10000.00", "overPct": "0", "reserve": "10000.00"}},
+    {"id": "C03", "policy": "dept", "balance": "B1", "amount": "10000.01", "want": {"result": "warn", "net": "10000.01", "overPct": "0.0001", "reserve": "10000.01"}},
+    {"id": "C04", "policy": "dept", "balance": "B1", "amount": "10500.00", "want": {"result": "warn", "net": "10500.00", "overPct": "5", "reserve": "10500.00"}},
+    {"id": "C05", "policy": "dept", "balance": "B1", "amount": "10500.01", "want": {"result": "fail", "net": "10500.01", "overPct": "5.0001", "reserve": "0"}},
+    {"id": "C06", "policy": "dept", "balance": "B1", "amount": "12000.00", "want": {"result": "fail", "net": "12000.00", "overPct": "20", "reserve": "0"}},
+    {"id": "C07", "policy": "dept", "balance": "B1", "amount": "12000.00", "override": true, "want": {"result": "warn", "net": "12000.00", "overPct": "20", "reserve": "12000.00"}},
+    {"id": "C08", "policy": "strict", "balance": "B1", "amount": "10000.00", "want": {"result": "pass", "net": "10000.00", "overPct": "0", "reserve": "10000.00"}},
+    {"id": "C09", "policy": "strict", "balance": "B1", "amount": "10000.01", "want": {"result": "fail", "net": "10000.01", "overPct": "0.0001", "reserve": "0"}},
+    {"id": "C10", "policy": "strict", "balance": "B1", "amount": "10000.01", "override": true, "want": {"result": "warn", "net": "10000.01", "overPct": "0.0001", "reserve": "10000.01"}},
+    {"id": "C11", "policy": "tolerant", "balance": "B1", "amount": "10500.00", "want": {"result": "pass", "net": "10500.00", "overPct": "5", "reserve": "10500.00"}},
+    {"id": "C12", "policy": "tolerant", "balance": "B1", "amount": "10500.01", "want": {"result": "warn", "net": "10500.01", "overPct": "5.0001", "reserve": "10500.01"}},
+    {"id": "C13", "policy": "tolerant", "balance": "B1", "amount": "11000.00", "want": {"result": "warn", "net": "11000.00", "overPct": "10", "reserve": "11000.00"}},
+    {"id": "C14", "policy": "tolerant", "balance": "B1", "amount": "11000.01", "want": {"result": "fail", "net": "11000.01", "overPct": "10.0001", "reserve": "0"}},
+    {"id": "C15", "policy": "dept", "balance": "B2", "amount": "15000.00", "want": {"result": "pass", "net": "15000.00", "overPct": "0", "reserve": "15000.00"}},
+    {"id": "C16", "policy": "dept", "balance": "B2", "amount": "15750.00", "want": {"result": "warn", "net": "15750.00", "overPct": "5", "reserve": "15750.00"}},
+    {"id": "C17", "policy": "dept", "balance": "B2", "amount": "15750.15", "want": {"result": "fail", "net": "15750.15", "overPct": "5.001", "reserve": "0"}},
+    {"id": "C18", "policy": "dept", "balance": "B1", "amount": "12000.00", "prior": "2000.00", "want": {"result": "pass", "net": "10000.00", "overPct": "0", "reserve": "10000.00"}},
+    {"id": "C19", "policy": "dept", "balance": "B1", "amount": "12500.00", "prior": "2000.00", "want": {"result": "warn", "net": "10500.00", "overPct": "5", "reserve": "10500.00"}},
+    {"id": "C20", "policy": "strict", "balance": "B1", "amount": "3000.00", "prior": "12000.00", "want": {"result": "pass", "net": "-9000.00", "overPct": "0", "reserve": "-9000.00"}},
+    {"id": "C21", "policy": "strict", "balance": "B1", "amount": "200.00", "prior": "500.00", "relieved": "300.00", "want": {"result": "pass", "net": "-200.00", "overPct": "0", "reserve": "-200.00"}},
+    {"id": "C22", "policy": "dept", "balance": "B1", "amount": "600.00", "prior": "500.00", "relieved": "300.00", "want": {"result": "pass", "net": "100.00", "overPct": "0", "reserve": "100.00"}},
+    {"id": "C23", "policy": "tolerant", "balance": "B3", "amount": "0.01", "want": {"result": "fail", "net": "0.01", "overPct": "100", "reserve": "0"}},
+    {"id": "C24", "policy": "tolerant", "balance": "B3", "amount": "0.00", "want": {"result": "pass", "net": "0.00", "overPct": "0", "reserve": "0"}},
+    {"id": "C25", "policy": "dept", "balance": "B4", "amount": "50.00", "want": {"result": "fail", "net": "50.00", "overPct": "100", "reserve": "0"}},
+    {"id": "C26", "policy": "dept", "balance": "B4", "amount": "50.00", "override": true, "want": {"result": "warn", "net": "50.00", "overPct": "100", "reserve": "50.00"}},
+    {"id": "C27", "policy": "dept", "balance": "B4", "amount": "100.00", "prior": "150.00", "want": {"result": "pass", "net": "-50.00", "overPct": "0", "reserve": "-50.00"}},
+    {"id": "C28", "policy": "dept", "balance": "B5", "amount": "1050.00", "want": {"result": "warn", "net": "1050.00", "overPct": "5", "reserve": "1050.00"}},
+    {"id": "C29", "policy": "dept", "balance": "B5", "amount": "1033.33", "want": {"result": "warn", "net": "1033.33", "overPct": "3.333", "reserve": "1033.33"}},
+    {"id": "C30", "policy": "tolerant", "balance": "B5", "amount": "1033.33", "want": {"result": "pass", "net": "1033.33", "overPct": "3.333", "reserve": "1033.33"}},
+    {"id": "C31", "policy": "dept", "balance": "B6", "amount": "525000.00", "want": {"result": "warn", "net": "525000.00", "overPct": "5", "reserve": "525000.00"}},
+    {"id": "C32", "policy": "dept", "balance": "B6", "amount": "525000.01", "want": {"result": "fail", "net": "525000.01", "overPct": "5.000002", "reserve": "0"}},
+    {"id": "C33", "policy": "tolerant", "balance": "B2", "amount": "16500.00", "want": {"result": "warn", "net": "16500.00", "overPct": "10", "reserve": "16500.00"}},
+    {"id": "C34", "policy": "strict", "balance": "B2", "amount": "15000.01", "want": {"result": "fail", "net": "15000.01", "overPct": "", "reserve": "0"}}
+  ],
+  "liquidations": [
+    {"id": "L1", "name": "AC-38.3 price variance: 10 x 50.00 PO, 10 x 52.00 invoice", "reserve": "500.00", "steps": [
+      {"op": "invoice", "amount": "520.00", "matchedShare": "500.00", "want": {"relief": "500.00", "excess": "20.00", "remaining": "0", "status": "Relieved"}}
+    ]},
+    {"id": "L2", "name": "12 x 83.33 PO liquidated by invoices of 5, 4 and 3 units, then a 13th unit", "reserve": "999.96", "steps": [
+      {"op": "invoice", "amount": "416.65", "matchedShare": "416.65", "want": {"relief": "416.65", "excess": "0", "remaining": "583.31", "status": "PartiallyRelieved"}},
+      {"op": "invoice", "amount": "333.32", "matchedShare": "333.32", "want": {"relief": "333.32", "excess": "0", "remaining": "249.99", "status": "PartiallyRelieved"}},
+      {"op": "invoice", "amount": "249.99", "matchedShare": "249.99", "want": {"relief": "249.99", "excess": "0", "remaining": "0", "status": "Relieved"}},
+      {"op": "invoice", "amount": "83.33", "matchedShare": "83.33", "want": {"relief": "0", "excess": "83.33", "remaining": "0", "status": "Relieved"}}
+    ]},
+    {"id": "L3", "name": "favourable price: 10 x 48.00 invoice on a 10 x 50.00 PO relieves the PO amount", "reserve": "500.00", "steps": [
+      {"op": "invoice", "amount": "480.00", "matchedShare": "500.00", "want": {"relief": "500.00", "excess": "0", "remaining": "0", "status": "Relieved"}}
+    ]},
+    {"id": "L4", "name": "over-delivered: 12 x 50.00 invoice on a 10 x 50.00 PO", "reserve": "500.00", "steps": [
+      {"op": "invoice", "amount": "600.00", "matchedShare": "600.00", "want": {"relief": "500.00", "excess": "100.00", "remaining": "0", "status": "Relieved"}}
+    ]},
+    {"id": "L5", "name": "partial invoice, PO closed, late invoice", "reserve": "500.00", "steps": [
+      {"op": "invoice", "amount": "320.00", "matchedShare": "320.00", "want": {"relief": "320.00", "excess": "0", "remaining": "180.00", "status": "PartiallyRelieved"}},
+      {"op": "release", "reason": "Closed", "want": {"released": "180.00", "remaining": "0", "status": "Released"}},
+      {"op": "invoice", "amount": "50.00", "matchedShare": "50.00", "want": {"relief": "0", "excess": "50.00", "remaining": "0", "status": "Released"}}
+    ]},
+    {"id": "L6", "name": "sub-cent unit price: 3 x 33.3350 PO invoiced 1 then 2 units", "reserve": "100.0050", "steps": [
+      {"op": "invoice", "amount": "33.3350", "matchedShare": "33.3350", "want": {"relief": "33.3350", "excess": "0", "remaining": "66.6700", "status": "PartiallyRelieved"}},
+      {"op": "invoice", "amount": "66.6700", "matchedShare": "66.6700", "want": {"relief": "66.6700", "excess": "0", "remaining": "0", "status": "Relieved"}}
+    ]},
+    {"id": "L7", "name": "PO line cancelled before any invoice; a stray invoice is all excess", "reserve": "750.00", "steps": [
+      {"op": "release", "reason": "Cancelled", "want": {"released": "750.00", "remaining": "0", "status": "Released"}},
+      {"op": "invoice", "amount": "750.00", "matchedShare": "750.00", "want": {"relief": "0", "excess": "750.00", "remaining": "0", "status": "Released"}}
+    ]},
+    {"id": "L8", "name": "20 x 50.00 PO: 10 units at 49.00 then 10 units at 51.00", "reserve": "1000.00", "steps": [
+      {"op": "invoice", "amount": "490.00", "matchedShare": "500.00", "want": {"relief": "500.00", "excess": "0", "remaining": "500.00", "status": "PartiallyRelieved"}},
+      {"op": "invoice", "amount": "510.00", "matchedShare": "500.00", "want": {"relief": "500.00", "excess": "10.00", "remaining": "0", "status": "Relieved"}}
+    ]}
+  ]
+}
