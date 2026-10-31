@@ -1,0 +1,4976 @@
+{
+ "generator": "gen_peppol50.py (python3 -I, stdlib only)",
+ "families": {
+  "DE domestic, 19%": 4,
+  "DE domestic, 19% and 7%": 4,
+  "DE domestic, allowance and freight": 3,
+  "DE domestic, SEPA and prepaid": 2,
+  "DE domestic, 19% and zero-rated": 3,
+  "DE domestic, zero-rated only": 1,
+  "DE domestic, exempt training": 2,
+  "intra-community supply": 5,
+  "intra-community supply with allowance": 2,
+  "reverse charge services": 4,
+  "export": 4,
+  "not subject to VAT": 2,
+  "consumer sale at French rate": 2,
+  "NO domestic, 25% and 15%": 3,
+  "NO domestic with allowance": 2,
+  "NO export to Germany": 1,
+  "DE domestic, 40 lines": 1,
+  "DE domestic, single line": 1,
+  "DE domestic, buyer and order reference": 2,
+  "intra-community supply with freight": 1,
+  "DE domestic, half-cent rounding": 1
+ },
+ "creditNotes": 8,
+ "documents": [
+  {
+   "family": "DE domestic, 19%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00001",
+    "issueDate": "2026-10-02",
+    "dueDate": "2026-11-02",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "886",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "19",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1001"
+   },
+   "expect": {
+    "lineAmounts": [
+     "2067.30",
+     "360.81"
+    ],
+    "lineExtension": "2428.11",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "2428.11",
+    "taxAmount": "461.34",
+    "taxInclusive": "2889.45",
+    "prepaid": "0.00",
+    "payable": "2889.45",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "2428.11",
+      "tax": "461.34"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00002",
+    "issueDate": "2026-10-03",
+    "dueDate": "2026-11-03",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "4",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "773.25",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "3",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "668.75",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1002"
+   },
+   "expect": {
+    "lineAmounts": [
+     "22.42",
+     "21225.71",
+     "2745.22"
+    ],
+    "lineExtension": "23993.35",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "23993.35",
+    "taxAmount": "4558.74",
+    "taxInclusive": "28552.09",
+    "prepaid": "0.00",
+    "payable": "28552.09",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "23993.35",
+      "tax": "4558.74"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00003",
+    "issueDate": "2026-10-04",
+    "dueDate": "2026-11-04",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "24",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "33",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "3",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "7",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "5",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "22",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1003"
+   },
+   "expect": {
+    "lineAmounts": [
+     "83.40",
+     "41217.00",
+     "8743.00",
+     "125.00",
+     "27478.00"
+    ],
+    "lineExtension": "77646.40",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "77646.40",
+    "taxAmount": "14752.82",
+    "taxInclusive": "92399.22",
+    "prepaid": "0.00",
+    "payable": "92399.22",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "77646.40",
+      "tax": "14752.82"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00004",
+    "issueDate": "2026-10-05",
+    "dueDate": "2026-11-05",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "16",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1004"
+   },
+   "expect": {
+    "lineAmounts": [
+     "19984.00"
+    ],
+    "lineExtension": "19984.00",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "19984.00",
+    "taxAmount": "3796.96",
+    "taxInclusive": "23780.96",
+    "prepaid": "0.00",
+    "payable": "23780.96",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "19984.00",
+      "tax": "3796.96"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and 7%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00005",
+    "issueDate": "2026-10-06",
+    "dueDate": "2026-11-06",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "11",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "168.25",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "5",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1005"
+   },
+   "expect": {
+    "lineAmounts": [
+     "38.23",
+     "392.58",
+     "28.03",
+     "125.00"
+    ],
+    "lineExtension": "583.84",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "583.84",
+    "taxAmount": "48.82",
+    "taxInclusive": "632.66",
+    "prepaid": "0.00",
+    "payable": "632.66",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "66.26",
+      "tax": "12.59"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "517.58",
+      "tax": "36.23"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and 7%",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00006",
+    "issueDate": "2026-10-07",
+    "dueDate": "2026-11-07",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "164.75",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "5",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1006"
+   },
+   "expect": {
+    "lineAmounts": [
+     "676.30",
+     "28.03"
+    ],
+    "lineExtension": "704.33",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "704.33",
+    "taxAmount": "130.46",
+    "taxInclusive": "834.79",
+    "prepaid": "0.00",
+    "payable": "834.79",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "676.30",
+      "tax": "128.50"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "28.03",
+      "tax": "1.96"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and 7%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00007",
+    "issueDate": "2026-10-08",
+    "dueDate": "2026-11-08",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "748.75",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "404.5",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1007"
+   },
+   "expect": {
+    "lineAmounts": [
+     "20553.19",
+     "154.31",
+     "943.82"
+    ],
+    "lineExtension": "21651.32",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "21651.32",
+    "taxAmount": "4095.23",
+    "taxInclusive": "25746.55",
+    "prepaid": "0.00",
+    "payable": "25746.55",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "21497.01",
+      "tax": "4084.43"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "154.31",
+      "tax": "10.80"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and 7%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00008",
+    "issueDate": "2026-10-09",
+    "dueDate": "2026-11-09",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "36.5",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "794.75",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "50",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "5",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "43",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "6",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "561.5",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1008"
+   },
+   "expect": {
+    "lineAmounts": [
+     "3522.25",
+     "3262.45",
+     "280.25",
+     "12.50",
+     "149.43",
+     "1310.15"
+    ],
+    "lineExtension": "8537.03",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "8537.03",
+    "taxAmount": "1071.83",
+    "taxInclusive": "9608.86",
+    "prepaid": "0.00",
+    "payable": "9608.86",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "3951.93",
+      "tax": "750.87"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "4585.10",
+      "tax": "320.96"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, allowance and freight",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00009",
+    "issueDate": "2026-10-10",
+    "dueDate": "2026-11-10",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "25",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "873.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "453",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1009",
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Volume discount",
+      "amount": "12.35",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": true,
+      "reason": "Freight",
+      "amount": "45.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": false,
+      "reason": "Early order",
+      "amount": "0.05",
+      "category": "S",
+      "percent": "7"
+     }
+    ]
+   },
+   "expect": {
+    "lineAmounts": [
+     "12.50",
+     "86.88",
+     "84316.88",
+     "508.95"
+    ],
+    "lineExtension": "84925.21",
+    "allowanceTotal": "12.40",
+    "chargeTotal": "45.00",
+    "taxExclusive": "84957.81",
+    "taxAmount": "16070.49",
+    "taxInclusive": "101028.30",
+    "prepaid": "0.00",
+    "payable": "101028.30",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "84362.03",
+      "tax": "16028.79"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "595.78",
+      "tax": "41.70"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, allowance and freight",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00010",
+    "issueDate": "2026-10-11",
+    "dueDate": "2026-11-11",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "697.25",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "17",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "47",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "252.5",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1010",
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Volume discount",
+      "amount": "12.35",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": true,
+      "reason": "Freight",
+      "amount": "45.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": false,
+      "reason": "Early order",
+      "amount": "0.05",
+      "category": "S",
+      "percent": "7"
+     }
+    ]
+   },
+   "expect": {
+    "lineAmounts": [
+     "67284.63",
+     "21233.00",
+     "263.44",
+     "283.68"
+    ],
+    "lineExtension": "89064.75",
+    "allowanceTotal": "12.40",
+    "chargeTotal": "45.00",
+    "taxExclusive": "89097.35",
+    "taxAmount": "14346.50",
+    "taxInclusive": "103443.85",
+    "prepaid": "0.00",
+    "payable": "103443.85",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "67580.72",
+      "tax": "12840.34"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "21516.63",
+      "tax": "1506.16"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, allowance and freight",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00011",
+    "issueDate": "2026-10-12",
+    "dueDate": "2026-11-12",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "53",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "2",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "7",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "45",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1011",
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Volume discount",
+      "amount": "12.35",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": true,
+      "reason": "Freight",
+      "amount": "45.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "charge": false,
+      "reason": "Early order",
+      "amount": "0.05",
+      "category": "S",
+      "percent": "7"
+     }
+    ]
+   },
+   "expect": {
+    "lineAmounts": [
+     "297.07",
+     "37.98",
+     "24.33",
+     "156.38"
+    ],
+    "lineExtension": "515.76",
+    "allowanceTotal": "12.40",
+    "chargeTotal": "45.00",
+    "taxExclusive": "548.36",
+    "taxAmount": "80.87",
+    "taxInclusive": "629.23",
+    "prepaid": "0.00",
+    "payable": "629.23",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "354.05",
+      "tax": "67.27"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "194.31",
+      "tax": "13.60"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, SEPA and prepaid",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00012",
+    "issueDate": "2026-10-13",
+    "dueDate": "2026-11-13",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "9",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1012",
+    "paymentMeansCode": "58",
+    "prepaid": "100.00"
+   },
+   "expect": {
+    "lineAmounts": [
+     "11241.00",
+     "12.50"
+    ],
+    "lineExtension": "11253.50",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "11253.50",
+    "taxAmount": "2138.17",
+    "taxInclusive": "13391.67",
+    "prepaid": "100.00",
+    "payable": "13291.67",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "11253.50",
+      "tax": "2138.17"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, SEPA and prepaid",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00013",
+    "issueDate": "2026-10-14",
+    "dueDate": "2026-11-14",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "849",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "54",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "3",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "299.25",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "452.75",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1013",
+    "paymentMeansCode": "58",
+    "prepaid": "100.00"
+   },
+   "expect": {
+    "lineAmounts": [
+     "23305.05",
+     "1025.46",
+     "8214.41",
+     "12427.99"
+    ],
+    "lineExtension": "44972.91",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "44972.91",
+    "taxAmount": "8544.85",
+    "taxInclusive": "53517.76",
+    "prepaid": "100.00",
+    "payable": "53417.76",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "44972.91",
+      "tax": "8544.85"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and zero-rated",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00014",
+    "issueDate": "2026-10-15",
+    "dueDate": "2026-11-15",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "831",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "45",
+      "unitPrice": "1249.00",
+      "category": "Z",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "845.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1014"
+   },
+   "expect": {
+    "lineAmounts": [
+     "80191.50",
+     "56205.00",
+     "81614.88"
+    ],
+    "lineExtension": "218011.38",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "218011.38",
+    "taxAmount": "30743.21",
+    "taxInclusive": "248754.59",
+    "prepaid": "0.00",
+    "payable": "248754.59",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "161806.38",
+      "tax": "30743.21"
+     },
+     {
+      "category": "Z",
+      "percent": "0",
+      "taxable": "56205.00",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and zero-rated",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00015",
+    "issueDate": "2026-10-16",
+    "dueDate": "2026-11-16",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "754",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "18",
+      "unitPrice": "5.6050",
+      "category": "Z",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "517.5",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1015"
+   },
+   "expect": {
+    "lineAmounts": [
+     "20697.30",
+     "100.89",
+     "14205.38"
+    ],
+    "lineExtension": "35003.57",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "35003.57",
+    "taxAmount": "6631.51",
+    "taxInclusive": "41635.08",
+    "prepaid": "0.00",
+    "payable": "41635.08",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "34902.68",
+      "tax": "6631.51"
+     },
+     {
+      "category": "Z",
+      "percent": "0",
+      "taxable": "100.89",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 19% and zero-rated",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00016",
+    "issueDate": "2026-10-17",
+    "dueDate": "2026-11-17",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "22",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "31",
+      "unitPrice": "5.6050",
+      "category": "Z",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "508.25",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1016"
+   },
+   "expect": {
+    "lineAmounts": [
+     "417.78",
+     "173.76",
+     "2086.37"
+    ],
+    "lineExtension": "2677.91",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "2677.91",
+    "taxAmount": "475.79",
+    "taxInclusive": "3153.70",
+    "prepaid": "0.00",
+    "payable": "3153.70",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "2504.15",
+      "tax": "475.79"
+     },
+     {
+      "category": "Z",
+      "percent": "0",
+      "taxable": "173.76",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, zero-rated only",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00017",
+    "issueDate": "2026-10-18",
+    "dueDate": "2026-11-18",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "795.5",
+      "unitPrice": "2.3333",
+      "category": "Z",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1017"
+   },
+   "expect": {
+    "lineAmounts": [
+     "1856.14"
+    ],
+    "lineExtension": "1856.14",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "1856.14",
+    "taxAmount": "0.00",
+    "taxInclusive": "1856.14",
+    "prepaid": "0.00",
+    "payable": "1856.14",
+    "subtotals": [
+     {
+      "category": "Z",
+      "percent": "0",
+      "taxable": "1856.14",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, exempt training",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00018",
+    "issueDate": "2026-10-19",
+    "dueDate": "2026-11-19",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "39",
+      "unitPrice": "3.4750",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "54",
+      "unitPrice": "5.6050",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "749.25",
+      "unitPrice": "2.3333",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "5",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "29",
+      "unitPrice": "1249.00",
+      "category": "E",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1018",
+    "exemptionReasons": {
+     "E": "Exempt under §4 Nr. 21 UStG"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "135.53",
+     "302.67",
+     "1748.23",
+     "154.31",
+     "36221.00"
+    ],
+    "lineExtension": "38561.74",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "38561.74",
+    "taxAmount": "0.00",
+    "taxInclusive": "38561.74",
+    "prepaid": "0.00",
+    "payable": "38561.74",
+    "subtotals": [
+     {
+      "category": "E",
+      "percent": "0",
+      "taxable": "38561.74",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, exempt training",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00019",
+    "issueDate": "2026-10-20",
+    "dueDate": "2026-11-20",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "713.25",
+      "unitPrice": "1.1235",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "689",
+      "unitPrice": "2.3333",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "166",
+      "unitPrice": "27.45",
+      "category": "E",
+      "percent": "0"
+     },
+     {
+      "id": "5",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "E",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1019",
+    "exemptionReasons": {
+     "E": "Exempt under §4 Nr. 21 UStG"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "12.50",
+     "801.34",
+     "1607.64",
+     "4556.70",
+     "12.50"
+    ],
+    "lineExtension": "6990.68",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "6990.68",
+    "taxAmount": "0.00",
+    "taxInclusive": "6990.68",
+    "prepaid": "0.00",
+    "payable": "6990.68",
+    "subtotals": [
+     {
+      "category": "E",
+      "percent": "0",
+      "taxable": "6990.68",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00020",
+    "issueDate": "2026-10-21",
+    "dueDate": "2026-11-21",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "vatId": "FR12345678901",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "123.25",
+      "unitPrice": "4.105",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "434.25",
+      "unitPrice": "1.1235",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4020",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "deliveryDate": "2026-09-28",
+    "deliveryCountry": "FR"
+   },
+   "expect": {
+    "lineAmounts": [
+     "505.94",
+     "487.88"
+    ],
+    "lineExtension": "993.82",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "993.82",
+    "taxAmount": "0.00",
+    "taxInclusive": "993.82",
+    "prepaid": "0.00",
+    "payable": "993.82",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "993.82",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00021",
+    "issueDate": "2026-10-22",
+    "dueDate": "2026-11-22",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributeur B.V.",
+     "endpointScheme": "0088",
+     "endpointId": "3761042500213",
+     "countryCode": "NL",
+     "vatId": "NL123456789B01"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "359.5",
+      "unitPrice": "96.50",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4021",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "deliveryDate": "2026-09-28",
+    "deliveryCountry": "NL"
+   },
+   "expect": {
+    "lineAmounts": [
+     "34691.75"
+    ],
+    "lineExtension": "34691.75",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "34691.75",
+    "taxAmount": "0.00",
+    "taxInclusive": "34691.75",
+    "prepaid": "0.00",
+    "payable": "34691.75",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "34691.75",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00022",
+    "issueDate": "2026-10-23",
+    "dueDate": "2026-11-23",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Vertrieb GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "9012345000004",
+     "countryCode": "AT",
+     "vatId": "ATU12345678"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "718.5",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "12",
+      "unitPrice": "1249.00",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "52",
+      "unitPrice": "5.6050",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "32",
+      "unitPrice": "3.4750",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4022",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "deliveryDate": "2026-09-28",
+    "deliveryCountry": "AT"
+   },
+   "expect": {
+    "lineAmounts": [
+     "19722.83",
+     "14988.00",
+     "291.46",
+     "111.20"
+    ],
+    "lineExtension": "35113.49",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "35113.49",
+    "taxAmount": "0.00",
+    "taxInclusive": "35113.49",
+    "prepaid": "0.00",
+    "payable": "35113.49",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "35113.49",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00023",
+    "issueDate": "2026-10-24",
+    "dueDate": "2026-11-24",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Distributore Demo S.r.l.",
+     "endpointScheme": "0088",
+     "endpointId": "8012345000005",
+     "countryCode": "IT",
+     "vatId": "IT12345678901"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "100.75",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "252.25",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "986",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4023",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "deliveryDate": "2026-09-28",
+    "deliveryCountry": "IT"
+   },
+   "expect": {
+    "lineAmounts": [
+     "2765.59",
+     "6924.26",
+     "27065.70"
+    ],
+    "lineExtension": "36755.55",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "36755.55",
+    "taxAmount": "0.00",
+    "taxInclusive": "36755.55",
+    "prepaid": "0.00",
+    "payable": "36755.55",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "36755.55",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00024",
+    "issueDate": "2026-10-25",
+    "dueDate": "2026-11-25",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "vatId": "FR12345678901",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "961",
+      "unitPrice": "1.1235",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "14",
+      "unitPrice": "18.99",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "213.25",
+      "unitPrice": "96.50",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "744.25",
+      "unitPrice": "4.105",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4024",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "deliveryDate": "2026-09-28",
+    "deliveryCountry": "FR"
+   },
+   "expect": {
+    "lineAmounts": [
+     "1079.68",
+     "265.86",
+     "20578.63",
+     "3055.15"
+    ],
+    "lineExtension": "24979.32",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "24979.32",
+    "taxAmount": "0.00",
+    "taxInclusive": "24979.32",
+    "prepaid": "0.00",
+    "payable": "24979.32",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "24979.32",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply with allowance",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00025",
+    "issueDate": "2026-10-26",
+    "dueDate": "2026-11-26",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributeur B.V.",
+     "endpointScheme": "0088",
+     "endpointId": "3761042500213",
+     "countryCode": "NL",
+     "vatId": "NL123456789B01"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "793.75",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "971",
+      "unitPrice": "27.45",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1025",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Pallet return",
+      "amount": "8.40",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "deliveryDate": "2026-09-29",
+    "deliveryCountry": "NL"
+   },
+   "expect": {
+    "lineAmounts": [
+     "21788.44",
+     "26653.95"
+    ],
+    "lineExtension": "48442.39",
+    "allowanceTotal": "8.40",
+    "chargeTotal": "0",
+    "taxExclusive": "48433.99",
+    "taxAmount": "0.00",
+    "taxInclusive": "48433.99",
+    "prepaid": "0.00",
+    "payable": "48433.99",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "48433.99",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply with allowance",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00026",
+    "issueDate": "2026-10-27",
+    "dueDate": "2026-11-27",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Vertrieb GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "9012345000004",
+     "countryCode": "AT",
+     "vatId": "ATU12345678"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "2500",
+      "unitPrice": "0.0125",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "29",
+      "unitPrice": "18.99",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "29",
+      "unitPrice": "3.4750",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "35",
+      "unitPrice": "5.6050",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1026",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Pallet return",
+      "amount": "8.40",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "deliveryDate": "2026-09-29",
+    "deliveryCountry": "AT"
+   },
+   "expect": {
+    "lineAmounts": [
+     "31.25",
+     "550.71",
+     "100.78",
+     "196.18"
+    ],
+    "lineExtension": "878.92",
+    "allowanceTotal": "8.40",
+    "chargeTotal": "0",
+    "taxExclusive": "870.52",
+    "taxAmount": "0.00",
+    "taxInclusive": "870.52",
+    "prepaid": "0.00",
+    "payable": "870.52",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "870.52",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "reverse charge services",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00027",
+    "issueDate": "2026-10-28",
+    "dueDate": "2026-11-28",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "vatId": "FR12345678901",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "45",
+      "unitPrice": "5.6050",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "39",
+      "unitPrice": "1249.00",
+      "category": "AE",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4027",
+    "exemptionReasons": {
+     "AE": "Reverse charge"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "252.23",
+     "48711.00"
+    ],
+    "lineExtension": "48963.23",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "48963.23",
+    "taxAmount": "0.00",
+    "taxInclusive": "48963.23",
+    "prepaid": "0.00",
+    "payable": "48963.23",
+    "subtotals": [
+     {
+      "category": "AE",
+      "percent": "0",
+      "taxable": "48963.23",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "reverse charge services",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00028",
+    "issueDate": "2026-10-01",
+    "dueDate": "2026-11-01",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Distributore Demo S.r.l.",
+     "endpointScheme": "0088",
+     "endpointId": "8012345000005",
+     "countryCode": "IT",
+     "vatId": "IT12345678901"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "863",
+      "unitPrice": "96.50",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "17",
+      "unitPrice": "5.6050",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "755",
+      "unitPrice": "1.1235",
+      "category": "AE",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4028",
+    "exemptionReasons": {
+     "AE": "Reverse charge"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "83279.50",
+     "95.29",
+     "848.24"
+    ],
+    "lineExtension": "84223.03",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "84223.03",
+    "taxAmount": "0.00",
+    "taxInclusive": "84223.03",
+    "prepaid": "0.00",
+    "payable": "84223.03",
+    "subtotals": [
+     {
+      "category": "AE",
+      "percent": "0",
+      "taxable": "84223.03",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "reverse charge services",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00029",
+    "issueDate": "2026-10-02",
+    "dueDate": "2026-11-02",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributie NV",
+     "endpointScheme": "0088",
+     "endpointId": "5412345000013",
+     "countryCode": "BE",
+     "vatId": "BE0123456749"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "938.75",
+      "unitPrice": "2.3333",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "47.75",
+      "unitPrice": "2.3333",
+      "category": "AE",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4029",
+    "exemptionReasons": {
+     "AE": "Reverse charge"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "2190.39",
+     "111.42"
+    ],
+    "lineExtension": "2301.81",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "2301.81",
+    "taxAmount": "0.00",
+    "taxInclusive": "2301.81",
+    "prepaid": "0.00",
+    "payable": "2301.81",
+    "subtotals": [
+     {
+      "category": "AE",
+      "percent": "0",
+      "taxable": "2301.81",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "reverse charge services",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00030",
+    "issueDate": "2026-10-03",
+    "dueDate": "2026-11-03",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributeur B.V.",
+     "endpointScheme": "0088",
+     "endpointId": "3761042500213",
+     "countryCode": "NL",
+     "vatId": "NL123456789B01"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "4",
+      "unitPrice": "18.99",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "123.75",
+      "unitPrice": "4.105",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "25",
+      "unitPrice": "3.4750",
+      "category": "AE",
+      "percent": "0"
+     },
+     {
+      "id": "5",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "50",
+      "unitPrice": "5.6050",
+      "category": "AE",
+      "percent": "0"
+     }
+    ],
+    "orderReference": "PO-4030",
+    "exemptionReasons": {
+     "AE": "Reverse charge"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "75.96",
+     "125.00",
+     "507.99",
+     "86.88",
+     "280.25"
+    ],
+    "lineExtension": "1076.08",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "1076.08",
+    "taxAmount": "0.00",
+    "taxInclusive": "1076.08",
+    "prepaid": "0.00",
+    "payable": "1076.08",
+    "subtotals": [
+     {
+      "category": "AE",
+      "percent": "0",
+      "taxable": "1076.08",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "export",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00031",
+    "issueDate": "2026-10-04",
+    "dueDate": "2026-11-04",
+    "currency": "CHF",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Vertrieb AG",
+     "endpointScheme": "0088",
+     "endpointId": "7612345000008",
+     "countryCode": "CH"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "4",
+      "unitPrice": "5.6050",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "54",
+      "unitPrice": "1249.00",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "438.25",
+      "unitPrice": "96.50",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "23",
+      "unitPrice": "1249.00",
+      "category": "G",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1031",
+    "exemptionReasons": {
+     "G": "Export outside the EU"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "22.42",
+     "67446.00",
+     "42291.13",
+     "28727.00"
+    ],
+    "lineExtension": "138486.55",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "138486.55",
+    "taxAmount": "0.00",
+    "taxInclusive": "138486.55",
+    "prepaid": "0.00",
+    "payable": "138486.55",
+    "subtotals": [
+     {
+      "category": "G",
+      "percent": "0",
+      "taxable": "138486.55",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "export",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00032",
+    "issueDate": "2026-10-05",
+    "dueDate": "2026-11-05",
+    "currency": "USD",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distribution Inc.",
+     "endpointScheme": "0088",
+     "endpointId": "0012345000065",
+     "countryCode": "US"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "9",
+      "unitPrice": "1249.00",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "45",
+      "unitPrice": "18.99",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "G",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1032",
+    "exemptionReasons": {
+     "G": "Export outside the EU"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "11241.00",
+     "854.55",
+     "154.31"
+    ],
+    "lineExtension": "12249.86",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "12249.86",
+    "taxAmount": "0.00",
+    "taxInclusive": "12249.86",
+    "prepaid": "0.00",
+    "payable": "12249.86",
+    "subtotals": [
+     {
+      "category": "G",
+      "percent": "0",
+      "taxable": "12249.86",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "export",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00033",
+    "issueDate": "2026-10-06",
+    "dueDate": "2026-11-06",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Vertrieb AG",
+     "endpointScheme": "0088",
+     "endpointId": "7612345000008",
+     "countryCode": "CH"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "765.25",
+      "unitPrice": "4.105",
+      "category": "G",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1033",
+    "exemptionReasons": {
+     "G": "Export outside the EU"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "3141.35"
+    ],
+    "lineExtension": "3141.35",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "3141.35",
+    "taxAmount": "0.00",
+    "taxInclusive": "3141.35",
+    "prepaid": "0.00",
+    "payable": "3141.35",
+    "subtotals": [
+     {
+      "category": "G",
+      "percent": "0",
+      "taxable": "3141.35",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "export",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00034",
+    "issueDate": "2026-10-07",
+    "dueDate": "2026-11-07",
+    "currency": "USD",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distribution Inc.",
+     "endpointScheme": "0088",
+     "endpointId": "0012345000065",
+     "countryCode": "US"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "2",
+      "unitPrice": "3.4750",
+      "category": "G",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "36",
+      "unitPrice": "5.6050",
+      "category": "G",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1034",
+    "exemptionReasons": {
+     "G": "Export outside the EU"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "154.31",
+     "6.95",
+     "201.78"
+    ],
+    "lineExtension": "363.04",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "363.04",
+    "taxAmount": "0.00",
+    "taxInclusive": "363.04",
+    "prepaid": "0.00",
+    "payable": "363.04",
+    "subtotals": [
+     {
+      "category": "G",
+      "percent": "0",
+      "taxable": "363.04",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "not subject to VAT",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00035",
+    "issueDate": "2026-10-08",
+    "dueDate": "2026-11-08",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "23",
+      "unitPrice": "18.99",
+      "category": "O",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1035",
+    "exemptionReasons": {
+     "O": "Not subject to VAT"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "436.77"
+    ],
+    "lineExtension": "436.77",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "436.77",
+    "taxAmount": "0.00",
+    "taxInclusive": "436.77",
+    "prepaid": "0.00",
+    "payable": "436.77",
+    "subtotals": [
+     {
+      "category": "O",
+      "percent": "0",
+      "taxable": "436.77",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "not subject to VAT",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00036",
+    "issueDate": "2026-10-09",
+    "dueDate": "2026-11-09",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "572.5",
+      "unitPrice": "4.105",
+      "category": "O",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "3",
+      "unitPrice": "5.6050",
+      "category": "O",
+      "percent": "0"
+     },
+     {
+      "id": "3",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "876",
+      "unitPrice": "1.1235",
+      "category": "O",
+      "percent": "0"
+     },
+     {
+      "id": "4",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "916",
+      "unitPrice": "2.3333",
+      "category": "O",
+      "percent": "0"
+     },
+     {
+      "id": "5",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "O",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1036",
+    "exemptionReasons": {
+     "O": "Not subject to VAT"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "2350.11",
+     "16.82",
+     "984.19",
+     "2137.30",
+     "125.00"
+    ],
+    "lineExtension": "5613.42",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "5613.42",
+    "taxAmount": "0.00",
+    "taxInclusive": "5613.42",
+    "prepaid": "0.00",
+    "payable": "5613.42",
+    "subtotals": [
+     {
+      "category": "O",
+      "percent": "0",
+      "taxable": "5613.42",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "consumer sale at French rate",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00037",
+    "issueDate": "2026-10-10",
+    "dueDate": "2026-11-10",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Jean Dupont",
+     "endpointScheme": "0088",
+     "endpointId": "3012345000017",
+     "countryCode": "FR"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "772.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "20"
+     },
+     {
+      "id": "2",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "73.25",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "5.5"
+     }
+    ],
+    "buyerReference": "BR-1037"
+   },
+   "expect": {
+    "lineAmounts": [
+     "74570.38",
+     "7068.63"
+    ],
+    "lineExtension": "81639.01",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "81639.01",
+    "taxAmount": "15302.85",
+    "taxInclusive": "96941.86",
+    "prepaid": "0.00",
+    "payable": "96941.86",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "2E+1",
+      "taxable": "74570.38",
+      "tax": "14914.08"
+     },
+     {
+      "category": "S",
+      "percent": "5.5",
+      "taxable": "7068.63",
+      "tax": "388.77"
+     }
+    ]
+   }
+  },
+  {
+   "family": "consumer sale at French rate",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00038",
+    "issueDate": "2026-10-11",
+    "dueDate": "2026-11-11",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Jean Dupont",
+     "endpointScheme": "0088",
+     "endpointId": "3012345000017",
+     "countryCode": "FR"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "8",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "20"
+     },
+     {
+      "id": "2",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "796.25",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "5.5"
+     }
+    ],
+    "buyerReference": "BR-1038"
+   },
+   "expect": {
+    "lineAmounts": [
+     "9992.00",
+     "21857.06"
+    ],
+    "lineExtension": "31849.06",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "31849.06",
+    "taxAmount": "3200.54",
+    "taxInclusive": "35049.60",
+    "prepaid": "0.00",
+    "payable": "35049.60",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "2E+1",
+      "taxable": "9992.00",
+      "tax": "1998.40"
+     },
+     {
+      "category": "S",
+      "percent": "5.5",
+      "taxable": "21857.06",
+      "tax": "1202.14"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO domestic, 25% and 15%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00039",
+    "issueDate": "2026-10-12",
+    "dueDate": "2026-11-12",
+    "currency": "NOK",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Demo Distribusjon AS",
+     "endpointScheme": "0192",
+     "endpointId": "923639462",
+     "countryCode": "NO",
+     "vatId": "NO923639462MVA"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "24",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "25"
+     },
+     {
+      "id": "2",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "3",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "15"
+     },
+     {
+      "id": "3",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "950.25",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "25"
+     }
+    ],
+    "buyerReference": "BR-1039"
+   },
+   "expect": {
+    "lineAmounts": [
+     "134.52",
+     "10.43",
+     "1067.61"
+    ],
+    "lineExtension": "1212.56",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "1212.56",
+    "taxAmount": "302.09",
+    "taxInclusive": "1514.65",
+    "prepaid": "0.00",
+    "payable": "1514.65",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "25",
+      "taxable": "1202.13",
+      "tax": "300.53"
+     },
+     {
+      "category": "S",
+      "percent": "15",
+      "taxable": "10.43",
+      "tax": "1.56"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO domestic, 25% and 15%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00040",
+    "issueDate": "2026-10-13",
+    "dueDate": "2026-11-13",
+    "currency": "NOK",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Demo Distribusjon AS",
+     "endpointScheme": "0192",
+     "endpointId": "923639462",
+     "countryCode": "NO",
+     "vatId": "NO923639462MVA"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "236.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "25"
+     },
+     {
+      "id": "2",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "54",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "15"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "307.5",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "25"
+     }
+    ],
+    "buyerReference": "BR-1040"
+   },
+   "expect": {
+    "lineAmounts": [
+     "22846.38",
+     "187.65",
+     "29673.75"
+    ],
+    "lineExtension": "52707.78",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "52707.78",
+    "taxAmount": "13158.18",
+    "taxInclusive": "65865.96",
+    "prepaid": "0.00",
+    "payable": "65865.96",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "25",
+      "taxable": "52520.13",
+      "tax": "13130.03"
+     },
+     {
+      "category": "S",
+      "percent": "15",
+      "taxable": "187.65",
+      "tax": "28.15"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO domestic, 25% and 15%",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00041",
+    "issueDate": "2026-10-14",
+    "dueDate": "2026-11-14",
+    "currency": "NOK",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Demo Distribusjon AS",
+     "endpointScheme": "0192",
+     "endpointId": "923639462",
+     "countryCode": "NO",
+     "vatId": "NO923639462MVA"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "49",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "25"
+     },
+     {
+      "id": "2",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "584",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "15"
+     },
+     {
+      "id": "3",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "750.5",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "25"
+     }
+    ],
+    "buyerReference": "BR-1041"
+   },
+   "expect": {
+    "lineAmounts": [
+     "170.28",
+     "1362.65",
+     "1751.14"
+    ],
+    "lineExtension": "3284.07",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "3284.07",
+    "taxAmount": "684.76",
+    "taxInclusive": "3968.83",
+    "prepaid": "0.00",
+    "payable": "3968.83",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "25",
+      "taxable": "1921.42",
+      "tax": "480.36"
+     },
+     {
+      "category": "S",
+      "percent": "15",
+      "taxable": "1362.65",
+      "tax": "204.40"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO domestic with allowance",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00042",
+    "issueDate": "2026-10-15",
+    "dueDate": "2026-11-15",
+    "currency": "NOK",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Nordlys Grossist AS",
+     "endpointScheme": "0192",
+     "endpointId": "984711611",
+     "countryCode": "NO"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "969.5",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "25"
+     },
+     {
+      "id": "2",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "25"
+     }
+    ],
+    "buyerReference": "BR-1042",
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Rabatt",
+      "amount": "150.00",
+      "category": "S",
+      "percent": "25"
+     }
+    ]
+   },
+   "expect": {
+    "lineAmounts": [
+     "3979.80",
+     "125.00"
+    ],
+    "lineExtension": "4104.80",
+    "allowanceTotal": "150.00",
+    "chargeTotal": "0",
+    "taxExclusive": "3954.80",
+    "taxAmount": "988.70",
+    "taxInclusive": "4943.50",
+    "prepaid": "0.00",
+    "payable": "4943.50",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "25",
+      "taxable": "3954.80",
+      "tax": "988.70"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO domestic with allowance",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00043",
+    "issueDate": "2026-10-16",
+    "dueDate": "2026-11-16",
+    "currency": "NOK",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Nordlys Grossist AS",
+     "endpointScheme": "0192",
+     "endpointId": "984711611",
+     "countryCode": "NO"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "456.75",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "25"
+     },
+     {
+      "id": "2",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "25"
+     }
+    ],
+    "buyerReference": "BR-1043",
+    "allowanceCharges": [
+     {
+      "charge": false,
+      "reason": "Rabatt",
+      "amount": "150.00",
+      "category": "S",
+      "percent": "25"
+     }
+    ]
+   },
+   "expect": {
+    "lineAmounts": [
+     "513.16",
+     "125.00"
+    ],
+    "lineExtension": "638.16",
+    "allowanceTotal": "150.00",
+    "chargeTotal": "0",
+    "taxExclusive": "488.16",
+    "taxAmount": "122.04",
+    "taxInclusive": "610.20",
+    "prepaid": "0.00",
+    "payable": "610.20",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "25",
+      "taxable": "488.16",
+      "tax": "122.04"
+     }
+    ]
+   }
+  },
+  {
+   "family": "NO export to Germany",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00044",
+    "issueDate": "2026-10-17",
+    "dueDate": "2026-11-17",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer Norge AS",
+     "endpointScheme": "0192",
+     "endpointId": "974760673",
+     "countryCode": "NO",
+     "vatId": "NO974760673MVA",
+     "legalId": "974760673",
+     "streetName": "Havnegata 3",
+     "cityName": "Bergen",
+     "postalZone": "5003"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "NO9386011117947",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "2500",
+      "unitPrice": "0.0125",
+      "category": "G",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1044",
+    "exemptionReasons": {
+     "G": "Export"
+    }
+   },
+   "expect": {
+    "lineAmounts": [
+     "31.25"
+    ],
+    "lineExtension": "31.25",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "31.25",
+    "taxAmount": "0.00",
+    "taxInclusive": "31.25",
+    "prepaid": "0.00",
+    "payable": "31.25",
+    "subtotals": [
+     {
+      "category": "G",
+      "percent": "0",
+      "taxable": "31.25",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, 40 lines",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00045",
+    "issueDate": "2026-10-18",
+    "dueDate": "2026-11-18",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "2500",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "888.5",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "3",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "516",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "42",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "5",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "228",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "6",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "14",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "7",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "274",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "8",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "237.75",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "9",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "35",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "10",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "3",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "11",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "477",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "12",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "45",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "13",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "802.25",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "14",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "327.5",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "15",
+      "name": "Sheet metal 1 mm",
+      "unitCode": "MTK",
+      "quantity": "990.75",
+      "unitPrice": "27.45",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "16",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "1000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "17",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "701.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "18",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "336.75",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "19",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "879.25",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "20",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "21",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "879.5",
+      "unitPrice": "4.105",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "22",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "12",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "23",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "19",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "24",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "59",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "25",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "889.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "26",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "789.5",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "27",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "632.75",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "28",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "6",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "29",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "192.75",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "30",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "11",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "31",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "18",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "32",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "33",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "22",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "34",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "601.5",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "35",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "31",
+      "unitPrice": "1249.00",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "36",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "10000",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "37",
+      "name": "Commissioning service",
+      "unitCode": "HUR",
+      "quantity": "782.75",
+      "unitPrice": "96.50",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "38",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "7",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "7"
+     },
+     {
+      "id": "39",
+      "name": "Fastener M8 (pack)",
+      "unitCode": "EA",
+      "quantity": "12345",
+      "unitPrice": "0.0125",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "40",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "30",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1045"
+   },
+   "expect": {
+    "lineAmounts": [
+     "31.25",
+     "2073.14",
+     "49794.00",
+     "797.58",
+     "22002.00",
+     "17486.00",
+     "307.84",
+     "6526.24",
+     "43715.00",
+     "56.97",
+     "1958.09",
+     "854.55",
+     "3293.24",
+     "8989.88",
+     "27196.09",
+     "12.50",
+     "67718.88",
+     "1382.36",
+     "3609.32",
+     "125.00",
+     "3610.35",
+     "67.26",
+     "360.81",
+     "1120.41",
+     "85860.88",
+     "887.00",
+     "710.89",
+     "20.85",
+     "449.74",
+     "208.89",
+     "341.82",
+     "154.31",
+     "417.78",
+     "675.79",
+     "38719.00",
+     "125.00",
+     "75535.38",
+     "39.24",
+     "154.31",
+     "569.70"
+    ],
+    "lineExtension": "467959.34",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "467959.34",
+    "taxAmount": "70911.87",
+    "taxInclusive": "538871.21",
+    "prepaid": "0.00",
+    "payable": "538871.21",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "317956.01",
+      "tax": "60411.64"
+     },
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "150003.33",
+      "tax": "10500.23"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, single line",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00046",
+    "issueDate": "2026-10-19",
+    "dueDate": "2026-11-19",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Müller & Söhne <Großhandel> KG",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000029",
+     "countryCode": "DE",
+     "vatId": "DE811907980",
+     "cityName": "Düsseldorf",
+     "postalZone": "40213"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "295.75",
+      "unitPrice": "2.3333",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "buyerReference": "BR-1046"
+   },
+   "expect": {
+    "lineAmounts": [
+     "690.07"
+    ],
+    "lineExtension": "690.07",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "690.07",
+    "taxAmount": "131.11",
+    "taxInclusive": "821.18",
+    "prepaid": "0.00",
+    "payable": "821.18",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "690.07",
+      "tax": "131.11"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, buyer and order reference",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00047",
+    "issueDate": "2026-10-20",
+    "dueDate": "2026-11-20",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "32",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "orderReference": "PO-4047",
+    "buyerReference": "BR-1047"
+   },
+   "expect": {
+    "lineAmounts": [
+     "607.68"
+    ],
+    "lineExtension": "607.68",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "607.68",
+    "taxAmount": "115.46",
+    "taxInclusive": "723.14",
+    "prepaid": "0.00",
+    "payable": "723.14",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "607.68",
+      "tax": "115.46"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, buyer and order reference",
+   "request": {
+    "creditNote": true,
+    "id": "CN-2026-00048",
+    "issueDate": "2026-10-21",
+    "dueDate": "2026-11-21",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Copper wire 2.5 mm²",
+      "unitCode": "MTR",
+      "quantity": "788",
+      "unitPrice": "1.1235",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "2",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "20",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "3",
+      "name": "Bearing 6204-2RS",
+      "unitCode": "C62",
+      "quantity": "41",
+      "unitPrice": "5.6050",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "4",
+      "name": "Steel bracket, galvanised",
+      "unitCode": "H87",
+      "quantity": "5",
+      "unitPrice": "3.4750",
+      "category": "S",
+      "percent": "19"
+     },
+     {
+      "id": "5",
+      "name": "Sealing ring set",
+      "unitCode": "SET",
+      "quantity": "33",
+      "unitPrice": "18.99",
+      "category": "S",
+      "percent": "19"
+     }
+    ],
+    "orderReference": "PO-4048",
+    "buyerReference": "BR-1048"
+   },
+   "expect": {
+    "lineAmounts": [
+     "885.32",
+     "112.10",
+     "229.81",
+     "17.38",
+     "626.67"
+    ],
+    "lineExtension": "1871.28",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "1871.28",
+    "taxAmount": "355.54",
+    "taxInclusive": "2226.82",
+    "prepaid": "0.00",
+    "payable": "2226.82",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "19",
+      "taxable": "1871.28",
+      "tax": "355.54"
+     }
+    ]
+   }
+  },
+  {
+   "family": "intra-community supply with freight",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00049",
+    "issueDate": "2026-10-22",
+    "dueDate": "2026-11-22",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor SAS",
+     "endpointScheme": "0088",
+     "endpointId": "0614141000012",
+     "countryCode": "FR",
+     "vatId": "FR12345678901",
+     "cityName": "Lyon",
+     "postalZone": "69002"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Polymer granulate",
+      "unitCode": "KGM",
+      "quantity": "731.75",
+      "unitPrice": "2.3333",
+      "category": "K",
+      "percent": "0"
+     },
+     {
+      "id": "2",
+      "name": "Lubricant ISO VG 46",
+      "unitCode": "LTR",
+      "quantity": "584.25",
+      "unitPrice": "4.105",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "buyerReference": "BR-1049",
+    "exemptionReasons": {
+     "K": "Intra-community supply"
+    },
+    "allowanceCharges": [
+     {
+      "charge": true,
+      "reason": "Freight",
+      "amount": "35.00",
+      "category": "K",
+      "percent": "0"
+     }
+    ],
+    "deliveryDate": "2026-09-30",
+    "deliveryCountry": "FR"
+   },
+   "expect": {
+    "lineAmounts": [
+     "1707.39",
+     "2398.35"
+    ],
+    "lineExtension": "4105.74",
+    "allowanceTotal": "0",
+    "chargeTotal": "35.00",
+    "taxExclusive": "4140.74",
+    "taxAmount": "0.00",
+    "taxInclusive": "4140.74",
+    "prepaid": "0.00",
+    "payable": "4140.74",
+    "subtotals": [
+     {
+      "category": "K",
+      "percent": "0",
+      "taxable": "4140.74",
+      "tax": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "family": "DE domestic, half-cent rounding",
+   "request": {
+    "creditNote": false,
+    "id": "INV-2026-00050",
+    "issueDate": "2026-10-23",
+    "dueDate": "2026-11-23",
+    "currency": "EUR",
+    "supplier": {
+     "name": "Demo Manufacturer GmbH",
+     "legalName": "Demo Manufacturer GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4006403333338",
+     "countryCode": "DE",
+     "vatId": "DE123456789",
+     "legalId": "HRB 12345",
+     "streetName": "Industriestraße 7",
+     "cityName": "Köln",
+     "postalZone": "50667",
+     "contactName": "Accounts receivable",
+     "contactPhone": "+49 221 5550100",
+     "contactEmail": "ar@demo-manufacturer.example"
+    },
+    "customer": {
+     "name": "Demo Distributor Rhein GmbH",
+     "endpointScheme": "0088",
+     "endpointId": "4000001234561",
+     "countryCode": "DE",
+     "vatId": "DE987654321",
+     "streetName": "Am Hafen 2",
+     "cityName": "Bonn",
+     "postalZone": "53111"
+    },
+    "iban": "DE89370400440532013000",
+    "lines": [
+     {
+      "id": "1",
+      "name": "Hydraulic pump HP-200",
+      "unitCode": "C62",
+      "quantity": "3",
+      "unitPrice": "0.835",
+      "category": "S",
+      "percent": "7"
+     }
+    ],
+    "buyerReference": "BR-1050"
+   },
+   "expect": {
+    "lineAmounts": [
+     "2.51"
+    ],
+    "lineExtension": "2.51",
+    "allowanceTotal": "0",
+    "chargeTotal": "0",
+    "taxExclusive": "2.51",
+    "taxAmount": "0.18",
+    "taxInclusive": "2.69",
+    "prepaid": "0.00",
+    "payable": "2.69",
+    "subtotals": [
+     {
+      "category": "S",
+      "percent": "7",
+      "taxable": "2.51",
+      "tax": "0.18"
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -15,9 +15,9 @@ func sampleInvoice(credit bool) UBLInvoice {
 		DueDate:        "2026-10-31",
 		Currency:       "EUR",
 		BuyerReference: "PO-7788",
-		Supplier: UBLParty{Name: "Demo Manufacturer & Co", EndpointScheme: "0088", EndpointID: "4006403333333",
+		Supplier: UBLParty{Name: "Demo Manufacturer & Co", EndpointScheme: "0088", EndpointID: "4006403333338",
 			CountryCode: "DE", VATID: "DE123456789"},
-		Customer: UBLParty{Name: "Demo Distributor", EndpointScheme: "0088", EndpointID: "4000001234567",
+		Customer: UBLParty{Name: "Demo Distributor", EndpointScheme: "0088", EndpointID: "4000001234561",
 			CountryCode: "FR"},
 		IBAN: "DE89370400440532013000",
 		Lines: []UBLLine{
@@ -93,16 +93,129 @@ func TestBuildUBL_TwoStandardRatesGetTwoBreakdowns(t *testing.T) {
 	}
 }
 
-func TestBuildUBL_ExemptCategoryCarriesReasonAndOHasNoRate(t *testing.T) {
+// oInvoice is a not-subject-to-VAT invoice: category O alone, no VAT
+// identifier on either party, the supplier identified by its legal
+// registration (BR-O-02, BR-O-11, BR-CO-26).
+func oInvoice() UBLInvoice {
 	inv := sampleInvoice(false)
-	inv.Lines[1].Category = "O"
+	inv.Supplier.VATID, inv.Supplier.LegalID = "", "HRB 12345"
+	for i := range inv.Lines {
+		inv.Lines[i].Category, inv.Lines[i].Percent = "O", d("0")
+	}
+	inv.AllowanceCharges[0].Category, inv.AllowanceCharges[0].Percent = "O", d("0")
 	inv.ExemptionReasons = map[string]string{"O": "Not subject to VAT"}
-	xmlOut, issues := BuildUBL(inv)
+	return inv
+}
+
+func TestBuildUBL_ExemptCategoryCarriesReasonAndOHasNoRate(t *testing.T) {
+	xmlOut, issues := BuildUBL(oInvoice())
 	if len(issues) != 0 {
 		t.Fatalf("issues = %+v", issues)
 	}
 	if !strings.Contains(xmlOut, "<cbc:ID>O</cbc:ID><cbc:TaxExemptionReason>Not subject to VAT</cbc:TaxExemptionReason>") {
 		t.Errorf("O breakdown must carry the reason and no Percent: %s", xmlOut)
+	}
+	if !strings.Contains(xmlOut, "<cbc:RegistrationName>Demo Manufacturer &amp; Co</cbc:RegistrationName><cbc:CompanyID>HRB 12345</cbc:CompanyID>") {
+		t.Errorf("the supplier's legal registration must be written as PartyLegalEntity/CompanyID: %s", xmlOut)
+	}
+}
+
+// Each case is an input the builder used to accept although the Peppol BIS
+// 3.0.21 schematron rejects the XML it produced (rule ids from running
+// testdata/peppol/validate.py on that XML). The builder must now refuse it.
+func TestValidateUBL_RefusesWhatPeppolSchematronRejects(t *testing.T) {
+	de := func(u *UBLInvoice) {
+		u.Customer.CountryCode, u.Customer.VATID = "DE", "DE987654321"
+	}
+	tests := []struct {
+		rule string
+		edit func(*UBLInvoice)
+	}{
+		{"PEPPOL-COMMON-R040 GLN check digit", func(u *UBLInvoice) { u.Supplier.EndpointID = "4006403333333" }},
+		{"PEPPOL-COMMON-R040 GLN length", func(u *UBLInvoice) { u.Customer.EndpointID = "400000123456" }},
+		{"PEPPOL-COMMON-R041 org number check digit", func(u *UBLInvoice) {
+			u.Customer.EndpointScheme, u.Customer.EndpointID = "0192", "974760674"
+		}},
+		{"BR-O-11 O with another category", func(u *UBLInvoice) {
+			*u = oInvoice()
+			u.Lines[1].Category = "Z"
+		}},
+		{"BR-O-02 O with a customer VAT id", func(u *UBLInvoice) {
+			*u = oInvoice()
+			u.Customer.VATID = "FR12345678901"
+		}},
+		{"BR-CO-26 supplier without any identifier", func(u *UBLInvoice) {
+			*u = oInvoice()
+			u.Supplier.LegalID = ""
+		}},
+		{"BR-Z-02 Z without supplier VAT id", func(u *UBLInvoice) {
+			u.AllowanceCharges, u.Lines = nil, u.Lines[1:]
+			u.Supplier.VATID, u.Supplier.LegalID = "", "HRB 12345"
+		}},
+		{"BR-E-02 E without supplier VAT id", func(u *UBLInvoice) {
+			u.AllowanceCharges, u.Lines = nil, u.Lines[1:]
+			u.Lines[0].Category = "E"
+			u.ExemptionReasons = map[string]string{"E": "Exempt"}
+			u.Supplier.VATID, u.Supplier.LegalID = "", "HRB 12345"
+		}},
+		{"BR-IC-11 K without delivery date", func(u *UBLInvoice) {
+			u.Lines[1].Category = "K"
+			u.Customer.VATID = "FR12345678901"
+			u.ExemptionReasons = map[string]string{"K": "Intra-community supply"}
+			u.DeliveryCountry = "FR"
+		}},
+		{"BR-IC-12 K without deliver-to country", func(u *UBLInvoice) {
+			u.Lines[1].Category = "K"
+			u.Customer.VATID = "FR12345678901"
+			u.ExemptionReasons = map[string]string{"K": "Intra-community supply"}
+			u.DeliveryDate = "2026-09-30"
+		}},
+		{"DE-R-002 domestic German without seller contact", func(u *UBLInvoice) {
+			de(u)
+			u.Supplier.CityName, u.Supplier.PostalZone, u.Customer.CityName, u.Customer.PostalZone = "Köln", "50667", "Bonn", "53111"
+		}},
+		{"DE-R-003 domestic German without seller city", func(u *UBLInvoice) {
+			de(u)
+			u.Supplier.ContactName, u.Supplier.ContactPhone, u.Supplier.ContactEmail = "Billing", "+49 221 123456", "billing@example.de"
+			u.Supplier.PostalZone, u.Customer.CityName, u.Customer.PostalZone = "50667", "Bonn", "53111"
+		}},
+		{"DE-R-015 domestic German without buyer reference", func(u *UBLInvoice) {
+			de(u)
+			u.Supplier.ContactName, u.Supplier.ContactPhone, u.Supplier.ContactEmail = "Billing", "+49 221 123456", "billing@example.de"
+			u.Supplier.CityName, u.Supplier.PostalZone, u.Customer.CityName, u.Customer.PostalZone = "Köln", "50667", "Bonn", "53111"
+			u.BuyerReference, u.OrderReference = "", "PO-7788"
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.rule, func(t *testing.T) {
+			inv := sampleInvoice(false)
+			tc.edit(&inv)
+			xmlOut, issues := BuildUBL(inv)
+			if len(issues) == 0 || xmlOut != "" {
+				t.Fatalf("accepted; Peppol rejects this (%s)", tc.rule)
+			}
+		})
+	}
+	// The same shapes with the missing data supplied are built.
+	k := sampleInvoice(false)
+	k.Lines[1].Category = "K"
+	k.Customer.VATID = "FR12345678901"
+	k.ExemptionReasons = map[string]string{"K": "Intra-community supply"}
+	k.DeliveryDate, k.DeliveryCountry = "2026-09-30", "FR"
+	xmlOut, issues := BuildUBL(k)
+	if len(issues) != 0 || !strings.Contains(xmlOut, "<cac:Delivery><cbc:ActualDeliveryDate>2026-09-30</cbc:ActualDeliveryDate>"+
+		"<cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation></cac:Delivery>") {
+		t.Fatalf("K with delivery: %+v %s", issues, xmlOut)
+	}
+	dom := sampleInvoice(false)
+	de(&dom)
+	dom.Supplier.ContactName, dom.Supplier.ContactPhone, dom.Supplier.ContactEmail = "Billing", "+49 221 123456", "billing@example.de"
+	dom.Supplier.StreetName, dom.Supplier.CityName, dom.Supplier.PostalZone = "Hauptstr. 1", "Köln", "50667"
+	dom.Customer.CityName, dom.Customer.PostalZone = "Bonn", "53111"
+	xmlOut, issues = BuildUBL(dom)
+	if len(issues) != 0 || !strings.Contains(xmlOut, "<cac:PostalAddress><cbc:StreetName>Hauptstr. 1</cbc:StreetName><cbc:CityName>Köln</cbc:CityName><cbc:PostalZone>50667</cbc:PostalZone><cac:Country>") ||
+		!strings.Contains(xmlOut, "<cac:Contact><cbc:Name>Billing</cbc:Name><cbc:Telephone>+49 221 123456</cbc:Telephone><cbc:ElectronicMail>billing@example.de</cbc:ElectronicMail></cac:Contact></cac:Party></cac:AccountingSupplierParty>") {
+		t.Fatalf("domestic German: %+v %s", issues, xmlOut)
 	}
 }
 

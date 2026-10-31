@@ -31,10 +31,21 @@ const (
 type UBLParty struct {
 	Name           string
 	LegalName      string
-	EndpointScheme string // 0088 (GLN) or 0192 (Norwegian org number)
+	EndpointScheme string // 0088 (GLN) or 0192 (Norwegian org number); both check digits are verified
 	EndpointID     string
 	CountryCode    string // ISO 3166-1 alpha-2
 	VATID          string // empty when no VAT applies to the party
+	// LegalID is PartyLegalEntity/CompanyID (BT-30, BT-47). A supplier needs it
+	// or a VAT identifier (BR-CO-26); with category O it is the only identifier.
+	LegalID    string
+	StreetName string
+	CityName   string
+	PostalZone string
+	// Contact (BG-6 for the seller). Peppol requires it, with the city and post
+	// code of both parties, when supplier and customer are in Germany (DE-R-002..009).
+	ContactName  string
+	ContactPhone string
+	ContactEmail string
 }
 
 // UBLLine is one InvoiceLine (or CreditNoteLine).
@@ -79,7 +90,11 @@ type UBLInvoice struct {
 	// ExemptionReasons holds the TaxExemptionReason per VAT category. Categories
 	// E, AE, K, G and O need one (BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10).
 	ExemptionReasons map[string]string
-	Lines            []UBLLine
+	// DeliveryDate (BT-72, ActualDeliveryDate) and DeliveryCountry (BT-80) are
+	// required with category K (BR-IC-11, BR-IC-12).
+	DeliveryDate    string
+	DeliveryCountry string
+	Lines           []UBLLine
 }
 
 var hundred = decimal.NewFromInt(100)
@@ -178,6 +193,8 @@ func ValidateUBL(inv UBLInvoice) []Issue {
 		}
 		if p.EndpointScheme == "" || p.EndpointID == "" {
 			fail("%s EndpointID with schemeID is required", role)
+		} else if !validEndpoint(p.EndpointScheme, p.EndpointID) {
+			fail("%s EndpointID %s fails the check digit of scheme %s (PEPPOL-COMMON-R040, R041)", role, p.EndpointID, p.EndpointScheme)
 		}
 		if len(p.CountryCode) != 2 || strings.ToUpper(p.CountryCode) != p.CountryCode {
 			fail("%s country must be an ISO 3166-1 alpha-2 code", role)
@@ -244,11 +261,56 @@ func ValidateUBL(inv UBLInvoice) []Issue {
 			fail("VAT category %s needs an exemption reason", category)
 		}
 	}
-	if used["S"] && inv.Supplier.VATID == "" {
-		fail("AccountingSupplierParty VAT identifier is required with VAT category S (BR-S-02)")
+	for _, category := range []string{"S", "Z", "E", "AE", "K", "G", "L", "M"} {
+		if used[category] && inv.Supplier.VATID == "" {
+			// BR-S-02, BR-Z-02, BR-E-02, BR-AE-02, BR-IC-02, BR-G-02, BR-AF-02, BR-AG-02.
+			fail("AccountingSupplierParty VAT identifier is required with VAT category %s", category)
+		}
 	}
 	if (used["AE"] || used["K"]) && (inv.Supplier.VATID == "" || inv.Customer.VATID == "") {
 		fail("reverse charge and intra-community supply need the supplier and customer VAT identifiers (BR-AE-02, BR-IC-02)")
+	}
+	if used["O"] {
+		if len(used) > 1 {
+			fail("VAT category O cannot be combined with another category (BR-O-11 to BR-O-14)")
+		}
+		if inv.Supplier.VATID != "" || inv.Customer.VATID != "" {
+			fail("VAT category O allows no supplier or customer VAT identifier (BR-O-02)")
+		}
+	}
+	if inv.Supplier.VATID == "" && inv.Supplier.LegalID == "" {
+		fail("AccountingSupplierParty needs a VAT identifier or a legal registration identifier (BR-CO-26)")
+	}
+	if used["K"] {
+		if _, err := time.Parse("2006-01-02", inv.DeliveryDate); err != nil {
+			fail("VAT category K needs the actual delivery date YYYY-MM-DD (BR-IC-11)")
+		}
+		if len(inv.DeliveryCountry) != 2 || strings.ToUpper(inv.DeliveryCountry) != inv.DeliveryCountry {
+			fail("VAT category K needs the deliver-to country (BR-IC-12)")
+		}
+	} else if inv.DeliveryDate != "" {
+		if _, err := time.Parse("2006-01-02", inv.DeliveryDate); err != nil {
+			fail("DeliveryDate must be YYYY-MM-DD")
+		}
+	}
+	if inv.Supplier.CountryCode == "DE" && inv.Customer.CountryCode == "DE" {
+		// Peppol national rules for a German supplier and customer.
+		s, c := inv.Supplier, inv.Customer
+		if s.ContactName == "" || s.ContactPhone == "" || s.ContactEmail == "" {
+			fail("a German supplier invoicing a German customer needs the seller contact name, telephone and email (DE-R-002, DE-R-005 to DE-R-007)")
+		}
+		if s.CityName == "" || s.PostalZone == "" || c.CityName == "" || c.PostalZone == "" {
+			fail("a German supplier invoicing a German customer needs the city and post code of both parties (DE-R-003, DE-R-004, DE-R-008, DE-R-009)")
+		}
+		if inv.BuyerReference == "" {
+			fail("a German supplier invoicing a German customer needs BuyerReference (DE-R-015)")
+		}
+		if used["O"] {
+			fail("a German supplier invoicing a German customer needs a VAT rate on every breakdown, so category O is not allowed (DE-R-014)")
+		}
+		if inv.DeliveryCountry != "" {
+			fail("a deliver-to address needs a city and post code between German parties, which are not modelled (DE-R-010, DE-R-011)")
+		}
 	}
 	// Every finding blocks the build, arithmetic ones included.
 	for _, i := range CheckArithmetic(ComputeUBLTotals(inv)) {
@@ -303,6 +365,16 @@ func BuildUBL(inv UBLInvoice) (string, []Issue) {
 	}
 	b.WriteString(cac("AccountingSupplierParty", cac("Party", partyBody(inv.Supplier))))
 	b.WriteString(cac("AccountingCustomerParty", cac("Party", partyBody(inv.Customer))))
+	if inv.DeliveryDate != "" || inv.DeliveryCountry != "" {
+		delivery := ""
+		if inv.DeliveryDate != "" {
+			delivery += text("ActualDeliveryDate", inv.DeliveryDate)
+		}
+		if inv.DeliveryCountry != "" {
+			delivery += cac("DeliveryLocation", cac("Address", cac("Country", text("IdentificationCode", inv.DeliveryCountry))))
+		}
+		b.WriteString(cac("Delivery", delivery))
+	}
 	means := text("PaymentMeansCode", paymentCode(inv))
 	if inv.CreditNote {
 		means += text("PaymentDueDate", inv.DueDate)
@@ -374,7 +446,13 @@ func partyBody(p UBLParty) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<cbc:EndpointID schemeID="%s">%s</cbc:EndpointID>`, esc(p.EndpointScheme), esc(p.EndpointID))
 	b.WriteString(cac("PartyName", text("Name", p.Name)))
-	b.WriteString(cac("PostalAddress", cac("Country", text("IdentificationCode", p.CountryCode))))
+	address := ""
+	for _, f := range []struct{ name, value string }{{"StreetName", p.StreetName}, {"CityName", p.CityName}, {"PostalZone", p.PostalZone}} {
+		if f.value != "" {
+			address += text(f.name, f.value)
+		}
+	}
+	b.WriteString(cac("PostalAddress", address+cac("Country", text("IdentificationCode", p.CountryCode))))
 	if p.VATID != "" {
 		b.WriteString(cac("PartyTaxScheme", text("CompanyID", p.VATID)+cac("TaxScheme", text("ID", "VAT"))))
 	}
@@ -382,7 +460,20 @@ func partyBody(p UBLParty) string {
 	if legal == "" {
 		legal = p.Name
 	}
-	b.WriteString(cac("PartyLegalEntity", text("RegistrationName", legal)))
+	entity := text("RegistrationName", legal)
+	if p.LegalID != "" {
+		entity += text("CompanyID", p.LegalID)
+	}
+	b.WriteString(cac("PartyLegalEntity", entity))
+	contact := ""
+	for _, f := range []struct{ name, value string }{{"Name", p.ContactName}, {"Telephone", p.ContactPhone}, {"ElectronicMail", p.ContactEmail}} {
+		if f.value != "" {
+			contact += text(f.name, f.value)
+		}
+	}
+	if contact != "" {
+		b.WriteString(cac("Contact", contact))
+	}
 	return b.String()
 }
 
@@ -404,4 +495,39 @@ func esc(s string) string {
 	var buf bytes.Buffer
 	_ = xml.EscapeText(&buf, []byte(s))
 	return buf.String()
+}
+
+// validEndpoint checks the identifier of the two endpoint schemes whose format
+// the Peppol rules verify and this builder documents: 0088 is a 13-digit GLN
+// with its GS1 mod-10 check digit (PEPPOL-COMMON-R040) and 0192 a 9-digit
+// Norwegian organisation number with its mod-11 check digit (PEPPOL-COMMON-R041).
+// Other schemes are passed through.
+func validEndpoint(scheme, id string) bool {
+	switch scheme {
+	case "0088":
+		if !isDigits(id, 13) {
+			return false
+		}
+		sum := 0
+		for i := 0; i < 12; i++ {
+			d := int(id[i] - '0')
+			if i%2 == 1 { // the digit left of the check digit (index 11) weighs 3
+				d *= 3
+			}
+			sum += d
+		}
+		return byte('0'+(10-sum%10)%10) == id[12]
+	case "0192":
+		if !isDigits(id, 9) {
+			return false
+		}
+		weights := [8]int{3, 2, 7, 6, 5, 4, 3, 2}
+		sum := 0
+		for i, w := range weights {
+			sum += w * int(id[i]-'0')
+		}
+		check := (11 - sum%11) % 11
+		return check < 10 && byte('0'+check) == id[8]
+	}
+	return true
 }
