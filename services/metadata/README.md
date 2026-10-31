@@ -33,7 +33,7 @@ The registry API publishes and diffs definitions, atomically applies customer ex
 
 ## CDC
 
-Migration `0004_cdc_publication` creates the `passage_outbox_metadata` publication. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migration 0004.
+Migration `0004_cdc_publication` pre-creates the `passage_outbox_metadata` publication (the connector runs with `publication.autocreate.mode: disabled`, so the CDC role needs no CREATE or ownership) and `0006_cdc_role_grants` gives the `debezium_cdc` role SELECT on `outbox` when that role exists. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migrations 0004 and 0006. The database, role and `wal_level=logical` come from the `deploy/postgres` chart.
 
 ## Duties
 
