@@ -518,6 +518,13 @@ type ppvRequest struct {
 	PoUnitPrice      string `json:"poUnitPrice"`
 	InvoiceUnitPrice string `json:"invoiceUnitPrice"`
 	SourceDocumentID string `json:"sourceDocumentId"`
+	// The four fields below are given together to also append the PPV
+	// CostTransaction (kind PPV, idempotent per source document); without them
+	// the hook only calculates.
+	LegalEntityID string `json:"legalEntityId"`
+	ProductID     string `json:"productId"`
+	SiteID        string `json:"siteId"`
+	FinancialDate string `json:"financialDate"`
 }
 
 type ppvResponse struct {
@@ -526,11 +533,14 @@ type ppvResponse struct {
 	Amount           string `json:"amount"`
 	Direction        string `json:"direction"`
 	SourceDocumentID string `json:"sourceDocumentId"`
+	Recorded         bool   `json:"recorded"`
 }
 
 // postPPV calculates the purchase price variance for a STANDARD item at receipt
 // (PO price against standard) or at invoice (invoice price against PO price).
-// A positive amount is a debit. Persisting the CostTransaction is a later slice.
+// A positive amount is a debit. With legalEntityId, productId, siteId and
+// financialDate it also appends the PPV CostTransaction, keyed by kind and
+// source document, so the PPV analysis sees it and the inventory value does not.
 func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -573,9 +583,32 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		}
 		amount = domain.InvoicePPV(qty, inv, po, scale)
 	}
+	persist := req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
+	var row store.CostTransaction
+	if persist {
+		ppvQty := "0"
+		if req.Kind == "RECEIPT" {
+			ppvQty = qty.String()
+		}
+		row = validateCostTransaction(fields, "ppv", costTransactionRequest{SourceKey: "ppv:" + req.Kind + ":" + req.SourceDocumentID,
+			LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, Kind: domain.KindPPV, Qty: ppvQty,
+			Amount: amount.StringFixed(scale), Currency: req.Currency, FinancialDate: req.FinancialDate})
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
+	}
+	if persist {
+		if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, row.LegalEntityID) {
+			httpx.Fail(w, r, outOfScope())
+			return
+		}
+		inserted, err := a.store.RecordCostTransactions(r.Context(), []store.CostTransaction{row})
+		if err != nil {
+			a.fail(w, r, "record ppv cost transaction", err)
+			return
+		}
+		a.costTxnsRecorded.Add(int64(inserted))
 	}
 	direction := "NONE"
 	switch {
@@ -586,5 +619,5 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	}
 	a.ppvCalculated.Add(1)
 	httpx.JSON(w, http.StatusOK, ppvResponse{Kind: req.Kind, Currency: req.Currency, Amount: amount.StringFixed(scale),
-		Direction: direction, SourceDocumentID: req.SourceDocumentID})
+		Direction: direction, SourceDocumentID: req.SourceDocumentID, Recorded: persist})
 }

@@ -1676,13 +1676,18 @@ components:
         standardUnitCost: { $ref: "#/components/schemas/Decimal", description: "Required for RECEIPT: (PO price - standard) x qty." }
         poUnitPrice: { $ref: "#/components/schemas/Decimal", description: "PO unit price, required for both kinds." }
         invoiceUnitPrice: { $ref: "#/components/schemas/Decimal", description: "Required for INVOICE: (invoice price - PO price) x qty." }
-        sourceDocumentId: { type: string }
+        sourceDocumentId: { type: string, maxLength: 188 }
+        legalEntityId: { type: string, format: uuid, description: "With productId, siteId and financialDate (all four or none), also appends the PPV cost transaction under source key ppv:<kind>:<sourceDocumentId>; a retry is a replay." }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        financialDate: { type: string, format: date }
     PpvResponse:
       type: object
-      required: [kind, currency, amount, direction, sourceDocumentId]
+      required: [kind, currency, amount, direction, sourceDocumentId, recorded]
       properties:
         kind: { type: string }
         currency: { type: string }
         amount: { $ref: "#/components/schemas/Decimal" }
         direction: { type: string, enum: [DR, CR, NONE], description: "DR is an unfavourable debit; CR a credit." }
         sourceDocumentId: { type: string }
+        recorded: { type: boolean, description: "True when the PPV cost transaction was appended or replayed." }

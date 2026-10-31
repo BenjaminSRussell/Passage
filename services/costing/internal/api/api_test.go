@@ -158,6 +158,39 @@ func TestPPV_AC204(t *testing.T) {
 	}
 }
 
+func TestPPV_PostsCostTransactionOnReceiptAndInvoice(t *testing.T) {
+	h, f := server()
+	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05"`
+	receipt := `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref + `}`
+	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"100","poUnitPrice":"10.50","invoiceUnitPrice":"10.80","sourceDocumentId":"INV-1",` + ref + `}`
+	for _, body := range []string{receipt, invoice, receipt} {
+		rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil)
+		if m, _ := decodeMap(rec); rec.Code != http.StatusOK || m["recorded"] != true {
+			t.Fatalf("status %d body %v, want recorded", rec.Code, m)
+		}
+	}
+	if len(f.costTxns) != 2 {
+		t.Fatalf("stored %d rows, want 2 (the replayed receipt is one source key)", len(f.costTxns))
+	}
+	if r := f.costTxns["ppv:RECEIPT:GR-1"]; r.Kind != "PPV" || r.Amount != "50" || r.Qty != "100" || r.Currency != "EUR" {
+		t.Errorf("receipt row = %+v, want PPV 50.00 on qty 100", r)
+	}
+	if r := f.costTxns["ppv:INVOICE:INV-1"]; r.Kind != "PPV" || r.Amount != "30" || r.Qty != "0" {
+		t.Errorf("invoice row = %+v, want PPV 30.00 on qty 0", r)
+	}
+	partial := `{"kind":"RECEIPT","currency":"EUR","qty":"1","standardUnitCost":"1","poUnitPrice":"2","sourceDocumentId":"GR-2","productId":"22222222-2222-4222-8222-222222222222"}`
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", partial, allDuties, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("partial reference status %d, want 400", rec.Code)
+	}
+	other := strings.Replace(receipt, testLE, ids.New(), 1)
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", other, allDuties, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("other legal entity status %d, want 403", rec.Code)
+	}
+	if len(f.costTxns) != 2 {
+		t.Errorf("refused calls stored rows: %d", len(f.costTxns))
+	}
+}
+
 func TestCreateVersion_RequiresIdempotencyKeyAndScope(t *testing.T) {
 	h, _ := server()
 	le := testLE
