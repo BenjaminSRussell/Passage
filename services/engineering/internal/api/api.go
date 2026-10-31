@@ -540,7 +540,7 @@ func (a *API) leadTime(w http.ResponseWriter, r *http.Request) {
 		fields["quantity"] = "quantity and hoursPerDay must be decimals within range"
 	}
 	for _, o := range req.Operations {
-		if !finite(o.SetupH, o.RunH, o.ProcessQty, o.QueueBeforeH, o.QueueAfterH, o.TransitH, o.EfficiencyPct) {
+		if !finite(o.SetupH, o.RunH, o.ProcessQty, o.QueueBeforeH, o.QueueAfterH, o.TransitH, o.EfficiencyPct, o.OverlapQty) {
 			fields["operations"] = "operation times must be decimals within range"
 		}
 	}
