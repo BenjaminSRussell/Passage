@@ -4,16 +4,20 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
+	partyevents "github.com/BenjaminSRussell/passage/services/party/internal/events"
 	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 )
 
@@ -70,7 +74,7 @@ func (s *Postgres) CreateVendor(ctx context.Context, partyID string, in domain.N
 	var v domain.Vendor
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
-		if err := tx.QueryRow(ctx, `select status from party where tenant_id = $1 and id = $2`, caller.TenantID, id).Scan(&status); err != nil {
+		if err := tx.QueryRow(ctx, `select status from party where tenant_id = $1 and id = $2 for share`, caller.TenantID, id).Scan(&status); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -120,6 +124,13 @@ func (s *Postgres) ListPartyVendors(ctx context.Context, partyID string) ([]doma
 	}
 	vendors := []domain.Vendor{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var known bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from party where tenant_id = $1 and id = $2)`, caller.TenantID, id).Scan(&known); err != nil {
+			return err
+		}
+		if !known {
+			return ErrNotFound
+		}
 		rows, err := tx.Query(ctx, `select `+vendorColumns+` from vendor_role where tenant_id = $1 and party_id = $2 order by legal_entity_id`, caller.TenantID, id)
 		if err != nil {
 			return err
@@ -184,12 +195,12 @@ func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal
 	}
 	accounts := []domain.BankAccount{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from vendor_role where tenant_id = $1 and id = $2)`, caller.TenantID, id).Scan(&exists); err != nil {
+		var legalEntityID string
+		if err := tx.QueryRow(ctx, `select legal_entity_id::text from vendor_role where tenant_id = $1 and id = $2`, caller.TenantID, id).Scan(&legalEntityID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return vendorNotFound()
+			}
 			return err
-		}
-		if !exists {
-			return vendorNotFound()
 		}
 		rows, err := tx.Query(ctx, `select `+bankColumns+`, account_number_sealed, routing_number_sealed from vendor_bank_account where tenant_id = $1 and vendor_id = $2 order by created_at, id`, caller.TenantID, id)
 		if err != nil {
@@ -209,7 +220,20 @@ func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal
 			}
 			accounts = append(accounts, b)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		if !reveal {
+			return nil
+		}
+		evt, err := events.New(partyevents.VendorBankRevealed, domain.EventSource, id, caller.TenantID, partyevents.VendorBankRevealedData{
+			VendorID: id, LegalEntityID: legalEntityID, ActorUserID: caller.UserID, ActorService: caller.Service, AccountCount: len(accounts), RevealedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			return err
+		}
+		return outbox.Enqueue(ctx, tx, domain.AggregateVendor, id, evt)
 	})
 	return accounts, err
 }

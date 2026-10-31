@@ -64,11 +64,13 @@ var serviceGrants = map[string]map[string][]string{
 		"close":      {"period.check"},
 		"purchasing": {"procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"},
 		"inventory":  {"inventory.ownership-change.read"},
+		"party":      {"party.read"},
 	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"},
 		"fx":     {"fx.rate.lookup"},
 		"tax":    {"Calculate withholding tax"},
+		"party":  {"party.vendor_bank.reveal"},
 	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},

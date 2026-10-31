@@ -30,7 +30,21 @@ func (a *API) registerVendors(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}", a.getVendor)
 	r.With(authz.RequireDuty(dutyBankWrite)).Post("/v1/party/vendors/{id}/bank-accounts", a.addBankAccount)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}/bank-accounts", a.listBankAccounts(false))
-	r.With(authz.RequireDuty(dutyBankReveal)).Get("/v1/party/vendors/{id}/bank-accounts:reveal", a.listBankAccounts(true))
+	r.With(auditReveal, authz.RequireDuty(dutyBankReveal)).Get("/v1/party/vendors/{id}/bank-accounts:reveal", a.listBankAccounts(true))
+}
+
+func auditReveal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		caller, _ := tenant.FromContext(r.Context())
+		outcome, level := "revealed", slog.LevelInfo
+		if status := ww.Status(); status < 200 || status > 299 {
+			outcome, level = "refused", slog.LevelWarn
+		}
+		slog.Log(r.Context(), level, "vendor bank reveal "+outcome, "vendorId", chi.URLParam(r, "id"), "userId", caller.UserID, "service", caller.Service, "tenantId", caller.TenantID, "status", ww.Status(), "correlationId", middleware.GetReqID(r.Context()))
+	})
 }
 
 func (a *API) createVendor(w http.ResponseWriter, r *http.Request) {
@@ -116,10 +130,6 @@ func (a *API) listBankAccounts(reveal bool) http.HandlerFunc {
 		if err != nil {
 			failParty(w, r, err)
 			return
-		}
-		if reveal {
-			caller, _ := tenant.FromContext(r.Context())
-			slog.Info("vendor bank details revealed", "vendorId", vendorID, "userId", caller.UserID, "accounts", len(accounts), "correlationId", middleware.GetReqID(r.Context()))
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"bankAccounts": accounts})
 	}

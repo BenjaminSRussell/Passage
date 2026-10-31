@@ -119,6 +119,13 @@ func TestVendorRoutes_BankAccountsMaskedUnlessRevealDuty(t *testing.T) {
 		t.Fatalf("masked: %d %s reveal=%t", rec.Code, rec.Body, f.reveal)
 	}
 	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor_bank.reveal", true)
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("reveal Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
+	}
+	if rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.read", true); rec.Code != http.StatusForbidden || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("refused reveal: %d Cache-Control %q", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor_bank.reveal", true)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"accountNumber":"DE89370400440532013000"`) || !f.reveal {
 		t.Fatalf("reveal: %d %s reveal=%t", rec.Code, rec.Body, f.reveal)
 	}

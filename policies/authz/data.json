@@ -2239,12 +2239,14 @@
       "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.journal.post"],
       "close": ["period.check"],
       "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
-      "inventory": ["inventory.ownership-change.read"]
+      "inventory": ["inventory.ownership-change.read"],
+      "party": ["party.read"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"],
       "fx": ["fx.rate.lookup"],
-      "tax": ["Calculate withholding tax"]
+      "tax": ["Calculate withholding tax"],
+      "party": ["party.vendor_bank.reveal"]
     },
     "workflow-ts": {
       "payables": ["payment-run.execute"]

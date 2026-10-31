@@ -7,7 +7,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const RoleVendor = "vendor"
+const (
+	RoleVendor      = "vendor"
+	AggregateVendor = "vendor"
+)
 
 var (
 	currencyPattern   = regexp.MustCompile(`^[A-Z]{3}$`)

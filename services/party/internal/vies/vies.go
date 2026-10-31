@@ -3,6 +3,7 @@ package vies
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,7 +27,17 @@ type Client struct {
 }
 
 func New(baseURL string, timeout time.Duration) *Client {
-	return &Client{baseURL: baseURL, http: &http.Client{Timeout: timeout}}
+	return &Client{baseURL: baseURL, http: &http.Client{Timeout: timeout, CheckRedirect: sameHostOnly}}
+}
+
+func sameHostOnly(req *http.Request, via []*http.Request) error {
+	if req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("vies: refusing redirect to %s", req.URL.Host)
+	}
+	if len(via) >= 3 {
+		return errors.New("vies: too many redirects")
+	}
+	return nil
 }
 
 type response struct {

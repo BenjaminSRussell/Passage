@@ -103,3 +103,31 @@ func TestClient_UnreachableIsAnError(t *testing.T) {
 		t.Fatal("want a transport error")
 	}
 }
+
+func TestClient_RefusesCrossHostRedirect(t *testing.T) {
+	var reached bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.Write([]byte(`{"isValid":true,"userError":"VALID"}`))
+	}))
+	defer elsewhere.Close()
+	redirector := httptest.NewServer(http.RedirectHandler(elsewhere.URL, http.StatusFound))
+	defer redirector.Close()
+	if status, err := vies.New(redirector.URL, time.Second).Check(context.Background(), "DE", "811128135"); err == nil || reached {
+		t.Fatalf("Check = %q, %v, reached=%t; want an error and no request to the other host", status, err, reached)
+	}
+}
+
+func TestClient_FollowsSameHostRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			w.Write([]byte(`{"isValid":true,"userError":"VALID"}`))
+			return
+		}
+		http.Redirect(w, r, "/moved", http.StatusFound)
+	}))
+	defer srv.Close()
+	if status, err := vies.New(srv.URL, time.Second).Check(context.Background(), "DE", "811128135"); err != nil || status != domain.StatusValid {
+		t.Fatalf("Check = %q, %v; want valid", status, err)
+	}
+}
