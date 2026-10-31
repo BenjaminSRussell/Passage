@@ -29,19 +29,22 @@ const (
 
 // LineChange sets editable fields on one line. Nil fields are left unchanged.
 type LineChange struct {
-	LineNo            int
-	Quantity          *decimal.Decimal
-	UnitPrice         *decimal.Decimal
-	DiscPct           *decimal.Decimal
-	RequestedShipDate *string
+	LineNo            int              `json:"lineNo"`
+	Quantity          *decimal.Decimal `json:"quantity,omitempty"`
+	UnitPrice         *decimal.Decimal `json:"unitPrice,omitempty"`
+	DiscPct           *decimal.Decimal `json:"discPct,omitempty"`
+	RequestedShipDate *string          `json:"requestedShipDate,omitempty"`
 }
 
 // ChangeRequest is one PATCH: header and line edits plus the reason recorded
 // with the version it creates.
 type ChangeRequest struct {
-	Reason            string
-	RequestedShipDate *string
-	Lines             []LineChange
+	Reason            string       `json:"reason"`
+	RequestedShipDate *string      `json:"requestedShipDate,omitempty"`
+	Lines             []LineChange `json:"lines"`
+	// Approver is set by the API when the caller holds SalesOrderApprove: such
+	// a change applies at once even for a customer whose changes need approval.
+	Approver bool `json:"-"`
 }
 
 // OrderVersion is one entry of an order's change history: the version a change
@@ -247,6 +250,34 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 		if !domain.CanChange(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotChangeable, fmt.Sprintf("order is %s and cannot be changed", o.Status))
 		}
+		if o.Status == domain.OrderConfirmed && !req.Approver {
+			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+			if err != nil {
+				return err
+			}
+			if required {
+				pending, err := submitChangeRequestTx(ctx, tx, p.TenantID, o, req, actor, now)
+				if err != nil {
+					return err
+				}
+				out = o
+				out.PendingChange = pending
+				return nil
+			}
+		}
+		out, err = applyChangeTx(ctx, tx, p.TenantID, o, id, req, actor, now)
+		return err
+	})
+	return out, err
+}
+
+// applyChangeTx applies req to the locked order o in tx: line rows, allocation,
+// schedule, version, order.changed and the credit re-check. It returns the
+// order at its new version, or o unchanged for a request that changes nothing.
+func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id string, req ChangeRequest, actor string, now time.Time) (Order, error) {
+	p := tenant.Principal{TenantID: tenantID}
+	var out Order
+	err := func() error {
 		before := make(map[int]Line, len(o.Lines))
 		for _, l := range o.Lines {
 			before[l.LineNo] = l
@@ -321,10 +352,11 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 				}
 			}
 		}
-		out, err = loadOrder(ctx, tx, p.TenantID, id, false)
-		out.Warnings = notices
+		loaded, err := loadOrder(ctx, tx, p.TenantID, id, false)
+		loaded.Warnings = notices
+		out = loaded
 		return err
-	})
+	}()
 	return out, err
 }
 

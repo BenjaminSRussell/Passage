@@ -122,6 +122,10 @@ paths:
         quota draw and draws again (BR-27.15); a line moved to a later period
         gets an SLS-0013 entry in warnings and the moved date in the diff, and a
         line no period can cover refuses the change with 422 SLS-0013.
+        When the order is CONFIRMED, its customer has change approval switched
+        on (change-policy) and the caller lacks sales.order.approve, the change
+        is validated and stored as a PENDING change request instead of applied
+        (202); a caller with sales.order.approve changes the order directly.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -139,9 +143,25 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Order"}
+        "202":
+          description: >-
+            the customer's changes to confirmed orders need approval (see
+            changeOrder description) and the caller lacks sales.order.approve:
+            nothing was applied, the order is returned unchanged with
+            pendingChange holding the stored change request
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0043 the order already has a change waiting for approval
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
           description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0013 allocation quota cannot cover a changed line in any period
@@ -626,6 +646,180 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/SalesParameters"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests:
+    get:
+      summary: Change requests awaiting approval (status=PENDING, oldest first) or the change history of an order (FR-27.9)
+      description: >-
+        A change of a CONFIRMED order for a customer whose changes need approval
+        is stored here instead of applied when the caller lacks
+        sales.order.approve. Each item carries the change, the field-level diff
+        it would make and the order version it was made against.
+      operationId: listChangeRequests
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: status, in: query, schema: {type: string, enum: [PENDING, APPROVED, REJECTED]}}
+        - {name: orderId, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: the change requests; PENDING oldest first, otherwise newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/ChangeRequest"}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:
+    get:
+      summary: Read one change request with its diff and decision
+      operationId: getChangeRequest
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the change request; the ETag is its version, used as If-Match by approve and reject
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangeRequest"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:approve:
+    post:
+      summary: Approve a change request and apply it to the order in the same transaction (FR-27.9)
+      description: >-
+        The order gets its new version through the same path as a direct PATCH
+        (diff, re-promise of the changed lines, allocation, credit re-check), as
+        the requester's change. orderchange.approved is written with
+        order.changed. The requester cannot approve their own request; an order
+        that moved since the request was made refuses the approval.
+      operationId: approveChangeRequest
+      x-passage-duty: sales.order.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ChangeDecisionRequest"}
+      responses:
+        "200":
+          description: the approved request and the order at its new version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request, order]
+                properties:
+                  request: {$ref: "#/components/schemas/ChangeRequest"}
+                  order: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403":
+          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0044 the request was already decided; SLS-0046 the order changed since the request was made
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0024 the stored change no longer applies; SLS-0013 allocation quota cannot cover a changed line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:reject:
+    post:
+      summary: Reject a change request with a comment; the order stays as it was (FR-27.9)
+      operationId: rejectChangeRequest
+      x-passage-duty: sales.order.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ChangeDecisionRequest"
+                - {type: object, required: [comment]}
+      responses:
+        "200":
+          description: the rejected request; orderchange.rejected is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangeRequest"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0044 the request was already decided
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/customers/{customerId}/change-policy:
+    parameters:
+      - {name: customerId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read whether a customer's changes to confirmed orders need approval (change_approval_required, off at version 0)
+      operationId: getChangePolicy
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the switch; the ETag is the version, 0 when never saved
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangePolicy"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Turn change approval on or off for a customer (If-Match carries the current ETag; first save uses "0")
+      operationId: putChangePolicy
+      x-passage-duty: sales.order.approve
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approvalRequired]
+              properties:
+                approvalRequired: {type: boolean}
+      responses:
+        "200":
+          description: the saved switch; changepolicy.changed is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangePolicy"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
@@ -1999,6 +2193,7 @@ components:
         listingOverrides:
           type: array
           items: {$ref: "#/components/schemas/ListingOverride"}
+        pendingChange: {allOf: [{$ref: "#/components/schemas/ChangeRequest"}], description: set only on the 202 result of a change stored for approval}
         warnings:
           type: array
           description: >-
@@ -2251,6 +2446,50 @@ components:
               field: {type: string, example: quantity}
               old: {type: string}
               new: {type: string}
+    ChangeDecisionRequest:
+      type: object
+      properties:
+        comment: {type: string, maxLength: 500}
+    ChangePolicy:
+      type: object
+      required: [legalEntityId, customerId, approvalRequired, version]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        approvalRequired: {type: boolean}
+        version: {type: integer, minimum: 0}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
+    ChangeRequest:
+      type: object
+      required: [id, legalEntityId, orderId, orderNumber, customerId, status, baseVersion, reason, change, diff, requestedBy, requestedAt, decisionComment, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        customerId: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED]}
+        baseVersion: {type: integer, description: the order version the change was made against}
+        reason: {type: string}
+        change: {$ref: "#/components/schemas/ChangeOrderRequest"}
+        diff:
+          type: array
+          items:
+            type: object
+            required: [lineNo, field, old, new]
+            properties:
+              lineNo: {type: integer, description: 0 for a header field}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+        requestedBy: {type: string}
+        requestedAt: {type: string, format: date-time}
+        decidedBy: {type: string}
+        decidedAt: {type: string, format: date-time}
+        decisionComment: {type: string}
+        appliedVersion: {type: integer, description: the order version an approval produced}
+        version: {type: integer}
     ChangeOrderRequest:
       type: object
       description: At least one of lines or requestedShipDate. Absent line fields keep their value.

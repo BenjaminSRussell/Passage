@@ -209,7 +209,11 @@ export function ChangeOrderPage() {
         newHold ? "The higher total failed the credit check, so a credit hold was placed." : "",
         ...moved,
       ].filter(Boolean);
-      setOutcome({ tone: notes.length > 0 ? "warning" : "success", text: [`Saved as version ${res.value.version}.`, ...notes].join(" ") });
+      if (res.value.pendingChange) {
+        setOutcome({ tone: "warning", text: "This customer's changes need approval, so nothing changed yet: the change was sent to a sales manager for approval." });
+      } else {
+        setOutcome({ tone: notes.length > 0 ? "warning" : "success", text: [`Saved as version ${res.value.version}.`, ...notes].join(" ") });
+      }
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {

@@ -30,13 +30,19 @@ var (
 
 	BackorderRunCommitted = events.Type(Context, "backorderrun", "committed", 1)
 	ParametersChanged     = events.Type(Context, "parameters", "changed", 1)
+
+	OrderChangeRequested = events.Type(Context, "orderchange", "requested", 1)
+	OrderChangeApproved  = events.Type(Context, "orderchange", "approved", 1)
+	OrderChangeRejected  = events.Type(Context, "orderchange", "rejected", 1)
+	ChangePolicyChanged  = events.Type(Context, "changepolicy", "changed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
-		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged}
+		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged,
+		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, ChangePolicyChanged}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -300,4 +306,39 @@ type ParametersChangedData struct {
 	DefaultOrderType            string `json:"default_order_type"`
 	Actor                       string `json:"actor"`
 	Version                     int    `json:"version"`
+}
+
+// OrderChangeRequestedData is the data member of orderchange.requested.v1: a
+// change of a confirmed order was stored for approval (FR-27.9).
+type OrderChangeRequestedData struct {
+	RequestID     string        `json:"request_id"`
+	LegalEntityID string        `json:"legal_entity_id"`
+	OrderID       string        `json:"order_id"`
+	CustomerID    string        `json:"customer_id"`
+	BaseVersion   int           `json:"base_version"`
+	Reason        string        `json:"reason"`
+	Actor         string        `json:"actor"`
+	Diff          []FieldChange `json:"diff"`
+}
+
+// OrderChangeDecidedData is the data member of orderchange.approved.v1 and
+// orderchange.rejected.v1. applied_version is the order version an approval
+// produced and is absent on a rejection.
+type OrderChangeDecidedData struct {
+	RequestID      string `json:"request_id"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	OrderID        string `json:"order_id"`
+	RequestedBy    string `json:"requested_by"`
+	Actor          string `json:"actor"`
+	Comment        string `json:"comment"`
+	AppliedVersion *int   `json:"applied_version,omitempty"`
+}
+
+// ChangePolicyChangedData is the data member of changepolicy.changed.v1.
+type ChangePolicyChangedData struct {
+	LegalEntityID    string `json:"legal_entity_id"`
+	CustomerID       string `json:"customer_id"`
+	ApprovalRequired bool   `json:"approval_required"`
+	Actor            string `json:"actor"`
+	Version          int    `json:"version"`
 }

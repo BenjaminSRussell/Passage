@@ -112,6 +112,8 @@ export interface CreditEvaluation {
 }
 
 export interface Order {
+  /** Set only on the 202 result of a change that was stored for approval instead of applied. */
+  pendingChange?: ChangeRequest;
   id: string;
   legalEntityId: string;
   orderNumber: string;
@@ -1340,4 +1342,81 @@ export interface SalesSummaryFilter {
 export function getSalesSummary(filter: SalesSummaryFilter = {}, signal?: AbortSignal): Promise<SalesSummary> {
   const { legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays } = filter;
   return json<SalesSummary>(`/summary${query({ legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays })}`, {}, signal);
+}
+
+// ---- Change approval (FR-27.9) ----
+
+export const CHANGE_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+export type ChangeStatus = (typeof CHANGE_STATUSES)[number];
+
+/** A change of a confirmed order that waits for, or has had, a decision. */
+export interface ChangeRequest {
+  id: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  status: ChangeStatus;
+  /** The order version the change was made against; approval needs the order still at it. */
+  baseVersion: number;
+  reason: string;
+  change: ChangeOrderInput;
+  diff: FieldChange[];
+  requestedBy: string;
+  requestedAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  decisionComment: string;
+  appliedVersion?: number;
+  version: number;
+}
+
+export interface ChangeRequestFilter {
+  legalEntityId?: string;
+  status?: ChangeStatus | "";
+  orderId?: string;
+}
+
+export async function listChangeRequests(filter: ChangeRequestFilter = {}, signal?: AbortSignal): Promise<ChangeRequest[]> {
+  const body = await json<{ items?: ChangeRequest[] }>(
+    `/change-requests${query({ legalEntityId: filter.legalEntityId, status: filter.status, orderId: filter.orderId })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getChangeRequest(id: string, signal?: AbortSignal): Promise<Versioned<ChangeRequest>> {
+  return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Approves the request at its ETag; the change is applied to the order in the same call. */
+export function approveChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<{ request: ChangeRequest; order: Order }>> {
+  return versioned(`/change-requests/${encodeURIComponent(id)}:approve`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
+}
+
+export function rejectChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<ChangeRequest>> {
+  return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}:reject`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
+}
+
+export interface ChangePolicy {
+  legalEntityId: string;
+  customerId: string;
+  approvalRequired: boolean;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getChangePolicy(legalEntityId: string, customerId: string, signal?: AbortSignal): Promise<Versioned<ChangePolicy>> {
+  return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {}, signal);
+}
+
+/** Creates (etag "0") or replaces the switch at the given ETag. */
+export function putChangePolicy(legalEntityId: string, customerId: string, approvalRequired: boolean, etag: string): Promise<Versioned<ChangePolicy>> {
+  return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {
+    method: "PUT",
+    body: JSON.stringify({ approvalRequired }),
+    headers: { "If-Match": etag },
+  });
 }

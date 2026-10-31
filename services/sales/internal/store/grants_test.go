@@ -52,6 +52,8 @@ func TestGrants_AppRoleCannotRewriteAppendOnlyTables(t *testing.T) {
 		`delete from schedule_release_line`,
 		`delete from backorder_run`,
 		`delete from backorder_run_line`,
+		`delete from order_change_request`,
+		`delete from customer_change_policy`,
 		`update backorder_run_line set seq = seq`,
 		`select count(*) from outbox`,
 		`update outbox set type = type`,

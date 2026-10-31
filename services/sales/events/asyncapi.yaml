@@ -72,6 +72,26 @@ channels:
     messages:
       parametersChanged:
         $ref: "#/components/messages/ParametersChanged"
+  orderChangeRequested:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeRequested:
+        $ref: "#/components/messages/OrderChangeRequested"
+  orderChangeApproved:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeApproved:
+        $ref: "#/components/messages/OrderChangeApproved"
+  orderChangeRejected:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeRejected:
+        $ref: "#/components/messages/OrderChangeRejected"
+  changePolicyChanged:
+    address: passage.sales.changepolicy
+    messages:
+      changePolicyChanged:
+        $ref: "#/components/messages/ChangePolicyChanged"
   quotationConverted:
     address: passage.sales.quotation
     messages:
@@ -114,6 +134,30 @@ operations:
     summary: The sales parameters of a legal entity were created or replaced (PRD 5.27.13). Consumers - audit, analytics.
     messages:
       - {$ref: "#/channels/parametersChanged/messages/parametersChanged"}
+  publishOrderChangeRequested:
+    action: send
+    channel: {$ref: "#/channels/orderChangeRequested"}
+    summary: A change of a confirmed order was stored for approval because its customer needs change approval (FR-27.9). Consumers - sales managers' work queue, audit.
+    messages:
+      - {$ref: "#/channels/orderChangeRequested/messages/orderChangeRequested"}
+  publishOrderChangeApproved:
+    action: send
+    channel: {$ref: "#/channels/orderChangeApproved"}
+    summary: A stored change was approved and applied to the order in the same transaction (FR-27.9). order.changed for the applied version is written just before it in the same transaction.
+    messages:
+      - {$ref: "#/channels/orderChangeApproved/messages/orderChangeApproved"}
+  publishOrderChangeRejected:
+    action: send
+    channel: {$ref: "#/channels/orderChangeRejected"}
+    summary: A stored change was rejected with a comment and the order stays as it was (FR-27.9).
+    messages:
+      - {$ref: "#/channels/orderChangeRejected/messages/orderChangeRejected"}
+  publishChangePolicyChanged:
+    action: send
+    channel: {$ref: "#/channels/changePolicyChanged"}
+    summary: The change approval switch of a customer was created or replaced (PRD 5.27.13 change_approval_required).
+    messages:
+      - {$ref: "#/channels/changePolicyChanged/messages/changePolicyChanged"}
   publishQuotationConverted:
     action: send
     channel: {$ref: "#/channels/quotationConverted"}
@@ -346,6 +390,38 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AllocationQuotaData"
+    OrderChangeRequested:
+      name: dev.passage.sales.orderchange.requested.v1
+      title: Order change requested
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeRequestedData"
+    OrderChangeApproved:
+      name: dev.passage.sales.orderchange.approved.v1
+      title: Order change approved
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeDecidedData"
+    OrderChangeRejected:
+      name: dev.passage.sales.orderchange.rejected.v1
+      title: Order change rejected
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeDecidedData"
+    ChangePolicyChanged:
+      name: dev.passage.sales.changepolicy.changed.v1
+      title: Customer change policy changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ChangePolicyChangedData"
     ParametersChanged:
       name: dev.passage.sales.parameters.changed.v1
       title: Sales parameters changed
@@ -415,6 +491,47 @@ components:
               status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
         actor: {type: string}
         version: {type: integer, description: order version after the promise}
+    OrderChangeRequestedData:
+      type: object
+      required: [request_id, legal_entity_id, order_id, customer_id, base_version, reason, actor, diff]
+      properties:
+        request_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        base_version: {type: integer, description: order version the change was made against}
+        reason: {type: string}
+        actor: {type: string, description: who asked for the change}
+        diff:
+          type: array
+          items:
+            type: object
+            required: [line_no, field, old, new]
+            properties:
+              line_no: {type: integer, description: 0 for a header field}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+    OrderChangeDecidedData:
+      type: object
+      required: [request_id, legal_entity_id, order_id, requested_by, actor, comment]
+      properties:
+        request_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        requested_by: {type: string}
+        actor: {type: string, description: who decided}
+        comment: {type: string}
+        applied_version: {type: integer, description: order version the approval produced; absent on a rejection}
+    ChangePolicyChangedData:
+      type: object
+      required: [legal_entity_id, customer_id, approval_required, actor, version]
+      properties:
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        approval_required: {type: boolean}
+        actor: {type: string}
+        version: {type: integer, description: version after the change}
     ParametersChangedData:
       type: object
       required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, actor, version]

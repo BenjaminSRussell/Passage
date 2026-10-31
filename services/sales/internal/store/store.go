@@ -122,10 +122,13 @@ type Order struct {
 	ListingOverrides  []ListingOverride `json:"listingOverrides"`
 	// Warnings is set only on the result of a create (including a replay),
 	// a quotation conversion or an agreement release.
-	Warnings    []Notice  `json:"warnings,omitempty"`
-	RequestHash string    `json:"-"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Warnings []Notice `json:"warnings,omitempty"`
+	// PendingChange is set only on the result of a PATCH that was stored as a
+	// change request awaiting approval instead of being applied.
+	PendingChange *OrderChangeRequest `json:"pendingChange,omitempty"`
+	RequestHash   string              `json:"-"`
+	CreatedAt     time.Time           `json:"createdAt"`
+	UpdatedAt     time.Time           `json:"updatedAt"`
 }
 
 // NewOrder is an intake request after validation.
@@ -263,6 +266,12 @@ type Store interface {
 	ListBackorderRuns(ctx context.Context, f BackorderRunFilter) ([]BackorderRun, error)
 	GetBackorderRun(ctx context.Context, id string) (BackorderRun, error)
 	CommitBackorderRun(ctx context.Context, id string, version int, actor string, now time.Time) (BackorderRun, error)
+	GetChangePolicy(ctx context.Context, legalEntityID, customerID string) (ChangePolicy, error)
+	PutChangePolicy(ctx context.Context, in ChangePolicy, version int, actor string) (ChangePolicy, error)
+	ListChangeRequests(ctx context.Context, f ChangeRequestFilter) ([]OrderChangeRequest, error)
+	GetChangeRequest(ctx context.Context, id string) (OrderChangeRequest, error)
+	ApproveChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (ChangeDecision, error)
+	RejectChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error

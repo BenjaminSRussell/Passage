@@ -112,6 +112,11 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/backorder-runs/{id}:commit` | `sales.backorder.run` | `If-Match`; applies a PREVIEW in one transaction serialised per product, site and warehouse: rewrites the schedule lines of each changed line, moves confirmed dates, versions each order, emits `order.changed`, `atp.promised` per changed line and `backorderrun.committed`; an order changed since the preview, or another line of the product promised differently since, is `SLS-0042` and nothing is applied; a committed run is `SLS-0041` |
 | POST | `/v1/sales/schedule-releases:check` | `sales.agreement.maintain` | Stateless BR-27.12 reconciliation; a mismatch returns `held: true`, `code: CUM_QTY_MISMATCH` and no schedule lines |
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
+| GET | `/v1/sales/change-requests` | `sales.order.read` | Optional `legalEntityId`, `status`, `orderId`, `limit`; PENDING oldest first (the approval queue), otherwise newest first |
+| GET | `/v1/sales/change-requests/{id}` | `sales.order.read` | The stored change, its field-level diff and the order version it was made against; the ETag is the request version |
+| POST | `/v1/sales/change-requests/{id}:approve` | `sales.order.approve` | `If-Match`; applies the stored change to the order and records the approval in one transaction (`order.changed`, then `orderchange.approved`); the requester cannot approve (`SLS-0045`), a decided request is `SLS-0044`, an order that moved since is `SLS-0046` |
+| POST | `/v1/sales/change-requests/{id}:reject` | `sales.order.approve` | `If-Match`; a `comment` is required; the order stays as it was |
+| GET / PUT | `/v1/sales/customers/{customerId}/change-policy` | `sales.order.read` / `sales.order.approve` | `legalEntityId` required; `approvalRequired` switch, off at version 0; PUT takes `If-Match` (`"0"` to create); `changepolicy.changed` |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
 | GET / PUT | `/v1/sales/credit-profiles/{customerId}` | `sales.order.read` / `sales.credit.maintain` | `legalEntityId` query or the caller's `Passage-Legal-Entity`; PUT takes `If-Match` (`"0"` to create) |
 | GET / POST | `/v1/sales/quotations` | `sales.order.read` / `sales.quotation.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`) without lines; create a DRAFT with `Idempotency-Key`, numbered `SQ-`, validity default +30 days, probability 50 |
@@ -171,6 +176,17 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   validity period (`SLS-0029`), creates the DRAFT order (channel `AGREEMENT`)
   and stores the release in the same transaction. At the commitment the
   agreement is EXHAUSTED. Overdelivery is 0 until the parameter table exists.
+- **FR-27.9 change approval** (slice 13): a customer can be switched to
+  `approvalRequired` (`customer_change_policy`, per legal entity and customer;
+  off when never saved). A PATCH of a CONFIRMED order of such a customer by a
+  caller without `sales.order.approve` is validated, then stored as a PENDING
+  `order_change_request` (the PATCH body, its diff, the order version it was
+  made against) and answered 202 with the order unchanged and `pendingChange`;
+  `orderchange.requested` is written. At most one request per order is PENDING
+  (`SLS-0043`). `:approve` applies it through the same path as a direct PATCH,
+  as the requester's change, and records the decision in one transaction
+  (`order.changed`, then `orderchange.approved`); `:reject` needs a comment. A
+  caller with `sales.order.approve` changes the order directly.
 - **FR-27.9 / BR-27.5** change management: PATCH changes the header date and
   OPEN/RESERVED lines of a DRAFT, OPEN or CONFIRMED order. Each change that
   alters something bumps the version, stores the field-level diff in
@@ -271,6 +287,10 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0040` | 422 | Cumulative shipped quantity would fall without a later reset date, or the reset date moves back |
 | `SLS-0041` | 409 | The backorder run was already committed |
 | `SLS-0042` | 409 | The run is out of date, so nothing was applied: an order of a changed line moved since the preview (version, status or line state), or another open line of the product, site and warehouse now holds another promised quantity than the preview saw |
+| `SLS-0043` | 409 | The order already has a change waiting for approval |
+| `SLS-0044` | 409 | The change request was already decided |
+| `SLS-0045` | 403 | A change cannot be approved by the user who requested it |
+| `SLS-0046` | 409 | The order changed since the change request was made; reject it and ask for a new change |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -283,6 +303,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0109` | 404 | Order line not found |
 | `SLS-0110` | 404 | Scheduling release not found |
 | `SLS-0111` | 404 | Backorder run not found |
+| `SLS-0112` | 404 | Change request not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

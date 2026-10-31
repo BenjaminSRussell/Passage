@@ -145,6 +145,33 @@ describe("Change sales order page", () => {
     expect(patch?.body).toEqual({ lines: [{ lineNo: 1, quantity: "8" }] });
   });
 
+  it("says the change was sent for approval when the service stored it (202) and keeps the order as it was", async () => {
+    const pending = {
+      id: "33333333-0000-4000-8000-000000000003",
+      legalEntityId: "11111111-0000-4000-8000-000000000001",
+      orderId: ORDER_ID,
+      orderNumber: "SO-0000042",
+      customerId: "22222222-0000-4000-8000-000000000002",
+      status: "PENDING",
+      baseVersion: 3,
+      reason: "",
+      change: { lines: [{ lineNo: 1, quantity: "8" }] },
+      diff: [{ lineNo: 1, field: "quantity", old: "5", new: "8" }],
+      requestedBy: "rep-1",
+      requestedAt: "2027-03-01T09:00:00Z",
+      decisionComment: "",
+      version: 1,
+    };
+    handler = (_url, init) =>
+      init.method === "PATCH" ? { status: 202, body: { ...order(), pendingChange: pending }, etag: '"3"' } : { status: 200, body: order(), etag: '"3"' };
+    renderAt(`/sales/orders/${ORDER_ID}/change`);
+    fireEvent.change(within(await screen.findByRole("group", { name: "Line 1" })).getByLabelText("Quantity"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/the change was sent to a sales manager for approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/Saved as version/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Line 1" })).getByLabelText("Quantity")).toHaveValue("5");
+  });
+
   it("warns when the higher total placed a credit hold", async () => {
     const hold = { id: "h1", holdType: "CREDIT", reasonCode: "CR-1", status: "ACTIVE", orderAmount: "3000", appliedBy: "u1", appliedAt: "2027-03-01T09:00:00Z" };
     handler = (_url, init) =>
