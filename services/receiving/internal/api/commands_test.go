@@ -34,6 +34,8 @@ type rig struct {
 	st     *memstore.Store
 	ledger *domain.FakeLedger
 	keys   int
+
+	confirmErsPrice string
 }
 
 func newRig(periods domain.PeriodStatus) *rig { return newRigOn(memstore.New(), periods) }
@@ -113,7 +115,28 @@ func (rg *rig) direct(t *testing.T, slip string, ordered, qty int) receiptJSON {
 func (rg *rig) posted(t *testing.T, slip string, ordered, qty int) receiptJSON {
 	t.Helper()
 	r := rg.direct(t, slip, ordered, qty)
-	return decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	posted := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	if rg.confirmErsPrice != "" {
+		for _, l := range posted.Lines {
+			body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, rg.confirmErsPrice)
+			rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, posted.ID, l.LineNo), body, userDuty("ErsPriceConfirm", rg.key(), "buyer"))
+		}
+	}
+	return posted
+}
+
+func (rg *rig) confirmPrice(t *testing.T, receiptID string, lineNo int, price string, want int) {
+	t.Helper()
+	rg.confirmPriceAs(t, receiptID, lineNo, price, "buyer", want)
+}
+
+func (rg *rig) confirmPriceAs(t *testing.T, receiptID string, lineNo int, price, user string, want int) {
+	t.Helper()
+	body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, price)
+	rec := rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, receiptID, lineNo), body, userDuty("ErsPriceConfirm", rg.key(), user))
+	if rec.Code != want {
+		t.Fatalf("confirm price: %d %s, want %d", rec.Code, rec.Body.String(), want)
+	}
 }
 
 func problemCode(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {

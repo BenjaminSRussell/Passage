@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -64,6 +65,7 @@ type ersRunJSON struct {
 	Skipped []struct {
 		SourceRef string `json:"sourceRef"`
 		Reason    string `json:"reason"`
+		Detail    string `json:"detail"`
 	} `json:"skipped"`
 	HasMore bool `json:"hasMore"`
 }
@@ -117,6 +119,7 @@ func ersRig(price string, periods domain.PeriodControl, sampler *domain.Sampler)
 			p.Periods = periods
 		}
 	})
+	rg.confirmErsPrice = price
 	return rg
 }
 
@@ -240,6 +243,8 @@ func TestErs_SettlesEveryOpenLineOfAReceiptAtItsOwnPOLinePrice(t *testing.T) {
 	body := strings.Replace(directBody("PS-2L", 10, 4, ""), `"lines":[`, `"lines":[{"poLineId":"`+poLineID[:len(poLineID)-1]+`6","productId":"`+second+`","orderedRemaining":10,"overDeliveryPct":5,"unitPrice":1.5,"unit":"EA","qty":10,"locationId":"`+locationID+`"},`, 1)
 	r := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath, body, rg.maintain()), http.StatusCreated)
 	decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	rg.confirmPrice(t, r.ID, 1, "1.80", http.StatusOK)
+	rg.confirmPrice(t, r.ID, 2, "2.60", http.StatusOK)
 
 	run := rg.ersRun(t, http.StatusOK)
 
@@ -347,8 +352,12 @@ func TestErs_RejectionsPostNothing(t *testing.T) {
 				}
 			})
 			rg.enableErs(t, true)
-			setup := newRigPorts(rg.st, domain.PeriodOpen, func(p *api.Ports) { p.Ledger = rg.ledger })
+			setup := newRigPorts(rg.st, domain.PeriodOpen, func(p *api.Ports) {
+				p.Ledger = rg.ledger
+				p.PurchaseOrders = domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: ersOrder("2.60", nil)}}
+			})
 			setup.keys = 1000
+			setup.confirmErsPrice = "2.60"
 			setup.posted(t, "PS-1", 10, 4)
 			before := len(rg.ledger.Entries)
 			hdr := rg.settle()
@@ -641,7 +650,7 @@ func TestAuditBlock_DecisionIsReproduciblePerInvoiceAndFollowsTheRate(t *testing
 		r := rg.posted(t, fmt.Sprintf("PS-%02d", i), 10, 1)
 		got := rg.manualInvoice(t, fmt.Sprintf("INV-%02d", i), r.ID, 1, "alice").invoice(t, http.StatusCreated)
 		want := "POSTED"
-		if twin.Blocks(got.ID, rate) {
+		if twin.Decide(got.ID, domain.AuditPolicy{RatePct: rate, RuleVersion: 1}, dec("0"), "") {
 			want = "AUDIT_BLOCKED"
 		}
 		if got.Status != want {
@@ -900,8 +909,8 @@ func TestPolicyChangesEmitEventsWithOldAndNewValues(t *testing.T) {
 		got = append(got, evt.Type+" "+string(evt.Data))
 	}
 	for _, want := range []string{
-		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"0","new_rate_pct":"5","changed_by":"policy-admin"}`,
-		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"5","new_rate_pct":"7.5","changed_by":"policy-admin"}`,
+		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"0","new_rate_pct":"5","rule_version":1,"changed_by":"policy-admin"}`,
+		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"5","new_rate_pct":"7.5","rule_version":2,"changed_by":"policy-admin"}`,
 		`dev.passage.receiving.ersvendor.changed.v1 {"legal_entity_id":"` + legalEntityID + `","vendor_id":"` + vendorID + `","old_enabled":false,"new_enabled":true,"changed_by":"policy-admin"}`,
 		`dev.passage.receiving.ersvendor.changed.v1 {"legal_entity_id":"` + legalEntityID + `","vendor_id":"` + vendorID + `","old_enabled":true,"new_enabled":false,"changed_by":"policy-admin"}`,
 	} {
@@ -979,4 +988,92 @@ func TestAuditRelease_AcceptsTheInvoiceIdInAnyCase(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(body, `"status":"POSTED"`) {
 		t.Fatalf("release %d %s", code, body)
 	}
+}
+
+func TestErs_BlocksWhenThePOPriceChangedSinceReceiptUntilABuyerConfirmsIt(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.confirmErsPrice = ""
+	rg.enableErs(t, true)
+	r := rg.posted(t, "PS-1", 10, 4)
+
+	blocked := rg.ersRun(t, http.StatusOK)
+
+	if len(blocked.Settled) != 0 || len(blocked.Skipped) != 1 || blocked.Skipped[0].Reason != "PRICE_CHANGED" ||
+		!strings.Contains(blocked.Skipped[0].Detail, "AP-ERS-001") || !strings.Contains(blocked.Skipped[0].Detail, "2.500000 -> 2.600000") || len(rg.ledger.Entries) != 1 {
+		t.Fatalf("a price that moved from 2.50 to 2.60 must block the self-billed invoice: %+v", blocked)
+	}
+	rg.confirmPrice(t, r.ID, 1, "2.50", http.StatusConflict)
+	rg.confirmPrice(t, r.ID, 1, "2.60", http.StatusOK)
+	rg.confirmPrice(t, r.ID, 1, "2.60", http.StatusOK)
+
+	released := rg.ersRun(t, http.StatusOK)
+
+	if len(released.Settled) != 1 || released.Settled[0].Total != "10.40" {
+		t.Fatalf("confirmed price must settle at the PO price: %+v", released)
+	}
+}
+
+func TestErs_APriceMatchingTheReceiptNeedsNoConfirmation(t *testing.T) {
+	rg := ersRig("2.50", nil, nil)
+	rg.confirmErsPrice = ""
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-1", 10, 4)
+
+	if run := rg.ersRun(t, http.StatusOK); len(run.Settled) != 1 || run.Settled[0].Total != "10.00" {
+		t.Fatalf("%+v", run)
+	}
+}
+
+func TestConfirmErsPrice_RefusesBadInputAndOutsiders(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.confirmErsPrice = ""
+	rg.enableErs(t, true)
+	r := rg.posted(t, "PS-1", 10, 4)
+	put := func(path, body string, hdr headers) *httptest.ResponseRecorder {
+		return rg.call(http.MethodPut, receiptsPath+"/"+r.ID+path, body, hdr)
+	}
+	ok := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":2.6}`, legalEntityID)
+	buyer := func() headers { return userDuty("ErsPriceConfirm", rg.key(), "buyer") }
+
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, duty("VendorInvoicePost", rg.key(), "X-Passage-User", "buyer")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, withoutUser(duty("ErsPriceConfirm", rg.key()))), http.StatusUnauthorized, "AUTH-0001")
+	problemCode(t, put("/lines/1/ers-price-confirmation", `{"legalEntityId":"`+legalEntityID+`","unitPrice":-1}`, buyer()), http.StatusBadRequest, "COM-0001")
+	problemCode(t, put("/lines/0/ers-price-confirmation", ok, buyer()), http.StatusBadRequest, "COM-0001")
+	problemCode(t, put("/lines/9/ers-price-confirmation", ok, buyer()), http.StatusNotFound, "RCV-NF-001")
+	problemCode(t, put("/lines/1/ers-price-confirmation", strings.Replace(ok, legalEntityID, "99999999-9999-4999-8999-999999999990", 1), buyer()), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, put("/lines/1/ers-price-confirmation", strings.Replace(ok, "2.6", "2.5", 1), buyer()), http.StatusConflict, "AP-ERS-002")
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, userDuty("ErsPriceConfirm", rg.key(), "test-user")), http.StatusForbidden, "AP-ERS-004")
+}
+
+func TestConfirmErsPrice_NeedsAnErsVendor(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.confirmErsPrice = ""
+	r := rg.posted(t, "PS-1", 10, 4)
+
+	rg.confirmPrice(t, r.ID, 1, "2.60", http.StatusConflict)
+}
+
+func TestErs_RefusesAPriceConfirmedByTheUserRunningTheSettlement(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.confirmErsPrice = ""
+	rg.enableErs(t, true)
+	direct := rg.direct(t, "PS-1", 10, 4)
+	posterHeaders := duty("ReceivingPost", rg.key(), "If-Match", `"`+strconv.Itoa(direct.Version)+`"`, "X-Passage-User", "receiver")
+	r := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+direct.ID+":post", "", posterHeaders), http.StatusOK)
+	rg.confirmPriceAs(t, r.ID, 1, "2.60", "test-user", http.StatusOK)
+
+	run := rg.ersRun(t, http.StatusOK)
+
+	if len(run.Settled) != 0 || len(run.Skipped) != 1 || run.Skipped[0].Reason != "PRICE_CONFIRMED_BY_RUNNER" {
+		t.Fatalf("the runner's own confirmation must not release the receipt: %+v", run)
+	}
+	rg.confirmPriceAs(t, r.ID, 1, "2.60", "buyer", http.StatusOK)
+	if released := rg.ersRun(t, http.StatusOK); len(released.Settled) != 1 {
+		t.Fatalf("another buyer's confirmation must release it: %+v", released)
+	}
+}
+
+func withoutUser(h headers) headers {
+	delete(h, tenant.HeaderUser)
+	return h
 }

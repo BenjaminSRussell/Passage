@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -20,16 +21,19 @@ import (
 const (
 	ersPageSize  = 200
 	ersScanPages = 5
+	priceScale   = 6
 
-	skipNotPosted   = "RECEIPT_NOT_POSTED"
-	skipNotErs      = "NOT_ERS_VENDOR"
-	skipNoOrder     = "PO_NOT_FOUND"
-	skipOrderDenied = "PO_FORBIDDEN"
-	skipOrderOpen   = "PO_NOT_APPROVED"
-	skipNoPOLine    = "NO_PO_LINE"
-	skipManyPOLines = "AMBIGUOUS_PO_LINE"
-	skipPlanSettled = "PLAN_SETTLED"
-	skipPartial     = "PARTIALLY_INVOICED"
+	skipNotPosted     = "RECEIPT_NOT_POSTED"
+	skipNotErs        = "NOT_ERS_VENDOR"
+	skipNoOrder       = "PO_NOT_FOUND"
+	skipOrderDenied   = "PO_FORBIDDEN"
+	skipOrderOpen     = "PO_NOT_APPROVED"
+	skipNoPOLine      = "NO_PO_LINE"
+	skipManyPOLines   = "AMBIGUOUS_PO_LINE"
+	skipPlanSettled   = "PLAN_SETTLED"
+	skipPartial       = "PARTIALLY_INVOICED"
+	skipPriceChange   = "PRICE_CHANGED"
+	skipSelfConfirmed = "PRICE_CONFIRMED_BY_RUNNER"
 )
 
 type ersRunRequest struct {
@@ -84,6 +88,12 @@ func (r *ersRun) skip(ref, reason string) {
 	r.body.Skipped = append(r.body.Skipped, skippedBody{SourceRef: ref, Reason: reason})
 }
 
+func (r *ersRun) skipWithDetail(ref, reason, detail string) {
+	r.body.Skipped = append(r.body.Skipped, skippedBody{SourceRef: ref, Reason: reason, Detail: detail})
+}
+
+func samePrice(a, b decimal.Decimal) bool { return a.Round(priceScale).Equal(b.Round(priceScale)) }
+
 func (r *ersRun) order(id string) (ersOrder, error) {
 	if found, ok := r.orders[id]; ok {
 		return found, nil
@@ -135,7 +145,7 @@ func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrde
 	return domain.PurchaseOrderLine{}, skipManyPOLines
 }
 
-func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int) (store.Invoice, string) {
+func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int, confirmed map[int]store.PriceConfirmation) (store.Invoice, string, string) {
 	number := "ERS-" + rec.Number
 	if rejected > 0 {
 		number = fmt.Sprintf("%s-R%d", number, rejected)
@@ -154,7 +164,7 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 		}
 	}
 	if open > 0 && invoiced > 0 {
-		return store.Invoice{}, skipPartial
+		return store.Invoice{}, skipPartial, ""
 	}
 	for _, l := range rec.Lines {
 		if l.InvoicedQty.IsPositive() {
@@ -162,20 +172,27 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 		}
 		poLine, reason := matchPOLine(po, l.ProductID)
 		if reason != "" {
-			return store.Invoice{}, reason
+			return store.Invoice{}, reason, ""
 		}
 		price := poLine.NetUnitPrice()
+		confirmation, ok := confirmed[l.LineNo]
+		if !samePrice(l.UnitPrice, price) && ok && samePrice(confirmation.Price, price) && store.SameActor(confirmation.By, r.principal.UserID) {
+			return store.Invoice{}, skipSelfConfirmed, fmt.Sprintf("AP-ERS-004: the price on line %d was confirmed by the user running the settlement", l.LineNo)
+		}
+		if !samePrice(l.UnitPrice, price) && (!ok || !samePrice(confirmation.Price, price)) {
+			return store.Invoice{}, skipPriceChange, fmt.Sprintf("AP-ERS-001: PO price changed since receipt (%s -> %s) on line %d", l.UnitPrice.StringFixed(priceScale), price.Round(priceScale).StringFixed(priceScale), l.LineNo)
+		}
 		in.Lines = append(in.Lines, store.InvoiceLine{
 			ReceiptID: rec.ID, ReceiptLineNo: l.LineNo, Qty: l.Qty, UnitPrice: price, Amount: l.Qty.Mul(price).RoundBank(money.MinorUnits(rec.Currency)),
 		})
 	}
 	if len(in.Lines) == 0 {
-		return store.Invoice{}, skipAlreadyInvoiced
+		return store.Invoice{}, skipAlreadyInvoiced, ""
 	}
 	if rejected > 0 {
 		in.AuditReason = auditReasonReissue
 	}
-	return in, ""
+	return in, "", ""
 }
 
 func (r *ersRun) receipt(receiptID string) error {
@@ -219,9 +236,13 @@ func (r *ersRun) receipt(receiptID string) error {
 	if err != nil {
 		return err
 	}
-	in, reason := r.invoiceFor(rec, order.po, rejected)
+	confirmed, err := r.api.store.ErsPriceConfirmations(r.ctx, rec.ID)
+	if err != nil {
+		return err
+	}
+	in, reason, detail := r.invoiceFor(rec, order.po, rejected, confirmed)
 	if reason != "" {
-		r.skip(ref, reason)
+		r.skipWithDetail(ref, reason, detail)
 		return nil
 	}
 	posted, err := r.api.submitInvoice(r.ctx, r.principal, in)

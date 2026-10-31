@@ -493,7 +493,7 @@ paths:
         cannot be invoiced again and an invoiced line is skipped. Idempotent per receipt (ALREADY_SETTLED). The invoice goes
         through the stochastic audit block like any other (status AUDIT_BLOCKED in the result). At most 100 invoices are created
         per run and 1000 GR/IR items scanned (hasMore); a failure stops the run and a repeat continues. Quantity discrepancies
-        and BR-18.9 price-change confirmation are not handled. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
+        are not handled. BR-18.9: a receipt line whose recorded unit price differs (at 6 decimals) from the PO line's current net price is skipped (PRICE_CHANGED, detail AP-ERS-001 with old and new price) until a buyer confirms the current price (PUT /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation); a later PO price change needs a new confirmation. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
         invoice.sampled.v1 per invoice.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -540,6 +540,48 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation:
+    put:
+      operationId: confirmErsPrice
+      x-passage-duty: ErsPriceConfirm
+      description: A buyer confirms the unit price an ERS run may settle a receipt line at when the PO price changed since receipt (BR-18.9, AP-ERS-001). unitPrice must equal the PO line's current net price (409 AP-ERS-002). The receipt must be POSTED and its vendor ERS-enabled (409 AP-ERS-003). The user who posted the receipt cannot confirm it (403 AP-ERS-004), and an ERS run by the confirming user skips the line (PRICE_CONFIRMED_BY_RUNNER). Each confirmation is kept in an insert-only history and published as erspriceconfirmation.confirmed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: lineNo
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, unitPrice]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                unitPrice: { type: [number, string], minimum: 0 }
+      responses:
+        '200':
+          description: The stored confirmation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receiptId, lineNo, unitPrice]
+                properties:
+                  receiptId: { type: string, format: uuid }
+                  lineNo: { type: integer }
+                  unitPrice: { type: string }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001 no such receipt line in the legal entity.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-ERS-002 price differs from the PO, AP-ERS-003 not confirmable.' }
   /v1/receiving/audit-policy:
     put:
       operationId: setAuditPolicy
@@ -1196,12 +1238,17 @@ components:
       properties:
         legalEntityId: { type: string, format: uuid }
         sampleRatePct: { type: [number, string], minimum: 0, maximum: 100, description: At most two decimals. }
+        thresholdAmount: { type: [number, string], exclusiveMinimum: 0, description: 'BR-18.14: an invoice below it in thresholdCurrency is blocked with probability rate x total / threshold; omit for a flat rate.' }
+        thresholdCurrency: { type: string, pattern: '^[A-Z]{3}$', description: Required with thresholdAmount; invoices in another currency are drawn at the full rate. }
     AuditPolicy:
       type: object
-      required: [legalEntityId, sampleRatePct]
+      required: [legalEntityId, sampleRatePct, ruleVersion]
       properties:
         legalEntityId: { type: string, format: uuid }
         sampleRatePct: { type: string }
+        thresholdAmount: { type: string }
+        thresholdCurrency: { type: string }
+        ruleVersion: { type: integer, minimum: 1, description: Bumped whenever the rate or threshold changes; each invoice records the version its draw used. }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

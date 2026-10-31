@@ -14,7 +14,7 @@ if err != nil {
 r.With(verifier.Middleware, identity.RequireOPA(policy, http.MethodPut, "/v1/vendors")).Put("/v1/vendors/{id}", handler)
 ```
 
-Run `go test ./...` from this directory. The bundle is under `../../policies/authz`; `opa test ../../policies/authz` runs its Rego contract tests. The policy bundle defines 122 duties and starts with no assignments; the policy compiler must populate assignments per tenant before access is granted. Each route passes its HTTP method and resource path to the policy middleware.
+Run `go test ./...` from this directory. The bundle is under `../../policies/authz`; `opa test ../../policies/authz` runs its Rego contract tests. The policy bundle defines 123 duties and starts with no assignments; the policy compiler must populate assignments per tenant before access is granted. Each route passes its HTTP method and resource path to the policy middleware.
 
 Tenant-level writes need the `tenant.administer` duty (a flag duty, no routes) with no legal-entity scope, on top of the specific admin duty. The platform operator (`Maintain tenants`, operator tenant) seeds the first holder: `POST /v1/tenants` takes optional `adminUserId` and `adminIdpSubject`, and `POST /v1/tenants/{id}/admins` (`userId`, `reason`) grants it in an existing tenant. Before deploying, add `tenant.administer` to the duties claim of existing tenant administrators in the Keycloak duties mapper; the last active tenant-wide `tenant.administer` assignment of a tenant cannot be ended (`IDN-LAST-TENANT-ADMIN`).
 

@@ -73,6 +73,7 @@ type Receipt struct {
 	ExchangeRate    decimal.Decimal
 	PostingDate     *time.Time
 	PostedAt        *time.Time
+	PostedBy        string
 	LedgerEntryID   string
 	CreatedAt       time.Time
 	Lines           []Line
@@ -141,29 +142,30 @@ type InvoiceLine struct {
 }
 
 type Invoice struct {
-	ID             string
-	LegalEntityID  string
-	VendorID       string
-	InvoiceNumber  string
-	InvoiceDate    time.Time
-	PostingDate    time.Time
-	Currency       string
-	LedgerID       string
-	FiscalPeriodID string
-	LedgerEntryID  string
-	Total          decimal.Decimal
-	CreatedAt      time.Time
-	Source         string
-	Status         string
-	PostedBy       string
-	OneTimePayeeID string
-	AuditReason    string
-	ReleasedBy     string
-	ReleasedAt     *time.Time
-	RejectedBy     string
-	RejectedAt     *time.Time
-	RejectReason   string
-	Lines          []InvoiceLine
+	ID               string
+	LegalEntityID    string
+	VendorID         string
+	InvoiceNumber    string
+	InvoiceDate      time.Time
+	PostingDate      time.Time
+	Currency         string
+	LedgerID         string
+	FiscalPeriodID   string
+	LedgerEntryID    string
+	Total            decimal.Decimal
+	CreatedAt        time.Time
+	Source           string
+	Status           string
+	PostedBy         string
+	OneTimePayeeID   string
+	AuditReason      string
+	AuditRuleVersion int
+	ReleasedBy       string
+	ReleasedAt       *time.Time
+	RejectedBy       string
+	RejectedAt       *time.Time
+	RejectReason     string
+	Lines            []InvoiceLine
 }
 
 type InvoiceOutcome struct {
@@ -180,7 +182,14 @@ type ReleaseFunc func(inv Invoice) (InvoiceOutcome, error)
 
 type RejectFunc func(inv Invoice) (events.Event, error)
 
-type AuditRateFunc func(old decimal.Decimal) (events.Event, error)
+type PriceConfirmation struct {
+	Price decimal.Decimal
+	By    string
+}
+
+type ErsPriceFunc func(old decimal.NullDecimal) (events.Event, error)
+
+type AuditPolicyFunc func(old, next domain.AuditPolicy) (events.Event, error)
 
 type ErsVendorFunc func(old bool) (events.Event, error)
 
@@ -271,8 +280,10 @@ type Store interface {
 	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error
 	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)
 	ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error)
-	SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string, fn AuditRateFunc) error
-	AuditRate(ctx context.Context, legalEntityID string) (decimal.Decimal, error)
+	ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string, fn ErsPriceFunc) error
+	ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]PriceConfirmation, error)
+	SetAuditPolicy(ctx context.Context, legalEntityID string, policy domain.AuditPolicy, by string, fn AuditPolicyFunc) error
+	AuditPolicy(ctx context.Context, legalEntityID string) (domain.AuditPolicy, error)
 	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)
 	PostSettlement(ctx context.Context, in Settlement, fn SettlementFunc) (out Settlement, replayed bool, err error)
 	SettledSources(ctx context.Context, kind string, sources []string) (map[string]struct{}, error)

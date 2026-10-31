@@ -407,8 +407,8 @@ func TestPolicyChangesWriteAppendOnlyHistoryWithTheOldValue(t *testing.T) {
 	ctx := tenant.With(context.Background(), db.one)
 	var olds []string
 	for _, rate := range []string{"5", "7.5"} {
-		err := st.SetAuditRate(ctx, db.one.LegalEntityID, decimal.RequireFromString(rate), "alice", func(old decimal.Decimal) (events.Event, error) {
-			olds = append(olds, old.String())
+		err := st.SetAuditPolicy(ctx, db.one.LegalEntityID, domain.AuditPolicy{RatePct: decimal.RequireFromString(rate)}, "alice", func(old, _ domain.AuditPolicy) (events.Event, error) {
+			olds = append(olds, old.RatePct.String())
 			return event(t, db.one, "invoice", "sampled"), nil
 		})
 		if err != nil {
@@ -423,7 +423,7 @@ func TestPolicyChangesWriteAppendOnlyHistoryWithTheOldValue(t *testing.T) {
 		}
 	}
 	boom := errors.New("event failed")
-	if err := st.SetAuditRate(ctx, db.one.LegalEntityID, decimal.NewFromInt(50), "mallory", func(decimal.Decimal) (events.Event, error) { return events.Event{}, boom }); !errors.Is(err, boom) {
+	if err := st.SetAuditPolicy(ctx, db.one.LegalEntityID, domain.AuditPolicy{RatePct: decimal.NewFromInt(50)}, "mallory", func(_, _ domain.AuditPolicy) (events.Event, error) { return events.Event{}, boom }); !errors.Is(err, boom) {
 		t.Fatalf("err %v", err)
 	}
 
@@ -433,8 +433,8 @@ func TestPolicyChangesWriteAppendOnlyHistoryWithTheOldValue(t *testing.T) {
 	if got := scalar(t, db, `select string_agg(old_enabled::text || '>' || new_enabled::text, ',' order by changed_at) from receiving_ers_vendor_history`); got != "false>true,true>false" {
 		t.Errorf("ERS history %q", got)
 	}
-	if rate, _ := st.AuditRate(ctx, db.one.LegalEntityID); !rate.Equal(decimal.RequireFromString("7.5")) {
-		t.Errorf("a failed change was applied: %s", rate)
+	if got, _ := st.AuditPolicy(ctx, db.one.LegalEntityID); !got.RatePct.Equal(decimal.RequireFromString("7.5")) || got.RuleVersion != 2 {
+		t.Errorf("a failed change was applied: %+v", got)
 	}
 	if olds[0] != "0" || olds[1] != "5" {
 		t.Errorf("old values seen by the event builder %v", olds)
@@ -450,5 +450,48 @@ func TestDecisionOnAnUnknownOrMalformedInvoiceIdIsNotFound(t *testing.T) {
 	}
 	if _, err := st.RejectInvoice(ctx, "not-a-uuid", db.one.LegalEntityID, "bob", "x", nil); !errors.Is(err, store.ErrInvoiceNotFound) {
 		t.Fatalf("reject err %v", err)
+	}
+}
+
+func TestAuditPolicyKeepsThresholdAndBumpsRuleVersionOnlyOnChange(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	set := func(rate, threshold, currency string) domain.AuditPolicy {
+		t.Helper()
+		var next domain.AuditPolicy
+		policy := domain.AuditPolicy{RatePct: decimal.RequireFromString(rate), ThresholdCurrency: currency}
+		if threshold != "" {
+			policy.Threshold = decimal.RequireFromString(threshold)
+		}
+		err := st.SetAuditPolicy(ctx, db.one.LegalEntityID, policy, "alice", func(_, n domain.AuditPolicy) (events.Event, error) {
+			next = n
+			return event(t, db.one, "invoice", "sampled"), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return next
+	}
+
+	if v := set("10", "500", "USD").RuleVersion; v != 1 {
+		t.Fatalf("first policy version %d", v)
+	}
+	if v := set("10", "500", "USD").RuleVersion; v != 1 {
+		t.Fatalf("an unchanged policy bumped the version to %d", v)
+	}
+	if v := set("10", "", "").RuleVersion; v != 2 {
+		t.Fatalf("dropping the threshold must bump the version, got %d", v)
+	}
+	if v := set("20", "", "").RuleVersion; v != 3 {
+		t.Fatalf("a rate change must bump the version, got %d", v)
+	}
+	got, err := st.AuditPolicy(ctx, db.one.LegalEntityID)
+	if err != nil || !got.RatePct.Equal(decimal.NewFromInt(20)) || got.Threshold.Sign() != 0 || got.ThresholdCurrency != "" || got.RuleVersion != 3 {
+		t.Fatalf("policy %+v err %v", got, err)
+	}
+	set("20", "750", "EUR")
+	if got, _ := st.AuditPolicy(ctx, db.one.LegalEntityID); !got.Threshold.Equal(decimal.NewFromInt(750)) || got.ThresholdCurrency != "EUR" {
+		t.Fatalf("threshold not kept: %+v", got)
 	}
 }

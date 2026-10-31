@@ -36,6 +36,8 @@ channels:
         $ref: "#/components/messages/AuditPolicyChanged"
       ersVendorChanged:
         $ref: "#/components/messages/ErsVendorChanged"
+      ersPriceConfirmed:
+        $ref: "#/components/messages/ErsPriceConfirmed"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -82,6 +84,11 @@ operations:
     channel: { $ref: "#/channels/policyEvents" }
     messages:
       - { $ref: "#/channels/policyEvents/messages/ersVendorChanged" }
+  publishErsPriceConfirmed:
+    action: send
+    channel: { $ref: "#/channels/policyEvents" }
+    messages:
+      - { $ref: "#/channels/policyEvents/messages/ersPriceConfirmed" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -153,6 +160,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsVendorChangedData"
+    ErsPriceConfirmed:
+      name: dev.passage.receiving.erspriceconfirmation.confirmed.v1
+      summary: A buyer confirmed the PO price an ERS run may settle a receipt line at (BR-18.9). Consumers: audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ErsPriceConfirmedData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -245,7 +258,7 @@ components:
               grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }
     InvoiceSampledData:
       type: object
-      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct, reason]
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct, rule_version, reason]
       properties:
         invoice_id: { type: string, format: uuid }
         one_time_payee_id: { type: string, format: uuid, description: "present when the invoice names a one-time payee" }
@@ -256,6 +269,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         total: { type: string, description: "decimal string; the vendor control credit that will post on release" }
         sample_rate_pct: { type: string, description: "decimal string, 0 to 100; the legal entity's sample rate when the draw was made" }
+        rule_version: { type: integer, minimum: 0, description: "version of the legal entity's audit policy (rate and threshold) the draw used; the decision is recorded with it and never re-drawn" }
         reason: { type: string, enum: ["stochastic sample", "re-issue after audit rejection"], description: "why the invoice was held; a re-issue of a rejected ERS invoice is always held" }
     InvoiceRejectedData:
       type: object
@@ -272,12 +286,25 @@ components:
         rejected_by: { type: string }
     AuditPolicyChangedData:
       type: object
-      required: [legal_entity_id, old_rate_pct, new_rate_pct, changed_by]
+      required: [legal_entity_id, old_rate_pct, new_rate_pct, rule_version, changed_by]
       properties:
         legal_entity_id: { type: string, format: uuid }
         old_rate_pct: { type: string, description: decimal string, 0 to 100 }
         new_rate_pct: { type: string, description: decimal string, 0 to 100 }
+        threshold_amount: { type: string, description: "decimal string; present when amount weighting is on (BR-18.14)" }
+        threshold_currency: { type: string, pattern: "^[A-Z]{3}$" }
+        rule_version: { type: integer, minimum: 1, description: "policy version after this change; bumped whenever the rate or threshold changes" }
         changed_by: { type: string }
+    ErsPriceConfirmedData:
+      type: object
+      required: [receipt_id, line_no, legal_entity_id, new_price, confirmed_by]
+      properties:
+        receipt_id: { type: string, format: uuid }
+        line_no: { type: integer, minimum: 1 }
+        legal_entity_id: { type: string, format: uuid }
+        old_price: { type: string, description: "decimal string; omitted on the first confirmation" }
+        new_price: { type: string, description: "decimal string, the confirmed unit price" }
+        confirmed_by: { type: string }
     ErsVendorChangedData:
       type: object
       required: [legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by]

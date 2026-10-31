@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 122
+	count(data.duties) == 123
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -99,6 +99,7 @@ segregation_grants := [
 	["VendorInvoicePost", "POST", "/v1/receiving/ers-settlements:run"],
 	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
 	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
+	["ErsPriceConfirm", "PUT", "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation"],
 	["MatchingPolicyMaintain", "PUT", "/v1/receiving/audit-policy"],
 	["MatchingPolicyMaintain", "PUT", "/v1/receiving/ers-vendors/v1"],
 	["PurchaseOrderConfirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],

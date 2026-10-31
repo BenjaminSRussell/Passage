@@ -47,12 +47,14 @@ type tenantData struct {
 	invoices map[string]struct{}
 	counter  int
 
-	invoiceDocs map[string]store.Invoice
-	adjustments map[string]store.InvoiceAdjustment
-	settlements map[string]store.Settlement
-	ersVendors  map[string]bool
-	auditRates  map[string]decimal.Decimal
-	payees      map[string]store.OneTimePayee
+	invoiceDocs     map[string]store.Invoice
+	adjustments     map[string]store.InvoiceAdjustment
+	settlements     map[string]store.Settlement
+	ersVendors      map[string]bool
+	auditRates      map[string]domain.AuditPolicy
+	payees          map[string]store.OneTimePayee
+	ersPrices       map[string]store.PriceConfirmation
+	ersPriceHistory []string
 
 	policyHistory []PolicyChange
 }
@@ -91,7 +93,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]decimal.Decimal{}, payees: map[string]store.OneTimePayee{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -340,6 +342,9 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 			})
 		}
 		current.State, current.PostingDate, current.PostedAt, current.LedgerEntryID = domain.Posted, &outcome.PostingDate, &now, outcome.LedgerEntryID
+		if p, ok := tenant.FromContext(ctx); ok {
+			current.PostedBy = p.UserID
+		}
 		current.Version++
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)
@@ -711,7 +716,11 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		if current.State != domain.Posted {
 			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s, not POSTED", id, current.State)}
 		}
-		adj, err := fn(cloneReceipt(current))
+		withOthers := cloneReceipt(current)
+		for i, l := range withOthers.Lines {
+			withOthers.Lines[i].OtherReceived = t.receivedOn(current.ID, current.PurchaseOrderID, l.POLineNo)
+		}
+		adj, err := fn(withOthers)
 		if err != nil {
 			return err
 		}

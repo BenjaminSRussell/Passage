@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -50,15 +51,29 @@ func ValidSampleRate(ratePct decimal.Decimal) bool {
 	return !ratePct.IsNegative() && !ratePct.GreaterThan(hundred) && ratePct.Exponent() >= -2
 }
 
-func (s *Sampler) Blocks(invoiceID string, ratePct decimal.Decimal) bool {
-	if !ratePct.IsPositive() {
+type AuditPolicy struct {
+	RatePct           decimal.Decimal
+	Threshold         decimal.Decimal
+	ThresholdCurrency string
+	RuleVersion       int
+}
+
+func (p AuditPolicy) Weight(total decimal.Decimal, currency string) decimal.Decimal {
+	if !p.Threshold.IsPositive() || currency != p.ThresholdCurrency || total.GreaterThanOrEqual(p.Threshold) {
+		return decimal.NewFromInt(1)
+	}
+	return decimal.Max(total, decimal.Zero).Div(p.Threshold)
+}
+
+func (s *Sampler) Decide(invoiceID string, p AuditPolicy, total decimal.Decimal, currency string) bool {
+	if !p.RatePct.IsPositive() {
 		return false
 	}
 	if s == nil {
 		return true
 	}
 	mac := hmac.New(sha256.New, s.seed)
-	mac.Write([]byte(strings.ToLower(invoiceID)))
+	mac.Write([]byte(strings.ToLower(invoiceID) + "|" + strconv.Itoa(p.RuleVersion)))
 	bucket := binary.BigEndian.Uint64(mac.Sum(nil)[:8]) % sampleBuckets
-	return int64(bucket) < ratePct.Mul(bucketsPerPct).IntPart()
+	return decimal.NewFromInt(int64(bucket)).LessThan(p.RatePct.Mul(bucketsPerPct).Mul(p.Weight(total, currency)))
 }

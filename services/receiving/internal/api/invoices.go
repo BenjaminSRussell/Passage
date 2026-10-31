@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -55,28 +57,29 @@ type invoiceLineBody struct {
 }
 
 type invoiceBody struct {
-	ID             string            `json:"id"`
-	VendorID       string            `json:"vendorId"`
-	LegalEntityID  string            `json:"legalEntityId"`
-	InvoiceNumber  string            `json:"invoiceNumber"`
-	InvoiceDate    string            `json:"invoiceDate"`
-	PostingDate    string            `json:"postingDate"`
-	Currency       string            `json:"currency"`
-	LedgerID       string            `json:"ledgerId"`
-	FiscalPeriodID string            `json:"fiscalPeriodId"`
-	OneTimePayeeID string            `json:"oneTimePayeeId,omitempty"`
-	Total          string            `json:"total"`
-	LedgerEntryID  string            `json:"ledgerEntryId"`
-	Source         string            `json:"source"`
-	Status         string            `json:"status"`
-	AuditReason    string            `json:"auditReason,omitempty"`
-	ReleasedBy     string            `json:"releasedBy,omitempty"`
-	ReleasedAt     string            `json:"releasedAt,omitempty"`
-	RejectedBy     string            `json:"rejectedBy,omitempty"`
-	RejectedAt     string            `json:"rejectedAt,omitempty"`
-	RejectReason   string            `json:"rejectReason,omitempty"`
-	CreatedAt      string            `json:"createdAt"`
-	Lines          []invoiceLineBody `json:"lines"`
+	ID               string            `json:"id"`
+	VendorID         string            `json:"vendorId"`
+	LegalEntityID    string            `json:"legalEntityId"`
+	InvoiceNumber    string            `json:"invoiceNumber"`
+	InvoiceDate      string            `json:"invoiceDate"`
+	PostingDate      string            `json:"postingDate"`
+	Currency         string            `json:"currency"`
+	LedgerID         string            `json:"ledgerId"`
+	FiscalPeriodID   string            `json:"fiscalPeriodId"`
+	OneTimePayeeID   string            `json:"oneTimePayeeId,omitempty"`
+	Total            string            `json:"total"`
+	LedgerEntryID    string            `json:"ledgerEntryId"`
+	Source           string            `json:"source"`
+	Status           string            `json:"status"`
+	AuditReason      string            `json:"auditReason,omitempty"`
+	AuditRuleVersion int               `json:"auditRuleVersion,omitempty"`
+	ReleasedBy       string            `json:"releasedBy,omitempty"`
+	ReleasedAt       string            `json:"releasedAt,omitempty"`
+	RejectedBy       string            `json:"rejectedBy,omitempty"`
+	RejectedAt       string            `json:"rejectedAt,omitempty"`
+	RejectReason     string            `json:"rejectReason,omitempty"`
+	CreatedAt        string            `json:"createdAt"`
+	Lines            []invoiceLineBody `json:"lines"`
 }
 
 func stableID(parts ...string) string {
@@ -197,12 +200,16 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
 	in.PostedBy = p.UserID
-	ratePct, err := a.store.AuditRate(ctx, in.LegalEntityID)
+	policy, err := a.store.AuditPolicy(ctx, in.LegalEntityID)
 	if err != nil {
 		return store.Invoice{}, err
 	}
-	if in.AuditReason == "" && a.ports.AuditSampler.Blocks(in.ID, ratePct) {
+	ratePct := policy.RatePct
+	if in.AuditReason == "" && a.ports.AuditSampler.Decide(in.ID, policy, invoiceAmount(in), in.Currency) {
 		in.AuditReason = auditReasonSample
+	}
+	if in.AuditReason != "" || policy.RatePct.IsPositive() {
+		in.AuditRuleVersion = policy.RuleVersion
 	}
 	blocked := in.AuditReason != ""
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
@@ -243,12 +250,20 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	return posted, nil
 }
 
+func invoiceAmount(in store.Invoice) decimal.Decimal {
+	total := decimal.Zero
+	for _, l := range in.Lines {
+		total = total.Add(l.Amount)
+	}
+	return total
+}
+
 func toInvoiceBody(in store.Invoice) invoiceBody {
 	scale := money.MinorUnits(in.Currency)
 	out := invoiceBody{
 		ID: in.ID, VendorID: in.VendorID, LegalEntityID: in.LegalEntityID, InvoiceNumber: in.InvoiceNumber, InvoiceDate: in.InvoiceDate.Format(dateLayout),
 		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-		OneTimePayeeID: in.OneTimePayeeID, Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, AuditReason: in.AuditReason, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+		OneTimePayeeID: in.OneTimePayeeID, Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, AuditReason: in.AuditReason, AuditRuleVersion: in.AuditRuleVersion, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
 	}
 	if in.ReleasedAt != nil {
 		out.ReleasedAt = in.ReleasedAt.UTC().Format(time.RFC3339)

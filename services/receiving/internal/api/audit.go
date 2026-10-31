@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -15,16 +18,26 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const dutyInvoiceAuditRelease = "InvoiceAuditRelease"
+const (
+	dutyInvoiceAuditRelease = "InvoiceAuditRelease"
+	dutyErsPriceConfirm     = "ErsPriceConfirm"
+)
 
 type auditPolicyRequest struct {
 	LegalEntityID string        `json:"legalEntityId"`
 	SampleRatePct *fieldDecimal `json:"sampleRatePct"`
+
+	ThresholdAmount   *fieldDecimal `json:"thresholdAmount"`
+	ThresholdCurrency string        `json:"thresholdCurrency"`
 }
 
 type auditPolicyBody struct {
 	LegalEntityID string `json:"legalEntityId"`
 	SampleRatePct string `json:"sampleRatePct"`
+
+	ThresholdAmount   string `json:"thresholdAmount,omitempty"`
+	ThresholdCurrency string `json:"thresholdCurrency,omitempty"`
+	RuleVersion       int    `json:"ruleVersion"`
 }
 
 type ersVendorRequest struct {
@@ -78,6 +91,18 @@ func (a *API) setAuditPolicy(w http.ResponseWriter, r *http.Request) {
 	if present && !domain.ValidSampleRate(rate) {
 		fields["sampleRatePct"] = "must be from 0 to 100 with at most two decimals"
 	}
+	policy := domain.AuditPolicy{RatePct: rate}
+	if threshold, given := decimalField(fields, "thresholdAmount", req.ThresholdAmount, false); given {
+		if !threshold.IsPositive() {
+			fields["thresholdAmount"] = "must be greater than zero"
+		}
+		if len(req.ThresholdCurrency) != 3 || !isUpperAlpha(req.ThresholdCurrency) {
+			fields["thresholdCurrency"] = "is required with thresholdAmount as a 3-letter upper-case ISO 4217 code"
+		}
+		policy.Threshold, policy.ThresholdCurrency = threshold, req.ThresholdCurrency
+	} else if req.ThresholdCurrency != "" {
+		fields["thresholdAmount"] = "is required with thresholdCurrency"
+	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validationProblem(fields))
 		return
@@ -86,14 +111,20 @@ func (a *API) setAuditPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	err := a.store.SetAuditRate(r.Context(), req.LegalEntityID, rate, p.UserID, func(old decimal.Decimal) (events.Event, error) {
-		return auditPolicyChangedEvent(p.TenantID, req.LegalEntityID, old, rate, p.UserID)
+	var saved domain.AuditPolicy
+	err := a.store.SetAuditPolicy(r.Context(), req.LegalEntityID, policy, p.UserID, func(old, next domain.AuditPolicy) (events.Event, error) {
+		saved = next
+		return auditPolicyChangedEvent(p.TenantID, req.LegalEntityID, old, next, p.UserID)
 	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, auditPolicyBody{LegalEntityID: req.LegalEntityID, SampleRatePct: rate.StringFixed(2)})
+	body := auditPolicyBody{LegalEntityID: req.LegalEntityID, SampleRatePct: saved.RatePct.StringFixed(2), RuleVersion: saved.RuleVersion}
+	if saved.Threshold.IsPositive() {
+		body.ThresholdAmount, body.ThresholdCurrency = saved.Threshold.String(), saved.ThresholdCurrency
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) setErsVendor(w http.ResponseWriter, r *http.Request) {
@@ -215,4 +246,111 @@ func (a *API) rejectAuditBlock(w http.ResponseWriter, r *http.Request) {
 	}
 	a.auditRejected.Add(1)
 	httpx.JSON(w, http.StatusOK, toInvoiceBody(rejected))
+}
+
+type ersPriceRequest struct {
+	LegalEntityID string        `json:"legalEntityId"`
+	UnitPrice     *fieldDecimal `json:"unitPrice"`
+}
+
+type ersPriceBody struct {
+	ReceiptID string `json:"receiptId"`
+	LineNo    int    `json:"lineNo"`
+	UnitPrice string `json:"unitPrice"`
+}
+
+func (a *API) confirmErsPrice(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalWithUser(w, r)
+	if !ok {
+		return
+	}
+	var req ersPriceRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	lineNo, lineErr := strconv.Atoi(chi.URLParam(r, "lineNo"))
+	fields := map[string]string{}
+	checkUUID(fields, "id", id)
+	checkUUID(fields, "legalEntityId", req.LegalEntityID)
+	if lineErr != nil || lineNo < 1 {
+		fields["lineNo"] = "must be at least 1"
+	}
+	price, present := decimalField(fields, "unitPrice", req.UnitPrice, true)
+	if present && price.IsNegative() {
+		fields["unitPrice"] = "must not be negative"
+	}
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
+	if err := inScope(p, req.LegalEntityID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	ctx := r.Context()
+	rec, err := a.store.GetReceipt(ctx, id)
+	if err == nil && rec.LegalEntityID != req.LegalEntityID {
+		err = store.ErrNotFound
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	poPrice, err := a.ersConfirmablePrice(ctx, rec, lineNo, p.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !samePrice(price, poPrice) {
+		writeError(w, r, poProblem(http.StatusConflict, "AP-ERS-002", "unitPrice %s differs from the current purchase order price %s", price.String(), poPrice.Round(priceScale).String()))
+		return
+	}
+	err = a.store.ConfirmErsPrice(ctx, req.LegalEntityID, id, lineNo, price, p.UserID, func(old decimal.NullDecimal) (events.Event, error) {
+		return ersPriceConfirmedEvent(p.TenantID, rec, lineNo, old, price, p.UserID)
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, ersPriceBody{ReceiptID: id, LineNo: lineNo, UnitPrice: price.String()})
+}
+
+func (a *API) ersConfirmablePrice(ctx context.Context, rec store.Receipt, lineNo int, by string) (decimal.Decimal, error) {
+	idx := slices.IndexFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == lineNo })
+	switch {
+	case idx < 0:
+		return decimal.Zero, store.ErrNotFound
+	case rec.State != domain.Posted:
+		return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "only a posted receipt can have its price confirmed, this one is %s", rec.State)
+	case strings.TrimSpace(rec.PostedBy) == "" || store.SameActor(rec.PostedBy, by):
+		return decimal.Zero, poProblem(http.StatusForbidden, "AP-ERS-004", "the user who posted a receipt cannot confirm its ERS price (and a receipt without a recorded poster cannot be confirmed)")
+	}
+	enabled, err := a.store.ErsVendor(ctx, rec.LegalEntityID, rec.VendorID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if !enabled {
+		return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the vendor is not enabled for evaluated receipt settlement")
+	}
+	po, err := a.loadPurchaseOrder(ctx, rec.LegalEntityID, rec.PurchaseOrderID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	line := rec.Lines[idx]
+	var poLine domain.PurchaseOrderLine
+	if line.POLineNo > 0 {
+		at := slices.IndexFunc(po.Lines, func(l domain.PurchaseOrderLine) bool { return l.LineNo == line.POLineNo && l.Usable() })
+		if at < 0 {
+			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "purchase order line %d is gone or cancelled", line.POLineNo)
+		}
+		poLine = po.Lines[at]
+	} else {
+		var reason string
+		if poLine, reason = matchPOLine(po, line.ProductID); reason != "" {
+			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the receipt line has no single purchase order line (%s)", reason)
+		}
+	}
+	return poLine.NetUnitPrice(), nil
 }

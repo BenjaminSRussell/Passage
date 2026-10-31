@@ -267,3 +267,34 @@ func TestArrival_RequiresPOLineNoWhenTheLookupIsConfiguredForReal(t *testing.T) 
 		t.Fatalf("a legacy direct line must be refused: %d %s", direct.Code, direct.Body)
 	}
 }
+
+func TestCorrect_UpwardCorrectionCountsWhatOtherReceiptsTookFromThePOLine(t *testing.T) {
+	r, _ := newPurchasingRouter(t, poOverrides{})
+	first, second := arriveOne(t, r, "PS-A", "k1"), arriveOne(t, r, "PS-B", "k2")
+	if rec := registerCall(r, first, "k3", 4); rec.Code != http.StatusOK {
+		t.Fatalf("register A: %d %s", rec.Code, rec.Body)
+	}
+	if rec := registerCall(r, second, "k4", 6); rec.Code != http.StatusOK {
+		t.Fatalf("register B: %d %s", rec.Code, rec.Body)
+	}
+	postHdr := func(key string) headers {
+		return headers{"X-Passage-Tenant": maintainer(key)["X-Passage-Tenant"], "X-Passage-Duties": "ReceivingPost", "Idempotency-Key": key, "If-Match": "2"}
+	}
+	if rec := doWith(r, http.MethodPost, "/v1/receiving/receipts/"+first+":post", "", postHdr("k5")); rec.Code != http.StatusOK {
+		t.Fatalf("post A: %d %s", rec.Code, rec.Body)
+	}
+	correct := func(key string, delta string) *httptest.ResponseRecorder {
+		hdr := postHdr(key)
+		hdr["If-Match"] = "3"
+		return doWith(r, http.MethodPost, "/v1/receiving/receipts/"+first+":correct", `{"lines":[{"lineNo":1,"qtyDelta":`+delta+`}]}`, hdr)
+	}
+
+	refused := correct("k6", "6")
+
+	if refused.Code != http.StatusUnprocessableEntity || !strings.Contains(refused.Body.String(), "RCV-OVR-001") {
+		t.Fatalf("+6 on A would take the PO line to 12 of 10: %d %s", refused.Code, refused.Body)
+	}
+	if ok := correct("k7", "0.2"); ok.Code != http.StatusOK {
+		t.Fatalf("+0.2 stays inside the 5%% tolerance left by B: %d %s", ok.Code, ok.Body)
+	}
+}

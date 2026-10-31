@@ -42,6 +42,9 @@ func (s *Postgres) Correct(ctx context.Context, id string, fn AdjustFunc) (Recei
 		if current.State != domain.Posted {
 			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s, not POSTED", id, current.State)}
 		}
+		if err := attachOtherReceived(ctx, tx, tenantID, &current); err != nil {
+			return err
+		}
 		adj, err := fn(current)
 		if err != nil {
 			return err
