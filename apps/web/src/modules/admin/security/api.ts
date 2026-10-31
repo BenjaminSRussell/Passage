@@ -38,11 +38,11 @@ async function readProblem(res: Response): Promise<SecurityApiError> {
   const code = typeof body.code === "string" ? body.code : "COM-0500";
   const message =
     typeof body.detail === "string" ? body.detail : typeof body.title === "string" ? body.title : `request failed with status ${res.status}`;
-  const fields = z.record(z.string()).safeParse(body.errors ?? {});
+  const fields = z.record(z.string(), z.string()).safeParse(body.errors ?? {});
   return new SecurityApiError(res.status, code, message, fields.success ? fields.data : {}, typeof body.traceId === "string" ? body.traceId : undefined);
 }
 
-async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T, z.ZodTypeDef, unknown>, fetchImpl: FetchLike): Promise<T> {
+async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T, unknown>, fetchImpl: FetchLike): Promise<T> {
   const res = await fetchImpl(url, init);
   if (!res.ok) throw await readProblem(res);
   return schema.parse(await res.json());

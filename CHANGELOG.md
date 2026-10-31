@@ -8,6 +8,18 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Security
+
+- `apps/web` upgrades `zod` from 3.23.8 to 4.6.7, which fixes the high-severity advisory
+  GHSA-mrhx-c7xc-m3w5 (CVE-2023-54404). Schemas use the zod 4 two-argument `z.record(key, value)`
+  and `z.ZodType<Output, Input>`; `npm audit --omit=dev` reports no zod advisory (#355).
+
+### Changed
+
+- `productcost` (Wave 39) serves `/v1/product-costing/...` instead of `/v1/costing/...`, so it
+  no longer shares the `versions` and `reconciliations` route templates (and their duty rows)
+  with `costing` (Wave 20). The web client calls `/api/v1/product-costing/...` (#342).
+
 ### Removed
 
 - The transitional umbrella service grants kept for the 0.1.0 rolling deploy: `ledger.journal.post`

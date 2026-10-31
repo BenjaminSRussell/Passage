@@ -79,7 +79,7 @@ async function readProblem(res: Response): Promise<FxApiError> {
   }
   const code = typeof body.code === "string" ? body.code : "COM-0500";
   const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
-  const fields = z.record(z.string()).safeParse(body.errors ?? {});
+  const fields = z.record(z.string(), z.string()).safeParse(body.errors ?? {});
   const retryAfter = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
   return new FxApiError(res.status, code, detail, fields.success ? fields.data : {}, Number.isFinite(retryAfter) ? retryAfter : undefined);
 }

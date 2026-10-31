@@ -133,7 +133,7 @@ async function readProblem(res: Response): Promise<LedgerApiError> {
   const code = typeof body.code === "string" ? body.code : "COM-0500";
   const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
   const parsed = z.array(violationSchema).safeParse(body.violations ?? []);
-  const fields = z.record(z.string()).safeParse(body.errors ?? {});
+  const fields = z.record(z.string(), z.string()).safeParse(body.errors ?? {});
   return new LedgerApiError(res.status, code, detail, parsed.success ? parsed.data : [], fields.success ? fields.data : {});
 }
 
@@ -231,7 +231,7 @@ export const MAIN_ACCOUNT = "MAIN_ACCOUNT";
  */
 export const constraintSchema = z.object({
   segment: z.string(),
-  under: z.record(z.string()).optional(),
+  under: z.record(z.string(), z.string()).optional(),
   allowed: z.array(z.string()),
 });
 export type Constraint = z.infer<typeof constraintSchema>;
@@ -395,7 +395,7 @@ export const descriptionTemplateSchema = z.object({
   sourceType: z.string(),
   language: z.string(),
   template: z.string(),
-  fieldBindings: z.record(z.string()),
+  fieldBindings: z.record(z.string(), z.string()),
   updatedAt: z.string(),
 });
 export type DescriptionTemplate = z.infer<typeof descriptionTemplateSchema>;
@@ -477,7 +477,7 @@ export function putJournalName(code: string, input: JournalNameInput, fetchImpl:
 export const batchLineSchema = z.object({
   lineNumber: z.number().int(),
   account: z.string(),
-  dimensions: z.record(z.string()).optional(),
+  dimensions: z.record(z.string(), z.string()).optional(),
   debitCredit: z.enum(["D", "C"]),
   amount: z.string(),
   currency: z.string(),
@@ -655,7 +655,7 @@ export const journalLineSchema = z.object({
   lineNumber: z.number(),
   account: z.string(),
   displayName: z.string(),
-  dimensions: z.record(z.string()).optional(),
+  dimensions: z.record(z.string(), z.string()).optional(),
   debitCredit: z.enum(["D", "C"]),
   amount: z.string(),
   currency: z.string(),
@@ -715,7 +715,7 @@ export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
 export const recurringLineSchema = z.object({
   lineNumber: z.number().int(),
   account: z.string(),
-  dimensions: z.record(z.string()).optional(),
+  dimensions: z.record(z.string(), z.string()).optional(),
   debitCredit: z.enum(["D", "C"]),
   amountKind: z.enum(["fixed", "percent"]),
   amount: z.string(),
@@ -835,7 +835,7 @@ export const openItemSchema = z.object({
   ledgerId: z.string(),
   account: z.string(),
   accountName: z.string(),
-  dimensions: z.record(z.string()),
+  dimensions: z.record(z.string(), z.string()),
   sourceType: z.enum(["gl_line", "residual"]),
   amount: z.string(),
   debitCredit: z.enum(["D", "C"]),
