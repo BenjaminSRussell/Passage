@@ -59,11 +59,18 @@ func (s *Postgres) ConfirmWavePick(ctx context.Context, waveID string, picks []P
 
 func confirmWavePickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, picks []PickInput, pickRest bool) (WavePickResult, error) {
 	result := WavePickResult{WaveID: waveID, Shipments: []WavePickShipment{}}
-	var one int
-	if err := tx.QueryRow(ctx, `select 1 from wave where id = $1`, waveID).Scan(&one); errors.Is(err, pgx.ErrNoRows) {
+	// FOR SHARE: a concurrent close (FOR UPDATE) waits for these picks, and
+	// picks wait for a close in flight and then see the wave CLOSED.
+	var number, status string
+	if err := tx.QueryRow(ctx, `select wave_number, status from wave where id = $1 for share`, waveID).Scan(&number, &status); errors.Is(err, pgx.ErrNoRows) {
 		return result, httpx.NewProblem(http.StatusNotFound, CodeWaveNotFound, "wave not found")
 	} else if err != nil {
 		return result, err
+	}
+	// A CLOSED wave is final; a short-picked remainder is re-picked on its
+	// shipment, not through the closed wave.
+	if status != "OPEN" {
+		return result, httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatus, "wave "+number+" is "+status+"; only an OPEN wave takes picks")
 	}
 	// The wave's lines, grouped by shipment in shipment-number order so that
 	// concurrent wave picks lock shipments in the same order.

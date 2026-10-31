@@ -56,6 +56,16 @@ channels:
     messages:
       waveCreated:
         $ref: "#/components/messages/WaveCreated"
+  waveAssigned:
+    address: passage.fulfillment.wave
+    messages:
+      waveAssigned:
+        $ref: "#/components/messages/WaveAssigned"
+  waveClosed:
+    address: passage.fulfillment.wave
+    messages:
+      waveClosed:
+        $ref: "#/components/messages/WaveClosed"
   asnIssued:
     address: passage.fulfillment.asn
     messages:
@@ -112,6 +122,16 @@ operations:
     channel: { $ref: "#/channels/waveCreated" }
     messages:
       - $ref: "#/channels/waveCreated/messages/waveCreated"
+  publishWaveAssigned:
+    action: send
+    channel: { $ref: "#/channels/waveAssigned" }
+    messages:
+      - $ref: "#/channels/waveAssigned/messages/waveAssigned"
+  publishWaveClosed:
+    action: send
+    channel: { $ref: "#/channels/waveClosed" }
+    messages:
+      - $ref: "#/channels/waveClosed/messages/waveClosed"
   publishASNIssued:
     action: send
     channel: { $ref: "#/channels/asnIssued" }
@@ -345,6 +365,42 @@ components:
             items: { type: string, format: uuid }
           line_count: { type: integer }
           order_count: { type: integer }
+    WaveAssigned:
+      name: dev.passage.fulfillment.wave.assigned.v1
+      summary: >
+        A supervisor gave a pick wave to a picker or handed it to another one
+        (FR-28.13). previous_picker is absent on the first assignment.
+      contentType: application/json
+      payload:
+        type: object
+        required: [wave_id, wave_number, legal_entity_id, warehouse, picker]
+        properties:
+          wave_id: { type: string, format: uuid }
+          wave_number: { type: string, example: "WV-0000001" }
+          legal_entity_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          picker: { type: string }
+          previous_picker: { type: string }
+    WaveClosed:
+      name: dev.passage.fulfillment.wave.closed.v1
+      summary: >
+        A pick wave was closed: every line is picked, or sits on a cancelled
+        shipment. short_lines counts the lines picked below plan.
+      contentType: application/json
+      payload:
+        type: object
+        required: [wave_id, wave_number, legal_entity_id, warehouse, shipment_ids, line_count, short_lines]
+        properties:
+          wave_id: { type: string, format: uuid }
+          wave_number: { type: string, example: "WV-0000001" }
+          legal_entity_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          picker: { type: string, description: Absent when the wave was never assigned. }
+          shipment_ids:
+            type: array
+            items: { type: string, format: uuid }
+          line_count: { type: integer }
+          short_lines: { type: integer }
     ASNIssued:
       name: dev.passage.fulfillment.asn.issued.v1
       summary: >

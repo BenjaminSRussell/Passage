@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { confirmWavePick, describeProblem, getWave, type Problem, type ShortPickReason, type Wave, type WaveLine, type WavePickResult, type WaveShipment } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
+import { AssignWaveCard, CloseWavePanel, PickListCard, WaveStatusBadge } from "./WaveActions";
 import { compareDecimal, dash, DECIMAL, formatDate, formatDateTime, GROUP_LABELS, SHORT_PICK_REASONS, shortId } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
@@ -74,7 +75,8 @@ export function WavePickCard({ wave, onDone }: { wave: Wave; onDone(): void }) {
       </Alert>
     );
   }
-  if (open.length === 0) return null;
+  // A CLOSED wave takes no picks (FUL-0001); its remainders are re-picked on the shipment.
+  if (wave.status !== "OPEN" || open.length === 0) return null;
   return (
     <Card title="Confirm picks for the wave">
       <form className={styles.form} onSubmit={submit} noValidate>
@@ -164,18 +166,23 @@ export function WaveDetailPage() {
         title={`Wave ${wave.waveNumber}`}
         description={`${wave.lineCount} ${wave.lineCount === 1 ? "line" : "lines"} of ${wave.orderCount} ${wave.orderCount === 1 ? "order" : "orders"}, grouped by ${(GROUP_LABELS[wave.groupBy] ?? wave.groupBy).toLowerCase()}.`}
         actions={
-          <Link className={buttonClassName("secondary")} to="/fulfillment/waves">
-            All waves
-          </Link>
+          <span className={`${styles.actions} ${styles.noPrint}`}>
+            <WaveStatusBadge status={wave.status} />
+            <Link className={buttonClassName("secondary")} to="/fulfillment/waves">
+              All waves
+            </Link>
+          </span>
         }
       />
       <Card>
         <dl className={styles.details}>
           {[
             ["Group", wave.groupKey === "UNASSIGNED" ? "Unassigned" : wave.groupKey],
+            ["Picker", wave.picker ?? "Not assigned"],
             ["Warehouse", wave.warehouseId],
             ["Legal entity", wave.legalEntityId],
             ["Created", formatDateTime(wave.createdAt)],
+            ...(wave.closedAt ? [["Closed", formatDateTime(wave.closedAt)]] : []),
           ].map(([term, value]) => (
             <div key={term} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
@@ -184,7 +191,16 @@ export function WaveDetailPage() {
           ))}
         </dl>
       </Card>
-      <WavePickCard wave={wave} onDone={state.reload} />
+      <div className={styles.noPrint}>
+        <AssignWaveCard wave={wave} onDone={state.reload} />
+      </div>
+      <div className={styles.noPrint}>
+        <WavePickCard wave={wave} onDone={state.reload} />
+      </div>
+      <PickListCard wave={wave} />
+      <div className={styles.noPrint}>
+        <CloseWavePanel key={`close-${wave.version}`} wave={wave} onDone={state.reload} />
+      </div>
       <Card title="Shipments">
         <DataTable
           label="Wave shipments"

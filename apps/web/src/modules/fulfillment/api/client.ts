@@ -380,10 +380,15 @@ export interface WaveSummary {
   warehouseId: string;
   groupBy: WaveGroupBy;
   groupKey: string;
-  status: "OPEN";
+  status: "OPEN" | "CLOSED";
   lineCount: number;
   orderCount: number;
   createdAt: string;
+  /** Wave version, sent as If-Match on assign and close. */
+  version: number;
+  picker: string | null;
+  assignedAt: string | null;
+  closedAt: string | null;
 }
 
 /** Reason codes of a short pick. */
@@ -592,8 +597,18 @@ export function createWaves(input: WorkbenchInput, key: string): Promise<WavesRe
   return command<WavesResult<Wave>>("/waves", input, key);
 }
 
-export function listWaves(filter: { warehouseId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<WaveSummary[]> {
-  return items<WaveSummary>(`/waves${query(filter)}`, signal);
+export function listWaves(filter: { warehouseId?: string; status?: "OPEN" | "CLOSED" | ""; picker?: string; unassigned?: boolean; limit?: number } = {}, signal?: AbortSignal): Promise<WaveSummary[]> {
+  return items<WaveSummary>(`/waves${query({ ...filter, unassigned: filter.unassigned ? "true" : undefined })}`, signal);
+}
+
+/** Gives an OPEN wave to a picker, or hands it to another one (FR-28.13). */
+export function assignWave(id: string, version: number, picker: string, key: string): Promise<Wave> {
+  return command<Wave>(`/waves/${encodeURIComponent(id)}:assign`, { picker }, key, version);
+}
+
+/** Closes a wave once every line is picked or on a cancelled shipment (FUL-0055 otherwise). */
+export function closeWave(id: string, version: number, key: string): Promise<Wave> {
+  return command<Wave>(`/waves/${encodeURIComponent(id)}:close`, undefined, key, version);
 }
 
 export function getWave(id: string, signal?: AbortSignal): Promise<Wave> {

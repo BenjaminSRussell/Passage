@@ -168,6 +168,29 @@ location and quantity, the covered quantity) and a "Batch / serial" column on th
 lines; the release form has a "Batch or serial tracked" checkbox per line. No new duty is introduced (`WarehousePick`), so there is nothing new for #313.
 The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
+Slice 11 adds wave assignment and close (FR-28.13, section 5.28.6). Migration 0012
+gives `wave` a `picker`, `assigned_at`, `closed_at`, a `version` and the status
+CLOSED, and grants `passage_app` UPDATE on it (no new table).
+`POST /waves/{id}:assign` (`WarehouseRelease`, `If-Match` with the wave version,
+`Idempotency-Key`, body `picker`) gives an OPEN wave to a picker or hands it to
+another one; a CLOSED wave, or the picker it already has, is refused.
+`POST /waves/{id}:close` (same headers) closes an OPEN wave once every line of a
+live shipment is pick-confirmed, else FUL-0055 with the count left; lines on
+cancelled shipments do not count. `dev.passage.fulfillment.wave.assigned.v1`
+(with `previous_picker`) and `dev.passage.fulfillment.wave.closed.v1` (with
+`short_lines`) are written through the outbox in the same transaction. The waves
+list filters by `status`, `picker` and `unassigned`, and `GET /waves` and
+`/waves/{id}` return `version`, `picker`, `assignedAt` and `closedAt`. Store tests
+against Postgres cover assign, replay, stale version, same picker, tenant and
+legal-entity scope, the events, the filters, close refusals with open lines and a
+cancelled shipment, close with a short line, replay, and that a CLOSED wave is final
+(no assign, close or wave pick);
+API tests cover the validation, headers and duty. The wave detail has an "Assign the
+wave" card, a "Close wave" button with confirmation and a printable "Pick list" in
+zone order, and the waves list a status and picker filter. No new duty is introduced
+(`WarehouseRelease`), so there is nothing new for #313. The OpenAPI and AsyncAPI have
+zero FAIL lines on the doc gates.
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -189,7 +212,7 @@ The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | D1 | Order release rules (horizon, ATP, hold, one shipment per order × warehouse × date) | built (domain + `POST /releases:run` + release board screen) | A line already on a shipment that is not cancelled is skipped as `already_released`, and runs per warehouse are serialised. Release priority ordering and consolidation (BR-28.8, `fulfillment.consolidation`) are not built. The caller supplies the confirmed lines; reading them from sales (wave 27) is a later slice. |
-| D1 | Wave and batch picking, wave creation, wave pick-list print | partial | Built: waves from the picking workbench (see D6), the waves list and detail, shipments moved to PICKING, `wave.created`. Not built: batch picking, the pick list document (`WV-` PDF/ZPL), picker assignment, wave close (waves stay OPEN), and pick confirmation per wave (`/waves/{id}:confirm-pick`); picks are confirmed per shipment. |
+| D1 | Wave and batch picking, wave creation, wave pick-list print | partial | Built: waves from the picking workbench (see D6), the waves list and detail, shipments moved to PICKING, `wave.created`, pick confirmation per wave (slice 9), picker assignment and reassignment, wave close and the printable pick list (slice 11). Not built: batch picking (one picker walking several orders' lines as one task), the pick list as a stored document (`WV-` PDF/ZPL, wave 5 docgen), bin-sequenced paths (the list orders by zone and product, because lines carry no bin location yet, wave 31), and automatic close of a wave when its last line is picked (close is a manual command). |
 | D1 | Pick confirmation with batch/serial/location, `short_pick_action` | partial | Quantity confirmation is built; batch, serial and location capture per line with the FUL-0006 check at post is built (slice 10). Not built: the `short_pick_action` setting, capture inside the pick call itself and per wave (capture is its own command after the pick), batch and serial existence or on-hand checks against inventory (wave 16), and expiry or batch-status rules (handoff to inventory, wave 16). |
 | D1 | `trackingRequired` source | handoff to product (wave 8) and sales (wave 27) | The release caller supplies `trackingRequired` per line (the web release form has a checkbox for it); this service does not read the product's tracking dimension group, so a caller that omits it releases the line as untracked. |
 | D1 | Serial freed by a customer return | handoff to sales returns (wave 30) and inventory (wave 16) | A serial that shipped on a posted slip stays unique for its product in `pick_tracking`, so the same unit cannot be picked again. A return receipt must free it (or inventory must own serial status); until then a returned and resold serial is refused with FUL-0036. |
@@ -293,7 +316,10 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Migration from AX/SAP | later slice of PSG-28 | |
 | Reporting: carrier exceptions and cost | later slice of PSG-28 | Needs carrier-gateway. Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, RTP balances and aging, the SSCC register and short picks and backorders are built. |
 | Short picks report: the "reason" column (section 5.28.14) | built (slice 9) | Reason codes (OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER) on pick confirmation, single shipment and wave, in the API and the web forms, and in the report. The code list is fixed in the service (a check constraint); a tenant-maintained reason list is not built. |
-| Wave / pick list screen: picker, reassign and print (section 5.28.6) | later slice of PSG-28 / wave 31 | Waves carry no picker yet, so there is nothing to reassign or show in a picker column; printing the pick list is not built. |
+| Wave screen: picker, reassign and print (section 5.28.6) | built (slice 11) | The wave detail assigns and reassigns the picker (`:assign`, version checked, `wave.assigned` carries the previous picker), closes the wave (`:close`, FUL-0055 while a line is left) and prints the pick list; the waves list shows status and picker and filters by both (`-` lists waves nobody has). |
+| Picker is free text (a user name or badge up to 64 characters), not a reference to a user or worker | deviation | The user directory is outside this service. Nothing checks that the picker exists or holds `WarehousePick`; the "my waves" view is the picker filter. A picker has no capacity limit and a wave can be reassigned any number of times while OPEN. |
+| Closing a wave leaves its shipments alone | deviation | The wave is a pick-work container; shipments keep their own lifecycle (PICKED, PACKED). A short-picked line stays a backorder on its shipment and is re-picked through the shipment's own pick; a CLOSED wave refuses wave picks (FUL-0001), and a wave pick takes the wave row FOR SHARE so it cannot slip in beside a close. Nothing reopens a CLOSED wave. |
+| Assign and close need `WarehouseRelease`, not `WarehousePick` | deviation | Section 5.28.6 lists "reassign" on the wave / pick list screen, whose duty is `WarehousePick`. Handing work to a picker and closing the wave are supervisor actions here, so a picker cannot reassign or close their own wave; picks stay on `WarehousePick`. Both duties were already enforced by this service and are already on the #313 seeding list, so nothing is new for #313. |
 | Short picks report: "period" filters the line's first short pick | deviation | A line keeps the time of its first short pick, so a later short re-pick of the same line does not move it to another period. Lines short-picked before migration 0005 take their shipment's last change time. |
 | Returnable aging is as of today (UTC) only | deviation | The balance is the current one, so aging it as of a past date would mix in containers shipped later. The nightly job (not built) would run it daily. |
 | Returnable aging is computed on read and returns at most `limit` balances (default 100, max 500) | deviation | `count` and `chargeDueCount` cover every outstanding balance; the screen asks for 500 and says when the list is cut. Paging is not built. |

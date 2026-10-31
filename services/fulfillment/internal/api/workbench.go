@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -42,6 +43,8 @@ func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves", a.listWaves)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves/{id}", a.getWave)
 	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/waves/{id}:confirm-pick", a.confirmWavePick)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves/{id}:assign", a.assignWave)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves/{id}:close", a.closeWave)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/tracking", a.listTracking)
 	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}/tracking", a.recordTracking)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
@@ -283,6 +286,25 @@ func (a *API) listWaves(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "warehouseId", "must be a UUID")
 		return
 	}
+	q := r.URL.Query()
+	if st := q.Get("status"); st != "" {
+		if st != "OPEN" && st != "CLOSED" {
+			fail(w, r, "status", "must be OPEN or CLOSED")
+			return
+		}
+		f.Status = st
+	}
+	if f.Picker = strings.TrimSpace(q.Get("picker")); utf8.RuneCountInString(f.Picker) > store.MaxPickerLen {
+		fail(w, r, "picker", "must be at most 64 characters")
+		return
+	}
+	if q.Get("unassigned") == "true" {
+		if f.Picker != "" {
+			fail(w, r, "unassigned", "cannot be combined with picker")
+			return
+		}
+		f.Unassigned = true
+	}
 	limit, ok := limitParam(w, r)
 	if !ok {
 		return
@@ -307,6 +329,7 @@ func (a *API) getWave(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	etag(w, wave.Version)
 	httpx.JSON(w, http.StatusOK, wave)
 }
 
@@ -454,4 +477,81 @@ func (a *API) confirmWavePick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
+}
+
+// waveCommand validates the wave id and the If-Match version of a wave command.
+func waveCommand(w http.ResponseWriter, r *http.Request) (string, int, bool) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeWaveNotFound, "wave not found"))
+		return "", 0, false
+	}
+	raw := strings.Trim(strings.TrimSpace(r.Header.Get("If-Match")), `"`)
+	if raw == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, CodePreconditionIf, "If-Match with the wave version is required"))
+		return "", 0, false
+	}
+	version, err := strconv.Atoi(raw)
+	if err != nil || version < 1 {
+		fail(w, r, "If-Match", "must be the wave version as an integer")
+		return "", 0, false
+	}
+	return id, version, true
+}
+
+type assignWaveRequest struct {
+	Picker string `json:"picker"`
+}
+
+// assignWave answers POST /v1/fulfillment/waves/{id}:assign: the wave goes to
+// a picker, or to another one while it is OPEN.
+func (a *API) assignWave(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := waveCommand(w, r)
+	if !ok {
+		return
+	}
+	var req assignWaveRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	req.Picker = strings.TrimSpace(req.Picker)
+	if req.Picker == "" || utf8.RuneCountInString(req.Picker) > store.MaxPickerLen {
+		fail(w, r, "picker", "is required and must be at most 64 characters")
+		return
+	}
+	for _, c := range req.Picker {
+		if c < ' ' || c == 0x7f {
+			fail(w, r, "picker", "must not contain control characters")
+			return
+		}
+	}
+	wave, err := a.store.AssignWave(r.Context(), id, version, req.Picker, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, wave.Version)
+	httpx.JSON(w, http.StatusOK, wave)
+}
+
+// closeWave answers POST /v1/fulfillment/waves/{id}:close once every line is picked.
+func (a *API) closeWave(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := waveCommand(w, r)
+	if !ok {
+		return
+	}
+	_, idem, err := command(r, nil)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	wave, err := a.store.CloseWave(r.Context(), id, version, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, wave.Version)
+	httpx.JSON(w, http.StatusOK, wave)
 }

@@ -37,6 +37,10 @@ const wave = (lines: Wave["lines"]): Wave => ({
   lineCount: 2,
   orderCount: 1,
   createdAt: "2026-10-27T08:00:00Z",
+  version: 1,
+  picker: null,
+  assignedAt: null,
+  closedAt: null,
   shipments: [{ id: SH, shipmentNumber: "SH-0000001", orderId: ID, customerId: ID, status: "PICKING", carrierCode: "UPS", plannedShipDate: "2026-10-27T00:00:00Z", lineCount: 2 }],
   lines,
 });

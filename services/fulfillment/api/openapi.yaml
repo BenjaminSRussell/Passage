@@ -3,7 +3,7 @@ info:
   title: Passage Fulfillment API
   version: 1.0.0
   description: >
-    Wave 28 slices 1 to 6. Release, pick, pack and packing-slip posting;
+    Wave 28 slices 1 to 11 (the wave picker, assign and close are slice 11). Release, pick, pack and packing-slip posting;
     container types, packing rules and auto-pack; packaging materials, country
     fee rates, the statistical packaging fee and the packaging report;
     returnable transport packaging balances; partial shipments, shipment
@@ -29,7 +29,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Shipment version from the ETag of the last read, e.g. "3".
+      description: Version from the ETag of the last read (shipment, or wave on the wave commands), e.g. "3".
       schema: { type: string }
     ShipmentId:
       name: id
@@ -294,7 +294,7 @@ components:
           items: { $ref: "#/components/schemas/WaveShipment" }
     WaveSummary:
       type: object
-      required: [id, waveNumber, legalEntityId, warehouseId, groupBy, groupKey, status, lineCount, orderCount, createdAt]
+      required: [id, waveNumber, legalEntityId, warehouseId, groupBy, groupKey, status, lineCount, orderCount, createdAt, version]
       properties:
         id: { type: string, format: uuid }
         waveNumber: { type: string, example: "WV-0000001" }
@@ -302,10 +302,14 @@ components:
         warehouseId: { type: string, format: uuid }
         groupBy: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
         groupKey: { type: string }
-        status: { type: string, enum: [OPEN] }
+        status: { type: string, enum: [OPEN, CLOSED] }
         lineCount: { type: integer }
         orderCount: { type: integer }
         createdAt: { type: string, format: date-time }
+        version: { type: integer, description: Wave version for If-Match on assign and close; also the ETag. }
+        picker: { type: [string, "null"], description: The picker the wave is assigned to; null until assigned. }
+        assignedAt: { type: [string, "null"], format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
     Wave:
       allOf:
         - { $ref: "#/components/schemas/WaveSummary" }
@@ -1376,9 +1380,13 @@ paths:
     get:
       operationId: listWaves
       summary: Pick waves, newest first
+      description: Optionally filtered by warehouse, status, picker, or only the waves nobody is assigned to.
       x-passage-duty: WarehouseView
       parameters:
         - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, CLOSED] } }
+        - { name: picker, in: query, description: Waves assigned to this picker., schema: { type: string, maxLength: 64 } }
+        - { name: unassigned, in: query, description: "true lists only waves with no picker; not combinable with picker.", schema: { type: boolean } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
         "200":
@@ -1439,7 +1447,7 @@ paths:
         - { $ref: "#/components/parameters/WaveId" }
       responses:
         "200":
-          description: Wave
+          description: Wave; the ETag carries the wave version for If-Match on assign and close
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Wave" }
@@ -1504,7 +1512,67 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0052 wave or FUL-0041 line not in the wave", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave CLOSED or shipment status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/waves/{id}:assign:
+    post:
+      operationId: assignWave
+      summary: Give a wave to a picker or hand it to another one (FR-28.13)
+      description: >
+        Sets the picker of an OPEN wave; assigning again reassigns it. Needs the wave version in
+        If-Match. Writes wave.assigned with the previous picker. A CLOSED wave, or the picker the
+        wave already has, is refused.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WaveId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [picker]
+              additionalProperties: false
+              properties:
+                picker: { type: string, minLength: 1, maxLength: 64, description: The picker's user name or badge; no control characters. }
+      responses:
+        "200":
+          description: The wave with its new picker; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wave" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0052 wave not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave is CLOSED, FUL-0050 already assigned to that picker, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/waves/{id}:close:
+    post:
+      operationId: closeWave
+      summary: Close a wave once every line is picked (FR-28.13)
+      description: >
+        Closes an OPEN wave when each of its lines is pick-confirmed or sits on a cancelled
+        shipment; a line still to pick answers FUL-0055. Needs the wave version in If-Match.
+        Writes wave.closed with the number of lines picked short.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WaveId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: The CLOSED wave; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wave" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0052 wave not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave already CLOSED, FUL-0055 a line is still to pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/tracking:
     get:
       operationId: listTracking

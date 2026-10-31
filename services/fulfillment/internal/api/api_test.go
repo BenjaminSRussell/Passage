@@ -31,20 +31,23 @@ type fakeStore struct {
 	notFound  bool
 	stalePick bool
 
-	warehouse      string
-	storeSkips     []domain.Skip
-	shipmentFilter store.ShipmentFilter
-	slipFilter     store.PackingSlipFilter
-	picks          []store.PickInput
-	lastPost       store.PostInput
-	packing        packingCalls
-	workbench      workbenchCalls
-	dniFilter      store.DNIFilter
-	dniRows        []domain.DNIRow
-	ssccFilter     store.SSCCFilter
-	ssccRows       []store.SSCCRow
-	ssccCalls      int
-	reports        reportCalls
+	warehouse       string
+	storeSkips      []domain.Skip
+	shipmentFilter  store.ShipmentFilter
+	slipFilter      store.PackingSlipFilter
+	picks           []store.PickInput
+	assigned        string
+	assignedVersion int
+	closedVersion   int
+	lastPost        store.PostInput
+	packing         packingCalls
+	workbench       workbenchCalls
+	dniFilter       store.DNIFilter
+	dniRows         []domain.DNIRow
+	ssccFilter      store.SSCCFilter
+	ssccRows        []store.SSCCRow
+	ssccCalls       int
+	reports         reportCalls
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

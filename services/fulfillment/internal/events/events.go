@@ -18,6 +18,8 @@ var (
 	ShipmentClosed       = events.Type(Context, "shipment", "closed", 1)
 	ContainerUnpacked    = events.Type(Context, "container", "unpacked", 1)
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
+	WaveAssigned         = events.Type(Context, "wave", "assigned", 1)
+	WaveClosed           = events.Type(Context, "wave", "closed", 1)
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
@@ -27,7 +29,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, ASNIssued, TrackingUpdated, PickTracked,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked,
 	}
 }
 
@@ -85,6 +87,31 @@ type WaveCreatedData struct {
 	ShipmentIDs   []string `json:"shipment_ids"`
 	LineCount     int      `json:"line_count"`
 	OrderCount    int      `json:"order_count"`
+}
+
+// WaveAssignedData is published when a wave is given to a picker or handed to
+// another one (FR-28.13). PreviousPicker is empty for the first assignment.
+type WaveAssignedData struct {
+	WaveID         string `json:"wave_id"`
+	WaveNumber     string `json:"wave_number"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	WarehouseID    string `json:"warehouse"`
+	Picker         string `json:"picker"`
+	PreviousPicker string `json:"previous_picker,omitempty"`
+}
+
+// WaveClosedData is published when every line of a wave is picked or on a
+// cancelled shipment and the wave is closed. ShortLines counts the lines picked
+// below plan (their remainder is a backorder).
+type WaveClosedData struct {
+	WaveID        string   `json:"wave_id"`
+	WaveNumber    string   `json:"wave_number"`
+	LegalEntityID string   `json:"legal_entity_id"`
+	WarehouseID   string   `json:"warehouse"`
+	Picker        string   `json:"picker,omitempty"`
+	ShipmentIDs   []string `json:"shipment_ids"`
+	LineCount     int      `json:"line_count"`
+	ShortLines    int      `json:"short_lines"`
 }
 
 // ASNLine is one shipment line quantity inside an ASN container.

@@ -46,6 +46,10 @@ const summary: WaveSummary = {
   lineCount: 20,
   orderCount: 8,
   createdAt: "2026-10-27T08:00:00Z",
+  version: 1,
+  picker: null,
+  assignedAt: null,
+  closedAt: null,
 };
 
 const wave: Wave = { ...summary, shipments: plans[0].shipments.map((s) => ({ ...s, status: "PICKING" })) };
