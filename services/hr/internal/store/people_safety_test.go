@@ -282,11 +282,11 @@ func scenarioOffboarding(t *testing.T, s *Postgres, ctx context.Context, tag str
 		t.Fatal(err)
 	}
 	eff := day(time.March, 15)
-	list, created, err := s.StartChecklist(ctx, w.ID, tpl.ID, eff)
+	list, created, err := s.StartChecklist(ctx, w.ID, tpl.ID, eff, nil)
 	if err != nil || !created || len(list.Tasks) != 2 {
 		t.Fatalf("start = %+v %v", list, err)
 	}
-	if again, created, err := s.StartChecklist(ctx, w.ID, tpl.ID, eff); err != nil || created || again.ID != list.ID {
+	if again, created, err := s.StartChecklist(ctx, w.ID, tpl.ID, eff, nil); err != nil || created || again.ID != list.ID {
 		t.Fatalf("starting twice must return the stored checklist: %+v %v", again, err)
 	}
 	var returnTask, access WorkerTask
@@ -379,7 +379,7 @@ func scenarioOnboarding(t *testing.T, s *Postgres, ctx context.Context, tag stri
 	if _, _, err := s.CreateChecklistTemplate(ctx, ChecklistTemplate{Code: "ON-" + tag, Kind: "ONBOARDING", Name: "Again", Tasks: tpl.Tasks}, ""); err == nil {
 		t.Error("duplicate template code accepted")
 	}
-	list, _, err := s.StartChecklist(ctx, hire.ID, tpl.ID, day(time.November, 2))
+	list, _, err := s.StartChecklist(ctx, hire.ID, tpl.ID, day(time.November, 2), nil)
 	if err != nil || len(list.Tasks) != 3 {
 		t.Fatalf("start = %+v %v", list, err)
 	}
@@ -401,7 +401,7 @@ func scenarioOnboarding(t *testing.T, s *Postgres, ctx context.Context, tag stri
 	if err != nil || len(owned) != 1 || owned[0].TaskCode != "WELCOME" {
 		t.Errorf("manager tasks = %+v %v", owned, err)
 	}
-	if _, _, err := s.StartChecklist(ctx, hire.ID, ids.New(), day(time.November, 2)); err == nil {
+	if _, _, err := s.StartChecklist(ctx, hire.ID, ids.New(), day(time.November, 2), nil); err == nil {
 		t.Error("unknown template accepted")
 	}
 	if tpls, err := s.ListChecklistTemplates(ctx, "ONBOARDING"); err != nil || len(tpls) < 1 {
@@ -421,7 +421,7 @@ func TestChecklistAndLoanEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := s.StartChecklist(ctx, w.ID, tpl.ID, day(time.March, 1))
+	list, _, err := s.StartChecklist(ctx, w.ID, tpl.ID, day(time.March, 1), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

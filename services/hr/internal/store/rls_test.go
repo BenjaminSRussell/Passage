@@ -115,7 +115,7 @@ func TestRowLevelSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := s.StartChecklist(one, scopedWorker.ID, tpl.ID, day(time.March, 1))
+	list, _, err := s.StartChecklist(one, scopedWorker.ID, tpl.ID, day(time.March, 1), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +137,48 @@ func TestRowLevelSecurity(t *testing.T) {
 	}
 	if _, _, err := s.IssueLoanedItem(foreign, LoanedItem{WorkerID: scopedWorker.ID, LoanType: "KEYS", ItemDescription: "k", IssuedOn: "2026-03-01"}, ""); err == nil {
 		t.Error("a caller scoped to another entity lent an item to a worker outside its scope")
+	}
+
+	// A worker employed in two entities: a loan tagged entity B must still block
+	// offboarding for a user scoped to entity A (AC-42.15).
+	twoLE := mustWorker(t, s, one, "RlsTwoLE")
+	mustEmployment(t, s, one, twoLE.ID, le, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, one, twoLE.ID, otherLE, "CONCURRENT", day(time.January, 1))
+	laptop := LoanedItem{WorkerID: twoLE.ID, LoanType: "LAPTOP", ItemDescription: "laptop", IssuedOn: "2026-03-01"}
+	_, _, err = s.IssueLoanedItem(one, laptop, "")
+	requireCode(t, err, CodeEntityRequired)
+	laptop.LegalEntityID = strp(ids.New())
+	_, _, err = s.IssueLoanedItem(one, laptop, "")
+	requireCode(t, err, CodeEntityMismatch)
+	laptop.LegalEntityID = &otherLE
+	loanB, _, err := s.IssueLoanedItem(one, laptop, "")
+	if err != nil || loanB.LegalEntityID == nil || *loanB.LegalEntityID != otherLE {
+		t.Fatalf("loan tagged B = %+v %v", loanB, err)
+	}
+	offTpl, _, err := s.CreateChecklistTemplate(one, ChecklistTemplate{Code: "RLS-OFF", Kind: "OFFBOARDING", Name: "n", Tasks: []TemplateTask{{Code: "T", Title: "t", OwnerRole: "WORKER"}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, _, err := s.StartChecklist(one, twoLE.ID, offTpl.ID, day(time.March, 5), &le)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopedA := scoped(testkit.TenantID(1), le)
+	if n := count(scopedA, "hr_loaned_item"); n != 1 {
+		t.Fatalf("scope A sees %d loans, want only the scopedWorker one", n)
+	}
+	for _, task := range off.Tasks {
+		if task.TaskCode == domain.ReturnLoanedItemsCode {
+			_, _, err = s.FinishTask(scopedA, task.ID, "DONE", nil)
+			requireCode(t, err, domain.CodeLoanedItemsOut)
+		} else if _, _, err := s.FinishTask(scopedA, task.ID, "DONE", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, err = s.CompleteChecklist(scopedA, off.ID)
+	requireCode(t, err, CodeOpenTasks)
+	if _, _, err := s.CloseLoanedItem(one, loanB.ID, "RETURNED", "2026-03-06", nil); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.GetIncident(scoped(testkit.TenantID(2), ""), rlsIncident.ID); err == nil {
 		t.Error("tenant 2 read tenant 1's incident")
@@ -172,12 +214,12 @@ func TestRowLevelSecurity(t *testing.T) {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}
 	}
-	if n := count(one, "employment"); n != 6 {
-		t.Fatalf("tenant 1 with all entities sees %d employments, want 6", n)
+	if n := count(one, "employment"); n != 8 {
+		t.Fatalf("tenant 1 with all entities sees %d employments, want 8", n)
 	}
 	inEntity := scoped(testkit.TenantID(1), le)
-	if n := count(inEntity, "employment"); n != 3 {
-		t.Errorf("scope %s sees %d employments, want 3", le, n)
+	if n := count(inEntity, "employment"); n != 4 {
+		t.Errorf("scope %s sees %d employments, want 4", le, n)
 	}
 	if n := count(scoped(testkit.TenantID(1), otherLE), "hr_position"); n != 0 {
 		t.Errorf("scope %s sees %d positions of another entity", otherLE, n)

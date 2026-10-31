@@ -4473,6 +4473,7 @@ components:
         issuedOn: {type: string, format: date}
         dueOn: {type: string, format: date}
         conditionOut: {type: string}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker is employed in several legal entities on issuedOn}
     LoanedItemClose:
       type: object
       required: [status, closedOn]
@@ -4546,6 +4547,7 @@ components:
       properties:
         templateId: {type: string, format: uuid}
         effectiveDate: {type: string, format: date}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker is employed in several legal entities on effectiveDate}
     WorkerTask:
       type: object
       required: [id, checklistId, workerId, taskCode, title, ownerRole, dueOn, status]

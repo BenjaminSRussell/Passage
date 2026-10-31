@@ -235,7 +235,7 @@ func (s *Postgres) ListChecklistTemplates(ctx context.Context, kind string) ([]C
 // worker; HR_PARTNER and IT need the department and role mappings and stay
 // unassigned). An OFFBOARDING checklist gets the RETURN_LOANED_ITEMS task. Starting
 // the same template for the same date again returns the stored checklist.
-func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID string, effective time.Time) (Checklist, bool, error) {
+func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID string, effective time.Time, legalEntityID *string) (Checklist, bool, error) {
 	p := principal(ctx)
 	var out Checklist
 	inserted := false
@@ -273,7 +273,7 @@ func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID stri
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		entity, err := workerEntity(ctx, tx, p.TenantID, workerID)
+		entity, err := workerEntity(ctx, tx, p.TenantID, workerID, effective.Format("2006-01-02"), legalEntityID)
 		if err != nil {
 			return err
 		}

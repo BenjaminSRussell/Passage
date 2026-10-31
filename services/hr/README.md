@@ -479,6 +479,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-INC-CORRECTION-DUTY` | 403 | A correction needs HcmIncidentAdmin |
 | `HCM-INC-SELF-CORRECT` | 403 | The reporter or closer tried to correct their own incident |
 | `HCM-INC-ENTITY` | 422 | The worker had no employment in that legal entity on the incident date |
+| `HCM-ENTITY-REQUIRED` / `HCM-ENTITY-MISMATCH` | 422 | A loan or checklist for a worker employed in several entities needs a valid `legalEntityId` |
 | `HCM-QST-NOT-CLOSED` | 409 | Anonymous results are released after the schedule closes |
 | `HCM-INC-CORRECTED` | 409 | The incident already has a correction |
 | `HCM-LOAN-001` | 422 | Items are still out for the worker (task or checklist) |

@@ -36,17 +36,18 @@ type LoanedItem struct {
 	ClosedOn        *string   `json:"closedOn,omitempty"`
 	ConditionOut    *string   `json:"conditionOut,omitempty"`
 	ConditionIn     *string   `json:"conditionIn,omitempty"`
+	LegalEntityID   *string   `json:"legalEntityId,omitempty"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
 const loanColumns = `id::text, worker_id::text, loan_type, item_description, asset_id::text, serial, to_char(issued_on, 'YYYY-MM-DD'),
-	to_char(due_on, 'YYYY-MM-DD'), to_char(closed_on, 'YYYY-MM-DD'), condition_out, condition_in, status, created_at`
+	to_char(due_on, 'YYYY-MM-DD'), to_char(closed_on, 'YYYY-MM-DD'), condition_out, condition_in, legal_entity_id::text, status, created_at`
 
 func scanLoan(row pgx.Row) (LoanedItem, error) {
 	var l LoanedItem
 	err := row.Scan(&l.ID, &l.WorkerID, &l.LoanType, &l.ItemDescription, &l.AssetID, &l.Serial, &l.IssuedOn, &l.DueOn, &l.ClosedOn,
-		&l.ConditionOut, &l.ConditionIn, &l.Status, &l.CreatedAt)
+		&l.ConditionOut, &l.ConditionIn, &l.LegalEntityID, &l.Status, &l.CreatedAt)
 	l.CreatedAt = utc(l.CreatedAt)
 	return l, err
 }
@@ -84,7 +85,7 @@ func (s *Postgres) IssueLoanedItem(ctx context.Context, in LoanedItem, idempoten
 		if !exists {
 			return problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 		}
-		entity, err := workerEntity(ctx, tx, p.TenantID, in.WorkerID)
+		entity, err := workerEntity(ctx, tx, p.TenantID, in.WorkerID, in.IssuedOn, in.LegalEntityID)
 		if err != nil {
 			return err
 		}
@@ -192,20 +193,74 @@ func (s *Postgres) listLoans(ctx context.Context, where, arg string, workerExist
 
 const rlsViolation = "42501"
 
-// workerEntity is the legal entity a worker's loan, checklist or answer
-// belongs to: that of their latest employment the caller can see. A worker with
-// none yields nil, which only an all-entity caller can write or read.
-func workerEntity(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (*string, error) {
-	var le string
-	err := tx.QueryRow(ctx, `select legal_entity_id::text from employment where tenant_id = $1 and worker_id = $2 order by valid_from desc, id limit 1`, tenantID, workerID).Scan(&le)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+const (
+	CodeEntityRequired = "HCM-ENTITY-REQUIRED"
+	CodeEntityMismatch = "HCM-ENTITY-MISMATCH"
+)
+
+func entityList(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
-	return &le, err
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var le string
+		if err := rows.Scan(&le); err != nil {
+			return nil, err
+		}
+		out = append(out, le)
+	}
+	return out, rows.Err()
+}
+
+// workerEntity is the legal entity a worker's loan, checklist or answer
+// belongs to: the entity of the employment valid on the date. When several are
+// valid the caller must name one of them. With none valid on the date it falls
+// back to the latest employment the caller can see; a worker with none yields
+// nil, which only an all-entity caller can write or read.
+func workerEntity(ctx context.Context, tx pgx.Tx, tenantID, workerID, on string, requested *string) (*string, error) {
+	valid, err := entityList(ctx, tx, `select distinct legal_entity_id::text from employment where tenant_id = $1 and worker_id = $2 and validity @> $3::date::timestamptz`, tenantID, workerID, on)
+	if err != nil {
+		return nil, err
+	}
+	pick := func(list []string) (*string, error) {
+		for _, le := range list {
+			if requested != nil && le == *requested {
+				return &le, nil
+			}
+		}
+		return nil, problem(http.StatusUnprocessableEntity, CodeEntityMismatch, "the worker has no employment in that legal entity on that date")
+	}
+	switch {
+	case len(valid) > 1:
+		if requested == nil {
+			return nil, problem(http.StatusUnprocessableEntity, CodeEntityRequired, "the worker is employed in several legal entities on that date; pass legalEntityId")
+		}
+		return pick(valid)
+	case len(valid) == 1:
+		if requested != nil {
+			return pick(valid)
+		}
+		return &valid[0], nil
+	}
+	if requested != nil {
+		any, err := entityList(ctx, tx, `select distinct legal_entity_id::text from employment where tenant_id = $1 and worker_id = $2`, tenantID, workerID)
+		if err != nil {
+			return nil, err
+		}
+		return pick(any)
+	}
+	latest, err := entityList(ctx, tx, `select legal_entity_id::text from employment where tenant_id = $1 and worker_id = $2 order by valid_from desc, id limit 1`, tenantID, workerID)
+	if err != nil || len(latest) == 0 {
+		return nil, err
+	}
+	return &latest[0], nil
 }
 
 func outstandingLoans(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (int, error) {
 	var n int
-	err := tx.QueryRow(ctx, `select count(*)::int from hr_loaned_item where tenant_id = $1 and worker_id = $2 and status = 'OUT'`, tenantID, workerID).Scan(&n)
+	err := tx.QueryRow(ctx, `select hr_outstanding_loan_count($1, $2)`, tenantID, workerID).Scan(&n)
 	return n, err
 }

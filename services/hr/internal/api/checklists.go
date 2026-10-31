@@ -26,6 +26,7 @@ type loanRequest struct {
 	LoanType        string  `json:"loanType"`
 	ItemDescription string  `json:"itemDescription"`
 	AssetID         *string `json:"assetId"`
+	LegalEntityID   *string `json:"legalEntityId"`
 	Serial          *string `json:"serial"`
 	IssuedOn        string  `json:"issuedOn"`
 	DueOn           *string `json:"dueOn"`
@@ -55,8 +56,9 @@ type templateRequest struct {
 }
 
 type startChecklistRequest struct {
-	TemplateID    string `json:"templateId"`
-	EffectiveDate string `json:"effectiveDate"`
+	TemplateID    string  `json:"templateId"`
+	EffectiveDate string  `json:"effectiveDate"`
+	LegalEntityID *string `json:"legalEntityId"`
 }
 
 type finishTaskRequest struct {
@@ -91,7 +93,10 @@ func validateLoan(workerID string, req loanRequest) (store.LoanedItem, map[strin
 	if _, ok := optionalDate(req.DueOn); !ok {
 		fields["dueOn"] = "must be a YYYY-MM-DD date"
 	}
-	in := store.LoanedItem{WorkerID: workerID, LoanType: req.LoanType, ItemDescription: req.ItemDescription, AssetID: req.AssetID, IssuedOn: req.IssuedOn, DueOn: req.DueOn}
+	if req.LegalEntityID != nil && !ids.Valid(*req.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	in := store.LoanedItem{LegalEntityID: req.LegalEntityID, WorkerID: workerID, LoanType: req.LoanType, ItemDescription: req.ItemDescription, AssetID: req.AssetID, IssuedOn: req.IssuedOn, DueOn: req.DueOn}
 	in.Serial = optionalText("serial", req.Serial, 80, fields)
 	in.ConditionOut = optionalText("conditionOut", req.ConditionOut, 200, fields)
 	return in, fields
@@ -285,6 +290,9 @@ func (a *API) startChecklist(w http.ResponseWriter, r *http.Request, workerID st
 	if !ids.Valid(req.TemplateID) {
 		fields["templateId"] = "must be a UUID"
 	}
+	if req.LegalEntityID != nil && !ids.Valid(*req.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
 	effective, ok := parseDate(req.EffectiveDate)
 	if !ok {
 		fields["effectiveDate"] = "must be a YYYY-MM-DD date"
@@ -293,7 +301,7 @@ func (a *API) startChecklist(w http.ResponseWriter, r *http.Request, workerID st
 		validationFailed(w, r, fields)
 		return
 	}
-	out, inserted, err := a.store.StartChecklist(r.Context(), workerID, req.TemplateID, effective)
+	out, inserted, err := a.store.StartChecklist(r.Context(), workerID, req.TemplateID, effective, req.LegalEntityID)
 	if err != nil {
 		logFailure(r, "start checklist", err)
 		httpx.Fail(w, r, err)

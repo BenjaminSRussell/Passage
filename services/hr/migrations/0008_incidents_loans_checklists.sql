@@ -234,6 +234,50 @@ CREATE POLICY hr_worker_task_legal_entity_scope ON hr_worker_task AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+-- The offboarding gate must see every OUT item of a worker whatever entity it
+-- is tagged with, or an entity-scoped HR user could complete offboarding with a
+-- laptop still out. The function returns only a count, is pinned to the
+-- caller's own tenant, and is owned by a NOLOGIN role that bypasses RLS (the
+-- owner is left as the migrating role when that role cannot create it).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hr_loan_gate') THEN
+    CREATE ROLE hr_loan_gate NOLOGIN BYPASSRLS;
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'cannot create hr_loan_gate; hr_outstanding_loan_count stays owned by the migrating role';
+END
+$$;
+
+DO $do$
+BEGIN
+  EXECUTE format($f$
+    CREATE OR REPLACE FUNCTION hr_outstanding_loan_count(p_tenant uuid, p_worker uuid) RETURNS int
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %I AS $b$
+      SELECT count(*)::int FROM hr_loaned_item
+       WHERE tenant_id = p_tenant AND worker_id = p_worker AND status = 'OUT'
+         AND p_tenant = nullif(current_setting('passage.tenant_id', true), '')::uuid
+    $b$
+  $f$, current_schema());
+END
+$do$;
+REVOKE ALL ON FUNCTION hr_outstanding_loan_count(uuid, uuid) FROM PUBLIC;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hr_loan_gate') THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO hr_loan_gate', current_schema());
+    EXECUTE 'GRANT SELECT ON hr_loaned_item TO hr_loan_gate';
+    EXECUTE 'ALTER FUNCTION hr_outstanding_loan_count(uuid, uuid) OWNER TO hr_loan_gate';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION hr_outstanding_loan_count(uuid, uuid) TO passage_app';
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'cannot hand hr_outstanding_loan_count to hr_loan_gate';
+END
+$$;
+
 -- Application-role grants (0004_grants.sql pattern). An incident changes only
 -- its workflow columns, and the trigger above freezes it once CLOSED. Loans,
 -- checklists and tasks change only their status columns; templates and their

@@ -105,6 +105,7 @@ another owner).
 | 7 | Manager sees only their subtree in skill search and gap (8.42.17, OPA) | handoff (platform OPA) | `HcmOrgInquire` searches the tenant; positions follow the legal-entity scope |
 | 7 | GIN index on WorkerSkill (8.42.19) | built differently | A btree on (tenant, skill, rating) answers "at least n on skill s" as a range scan; the 500/day budget is not load-tested |
 | 8 | Onboarding and offboarding checklists, worker tasks | **built** (API) | Instantiation is an endpoint a personnel action will call (FR-42.5 not built), so "when the action is approved" is not automatic. HR_PARTNER and IT owners stay unassigned (need the department and role mappings). Not built: one template per action type per legal entity, MSS/ESS task screens |
+| 7 | Anonymity against database operators | decision, out of threat model | Anonymity of questionnaire answers holds against application-level users and the API. Pairing a response marker with its session by `xmin` or `ctid` needs raw database access, which already exposes the WAL and query logs, so DB operators are out of scope. A buffered, shuffled insert of anonymous sessions at schedule close is the future hardening |
 | 8 | HR reminders on the wave-5 alert rules | handoff (wave 5) | The reminder rule model needs the alert rule engine; not started |
 | 8 | Requisitions, candidates, offers | later slice of PSG-42 | Not started (FR-42.21, BR-42.15) |
 | 8 | Compensation planning cycles and worksheets | later slice of PSG-42 | Not started (FR-42.22, BR-42.13) |
