@@ -8,15 +8,17 @@ release may change public APIs.
 
 ## [0.1.0] - 2026-10-31
 
-First tagged release of Passage, cut from `main` at `bf74ec27`. It is a **source-only
+First tagged release of Passage, cut from `main` at `76f9a4f5`. It is a **source-only
 pre-release**:
 
 - GitHub Actions is blocked by the repository owner's billing, so CI did not run on the
   release commit and **no container images or Helm charts were built, signed or published**.
 - Every Passage service image digest in `deploy/envs/{dev,stage,prod}/apps/*.yaml` is a
   placeholder (`sha256:0000…0000`). Only pinned third-party images, such as Postgres, carry real
-  digests. Nothing in
-  `deploy/envs` can be rolled out as-is.
+  digests. Nothing in `deploy/envs` can be rolled out as-is.
+- Only fx, org, receiving and hello-ledger have dev Argo CD apps, next to the platform apps
+  (gateway, Kyverno, cert issuer, Postgres, outbox databases, event backbone). Stage and prod
+  carry only hello-ledger and Kyverno. Every other service ships a chart but no environment app.
 - The release-notes gate (`docs/ops/tools/check_release_notes.py`, PRD 9.50.15) requires real
   `sha256` image digests, so it applies from the first release that publishes images. This
   changelog does not take its place.
@@ -27,7 +29,7 @@ pre-release**:
 Most of the code came from Ben Russell's automated wave pipeline: one `PSG-NNxx` ticket per
 slice of the 50-wave roadmap (`roadmap/waves.json`), 357 slices across all 50 waves. Many of the
 later slices are marked "Haiku swarm draft, Opus review" in their commit subjects. Follow-up pull
-requests #154 to #350 then hardened, wired and proved those slices. Each was reviewed on its own
+requests #154 to #352 then hardened, wired and proved those slices. Each was reviewed on its own
 before it was merged.
 
 ### Security
@@ -45,14 +47,28 @@ before it was merged.
   forced RLS (#249). There are `passage_app` cross-tenant tests for six services (#250),
   isolation tests for receivables, purchasing and revrec (#194, #201), and a repo-wide RLS
   coverage check (`tools/rlscheck`, #300).
-- Database grants: explicit `passage_app` grants for every service schema (#195, #204, #255,
-  #268, #269). Unused `DELETE` grants were revoked (#221).
+- Database grants: explicit `passage_app` grant migrations (`NNNN_grants.sql`) for 43 services
+  (#195, #204, #255, #268, #269). Unused `DELETE` grants were revoked (#221). Twelve services
+  with migrations have no separate grants file and grant inside their other migrations: close,
+  engineering, inventory, lean, migration, processmfg, product, production, receiving,
+  scheduling, shopfloor and transport.
 - `SECURITY DEFINER` functions pin `search_path` against `pg_temp` table shadowing (#311,
   #314).
 - Service-to-service calls use signed Ed25519 service-principal tokens (#226, #303, #305,
   #320), with a replay cache shared through Postgres that fails closed (#321, #336). Ledger
-  and numbering duties were split so a caller signs only the exact duty it uses (#333).
-  Payables' service grant on tax covers only the `Calculate withholding tax` duty (#350).
+  and numbering duties were split so a caller signs only the exact duty it uses (#333). For
+  this one release the grant tables still hold the old umbrella duties
+  (`ledger.journal.post` and `ledger.journal.read` for receiving and payables to ledger,
+  `numbering.write` for party to numbering) so a rolling deploy keeps working. They are removed
+  in #341. Payables' grant on tax covers only `Calculate withholding tax` (#350). Close calls
+  ledger with a signed `ledger.ledger.lookup` to check ledger ownership before it registers a
+  period (#351). Payables holds `party.vendor_bank.reveal` on party (#352).
+- Vendor bank details: account and routing numbers are sealed with `fieldcrypt` (tenant and
+  field as additional data). Reads return only the last four digits. The `:reveal` route needs
+  the `party.vendor_bank.reveal` duty and logs every reveal with user and vendor (#352).
+- Treasury bank files: the signer uses Vault transit, so private keys never leave Vault, with
+  RSA-PSS pinned. Every file is recorded in an insert-only `bank_file_audit` before and after it
+  is sent (#346). The sender is not yet wired to a route.
 - Authorization policy: every service's duties are seeded in `policies/authz` and scanned
   (#313, #337). Duty contract tests run against the real Rego with `opa test` in CI (#78,
   #187). There is a dedicated tenant-admin duty for tenant-level writers (#298, #326), and
@@ -108,7 +124,10 @@ extended that wave.
 - **Wave 7 - Global Party & Business Partner Model** (3 slices): party persistence, roles, tax
   registrations, terms and the core party API. Follow-ups: atomic merge with survivorship rules
   and a referential-integrity audit (#173), credit-limit increase approval with per-legal-entity
-  configuration (#90, #208, #212, #230, #251).
+  configuration (#90, #208, #212, #230, #251). Proof and vendor master (#352): a VIES adapter
+  replayed against six recorded VIES REST responses (Wave 7 AC3, so all four Wave 7 criteria
+  are met in code), `vendor_role` and `vendor_bank_account` (`party/0008_vendor_role.sql`),
+  vendor read routes, and merge that moves vendor roles.
 - **Wave 8 - Product Master, Variants & Catalogs** (2 slices): product master and configurator,
   org site and warehouse check, numbering sequences.
 - **Wave 9 - Engineering Data: BOMs, Routings, Resources & Change Management** (14 slices):
@@ -139,7 +158,12 @@ extended that wave.
   while settlement-to-GL and the SAF-T XSD check remain open.
 - **Wave 14 - Period Close, Year-End & Allocations** (2 slices): period maintenance, reopen
   approval and the close checklist API. Follow-up: period resolver, with receiving deriving the
-  fiscal period from the posting date (#96, #307).
+  fiscal period from the posting date (#96, #307). Proof (#351): `PUT
+  /v1/close/periods/{fiscalPeriodId}` (duty `period.maintain`) registers a period's dates once
+  the ledger service confirms that the ledger belongs to the caller's legal entity. Allocation,
+  year-end and checklist criteria are met (AC2 to AC4). Closed-period rejection (AC1) is
+  proved per ledger and receiving posting path, but ledger does not yet read close's period
+  status.
 - **Wave 15 - Financial Reporting, Statements & Audit Trail** (6 slices): statement
   definitions, runs and drill-down, derived hierarchies, cash flow statement, HTML, XLSX and CSV
   output, schedules, and the audit trail report. Proof: demo-year statements tie to the trial
@@ -170,7 +194,11 @@ extended that wave.
   block and proposal list routes (#332), distroless runtime image (#294).
 - **Wave 20 - Inventory Costing & Supplier Collaboration** (6 slices): costing settlement,
   marking, valuation ledgers, costing versions and standard cost, cost transactions with GL
-  tie-out, manual adjustments and reconciliation runs.
+  tie-out, manual adjustments and reconciliation runs. Proof (#347): a 104-sequence reference
+  fixture matches to the cent under all 7 costing methods (AC-20.1). Settle, post and report tie
+  to the ledger, including a gated 1M-transaction run in 16.7 s against a 20-minute bar
+  (AC-20.3). Purchase price variance posts a cost transaction on receipt and invoice
+  (AC-20.4).
 
 #### Phase 4 - Manufacturing & Planning
 
@@ -212,7 +240,16 @@ extended that wave.
 #### Phase 6 - Warehouse, Quality & Logistics
 
 - **Wave 31 - Advanced Warehouse Management** (4 slices): location directive engine and
-  simulator, hazmat and cross-dock checks, work execution, dock appointments.
+  simulator, hazmat and cross-dock checks, work execution, dock appointments. Proof (#348):
+  100 outbound PICK directive scenarios (AC1), a 10k-lines/day simulation with a measured p95
+  assignment of 11 ms (AC2), capacity property tests (AC3), and wave release of 500 orders
+  (AC4).
+  - Wave release (`domain.ReleaseWave` / `Store.ReleaseWave`) creates pick work plus min/max
+    replenishment.
+  - A pick that only a refill can cover stays `WAITING` (`depends_on`) until the refill
+    finishes, then emits the new event `dev.passage.wms.work.released.v1`. Migration:
+    `warehouse/0004_work_dependencies.sql`.
+  - There is no HTTP route or wave record yet.
 - **Wave 32 - Mobile Warehouse Execution** (6 slices): print service, GS1 labels and scanning,
   PDF and PCL transports, offline queue and device flows.
 - **Wave 33 - Quality Management & Nonconformance** (6 slices): quality orders and sampling,
@@ -227,7 +264,10 @@ extended that wave.
 #### Phase 7 - Treasury, Assets & Controlling
 
 - **Wave 36 - Cash & Bank Management, Reconciliation & Treasury** (4 slices): bank accounts,
-  BAI2 and MT940 import, cash forecast, checks, facilities and loans.
+  BAI2 and MT940 import, cash forecast, checks, facilities and loans. Proof (#346): stricter
+  reconciliation rules, a cash-forecast bucket property (AC2), an EBICS H004 upload subset
+  against a fake bank (AC3, partial), and a Vault-signed, audited bank-file sender
+  (`treasury/0007_bank_file_audit.sql`, AC4). AC1 is not met; see Known limitations.
 - **Wave 37 - Fixed Assets & Leases** (5 slices): asset register, depreciation books and runs,
   disposal, leases and remeasurement, capex approvals, transfers and splits.
 - **Wave 38 - Cost Accounting, Budgeting & Budget Control** (5 slices): budget control and
@@ -282,14 +322,19 @@ extended that wave.
 - `services/ledger` serves its API under `/v1/ledger` (#199, #202).
 - The `warehouse-mobile` toolchain matches `apps/web`, with a lockfile and a CI build (#281,
   #309).
-- Fixes: the configurator's CP-SAT `OnlyEnforceIf` now works with OR-Tools 9.11+ (#154). The
-  dev DB secret is recreated when `APP_PASSWORD` is missing (#156). Migration catalog checks are
-  scoped by schema (#224, #233). Org seed and postal replay gaps were fixed (#235, #253). Ledger
-  sets enforce their constraints and take locks in a consistent order (#237, #245). Payables
-  classifies XSD validator interruptions and has a preview timeout and 503 contract (#239,
-  #242). Smaller fx, org-web and receiving follow-ups landed in #227/#228, #234, #236, #238,
-  #240, #244, #247 and #252.
 - Docs: README getting-started guide for newcomers (#192).
+
+### Fixed
+
+- The configurator's CP-SAT `OnlyEnforceIf` works with OR-Tools 9.11+ (#154).
+- The dev DB secret is recreated when `APP_PASSWORD` is missing (#156).
+- Migration catalog checks are scoped by schema (#224, #233).
+- Org seed and postal replay gaps (#235, #253).
+- Ledger sets enforce their constraints and take locks in a consistent order (#237, #245).
+- Payables classifies XSD validator interruptions and has a preview timeout and 503 contract
+  (#239, #242).
+- Smaller fx, org-web and receiving follow-ups: #227/#228, #234, #236, #238, #240, #244, #247
+  and #252.
 
 ### Dependencies
 
@@ -303,15 +348,30 @@ extended that wave.
 There is no earlier release, so this is a first install rather than an upgrade. Before any
 environment runs 0.1.0:
 
-1. **Build, sign and pin images.** Once Actions billing is restored, re-run CI on the tag, then
+1. **Protect `main` before prod.** A repo admin must enable branch protection on `main`
+   (required review plus code-owner review) before the prod cluster is registered in Argo CD.
+   Until then any push to `main` auto-deploys prod (`docs/runbooks/delivery/deploy-local.md`).
+2. **Build, sign and pin images.** Once Actions billing is restored, re-run CI on the tag, then
    build every service image and sign it with cosign. Replace each placeholder digest in
    `deploy/envs/{dev,stage,prod}/apps/*.yaml` with the real digest. The Kyverno admission
    policy (#170, #172) rejects unsigned or tag-referenced images.
-2. **Apply each service's migrations in filename order** (`services/<svc>/migrations`). Pay
-   particular attention to the security-relevant ones:
-   - Identity schema and SCIM: `identity/0001_identity.sql`, `identity/0002_grants.sql`,
-     `identity/0007_scim.sql`.
-   - Grants: the `NNNN_grants.sql` file in every service, for example `pricing/0008_grants.sql`.
+3. **External Secrets.** The charts read their Secrets through External Secrets Operator from a
+   `ClusterSecretStore` named `passage` (the `storeName` default in `deploy/postgres` and the
+   batch chart; also `deploy/envs/dev/kafka-secrets`). Install ESO and create that store,
+   backed by Vault, before syncing.
+4. **Apply each service's migrations in filename order** (`services/<svc>/migrations`). Pay
+   particular attention to these:
+   - Identity schema, operator and SCIM: `identity/0001_identity.sql`,
+     `identity/0002_grants.sql`, `identity/0004_tenant_provisioning.sql`,
+     `identity/0006_operator_single_row.sql`, `identity/0007_scim.sql`.
+   - Grants: the `NNNN_grants.sql` file in each of the 43 services that has one (for example
+     `pricing/0008_grants.sql`). The other twelve grant inside their other migrations.
+   - `payables/0010_vendor_block_per_legal_entity.sql` must run as a superuser or a `BYPASSRLS`
+     role. It rewrites every tenant's existing vendor blocks into per-legal-entity rows, so a
+     role that is subject to RLS cannot see the rows it has to move.
+   - Vendor master: `party/0008_vendor_role.sql`. Treasury bank-file audit:
+     `treasury/0007_bank_file_audit.sql`. Warehouse work dependencies:
+     `warehouse/0004_work_dependencies.sql`.
    - Legal-entity RLS: `org/0032_legal_entity_bootstrap_scope.sql`,
      `billing/0006_child_legal_entity_scope.sql`, `pricing/0007_child_legal_entity_scope.sql`,
      `purchasing/0010_child_legal_entity_scope.sql`, `revrec/0004_outbox_and_child_scope.sql`,
@@ -333,26 +393,72 @@ environment runs 0.1.0:
      before its database had the role, delete that `schema_migrations` row and restart (see
      `deploy/postgres/README.md`).
    - One-time payees: `receiving/0010_one_time_payee.sql`.
-3. **Service-token keys** (`deploy/gateway/README.md`). Give each caller (receiving, payables,
-   party) an Ed25519 seed Secret (`serviceIdentity.signingKeySecret`, key `signing-key`) and a
-   `serviceIdentity.keyId`. Give each target (ledger, close, numbering, purchasing, inventory,
-   fx) the callers' public keys in `serviceIdentity.publicKeys`. Roll out targets first, then
-   their replay migrations, then callers. Roll back in reverse order (#321).
-4. **Field-encryption keys.** Set `FIELDCRYPT_KEYS` or `FIELDCRYPT_KEYS_FILE` and
-   `FIELDCRYPT_CURRENT_KEY_ID` for hr (it refuses to start without them), for receiving and
-   payables (they share a service key; without it, one-time payees and payables proposals with bank
-   details or a payment-run start return 503) and for compliance
-   (erasure preview returns 503 `PRV-1211` without it). Keep the legacy `HR_PII_KEY` until every
-   HR row is re-sealed. Do not rotate the compliance current key while erasure requests are open.
-5. **CDC credentials.** Each CDC database needs Vault entries
-   `<prefix>/<release>-postgres/{postgres-password,app-password,cdc-password}` and a matching
-   `debezium-cdc-<release>` Secret in the `kafka` namespace (`deploy/envs/<env>/kafka-secrets`).
-6. **Notify adapters.** Enabling `NOTIFY_SMTP_ENABLED` or `NOTIFY_WEBHOOK_ENABLED` needs that
-   adapter's credentials, from the batch chart's ExternalSecret or `NOTIFY_SECRETS_DIR`. Startup
-   fails if they are missing.
-7. **SCIM (optional).** SCIM is mounted only when `IDENTITY_SCIM_ISSUER_BASE`,
-   `IDENTITY_SCIM_AUDIENCE` and `IDENTITY_OPA_URL` are all set. Assign the duty `Provision users
-   via SCIM` to the IdP's service account.
+   - Receiving `posted_by`: `receiving/0009_ers_audit_block.sql` and
+     `receiving/0013_ers_price_confirmation.sql` add `posted_by` with default `''`. Receipts
+     posted before 0013 have no recorded poster, so ERS price confirmation refuses them
+     (`AP-ERS-004`) until `posted_by` is backfilled from the posting audit trail.
+5. **Service-token keys and rollout order** (`deploy/gateway/README.md`, #321).
+   - Callers and their targets:
+     - receiving to ledger, close, purchasing and inventory;
+     - payables to ledger and fx;
+     - party to numbering;
+     - batch to product;
+     - workflow-ts to payables;
+     - close to ledger. Close also needs `ledgerUrl` (`LEDGER_URL`), and without it period
+       registration returns 503.
+   - Give each caller an Ed25519 seed Secret (`serviceIdentity.signingKeySecret`, key
+     `signing-key`) and a `serviceIdentity.keyId`. Give each target its callers' public keys in
+     `serviceIdentity.publicKeys`.
+   - Order, per target:
+     1. Set its public keys and apply its `service_token_replay` migration.
+     2. Deploy the target build.
+     3. Deploy the callers.
+   - Payables and close are both targets and callers. Deploy them after ledger and fx, and
+     before workflow-ts and receiving.
+   - Roll back in reverse order, callers first.
+6. **Field-encryption keys** (`FIELDCRYPT_KEYS` or `FIELDCRYPT_KEYS_FILE`, plus
+   `FIELDCRYPT_CURRENT_KEY_ID`):
+   - hr: refuses to start without them. Keep the legacy `HR_PII_KEY` until every HR row is
+     re-sealed.
+   - receiving and payables (they share a service key): without it, one-time payees, payables
+     proposals with bank details and payment-run starts return 503.
+   - party: without it, vendor bank writes and reveals return 503
+     `PTY-BANK-ENCRYPTION-UNAVAILABLE`. The chart reads the keys from `existingSecret`.
+   - compliance: without it, the erasure preview returns 503 `PRV-1211`. Do not rotate its
+     current key while erasure requests are open.
+7. **Party VIES.** Set `PARTY_VIES_URL` (the VIES REST base,
+   `https://ec.europa.eu/taxation_customs/vies/rest-api`) and optionally
+   `PARTY_VIES_TIMEOUT_MS` (default 5000). With an empty URL, VAT numbers stay `unverified`.
+8. **Tenant administrators and the platform operator** (`services/identity/README.md`).
+   - Before deploying, add `tenant.administer` to the duties claim of existing tenant
+     administrators in the Keycloak duties mapper. Tenant-level writes need it.
+   - Seed the operator tenant in `identity_tenants` and the single `identity_operator` row with
+     its id. Do this as the migration owner, because `passage_app` can only read
+     `identity_operator`. Then set `IDENTITY_OPERATOR_TENANT_ID` on identity to the same id.
+     Without it, the tenant routes and `Maintain tenants` grants are refused.
+   - The operator then bootstraps each tenant's first administrator, through `adminUserId` /
+     `adminIdpSubject` on `POST /v1/tenants` or through `POST /v1/tenants/{id}/admins`.
+9. **Gateway** (`deploy/gateway/README.md`).
+   - Install Envoy Gateway v1.4 or newer, which provides the CRDs, `localJWKS`/`remoteJWKS` and
+     shared rate limits.
+   - Replace the dev placeholder `localJWKS` with `remoteJWKS` pointing at the IdP realm's JWKS,
+     and set `issuer`.
+   - Emit `duties` as a single comma-joined string claim, not a multivalued array.
+   - Provide the TLS Secret `passage-api-tls` for the `https` listener.
+   - Remove the `http-dev` listener in every non-dev environment.
+10. **CDC credentials.** Each CDC database needs Vault entries
+    `<prefix>/<release>-postgres/{postgres-password,app-password,cdc-password}` and a matching
+    `debezium-cdc-<release>` Secret in the `kafka` namespace (`deploy/envs/<env>/kafka-secrets`).
+11. **Notify adapters.** Enabling `NOTIFY_SMTP_ENABLED` or `NOTIFY_WEBHOOK_ENABLED` needs that
+    adapter's credentials, from the batch chart's ExternalSecret or `NOTIFY_SECRETS_DIR`.
+    Startup fails if they are missing.
+12. **SCIM (optional).** SCIM is mounted only when `IDENTITY_SCIM_ISSUER_BASE`,
+    `IDENTITY_SCIM_AUDIENCE` and `IDENTITY_OPA_URL` are all set. Assign the duty `Provision
+    users via SCIM` to the IdP's service account.
+13. **`RECEIVING_ALLOW_LEGACY_PO_LINE` is for dev only.** Chart value `allowLegacyPoLine`
+    defaults to false. When it is set, receiving trusts client-sent `poLineId`,
+    `orderedRemaining` and `unitPrice` instead of resolving `poLineNo` against the purchase
+    order. Never set it in stage or prod; it is removed in #340.
 
 ### Known limitations
 
@@ -364,20 +470,41 @@ environment runs 0.1.0:
 - **Identity is incomplete.** The Keycloak realm and push (#80), OIDC/SAML federation and MFA,
   OPA bundle build and distribution, and gateway host-to-tenant mapping (#213) are not
   implemented. mTLS between pods is a follow-up to the service tokens.
-- **Wave proof criteria are mostly open.** Only these are proved on this commit: Wave 15 AC1
-  (#344), Wave 23 (#261), Wave 42 AC2 (#258), Wave 12 AC-12.4 (#273), two of the four Wave 13
-  criteria (#350) and the interim Wave 40 fixture (#345). No phase-exit stakeholder sign-off
-  has taken place.
+- **No live-cluster proof.** Nothing has been proved on a live cluster: Actions runs, the
+  gateway, the CDC relay, the EBICS bank sandbox, or the repository admin steps. All of these
+  are tracked in #213.
+- **Wave proof criteria are partly open.** The proofs that landed in code are Wave 7 (#352),
+  Wave 12 AC-12.4 (#273), Wave 13 (two of four, #350), Wave 14 (AC2 to AC4, AC1 partial, #351),
+  Wave 15 AC1 (#344), Wave 20 (AC-20.1, 20.3 and 20.4, #347), Wave 23 (#261), Wave 31 (AC1 to
+  AC4, #348), Wave 36 (AC2 and AC4, AC3 partial, #346), Wave 42 AC2 (#258) and the interim Wave
+  40 fixture (#345). Human steps are still open: accountant workbooks and sign-offs, recorded
+  walkthroughs, and every phase-exit sign-off.
+- **Wave 36 AC1 is not met.** On the adversarial 1,000-line reconciliation fixture, 78.0% of
+  all lines auto-match correctly (91.8% of the lines that have a book counterpart, 0 wrong),
+  against the 95% bar (#346).
+- **Transitional umbrella grants.** The service grant tables keep `ledger.journal.post`,
+  `ledger.journal.read` and `numbering.write` for this one release, until #341 removes them.
 - **Tax is not deployable yet.** The tax service has no Helm chart, Dockerfile or store (slice
-  B in `services/tax/NOT-IMPLEMENTED.md`). Once it is deployed, it needs payables' service-token
-  public key before payables can call withholding.
-- **Proof PRs not merged into 0.1.0:** #352 (Wave 7 VIES adapter and vendor master), #346 (Wave
-  36 treasury), #347 (Wave 20 costing), #348 (Wave 31 warehouse), #351 (Wave 14 close) and
-  #262 (platform-health release persistence and promote/rollback recording, #75).
+  B in `services/tax/NOT-IMPLEMENTED.md`). Tax and party do not verify service tokens yet, so
+  the seeded payables to tax and receiving or payables to party grants are not exercised.
+- **Known vulnerability.** `apps/web` depends on `zod` 3.23.8 in production, which is affected
+  by the high-severity advisory GHSA-mrhx-c7xc-m3w5 (CVE-2023-54404: memory exhaustion when
+  validating oversized constrained collections). It is fixed in zod 4.6.6+, but that is a major
+  version bump, tracked in #355. The code runs client-side, in API response validation in the
+  browser.
+- **Go and Python dependencies were not audited.** No `govulncheck` or `pip-audit` run was made
+  for this release. Only the npm advisory above was checked.
+- **Not merged into 0.1.0:** #262 (platform-health release persistence and promote/rollback
+  recording, #75) and #354 (receiving puts `vendor_group_id` on `invoice.posted` from the party
+  vendor master, #302).
 - **Open follow-up issues:**
+  - #335: fieldcrypt follow-ups from #330 (hr legacy fallback, receiving idempotency hash).
+  - #340: receiving web must send `poLineNo`, then `RECEIVING_ALLOW_LEGACY_PO_LINE` is dropped.
+  - #341: remove the transitional umbrella service grants.
   - #342: costing and productcost mount the same `/v1/costing` routes with different duties.
   - #343: SCIM follow-ups from the #339 review (admin-end deadlock, silent cap on group members).
   - #349: the IAS 21 FX treatment in the FR-40.9 consolidation eliminations needs accountant
     review. Until then the Wave 40 fixture (#345) stays interim.
+  - #355: upgrade `apps/web` to zod 4 for GHSA-mrhx-c7xc-m3w5.
 
 [0.1.0]: https://github.com/BenjaminSRussell/Passage/releases/tag/v0.1.0
