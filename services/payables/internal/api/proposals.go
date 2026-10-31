@@ -61,7 +61,7 @@ type PayablesStore interface {
 	FindProposal(ctx context.Context, legalEntityID, runDate, runID string) (store.Proposal, error)
 	CreateProposal(ctx context.Context, in store.NewProposal) (store.Proposal, bool, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
-	ApproveProposal(ctx context.Context, id, approver, today string) (store.Proposal, error)
+	ApproveProposal(ctx context.Context, id, approver, today string, banks ...store.GroupBank) (store.Proposal, error)
 	CancelProposal(ctx context.Context, id, user string) (store.Proposal, error)
 	ListProposals(ctx context.Context, f store.ProposalFilter, limit int) ([]store.ProposalSummary, error)
 	SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error)
@@ -578,7 +578,28 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
 		return
 	}
-	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly))
+	var binds []store.GroupBank
+	if a.runs != nil && a.runs.banks != nil {
+		draft, err := a.proposals.store.GetProposal(r.Context(), id)
+		switch {
+		case errors.Is(err, store.ErrProposalNotFound):
+			a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+			return
+		case err != nil:
+			a.fault(w, r, "payment proposal get failed", err)
+			return
+		case draft.Status != domain.ProposalDraft:
+			a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
+			return
+		}
+		var ok bool
+		if draft.CreatedBy != caller.UserID {
+			if binds, ok = a.bankBindings(w, r, draft); !ok {
+				return
+			}
+		}
+	}
+	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly), binds...)
 	var changed *store.LinesChangedError
 	switch {
 	case errors.As(err, &changed):

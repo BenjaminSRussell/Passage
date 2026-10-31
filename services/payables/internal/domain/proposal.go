@@ -72,6 +72,10 @@ type ProposalGroup struct {
 	Net      decimal.Decimal `json:"net"`
 	Valued   decimal.Decimal `json:"valued"`
 	Lines    []ProposalLine  `json:"lines"`
+
+	BankAccountID   string `json:"bankAccountId,omitempty"`
+	BankLast4       string `json:"bankLast4,omitempty"`
+	BankFingerprint string `json:"-"`
 }
 
 func discountFor(c ProposalCandidate, runDate time.Time) decimal.Decimal {

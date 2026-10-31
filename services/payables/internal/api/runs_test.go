@@ -162,7 +162,7 @@ type fakeParty struct {
 }
 
 func partyAccount(holder, number, routing, currency string) map[string]any {
-	return map[string]any{"id": "acct-" + number, "accountHolder": holder, "bankCountry": "US", "currencyCode": currency, "accountNumber": number, "routingNumber": routing}
+	return map[string]any{"id": "acct-" + strings.ToLower(currency) + "-" + number[len(number)-4:], "accountHolder": holder, "bankCountry": "US", "currencyCode": currency, "accountNumber": number, "routingNumber": routing}
 }
 
 func newFakeParty() *fakeParty {
@@ -331,6 +331,9 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 		runProfiles = nil
 	}
 	fp := newFakeParty()
+	if opts.foreign {
+		fp.accounts[vendorTwo] = []map[string]any{partyAccount("Example Widgets LLC", "000444555666", "011000015", "EUR")}
+	}
 	partySrv := httptest.NewServer(fp)
 	t.Cleanup(partySrv.Close)
 	ft := newFakeTax()
@@ -473,8 +476,8 @@ func TestPaymentRun_GenerateFileRevealsBankDetailsFromPartyWithASignedTokenAndSt
 	f := newRunFixture(t, fixtureOptions{})
 	f.approve()
 	runID := f.start()["id"].(string)
-	if f.party.callCount() != 0 {
-		t.Fatal("run start must not fetch bank details")
+	if f.party.callCount() != 2 {
+		t.Fatal("only approval fetches bank details at or before run start")
 	}
 	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
 		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
@@ -486,8 +489,8 @@ func TestPaymentRun_GenerateFileRevealsBankDetailsFromPartyWithASignedTokenAndSt
 	f.party.mu.Lock()
 	calls, tokens := append([]string(nil), f.party.calls...), append([]string(nil), f.party.tokens...)
 	f.party.mu.Unlock()
-	if len(calls) != 2 {
-		t.Fatalf("party calls = %v, want one per vendor", calls)
+	if len(calls) != 4 {
+		t.Fatalf("party calls = %v, want one per vendor at approval and again at generation", calls)
 	}
 	verifier := tenant.NewServiceVerifier("party", map[string]ed25519.PublicKey{"payables": f.verify})
 	for _, token := range tokens {
@@ -541,7 +544,7 @@ func TestPaymentRun_VendorWithoutAUsableBankAccountIsRefusedWithAPCode(t *testin
 		}, "ambiguous"},
 		"no account holder": {func(f *fakeParty) {
 			f.accounts[vendorTwo] = []map[string]any{partyAccount("", "123456789", "011000015", "USD")}
-		}, "no account holder"},
+		}, "account holder"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

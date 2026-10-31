@@ -2,6 +2,8 @@ package party
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +44,22 @@ type BankAccount struct {
 	CurrencyCode  string `json:"currencyCode"`
 	AccountNumber string `json:"accountNumber"`
 	RoutingNumber string `json:"routingNumber"`
+}
+
+func (b BankAccount) Last4() string {
+	n := strings.TrimSpace(b.AccountNumber)
+	if len(n) < 4 {
+		return "****"
+	}
+	return n[len(n)-4:]
+}
+
+func (b BankAccount) Fingerprint() string {
+	h := sha256.New()
+	for _, f := range []string{b.AccountNumber, b.RoutingNumber, b.AccountHolder, b.BankCountry} {
+		_, _ = fmt.Fprintf(h, "%d:%s|", len(f), strings.TrimSpace(f))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (b BankAccount) Creditor() domain.CreditorDTO {

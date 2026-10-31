@@ -446,7 +446,7 @@ paths:
       operationId: generatePaymentRunFile
       x-passage-duty: payment-run.execute
       description: |
-        Builds one pain.001.001.09 payment per proposal group, paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor_bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable is a retryable 502 COM-0502.  validates it against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
+        Builds one pain.001.001.09 payment per proposal group (a bank account whose id or fingerprint differs from the one bound at approval is a terminal 422 AP-RUN-017), paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor_bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable is a retryable 502 COM-0502.  validates it against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -783,6 +783,8 @@ components:
               gross: { type: string, description: Sum of open amounts in the group currency. }
               discount: { type: string }
               withheld: { type: string, description: Tax withheld in the group currency. }
+              bankAccountId: { type: string, description: Party bank account id bound at approval; absent on a draft. }
+              bankLast4: { type: string, description: Last four digits of the bound account number. }
               net: { type: string, description: Gross minus discount minus withheld; the amount paid to the vendor in the group currency. }
               valued: { type: string, description: Sum of line valued amounts in legalEntityCurrency. }
               lines:

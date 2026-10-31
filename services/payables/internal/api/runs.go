@@ -502,12 +502,12 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	a.runResult(w, r, "post-journal", recorded, err)
 }
 
-func (a *API) vendorCreditors(w http.ResponseWriter, r *http.Request, legalEntityID string, groups []domain.ProposalGroup) (map[string]domain.CreditorDTO, bool) {
-	creditors := map[string]domain.CreditorDTO{}
-	accounts := map[string][]party.BankAccount{}
+func (a *API) groupAccounts(w http.ResponseWriter, r *http.Request, legalEntityID string, groups []domain.ProposalGroup) (map[string]party.BankAccount, bool) {
+	chosen := map[string]party.BankAccount{}
+	fetched := map[string][]party.BankAccount{}
 	for _, g := range groups {
-		list, fetched := accounts[g.VendorID]
-		if !fetched {
+		list, done := fetched[g.VendorID]
+		if !done {
 			var err error
 			if list, err = a.runs.banks.BankAccounts(r.Context(), legalEntityID, g.VendorID); errors.Is(err, party.ErrVendorNotFound) {
 				a.reject(w, r, &domain.Error{Code: domain.CodeRunPayee, Detail: "vendor " + g.VendorID + " is not in the party vendor master"})
@@ -516,19 +516,52 @@ func (a *API) vendorCreditors(w http.ResponseWriter, r *http.Request, legalEntit
 				a.partyUnavailable(w, r, err)
 				return nil, false
 			}
-			accounts[g.VendorID] = list
+			fetched[g.VendorID] = list
 		}
-		creditor, err := creditorFor(g, list)
+		account, err := selectAccount(g, list)
 		if err != nil {
 			a.reject(w, r, err)
 			return nil, false
 		}
-		creditors[g.VendorID] = creditor
+		chosen[g.ID] = account
+	}
+	return chosen, true
+}
+
+func (a *API) bankBindings(w http.ResponseWriter, r *http.Request, proposal store.Proposal) ([]store.GroupBank, bool) {
+	if a.runs == nil || a.runs.banks == nil {
+		return nil, true
+	}
+	chosen, ok := a.groupAccounts(w, r, proposal.LegalEntityID, proposal.Groups)
+	if !ok {
+		return nil, false
+	}
+	binds := make([]store.GroupBank, 0, len(chosen))
+	for _, g := range proposal.Groups {
+		acct := chosen[g.ID]
+		binds = append(binds, store.GroupBank{GroupID: g.ID, AccountID: acct.ID, Fingerprint: acct.Fingerprint(), Last4: acct.Last4()})
+	}
+	return binds, true
+}
+
+func (a *API) vendorCreditors(w http.ResponseWriter, r *http.Request, legalEntityID string, groups []domain.ProposalGroup) (map[string]domain.CreditorDTO, bool) {
+	chosen, ok := a.groupAccounts(w, r, legalEntityID, groups)
+	if !ok {
+		return nil, false
+	}
+	creditors := map[string]domain.CreditorDTO{}
+	for _, g := range groups {
+		acct := chosen[g.ID]
+		if g.BankAccountID == "" || g.BankAccountID != acct.ID || g.BankFingerprint != acct.Fingerprint() {
+			a.reject(w, r, &domain.Error{Code: domain.CodeRunPayee, Detail: "the bank details of vendor " + g.VendorID + " are not the ones approved (changed or never bound); create and approve a new proposal"})
+			return nil, false
+		}
+		creditors[g.VendorID] = acct.Creditor()
 	}
 	return creditors, true
 }
 
-func creditorFor(g domain.ProposalGroup, accounts []party.BankAccount) (domain.CreditorDTO, error) {
+func selectAccount(g domain.ProposalGroup, accounts []party.BankAccount) (party.BankAccount, error) {
 	var match []party.BankAccount
 	for _, b := range accounts {
 		if strings.EqualFold(b.CurrencyCode, g.Currency) {
@@ -537,15 +570,15 @@ func creditorFor(g domain.ProposalGroup, accounts []party.BankAccount) (domain.C
 	}
 	switch {
 	case len(match) == 0:
-		return domain.CreditorDTO{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "vendor " + g.VendorID + " has no " + g.Currency + " bank account in the party vendor master"}
+		return party.BankAccount{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "vendor " + g.VendorID + " has no " + g.Currency + " bank account in the party vendor master"}
 	case len(match) > 1:
-		return domain.CreditorDTO{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "vendor " + g.VendorID + " has more than one " + g.Currency + " bank account in the party vendor master; the payee is ambiguous"}
+		return party.BankAccount{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "vendor " + g.VendorID + " has more than one " + g.Currency + " bank account in the party vendor master; the payee is ambiguous"}
 	}
 	creditor := match[0].Creditor()
-	if creditor.Name == "" || creditor.Address.Country == "" || (creditor.IBAN == "" && creditor.OtherID == "") {
-		return domain.CreditorDTO{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "the " + g.Currency + " bank account of vendor " + g.VendorID + " has no account holder, bank country or account number"}
+	if match[0].ID == "" || creditor.Name == "" || creditor.Address.Country == "" || (creditor.IBAN == "" && creditor.OtherID == "") {
+		return party.BankAccount{}, &domain.Error{Code: domain.CodeRunPayee, Detail: "the " + g.Currency + " bank account of vendor " + g.VendorID + " has no id, account holder, bank country or account number"}
 	}
-	return creditor, nil
+	return match[0], nil
 }
 
 func (a *API) partyUnavailable(w http.ResponseWriter, r *http.Request, err error) {
