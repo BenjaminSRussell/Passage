@@ -28,7 +28,7 @@ work outside the owned paths).
 | D3 | Scheduling against wave-23 resources and team capacity (FR-44.8) | handoff (wave 23) | Wave 23 owns the resource model and capacity. Slice 2 emits `downtime.recorded` for recorded downtime windows; planned downtime of SCHEDULED/RELEASED orders (tentative, then firm at RELEASED, BR-44.5) needs planned_start/planned_end, which work orders do not carry yet. |
 | D3 | Parts reservation, pick and issue through wave-16 (FR-44.9, BR-44.6) | handoff (wave 16) | Needs the inventory reservation and journal API. The `work_order_part` table exists but no endpoint writes it. |
 | D3 | Labor from the wave-25 kiosk or mobile app (FR-44.10) | handoff (wave 25 / PWA) | Only the API booking endpoint is built. |
-| D3 | Cost posting to asset and GL via ledger.Post, reconciliation (FR-44.11, AC2) | handoff (ledger) | The WO event carries costs (`workorder.completed.v1`). Ledger posting is a synchronous call that this slice does not make. WO-cost-to-GL reconciliation is therefore not tested. |
+| D3 | Cost posting to GL via ledger.Post, maintenance expense posting key, GL reconciliation (FR-44.11, AC2) | handoff (ledger) | The WO event carries costs (`workorder.completed.v1`). Ledger posting is a synchronous call that this service does not make, and no posting key maps (asset type, job type, location) to an expense account. The asset side reconciles: `TestWorkOrderCost50_ReconcilesAssetKPIAndEvents` (eam-wo-cost-50, 50 orders, 94 labor lines, `gen_wo_cost_50.py` decimal reference) checks every order, the asset cost history, the cost KPI window and the sum of the `workorder.completed` events to the cent. No GL balance is checked. |
 | D3 | CAPITAL work orders with a fixed asset or CIP link (FR-44.11) | later slice of PSG-44 (fixed asset: wave 37) | No fixed-asset or CIP link exists yet, so every CAPITAL order is refused with EAM-WO-005. |
 | D3 | REFURBISHMENT work order type; "work order types enabled" site parameter (8.44.13) | later slice of PSG-44 | ROUND orders exist since slice 5 but only rounds create them (`POST /work-orders` refuses ROUND). REFURBISHMENT waits for FR-44.20. |
 | D3 | Closing with pending journals (EAM-WO-002), CLOSED transition from costs (BR-44.3) | later slice of PSG-44 | Depends on ledger posting. CLOSED is allowed without checks. |
@@ -36,7 +36,7 @@ work outside the owned paths).
 | D3 | ON_HOLD reasons | later slice of PSG-44 | Not modeled. Failure codes are built in slice 2 as fault registration (FR-44.16). |
 | D4 | Condition consumer for the wave-25 IoT stream (Kafka) | handoff (wave 25 / eventing) | Slice 1 accepts readings through `POST /counters/{id}/readings` with source IOT. The bridge that calls it is not built. |
 | D4 | RATE_OVER(window) rules, tag-based rules (BR-44.4) | later slice of PSG-44 | Only threshold rules (`>`, `<`) on counters exist. |
-| D4 | p95 < 5 s latency target (AC3) and 10 readings/s performance test | later slice of PSG-44 | The breach path is synchronous and tested for correctness. Load test is not run. |
+| D4 | p95 < 5 s latency target (AC3) in production, through the wave-25 bridge | handoff (wave 25 / eventing) | Measured on a local stack only: `TestIoTStream_BreachToRequestLatency` replays 200 IoT readings at 10/s through a real HTTP server into Postgres and times each breach from its scheduled send until another connection sees the request and its `request.created` outbox row (p95 about 5 ms locally, assertion < 5 s; `PASSAGE_EAM_IOT_READINGS` lengthens it). The Kafka bridge and the outbox relay are not in the path, and no load runs against a deployed stack. |
 | D4 | Predictive hooks (`eam.predictive-hooks` flag) | later slice of PSG-44 | Hooks only; no model in v1. |
 | D5 | MTBF, MTTR and availability by location, type and criticality; cost per asset by location and period with external and overhead cost and budget comparison; backlog hours, weeks of backlog and the trade dimension (FR-44.13, 8.44.14) | later slice of PSG-44 (cost from GL: handoff to ledger) | Slice 5 builds cost per asset and currency over a completion window with an asset type filter (`GET /kpis/cost`) and the backlog per priority with overdue count and oldest due date, optionally per site (`GET /kpis/backlog`). MTBF/MTTR/availability stay per asset. Backlog hours need estimated hours on jobs (D2/D3); external and overhead costs need the ledger posting (D3). |
 | D5 | `eam-kpi-rollup` hourly job, `/reports/eam/kpis` path | later slice of PSG-44 | KPI is computed on request at `GET /v1/eam/kpis`. |
@@ -64,9 +64,9 @@ work outside the owned paths).
 | AC | Status | Note |
 |---|---|---|
 | AC-44.1 | built | `TestScheduler_BR441Example` (store) runs the example end to end: readings give 6.5 h/day over 30 days, the line carries its 2026-08-01 / 12,000 h completion, and scheduling on 2026-10-21 creates a work order due 2026-10-30 with next due reading 12,500 and forecast 2026-11-21. |
-| AC-44.2 | later slice of PSG-44 | Needs the 40-plan fixture set (`testdata/eam-plans-40`). |
-| AC-44.3 | handoff (ledger) | Labor cost accumulates on the work order (8 h at 45.00 = 360.00, store test). Parts issue and the GL posting to the maintenance expense account (710.00 with parts) are not built. |
-| AC-44.4 | partial | Breach creates one request in the reading transaction and dedupes while it is open and within the cooldown (store tests). The 5 s latency target is not measured. |
+| AC-44.2 | built | `TestPlans40_SimulatedYear` (store): the 40 plans of `testdata/eam-plans-40` (10 each of TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER on 14 counters) run 365 simulated days through the database; all 474 generated work orders (when generated, due date, due reading) and every line's final state equal `reference_plans.py` (python3 -I, exact rationals) within 0 days / 0 units. The fixture found the month-end bug fixed with `TestAddInterval_MonthEnd`: Jan 31 + 1 month was Mar 3, not Feb 28 (32/40 plans matched before the fix). Shift factors, merge window and release tolerance (BR-44.1 (a), (e), (f)) are not built, so the fixture does not use them. |
+| AC-44.3 | partial (GL: handoff to ledger) | `TestWorkOrderCost50_ReconcilesAssetKPIAndEvents`: order 1 is 350.00 parts + 8 h at 45.00 = 710.00, and over 50 orders the asset cost history, the cost KPI and the `workorder.completed` events reconcile to the reference. The GL posting to the maintenance expense account is not built; parts are written on the order because wave-16 part issue is not built. |
+| AC-44.4 | partial | Breach creates one request in the reading transaction and dedupes while it is open and within the cooldown (store tests). `TestIoTStream_BreachToRequestLatency` measures ingest to request + outbox event at 10 readings/s on a local stack (p95 well under 5 s); production latency through the wave-25 bridge is not measured. |
 | AC-44.5 | handoff (wave 23) | Slice 2 records downtime windows on the production resource and emits `downtime.recorded` in the same transaction (`TestDowntime_BR445`). Zeroing M-12's capacity is wave 23's consumer; planned downtime of RELEASED orders is not built (D3). |
 | AC-44.6 | built | Store test: EAM-CTR-001. |
 | AC-44.7 | later slice of PSG-44 | Needs checklists. |
@@ -80,15 +80,16 @@ work outside the owned paths).
 | AC-44.15 | built | `TestFault_AC4415` (store) and `TestHTTP_FaultCatalogAndCompletion` (HTTP): EAM-FLT-001 without a fault, EAM-FLT-002 for a combination the asset type does not allow. |
 | AC-44.16 | built | `TestCriticality_AC4416`: SAFETY 3, PRODUCTION 5, likelihood 4 give risk 20 and criticality 5, and a new CORRECTIVE order defaults to priority 1. |
 
-Ticket acceptance criteria: AC1 partially built (the BR-44.1 example and a time line
-with its completion reset run against the database; the 40-plan fixture is not built). AC2 handoff (see D3 above).
-AC3 partial (see D4). AC4 handoff (wave 23 consumes `downtime.recorded`; see AC-44.5). AC5 satisfied by this file. AC6
+Ticket acceptance criteria: AC1 built (AC-44.2 above). AC2 partial: the asset side
+reconciles, the GL posting is a ledger handoff (see D3 above).
+AC3 partial: met on a local stack, production latency open (see D4). AC4 handoff (wave 23 consumes `downtime.recorded`; see AC-44.5). AC5 satisfied by this file. AC6
 satisfied for the Go module; the web checks pass.
 
 ## Other gaps in slice 1
 
 | Item | Status | Reason |
 |---|---|---|
+| Month-end rule for warranty ends and the plan review date | later slice of PSG-44 | Plan line intervals clamp to the month end (Jan 31 + 1 month = Feb 28, `domain.AddInterval`). `WarrantyEnds` and the 12-month plan review still use `time.AddDate`, which rolls over (Aug 31 + 6 months = Mar 3); whether an exclusive warranty end should clamp is a product decision, so it is left as is. |
 | Idempotency for `POST /plans/schedule` | later slice of PSG-44 | Re-runs are safe by construction (one open WO per line). No stored key. |
 | Kernel httpx idempotency middleware (`idempotency_keys` table) | handoff (platform kernel) | Slice 1 stores keys on each aggregate row instead. |
 | Work order and asset numbers from wave-5 number sequences (site scope) | handoff (wave 5 / platform) | Slice 1 uses global sequences `WO-n` and `AST-n`. |
