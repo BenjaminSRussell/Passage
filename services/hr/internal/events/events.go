@@ -54,12 +54,12 @@ func All() []string {
 type IncidentChangedData struct {
 	ID             string `json:"id"`
 	CaseNo         int    `json:"case_no"`
-	WorkerID       string `json:"worker_id"`
+	WorkerID       string `json:"worker_id,omitempty"`
 	LegalEntityID  string `json:"legal_entity_id"`
 	SiteID         string `json:"site_id"`
-	IncidentType   string `json:"incident_type"`
+	IncidentType   string `json:"incident_type,omitempty"`
 	Status         string `json:"status"`
-	Outcome        string `json:"outcome"`
+	Outcome        string `json:"outcome,omitempty"`
 	OSHARecordable bool   `json:"osha_recordable"`
 	OccurredAt     string `json:"occurred_at"`
 }

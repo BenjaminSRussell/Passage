@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
@@ -24,6 +25,7 @@ const (
 	CodeQuestionnaireNotOwn    = "HCM-QST-NOT-OWN"
 	CodeNotInvited             = "HCM-QST-NOT-INVITED"
 	CodeAlreadyAnswered        = "HCM-QST-ANSWERED"
+	CodeResultsOpen            = "HCM-QST-NOT-CLOSED"
 
 	maxSessions = 10000
 )
@@ -294,14 +296,46 @@ func (s *Postgres) ListOpenSchedules(ctx context.Context) ([]QuestionnaireSchedu
 	return out, err
 }
 
+type sessionDraft struct {
+	respondent, department, entity *string
+	day                            time.Time
+	answers, scores                []byte
+}
+
+func insertSession(ctx context.Context, tx pgx.Tx, tenantID, id, scheduleID string, d sessionDraft) error {
+	_, err := tx.Exec(ctx, `insert into hr_questionnaire_session (tenant_id, id, schedule_id, respondent_worker_id, department_id, legal_entity_id, completed_on, answers, scores)
+		values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9)`, tenantID, id, scheduleID, d.respondent, d.department, d.entity, d.day, d.answers, d.scores)
+	return err
+}
+
+// eligibleEntity is the legal entity of the first PRIMARY employment the
+// population rule accepts.
+func eligibleEntity(emps []benEmployment, rule domain.Rule) *string {
+	for _, e := range emps {
+		if domain.Evaluate(rule, 0, e.Facts).Eligible {
+			le := e.Facts.LegalEntityID
+			return &le
+		}
+	}
+	return nil
+}
+
 // SubmitAnswers records one worker's answers (FR-42.15). The caller must be
 // the worker; the schedule must be open (HCM-QST-001 after it closed); the
-// worker must match the population now; a second answer is refused. The
-// session of an anonymous questionnaire carries no worker id, only the
-// worker's department for grouping and the day. Scores follow BR-42.10.
+// worker must match the population now; a second answer is refused. Scores
+// follow BR-42.10.
+//
+// On an anonymous questionnaire the response marker and the answer session are
+// written in two separate transactions, and the session gets a random v4 id and
+// only a date, no worker id: nothing in the session row (xmin, id order, time)
+// links it to the marker. Answers are fully validated before the marker is
+// written, so a failure between the two transactions needs a database outage;
+// the worker then cannot answer again (no delete grant), which is the safe side.
 func (s *Postgres) SubmitAnswers(ctx context.Context, scheduleID, workerID string, raw map[string]json.RawMessage) error {
 	p := principal(ctx)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	var draft sessionDraft
+	anonymous := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		v, err := s.loadScheduleView(ctx, tx, p.TenantID, scheduleID)
 		if err != nil {
 			return err
@@ -341,34 +375,38 @@ func (s *Postgres) SubmitAnswers(ctx context.Context, scheduleID, workerID strin
 			pr.Errors = fields
 			return pr
 		}
-		tag, err := tx.Exec(ctx, `insert into hr_questionnaire_responded (tenant_id, schedule_id, worker_id) values ($1, $2, $3) on conflict do nothing`, p.TenantID, scheduleID, workerID)
+		draft = sessionDraft{entity: eligibleEntity(emps, rule), day: now}
+		if draft.answers, err = json.Marshal(answers); err != nil {
+			return err
+		}
+		if draft.scores, err = json.Marshal(domain.Score(v.Questionnaire.Questions, answers)); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `select p.department_id::text from position_assignment pa
+			join hr_position p on p.tenant_id = pa.tenant_id and p.id = pa.position_id
+			where pa.tenant_id = $1 and pa.worker_id = $2 and pa.is_primary and pa.validity @> $3::timestamptz`, p.TenantID, workerID, now).Scan(&draft.department); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `insert into hr_questionnaire_responded (tenant_id, schedule_id, worker_id, legal_entity_id) values ($1, $2, $3, $4) on conflict do nothing`,
+			p.TenantID, scheduleID, workerID, draft.entity)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
 			return problem(http.StatusConflict, CodeAlreadyAnswered, "you have already answered this questionnaire")
 		}
-		var department *string
-		if err := tx.QueryRow(ctx, `select p.department_id::text from position_assignment pa
-			join hr_position p on p.tenant_id = pa.tenant_id and p.id = pa.position_id
-			where pa.tenant_id = $1 and pa.worker_id = $2 and pa.is_primary and pa.validity @> $3::timestamptz`, p.TenantID, workerID, now).Scan(&department); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		anonymous = v.Questionnaire.Anonymous
+		if anonymous {
+			return nil
 		}
-		answerDoc, err := json.Marshal(answers)
-		if err != nil {
-			return err
-		}
-		scoreDoc, err := json.Marshal(domain.Score(v.Questionnaire.Questions, answers))
-		if err != nil {
-			return err
-		}
-		var respondent *string
-		if !v.Questionnaire.Anonymous {
-			respondent = &workerID
-		}
-		_, err = tx.Exec(ctx, `insert into hr_questionnaire_session (tenant_id, id, schedule_id, respondent_worker_id, department_id, completed_on, answers, scores)
-			values ($1, $2, $3, $4, $5, $6::date, $7, $8)`, p.TenantID, ids.New(), scheduleID, respondent, department, now, answerDoc, scoreDoc)
+		draft.respondent = &workerID
+		return insertSession(ctx, tx, p.TenantID, ids.New(), scheduleID, draft)
+	})
+	if err != nil || !anonymous {
 		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return insertSession(ctx, tx, p.TenantID, uuid.NewString(), scheduleID, draft)
 	})
 }
 
@@ -404,6 +442,9 @@ func (s *Postgres) QuestionnaireResults(ctx context.Context, scheduleID string, 
 		v, err := s.loadScheduleView(ctx, tx, p.TenantID, scheduleID)
 		if err != nil {
 			return err
+		}
+		if v.Questionnaire.Anonymous && v.Status != "CLOSED" {
+			return problem(http.StatusConflict, CodeResultsOpen, "results of an anonymous questionnaire are released after it closes on "+v.ClosesAt.Format(time.RFC3339))
 		}
 		rows, err := tx.Query(ctx, `select department_id::text, answers, scores from hr_questionnaire_session where tenant_id = $1 and schedule_id = $2 limit $3`,
 			p.TenantID, scheduleID, maxSessions)

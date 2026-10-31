@@ -208,7 +208,7 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   (HCM-INC-SELF-CLOSE). A CLOSED incident is frozen by a trigger. A correction is a new
   incident with `supersedesId`: it needs `HcmIncidentAdmin`, cannot be filed by the
   original's reporter or closer, and hides the original from the OSHA extract only once
-  the correction is itself CLOSED (so a second administrator must close it). Rows follow the
+  the correction is itself CLOSED (so a second administrator must close it). The override justification is sealed with the details, body parts are a fixed code list, the incident's legal entity must match the worker's employment on the incident date (HCM-INC-ENTITY), and events omit worker, type and outcome for a privacy case. Rows follow the
   legal-entity scope. The OSHA extract (`/incidents/osha-extract?year=&siteId=`) returns the
   300 log with 301 detail and the 300A summary; privacy cases show "Privacy case" for the
   name and no worker id, in lists too. The extract is audited as one export row.
@@ -227,7 +227,7 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   department. An anonymous session stores no worker id and a date, not a time; a separate
   marker stops a second answer. Anonymous rules: a schedule needs at least 5 invited; with
   fewer than 5 responses the overall figures are suppressed (counts only, `suppressed`);
-  a department breakdown with any group under 5 is HCM-QST-002; late answers HCM-QST-001.
+  a department breakdown with any group under 5 is HCM-QST-002; late answers HCM-QST-001. Results of an anonymous questionnaire are released only after it closes (HCM-QST-NOT-CLOSED), and its marker and session are written in separate transactions with a random v4 session id and a date only. Loans, checklists, tasks and answers carry the worker's legal entity and follow the legal-entity scope like incidents.
 
 Domain rules that are not yet exposed by an endpoint, but are implemented and
 tested: hierarchy cycle detection (BR-42.7) and the reveal gate (`CheckReveal`).
@@ -478,6 +478,8 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-INC-SELF-CLOSE` | 403 | The reporter tried to close their own incident |
 | `HCM-INC-CORRECTION-DUTY` | 403 | A correction needs HcmIncidentAdmin |
 | `HCM-INC-SELF-CORRECT` | 403 | The reporter or closer tried to correct their own incident |
+| `HCM-INC-ENTITY` | 422 | The worker had no employment in that legal entity on the incident date |
+| `HCM-QST-NOT-CLOSED` | 409 | Anonymous results are released after the schedule closes |
 | `HCM-INC-CORRECTED` | 409 | The incident already has a correction |
 | `HCM-LOAN-001` | 422 | Items are still out for the worker (task or checklist) |
 | `HCM-LOAN-STATE` / `HCM-LOAN-DATE` | 409 / 422 | Item already closed another way / dates out of order |

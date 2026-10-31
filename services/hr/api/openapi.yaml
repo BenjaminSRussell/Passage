@@ -4402,7 +4402,7 @@ components:
         occurredAt: {type: string, format: date-time}
         reportedAt: {type: string, format: date-time}
         location: {type: string, maxLength: 200}
-        bodyParts: {type: array, maxItems: 20, items: {type: string, maxLength: 60}}
+        bodyParts: {type: array, maxItems: 20, items: {type: string, enum: [HEAD, EYE, EAR, FACE, NECK, SHOULDER, ARM, ELBOW, WRIST, HAND, FINGER, CHEST, BACK, ABDOMEN, HIP, LEG, KNEE, ANKLE, FOOT, TOE, INTERNAL, MULTIPLE, OTHER]}}
         death: {type: boolean}
         lossOfConsciousness: {type: boolean}
         medicalTreatment: {type: boolean, description: Medical treatment beyond first aid}

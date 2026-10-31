@@ -38,7 +38,7 @@ func incidentFor(w Worker, le, site string, facts domain.IncidentFacts) Incident
 	return IncidentInput{
 		WorkerID: w.ID, LegalEntityID: le, SiteID: site, IncidentType: "INJURY",
 		OccurredAt: day(time.March, 2).Add(9 * time.Hour), ReportedAt: day(time.March, 2).Add(11 * time.Hour),
-		Location: "Press line 2", BodyParts: []string{"LEFT_HAND"}, Facts: facts,
+		Location: "Press line 2", BodyParts: []string{"HAND"}, Facts: facts,
 		Details: IncidentDetails{Description: "Hand caught in the guard", Witnesses: []string{"R. Okafor"}, Treatments: []string{"sutures"}},
 	}
 }
@@ -57,6 +57,11 @@ func scenarioIncidents(t *testing.T, s *Postgres, ctx context.Context, tag strin
 	le, site := ids.New(), ids.New()
 	w := mustWorker(t, s, ctx, "Inc"+tag)
 	other := mustWorker(t, s, ctx, "Inc2"+tag)
+	mustEmployment(t, s, ctx, w.ID, le, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, ctx, other.ID, le, "PRIMARY", day(time.January, 1))
+	elsewhere := incidentFor(w, ids.New(), site, domain.IncidentFacts{DaysAway: 1})
+	_, _, err0 := s.ReportIncident(ctx, elsewhere, "")
+	requireCode(t, err0, CodeIncidentEntity)
 
 	away := mustIncident(t, s, ctx, incidentFor(w, le, site, domain.IncidentFacts{DaysAway: 3, MedicalTreatment: true}))
 	if !away.OSHARecordable || away.Outcome != domain.OutcomeDaysAway || away.CaseNo < 1 {
@@ -76,8 +81,9 @@ func scenarioIncidents(t *testing.T, s *Postgres, ctx context.Context, tag strin
 	_, _, err := s.ReportIncident(ctx, denied, "")
 	requireCode(t, err, domain.CodeIncidentRecordable)
 	denied.OverrideReason = "confirmed first aid by the plant physician"
-	if o := mustIncident(t, s, ctx, denied); o.OSHARecordable || o.RecordableOverrideReason == nil {
-		t.Fatalf("justified override = %+v", o)
+	o := mustIncident(t, s, ctx, denied)
+	if d, err := s.GetIncident(asUser(ctx, "ehs-reader"), o.ID); o.OSHARecordable || err != nil || d.Details.OverrideReason != denied.OverrideReason {
+		t.Fatalf("justified override = %+v %v", o, err)
 	}
 
 	extract, err := s.OSHAExtract(ctx, 2026, &site)
@@ -193,6 +199,7 @@ func TestIncidentSealedAuditedAndEventsCarryNoMedicalText(t *testing.T) {
 	s, ctx := newStore(t)
 	w := mustWorker(t, s, ctx, "Sealed")
 	le, site := ids.New(), ids.New()
+	mustEmployment(t, s, ctx, w.ID, le, "PRIMARY", day(time.January, 1))
 	in := incidentFor(w, le, site, domain.IncidentFacts{DaysAway: 3})
 	inc, inserted, err := s.ReportIncident(ctx, in, "inc-key-1")
 	if err != nil || !inserted {
@@ -231,6 +238,15 @@ func TestIncidentSealedAuditedAndEventsCarryNoMedicalText(t *testing.T) {
 	for k, v := range rows[0].Data {
 		if strings.Contains(fmt.Sprint(v), "guard") || k == "description" || k == "legal_name" {
 			t.Errorf("event leaks %s=%v", k, v)
+		}
+	}
+	hidden := incidentFor(w, le, site, domain.IncidentFacts{DaysAway: 1})
+	hidden.PrivacyCase = true
+	pc := mustIncident(t, s, ctx, hidden)
+	pcEvents := outboxFor(t, s, ctx, pc.ID)
+	for _, k := range []string{"worker_id", "incident_type", "outcome"} {
+		if _, leaked := pcEvents[0].Data[k]; leaked {
+			t.Errorf("privacy-case event carries %s", k)
 		}
 	}
 }
@@ -511,6 +527,41 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	}); err != nil || withRespondent != 0 {
 		t.Fatalf("anonymous sessions carrying a respondent id = %d, %v", withRespondent, err)
 	}
+	_, err = s.QuestionnaireResults(ctx, sched.ID, false)
+	requireCode(t, err, CodeResultsOpen)
+	_, err = s.QuestionnaireResults(ctx, sched.ID, true)
+	requireCode(t, err, CodeResultsOpen)
+	var sessionIDs []string
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text from hr_questionnaire_session where schedule_id = $1`, sched.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			sessionIDs = append(sessionIDs, id)
+		}
+		return rows.Err()
+	}); err != nil || len(sessionIDs) != 4 {
+		t.Fatalf("sessions = %v %v", sessionIDs, err)
+	}
+	for _, id := range sessionIDs {
+		if id[14] != '4' {
+			t.Errorf("anonymous session id %s is not a random v4 uuid", id)
+		}
+	}
+	var finer int
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*)::int from information_schema.columns where table_name = 'hr_questionnaire_session'
+			and (column_name like '%worker%' and column_name <> 'respondent_worker_id' or data_type like 'timestamp%')`).Scan(&finer)
+	}); err != nil || finer != 0 {
+		t.Fatalf("session table has a worker link or a timestamp column: %d %v", finer, err)
+	}
+	at(s, day(time.April, 2))
 	res, err := s.QuestionnaireResults(ctx, sched.ID, false)
 	if err != nil || res.Responded != 4 || res.Invited < 12 || !res.Suppressed || len(res.Overall.Questions) != 0 || len(res.Overall.ResultGroups) != 0 {
 		t.Fatalf("4 of 12 anonymous responses must report counts only: %+v %v", res, err)
@@ -518,9 +569,11 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	_, err = s.QuestionnaireResults(ctx, sched.ID, true)
 	requireCode(t, err, domain.CodeQuestionnaireThreshold)
 
+	at(s, day(time.March, 10))
 	if err := s.SubmitAnswers(userCtx(5), sched.ID, workers[4].ID, answersDoc(5)); err != nil {
 		t.Fatal(err)
 	}
+	at(s, day(time.April, 2))
 	full, err := s.QuestionnaireResults(ctx, sched.ID, false)
 	if err != nil || full.Suppressed || len(full.Overall.ResultGroups) != 1 || *full.Overall.ResultGroups[0].MeanScore != "3.00" {
 		t.Fatalf("5 responses show the overall figures: %+v %v", full, err)
@@ -536,7 +589,6 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 		t.Fatalf("grouped = %+v %v", grouped, err)
 	}
 
-	at(s, day(time.April, 2))
 	requireCode(t, s.SubmitAnswers(userCtx(6), sched.ID, workers[5].ID, answersDoc(3)), domain.CodeQuestionnaireClosed)
 	at(s, day(time.March, 10))
 }
@@ -584,4 +636,19 @@ func TestGrants_PeopleSafetyPathsWorkAsAppRole(t *testing.T) {
 	scenarioOffboarding(t, s, ctx, "G")
 	scenarioOnboarding(t, s, ctx, "G")
 	scenarioQuestionnaire(t, s, ctx, "G")
+	other := ids.New()
+	foreign := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: other, UserID: "scoped", Duties: testkit.ScopeDuties(other)})
+	for _, table := range []string{"hr_questionnaire_session", "hr_questionnaire_responded", "hr_incident", "hr_loaned_item", "hr_checklist", "hr_worker_task"} {
+		var all, scoped int
+		if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*)::int from `+table).Scan(&all)
+		}); err != nil || all == 0 {
+			t.Fatalf("%s: %d rows for the all-entity caller, %v", table, all, err)
+		}
+		if err := dbx.WithTenantTx(foreign, s.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(foreign, `select count(*)::int from `+table).Scan(&scoped)
+		}); err != nil || scoped != 0 {
+			t.Errorf("%s: a caller scoped to another legal entity sees %d rows, %v", table, scoped, err)
+		}
+	}
 }

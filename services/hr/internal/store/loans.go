@@ -84,11 +84,14 @@ func (s *Postgres) IssueLoanedItem(ctx context.Context, in LoanedItem, idempoten
 		if !exists {
 			return problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 		}
-		var err error
-		out, err = scanLoan(tx.QueryRow(ctx, `insert into hr_loaned_item (tenant_id, id, worker_id, loan_type, item_description, asset_id, serial,
+		entity, err := workerEntity(ctx, tx, p.TenantID, in.WorkerID)
+		if err != nil {
+			return err
+		}
+		out, err = scanLoan(tx.QueryRow(ctx, `insert into hr_loaned_item (tenant_id, id, worker_id, legal_entity_id, loan_type, item_description, asset_id, serial,
 				issued_on, due_on, condition_out, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::date, $10, $11) returning `+loanColumns,
-			p.TenantID, ids.New(), in.WorkerID, in.LoanType, in.ItemDescription, in.AssetID, in.Serial, in.IssuedOn, in.DueOn, in.ConditionOut, key))
+			values ($1, $2, $3, $12, $4, $5, $6, $7, $8::date, $9::date, $10, $11) returning `+loanColumns,
+			p.TenantID, ids.New(), in.WorkerID, in.LoanType, in.ItemDescription, in.AssetID, in.Serial, in.IssuedOn, in.DueOn, in.ConditionOut, key, entity))
 		if err != nil {
 			return err
 		}
@@ -97,6 +100,9 @@ func (s *Postgres) IssueLoanedItem(ctx context.Context, in LoanedItem, idempoten
 	})
 	if idempotencyRace(err) {
 		return LoanedItem{}, false, idempotencyInFlight()
+	}
+	if pgCode(err, rlsViolation) {
+		return LoanedItem{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
 	if pgCode(err, checkViolation) {
 		return LoanedItem{}, false, problem(http.StatusUnprocessableEntity, CodeLoanDate, "the due date cannot be before the issue date")
@@ -182,6 +188,20 @@ func (s *Postgres) listLoans(ctx context.Context, where, arg string, workerExist
 		return rows.Err()
 	})
 	return out, err
+}
+
+const rlsViolation = "42501"
+
+// workerEntity is the legal entity a worker's loan, checklist or answer
+// belongs to: that of their latest employment the caller can see. A worker with
+// none yields nil, which only an all-entity caller can write or read.
+func workerEntity(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (*string, error) {
+	var le string
+	err := tx.QueryRow(ctx, `select legal_entity_id::text from employment where tenant_id = $1 and worker_id = $2 order by valid_from desc, id limit 1`, tenantID, workerID).Scan(&le)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return &le, err
 }
 
 func outstandingLoans(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (int, error) {

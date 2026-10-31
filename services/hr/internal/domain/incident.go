@@ -20,6 +20,9 @@ const (
 	MinOverrideReason = 10
 )
 
+var BodyParts = []string{"HEAD", "EYE", "EAR", "FACE", "NECK", "SHOULDER", "ARM", "ELBOW", "WRIST", "HAND", "FINGER", "CHEST", "BACK", "ABDOMEN",
+	"HIP", "LEG", "KNEE", "ANKLE", "FOOT", "TOE", "INTERNAL", "MULTIPLE", "OTHER"}
+
 var IncidentTypes = []string{"INJURY", "SKIN_DISORDER", "RESPIRATORY", "POISONING", "HEARING_LOSS", "OTHER_ILLNESS"}
 
 // IncidentFacts are the facts BR-42.11 reads (29 CFR 1904.7).

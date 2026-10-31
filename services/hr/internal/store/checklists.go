@@ -273,9 +273,13 @@ func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID stri
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		entity, err := workerEntity(ctx, tx, p.TenantID, workerID)
+		if err != nil {
+			return err
+		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into hr_checklist (tenant_id, id, worker_id, template_id, kind, effective_date, created_by) values ($1, $2, $3, $4, $5, $6::date, $7)`,
-			p.TenantID, id, workerID, templateID, tpl.Kind, effective, p.UserID); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hr_checklist (tenant_id, id, worker_id, legal_entity_id, template_id, kind, effective_date, created_by) values ($1, $2, $3, $8, $4, $5, $6::date, $7)`,
+			p.TenantID, id, workerID, templateID, tpl.Kind, effective, p.UserID, entity); err != nil {
 			return err
 		}
 		tasks := tpl.Tasks
@@ -290,9 +294,9 @@ func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID stri
 			case domain.RoleManager:
 				owner = manager
 			}
-			if _, err := tx.Exec(ctx, `insert into hr_worker_task (tenant_id, id, checklist_id, worker_id, task_code, title, owner_role, owner_worker_id, due_on, evidence_required)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10)`, p.TenantID, ids.New(), id, workerID, k.Code, k.Title, k.OwnerRole, owner,
-				domain.TaskDueOn(effective, k.DueOffsetDays), k.EvidenceRequired); err != nil {
+			if _, err := tx.Exec(ctx, `insert into hr_worker_task (tenant_id, id, checklist_id, worker_id, legal_entity_id, task_code, title, owner_role, owner_worker_id, due_on, evidence_required)
+				values ($1, $2, $3, $4, $11, $5, $6, $7, $8, $9::date, $10)`, p.TenantID, ids.New(), id, workerID, k.Code, k.Title, k.OwnerRole, owner,
+				domain.TaskDueOn(effective, k.DueOffsetDays), k.EvidenceRequired, entity); err != nil {
 				return err
 			}
 		}
@@ -302,6 +306,9 @@ func (s *Postgres) StartChecklist(ctx context.Context, workerID, templateID stri
 		inserted = true
 		return enqueue(ctx, tx, "checklist", out.ID, hrevents.ChecklistChanged, p.TenantID, checklistEvent(out))
 	})
+	if pgCode(err, rlsViolation) {
+		return Checklist{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
+	}
 	return out, inserted, err
 }
 

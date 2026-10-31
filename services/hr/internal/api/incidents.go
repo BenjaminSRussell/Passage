@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -110,7 +111,15 @@ func validateIncident(req incidentRequest, now time.Time) (store.IncidentInput, 
 	if tooLong(req.OverrideReason, 500) {
 		fields["overrideReason"] = "at most 500 characters"
 	}
-	textList("bodyParts", req.BodyParts, maxListEntries, 60, fields)
+	if len(req.BodyParts) > maxListEntries {
+		fields["bodyParts"] = "at most 20 entries"
+	}
+	for _, b := range req.BodyParts {
+		if !contains(domain.BodyParts, b) {
+			fields["bodyParts"] = "each entry must be one of " + strings.Join(domain.BodyParts, ", ")
+			break
+		}
+	}
 	textList("witnesses", req.Witnesses, maxListEntries, 120, fields)
 	textList("treatments", req.Treatments, maxListEntries, 200, fields)
 	if req.DaysAway < 0 || req.DaysAway > maxIncidentDays {

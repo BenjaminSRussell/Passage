@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS hr_questionnaire_responded (
   tenant_id uuid NOT NULL,
   schedule_id uuid NOT NULL,
   worker_id uuid NOT NULL,
+  legal_entity_id uuid,
   PRIMARY KEY (tenant_id, schedule_id, worker_id),
   FOREIGN KEY (tenant_id, schedule_id) REFERENCES hr_questionnaire_schedule (tenant_id, id),
   FOREIGN KEY (tenant_id, worker_id) REFERENCES worker (tenant_id, id)
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS hr_questionnaire_session (
   schedule_id uuid NOT NULL,
   respondent_worker_id uuid,
   department_id uuid,
+  legal_entity_id uuid,
   completed_on date NOT NULL,
   answers jsonb NOT NULL,
   scores jsonb NOT NULL DEFAULT '{}',
@@ -89,6 +91,13 @@ ALTER TABLE hr_questionnaire_session FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_questionnaire_session_tenant_access ON hr_questionnaire_session AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+
+CREATE POLICY hr_questionnaire_responded_legal_entity_scope ON hr_questionnaire_responded AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+CREATE POLICY hr_questionnaire_session_legal_entity_scope ON hr_questionnaire_session AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 -- Everything is write-once: a questionnaire, its schedule, an answer session
 -- and the response marker. Nothing is updated or deleted.

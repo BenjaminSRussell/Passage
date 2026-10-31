@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS hr_incident (
   days_away int NOT NULL DEFAULT 0 CHECK (days_away BETWEEN 0 AND 365),
   days_restricted int NOT NULL DEFAULT 0 CHECK (days_restricted BETWEEN 0 AND 365),
   osha_recordable boolean NOT NULL,
-  recordable_override_reason text CHECK (recordable_override_reason IS NULL OR length(recordable_override_reason) BETWEEN 10 AND 500),
   outcome text NOT NULL CHECK (outcome IN ('DEATH', 'DAYS_AWAY', 'RESTRICTED', 'OTHER_RECORDABLE', 'NONE')),
   privacy_case boolean NOT NULL DEFAULT false,
   details_sealed bytea NOT NULL,
@@ -78,6 +77,7 @@ CREATE TABLE IF NOT EXISTS hr_loaned_item (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   worker_id uuid NOT NULL,
+  legal_entity_id uuid,
   loan_type text NOT NULL CHECK (loan_type ~ '^[A-Z0-9][A-Z0-9_-]{0,19}$'),
   item_description text NOT NULL CHECK (length(item_description) BETWEEN 1 AND 200),
   asset_id uuid,
@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS hr_checklist (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   worker_id uuid NOT NULL,
+  legal_entity_id uuid,
   template_id uuid NOT NULL,
   kind text NOT NULL CHECK (kind IN ('ONBOARDING', 'OFFBOARDING', 'TRANSFER')),
   effective_date date NOT NULL,
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS hr_worker_task (
   id uuid NOT NULL,
   checklist_id uuid NOT NULL,
   worker_id uuid NOT NULL,
+  legal_entity_id uuid,
   task_code text NOT NULL,
   title text NOT NULL,
   owner_role text NOT NULL CHECK (owner_role IN ('MANAGER', 'WORKER', 'HR_PARTNER', 'IT')),
@@ -219,16 +221,33 @@ CREATE POLICY hr_worker_task_tenant_access ON hr_worker_task AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
+-- The legal entity of a worker's row is the entity of their latest employment
+-- (NULL when they have none, which only an all-entity caller can see), so a
+-- caller scoped to one entity never reads another entity's loans or tasks.
+CREATE POLICY hr_loaned_item_legal_entity_scope ON hr_loaned_item AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+CREATE POLICY hr_checklist_legal_entity_scope ON hr_checklist AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+CREATE POLICY hr_worker_task_legal_entity_scope ON hr_worker_task AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
 -- Application-role grants (0004_grants.sql pattern). An incident changes only
--- its workflow columns, and the trigger above freezes it once CLOSED. Loans and
--- tasks change status; templates, their tasks and checklists are write-once
--- apart from a checklist completing. Nothing is deleted.
+-- its workflow columns, and the trigger above freezes it once CLOSED. Loans,
+-- checklists and tasks change only their status columns; templates and their
+-- tasks are write-once. Nothing is deleted.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT ON hr_incident, hr_checklist_template, hr_checklist_template_task TO passage_app';
     EXECUTE 'GRANT UPDATE (status, reviewed_by, closed_by, closed_at, updated_at) ON hr_incident TO passage_app';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON hr_incident_counter, hr_loaned_item, hr_checklist, hr_worker_task TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON hr_incident_counter TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT ON hr_loaned_item, hr_checklist, hr_worker_task TO passage_app';
+    EXECUTE 'GRANT UPDATE (status, closed_on, condition_in, updated_at) ON hr_loaned_item TO passage_app';
+    EXECUTE 'GRANT UPDATE (status, completed_at) ON hr_checklist TO passage_app';
+    EXECUTE 'GRANT UPDATE (status, evidence_ref, completed_by, completed_at) ON hr_worker_task TO passage_app';
   END IF;
 END
 $$;

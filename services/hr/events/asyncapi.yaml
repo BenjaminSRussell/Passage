@@ -206,7 +206,8 @@ components:
   schemas:
     IncidentChangedData:
       type: object
-      required: [id, case_no, worker_id, legal_entity_id, site_id, incident_type, status, outcome, osha_recordable, occurred_at]
+      description: worker_id, incident_type and outcome are omitted for a privacy case.
+      required: [id, case_no, legal_entity_id, site_id, status, osha_recordable, occurred_at]
       properties:
         id: {type: string, format: uuid}
         case_no: {type: integer}
