@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -25,6 +26,38 @@ const (
 	webhookTimeout = 10 * time.Second
 	smtpTimeout    = 30 * time.Second
 )
+
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string { return e.err.Error() }
+func (e permanentError) Unwrap() error { return e.err }
+
+func IsPermanent(err error) bool {
+	var p permanentError
+	return errors.As(err, &p)
+}
+
+type statusError struct{ code int }
+
+func (e statusError) Error() string { return fmt.Sprintf("webhook send: status %d", e.code) }
+
+func errorClass(err error) string {
+	var tpe *textproto.Error
+	var se statusError
+	switch {
+	case errors.As(err, &tpe):
+		return "smtp " + strconv.Itoa(tpe.Code)
+	case errors.As(err, &se):
+		return "http " + strconv.Itoa(se.code)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case IsPermanent(err):
+		return "rejected"
+	}
+	return "send error"
+}
 
 type Message struct {
 	ID      string
@@ -63,15 +96,15 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 	if strings.ContainsAny(msg.Subject, "\r\n") {
-		return errors.New("smtp subject contains a line break")
+		return permanentError{errors.New("smtp subject contains a line break")}
 	}
 	to, err := parseSingleAddress("to", msg.To)
 	if err != nil {
-		return err
+		return permanentError{err}
 	}
 	from, err := parseSingleAddress("from", s.cfg.From)
 	if err != nil {
-		return err
+		return permanentError{err}
 	}
 	raw, err := buildMessage(from, to, msg)
 	if err != nil {
@@ -80,6 +113,10 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if err := s.deliver(ctx, from, to, raw); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("smtp send: %w", ctxErr)
+		}
+		var tpe *textproto.Error
+		if errors.As(err, &tpe) && tpe.Code >= 500 {
+			return permanentError{fmt.Errorf("smtp send: %w", err)}
 		}
 		return fmt.Errorf("smtp send: %w", err)
 	}
@@ -211,7 +248,7 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.cfg.URL, bytes.NewReader(payload))
 	if err != nil {
-		return errors.New("build webhook request: invalid url")
+		return permanentError{errors.New("build webhook request: invalid url")}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+w.cfg.Token)
@@ -224,7 +261,11 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("webhook send: status %d", resp.StatusCode)
+		err := statusError{resp.StatusCode}
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			return permanentError{err}
+		}
+		return err
 	}
 	return nil
 }

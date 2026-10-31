@@ -216,8 +216,8 @@ func TestDistributorReplicasNeverClaimTheSameMessage(t *testing.T) {
 		r.seed(t, 1+i%3, domain.ChannelEmail, "a@example.test")
 	}
 	other := &fakeSender{}
-	second := &Distributor{Pool: r.app, Senders: map[string]Sender{domain.ChannelEmail: other}, BatchSize: 7}
-	r.dist.BatchSize = 7
+	second := &Distributor{Pool: r.app, Senders: map[string]Sender{domain.ChannelEmail: other}, Concurrency: 3}
+	r.dist.Concurrency = 3
 
 	var wg sync.WaitGroup
 	for _, d := range []*Distributor{r.dist, second} {
@@ -304,6 +304,81 @@ func TestDistributorStaleAttemptCannotOverwriteNewerState(t *testing.T) {
 	}
 	if r.dist.recordErrs.Load() != 1 || r.dist.sentTotal.Load() != 0 {
 		t.Fatalf("recordErrs=%d sent=%d", r.dist.recordErrs.Load(), r.dist.sentTotal.Load())
+	}
+}
+
+func TestDistributorStaleClaimTokenCannotRecordAfterReclaim(t *testing.T) {
+	r := newRig(t)
+	id := r.seed(t, 1, domain.ChannelEmail, "a@example.test")
+	r.email.onSend = func(Message) {
+		_, err := r.admin.Exec(context.Background(), `update notify_outbound_message set claim_token = gen_random_uuid(), attempts = 0 where id = $1`, id)
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	r.dist.Tick(context.Background())
+
+	if got := r.row(t, id); got.status != domain.MsgSending || got.sentAt != nil {
+		t.Fatalf("stale claim recorded its result: %+v", got)
+	}
+	if r.dist.recordErrs.Load() != 1 {
+		t.Fatalf("recordErrs = %d", r.dist.recordErrs.Load())
+	}
+}
+
+func TestDistributorClaimsNoMoreThanItCanSendPerRound(t *testing.T) {
+	r := newRig(t)
+	r.dist.Concurrency = 2
+	for range 5 {
+		r.seed(t, 1, domain.ChannelEmail, "a@example.test")
+	}
+	rows, err := r.dist.claim(context.Background())
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("claimed %d rows, %v; want 2", len(rows), err)
+	}
+	var queued int
+	if err := r.admin.QueryRow(context.Background(), `select count(*) from notify_outbound_message where status = 'queued'`).Scan(&queued); err != nil || queued != 3 {
+		t.Fatalf("queued = %d, %v", queued, err)
+	}
+	r.dist.Tick(context.Background())
+	if r.email.calls() != 3 {
+		t.Fatalf("Tick drained %d of the remaining 3", r.email.calls())
+	}
+}
+
+func TestDistributorFailsPermanentErrorsWithoutRetry(t *testing.T) {
+	r := newRig(t)
+	r.email.errs = []error{permanentError{errors.New("smtp send: 550 no such user a@example.test")}}
+	r.hook.errs = []error{errors.New("transient")}
+	mail := r.seed(t, 1, domain.ChannelEmail, "a@example.test")
+	hook := r.seed(t, 1, domain.ChannelWebhook, "")
+
+	r.dist.Tick(context.Background())
+
+	if got := r.row(t, mail); got.status != domain.MsgFailed || got.attempts != 1 {
+		t.Fatalf("permanent failure = %+v", got)
+	}
+	if got := r.row(t, hook); got.status != domain.MsgQueued {
+		t.Fatalf("transient failure = %+v", got)
+	}
+}
+
+func TestClaimFunctionsIgnoreAShadowingMakeInterval(t *testing.T) {
+	r := newRig(t)
+	for _, sig := range []string{"secs integer", "secs double precision"} {
+		if _, err := r.admin.Exec(context.Background(), `create function make_interval(`+sig+`) returns interval language sql as $$ select interval '0 seconds' $$`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := r.seed(t, 1, domain.ChannelEmail, "a@example.test")
+
+	rows, err := r.dist.claim(context.Background())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("claim = %d, %v", len(rows), err)
+	}
+	if got := r.row(t, id); got.nextAt == nil || time.Until(*got.nextAt) < time.Minute {
+		t.Fatalf("a hijacked make_interval shortened the lease: %+v", got)
 	}
 }
 

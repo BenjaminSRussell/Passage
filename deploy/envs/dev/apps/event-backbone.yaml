@@ -16,11 +16,14 @@ spec:
         watchNamespaces: [kafka]
   destination:
     server: https://kubernetes.default.svc
-    namespace: strimzi-system
+    namespace: kafka
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
@@ -47,6 +50,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
     syncOptions:
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
@@ -73,6 +79,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -96,36 +105,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
     syncOptions:
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: temporal
-  namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "0"
-spec:
-  project: default
-  sources:
-    - repoURL: https://go.temporal.io/helm-charts
-      chart: temporal
-      targetRevision: 0.74.0
-      helm:
-        releaseName: temporal
-        valueFiles:
-          - $values/deploy/temporal/values.yaml
-    - repoURL: https://github.com/BenjaminSRussell/Passage.git
-      targetRevision: main
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: temporal
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true

@@ -276,6 +276,8 @@ const (
 	modeImplicitTLS
 	modeHang
 	modeDropOnQuit
+	modeRejectRcpt
+	modeTempRcpt
 )
 
 type fakeSMTP struct {
@@ -376,7 +378,14 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			f.mu.Lock()
 			f.rcpt = line
 			f.mu.Unlock()
-			say("250 ok")
+			switch f.mode {
+			case modeRejectRcpt:
+				say("550 no such user")
+			case modeTempRcpt:
+				say("451 try later")
+			default:
+				say("250 ok")
+			}
 		case line == "DATA":
 			inData = true
 			say("354 go")
@@ -575,5 +584,37 @@ func TestSMTPSenderConnectionFailure(t *testing.T) {
 		Send(context.Background(), Message{To: "x@y.test"})
 	if err == nil || strings.Contains(err.Error(), "pw-secret") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPermanentErrorClassification(t *testing.T) {
+	status := func(code int) error {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(code) }))
+		defer srv.Close()
+		return NewWebhookSender(WebhookConfig{URL: srv.URL, Token: "t"}, srv.Client()).Send(context.Background(), Message{})
+	}
+	for code, want := range map[int]bool{400: true, 404: true, 408: false, 429: false, 500: false, 503: false} {
+		if got := IsPermanent(status(code)); got != want {
+			t.Fatalf("webhook %d permanent=%v want %v", code, got, want)
+		}
+	}
+	if err := NewSMTPSender(SMTPConfig{Host: "127.0.0.1", Port: 1, From: "a@b.test", TLS: TLSNone}).Send(context.Background(), Message{To: "nobody"}); !IsPermanent(err) {
+		t.Fatalf("invalid address not permanent: %v", err)
+	}
+	if IsPermanent(errors.New("connection refused")) {
+		t.Fatal("plain error is permanent")
+	}
+	if got := errorClass(status(404)); got != "http 404" {
+		t.Fatalf("class = %q", got)
+	}
+}
+
+func TestSMTPReplyCodesDecidePermanence(t *testing.T) {
+	for mode, want := range map[smtpMode]bool{modeRejectRcpt: true, modeTempRcpt: false} {
+		f := startFakeSMTP(t, mode, nil)
+		err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "s"})
+		if err == nil || IsPermanent(err) != want || errorClass(err) == "send error" {
+			t.Fatalf("mode %d: err=%v permanent=%v class=%q", mode, err, IsPermanent(err), errorClass(err))
+		}
 	}
 }

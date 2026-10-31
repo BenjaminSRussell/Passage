@@ -1,12 +1,16 @@
+alter table notify_outbound_message add column if not exists claim_token uuid;
+create index if not exists ix_notify_outbound_claimable on notify_outbound_message ((coalesce(next_attempt_at, created_at))) where status = 'queued';
+create index if not exists ix_notify_outbound_sending on notify_outbound_message (next_attempt_at) where status = 'sending';
+
 DO $do$
 BEGIN
   EXECUTE format($f$
     CREATE OR REPLACE FUNCTION notify_claim_messages(channels text[], lease_secs int, max_rows int)
-      RETURNS TABLE (tenant_id uuid, id uuid, channel text, recipient_address text, subject text, body_text text, attempts int)
+      RETURNS TABLE (tenant_id uuid, id uuid, channel text, recipient_address text, subject text, body_text text, attempts int, claim_token uuid)
       LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
       AS $body$
         UPDATE notify_outbound_message m
-        SET status = 'sending', attempts = m.attempts + 1,
+        SET status = 'sending', attempts = m.attempts + 1, claim_token = pg_catalog.gen_random_uuid(),
             next_attempt_at = pg_catalog.now() + pg_catalog.make_interval(secs => lease_secs::float8)
         WHERE (m.tenant_id, m.id) IN (
           SELECT q.tenant_id, q.id FROM notify_outbound_message q
@@ -15,14 +19,14 @@ BEGIN
           ORDER BY coalesce(q.next_attempt_at, q.created_at), q.id
           LIMIT max_rows
           FOR UPDATE SKIP LOCKED)
-        RETURNING m.tenant_id, m.id, m.channel, m.recipient_address::text, m.subject::text, m.body_text, m.attempts
+        RETURNING m.tenant_id, m.id, m.channel, m.recipient_address::text, m.subject::text, m.body_text, m.attempts, m.claim_token
       $body$;
     CREATE OR REPLACE FUNCTION notify_fail_unconfirmed_messages(max_rows int)
       RETURNS TABLE (tenant_id uuid, id uuid, channel text, attempts int)
       LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
       AS $body$
         UPDATE notify_outbound_message m
-        SET status = 'failed', next_attempt_at = NULL,
+        SET status = 'failed', next_attempt_at = NULL, claim_token = NULL,
             last_error = 'delivery outcome unknown: the send lease expired before the result was recorded; not retried automatically to avoid a duplicate send'
         WHERE (m.tenant_id, m.id) IN (
           SELECT q.tenant_id, q.id FROM notify_outbound_message q
