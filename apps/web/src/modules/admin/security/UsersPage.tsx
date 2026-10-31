@@ -1,12 +1,36 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../../shell/ui";
-import { getUser, listAssignments, listLegalEntities, listUsers, SecurityApiError, type RoleAssignment, type User, type UserQuery } from "./api";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../../shell/ui";
+import {
+  getUser,
+  listAssignments,
+  listLegalEntities,
+  listUsers,
+  SecurityApiError,
+  USER_STATUSES,
+  UUID,
+  type LegalEntity,
+  type RoleAssignment,
+  type User,
+  type UserQuery,
+  type UserStatus,
+} from "./api";
 import styles from "./security.module.css";
-import { ApiFailure, canRetry } from "./support";
+import { ApiFailure, retryAction } from "./support";
 
 const DUTY = "Maintain users";
+
+async function listAllLegalEntities(): Promise<LegalEntity[]> {
+  const all: LegalEntity[] = [];
+  let after: string | undefined;
+  do {
+    const page = await listLegalEntities(after);
+    all.push(...page.items);
+    after = page.next;
+  } while (after);
+  return all;
+}
 
 const columns: DataTableColumn<User>[] = [
   {
@@ -14,7 +38,7 @@ const columns: DataTableColumn<User>[] = [
     header: "Name",
     render: (u) => <Link to={`/admin/security/users/${encodeURIComponent(u.userId)}`}>{u.displayName}</Link>,
   },
-  { key: "email", header: "Email" },
+  { key: "email", header: "Email", render: (u) => u.email ?? "None" },
   {
     key: "status",
     header: "Status",
@@ -50,16 +74,8 @@ const assignmentColumns: DataTableColumn<RoleAssignment>[] = [
   },
 ];
 
-function retryAction(error: unknown, fetching: boolean, retry: () => void) {
-  return canRetry(error) ? (
-    <Button variant="secondary" loading={fetching} onClick={retry}>
-      Try again
-    </Button>
-  ) : undefined;
-}
-
 export function UsersPage() {
-  const [draft, setDraft] = useState({ q: "", status: "", legalEntityId: "" });
+  const [draft, setDraft] = useState<{ q: string; status: UserStatus | ""; legalEntityId: string }>({ q: "", status: "", legalEntityId: "" });
   const [applied, setApplied] = useState<UserQuery>({});
   const users = useInfiniteQuery({
     queryKey: ["admin", "users", applied],
@@ -70,7 +86,7 @@ export function UsersPage() {
   });
   const entities = useQuery({
     queryKey: ["admin", "legal-entities", "options"],
-    queryFn: () => listLegalEntities(),
+    queryFn: listAllLegalEntities,
     retry: false,
   });
 
@@ -78,8 +94,8 @@ export function UsersPage() {
     event.preventDefault();
     setApplied({
       q: draft.q.trim(),
-      status: draft.status,
-      legalEntityId: draft.legalEntityId,
+      status: draft.status || undefined,
+      legalEntityId: draft.legalEntityId || undefined,
     });
   }
 
@@ -98,10 +114,13 @@ export function UsersPage() {
           </FormField>
           <FormField id="usr-status" label="Status">
             {(c) => (
-              <Select {...c} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
+              <Select {...c} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as UserStatus | "" })}>
                 <option value="">Any status</option>
-                <option value="active">Active</option>
-                <option value="deprovisioned">Deprovisioned</option>
+                {USER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status === "active" ? "Active" : "Deprovisioned"}
+                  </option>
+                ))}
               </Select>
             )}
           </FormField>
@@ -109,7 +128,7 @@ export function UsersPage() {
             {(c) => (
               <Select {...c} value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })}>
                 <option value="">All legal entities</option>
-                {(entities.data?.items ?? []).map((le) => (
+                {(entities.data ?? []).map((le) => (
                   <option key={le.legalEntityId} value={le.legalEntityId}>
                     {`${le.code} - ${le.displayName}`}
                   </option>
@@ -166,9 +185,11 @@ export function UsersPage() {
 
 export function UserDetailPage() {
   const userId = useParams().userId ?? "";
+  const validId = UUID.test(userId);
   const user = useQuery({
     queryKey: ["admin", "user", userId],
     queryFn: () => getUser(userId),
+    enabled: validId,
     retry: false,
   });
   const assignments = useInfiniteQuery({
@@ -188,6 +209,11 @@ export function UserDetailPage() {
       <p>
         <Link to="/admin/security/users">Back to users</Link>
       </p>
+      {!validId ? (
+        <Alert tone="danger" title="User not found" live="alert">
+          The user id in the address is not a valid UUID.
+        </Alert>
+      ) : null}
       {user.isError ? (
         <ApiFailure
           error={user.error}
@@ -197,7 +223,7 @@ export function UserDetailPage() {
         />
       ) : null}
       <p className={styles.note} role="status">
-        {user.isPending ? "Loading user…" : null}
+        {validId && user.isPending ? "Loading user…" : null}
       </p>
       {user.data ? (
         <>

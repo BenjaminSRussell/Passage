@@ -144,6 +144,17 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 		if d.Name != "Maintain security roles" || len(d.Permissions) != 4 || d.Permissions[0].Resource != "/v1/authz/roles{,/**}" {
 			t.Fatalf("detail = %+v", d)
 		}
+		all := decode[pageOf[dutySummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/duties", nil), http.StatusOK)
+		for _, summary := range all.Items {
+			if summary.PermissionCount != 0 {
+				continue
+			}
+			body := f.do(c, http.MethodGet, "/v1/authz/duties/"+url.PathEscape(summary.Name), nil).Body.String()
+			if !strings.Contains(body, `"permissions":[]`) {
+				t.Fatalf("route-less duty %q must emit an empty permissions array, got %s", summary.Name, body)
+			}
+			break
+		}
 		wantProblem(t, f.do(c, http.MethodGet, "/v1/authz/duties/nope", nil), http.StatusNotFound, "IDN-DUTY-NOT-FOUND")
 	})
 

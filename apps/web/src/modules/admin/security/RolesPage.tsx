@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../../shell/ui";
 import { getRole, listDuties, listRoles, SecurityApiError, type DutyDetail, type DutySummary, type RoleSummary } from "./api";
 import styles from "./security.module.css";
-import { ApiFailure, canRetry } from "./support";
+import { ApiFailure, retryAction } from "./support";
 
 const DUTY = "Maintain security roles";
 
@@ -37,14 +37,6 @@ const permissionColumns: DataTableColumn<DutyDetail["permissions"][number]>[] = 
   },
 ];
 
-function retry(error: unknown, fetching: boolean, refetch: () => void) {
-  return canRetry(error) ? (
-    <Button variant="secondary" loading={fetching} onClick={refetch}>
-      Try again
-    </Button>
-  ) : undefined;
-}
-
 export function RolesPage() {
   const [draft, setDraft] = useState({ q: "", serviceOnly: "" });
   const [applied, setApplied] = useState({ q: "", serviceOnly: "" });
@@ -65,6 +57,7 @@ export function RolesPage() {
   }
 
   const filtered = applied.q !== "";
+  const dutiesFiltered = filtered || applied.serviceOnly !== "";
 
   return (
     <div className={styles.stack}>
@@ -98,7 +91,7 @@ export function RolesPage() {
           error={roles.error}
           title="Could not load the roles"
           duty={DUTY}
-          action={retry(roles.error, roles.isFetching, () => void roles.refetch())}
+          action={retryAction(roles.error, roles.isFetching, () => void roles.refetch())}
         />
       ) : (
         <DataTable
@@ -119,7 +112,7 @@ export function RolesPage() {
           error={duties.error}
           title="Could not load the duties"
           duty={DUTY}
-          action={retry(duties.error, duties.isFetching, () => void duties.refetch())}
+          action={retryAction(duties.error, duties.isFetching, () => void duties.refetch())}
         />
       ) : (
         <DataTable
@@ -129,8 +122,8 @@ export function RolesPage() {
           getRowKey={(d) => d.name}
           loading={duties.isPending}
           empty={{
-            title: "No duties match",
-            description: "Clear the search or duty kind to see every duty.",
+            title: dutiesFiltered ? "No duties match" : "No duties yet",
+            description: dutiesFiltered ? "Clear the search or duty kind to see every duty." : undefined,
           }}
         />
       )}
@@ -158,7 +151,7 @@ export function RoleDetailPage() {
           error={role.error}
           title={notFound ? "Role not found" : "Could not load the role"}
           duty={DUTY}
-          action={retry(role.error, role.isFetching, () => void role.refetch())}
+          action={retryAction(role.error, role.isFetching, () => void role.refetch())}
         />
       ) : null}
       <p className={styles.note} role="status">

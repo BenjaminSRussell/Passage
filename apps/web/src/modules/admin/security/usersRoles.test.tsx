@@ -236,7 +236,7 @@ describe("role catalogue page", () => {
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/admin/security/roles");
     expect(await screen.findByText("No roles yet")).toBeInTheDocument();
-    expect(await screen.findByText("No duties match")).toBeInTheDocument();
+    expect(await screen.findByText("No duties yet")).toBeInTheDocument();
     first.unmount();
     server.handler = () => json(403, { code: "IAM-0403", detail: "needs Maintain security roles" });
     const { container } = renderAt("/admin/security/roles");
@@ -282,5 +282,51 @@ describe("role detail page", () => {
     server.handler = () => json(200, { name: "Empty", duties: [] });
     renderAt("/admin/security/roles/Empty");
     expect(await screen.findByText("This role holds no duties.")).toBeInTheDocument();
+  });
+});
+
+describe("review follow-ups", () => {
+  it("renders a role whose duty has null permissions", async () => {
+    server.handler = () => json(200, { name: "Flag", duties: [{ name: "Flag", serviceOnly: false, permissions: null }] });
+    renderAt("/admin/security/roles/Flag");
+    expect(await screen.findByText("No routes")).toBeInTheDocument();
+  });
+
+  it("does not call the API for a malformed user id", async () => {
+    renderAt("/admin/security/users/nope");
+    expect(await screen.findByText("User not found")).toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+  });
+
+  it("shows None for a user without an email", async () => {
+    const { email: _email, ...noEmail } = user(U1, "Ada");
+    server.handler = (url) => (url.pathname === "/api/v1/identity/users" ? json(200, { items: [noEmail] }) : json(200, { items: [] }));
+    renderAt("/admin/security/users");
+    expect(await within(await screen.findByRole("table", { name: "Users" })).findByText("None")).toBeInTheDocument();
+  });
+
+  it("loads every legal-entity page for the filter", async () => {
+    const entity = (id: string, code: string) => ({ legalEntityId: id, code, displayName: code, status: "active", createdAt: "2026-01-01T00:00:00Z" });
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/legal-entities") {
+        return url.searchParams.get("after") ? json(200, { items: [entity(U2, "FR01")] }) : json(200, { items: [entity(ENTITY, "DE01")], next: U2 });
+      }
+      return json(200, { items: [] });
+    };
+    renderAt("/admin/security/users");
+    expect(await screen.findByRole("option", { name: "FR01 - FR01" })).toBeInTheDocument();
+  });
+
+  it("follows a changed ?userId and writes the submitted user to the URL", async () => {
+    server.handler = (url) => {
+      const m = /users\/([^/]+)\/effective-permissions/.exec(url.pathname);
+      return m ? json(200, { userId: m[1], duties: [], ignoredRoles: [], permissions: [] }) : undefined;
+    };
+    renderAt(`/admin/security/permissions?userId=${U1}`);
+    await screen.findByRole("list", { name: "Duties in effect" });
+    fireEvent.change(screen.getByLabelText("User id"), { target: { value: U2 } });
+    fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
+    await waitFor(() => expect(server.calls.some((c) => c.url.pathname.includes(U2))).toBe(true));
+    expect(screen.getByLabelText("User id")).toHaveValue(U2);
   });
 });

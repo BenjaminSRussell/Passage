@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../../shell/ui";
 import { fetchEffectivePermissions, SecurityApiError, UUID, type Permission } from "./api";
@@ -40,11 +40,18 @@ function validate(values: Request): Errors {
 
 export function EffectivePermissionsPage() {
   const form = useRef<HTMLFormElement>(null);
-  const linkedUser = useSearchParams()[0].get("userId")?.trim() ?? "";
+  const [params, setParams] = useSearchParams();
+  const linkedUser = params.get("userId")?.trim() ?? "";
   const linked: Request | null = UUID.test(linkedUser) ? { userId: linkedUser, legalEntityId: "" } : null;
   const [values, setValues] = useState<Request>(linked ?? { userId: "", legalEntityId: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [request, setRequest] = useState<Request | null>(linked);
+  useEffect(() => {
+    if (!UUID.test(linkedUser)) return;
+    const next: Request = { userId: linkedUser, legalEntityId: "" };
+    setRequest((prev) => (prev?.userId === linkedUser ? prev : next));
+    setValues((prev) => (prev.userId.trim() === linkedUser ? prev : next));
+  }, [linkedUser]);
   const [search, setSearch] = useState("");
   const [method, setMethod] = useState("");
   const [decision, setDecision] = useState("");
@@ -77,6 +84,7 @@ export function EffectivePermissionsPage() {
     setErrors(found);
     if (Object.keys(found).length === 0) {
       setRequest({ userId: values.userId.trim(), legalEntityId: values.legalEntityId.trim() });
+      setParams({ userId: values.userId.trim() });
     }
   }
 

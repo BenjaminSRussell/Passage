@@ -42,7 +42,7 @@ async function readProblem(res: Response): Promise<SecurityApiError> {
   return new SecurityApiError(res.status, code, message, fields.success ? fields.data : {}, typeof body.traceId === "string" ? body.traceId : undefined);
 }
 
-async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T>, fetchImpl: FetchLike): Promise<T> {
+async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T, z.ZodTypeDef, unknown>, fetchImpl: FetchLike): Promise<T> {
   const res = await fetchImpl(url, init);
   if (!res.ok) throw await readProblem(res);
   return schema.parse(await res.json());
@@ -154,12 +154,15 @@ export function createLegalEntity(input: CreateLegalEntityInput, fetchImpl: Fetc
   return send("/api/v1/legal-entities", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }, legalEntitySchema, fetchImpl);
 }
 
+export const USER_STATUSES = ["active", "deprovisioned"] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
 const userSchema = z.object({
   userId: z.string(),
   idpSubject: z.string(),
   email: z.string().optional(),
   displayName: z.string(),
-  status: z.string(),
+  status: z.enum(USER_STATUSES),
   createdAt: z.string(),
 });
 export type User = z.infer<typeof userSchema>;
@@ -172,38 +175,22 @@ export type UserPage = z.infer<typeof userPageSchema>;
 
 export interface UserQuery {
   q?: string;
-  status?: string;
+  status?: UserStatus;
   legalEntityId?: string;
   after?: string;
 }
 
-export function listUsers(
-  q: UserQuery,
-  fetchImpl: FetchLike = defaultFetch,
-): Promise<UserPage> {
+export function listUsers(q: UserQuery, fetchImpl: FetchLike = defaultFetch): Promise<UserPage> {
   const params = new URLSearchParams();
   if (q.q) params.set("q", q.q);
   if (q.status) params.set("status", q.status);
   if (q.legalEntityId) params.set("legalEntityId", q.legalEntityId);
   if (q.after) params.set("after", q.after);
-  return send(
-    `/api/v1/identity/users?${params.toString()}`,
-    GET,
-    userPageSchema,
-    fetchImpl,
-  );
+  return send(`/api/v1/identity/users?${params.toString()}`, GET, userPageSchema, fetchImpl);
 }
 
-export function getUser(
-  userId: string,
-  fetchImpl: FetchLike = defaultFetch,
-): Promise<User> {
-  return send(
-    `/api/v1/identity/users/${encodeURIComponent(userId)}`,
-    GET,
-    userSchema,
-    fetchImpl,
-  );
+export function getUser(userId: string, fetchImpl: FetchLike = defaultFetch): Promise<User> {
+  return send(`/api/v1/identity/users/${encodeURIComponent(userId)}`, GET, userSchema, fetchImpl);
 }
 
 const dutySummarySchema = z.object({
@@ -216,9 +203,10 @@ export type DutySummary = z.infer<typeof dutySummarySchema>;
 const dutyDetailSchema = z.object({
   name: z.string(),
   serviceOnly: z.boolean(),
-  permissions: z.array(
-    z.object({ resource: z.string(), methods: z.array(z.string()) }),
-  ),
+  permissions: z
+    .array(z.object({ resource: z.string(), methods: z.array(z.string()) }))
+    .nullable()
+    .transform((v) => v ?? []),
 });
 export type DutyDetail = z.infer<typeof dutyDetailSchema>;
 
@@ -236,49 +224,23 @@ export type RoleDetail = z.infer<typeof roleDetailSchema>;
 
 function filterQuery(params: Record<string, string | undefined>): string {
   const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params))
-    if (value) search.set(key, value);
+  for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
   const text = search.toString();
   return text ? `?${text}` : "";
 }
 
-export function listRoles(
-  q?: string,
-  fetchImpl: FetchLike = defaultFetch,
-): Promise<RoleSummary[]> {
-  return send(
-    `/api/v1/authz/roles${filterQuery({ q })}`,
-    GET,
-    z.object({ items: z.array(roleSummarySchema) }),
-    fetchImpl,
-  ).then((r) => r.items);
+export function listRoles(q?: string, fetchImpl: FetchLike = defaultFetch): Promise<RoleSummary[]> {
+  return send(`/api/v1/authz/roles${filterQuery({ q })}`, GET, z.object({ items: z.array(roleSummarySchema) }), fetchImpl).then((r) => r.items);
 }
 
-export function getRole(
-  name: string,
-  fetchImpl: FetchLike = defaultFetch,
-): Promise<RoleDetail> {
-  return send(
-    `/api/v1/authz/roles/${encodeURIComponent(name)}`,
-    GET,
-    roleDetailSchema,
-    fetchImpl,
-  );
+export function getRole(name: string, fetchImpl: FetchLike = defaultFetch): Promise<RoleDetail> {
+  return send(`/api/v1/authz/roles/${encodeURIComponent(name)}`, GET, roleDetailSchema, fetchImpl);
 }
 
-export function listDuties(
-  q?: string,
-  serviceOnly?: boolean,
-  fetchImpl: FetchLike = defaultFetch,
-): Promise<DutySummary[]> {
+export function listDuties(q?: string, serviceOnly?: boolean, fetchImpl: FetchLike = defaultFetch): Promise<DutySummary[]> {
   const query = filterQuery({
     q,
     serviceOnly: serviceOnly === undefined ? undefined : String(serviceOnly),
   });
-  return send(
-    `/api/v1/authz/duties${query}`,
-    GET,
-    z.object({ items: z.array(dutySummarySchema) }),
-    fetchImpl,
-  ).then((r) => r.items);
+  return send(`/api/v1/authz/duties${query}`, GET, z.object({ items: z.array(dutySummarySchema) }), fetchImpl).then((r) => r.items);
 }
