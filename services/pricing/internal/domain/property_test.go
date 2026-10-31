@@ -41,13 +41,15 @@ func randomRequest(rng *rand.Rand) domain.Input {
 	currency := []string{"USD", "EUR", "JPY"}[rng.Intn(3)]
 	h := domain.Header{CustomerID: customers[rng.Intn(2)], CustomerGroupID: groups[rng.Intn(2)], Currency: currency, PricingDate: pricingDate}
 	in := domain.Input{Header: h}
-	for i := 0; i < 1+rng.Intn(10); i++ {
+	// Bounds are drawn once: a bound drawn in the loop condition is redrawn every
+	// iteration and almost always stops after a record or two.
+	for i, n := 0, 1+rng.Intn(10); i < n; i++ {
 		in.Lines = append(in.Lines, domain.Line{No: i + 1, ProductID: products[rng.Intn(3)], ProductGroupID: pgroups[rng.Intn(2)],
 			Unit: "EA", Quantity: decimal.New(int64(1+rng.Intn(600)), -int32(rng.Intn(3)))})
 	}
 	types := []domain.ConditionType{domain.TypePrice, domain.TypePrice, domain.TypeLineDisc, domain.TypeTotalDisc}
 	accesses := domain.DefaultAccesses()
-	for i := 0; i < rng.Intn(30); i++ {
+	for i, n := 0, rng.Intn(30); i < n; i++ {
 		acc := accesses[1+rng.Intn(len(accesses)-1)] // variant records need a variant; keep to the other eight
 		r := domain.Record{ID: fmt.Sprintf("R%02d", i), Status: domain.StatusActive, Type: types[rng.Intn(len(types))],
 			CustomerKind: acc.Customer, ProductKind: acc.Product, Currency: currency, Unit: []string{"EA", ""}[rng.Intn(2)],

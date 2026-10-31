@@ -30,17 +30,19 @@ type Cache struct {
 	mu      sync.Mutex
 	gen     uint64
 	entries map[string]snapshot
+	loading map[string]*loadCall
 }
 
+// snapshot holds the records bucketed for the engine; resolves share it read-only.
 type snapshot struct {
-	records []domain.Record
+	set     *domain.RecordSet
 	expires time.Time
 }
 
 // NewCache wraps s with a snapshot cache of the given TTL. A TTL of zero or less disables
 // the cache: every resolve reads the store.
 func NewCache(s Store, ttl time.Duration) *Cache {
-	return &Cache{Store: s, ttl: ttl, now: time.Now, entries: map[string]snapshot{}}
+	return &Cache{Store: s, ttl: ttl, now: time.Now, entries: map[string]snapshot{}, loading: map[string]*loadCall{}}
 }
 
 func cacheKey(ctx context.Context, q ActiveQuery) string {
@@ -54,30 +56,82 @@ func (c *Cache) ActiveRecords(ctx context.Context, q ActiveQuery) ([]domain.Reco
 	if c.ttl <= 0 {
 		return c.Store.ActiveRecords(ctx, q)
 	}
-	key := cacheKey(ctx, q)
-	c.mu.Lock()
-	hit, ok := c.entries[key]
-	gen := c.gen
-	now := c.now()
-	c.mu.Unlock()
-	if ok && now.Before(hit.expires) {
-		return append([]domain.Record(nil), hit.records...), nil
-	}
-	records, err := c.Store.ActiveRecords(ctx, q)
+	set, err := c.ActiveRecordSet(ctx, q)
 	if err != nil {
 		return nil, err
 	}
+	return set.Records(), nil
+}
+
+// ActiveRecordSet serves the snapshot as the shared, pre-bucketed domain.RecordSet itself:
+// a hit neither copies nor re-indexes the price list, so a resolve costs what its own
+// lines' accesses read (FR-26.14). The engine never changes a RecordSet. Concurrent misses
+// of one key wait for a single load instead of each reading the whole price list (a cold
+// or expired snapshot under load); a load that began before a flush is neither joined nor
+// kept, since it may hold the old ACTIVE set. Without the cache (TTL zero) every call
+// loads and buckets afresh.
+func (c *Cache) ActiveRecordSet(ctx context.Context, q ActiveQuery) (*domain.RecordSet, error) {
+	if c.ttl <= 0 {
+		records, err := c.Store.ActiveRecords(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		return domain.NewRecordSet(records), nil
+	}
+	key := cacheKey(ctx, q)
 	c.mu.Lock()
-	// Keep the snapshot only when no change was flushed while it loaded: a load that began
-	// before a commit may hold the old ACTIVE set.
-	if c.gen == gen {
+	now := c.now()
+	if hit, ok := c.entries[key]; ok && now.Before(hit.expires) {
+		c.mu.Unlock()
+		return hit.set, nil
+	}
+	if call, ok := c.loading[key]; ok && call.gen == c.gen {
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if call.err == nil {
+			return call.set, nil
+		}
+		// The shared load failed (perhaps its caller went away): load for this caller.
+		records, err := c.Store.ActiveRecords(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		return domain.NewRecordSet(records), nil
+	}
+	call := &loadCall{gen: c.gen, done: make(chan struct{})}
+	c.loading[key] = call
+	c.mu.Unlock()
+
+	records, err := c.Store.ActiveRecords(ctx, q)
+	if err == nil {
+		call.set = domain.NewRecordSet(records)
+	}
+	call.err = err
+	c.mu.Lock()
+	if c.loading[key] == call {
+		delete(c.loading, key)
+	}
+	if err == nil && c.gen == call.gen {
 		if len(c.entries) >= maxCacheEntries {
 			c.entries = map[string]snapshot{}
 		}
-		c.entries[key] = snapshot{records: append([]domain.Record(nil), records...), expires: now.Add(c.ttl)}
+		c.entries[key] = snapshot{set: call.set, expires: now.Add(c.ttl)}
 	}
 	c.mu.Unlock()
-	return records, nil
+	close(call.done)
+	return call.set, err
+}
+
+// loadCall is one snapshot load that concurrent misses of the same key wait for.
+type loadCall struct {
+	gen  uint64
+	done chan struct{}
+	set  *domain.RecordSet
+	err  error
 }
 
 // Flush drops every snapshot (the runbook's cache rebuild: the next resolve reloads).
