@@ -14,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
@@ -28,10 +30,62 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
+	if len(os.Args) > 1 && os.Args[1] == resealCommand {
+		if err := reseal(context.Background(), os.Getenv, os.Args[2:]); err != nil {
+			slog.Error("hr reseal-pii stopped", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(context.Background(), os.Getenv); err != nil {
 		slog.Error("hr stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+const (
+	resealCommand = "reseal-pii"
+	resealActor   = "hr-reseal-pii"
+)
+
+// reseal is the operator command `hr reseal-pii <tenant-id>...` (#335): for each
+// tenant it re-seals every P3 value that opens only through HR_PII_KEY or names an
+// older fieldcrypt key under FIELDCRYPT_CURRENT_KEY_ID. It runs with the service's
+// own environment; once every tenant reports rewritten=0, HR_PII_KEY can be removed.
+func reseal(ctx context.Context, getenv func(string) string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: hr reseal-pii TENANT_ID [TENANT_ID ...]")
+	}
+	tenants := make([]string, len(args))
+	for i, arg := range args {
+		id, ok := ids.Canonical(arg)
+		if !ok || id == ids.Nil {
+			return fmt.Errorf("tenant id %q is not a UUID", arg)
+		}
+		tenants[i] = id
+	}
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	sealer, err := sealerFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	pool, err := dbx.Connect(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	s := store.New(pool, sealer, defaultMaxDepth)
+	for _, id := range tenants {
+		n, err := s.ResealPII(tenant.With(ctx, tenant.Principal{TenantID: id, UserID: resealActor}))
+		if err != nil {
+			return fmt.Errorf("tenant %s: %w (rewrote %d rows before stopping)", id, err, n)
+		}
+		slog.Info("hr pii re-sealed", "tenantId", id, "rewritten", n)
+	}
+	return nil
 }
 
 func newLogger(w io.Writer) *slog.Logger {

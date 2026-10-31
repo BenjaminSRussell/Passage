@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,8 +9,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
 
 // serve runs one request through the HR routes with a principal carrying the
@@ -126,6 +130,27 @@ func TestMetricsExposeCountersWithoutStore(t *testing.T) {
 	for _, name := range []string{"hr_pii_reveals_total", "hr_as_of_queries_total", "hr_workers_created_total"} {
 		if !strings.Contains(rec.Body.String(), name) {
 			t.Errorf("metrics missing %s", name)
+		}
+	}
+}
+
+func TestMetricsCountLegacyAndFailedPIIOpens(t *testing.T) {
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := domain.NewSealer(keys, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sealer.Open(tid(), "worker_pii.national_id", []byte("not sealed")); err == nil {
+		t.Fatal("garbage must not open")
+	}
+	rec := httptest.NewRecorder()
+	New(store.New(nil, sealer, 10)).Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, line := range []string{"hr_pii_legacy_opens_total 0\n", "hr_pii_open_failures_total 1\n"} {
+		if !strings.Contains(rec.Body.String(), line) {
+			t.Errorf("metrics missing %q:\n%s", line, rec.Body.String())
 		}
 	}
 }

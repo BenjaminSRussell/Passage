@@ -18,6 +18,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -57,6 +58,9 @@ type Ports struct {
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
+
+	// FieldCrypt keys the stored Idempotency-Key request hash (RequestHash); nil keeps plain SHA-256.
+	FieldCrypt *fieldcrypt.Keys
 }
 
 type API struct {

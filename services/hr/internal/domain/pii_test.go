@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -97,6 +99,94 @@ func TestSealer_OpensLegacyValues(t *testing.T) {
 	}
 	if _, err := other.Open("t1", "national_id", legacy); err == nil {
 		t.Error("a legacy value must not open under a different legacy key")
+	}
+}
+
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
+
+func TestSealer_OpenCountsAndLogsWhichPathFailedWithoutTheValue(t *testing.T) {
+	logs := captureLogs(t)
+	legacyKey := bytes.Repeat([]byte{9}, 32)
+	s, err := NewSealer(testKeys(t, 7), legacyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _ := s.Seal("t1", "national_id", "123-45-6789")
+	if _, err := s.Open("t1", "national_id", current); err != nil {
+		t.Fatal(err)
+	}
+	if legacy, failed := s.OpenCounts(); legacy != 0 || failed != 0 || logs.Len() != 0 {
+		t.Fatalf("a fieldcrypt open counted legacy=%d failed=%d logged %q", legacy, failed, logs)
+	}
+	if _, err := s.Open("t1", "national_id", legacySeal(t, legacyKey, "123-45-6789")); err != nil {
+		t.Fatal(err)
+	}
+	if legacy, failed := s.OpenCounts(); legacy != 1 || failed != 0 || !strings.Contains(logs.String(), `"level":"WARN"`) {
+		t.Fatalf("legacy open counted legacy=%d failed=%d logged %q", legacy, failed, logs)
+	}
+
+	rotatedAway, _ := fieldcrypt.NewKeys("k9", map[string][]byte{"k9": bytes.Repeat([]byte{5}, 32)})
+	orphan, _ := rotatedAway.Seal("t1", "national_id", []byte("123-45-6789"))
+	if _, err := s.Open("t1", "national_id", orphan); err == nil {
+		t.Fatal("a value under a key that is not configured must not open")
+	}
+	if legacy, failed := s.OpenCounts(); legacy != 1 || failed != 1 {
+		t.Fatalf("failed open counted legacy=%d failed=%d", legacy, failed)
+	}
+	for _, want := range []string{`"level":"ERROR"`, `"envelopeKeyId":"k9"`, `"fieldcrypt":"failed"`, `"legacy":"failed"`, `"field":"national_id"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs lack %s: %s", want, logs)
+		}
+	}
+	if _, err := testSealer(t).Open("t1", "national_id", orphan); err == nil || !strings.Contains(logs.String(), `"legacy":"not_configured"`) {
+		t.Errorf("without a legacy key the log must say so: %v %s", err, logs)
+	}
+	if strings.Contains(logs.String(), "6789") {
+		t.Errorf("logs leak the value: %s", logs)
+	}
+}
+
+func TestSealer_ResealMovesLegacyAndOlderKeysToTheCurrentKey(t *testing.T) {
+	legacyKey := bytes.Repeat([]byte{9}, 32)
+	oldKeys := testKeys(t, 7)
+	rotated, err := fieldcrypt.NewKeys("k2", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32), "k2": bytes.Repeat([]byte{8}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSealer(rotated, legacyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	underOld, _ := oldKeys.Seal("t1", "national_id", []byte("123-45-6789"))
+	underCurrent, _ := s.Seal("t1", "national_id", "123-45-6789")
+	for name, in := range map[string][]byte{"legacy": legacySeal(t, legacyKey, "123-45-6789"), "older key": underOld} {
+		out, changed, err := s.Reseal("t1", "national_id", in)
+		if err != nil || !changed {
+			t.Fatalf("%s: changed=%v err=%v", name, changed, err)
+		}
+		if id, _ := fieldcrypt.KeyID(out); id != "k2" {
+			t.Errorf("%s: re-sealed under %q, want k2", name, id)
+		}
+		if plain, err := rotated.Open("t1", "national_id", out); err != nil || string(plain) != "123-45-6789" {
+			t.Errorf("%s: re-sealed value opens to %q, %v", name, plain, err)
+		}
+	}
+	out, changed, err := s.Reseal("t1", "national_id", underCurrent)
+	if err != nil || changed || !bytes.Equal(out, underCurrent) {
+		t.Fatalf("a current value must stay as is: changed=%v err=%v", changed, err)
+	}
+	if _, _, err := s.Reseal("t2", "national_id", underCurrent); err == nil {
+		t.Fatal("a value that opens under neither key must fail")
+	}
+	if legacy, failed := s.OpenCounts(); legacy != 0 || failed != 0 {
+		t.Errorf("Reseal must not count read opens: legacy=%d failed=%d", legacy, failed)
 	}
 }
 
