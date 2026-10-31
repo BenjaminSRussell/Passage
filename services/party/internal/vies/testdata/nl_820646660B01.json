@@ -1,0 +1,22 @@
+{
+  "isValid" : true,
+  "requestDate" : "2026-10-31T02:44:26.533Z",
+  "userError" : "VALID",
+  "name" : "ABN AMRO BANK N.V.",
+  "address" : "\nGUSTAV MAHLERLAAN 00010\n1082PP AMSTERDAM\n",
+  "requestIdentifier" : "",
+  "originalVatNumber" : "820646660B01",
+  "vatNumber" : "820646660B01",
+  "viesApproximate" : {
+    "name" : "---",
+    "street" : "---",
+    "postalCode" : "---",
+    "city" : "---",
+    "companyType" : "---",
+    "matchName" : 3,
+    "matchStreet" : 3,
+    "matchPostalCode" : 3,
+    "matchCity" : 3,
+    "matchCompanyType" : 3
+  }
+}

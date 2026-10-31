@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -115,5 +116,17 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 		if _, ok := line[key]; !ok {
 			t.Errorf("log line missing %q: %s", key, out.String())
 		}
+	}
+}
+
+func TestTaxCheckerUsesVIESOnlyWhenConfigured(t *testing.T) {
+	env := map[string]string{}
+	getenv := func(k string) string { return env[k] }
+	if got := taxChecker(getenv); fmt.Sprintf("%T", got) != "vies.Unavailable" {
+		t.Fatalf("empty PARTY_VIES_URL gave %T", got)
+	}
+	env["PARTY_VIES_URL"] = "http://vies.invalid"
+	if got := taxChecker(getenv); fmt.Sprintf("%T", got) != "*vies.Client" {
+		t.Fatalf("configured PARTY_VIES_URL gave %T", got)
 	}
 }

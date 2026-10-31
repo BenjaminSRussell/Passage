@@ -402,12 +402,22 @@
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
-      {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]}
+      {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
+      {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]}
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
       {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
-      {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]}
+      {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]},
+      {"resource": "/v1/party/parties/*/vendors", "methods": ["GET"]},
+      {"resource": "/v1/party/vendors/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]}
+    ]},
+    "party.vendor_bank.write": {"permissions": [
+      {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["POST"]}
+    ]},
+    "party.vendor_bank.reveal": {"permissions": [
+      {"resource": "/v1/party/vendors/*/bank-accounts:reveal", "methods": ["GET"]}
     ]},
     "pii.read": {"flag": true, "permissions": []},
     "party.merge": {"flag": true, "permissions": []},

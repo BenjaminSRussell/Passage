@@ -342,6 +342,12 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "pii.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantDutyMissing: "party.read"},
 		{duty: "party.approve", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantDutyMissing: "party.approval_policy.write"},
 		{duty: "party.approval_policy.write", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantAllowed: true},
+		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/vendors/v1", wantAllowed: true},
+		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/vendors/v1/bank-accounts", wantAllowed: true},
+		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/vendors/v1/bank-accounts:reveal", wantDutyMissing: "party.vendor_bank.reveal"},
+		{duty: "party.vendor_bank.reveal", method: http.MethodGet, resource: "/v1/party/vendors/v1/bank-accounts:reveal", wantAllowed: true},
+		{duty: "party.write", method: http.MethodPost, resource: "/v1/party/vendors/v1/bank-accounts", wantDutyMissing: "party.vendor_bank.write"},
+		{duty: "party.vendor_bank.write", method: http.MethodPost, resource: "/v1/party/vendors/v1/bank-accounts", wantAllowed: true},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {

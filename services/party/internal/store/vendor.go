@@ -1,0 +1,230 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
+)
+
+const (
+	CodeVendorNotFound  = "PTY-VENDOR-NOT-FOUND"
+	CodeVendorInvalid   = "PTY-VENDOR-INVALID"
+	CodeVendorExists    = "PTY-VENDOR-EXISTS"
+	CodeBankInvalid     = "PTY-BANK-INVALID"
+	CodeBankUnavailable = "PTY-BANK-ENCRYPTION-UNAVAILABLE"
+	CodePartyMerged     = "PTY-PARTY-MERGED"
+	FieldBankAccountNo  = "vendor_bank_account.account_number"
+	FieldBankRoutingNo  = "vendor_bank_account.routing_number"
+	vendorColumns       = `id::text, party_id::text, legal_entity_id::text, account_number, vendor_group_id::text, payment_term_id::text, currency_code, blocked, version`
+	bankColumns         = `id::text, vendor_id::text, account_holder, bank_country, currency_code, account_last4`
+	foreignKeyViolation = "23503"
+)
+
+type VendorStore interface {
+	CreateVendor(ctx context.Context, partyID string, in domain.NewVendor) (domain.Vendor, error)
+	GetVendor(ctx context.Context, vendorID string) (domain.Vendor, error)
+	ListPartyVendors(ctx context.Context, partyID string) ([]domain.Vendor, error)
+	AddBankAccount(ctx context.Context, vendorID string, in domain.NewBankAccount) (domain.BankAccount, error)
+	ListBankAccounts(ctx context.Context, vendorID string, reveal bool) ([]domain.BankAccount, error)
+}
+
+func (s *Postgres) WithKeys(keys *fieldcrypt.Keys) *Postgres {
+	s.keys = keys
+	return s
+}
+
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation
+}
+
+func vendorNotFound() error { return notFound(CodeVendorNotFound, "vendor not found") }
+
+func scanVendor(row pgx.Row) (domain.Vendor, error) {
+	var v domain.Vendor
+	err := row.Scan(&v.ID, &v.PartyID, &v.LegalEntityID, &v.AccountNumber, &v.VendorGroupID, &v.PaymentTermID, &v.CurrencyCode, &v.Blocked, &v.Version)
+	return v, err
+}
+
+func (s *Postgres) CreateVendor(ctx context.Context, partyID string, in domain.NewVendor) (domain.Vendor, error) {
+	caller, _ := tenant.FromContext(ctx)
+	scopes := tenant.LegalEntityScopeList(caller)
+	if len(scopes) != 1 {
+		return domain.Vendor{}, httpx.NewProblem(http.StatusUnprocessableEntity, numbering.CodeEntityRequired, "a vendor role belongs to exactly one legal entity; the caller must carry one")
+	}
+	id, err := canonicalID(partyID)
+	if err != nil {
+		return domain.Vendor{}, ErrNotFound
+	}
+	var v domain.Vendor
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var status string
+		if err := tx.QueryRow(ctx, `select status from party where tenant_id = $1 and id = $2`, caller.TenantID, id).Scan(&status); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if status == "merged" {
+			return httpx.NewProblem(http.StatusConflict, CodePartyMerged, "party was merged; add the vendor role to the surviving party")
+		}
+		v, err = scanVendor(tx.QueryRow(ctx, `insert into vendor_role (tenant_id, id, party_id, legal_entity_id, account_number, vendor_group_id, payment_term_id, currency_code)
+			values ($1, $2, $3, $4, $5, $6, $7::text::uuid, $8) returning `+vendorColumns,
+			caller.TenantID, ids.New(), id, scopes[0], in.AccountNumber, in.VendorGroupID, in.PaymentTermID, in.CurrencyCode))
+		return err
+	})
+	switch {
+	case isUniqueViolation(err):
+		return domain.Vendor{}, httpx.NewProblem(http.StatusConflict, CodeVendorExists, "the party already has a vendor role in this legal entity, or the account number is taken")
+	case isForeignKeyViolation(err):
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeVendorInvalid, "vendor failed validation")
+		p.Errors = map[string]string{"paymentTermId": "does not exist"}
+		return domain.Vendor{}, p
+	}
+	return v, err
+}
+
+func (s *Postgres) GetVendor(ctx context.Context, vendorID string) (domain.Vendor, error) {
+	caller, _ := tenant.FromContext(ctx)
+	id, err := canonicalID(vendorID)
+	if err != nil {
+		return domain.Vendor{}, vendorNotFound()
+	}
+	var v domain.Vendor
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		v, err = scanVendor(tx.QueryRow(ctx, `select `+vendorColumns+` from vendor_role where tenant_id = $1 and id = $2`, caller.TenantID, id))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Vendor{}, vendorNotFound()
+	}
+	return v, err
+}
+
+func (s *Postgres) ListPartyVendors(ctx context.Context, partyID string) ([]domain.Vendor, error) {
+	caller, _ := tenant.FromContext(ctx)
+	id, err := canonicalID(partyID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	vendors := []domain.Vendor{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+vendorColumns+` from vendor_role where tenant_id = $1 and party_id = $2 order by legal_entity_id`, caller.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			v, err := scanVendor(rows)
+			if err != nil {
+				return err
+			}
+			vendors = append(vendors, v)
+		}
+		return rows.Err()
+	})
+	return vendors, err
+}
+
+func (s *Postgres) AddBankAccount(ctx context.Context, vendorID string, in domain.NewBankAccount) (domain.BankAccount, error) {
+	caller, _ := tenant.FromContext(ctx)
+	if err := requireUser(caller); err != nil {
+		return domain.BankAccount{}, err
+	}
+	if s.keys == nil {
+		return domain.BankAccount{}, httpx.NewProblem(http.StatusServiceUnavailable, CodeBankUnavailable, "bank details cannot be stored until field encryption keys are configured")
+	}
+	id, err := canonicalID(vendorID)
+	if err != nil {
+		return domain.BankAccount{}, vendorNotFound()
+	}
+	account, err := s.keys.Seal(caller.TenantID, FieldBankAccountNo, []byte(in.AccountNumber))
+	if err != nil {
+		return domain.BankAccount{}, err
+	}
+	var routing []byte
+	if in.RoutingNumber != "" {
+		if routing, err = s.keys.Seal(caller.TenantID, FieldBankRoutingNo, []byte(in.RoutingNumber)); err != nil {
+			return domain.BankAccount{}, err
+		}
+	}
+	var b domain.BankAccount
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `insert into vendor_bank_account (tenant_id, id, vendor_id, legal_entity_id, account_holder, bank_country, currency_code, account_last4, account_number_sealed, routing_number_sealed, created_by)
+			select tenant_id, $3, id, legal_entity_id, $4, $5, $6, $7, $8, $9, $10 from vendor_role where tenant_id = $1 and id = $2
+			returning `+bankColumns, caller.TenantID, id, ids.New(), in.AccountHolder, in.BankCountry, in.CurrencyCode, in.Last4(), account, routing, caller.UserID).
+			Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return vendorNotFound()
+		}
+		return err
+	})
+	return b, err
+}
+
+func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal bool) ([]domain.BankAccount, error) {
+	caller, _ := tenant.FromContext(ctx)
+	if reveal && s.keys == nil {
+		return nil, httpx.NewProblem(http.StatusServiceUnavailable, CodeBankUnavailable, "bank details cannot be read until field encryption keys are configured")
+	}
+	id, err := canonicalID(vendorID)
+	if err != nil {
+		return nil, vendorNotFound()
+	}
+	accounts := []domain.BankAccount{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from vendor_role where tenant_id = $1 and id = $2)`, caller.TenantID, id).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return vendorNotFound()
+		}
+		rows, err := tx.Query(ctx, `select `+bankColumns+`, account_number_sealed, routing_number_sealed from vendor_bank_account where tenant_id = $1 and vendor_id = $2 order by created_at, id`, caller.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b domain.BankAccount
+			var account, routing []byte
+			if err := rows.Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4, &account, &routing); err != nil {
+				return err
+			}
+			if reveal {
+				if err := s.reveal(caller.TenantID, &b, account, routing); err != nil {
+					return err
+				}
+			}
+			accounts = append(accounts, b)
+		}
+		return rows.Err()
+	})
+	return accounts, err
+}
+
+func (s *Postgres) reveal(tenantID string, b *domain.BankAccount, account, routing []byte) error {
+	plain, err := s.keys.Open(tenantID, FieldBankAccountNo, account)
+	if err != nil {
+		return err
+	}
+	b.AccountNumber = string(plain)
+	if routing != nil {
+		if plain, err = s.keys.Open(tenantID, FieldBankRoutingNo, routing); err != nil {
+			return err
+		}
+		b.RoutingNumber = string(plain)
+	}
+	return nil
+}

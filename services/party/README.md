@@ -41,14 +41,22 @@ Rules worth knowing: a `NULL` credit limit counts as 0, so any first limit needs
 
 Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/party/legal-entities/{id}/protected-fields` (`party.read`) returns `{"fields":[...]}`; `PUT` (`party.approval_policy.write`, a duty separate from `party.approve` so the approver of a change cannot also switch protection off) replaces the set; `fields` is required and `[]` is an explicit unprotect-all (a missing or null `fields` is 422). Every PUT enqueues `party.protectedfields.updated.v1` with before, after, actor and time in the same transaction. A credit limit request from the user who last changed the config, within 24 hours of unprotecting `credit_limit`, is still held for approval. The legal entity id is not checked against the org service (party has no legal entity table); a legal-entity-scoped caller can only address its own. Only `credit_limit` is protectable today; an unknown field is 422 `PTY-PROTECTED-FIELDS-INVALID`, and a caller scoped to another legal entity gets 403 `PTY-LEGAL-ENTITY-OUT-OF-SCOPE`. A legal entity with no row defaults to `["credit_limit"]`, the behaviour above. When `credit_limit` is not in the set, an increase is applied at once like a decrease (emits `customer.updated.v1`, no pending row). Changes already pending stay decidable. The table `protected_field_config` (`0007`) carries tenant and legal-entity RLS; `0006` tightens `pending_change` so `status = 'pending'` holds exactly when `decided_by IS NULL`.
 
+## Vendor master
+
+`vendor_role` (`0008`) is the vendor side of a party, one row per party and legal entity, with tenant and legal-entity RLS. It carries `vendor_group_id` (the vendor group other services reconcile against, for example payables aging and `invoice.posted` in receiving), `account_number`, `payment_term_id`, `currency_code` and `blocked`. Routes: `POST /v1/party/parties/{id}/vendor` (`party.write`; the caller must carry exactly one legal entity, 409 `PTY-VENDOR-EXISTS` for a second role or a taken account number), `GET /v1/party/vendors/{id}` and `GET /v1/party/parties/{id}/vendors` (`party.read`; the lookup receiving calls at invoice posting).
+
+Bank details live in `vendor_bank_account`. Account and routing numbers are sealed with `platform/go/fieldcrypt` under the tenant key, with tenant and field name (`vendor_bank_account.account_number`, `vendor_bank_account.routing_number`) as additional data, so a value moved to another field or tenant does not open. `POST /v1/party/vendors/{id}/bank-accounts` (`party.vendor_bank.write`, needs a user) stores one; `GET .../bank-accounts` (`party.read`) returns holder, country, currency and `accountLast4` only; `GET .../bank-accounts:reveal` (`party.vendor_bank.reveal`, for the payments service identity) returns the numbers and logs the reveal with the user and vendor id. With no `FIELDCRYPT_KEYS` the service starts, but bank writes and reveals return 503 `PTY-BANK-ENCRYPTION-UNAVAILABLE`. Bank accounts are insert-only; a bank change approval flow is not built. Merge moves vendor roles (and so their bank accounts) to the survivor, rejects the same legal entity on both sides, and `Audit` counts vendor roles still owned by a merged party.
+
 ## Duties
 
 | Duty | Grants |
 |---|---|
 | `party.approve` | (PRD name: Approve master data changes) `POST /v1/party/pending-changes/{id}:approve`, `:reject`; seeded in `policies/authz/data.json` |
-| `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/customers/{id}/credit-limit`, `PATCH /v1/party/parties/{id}` |
+| `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/customers/{id}/credit-limit`, `POST /v1/party/parties/{id}/vendor`, `PATCH /v1/party/parties/{id}` |
 | `party.approval_policy.write` | `PUT /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
-| `party.read` | `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/{id}`, `GET /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
+| `party.vendor_bank.write` | `POST /v1/party/vendors/{id}/bank-accounts` |
+| `party.vendor_bank.reveal` | `GET /v1/party/vendors/{id}/bank-accounts:reveal` |
+| `party.read` | `GET /v1/party/vendors/{id}`, `GET /v1/party/parties/{id}/vendors`, `GET /v1/party/vendors/{id}/bank-accounts` (masked), `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/{id}`, `GET /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
 | `pii.read` | shows `dob` unmasked on party responses; without it `dob` reads `"••••"` when set |
 
 ## Error codes
@@ -87,7 +95,9 @@ Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/
 | `NUMBERING_URL` | empty | numbering service base URL; party create allocates sequence `PARTY` through it with a 3 s timeout. When empty the service starts and create returns 503 `PTY-NUMBERING-UNAVAILABLE` |
 | `PARTY_DEDUP_LIKELY_WEIGHT` | `12` | likely-duplicate weight; read by the next slice |
 | `PARTY_DEDUP_POSSIBLE_WEIGHT` | `6` | possible-duplicate weight; read by the next slice |
-| `PARTY_VIES_TIMEOUT_MS` | `5000` | tax checker timeout; read by the tax slice |
+| `FIELDCRYPT_KEYS`, `FIELDCRYPT_CURRENT_KEY_ID` | empty | `id=base64(32 bytes)` pairs and the current id (`platform/go/fieldcrypt`); the chart reads them optionally from the `existingSecret` secret |
+| `PARTY_VIES_URL` | empty | VIES REST base, `https://ec.europa.eu/taxation_customs/vies/rest-api`; when empty VAT numbers stay `unverified` |
+| `PARTY_VIES_TIMEOUT_MS` | `5000` | VIES request timeout |
 
 No new Go dependency: `pgx` and `chi` were already required, and the database helpers come from `platform/go/dbx`.
 
@@ -95,4 +105,4 @@ No new Go dependency: `pgx` and `chi` were already required, and the database he
 
 `party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_parties_created_total` (new parties only; an idempotent replay is not counted), `party_credit_limit_changes_total{outcome}` (requested, applied, approved, rejected).
 
-VAT numbers are format-checked only and return `unverified`; this slice has no VIES client.
+VAT numbers are format-checked, then looked up against VIES (`internal/vies`) when `PARTY_VIES_URL` is set: `VALID` is `valid`, `INVALID` is `invalid`, and any other verdict (`MS_UNAVAILABLE`, `TIMEOUT`, a non-200, a body that is not JSON) leaves the number `unverified`. `internal/vies/testdata` holds responses recorded from the live VIES REST service on 2026-10-31.
