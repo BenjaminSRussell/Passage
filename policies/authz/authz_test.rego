@@ -522,9 +522,19 @@ test_service_grants_allow_only_their_declared_routes if {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
 	}
-	transitional := {"ledger.journal.post", "ledger.journal.read"}
+	umbrella := {"ledger.journal.post", "ledger.journal.read", "numbering.write"}
+	every _, targets in data.service_grants {
+		every _, duties in targets {
+			every duty in duties {
+				not duty in umbrella
+			}
+		}
+	}
+	data.service_grants.receiving.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
+	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
+	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
-		every duty in {d | some d in grant; not d in transitional} {
+		every duty in grant {
 			not allowed(duty, "POST", "/v1/ledger/validate")
 			not allowed(duty, "POST", "/v1/ledger/journal-batches/b1/post")
 			not allowed(duty, "POST", "/v1/ledger/ledger-sets/s1/journal-entries")

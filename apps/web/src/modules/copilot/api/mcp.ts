@@ -14,7 +14,7 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 export const toolSchema = z.object({
   name: z.string(),
   description: z.string(),
-  inputSchema: z.record(z.unknown()),
+  inputSchema: z.record(z.string(), z.unknown()),
   annotations: z.object({
     readOnlyHint: z.boolean(),
     destructiveHint: z.boolean(),

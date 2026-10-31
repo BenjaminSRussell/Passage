@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Until 1.0.0 any minor
 release may change public APIs.
 
+## [Unreleased]
+
+### Security
+
+- `apps/web` upgrades `zod` from 3.23.8 to 4.6.7, which fixes the high-severity advisory
+  GHSA-mrhx-c7xc-m3w5 (CVE-2023-54404). Schemas use the zod 4 two-argument `z.record(key, value)`
+  and `z.ZodType<Output, Input>`; `npm audit --omit=dev` reports no zod advisory (#355).
+
+### Changed
+
+- `productcost` (Wave 39) serves `/v1/product-costing/...` instead of `/v1/costing/...`, so it
+  no longer shares the `versions` and `reconciliations` route templates (and their duty rows)
+  with `costing` (Wave 20). The web client calls `/api/v1/product-costing/...` (#342).
+
+### Removed
+
+- The transitional umbrella service grants kept for the 0.1.0 rolling deploy: `ledger.journal.post`
+  and `ledger.journal.read` for receiving and payables to ledger, and `numbering.write` for party
+  to numbering. The grant tables (`policies/authz/data.json` `service_grants` and
+  `platform/go/tenant/service.go`) now hold only the narrow duties each caller signs, so a
+  service token that still carries an umbrella duty is refused with 401. `ledger.journal.read`
+  is no longer treated as a read-only duty for no-entity ALL-scope service calls. Person roles
+  keep the umbrella duties unchanged (#341).
+
 ## [0.1.0] - 2026-10-31
 
 First tagged release of Passage, cut from `main` at `463096ba`. It is a **source-only

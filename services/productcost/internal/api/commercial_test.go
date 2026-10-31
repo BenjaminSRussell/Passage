@@ -29,7 +29,7 @@ func TestMixedCost_WeightedOverHTTP(t *testing.T) {
 	body := `{"itemId":"FG","items":` + mixedItems + `,"alternatives":[
 	 {"source":"VENDOR-A","percent":"60","itemId":"BUY"},
 	 {"source":"IN-HOUSE","percent":"40","itemId":"PROD"}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/mixed-costs", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/mixed-costs", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -38,12 +38,12 @@ func TestMixedCost_WeightedOverHTTP(t *testing.T) {
 	bad := `{"itemId":"FG","items":` + mixedItems + `,"alternatives":[
 	 {"source":"VENDOR-A","percent":"60","itemId":"BUY"},
 	 {"source":"IN-HOUSE","percent":"39.99","itemId":"PROD"}]}`
-	rec = do(r, http.MethodPost, "/v1/costing/mixed-costs", bad, allDuties, true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/mixed-costs", bad, allDuties, true)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "CST-0741") {
 		t.Errorf("ratio total: %d %s", rec.Code, rec.Body.String())
 	}
 	unknown := `{"itemId":"FG","items":` + mixedItems + `,"alternatives":[{"source":"X","percent":"100","itemId":"NOPE"}]}`
-	if rec = do(r, http.MethodPost, "/v1/costing/mixed-costs", unknown, allDuties, true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/mixed-costs", unknown, allDuties, true); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown alternative item: %d", rec.Code)
 	}
 }
@@ -51,20 +51,20 @@ func TestMixedCost_WeightedOverHTTP(t *testing.T) {
 func TestPostings_COGSAndPriceDifferenceOverHTTP(t *testing.T) {
 	r := newRouter(t, nil)
 	cogs := `{"quantity":"10","unitCost":{"DM":"21.20","DL":"54.00","IND-MAT":"2.12","IND-LAB":"27.00"}}`
-	rec := do(r, http.MethodPost, "/v1/costing/postings:cogs", cogs, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/postings:cogs", cogs, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cogs status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"total":"1043.2"`, `"account":"COGS-DM"`, `"account":"COGS-IND-LAB"`, `"account":"Inventory"`)
 
 	ppv := `{"quantity":"10","receiptUnitCost":"5.20","standard":{"DM":"5.00"}}`
-	rec = do(r, http.MethodPost, "/v1/costing/postings:price-difference", ppv, allDuties, true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/postings:price-difference", ppv, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ppv status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"total":"2"`, `"account":"PPV-DM"`, `"account":"PriceDifferenceClearing"`)
 
-	if rec = do(r, http.MethodPost, "/v1/costing/postings:cogs", `{"quantity":"0","unitCost":{}}`, allDuties, true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/postings:cogs", `{"quantity":"0","unitCost":{}}`, allDuties, true); rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid cogs: %d", rec.Code)
 	}
 }
@@ -74,14 +74,14 @@ func TestSalesOrderEstimate_MarginOverHTTP(t *testing.T) {
 	body := `{"itemId":"CFG","quantity":"100","netAmount":"2400","items":[
 	 {"id":"X","kind":"Purchased","price":"18.60"},
 	 {"id":"CFG","kind":"Manufactured","costingLot":"1","bom":[{"childId":"X","qty":"1","scrapPct":"0"}]}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/sales-order-estimates", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/sales-order-estimates", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"calculationType":"SalesOrder"`, `"cost":"1860"`, `"margin":"540"`, `"marginPct":"22.5"`)
 
 	zero := `{"itemId":"CFG","quantity":"100","netAmount":"0","items":[{"id":"CFG","kind":"Purchased","price":"1"}]}`
-	if rec = do(r, http.MethodPost, "/v1/costing/sales-order-estimates", zero, allDuties, true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/sales-order-estimates", zero, allDuties, true); rec.Code != http.StatusBadRequest {
 		t.Errorf("zero net: %d", rec.Code)
 	}
 }
@@ -90,14 +90,14 @@ func TestCompare_BaselineAndCandidateOverHTTP(t *testing.T) {
 	r := newRouter(t, nil)
 	body := `{"baseline":{"items":[{"id":"A","kind":"Purchased","price":"10"}]},
 	 "candidate":{"items":[{"id":"A","kind":"Purchased","price":"11"},{"id":"C","kind":"Purchased","price":"3"}]}}`
-	rec := do(r, http.MethodPost, "/v1/costing/comparisons", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/comparisons", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"totalDelta":"1"`, `"status":"Compared"`, `"status":"CandidateOnly"`, `"deltaPct":"10"`)
 
 	bad := `{"baseline":{"items":[]},"candidate":{"items":[{"id":"A","kind":"Bogus"}]}}`
-	rec = do(r, http.MethodPost, "/v1/costing/comparisons", bad, allDuties, true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/comparisons", bad, allDuties, true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "baseline.items") || !strings.Contains(rec.Body.String(), "candidate.items[0].kind") {
 		t.Errorf("side validation: %d %s", rec.Code, rec.Body.String())
 	}
@@ -110,13 +110,13 @@ func TestReconcile_OverHTTPAndMetric(t *testing.T) {
 	body := `{"onHand":[{"siteId":"S1","itemId":"A","qty":"10","stdUnit":"10.50"},
 	 {"siteId":"S2","itemId":"A","qty":"4","stdUnit":"2.50"}],
 	 "glBalances":[{"siteId":"S1","amount":"100"},{"siteId":"S2","amount":"10"}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/reconciliations", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/reconciliations", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"differences":1`, `"difference":"5"`, `"status":"Reconciled"`)
 
-	if rec = do(r, http.MethodPost, "/v1/costing/reconciliations", `{"onHand":[{"siteId":"S1","itemId":"A","stdUnit":"-1"}]}`, allDuties, true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/reconciliations", `{"onHand":[{"siteId":"S1","itemId":"A","stdUnit":"-1"}]}`, allDuties, true); rec.Code != http.StatusBadRequest {
 		t.Errorf("negative standard: %d", rec.Code)
 	}
 	m := httptest.NewRecorder()
@@ -131,12 +131,12 @@ func TestReconcile_OverHTTPAndMetric(t *testing.T) {
 func TestCommercialRoutes_EnforceTheirDuty(t *testing.T) {
 	r := newRouter(t, nil)
 	for p, duty := range map[string]string{
-		"/v1/costing/mixed-costs":               "CostingCalculate",
-		"/v1/costing/postings:cogs":             "CostingCalculate",
-		"/v1/costing/postings:price-difference": "CostingCalculate",
-		"/v1/costing/sales-order-estimates":     "CostingCalculate",
-		"/v1/costing/comparisons":               "CostingView",
-		"/v1/costing/reconciliations":           "CostingView",
+		"/v1/product-costing/mixed-costs":               "CostingCalculate",
+		"/v1/product-costing/postings:cogs":             "CostingCalculate",
+		"/v1/product-costing/postings:price-difference": "CostingCalculate",
+		"/v1/product-costing/sales-order-estimates":     "CostingCalculate",
+		"/v1/product-costing/comparisons":               "CostingView",
+		"/v1/product-costing/reconciliations":           "CostingView",
 	} {
 		other := "CostingView"
 		if duty == "CostingView" {
@@ -155,12 +155,12 @@ func TestPostings_RoundToTheCurrencyMinorUnit(t *testing.T) {
 	r := newRouter(t, nil)
 	// 3 × (DM 10.4 + DL 5.3) = 47.1, which JPY posts as 47: DM 31 and DL 16, whole yen.
 	body := `{"currency":"JPY","quantity":"3","unitCost":{"DM":"10.4","DL":"5.3"}}`
-	rec := do(r, http.MethodPost, "/v1/costing/postings:cogs", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/postings:cogs", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"currency":"JPY"`, `"total":"47"`, `"account":"COGS-DL","debit":"16"`, `"account":"COGS-DM","debit":"31"`)
-	if rec = do(r, http.MethodPost, "/v1/costing/postings:price-difference", `{"currency":"usd","quantity":"1","receiptUnitCost":"1","standard":{"DM":"1"}}`, allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"currency"`) {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/postings:price-difference", `{"currency":"usd","quantity":"1","receiptUnitCost":"1","standard":{"DM":"1"}}`, allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"currency"`) {
 		t.Errorf("lower-case currency: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -170,7 +170,7 @@ func TestMixedCost_ValidatesAlternatives(t *testing.T) {
 	body := `{"itemId":"BUY","items":` + mixedItems + `,"alternatives":[
 	 {"source":"A","percent":"50","itemId":"BUY"},
 	 {"source":"A","percent":"150","itemId":"PROD"}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/mixed-costs", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/mixed-costs", body, allDuties, true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -182,7 +182,7 @@ func TestRoll_ValidatesLineFlagsAndOperationScrap(t *testing.T) {
 	body := `{"itemId":"P","items":[{"id":"X","kind":"Purchased","price":"1"},
 	 {"id":"P","kind":"Manufactured","costingLot":"1","bom":[{"childId":"X","qty":"1","phantom":true},{"childId":"X","qty":"1","phantom":true,"makeToOrder":true}],
 	  "operations":[{"runHours":"1","rate":"1","scrapPct":"100"}]}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/calculations", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/calculations", body, allDuties, true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -196,7 +196,7 @@ func TestSalesOrderEstimate_SplitSumsToCost(t *testing.T) {
 	body := `{"itemId":"P","quantity":"3","netAmount":"3","items":[
 	 {"id":"X","kind":"Purchased","price":"0.335"},
 	 {"id":"P","kind":"Manufactured","costingLot":"1","bom":[{"childId":"X","qty":"1"}],"operations":[{"runHours":"1","rate":"0.335"}]}]}`
-	rec := do(r, http.MethodPost, "/v1/costing/sales-order-estimates", body, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/sales-order-estimates", body, allDuties, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -205,7 +205,7 @@ func TestSalesOrderEstimate_SplitSumsToCost(t *testing.T) {
 
 func TestReconcile_RequiresInput(t *testing.T) {
 	r := newRouter(t, nil)
-	if rec := do(r, http.MethodPost, "/v1/costing/reconciliations", `{}`, allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"onHand"`) {
+	if rec := do(r, http.MethodPost, "/v1/product-costing/reconciliations", `{}`, allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"onHand"`) {
 		t.Errorf("empty reconciliation: %d %s", rec.Code, rec.Body.String())
 	}
 }

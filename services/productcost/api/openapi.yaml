@@ -26,7 +26,7 @@ paths:
       responses:
         "200": { description: Ready }
         "503": { description: Not ready }
-  /v1/costing/calculations:
+  /v1/product-costing/calculations:
     post:
       summary: Roll one item and return its standard with the component split
       operationId: rollOne
@@ -45,7 +45,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/rolls:
+  /v1/product-costing/rolls:
     post:
       summary: Mass roll a set of items by topological level
       operationId: massRoll
@@ -64,7 +64,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/variances/compute:
+  /v1/product-costing/variances/compute:
     post:
       summary: Decompose the variance of an ended production order
       operationId: computeVariance
@@ -84,7 +84,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /v1/costing/activations:preview:
+  /v1/product-costing/activations:preview:
     post:
       summary: Preview the on-hand revaluation of a standard cost activation
       operationId: previewActivation
@@ -103,7 +103,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/mixed-costs:
+  /v1/product-costing/mixed-costs:
     post:
       summary: Cost an item mixed from procurement alternatives (FR-39.14)
       operationId: mixedCost
@@ -123,7 +123,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0741: ratios do not total 100.00%" }
-  /v1/costing/postings:cogs:
+  /v1/product-costing/postings:cogs:
     post:
       summary: Book the cost of goods sold of an issue by cost component (FR-39.15)
       operationId: cogsPosting
@@ -142,7 +142,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/postings:price-difference:
+  /v1/product-costing/postings:price-difference:
     post:
       summary: Book a purchase price variance by cost component (FR-39.7, FR-39.15)
       operationId: priceDifferencePosting
@@ -161,7 +161,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/sales-order-estimates:
+  /v1/product-costing/sales-order-estimates:
     post:
       summary: Cost a configured or make-to-order line and show its margin (FR-39.16)
       operationId: salesOrderEstimate
@@ -180,7 +180,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/comparisons:
+  /v1/product-costing/comparisons:
     post:
       summary: Compare a baseline run with a candidate run item by item (FR-39.10 what-if)
       operationId: compareRuns
@@ -199,7 +199,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/reconciliations:
+  /v1/product-costing/reconciliations:
     post:
       summary: Reconcile inventory at standard to the GL per site (FR-39.11)
       operationId: reconcileStandard
@@ -218,7 +218,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/versions:transition:
+  /v1/product-costing/versions:transition:
     post:
       operationId: transitionCostingVersion
       summary: Block, unblock or close a costing version (BR-39.2, FR-39.3); stateless, the caller supplies the current version
@@ -238,7 +238,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation version Active, CST-0715 transition not allowed, CST-0716 fallback version" }
-  /v1/costing/versions:activate:
+  /v1/product-costing/versions:activate:
     post:
       operationId: activateCostingVersion
       summary: Move an Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Stateless; no revaluation is posted
@@ -258,7 +258,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0716 fallback version" }
-  /v1/costing/conversions:validate:
+  /v1/product-costing/conversions:validate:
     post:
       operationId: validateStandardCostConversion
       summary: Validate a standard cost conversion and preview its revaluation (FR-39.12); nothing is posted
@@ -277,7 +277,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/conversions:advance:
+  /v1/product-costing/conversions:advance:
     post:
       operationId: advanceStandardCostConversion
       summary: Record the next checklist step as done by the calling user (FR-39.12); stateless, the caller supplies the checklist so far
@@ -297,7 +297,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem", description: "No tenant, or no user on the principal" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0731 inventory close missing (close, activate), CST-0735 blocked (validate, activate), CST-0736 step out of order or checklist complete" }
-  /v1/costing/estimates:
+  /v1/product-costing/estimates:
     post:
       operationId: adHocEstimate
       summary: Ad-hoc estimate of a quote, internal order or project task from a costing model (FR-39.13)
@@ -322,7 +322,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0764 invalid model, formula, characteristic value, or negative quantity or price; CST-0702 no price for a line; CST-0708 costing sheet reference" }
-  /v1/costing/sales-order-estimates:refresh:
+  /v1/product-costing/sales-order-estimates:refresh:
     post:
       operationId: refreshSalesOrderEstimate
       summary: Recompute a sales order line's estimate for its configuration and version it (FR-39.16, BR-39.14)
@@ -346,7 +346,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem", description: "Validation, including a version of another line, a duplicate version number or an unknown status" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /v1/costing/sales-order-estimates:freeze:
+  /v1/product-costing/sales-order-estimates:freeze:
     post:
       operationId: freezeSalesOrderEstimate
       summary: Freeze the line's current estimate at confirmation (BR-39.14)
@@ -367,7 +367,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0763 no estimate to freeze, or the current estimate failed to roll" }
-  /v1/costing/cost-components:
+  /v1/product-costing/cost-components:
     get:
       operationId: listCostComponents
       summary: List the tenant's cost components (at most 20), ordered by code (FR-39.1)
@@ -410,7 +410,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem", description: "CST-0791 a component with this code exists" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0790 the tenant holds 20 components; idempotency_key_reuse" }
         "503": { $ref: "#/components/responses/Problem" }
-  /v1/costing/cost-groups:
+  /v1/product-costing/cost-groups:
     get:
       operationId: listCostGroups
       summary: List the tenant's cost groups (at most 50) with the component each maps to (FR-39.1)
@@ -453,7 +453,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem", description: "CST-0793 a cost group with this code exists" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0792 the tenant holds 50 cost groups; CST-0794 unknown cost component; idempotency_key_reuse" }
         "503": { $ref: "#/components/responses/Problem" }
-  /v1/costing/versions:
+  /v1/product-costing/versions:
     get:
       operationId: listCostingVersions
       summary: Page through the stored costing versions in the caller's legal-entity scope, in creation order (FR-39.3)
@@ -504,7 +504,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem", description: "CST-0713 the legal entity has a version with this code" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0716 SpecifiedVersion fallback missing, unknown or of another legal entity; idempotency_key_reuse" }
         "503": { $ref: "#/components/responses/Problem" }
-  /v1/costing/versions/{id}:
+  /v1/product-costing/versions/{id}:
     get:
       operationId: getCostingVersion
       summary: Read one stored costing version
@@ -521,7 +521,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-0717 no such version in the caller's scope" }
         "503": { $ref: "#/components/responses/Problem" }
-  /v1/costing/versions/{id}/transition:
+  /v1/product-costing/versions/{id}/transition:
     post:
       operationId: transitionStoredCostingVersion
       summary: Block, unblock or close a stored version (BR-39.2) under its optimistic version; publishes dev.passage.costing.version.transitioned.v1
@@ -552,7 +552,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0715 transition not allowed from the current status" }
         "503": { $ref: "#/components/responses/Problem" }
-  /v1/costing/versions/{id}/activate:
+  /v1/product-costing/versions/{id}/activate:
     post:
       operationId: activateStoredCostingVersion
       summary: Move a stored Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Sets activatedAt; no pending prices are stored yet, so nothing is revalued or posted

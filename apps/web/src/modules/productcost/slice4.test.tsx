@@ -128,7 +128,7 @@ describe("ad-hoc estimate helpers", () => {
 
 describe("ad-hoc estimate page", () => {
   it("computes the example estimate and shows its lines, split and total", async () => {
-    handler = (url) => (url.pathname === "/api/v1/costing/estimates" ? { status: 200, body: injectionEstimate } : undefined);
+    handler = (url) => (url.pathname === "/api/v1/product-costing/estimates" ? { status: 200, body: injectionEstimate } : undefined);
     const { container } = renderAt("/productcost/estimates");
     expect(screen.getByRole("heading", { level: 2, name: "Ad-hoc estimate" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "No estimate yet" })).toBeInTheDocument();
@@ -221,7 +221,7 @@ describe("sales order estimate versions page", () => {
     const v2: EstimateVersion = { ...v1, version: 2, configHash: "cfg-2", estimate: estimate("1900", "500", "20.83") };
     handler = (url, body) => {
       const req = body as { configHash?: string; versions: EstimateVersion[] };
-      if (url.pathname === "/api/v1/costing/sales-order-estimates:refresh") {
+      if (url.pathname === "/api/v1/product-costing/sales-order-estimates:refresh") {
         if (req.configHash === "cfg-1") return { status: 200, body: { current: v1, versions: [v1], changed: true, diagnostics: [] } };
         return {
           status: 200,
@@ -233,7 +233,7 @@ describe("sales order estimate versions page", () => {
           },
         };
       }
-      if (url.pathname === "/api/v1/costing/sales-order-estimates:freeze") {
+      if (url.pathname === "/api/v1/product-costing/sales-order-estimates:freeze") {
         const frozen = { ...req.versions[1], status: "Frozen" };
         return { status: 200, body: { versions: [req.versions[0], frozen], confirmed: frozen } };
       }

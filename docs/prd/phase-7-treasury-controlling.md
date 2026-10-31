@@ -1556,20 +1556,20 @@ Invariants: Σ CostComponentSplit.amount per calculation = unit_cost × calc_qua
 
 | Method | Path | Purpose | Idempotency | Auth duty |
 |---|---|---|---|---|
-| POST | /api/v1/costing/versions | Create version | Idempotency-Key | CostingMaintain |
-| POST | /api/v1/costing/sheets | Create/version sheet | Idempotency-Key | CostingMaintain |
-| POST | /api/v1/costing/calculations | Roll one item (explosion mode, qty) | (version, item, site, bom, route, qty) | CostingCalculate |
-| POST | /api/v1/costing/versions/{id}/roll | Mass roll selection | runId | CostingCalculate |
-| GET | /api/v1/costing/calculations/{id}/explain | Explanation tree with split | n/a | CostingView |
-| POST | /api/v1/costing/versions/{id}/activate | Preview (dryRun=true) or activate | (version, date) | CostingActivate |
-| GET | /api/v1/costing/variances?site=&period=&type= | Variances | n/a | CostingView |
-| POST | /api/v1/costing/variances/compute | Compute for ended order (system) | productionOrderId+version | CostingSystem |
-| GET | /api/v1/costing/compare?a=&b= | Version comparison | n/a | CostingView |
-| POST | /api/v1/costing/conversions | Start standard cost conversion checklist | Idempotency-Key | CostingActivate |
-| POST | /api/v1/costing/conversions/{id}/steps/{step} | Execute checklist step | (conversion, step) | CostingActivate |
-| POST | /api/v1/costing/estimates | Ad-hoc estimate from costing model | Idempotency-Key | CostingCalculate |
-| PUT | /api/v1/costing/procurement-alternatives/{itemId} | Set alternatives and ratios | version | CostingMaintain |
-| POST | /api/v1/costing/sales-order-estimates | Cost a sales order line | (lineId, configVersion) | CostingCalculate (system for sales) |
+| POST | /api/v1/product-costing/versions | Create version | Idempotency-Key | CostingMaintain |
+| POST | /api/v1/product-costing/sheets | Create/version sheet | Idempotency-Key | CostingMaintain |
+| POST | /api/v1/product-costing/calculations | Roll one item (explosion mode, qty) | (version, item, site, bom, route, qty) | CostingCalculate |
+| POST | /api/v1/product-costing/versions/{id}/roll | Mass roll selection | runId | CostingCalculate |
+| GET | /api/v1/product-costing/calculations/{id}/explain | Explanation tree with split | n/a | CostingView |
+| POST | /api/v1/product-costing/versions/{id}/activate | Preview (dryRun=true) or activate | (version, date) | CostingActivate |
+| GET | /api/v1/product-costing/variances?site=&period=&type= | Variances | n/a | CostingView |
+| POST | /api/v1/product-costing/variances/compute | Compute for ended order (system) | productionOrderId+version | CostingSystem |
+| GET | /api/v1/product-costing/compare?a=&b= | Version comparison | n/a | CostingView |
+| POST | /api/v1/product-costing/conversions | Start standard cost conversion checklist | Idempotency-Key | CostingActivate |
+| POST | /api/v1/product-costing/conversions/{id}/steps/{step} | Execute checklist step | (conversion, step) | CostingActivate |
+| POST | /api/v1/product-costing/estimates | Ad-hoc estimate from costing model | Idempotency-Key | CostingCalculate |
+| PUT | /api/v1/product-costing/procurement-alternatives/{itemId} | Set alternatives and ratios | version | CostingMaintain |
+| POST | /api/v1/product-costing/sales-order-estimates | Cost a sales order line | (lineId, configVersion) | CostingCalculate (system for sales) |
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|

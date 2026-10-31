@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,63 @@ func TestVerifyRejections(t *testing.T) {
 	for name, token := range cases {
 		if _, err := f.verifier.Verify(token); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// The umbrella duties kept for the 0.1.0 rolling deploy are gone (#341): no grant
+// holds one, and a correctly signed token from an old caller that still carries
+// one is over-granted and refused, while the same token with the narrow duty passes.
+func TestUmbrellaDutiesAreNotServiceGranted(t *testing.T) {
+	umbrella := []string{"ledger.journal.post", "ledger.journal.read", "numbering.write"}
+	for iss, targets := range tenant.ServiceGrantTable() {
+		for aud, duties := range targets {
+			for _, d := range duties {
+				if slices.Contains(umbrella, d) {
+					t.Errorf("%s -> %s still grants umbrella duty %s", iss, aud, d)
+				}
+			}
+		}
+	}
+
+	for _, tc := range []struct{ iss, aud, umbrella, narrow string }{
+		{"receiving", "ledger", "ledger.journal.post", "ledger.entry.post"},
+		{"payables", "ledger", "ledger.journal.post", "ledger.entry.post"},
+		{"payables", "ledger", "ledger.journal.read", "ledger.entry.lookup"},
+		{"party", "numbering", "numbering.write", "numbering.sequence.allocate"},
+	} {
+		pub, priv, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier := tenant.NewServiceVerifier(tc.aud, map[string]ed25519.PublicKey{tc.iss: pub}).WithClock(func() time.Time { return epoch })
+		sign := func(jti string, duties ...string) string {
+			payload, err := json.Marshal(tenant.ServiceClaims{
+				Iss: tc.iss, Aud: tc.aud, Tid: validTenant, Le: validLE, Act: "warehouse-user", Duties: duties,
+				Iat: epoch.Unix(), Exp: epoch.Add(tenant.ServiceTokenMaxTTL).Unix(), Jti: jti,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := base64.RawURLEncoding.EncodeToString(payload)
+			return body + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte("passage.service-token.v1."+body)))
+		}
+		if _, err := verifier.Verify(sign("narrow", tc.narrow)); err != nil {
+			t.Fatalf("%s -> %s: narrow %s refused: %v", tc.iss, tc.aud, tc.narrow, err)
+		}
+		if _, err := verifier.Verify(sign("umbrella-only", tc.umbrella)); err == nil {
+			t.Errorf("%s -> %s: token carrying %s accepted", tc.iss, tc.aud, tc.umbrella)
+		}
+		if _, err := verifier.Verify(sign("umbrella-and-narrow", tc.narrow, tc.umbrella)); err == nil {
+			t.Errorf("%s -> %s: token carrying %s beside %s accepted", tc.iss, tc.aud, tc.umbrella, tc.narrow)
+		}
+		signer, err := tenant.NewServiceSigner(tc.iss, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "warehouse-user"}
+		if _, err := signer.MintDuties(tc.aud, p, "", []string{tc.umbrella}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+			t.Errorf("%s -> %s: minting %s: %v, want ErrNoServiceGrant", tc.iss, tc.aud, tc.umbrella, err)
 		}
 	}
 }

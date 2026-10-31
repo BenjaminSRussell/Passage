@@ -32,21 +32,21 @@ func doAs(r http.Handler, path, body, duties, user string) *httptest.ResponseRec
 func TestVersionTransition_OverHTTP(t *testing.T) {
 	r := newRouter(t, nil)
 	open := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"Active"},"action":"block"}`
-	rec := do(r, http.MethodPost, "/v1/costing/versions:transition", open, "CostingMaintain", true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/versions:transition", open, "CostingMaintain", true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("block status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"status":"Blocked"`)
 
 	closeOpen := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"Active"},"action":"close"}`
-	rec = do(r, http.MethodPost, "/v1/costing/versions:transition", closeOpen, "CostingMaintain", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", closeOpen, "CostingMaintain", true)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("close an open version: %d", rec.Code)
 	}
 	expectAll(t, rec.Body.String(), "CST-0715")
 
 	specified := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"SpecifiedVersion"},"action":"block"}`
-	rec = do(r, http.MethodPost, "/v1/costing/versions:transition", specified, "CostingMaintain", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", specified, "CostingMaintain", true)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("specified fallback without a version: %d", rec.Code)
 	}
@@ -54,18 +54,18 @@ func TestVersionTransition_OverHTTP(t *testing.T) {
 
 	// Segregation of duties: the maintain route never activates.
 	activate := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"Active"},"action":"activate"}`
-	if rec = do(r, http.MethodPost, "/v1/costing/versions:transition", activate, "CostingMaintain", true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", activate, "CostingMaintain", true); rec.Code != http.StatusBadRequest {
 		t.Errorf("activate through the maintain route: %d", rec.Code)
 	}
-	if rec = do(r, http.MethodPost, "/v1/costing/versions:transition", open, "CostingActivate", true); rec.Code != http.StatusForbidden {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", open, "CostingActivate", true); rec.Code != http.StatusForbidden {
 		t.Errorf("transition without CostingMaintain: %d", rec.Code)
 	}
 	bad := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"Active"},"action":"explode"}`
-	if rec = do(r, http.MethodPost, "/v1/costing/versions:transition", bad, "CostingMaintain", true); rec.Code != http.StatusBadRequest {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", bad, "CostingMaintain", true); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown action: %d", rec.Code)
 	}
 	noID := `{"version":{"type":"Standard","status":"Open","fallback":"Active"},"action":"block"}`
-	rec = do(r, http.MethodPost, "/v1/costing/versions:transition", noID, "CostingMaintain", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/versions:transition", noID, "CostingMaintain", true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"version.id"`) {
 		t.Errorf("missing id: %d %s", rec.Code, rec.Body.String())
 	}
@@ -74,34 +74,34 @@ func TestVersionTransition_OverHTTP(t *testing.T) {
 func TestVersionActivate_OverHTTP(t *testing.T) {
 	r := newRouter(t, nil)
 	blocked := `{"version":{"id":"v1","type":"Standard","status":"Blocked","fallback":"Active"}}`
-	rec := do(r, http.MethodPost, "/v1/costing/versions:activate", blocked, "CostingActivate", true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/versions:activate", blocked, "CostingActivate", true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("activate status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"status":"Active"`)
 
 	sim := `{"version":{"id":"s1","type":"Simulation","status":"Open","fallback":"None"}}`
-	rec = do(r, http.MethodPost, "/v1/costing/versions:activate", sim, "CostingActivate", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/versions:activate", sim, "CostingActivate", true)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("simulation activate status %d", rec.Code)
 	}
 	expectAll(t, rec.Body.String(), "CST-0711")
 
 	closed := `{"version":{"id":"v1","type":"Standard","status":"Closed","fallback":"Active"}}`
-	rec = do(r, http.MethodPost, "/v1/costing/versions:activate", closed, "CostingActivate", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/versions:activate", closed, "CostingActivate", true)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("closed activate status %d", rec.Code)
 	}
 	expectAll(t, rec.Body.String(), "CST-0715")
 
-	if rec = do(r, http.MethodPost, "/v1/costing/versions:activate", blocked, "CostingMaintain", true); rec.Code != http.StatusForbidden {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/versions:activate", blocked, "CostingMaintain", true); rec.Code != http.StatusForbidden {
 		t.Errorf("activate without CostingActivate: %d", rec.Code)
 	}
 }
 
 func TestConversionValidate_OverHTTP(t *testing.T) {
 	r := newRouter(t, nil)
-	rec := do(r, http.MethodPost, "/v1/costing/conversions:validate", "{"+cleanConversion+"}", "CostingActivate", true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/conversions:validate", "{"+cleanConversion+"}", "CostingActivate", true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -129,7 +129,7 @@ func TestConversionValidate_OverHTTP(t *testing.T) {
 	}
 
 	late := `{"conversionDate":"2026-11-01","closeThrough":"2026-10-30","positions":[{"itemId":"A","siteId":"S","onHand":"1","standardUnit":"1","actualValue":"1"}]}`
-	rec = do(r, http.MethodPost, "/v1/costing/conversions:validate", late, "CostingActivate", true)
+	rec = do(r, http.MethodPost, "/v1/product-costing/conversions:validate", late, "CostingActivate", true)
 	expectAll(t, rec.Body.String(), `"closeComplete":false`, "CST-0731")
 
 	cases := []struct{ name, body, field string }{
@@ -140,12 +140,12 @@ func TestConversionValidate_OverHTTP(t *testing.T) {
 		{"bad currency", `{"conversionDate":"2026-11-01","currency":"usd","positions":[{"itemId":"A","siteId":"S"}]}`, "currency"},
 	}
 	for _, tc := range cases {
-		rec := do(r, http.MethodPost, "/v1/costing/conversions:validate", tc.body, "CostingActivate", true)
+		rec := do(r, http.MethodPost, "/v1/product-costing/conversions:validate", tc.body, "CostingActivate", true)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+tc.field+`"`) {
 			t.Errorf("%s: status %d, want 400 naming %s: %s", tc.name, rec.Code, tc.field, rec.Body.String())
 		}
 	}
-	if rec = do(r, http.MethodPost, "/v1/costing/conversions:validate", "{"+cleanConversion+"}", "CostingCalculate", true); rec.Code != http.StatusForbidden {
+	if rec = do(r, http.MethodPost, "/v1/product-costing/conversions:validate", "{"+cleanConversion+"}", "CostingCalculate", true); rec.Code != http.StatusForbidden {
 		t.Errorf("validate without CostingActivate: %d", rec.Code)
 	}
 }
@@ -155,22 +155,22 @@ func TestConversionAdvance_OverHTTP(t *testing.T) {
 	run := `{"status":"Draft","checklist":[]}`
 	// The user is the principal, never a body field.
 	spoofed := `{"run":` + run + `,"step":"select","user":"mallory","input":{` + cleanConversion + `}}`
-	if rec := doAs(r, "/v1/costing/conversions:advance", spoofed, "CostingActivate", "alice"); rec.Code != http.StatusBadRequest {
+	if rec := doAs(r, "/v1/product-costing/conversions:advance", spoofed, "CostingActivate", "alice"); rec.Code != http.StatusBadRequest {
 		t.Errorf("user in the body: %d, want 400", rec.Code)
 	}
 	body := `{"run":` + run + `,"step":"select","input":{` + cleanConversion + `}}`
-	rec := doAs(r, "/v1/costing/conversions:advance", body, "CostingActivate", "alice")
+	rec := doAs(r, "/v1/product-costing/conversions:advance", body, "CostingActivate", "alice")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("select status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), `"step":"select"`, `"user":"alice"`, `"status":"Draft"`)
 
-	if rec = doAs(r, "/v1/costing/conversions:advance", body, "CostingActivate", ""); rec.Code != http.StatusUnauthorized {
+	if rec = doAs(r, "/v1/product-costing/conversions:advance", body, "CostingActivate", ""); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no user on the principal: %d", rec.Code)
 	}
 
 	early := `{"run":` + run + `,"step":"validate","input":{` + cleanConversion + `}}`
-	rec = doAs(r, "/v1/costing/conversions:advance", early, "CostingActivate", "alice")
+	rec = doAs(r, "/v1/product-costing/conversions:advance", early, "CostingActivate", "alice")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("out-of-order step: %d", rec.Code)
 	}
@@ -178,20 +178,20 @@ func TestConversionAdvance_OverHTTP(t *testing.T) {
 
 	done := `{"step":"select","status":"Done","user":"alice","at":"2026-10-28T09:00:00Z"},{"step":"roll","status":"Done","user":"alice","at":"2026-10-28T09:00:00Z"}`
 	blocked := `{"run":{"status":"Draft","checklist":[` + done + `]},"step":"validate","input":{"conversionDate":"2026-11-01","closeThrough":"2026-10-31","blockers":["NegativeOnHand"],"positions":[{"itemId":"IT-1","siteId":"S-1","onHand":"-2","standardUnit":"10","actualValue":"-20"}]}}`
-	rec = doAs(r, "/v1/costing/conversions:advance", blocked, "CostingActivate", "alice")
+	rec = doAs(r, "/v1/product-costing/conversions:advance", blocked, "CostingActivate", "alice")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("blocked validate status %d: %s", rec.Code, rec.Body.String())
 	}
 	expectAll(t, rec.Body.String(), "CST-0735")
 
 	forged := `{"run":{"status":"Validated","checklist":[{"step":"validate","status":"Done","user":"alice","at":"2026-10-28T09:00:00Z"}]},"step":"preview","input":{` + cleanConversion + `}}`
-	rec = doAs(r, "/v1/costing/conversions:advance", forged, "CostingActivate", "alice")
+	rec = doAs(r, "/v1/product-costing/conversions:advance", forged, "CostingActivate", "alice")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"run.checklist[0]"`) {
 		t.Errorf("forged checklist: %d %s", rec.Code, rec.Body.String())
 	}
 
 	unknownStep := `{"run":` + run + `,"step":"party","input":{` + cleanConversion + `}}`
-	if rec = doAs(r, "/v1/costing/conversions:advance", unknownStep, "CostingActivate", "alice"); rec.Code != http.StatusBadRequest {
+	if rec = doAs(r, "/v1/product-costing/conversions:advance", unknownStep, "CostingActivate", "alice"); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown step: %d", rec.Code)
 	}
 }
@@ -214,13 +214,13 @@ func TestRoll_GroupViewAndSheetSubtotals(t *testing.T) {
 		"ProfitCenter": {`"unitCost":"154"`, `"DM":"120"`},
 	} {
 		body := `{"itemId":"FG","options":{"view":"` + view + `"},"items":` + items + `}`
-		rec := do(r, http.MethodPost, "/v1/costing/calculations", body, allDuties, true)
+		rec := do(r, http.MethodPost, "/v1/product-costing/calculations", body, allDuties, true)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: status %d: %s", view, rec.Code, rec.Body.String())
 		}
 		expectAll(t, rec.Body.String(), want...)
 	}
-	rec := do(r, http.MethodPost, "/v1/costing/calculations", `{"itemId":"FG","options":{"view":"Tax"},"items":`+items+`}`, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/product-costing/calculations", `{"itemId":"FG","options":{"view":"Tax"},"items":`+items+`}`, allDuties, true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"options"`) {
 		t.Errorf("unknown view: %d %s", rec.Code, rec.Body.String())
 	}

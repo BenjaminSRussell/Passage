@@ -632,38 +632,38 @@
       {"resource": "/api/v1/mcp", "methods": ["GET", "POST"]}
     ]},
     "CostingActivate": {"permissions": [
-      {"resource": "/v1/costing/activations:preview", "methods": ["POST"]},
-      {"resource": "/v1/costing/conversions:advance", "methods": ["POST"]},
-      {"resource": "/v1/costing/conversions:validate", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions/*/activate", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions:activate", "methods": ["POST"]}
+      {"resource": "/v1/product-costing/activations:preview", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/conversions:advance", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/conversions:validate", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions/*/activate", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions:activate", "methods": ["POST"]}
     ]},
     "CostingCalculate": {"permissions": [
-      {"resource": "/v1/costing/calculations", "methods": ["POST"]},
-      {"resource": "/v1/costing/estimates", "methods": ["POST"]},
-      {"resource": "/v1/costing/mixed-costs", "methods": ["POST"]},
-      {"resource": "/v1/costing/postings:cogs", "methods": ["POST"]},
-      {"resource": "/v1/costing/postings:price-difference", "methods": ["POST"]},
-      {"resource": "/v1/costing/rolls", "methods": ["POST"]},
-      {"resource": "/v1/costing/sales-order-estimates", "methods": ["POST"]},
-      {"resource": "/v1/costing/sales-order-estimates:freeze", "methods": ["POST"]},
-      {"resource": "/v1/costing/sales-order-estimates:refresh", "methods": ["POST"]}
+      {"resource": "/v1/product-costing/calculations", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/estimates", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/mixed-costs", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/postings:cogs", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/postings:price-difference", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/rolls", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/sales-order-estimates", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/sales-order-estimates:freeze", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/sales-order-estimates:refresh", "methods": ["POST"]}
     ]},
     "CostingMaintain": {"permissions": [
-      {"resource": "/v1/costing/cost-components", "methods": ["POST"]},
-      {"resource": "/v1/costing/cost-groups", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions/*/transition", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions:transition", "methods": ["POST"]}
+      {"resource": "/v1/product-costing/cost-components", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/cost-groups", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions/*/transition", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions:transition", "methods": ["POST"]}
     ]},
-    "CostingSystem": {"permissions": [{"resource": "/v1/costing/variances/compute", "methods": ["POST"]}]},
+    "CostingSystem": {"permissions": [{"resource": "/v1/product-costing/variances/compute", "methods": ["POST"]}]},
     "CostingView": {"permissions": [
-      {"resource": "/v1/costing/comparisons", "methods": ["POST"]},
-      {"resource": "/v1/costing/cost-components", "methods": ["GET"]},
-      {"resource": "/v1/costing/cost-groups", "methods": ["GET"]},
-      {"resource": "/v1/costing/reconciliations", "methods": ["POST"]},
-      {"resource": "/v1/costing/versions", "methods": ["GET"]},
-      {"resource": "/v1/costing/versions/*", "methods": ["GET"]}
+      {"resource": "/v1/product-costing/comparisons", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/cost-components", "methods": ["GET"]},
+      {"resource": "/v1/product-costing/cost-groups", "methods": ["GET"]},
+      {"resource": "/v1/product-costing/reconciliations", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/versions", "methods": ["GET"]},
+      {"resource": "/v1/product-costing/versions/*", "methods": ["GET"]}
     ]},
     "CutoverManager": {"permissions": [
       {"resource": "/api/v1/cutover/plans", "methods": ["GET"]},
@@ -2237,7 +2237,7 @@
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
     },
     "receiving": {
-      "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.journal.post"],
+      "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
       "close": ["period.check"],
       "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
       "inventory": ["inventory.ownership-change.read"],
@@ -2247,7 +2247,7 @@
       "ledger": ["ledger.ledger.lookup"]
     },
     "payables": {
-      "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"],
+      "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
       "tax": ["Calculate withholding tax"],
       "party": ["party.vendor_bank.reveal"]
@@ -2256,7 +2256,7 @@
       "payables": ["payment-run.execute"]
     },
     "party": {
-      "numbering": ["numbering.sequence.allocate", "numbering.write"]
+      "numbering": ["numbering.sequence.allocate"]
     }
   }
 }
