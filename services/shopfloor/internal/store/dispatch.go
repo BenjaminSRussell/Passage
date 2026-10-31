@@ -93,7 +93,13 @@ func jobStartFlags(ctx context.Context, tx pgx.Tx, tenantID string, in Registrat
 // applyJobStart runs the dispatch rules for a job-start that was just stored in
 // tx: a released job becomes started, and an open start (no stoppedAt) closes the
 // worker's other open unit of work (FR-25.3, BR-25.1).
-func applyJobStart(ctx context.Context, tx pgx.Tx, tenantID string, in Registration, status string, res *RegistrationResult) error {
+//
+// A start that its own job-stop already closes (a job-stop of the same worker
+// and job starting at or after it, stored or in this batch: the kiosk replays a
+// start and its stop together) still stops the worker's older units, but is never
+// closed by the server at a newer unit's start: its own stop carries its time,
+// and a server stop as well would count the job's hours twice (BR-25.7 replay).
+func applyJobStart(ctx context.Context, tx pgx.Tx, tenantID string, in Registration, status string, batch []Registration, res *RegistrationResult) error {
 	if status == JobReleased {
 		if _, err := tx.Exec(ctx, `update shop_job set status = 'started', version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 and status = 'released'`, tenantID, *in.JobID); err != nil {
@@ -111,7 +117,14 @@ func applyJobStart(ctx context.Context, tx pgx.Tx, tenantID string, in Registrat
 	if in.BundleID != nil {
 		incoming.BundleID = *in.BundleID
 	}
+	closed, err := startClosedByOwnStop(ctx, tx, tenantID, in, batch)
+	if err != nil {
+		return err
+	}
 	for _, unit := range domain.PlanAutoStop(open, incoming) {
+		if closed && unitHolds(unit, in.ID) {
+			continue
+		}
 		hours, err := unit.Hours()
 		if err != nil {
 			return err
@@ -127,6 +140,31 @@ func applyJobStart(ctx context.Context, tx pgx.Tx, tenantID string, in Registrat
 		}
 	}
 	return nil
+}
+
+// startClosedByOwnStop reports whether a job-stop of the same worker and job that
+// starts at or after the start is in the batch or already stored (the openStarts
+// rule applied to the incoming start).
+func startClosedByOwnStop(ctx context.Context, tx pgx.Tx, tenantID string, in Registration, batch []Registration) (bool, error) {
+	for _, b := range batch {
+		if b.Kind == KindJobStop && b.WorkerID == in.WorkerID && b.JobID != nil && *b.JobID == *in.JobID && !b.StartedAt.Before(in.StartedAt) {
+			return true, nil
+		}
+	}
+	var stored bool
+	err := tx.QueryRow(ctx, `select exists (select 1 from time_registration
+		where tenant_id = $1 and worker_id = $2 and kind = 'job-stop' and job_id = $3 and started_at >= $4)`,
+		tenantID, in.WorkerID, *in.JobID, in.StartedAt).Scan(&stored)
+	return stored, err
+}
+
+func unitHolds(u domain.StopUnit, registrationID string) bool {
+	for _, m := range u.Members {
+		if m.RegistrationID == registrationID {
+			return true
+		}
+	}
+	return false
 }
 
 // openStarts loads a worker's open job-starts in start order: job-starts with no

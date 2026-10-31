@@ -58,7 +58,9 @@ agreement list shows the windows and the create form adds and removes them.
   runs from its earliest start and is split by the good quantity on its starts, or equally
   (BR-25.1, `domain.SplitBundleHours`). Starts sharing the incoming `bundleId` stay open,
   so a bundle starts in one batch. A start older than an open unit (a late offline replay)
-  is itself closed at that unit's start. A unit open for more than 24 hours is stopped at
+  is itself closed at that unit's start, unless its own job-stop (same job, starting at or
+  after it) is stored or in the same batch: then that stop carries its time and the server
+  writes none, so a replayed start and stop are not counted twice. A unit open for more than 24 hours is stopped at
   24 hours and also flagged `auto-stop-capped`. Each auto-stop emits
   `registration.posted` (kind `job-stop`, `hours`, `flags`) in the same transaction and
   comes back in the item's `autoStopped` with warning SF-0002. The worker row is locked
@@ -287,11 +289,14 @@ agreement list shows the windows and the create form adds and removes them.
   this slice (SF-0109).
 - Machine-event ingest (`POST machine-events`, called by the iot-edge gateway with the
   `shopfloor.machine.ingest` duty): batches of up to 500 events, classified per machine by
-  BR-25.4. Events with seq at or below the machine's last stored seq and events older than
-  7 days are dropped and counted; missing seq runs are returned in `gaps` (SF-0008, a
-  warning) so the edge can replay them. Accepted events are stored under
-  `(tenant, machine, seq)` with the machine row locked, so a replayed batch never double
-  counts. An unknown machine code rejects the whole batch (SF-0108).
+  BR-25.4. Events older than 7 days and events whose `(machine, seq)` is already stored
+  are dropped and counted; missing seq runs above the last stored seq are returned in
+  `gaps` (SF-0008, a warning) so the edge can replay them. An event at or below the last
+  stored seq that is not stored yet (a gap replay, or a batch that commits after a later
+  one across a broker restart) is stored and counted as accepted; it feeds counts and OEE
+  but not the downtime record, which follows the newest state. Accepted events are stored
+  under `(tenant, machine, seq)` with the machine row locked, so a replayed batch never
+  double counts. An unknown machine code rejects the whole batch (SF-0108).
 - Downtime and andon (FR-25.11, BR-25.10): a DOWN state opens a downtime and any other
   state ends it. When an ingest finds a downtime open for more than 10 minutes (server
   time), it raises one andon per (resource, kind) and emits

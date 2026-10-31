@@ -118,6 +118,53 @@ func TestDispatch_JobStartAutoStopsThePreviousJob(t *testing.T) {
 	}
 }
 
+// Regression (BR-25.7, AC-25.1): while kiosk K1 was offline the worker started j6
+// on kiosk K2 at 07:20. K1 then replays a start of j5 at 07:03 together with its
+// own closed stop 07:03-07:13 (stop first in the request, as a tie may come). The
+// j5 start is older than j6, but its own stop closes it, so the server must not
+// also close it at 07:20: before the fix j5 carried 0.17 h from K1's stop plus a
+// server stop of 0.28 h. A start with no stop of its own (j4 at 07:17) is still
+// closed at j6's start (0.05 h), and j6 stays open.
+func TestDispatch_ReplayedStartWithOwnStopIsNotStoppedAgain(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(84))
+	w := mustWorker(t, s, ctx, "DISP-4", nil)
+	resource := ids.New()
+	j4, j5, j6 := mustJob(t, s, ctx, resource, 7), mustJob(t, s, ctx, resource, 8), mustJob(t, s, ctx, resource, 9)
+	register(t, s, ctx, jobStart(w.ID, j6.ID, day(7, 20), nil))
+
+	start := jobStart(w.ID, j5.ID, day(7, 3), nil)
+	stopAt := day(7, 13)
+	h := domain.ElapsedHours(day(7, 3), stopAt)
+	stop := Registration{ID: ids.New(), WorkerID: w.ID, Kind: KindJobStop, JobID: &j5.ID, StartedAt: day(7, 3), StoppedAt: &stopAt, Hours: &h, Offline: true}
+	res := register(t, s, ctx, stop, start)
+	if len(res[0].AutoStopped)+len(res[1].AutoStopped) != 0 {
+		t.Fatalf("replayed start with its own stop was auto-stopped: %+v", res)
+	}
+	res = register(t, s, ctx, jobStart(w.ID, j4.ID, day(7, 17), nil))
+	if a := res[0].AutoStopped; len(a) != 1 || a[0].JobID != j4.ID || !a[0].StoppedAt.Equal(day(7, 20)) || a[0].Hours.String() != "0.05" {
+		t.Fatalf("stale start without a stop = %+v", a)
+	}
+
+	regs, err := s.ListRegistrations(ctx, w.ID, day(0, 0), day(23, 0), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hours := map[string]decimal.Decimal{}
+	for _, r := range regs {
+		if r.Kind == KindJobStop && r.Hours != nil {
+			hours[*r.JobID] = hours[*r.JobID].Add(*r.Hours)
+		}
+	}
+	if len(hours) != 2 || !hours[j5.ID].Equal(h) || hours[j4.ID].String() != "0.05" {
+		t.Fatalf("job hours = %v, want j5 %s (its own stop) and j4 0.05 only", hours, h)
+	}
+	sess, err := s.BadgeLogin(ctx, "DISP-4")
+	if err != nil || len(sess.OpenJobs) != 1 || sess.OpenJobs[0].JobID != j6.ID {
+		t.Fatalf("open jobs = %+v, %v", sess.OpenJobs, err)
+	}
+}
+
 // FR-25.3 and BR-25.1: the jobs of a bundle start together without stopping each
 // other; the next start stops the bundle as one unit and splits its time by the
 // good quantity on the starts. A start for a job of another tenant moves nothing.
