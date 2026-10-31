@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"time"
@@ -78,7 +79,7 @@ type PersonnelAction struct {
 }
 
 func (a PersonnelAction) WithoutPay() PersonnelAction {
-	a.Payload.Amount = ""
+	a.Payload.Amount, a.Payload.CompPlanID, a.Payload.Currency = "", "", ""
 	return a
 }
 
@@ -357,7 +358,7 @@ func changeCompTx(ctx context.Context, tx pgx.Tx, tenantID, workerID, employment
 	if later {
 		return problem(http.StatusUnprocessableEntity, CodeActionCompLater, "compensation already starts on or after the effective date")
 	}
-	if _, err := tx.Exec(ctx, `update hr_fixed_compensation set valid_to = $3 where tenant_id = $1 and employment_id = $2 and validity @> $3::timestamptz`, tenantID, employmentID, at); err != nil {
+	if err := closeCompensation(ctx, tx, tenantID, workerID, employmentID, at); err != nil {
 		return err
 	}
 	var legalEntity string
@@ -393,11 +394,16 @@ func (s *Postgres) applyTerminate(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if validTo != nil && !end.Before(utc(*validTo)) {
 		return problem(http.StatusUnprocessableEntity, CodeActionInactive, "the employment already ends on or before the termination date")
 	}
+	allEntities, err := scopeIsAll(ctx, tx)
+	if err != nil {
+		return err
+	}
 	var lastEmployment, future bool
 	if err := tx.QueryRow(ctx, `select not exists (select 1 from employment where tenant_id = $1 and worker_id = $2 and id <> $3 and (valid_to is null or valid_to > $4))`,
 		p.TenantID, a.WorkerID, employmentID, end).Scan(&lastEmployment); err != nil {
 		return err
 	}
+	lastEmployment = lastEmployment && allEntities
 	if err := tx.QueryRow(ctx, `select exists (select 1 from position_assignment where tenant_id = $1 and employment_id = $2 and valid_from >= $3)
 		or exists (select 1 from hr_fixed_compensation where tenant_id = $1 and employment_id = $2 and valid_from >= $3)
 		or ($4 and exists (select 1 from benefit_enrollment where tenant_id = $1 and worker_id = $5 and valid_to is null and valid_from > $6))`,
@@ -414,8 +420,7 @@ func (s *Postgres) applyTerminate(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if err := s.closeAssignments(ctx, tx, p.TenantID, a.WorkerID, employmentID, end); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `update hr_fixed_compensation set valid_to = $3 where tenant_id = $1 and employment_id = $2 and valid_from < $3 and (valid_to is null or valid_to > $3)`,
-		p.TenantID, employmentID, end); err != nil {
+	if err := closeCompensation(ctx, tx, p.TenantID, a.WorkerID, employmentID, end); err != nil {
 		return err
 	}
 	if lastEmployment {
@@ -545,8 +550,11 @@ func (s *Postgres) WithdrawAction(ctx context.Context, id string) (PersonnelActi
 		}
 		out, err = scanAction(tx.QueryRow(ctx, `update hr_personnel_action set status = 'WITHDRAWN', withdrawn_by = $3, withdrawn_at = now()
 			where tenant_id = $1 and id = $2 returning `+actionColumns, p.TenantID, id, p.UserID))
-		changed = err == nil
-		return err
+		if err != nil {
+			return err
+		}
+		changed = true
+		return releaseOffer(ctx, tx, p.TenantID, id, s.now())
 	})
 	return out, changed, err
 }
@@ -573,12 +581,9 @@ func (s *Postgres) ApplyDueActions(ctx context.Context, asOf time.Time) (ApplyRe
 		return res, err
 	}
 	for _, id := range due {
-		applied, failure, err := s.applyOne(ctx, p, id)
-		if err != nil {
-			return res, err
-		}
+		applied, failed := s.applyOne(ctx, p, id)
 		switch {
-		case failure != nil:
+		case failed:
 			res.Failed++
 		case applied:
 			res.Applied++
@@ -587,8 +592,7 @@ func (s *Postgres) ApplyDueActions(ctx context.Context, asOf time.Time) (ApplyRe
 	return res, nil
 }
 
-func (s *Postgres) applyOne(ctx context.Context, p tenant.Principal, id string) (bool, *httpx.Problem, error) {
-	applied := false
+func (s *Postgres) applyOne(ctx context.Context, p tenant.Principal, id string) (applied, failed bool) {
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		act, err := scanAction(tx.QueryRow(ctx, `select `+actionColumns+` from hr_personnel_action where tenant_id = $1 and id = $2 and status = 'PENDING' for update skip locked`, p.TenantID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -603,14 +607,78 @@ func (s *Postgres) applyOne(ctx context.Context, p tenant.Principal, id string) 
 		applied = true
 		return nil
 	})
+	if err == nil {
+		return applied, false
+	}
+	code, detail := "HCM-ACT-ERROR", "the action could not be applied; see the service log"
 	var pr *httpx.Problem
-	if !errors.As(err, &pr) || pr.Status >= http.StatusInternalServerError {
-		return applied, nil, err
+	if errors.As(err, &pr) && pr.Status < http.StatusInternalServerError {
+		code, detail = pr.Code, pr.Detail
+	} else {
+		slog.Error("apply personnel action failed", "err", err, "actionId", id, "tenantId", p.TenantID)
 	}
 	failErr := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update hr_personnel_action set status = 'FAILED', failure_code = $3, failure_detail = $4
-			where tenant_id = $1 and id = $2 and status = 'PENDING'`, p.TenantID, id, pr.Code, pr.Detail)
-		return err
+		tag, err := tx.Exec(ctx, `update hr_personnel_action set status = 'FAILED', failure_code = $3, failure_detail = $4
+			where tenant_id = $1 and id = $2 and status = 'PENDING'`, p.TenantID, id, code, detail)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		return releaseOffer(ctx, tx, p.TenantID, id, s.now())
 	})
-	return false, pr, failErr
+	if failErr != nil {
+		slog.Error("mark personnel action failed", "err", failErr, "actionId", id, "tenantId", p.TenantID)
+		return false, false
+	}
+	return false, true
+}
+
+func releaseOffer(ctx context.Context, tx pgx.Tx, tenantID, actionID string, at time.Time) error {
+	var candidateID string
+	err := tx.QueryRow(ctx, `update hr_offer set hire_action_id = null, updated_at = now() where tenant_id = $1 and hire_action_id = $2 returning candidate_id::text`, tenantID, actionID).Scan(&candidateID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `update hr_candidate set stage = 'OFFER', stage_changed_at = $3 where tenant_id = $1 and id = $2 and stage = 'HIRED'`, tenantID, candidateID, at)
+	return err
+}
+
+func closeCompensation(ctx context.Context, tx pgx.Tx, tenantID, workerID, employmentID string, at time.Time) error {
+	rows, err := tx.Query(ctx, `update hr_fixed_compensation set valid_to = $3 where tenant_id = $1 and employment_id = $2 and valid_from < $3 and (valid_to is null or valid_to > $3)
+		returning id::text, plan_id::text, amount::text, currency, valid_from`, tenantID, employmentID, at)
+	if err != nil {
+		return err
+	}
+	var closed []hrevents.CompensationChangedData
+	for rows.Next() {
+		d := hrevents.CompensationChangedData{WorkerID: workerID, EmploymentID: employmentID}
+		var from time.Time
+		if err := rows.Scan(&d.ID, &d.PlanID, &d.Amount, &d.Currency, &from); err != nil {
+			rows.Close()
+			return err
+		}
+		to := at.Format(time.RFC3339)
+		d.ValidFrom, d.ValidTo = utc(from).Format(time.RFC3339), &to
+		closed = append(closed, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, d := range closed {
+		if err := enqueue(ctx, tx, "compensation", d.ID, hrevents.CompensationChanged, tenantID, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scopeIsAll(ctx context.Context, tx pgx.Tx) (bool, error) {
+	var scopes string
+	if err := tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&scopes); err != nil {
+		return false, err
+	}
+	return scopes == "*", nil
 }

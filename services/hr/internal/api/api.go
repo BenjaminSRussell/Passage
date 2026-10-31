@@ -77,6 +77,7 @@ type API struct {
 	cancellations    atomic.Int64
 	passes           atomic.Int64
 	personnel        personnelCounters
+	purgeEnabled     bool
 }
 
 // New builds the API over a store.

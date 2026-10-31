@@ -375,6 +375,11 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 		if c.Status != cycleManagerInput {
 			return problem(http.StatusConflict, CodeCycleState, "worksheets can be submitted only while the cycle is in MANAGER_INPUT")
 		}
+		if all, err := scopeIsAll(ctx, tx); err != nil {
+			return err
+		} else if !all {
+			return problem(http.StatusForbidden, "AUTH-0003", "submitting a worksheet checks department budgets across every legal entity and needs access to all of them")
+		}
 		rows, err := listWorksheet(ctx, tx, p.TenantID, cycleID, managerID)
 		if err != nil {
 			return err
@@ -451,11 +456,9 @@ func (s *Postgres) ApplyCompCycle(ctx context.Context, cycleID string) (CompCycl
 		if c.Status != cycleApproval {
 			return problem(http.StatusConflict, CodeCycleState, "a cycle is applied from APPROVAL; this one is "+c.Status)
 		}
-		var scopes string
-		if err := tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&scopes); err != nil {
+		if all, err := scopeIsAll(ctx, tx); err != nil {
 			return err
-		}
-		if scopes != "*" {
+		} else if !all {
 			return problem(http.StatusForbidden, "AUTH-0003", "applying a cycle needs access to every legal entity")
 		}
 		at, err := time.Parse("2006-01-02", c.EffectiveDate)
@@ -478,6 +481,23 @@ func (s *Postgres) ApplyCompCycle(ctx context.Context, cycleID string) (CompCycl
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
+		}
+		totals := map[string]decimal.Decimal{}
+		for _, r := range submitted {
+			totals[r.DepartmentID] = totals[r.DepartmentID].Add(decimal.RequireFromString(r.ProposedAmount))
+		}
+		for d, total := range totals {
+			budget := decimal.Zero
+			var text string
+			err := tx.QueryRow(ctx, `select budget_amount::text from hr_comp_cycle_budget where tenant_id = $1 and cycle_id = $2 and department_id = $3`, p.TenantID, cycleID, d).Scan(&text)
+			if err == nil {
+				budget = decimal.RequireFromString(text)
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err := domain.CheckDepartmentBudget(total, budget, c.AllowOverBudget, d); err != nil {
+				return problem(http.StatusUnprocessableEntity, domain.CodeCompOverBudget, err.(*domain.Error).Detail)
+			}
 		}
 		places := money.MinorUnits(c.Currency)
 		actionIDs = []string{}

@@ -44,8 +44,9 @@ CREATE INDEX IF NOT EXISTS hr_candidate_requisition ON hr_candidate (tenant_id, 
 CREATE TABLE IF NOT EXISTS hr_consent_record (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
-  subject_type text NOT NULL CHECK (subject_type IN ('CANDIDATE', 'WORKER')),
+  subject_type text NOT NULL CHECK (subject_type = 'CANDIDATE'),
   subject_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   purpose text NOT NULL CHECK (purpose ~ '^[A-Z0-9][A-Z0-9_-]{0,39}$'),
   granted_at timestamptz NOT NULL DEFAULT now(),
   granted_by text NOT NULL,
@@ -166,6 +167,9 @@ ALTER TABLE hr_consent_record FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_consent_record_tenant_access ON hr_consent_record AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_consent_record_legal_entity_scope ON hr_consent_record AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 ALTER TABLE hr_retention_policy ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hr_retention_policy FORCE ROW LEVEL SECURITY;

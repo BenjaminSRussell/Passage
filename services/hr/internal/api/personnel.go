@@ -53,6 +53,11 @@ func (c *personnelCounters) write(counter func(name, help string, v int64)) {
 	counter("hr_compensation_cycles_applied_total", "Compensation cycles applied.", c.cycleApplies.Load())
 }
 
+func (a *API) EnableRetentionPurge(on bool) *API {
+	a.purgeEnabled = on
+	return a
+}
+
 func (a *API) registerPersonnel(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCompAdmin)).Post("/v1/hr/jobs", a.createJob)
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/jobs", a.listJobs)

@@ -365,8 +365,8 @@ func (a *API) grantConsent(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	req.Purpose = strings.ToUpper(strings.TrimSpace(req.Purpose))
-	if !contains([]string{"CANDIDATE", "WORKER"}, req.SubjectType) {
-		fields["subjectType"] = "must be CANDIDATE or WORKER"
+	if req.SubjectType != "CANDIDATE" {
+		fields["subjectType"] = "must be CANDIDATE"
 	}
 	if !ids.Valid(req.SubjectID) {
 		fields["subjectId"] = "must be a UUID"
@@ -396,8 +396,8 @@ func (a *API) listConsents(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	fields := map[string]string{}
-	if !contains([]string{"CANDIDATE", "WORKER"}, q.Get("subjectType")) {
-		fields["subjectType"] = "must be CANDIDATE or WORKER"
+	if q.Get("subjectType") != "CANDIDATE" {
+		fields["subjectType"] = "must be CANDIDATE"
 	}
 	if !ids.Valid(q.Get("subjectId")) {
 		fields["subjectId"] = "must be a UUID"
@@ -470,6 +470,10 @@ func (a *API) listRetention(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) purgeCandidates(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
+		return
+	}
+	if !a.purgeEnabled {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "HCM-RET-DISABLED", "the retention purge is disabled until legal holds exist (FR-48.11); set HR_RETENTION_PURGE_ENABLED=true to enable it"))
 		return
 	}
 	n, err := a.store.PurgeCandidates(r.Context())

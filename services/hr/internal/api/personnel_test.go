@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
 
 func TestActionsThatTouchPayNeedCompAdmin(t *testing.T) {
@@ -54,5 +55,19 @@ func TestPersonnelRoutesRequireTheirDuty(t *testing.T) {
 		if rec := serve(t, tid(), c.method, c.target, `{}`, dutyWorkerInquire); rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s without %s: status %d, want 403", c.method, c.target, c.duty, rec.Code)
 		}
+	}
+}
+
+func TestRetentionPurgeIsOffByDefault(t *testing.T) {
+	rec := serve(t, tid(), http.MethodPost, "/v1/hr/candidates/purge", "", dutySetupAdmin)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "HCM-RET-DISABLED") {
+		t.Fatalf("status %d body %s, want 503 HCM-RET-DISABLED", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWithoutPayHidesPlanAmountAndCurrency(t *testing.T) {
+	act := store.PersonnelAction{Payload: store.ActionPayload{CompPlanID: "p", Amount: "1.00", Currency: "USD", PositionID: "x"}}.WithoutPay()
+	if act.Payload.CompPlanID != "" || act.Payload.Amount != "" || act.Payload.Currency != "" || act.Payload.PositionID != "x" {
+		t.Fatalf("payload = %+v", act.Payload)
 	}
 }

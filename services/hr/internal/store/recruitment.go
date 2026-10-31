@@ -24,6 +24,8 @@ const (
 	CodeOfferNotFound       = "HCM-OFR-NOT-FOUND"
 	CodeOfferConverted      = "HCM-OFR-001"
 	CodeConsentRequired     = "HCM-CNS-001"
+	CodeOfferNoPlan         = "HCM-OFR-002"
+	CodeOfferEntity         = "HCM-OFR-003"
 	CodeConsentNotFound     = "HCM-CNS-NOT-FOUND"
 	CodeSubjectNotFound     = "HCM-CNS-SUBJECT"
 
@@ -301,7 +303,7 @@ func (s *Postgres) CreateCandidate(ctx context.Context, in CandidateInput, idemp
 			replay, err := s.scanCandidate(p, tx.QueryRow(ctx, candidateSelect+` where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				out = replay
-				return nil
+				return auditCandidate(ctx, tx, p, "p3_read", replay.ID, candidatePIIFields, "")
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return err
@@ -337,8 +339,8 @@ func (s *Postgres) CreateCandidate(ctx context.Context, in CandidateInput, idemp
 			values ($1, $2, $3, $9, 'APPLIED', $4, $5, $6, $7, $8)`, p.TenantID, id, in.RequisitionID, in.Source, name, email, phone, key, req.LegalEntityID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into hr_consent_record (tenant_id, id, subject_type, subject_id, purpose, granted_by) values ($1, $2, 'CANDIDATE', $3, $4, $5)`,
-			p.TenantID, ids.New(), id, PurposeRecruitment, p.UserID); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hr_consent_record (tenant_id, id, subject_type, subject_id, legal_entity_id, purpose, granted_by) values ($1, $2, 'CANDIDATE', $3, $6, $4, $5)`,
+			p.TenantID, ids.New(), id, PurposeRecruitment, p.UserID, req.LegalEntityID); err != nil {
 			return err
 		}
 		if err := auditCandidate(ctx, tx, p, "p3_change", id, candidatePIIFields, ""); err != nil {
@@ -435,7 +437,10 @@ func (s *Postgres) MoveCandidate(ctx context.Context, id, to string) (Candidate,
 			return err
 		}
 		out, err = s.scanCandidate(p, tx.QueryRow(ctx, candidateSelect+` where tenant_id = $1 and id = $2`, p.TenantID, id))
-		return err
+		if err != nil {
+			return err
+		}
+		return auditCandidate(ctx, tx, p, "p3_read", id, candidatePIIFields, "")
 	})
 	return out, err
 }
@@ -465,16 +470,13 @@ func (s *Postgres) GrantConsent(ctx context.Context, subjectType, subjectID, pur
 	var out Consent
 	granted := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		table := "worker"
-		if subjectType == "CANDIDATE" {
-			table = "hr_candidate"
-		}
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from `+table+` where tenant_id = $1 and id = $2)`, p.TenantID, subjectID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
+		var legalEntity string
+		err := tx.QueryRow(ctx, `select legal_entity_id::text from hr_candidate where tenant_id = $1 and id = $2`, p.TenantID, subjectID).Scan(&legalEntity)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return problem(http.StatusNotFound, CodeSubjectNotFound, "the consent subject does not exist")
+		}
+		if err != nil {
+			return err
 		}
 		cur, err := scanConsent(tx.QueryRow(ctx, consentSelect+` where tenant_id = $1 and subject_type = $2 and subject_id = $3 and purpose = $4 and withdrawn_at is null`,
 			p.TenantID, subjectType, subjectID, purpose))
@@ -485,8 +487,8 @@ func (s *Postgres) GrantConsent(ctx context.Context, subjectType, subjectID, pur
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		out, err = scanConsent(tx.QueryRow(ctx, `insert into hr_consent_record (tenant_id, id, subject_type, subject_id, purpose, granted_by) values ($1, $2, $3, $4, $5, $6)
-			returning id::text, subject_type, subject_id::text, purpose, granted_at, granted_by, withdrawn_at, withdrawn_by`, p.TenantID, ids.New(), subjectType, subjectID, purpose, p.UserID))
+		out, err = scanConsent(tx.QueryRow(ctx, `insert into hr_consent_record (tenant_id, id, subject_type, subject_id, legal_entity_id, purpose, granted_by) values ($1, $2, $3, $4, $7, $5, $6)
+			returning id::text, subject_type, subject_id::text, purpose, granted_at, granted_by, withdrawn_at, withdrawn_by`, p.TenantID, ids.New(), subjectType, subjectID, purpose, p.UserID, legalEntity))
 		granted = err == nil
 		return err
 	})
@@ -519,6 +521,13 @@ func (s *Postgres) ListConsents(ctx context.Context, subjectType, subjectID stri
 	p := principal(ctx)
 	out := []Consent{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from hr_candidate where tenant_id = $1 and id = $2)`, p.TenantID, subjectID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return problem(http.StatusNotFound, CodeSubjectNotFound, "the consent subject does not exist")
+		}
 		rows, err := tx.Query(ctx, consentSelect+` where tenant_id = $1 and subject_type = $2 and subject_id = $3 order by granted_at, id`, p.TenantID, subjectType, subjectID)
 		if err != nil {
 			return err
@@ -768,6 +777,39 @@ func (s *Postgres) settleRequisition(ctx context.Context, tx pgx.Tx, tenantID, r
 	return requisitionEvent(ctx, tx, tenantID, req)
 }
 
+func checkHireFits(ctx context.Context, tx pgx.Tx, tenantID string, req Requisition, in HireInput, start time.Time) error {
+	var overlap bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from employment where tenant_id = $1 and worker_id = $2 and legal_entity_id = $3 and assignment_kind = 'PRIMARY'
+		and validity && tstzrange($4::timestamptz, null, '[)'))`, tenantID, in.WorkerID, in.LegalEntityID, start).Scan(&overlap); err != nil {
+		return err
+	}
+	if overlap {
+		return problem(http.StatusConflict, CodeEmploymentOverlap, "the worker already has a primary employment in this legal entity from that date")
+	}
+	var fte, existing string
+	var overfill bool
+	err := tx.QueryRow(ctx, `select fte::text, allow_overfill from hr_position where tenant_id = $1 and id = $2 for update`, tenantID, req.PositionID).Scan(&fte, &overfill)
+	if err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `select coalesce(sum(fte_share), 0)::text from position_assignment where tenant_id = $1 and position_id = $2
+		and validity && tstzrange($3::timestamptz, null, '[)')`, tenantID, req.PositionID, start).Scan(&existing); err != nil {
+		return err
+	}
+	share := in.FTEShare
+	if share == "" {
+		share = defaultFTEShare
+	}
+	if err := domain.CheckFTE(decimal.RequireFromString(fte), overfill, decimal.RequireFromString(existing), decimal.RequireFromString(share)); err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) {
+			return problem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+		}
+		return err
+	}
+	return nil
+}
+
 type HireInput struct {
 	WorkerID       string
 	LegalEntityID  string
@@ -792,6 +834,15 @@ func (s *Postgres) HireFromOffer(ctx context.Context, id string, in HireInput) (
 		}
 		start, err := time.Parse("2006-01-02", offer.StartDate)
 		if err != nil {
+			return err
+		}
+		if in.CompPlanID == "" {
+			return problem(http.StatusUnprocessableEntity, CodeOfferNoPlan, "a hire from an offer needs a compPlanId so the offered pay is recorded")
+		}
+		if in.LegalEntityID != req.LegalEntityID {
+			return problem(http.StatusUnprocessableEntity, CodeOfferEntity, "the hire must be in the requisition's legal entity "+req.LegalEntityID)
+		}
+		if err := checkHireFits(ctx, tx, p.TenantID, req, in, start); err != nil {
 			return err
 		}
 		payload := ActionPayload{
