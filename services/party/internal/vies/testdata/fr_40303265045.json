@@ -1,0 +1,22 @@
+{
+  "isValid" : true,
+  "requestDate" : "2026-10-31T02:44:25.802Z",
+  "userError" : "VALID",
+  "name" : "SA SODIMAS",
+  "address" : "11 RUE AMPERE\n26600 PONT DE L ISERE",
+  "requestIdentifier" : "",
+  "originalVatNumber" : "40303265045",
+  "vatNumber" : "40303265045",
+  "viesApproximate" : {
+    "name" : "---",
+    "street" : "---",
+    "postalCode" : "---",
+    "city" : "---",
+    "companyType" : "---",
+    "matchName" : 3,
+    "matchStreet" : 3,
+    "matchPostalCode" : 3,
+    "matchCity" : 3,
+    "matchCompanyType" : 3
+  }
+}

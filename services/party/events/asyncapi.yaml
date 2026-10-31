@@ -32,7 +32,16 @@ channels:
     messages:
       updated:
         $ref: '#/components/messages/protectedFieldsUpdated'
+  passage.party.vendorbank:
+    address: passage.party.vendorbank
+    messages:
+      revealed:
+        $ref: '#/components/messages/vendorBankRevealed'
 operations:
+  onVendorBankRevealed:
+    action: send
+    channel: { $ref: '#/channels/passage.party.vendorbank' }
+    messages: [{ $ref: '#/channels/passage.party.vendorbank/messages/revealed' }]
   onProtectedFieldsUpdated:
     action: send
     channel: { $ref: '#/channels/passage.party.protectedfields' }
@@ -156,6 +165,21 @@ components:
           actor_user_id: { type: string }
           updated_at: { type: string, format: date-time }
       x-passage-type: dev.passage.party.protectedfields.updated.v1
+    vendorBankRevealed:
+      name: revealed
+      title: Vendor bank details revealed
+      description: Audit record written in the same transaction as every successful decryption of vendor bank numbers. Carries no account data.
+      payload:
+        type: object
+        required: [vendor_id, legal_entity_id, actor_user_id, account_count, revealed_at]
+        properties:
+          vendor_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          actor_user_id: { type: string }
+          actor_service: { type: string }
+          account_count: { type: integer }
+          revealed_at: { type: string, format: date-time }
+      x-passage-type: dev.passage.party.vendorbank.revealed.v1
   schemas:
     Change:
       type: object

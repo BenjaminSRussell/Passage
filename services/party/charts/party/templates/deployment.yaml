@@ -43,6 +43,18 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: DATABASE_URL
+            - name: FIELDCRYPT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: FIELDCRYPT_KEYS
+                  optional: true
+            - name: FIELDCRYPT_CURRENT_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: FIELDCRYPT_CURRENT_KEY_ID
+                  optional: true
             - name: PASSAGE_SERVICE_NAME
               value: party
 {{- if .Values.serviceIdentity.signingKeySecret }}
