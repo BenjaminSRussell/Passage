@@ -734,12 +734,13 @@ components:
     ArrivalLine:
       type: object
       additionalProperties: false
-      required: [poLineId, productId, unit]
+      required: [productId, unit]
       description: |
         With poLineNo the line is validated against the purchase order line (same legal entity, vendor, currency,
         product and unit, open quantity above zero), orderedRemaining is the order quantity not yet received and
-        unitPrice the net price per unit, both taken from purchasing; supplying either is 400. Without poLineNo
-        both are required and trusted as sent. Either every line carries poLineNo or none does.
+        unitPrice the net price per unit, and poLineId is derived from the order line; supplying any of them is 400. The open quantity is the order line
+        quantity less what non-cancelled registered or posted receipts here already took. poLineNo is required unless the deployment sets
+        RECEIVING_ALLOW_LEGACY_PO_LINE=1; without it poLineId, orderedRemaining and unitPrice are required and trusted as sent. Either every line carries poLineNo or none does.
       properties:
         poLineId: { type: string, format: uuid }
         poLineNo: { type: integer, minimum: 1 }
@@ -834,7 +835,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [poLineId, productId, unit, qty, locationId]
+            required: [productId, unit, qty, locationId]
             description: Same purchase order line rules as ArrivalLine.
             properties:
               poLineId: { type: string, format: uuid }

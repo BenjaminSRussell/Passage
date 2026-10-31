@@ -176,7 +176,11 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 	for i, l := range r.Lines {
 		productIDs[i] = l.ProductID
 	}
-	lines, err := fn(cloneReceipt(r), t.recordedFor(productIDs))
+	withOthers := cloneReceipt(r)
+	for i, l := range withOthers.Lines {
+		withOthers.Lines[i].OtherReceived = t.receivedOn(r.ID, r.PurchaseOrderID, l.POLineNo)
+	}
+	lines, err := fn(withOthers, t.recordedFor(productIDs))
 	if err != nil {
 		return store.Receipt{}, err
 	}
@@ -211,6 +215,39 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 		}
 	}
 	return r, nil
+}
+
+func (t *tenantData) receivedOn(excludeID, purchaseOrderID string, poLineNo int) decimal.Decimal {
+	total := decimal.Zero
+	if poLineNo < 1 {
+		return total
+	}
+	for _, other := range t.receipts {
+		if other.ID == excludeID || other.PurchaseOrderID != purchaseOrderID || !slices.Contains([]domain.ReceiptState{domain.Registered, domain.Posted, domain.Corrected}, other.State) {
+			continue
+		}
+		for _, l := range other.Lines {
+			if l.POLineNo == poLineNo {
+				total = total.Add(l.Qty)
+			}
+		}
+	}
+	return total
+}
+
+func (s *Store) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (out map[int]decimal.Decimal, err error) {
+	out = map[int]decimal.Decimal{}
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, r := range t.receipts {
+			for _, l := range r.Lines {
+				if l.POLineNo > 0 && r.PurchaseOrderID == purchaseOrderID {
+					out[l.POLineNo] = t.receivedOn("", purchaseOrderID, l.POLineNo)
+				}
+			}
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (s *Store) Ping(context.Context) error { return nil }

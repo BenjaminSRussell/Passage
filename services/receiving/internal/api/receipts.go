@@ -194,7 +194,13 @@ func buildArrival(req arrivalRequest) (store.Receipt, map[string]string) {
 	}
 	for i, l := range req.Lines {
 		name := func(field string) string { return fmt.Sprintf("lines[%d].%s", i, field) }
-		checkUUID(fields, name("poLineId"), l.POLineID)
+		if l.POLineNo != nil {
+			if l.POLineID != "" {
+				fields[name("poLineId")] = "is derived from poLineNo and must be omitted"
+			}
+		} else {
+			checkUUID(fields, name("poLineId"), l.POLineID)
+		}
 		checkUUID(fields, name("productId"), l.ProductID)
 		checkLength(fields, name("unit"), l.Unit, 1, maxUnit)
 		line := store.Line{
@@ -258,6 +264,7 @@ func (a *API) arrive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, fields := buildArrival(req)
+	a.requirePOLine(in, fields)
 	if len(fields) > 0 {
 		problem := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
 		problem.Errors = fields
@@ -268,7 +275,7 @@ func (a *API) arrive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.bindPurchaseOrder(r.Context(), &in); err != nil {
+	if _, err := a.bindPurchaseOrder(r.Context(), &in); err != nil {
 		writeError(w, r, err)
 		return
 	}

@@ -36,6 +36,7 @@ type Line struct {
 	LineNo           int
 	POLineID         string
 	POLineNo         int
+	OtherReceived    decimal.Decimal
 	ProductID        string
 	Qty              decimal.Decimal
 	InvoicedQty      decimal.Decimal
@@ -269,6 +270,7 @@ type Store interface {
 	RejectedInvoiceCount(ctx context.Context, vendorID, number string) (int, error)
 	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error
 	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)
+	ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error)
 	SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string, fn AuditRateFunc) error
 	AuditRate(ctx context.Context, legalEntityID string) (decimal.Decimal, error)
 	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)

@@ -63,8 +63,8 @@ func newPurchasingRouter(t *testing.T, o poOverrides) (*chi.Mux, *purchasingStub
 }
 
 func poArrivalJSON(slip, lineFields string) string {
-	return fmt.Sprintf(`{"vendorId":%q,"purchaseOrderId":%q,"legalEntityId":%q,"packingSlip":%q,"receiptDate":"2026-10-25","currency":"USD","lines":[{"poLineId":%q,"poLineNo":1,"productId":%q,"overDeliveryPct":5,"unit":"EA"%s}]}`,
-		vendorID, poID, legalEntityID, slip, poLineID, productID, lineFields)
+	return fmt.Sprintf(`{"vendorId":%q,"purchaseOrderId":%q,"legalEntityId":%q,"packingSlip":%q,"receiptDate":"2026-10-25","currency":"USD","lines":[{"poLineNo":1,"productId":%q,"overDeliveryPct":5,"unit":"EA"%s}]}`,
+		vendorID, poID, legalEntityID, slip, productID, lineFields)
 }
 
 type arrivedReceipt struct {
@@ -87,8 +87,8 @@ func TestArrivalWithPOLineNo_TakesPriceAndOpenQuantityFromPurchasing(t *testing.
 		t.Fatal(err)
 	}
 	line := got.Lines[0]
-	if line.POLineNo != 1 || line.OrderedRemaining != "6" || line.UnitPrice != "2.5" {
-		t.Fatalf("line %+v: want PO line 1, open 6 (10 ordered, 4 received), net price 2.5 per unit", line)
+	if line.POLineNo != 1 || line.OrderedRemaining != "10" || line.UnitPrice != "2.5" {
+		t.Fatalf("line %+v: want PO line 1, open 10 (nothing received here yet), net price 2.5 per unit", line)
 	}
 	if stub.paths.Load() != "/v1/procurement/purchase-orders/"+poID {
 		t.Fatalf("purchasing was asked for %v", stub.paths.Load())
@@ -114,7 +114,7 @@ func TestArrivalWithPOLineNo_RefusesWhatThePurchaseOrderContradicts(t *testing.T
 		{"product mismatch", poOverrides{product: "99999999-9999-4999-8999-999999999992"}, "", 0, http.StatusBadRequest, "COM-0001"},
 		{"unit mismatch", poOverrides{unit: "KG"}, "", 0, http.StatusBadRequest, "COM-0001"},
 		{"cancelled line", poOverrides{status: "CANCELLED"}, "", 0, http.StatusUnprocessableEntity, "RCV-PO-002"},
-		{"fully received", poOverrides{received: "10"}, "", 0, http.StatusUnprocessableEntity, "RCV-OVR-001"},
+		{"caller poLineId", poOverrides{}, `,"poLineId":"` + poLineID + `"`, 0, http.StatusBadRequest, "COM-0001"},
 		{"order not approved", poOverrides{approval: "DRAFT"}, "", 0, http.StatusUnprocessableEntity, "RCV-PO-001"},
 		{"unknown order", poOverrides{}, "", http.StatusNotFound, http.StatusNotFound, "RCV-NF-004"},
 		{"purchasing down", poOverrides{}, "", http.StatusInternalServerError, http.StatusServiceUnavailable, "COM-0503"},
@@ -148,32 +148,122 @@ func TestArrivalWithPOLineNo_NeedsLookupAndAllLinesNamed(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[1].poLineNo") {
 		t.Fatalf("a line without poLineNo beside one with it must be refused: %d %s", rec.Code, rec.Body)
 	}
-	twice := strings.Replace(poArrivalJSON("PS-DUP", ""), `]}`, `,{"poLineId":"`+poLineID+`","poLineNo":1,"productId":"`+productID+`","unit":"EA"}]}`, 1)
+	twice := strings.Replace(poArrivalJSON("PS-DUP", ""), `]}`, `,{"poLineNo":1,"productId":"`+productID+`","unit":"EA"}]}`, 1)
 	rec = doWith(pr, http.MethodPost, arrivalsPath, twice, maintainer("k3"))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "duplicates lines[0].poLineNo") {
 		t.Fatalf("one PO line twice must be refused: %d %s", rec.Code, rec.Body)
 	}
 }
 
-func TestRegisterRechecksOpenQuantityAgainstPurchasing(t *testing.T) {
-	r, stub := newPurchasingRouter(t, poOverrides{})
-	created := doWith(r, http.MethodPost, arrivalsPath, poArrivalJSON("PS-REG", ""), maintainer("k1"))
-	if created.Code != http.StatusCreated {
-		t.Fatalf("arrival: %d %s", created.Code, created.Body)
+func directPOBody(slip string, qty int, lineExtra string) string {
+	return fmt.Sprintf(`{"vendorId":%q,"purchaseOrderId":%q,"legalEntityId":%q,"packingSlip":%q,"receiptDate":"2026-10-25","currency":"USD","lines":[{"poLineNo":1,"productId":%q,"overDeliveryPct":5,"unit":"EA","qty":%d,"locationId":%q%s}]}`,
+		vendorID, poID, legalEntityID, slip, productID, qty, locationID, lineExtra)
+}
+
+func poRegisterBody(qty int) string {
+	return fmt.Sprintf(`{"lines":[{"lineNo":1,"qty":%d,"locationId":%q}]}`, qty, locationID)
+}
+
+func registerCall(r http.Handler, id, key string, qty int) *httptest.ResponseRecorder {
+	hdr := maintainer(key)
+	hdr["If-Match"] = "1"
+	return doWith(r, http.MethodPost, "/v1/receiving/receipts/"+id+":register", poRegisterBody(qty), hdr)
+}
+
+func arriveOne(t *testing.T, r http.Handler, slip, key string) string {
+	t.Helper()
+	rec := doWith(r, http.MethodPost, arrivalsPath, poArrivalJSON(slip, ""), maintainer(key))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("arrival %s: %d %s", slip, rec.Code, rec.Body)
 	}
 	var got arrivedReceipt
-	_ = json.Unmarshal(created.Body.Bytes(), &got)
-	stub.body.Store(purchaseOrderJSON(poOverrides{received: "8"}))
-	hdr := maintainer("k2")
-	hdr["If-Match"] = "1"
-	body := fmt.Sprintf(`{"lines":[{"lineNo":1,"qty":3,"locationId":%q}]}`, locationID)
-	rec := doWith(r, http.MethodPost, "/v1/receiving/receipts/"+got.ID+":register", body, hdr)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "RCV-OVR-001") {
-		t.Fatalf("2 left open (+5%%) must refuse 3: %d %s", rec.Code, rec.Body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	return got.ID
+}
+
+func TestRegister_CountsWhatOtherReceiptsAlreadyTookFromThePOLine(t *testing.T) {
+	r, _ := newPurchasingRouter(t, poOverrides{received: "9"})
+	first, second := arriveOne(t, r, "PS-A", "k1"), arriveOne(t, r, "PS-B", "k2")
+
+	if rec := registerCall(r, first, "k3", 8); rec.Code != http.StatusOK {
+		t.Fatalf("8 of 10 must be accepted: %d %s", rec.Code, rec.Body)
 	}
-	hdr["Idempotency-Key"] = "k3"
-	ok := doWith(r, http.MethodPost, "/v1/receiving/receipts/"+got.ID+":register", strings.Replace(body, `"qty":3`, `"qty":2`, 1), hdr)
-	if ok.Code != http.StatusOK {
-		t.Fatalf("2 left open must be accepted: %d %s", ok.Code, ok.Body)
+	rec := registerCall(r, second, "k4", 5)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "RCV-OVR-001") {
+		t.Fatalf("a second arrival must not take more than the 2 (+5%%) the first receipt left: %d %s", rec.Code, rec.Body)
+	}
+	if rec := registerCall(r, second, "k5", 2); rec.Code != http.StatusOK {
+		t.Fatalf("the remaining 2 must be accepted: %d %s", rec.Code, rec.Body)
+	}
+	late := doWith(r, http.MethodPost, arrivalsPath, poArrivalJSON("PS-C", ""), maintainer("k6"))
+	if late.Code != http.StatusUnprocessableEntity || !strings.Contains(late.Body.String(), "RCV-OVR-001") {
+		t.Fatalf("a fully received PO line has no open quantity: %d %s", late.Code, late.Body)
+	}
+}
+
+func TestDirectReceiptWithPOLineNo_ChecksTheOpenQuantityUnderTheLine(t *testing.T) {
+	r, _ := newPurchasingRouter(t, poOverrides{})
+	if rec := doWith(r, http.MethodPost, receiptsPath, directPOBody("PS-1", 8, ""), maintainer("k1")); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"poLineNo":1`) {
+		t.Fatalf("direct receipt: %d %s", rec.Code, rec.Body)
+	}
+	rec := doWith(r, http.MethodPost, receiptsPath, directPOBody("PS-2", 5, ""), maintainer("k2"))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "RCV-OVR-001") {
+		t.Fatalf("5 more than the 2 left: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRegister_RefusesWhatChangedOnThePurchaseOrderSinceArrival(t *testing.T) {
+	tests := []struct {
+		name string
+		po   poOverrides
+		code string
+	}{
+		{"line cancelled", poOverrides{status: "CANCELLED"}, "RCV-PO-002"},
+		{"product changed", poOverrides{product: "99999999-9999-4999-8999-999999999992"}, "RCV-PO-007"},
+		{"unit changed", poOverrides{unit: "KG"}, "RCV-PO-007"},
+		{"line removed", poOverrides{extraLine: ""}, "RCV-PO-006"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, stub := newPurchasingRouter(t, poOverrides{})
+			id := arriveOne(t, r, "PS-X", "k1")
+			body := purchaseOrderJSON(tc.po)
+			if tc.code == "RCV-PO-006" {
+				body = strings.Replace(body, `"lineNo":1`, `"lineNo":2`, 1)
+			}
+			stub.body.Store(body)
+			rec := registerCall(r, id, "k2", 2)
+			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.code) {
+				t.Fatalf("got %d %s, want %s", rec.Code, rec.Body, tc.code)
+			}
+		})
+	}
+}
+
+func TestArrivalWithPOLineNo_RefusesAPurchaseOrderOfAnotherLegalEntity(t *testing.T) {
+	po := domain.PurchaseOrder{ID: poID, VendorID: vendorID, Currency: "USD", LegalEntityID: "99999999-9999-4999-8999-999999999990", ApprovalStatus: "APPROVED",
+		Lines: []domain.PurchaseOrderLine{{LineNo: 1, ProductID: productID, Unit: "EA", Qty: dec("10"), UnitPrice: dec("2.5"), PriceUnit: dec("1"), Status: "OPEN"}}}
+	a := api.New(memstore.New(), api.Ports{Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: po}}})
+	r := httpx.NewRouter()
+	a.Register(r)
+	rec := doWith(r, http.MethodPost, arrivalsPath, poArrivalJSON("PS-LE", ""), maintainer("k1"))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "RCV-PO-003") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestArrival_RequiresPOLineNoWhenTheLookupIsConfiguredForReal(t *testing.T) {
+	a := api.New(memstore.New(), api.Ports{Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: domain.FakePurchaseOrders{}, RequirePOLine: true})
+	r := httpx.NewRouter()
+	a.Register(r)
+	rec := doWith(r, http.MethodPost, arrivalsPath, arrivalJSON("PS-LEGACY", ""), maintainer("k1"))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].poLineNo") {
+		t.Fatalf("a legacy line must be refused: %d %s", rec.Code, rec.Body)
+	}
+	direct := doWith(r, http.MethodPost, receiptsPath, directBody("PS-LEGACY-2", 10, 4, ""), maintainer("k2"))
+	if direct.Code != http.StatusBadRequest || !strings.Contains(direct.Body.String(), "lines[0].poLineNo") {
+		t.Fatalf("a legacy direct line must be refused: %d %s", direct.Code, direct.Body)
 	}
 }

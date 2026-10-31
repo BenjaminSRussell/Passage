@@ -160,7 +160,7 @@ func toDomain(r store.Receipt) domain.Receipt {
 	return out
 }
 
-func registerFn(inputs map[int]registerInput, version int) store.RegisterFunc {
+func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal.Decimal) store.RegisterFunc {
 	return func(r store.Receipt, recorded map[domain.SerialKey]struct{}) ([]store.Line, error) {
 		if err := checkVersion(r.Version, version); err != nil {
 			return nil, err
@@ -174,6 +174,15 @@ func registerFn(inputs map[int]registerInput, version int) store.RegisterFunc {
 			in, ok := inputs[lines[i].LineNo]
 			if !ok {
 				return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no received quantity", lines[i].LineNo)}
+			}
+			if lines[i].POLineNo > 0 {
+				ordered, known := poQty[lines[i].LineNo]
+				if !known {
+					return nil, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", lines[i].LineNo)}
+				}
+				if err := checkOpenQuantity(r.Lines[i], in.Qty, ordered); err != nil {
+					return nil, err
+				}
 			}
 			dr.Lines[i].Qty, dr.Lines[i].Tracking = in.Qty, domain.Tracking{Batch: in.Batch, Serials: in.Serials}
 			lines[i].Qty, lines[i].Batch, lines[i].Serials, lines[i].LocationID, lines[i].InventoryStatus = in.Qty, in.Batch, in.Serials, in.LocationID, in.InventoryStatus
@@ -202,6 +211,7 @@ func (a *API) directReceipt(w http.ResponseWriter, r *http.Request) {
 		arrival.Lines[i] = l.arrivalLine
 	}
 	in, fields := buildArrival(arrival)
+	a.requirePOLine(in, fields)
 	inputs := map[int]registerInput{}
 	for i, l := range req.Lines {
 		inputs[i+1] = parseReceived(fields, fmt.Sprintf("lines[%d].", i), l.receivedFields)
@@ -214,11 +224,12 @@ func (a *API) directReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.bindPurchaseOrder(r.Context(), &in); err != nil {
+	poQty, err := a.bindPurchaseOrder(r.Context(), &in)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	created, err := a.store.DirectReceipt(r.Context(), in, registerFn(inputs, 0))
+	created, err := a.store.DirectReceipt(r.Context(), in, registerFn(inputs, 0, poQty))
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -292,11 +303,12 @@ func (a *API) registerReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.recheckOpenQuantity(r.Context(), arrived, inputs); err != nil {
+	poQty, err := a.registrationQuantities(r.Context(), arrived)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	registered, err := a.store.Register(r.Context(), cmd.id, registerFn(inputs, cmd.version))
+	registered, err := a.store.Register(r.Context(), cmd.id, registerFn(inputs, cmd.version, poQty))
 	if err != nil {
 		writeError(w, r, err)
 		return

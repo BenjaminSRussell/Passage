@@ -9,12 +9,13 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-func openQuantity(l domain.PurchaseOrderLine) decimal.Decimal {
-	return decimal.Max(l.Qty.Sub(l.ReceivedQty), decimal.Zero)
+func openQuantity(poQty, received decimal.Decimal) decimal.Decimal {
+	return decimal.Max(poQty.Sub(received), decimal.Zero)
 }
 
 func hasPOLineNo(lines []store.Line) bool {
@@ -30,9 +31,30 @@ func poProblem(status int, code, format string, args ...any) error {
 	return httpx.NewProblem(status, code, fmt.Sprintf(format, args...))
 }
 
-func (a *API) bindPurchaseOrder(ctx context.Context, in *store.Receipt) error {
+func (a *API) requirePOLine(in store.Receipt, fields map[string]string) {
+	if !a.ports.RequirePOLine {
+		return
+	}
+	for i, l := range in.Lines {
+		if l.POLineNo < 1 {
+			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "is required"
+		}
+	}
+}
+
+func lineMismatch(line domain.PurchaseOrderLine, l store.Line) (field, message string) {
+	switch {
+	case line.ProductID != "" && !strings.EqualFold(line.ProductID, l.ProductID):
+		return "productId", "does not match the purchase order line"
+	case line.Unit != "" && !strings.EqualFold(line.Unit, l.Unit):
+		return "unit", "does not match the purchase order line unit " + line.Unit
+	}
+	return "", ""
+}
+
+func (a *API) bindPurchaseOrder(ctx context.Context, in *store.Receipt) (map[int]decimal.Decimal, error) {
 	if !hasPOLineNo(in.Lines) {
-		return nil
+		return nil, nil
 	}
 	fields := map[string]string{}
 	seen := map[int]int{}
@@ -47,73 +69,93 @@ func (a *API) bindPurchaseOrder(ctx context.Context, in *store.Receipt) error {
 		}
 	}
 	if len(fields) > 0 {
-		return validationProblem(fields)
+		return nil, validationProblem(fields)
 	}
 	po, err := a.loadPurchaseOrder(ctx, in.LegalEntityID, in.PurchaseOrderID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	switch {
 	case !strings.EqualFold(po.LegalEntityID, in.LegalEntityID):
-		return poProblem(http.StatusUnprocessableEntity, "RCV-PO-003", "purchase order belongs to another legal entity")
+		return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-003", "purchase order belongs to another legal entity")
 	case !strings.EqualFold(po.VendorID, in.VendorID):
-		return poProblem(http.StatusUnprocessableEntity, "RCV-PO-004", "purchase order is placed with another vendor")
+		return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-004", "purchase order is placed with another vendor")
 	case po.Currency != in.Currency:
-		return poProblem(http.StatusUnprocessableEntity, "RCV-PO-005", "receipt currency %s differs from the purchase order currency %s", in.Currency, po.Currency)
+		return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-005", "receipt currency %s differs from the purchase order currency %s", in.Currency, po.Currency)
 	}
+	received, err := a.store.ReceivedOnPurchaseOrder(ctx, in.PurchaseOrderID)
+	if err != nil {
+		return nil, err
+	}
+	principal, _ := tenant.FromContext(ctx)
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
 		byNo[l.LineNo] = l
 	}
+	poQty := map[int]decimal.Decimal{}
 	for i := range in.Lines {
 		l := &in.Lines[i]
-		key := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		line, ok := byNo[l.POLineNo]
 		switch {
 		case !ok:
-			fields[key("poLineNo")] = "no such line on the purchase order"
+			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "no such line on the purchase order"
 			continue
 		case !line.Usable():
-			return poProblem(http.StatusUnprocessableEntity, "RCV-PO-002", "purchase order line %d is cancelled", l.POLineNo)
-		case line.ProductID != "" && !strings.EqualFold(line.ProductID, l.ProductID):
-			fields[key("productId")] = "does not match the purchase order line"
-		case line.Unit != "" && !strings.EqualFold(line.Unit, l.Unit):
-			fields[key("unit")] = "does not match the purchase order line unit " + line.Unit
+			return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-002", "purchase order line %d is cancelled", l.POLineNo)
 		}
-		open := openQuantity(line)
+		if field, message := lineMismatch(line, *l); field != "" {
+			fields[fmt.Sprintf("lines[%d].%s", i, field)] = message
+		}
+		open := openQuantity(line.Qty, received[l.POLineNo])
 		if !open.IsPositive() {
-			return poProblem(http.StatusUnprocessableEntity, domain.CodeOverDelivery, "purchase order line %d has no open quantity", l.POLineNo)
+			return nil, poProblem(http.StatusUnprocessableEntity, domain.CodeOverDelivery, "purchase order line %d has no open quantity", l.POLineNo)
 		}
 		l.OrderedRemaining, l.UnitPrice = open, line.NetUnitPrice()
+		l.POLineID = stableID(principal.TenantID, strings.ToLower(in.PurchaseOrderID), "po-line", fmt.Sprint(l.POLineNo))
+		poQty[l.LineNo] = line.Qty
 	}
 	if len(fields) > 0 {
-		return validationProblem(fields)
+		return nil, validationProblem(fields)
 	}
-	return nil
+	return poQty, nil
 }
 
-func (a *API) recheckOpenQuantity(ctx context.Context, rec store.Receipt, inputs map[int]registerInput) error {
+func (a *API) registrationQuantities(ctx context.Context, rec store.Receipt) (map[int]decimal.Decimal, error) {
 	if rec.State != domain.Arrived || !hasPOLineNo(rec.Lines) {
-		return nil
+		return nil, nil
 	}
 	po, err := a.loadPurchaseOrder(ctx, rec.LegalEntityID, rec.PurchaseOrderID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
 		byNo[l.LineNo] = l
 	}
+	poQty := map[int]decimal.Decimal{}
 	for _, l := range rec.Lines {
-		in, hasInput := inputs[l.LineNo]
-		line, onOrder := byNo[l.POLineNo]
-		if l.POLineNo < 1 || !hasInput || !onOrder {
+		if l.POLineNo < 1 {
 			continue
 		}
-		allowance := openQuantity(line).Mul(decimal.NewFromInt(100).Add(l.OverDeliveryPct)).Div(decimal.NewFromInt(100))
-		if in.Qty.GreaterThan(allowance) {
-			return poProblem(http.StatusUnprocessableEntity, domain.CodeOverDelivery, "line %d quantity %s exceeds the open quantity allowance %s of purchase order line %d", l.LineNo, in.Qty, allowance, l.POLineNo)
+		line, onOrder := byNo[l.POLineNo]
+		switch {
+		case !onOrder:
+			return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-006", "purchase order line %d is no longer on the purchase order", l.POLineNo)
+		case !line.Usable():
+			return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-002", "purchase order line %d is cancelled", l.POLineNo)
 		}
+		if field, message := lineMismatch(line, l); field != "" {
+			return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-007", "line %d %s %s", l.LineNo, field, message)
+		}
+		poQty[l.LineNo] = line.Qty
+	}
+	return poQty, nil
+}
+
+func checkOpenQuantity(l store.Line, qty, poQty decimal.Decimal) error {
+	allowance := openQuantity(poQty, l.OtherReceived).Mul(decimal.NewFromInt(100).Add(l.OverDeliveryPct)).Div(decimal.NewFromInt(100))
+	if qty.GreaterThan(allowance) {
+		return &domain.Error{Code: domain.CodeOverDelivery, Detail: fmt.Sprintf("line %d quantity %s exceeds the allowance %s left on purchase order line %d (%s ordered, %s received on other receipts)", l.LineNo, qty, allowance, l.POLineNo, poQty, l.OtherReceived)}
 	}
 	return nil
 }

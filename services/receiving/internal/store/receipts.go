@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -280,6 +282,9 @@ func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn Register
 	if err != nil {
 		return Receipt{}, err
 	}
+	if err := attachOtherReceived(ctx, tx, tenantID, &current); err != nil {
+		return Receipt{}, err
+	}
 	productIDs := make([]string, len(current.Lines))
 	for i, l := range current.Lines {
 		productIDs[i] = l.ProductID
@@ -315,6 +320,60 @@ func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn Register
 		return Receipt{}, err
 	}
 	return loadReceipt(ctx, tx, tenantID, id, false)
+}
+
+const receivedStates = `('REGISTERED', 'POSTED', 'CORRECTED')`
+
+func attachOtherReceived(ctx context.Context, tx pgx.Tx, tenantID string, r *Receipt) error {
+	var nos []int
+	for _, l := range r.Lines {
+		if l.POLineNo > 0 && !slices.Contains(nos, l.POLineNo) {
+			nos = append(nos, l.POLineNo)
+		}
+	}
+	slices.Sort(nos)
+	for _, n := range nos {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(fmt.Sprintf("%s|poline|%s|%d", tenantID, r.PurchaseOrderID, n))); err != nil {
+			return err
+		}
+	}
+	for i, l := range r.Lines {
+		if l.POLineNo < 1 {
+			continue
+		}
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(l.qty), 0) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no = $3 AND r.id <> $4 AND r.state IN `+receivedStates,
+			tenantID, r.PurchaseOrderID, l.POLineNo, r.ID).Scan(&r.Lines[i].OtherReceived); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Postgres) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int]decimal.Decimal{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(l.qty) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n int
+			var qty decimal.Decimal
+			if err := rows.Scan(&n, &qty); err != nil {
+				return err
+			}
+			out[n] = qty
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (s *Postgres) Register(ctx context.Context, id string, fn RegisterFunc) (Receipt, error) {
