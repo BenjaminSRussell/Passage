@@ -25,6 +25,7 @@ const (
 	EventPrepared = "prepared"
 	EventSent     = "sent"
 	EventFailed   = "failed"
+	EventUnknown  = "unknown"
 
 	ebicsOK       = "000000"
 	maxReplyBytes = 1 << 20
@@ -33,9 +34,14 @@ const (
 // Signature is a detached signature made inside the key store. The private key
 // is never part of it.
 type Signature struct {
-	Value      string
+	Bytes      []byte
 	KeyVersion int
 }
+
+// ErrAmbiguous marks a transport failure after the request may have reached the
+// bank. The file is audited as unknown and is never resent automatically: a
+// person checks the bank's records first.
+var ErrAmbiguous = errors.New("outcome unknown: the bank may have received the file")
 
 // Signer signs bank files with a key that stays in the key store. There is no
 // method that returns key material.
@@ -93,7 +99,8 @@ type Sender struct {
 }
 
 // Send audits the file as prepared, signs it in the key store, delivers it and
-// audits the outcome. If the prepared row cannot be written nothing is signed or
+// audits the outcome (sent, failed, or unknown when the transport cannot tell).
+// Outcome rows are written even when the caller's context is cancelled. If the prepared row cannot be written nothing is signed or
 // sent. If the file was delivered but the closing row cannot be written, the
 // receipt is returned with the error so the caller can reconcile.
 func (s Sender) Send(ctx context.Context, f File) (Receipt, error) {
@@ -113,19 +120,24 @@ func (s Sender) Send(ctx context.Context, f File) (Receipt, error) {
 	if err == nil {
 		receipt, err = s.Transport.Send(ctx, f, sig)
 	}
+	outcome := context.WithoutCancel(ctx)
 	if err != nil {
 		entry.Event, entry.Error = EventFailed, err.Error()
-		return Receipt{}, errors.Join(err, s.Audit.RecordBankFile(ctx, entry))
+		if errors.Is(err, ErrAmbiguous) {
+			entry.Event = EventUnknown
+		}
+		return Receipt{}, errors.Join(err, s.Audit.RecordBankFile(outcome, entry))
 	}
 	entry.Event, entry.BankReference = EventSent, receipt.Reference
-	if auditErr := s.Audit.RecordBankFile(ctx, entry); auditErr != nil {
+	if auditErr := s.Audit.RecordBankFile(outcome, entry); auditErr != nil {
 		return receipt, fmt.Errorf("file sent (reference %s) but audit failed: %w", receipt.Reference, auditErr)
 	}
 	return receipt, nil
 }
 
 // VaultTransit signs through Vault's transit engine (POST /v1/transit/sign/:key/sha2-256).
-// Only the token and key name travel; Vault hashes and signs the input itself.
+// Only the token, key name and input travel; Vault hashes and signs the input
+// itself. The algorithm is pinned to RSASSA-PSS with SHA-256 (EBICS A006).
 type VaultTransit struct {
 	Addr   string
 	Token  string
@@ -133,7 +145,10 @@ type VaultTransit struct {
 }
 
 func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) (Signature, error) {
-	body, err := json.Marshal(map[string]string{"input": base64.StdEncoding.EncodeToString(payload)})
+	if err := checkURL(v.Addr); err != nil {
+		return Signature{}, err
+	}
+	body, err := json.Marshal(map[string]string{"input": base64.StdEncoding.EncodeToString(payload), "signature_algorithm": "pss"})
 	if err != nil {
 		return Signature{}, err
 	}
@@ -162,10 +177,18 @@ func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) 
 			KeyVersion int    `json:"key_version"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || !strings.HasPrefix(out.Data.Signature, "vault:v") {
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return Signature{}, errors.New("vault sign: malformed reply")
 	}
-	return Signature{Value: out.Data.Signature, KeyVersion: out.Data.KeyVersion}, nil
+	parts := strings.SplitN(out.Data.Signature, ":", 3)
+	if len(parts) != 3 || parts[0] != "vault" || !strings.HasPrefix(parts[1], "v") {
+		return Signature{}, errors.New("vault sign: malformed signature")
+	}
+	sig, err := base64.StdEncoding.DecodeString(parts[2])
+	if err != nil || len(sig) == 0 {
+		return Signature{}, errors.New("vault sign: malformed signature")
+	}
+	return Signature{Bytes: sig, KeyVersion: out.Data.KeyVersion}, nil
 }
 
 // EBICS delivers a file as an EBICS upload order. The subset built here is one
@@ -182,7 +205,7 @@ type EBICS struct {
 func (EBICS) Protocol() string { return ProtocolEBICS }
 
 type ebicsRequest struct {
-	XMLName   xml.Name `xml:"ebicsRequest"`
+	XMLName   xml.Name `xml:"urn:org:ebics:H004 ebicsRequest"`
 	Version   string   `xml:"Version,attr"`
 	HostID    string   `xml:"header>static>HostID"`
 	PartnerID string   `xml:"header>static>PartnerID"`
@@ -199,9 +222,12 @@ type ebicsResponse struct {
 }
 
 func (e EBICS) Send(ctx context.Context, f File, sig Signature) (Receipt, error) {
+	if err := checkURL(e.URL); err != nil {
+		return Receipt{}, err
+	}
 	body, err := xml.Marshal(ebicsRequest{
 		Version: "H004", HostID: e.HostID, PartnerID: e.PartnerID, UserID: e.UserID, OrderType: f.OrderType,
-		Signature: sig.Value, OrderData: base64.StdEncoding.EncodeToString(f.Data),
+		Signature: base64.StdEncoding.EncodeToString(sig.Bytes), OrderData: base64.StdEncoding.EncodeToString(f.Data),
 	})
 	if err != nil {
 		return Receipt{}, err
@@ -213,21 +239,41 @@ func (e EBICS) Send(ctx context.Context, f File, sig Signature) (Receipt, error)
 	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 	resp, err := httpClient(e.Client).Do(req)
 	if err != nil {
-		return Receipt{}, fmt.Errorf("ebics upload: %w", err)
+		return Receipt{}, fmt.Errorf("ebics upload: %w: %w", ErrAmbiguous, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes))
 	if err != nil {
-		return Receipt{}, fmt.Errorf("ebics upload: %w", err)
+		return Receipt{}, fmt.Errorf("ebics upload: %w: %w", ErrAmbiguous, err)
 	}
 	var out ebicsResponse
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return Receipt{}, fmt.Errorf("ebics upload refused: status %d", resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK || xml.Unmarshal(raw, &out) != nil {
-		return Receipt{}, fmt.Errorf("ebics upload: status %d, unreadable reply", resp.StatusCode)
+		return Receipt{}, fmt.Errorf("ebics upload: %w: status %d, unreadable reply", ErrAmbiguous, resp.StatusCode)
 	}
 	if out.ReturnCode != ebicsOK {
 		return Receipt{}, fmt.Errorf("ebics upload refused: %s %s", out.ReturnCode, out.ReportText)
 	}
 	return Receipt{Reference: out.TransactionID}, nil
+}
+
+// checkURL accepts https, and http only to a loopback host (local fakes).
+func checkURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid url %q", raw)
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" {
+		if h := u.Hostname(); h == "localhost" || h == "127.0.0.1" || h == "::1" {
+			return nil
+		}
+	}
+	return fmt.Errorf("url %q must use https", raw)
 }
 
 func httpClient(c *http.Client) *http.Client {

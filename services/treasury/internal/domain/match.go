@@ -121,7 +121,7 @@ var refStrip = regexp.MustCompile(`[^A-Z0-9]`)
 func referenceResult(a, b string) float64 {
 	na, nb := refStrip.ReplaceAllString(strings.ToUpper(a), ""), refStrip.ReplaceAllString(strings.ToUpper(b), "")
 	switch {
-	case na == "" || nb == "":
+	case na == "" || nb == "" || placeholderReference(na) || placeholderReference(nb):
 		return 0
 	case na == nb:
 		return 1
@@ -129,6 +129,15 @@ func referenceResult(a, b string) float64 {
 		return 0.5
 	}
 	return 0
+}
+
+var placeholderReferences = map[string]bool{
+	"NOTPROVIDED": true, "NONREF": true, "NOREF": true, "NA": true, "NONE": true, "NULL": true,
+	"UNKNOWN": true, "REFERENCE": true, "EMPTY": true, "NOTAVAILABLE": true, "NOTAPPLICABLE": true,
+}
+
+func placeholderReference(normalized string) bool {
+	return placeholderReferences[normalized] || strings.Count(normalized, normalized[:1]) == len(normalized)
 }
 
 var nameStrip = regexp.MustCompile(`[^a-z0-9 ]`)
@@ -199,17 +208,33 @@ func Decide(cands []Candidate, t Thresholds) Decision {
 	return Decision{Status: StatusSuggested, Best: &best, Ranked: ranked}
 }
 
+// MinStrictReferenceLen is the shortest normalized reference a strict rule
+// trusts on its own.
+const MinStrictReferenceLen = 8
+
 // Rule is one ordered matching rule (FR-36.3): a weight set and a tolerance.
+// A Strict rule may only auto-match on a reference: the value date must be
+// inside the window, the reference at least MinStrictReferenceLen characters, not
+// a placeholder, and no other open item may carry the same reference.
 type Rule struct {
 	Name      string
 	Weights   Weights
 	Tolerance Tolerance
+	Strict    bool
 }
 
-// DefaultRules run the balanced rule first, then the reference rule that
+// DefaultRules run the balanced rule first, then the strict reference rule that
 // carries lines whose counterparty text the bank garbled.
 func DefaultRules(tol Tolerance) []Rule {
-	return []Rule{{"balanced", DefaultWeights, tol}, {"reference", ReferenceWeights, tol}}
+	return []Rule{{"balanced", DefaultWeights, tol, false}, {"reference", ReferenceWeights, tol, true}}
+}
+
+func normalizedReference(s string) string { return refStrip.ReplaceAllString(strings.ToUpper(s), "") }
+
+func withinWindow(a, b string, window int) bool {
+	da, errA := time.Parse("2006-01-02", a)
+	db, errB := time.Parse("2006-01-02", b)
+	return errA == nil && errB == nil && math.Abs(da.Sub(db).Hours()/24) <= float64(window)
 }
 
 // MatchLine ranks the candidates under each rule in order. The first rule that
@@ -219,10 +244,24 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 	best := Decision{Status: StatusUnmatched}
 	for _, r := range rules {
 		scored := make([]Candidate, 0, len(cands))
+		sameReference := 0
+		lineRef := normalizedReference(line.Reference)
+		for _, c := range cands {
+			if r.Strict && lineRef != "" && normalizedReference(c.Reference) == lineRef {
+				sameReference++
+			}
+		}
 		for id, c := range cands {
-			scored = append(scored, Candidate{ID: id, Score: ScoreWith(line, c, r.Tolerance, r.Weights)})
+			score := ScoreWith(line, c, r.Tolerance, r.Weights)
+			if r.Strict && !strictEligible(line, c, lineRef, r.Tolerance) {
+				score = 0
+			}
+			scored = append(scored, Candidate{ID: id, Score: score})
 		}
 		d := Decide(scored, t)
+		if d.Status == StatusMatched && r.Strict && sameReference > 1 {
+			d.Status = StatusSuggested
+		}
 		if d.Status == StatusMatched {
 			return d
 		}
@@ -231,4 +270,9 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 		}
 	}
 	return best
+}
+
+func strictEligible(line, cand Facts, lineRef string, tol Tolerance) bool {
+	return len(lineRef) >= MinStrictReferenceLen && !placeholderReference(lineRef) &&
+		normalizedReference(cand.Reference) == lineRef && withinWindow(line.ValueDate, cand.ValueDate, tol.DateWindowDays)
 }

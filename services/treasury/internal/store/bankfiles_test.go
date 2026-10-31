@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -15,7 +17,7 @@ import (
 type staticSigner struct{}
 
 func (staticSigner) Sign(context.Context, string, []byte) (bankconnect.Signature, error) {
-	return bankconnect.Signature{Value: "vault:v2:abc", KeyVersion: 2}, nil
+	return bankconnect.Signature{Bytes: []byte{1, 2, 3}, KeyVersion: 2}, nil
 }
 
 type staticTransport struct{ err error }
@@ -79,14 +81,33 @@ func TestBankFileAudit_EveryFileLeavesPreparedAndOutcomeRows(t *testing.T) {
 	requireInsufficientPrivilege(t, err, "the audit must not be deletable by the application role")
 }
 
-func TestBankFileAudit_TenantIsolatedAndRequiresOwnAccount(t *testing.T) {
+func sqlState(t *testing.T, err error) string {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("want a database error, got %v", err)
+	}
+	return pgErr.Code
+}
+
+func TestBankFileAudit_RejectsForeignAccountsAndEntities(t *testing.T) {
 	s, _ := newStore(t)
 	le := ids.New()
 	acct := activeAccount(t, s, ctxFor(1, le), le)
-	other := ctxFor(2, ids.New())
-	err := s.RecordBankFile(other, bankconnect.AuditEntry{FileID: ids.New(), Event: "prepared", LegalEntityID: le, BankAccountID: acct.ID,
-		Protocol: "ebics", FileName: "a.xml", OrderType: "CCT", SHA256: "0000000000000000000000000000000000000000000000000000000000000000", KeyName: "k"})
-	if err == nil {
-		t.Fatal("another tenant must not be able to audit a file against this tenant's account")
+	entry := func(legalEntity string) bankconnect.AuditEntry {
+		return bankconnect.AuditEntry{FileID: ids.New(), Event: "prepared", LegalEntityID: legalEntity, BankAccountID: acct.ID,
+			Protocol: "ebics", FileName: "a.xml", OrderType: "CCT", SHA256: strings.Repeat("0", 64), KeyName: "k"}
+	}
+	if err := s.RecordBankFile(ctxFor(1, ""), entry(le)); err != nil {
+		t.Fatalf("own account: %v", err)
+	}
+	if code := sqlState(t, s.RecordBankFile(ctxFor(2, ""), entry(le))); code != "23503" {
+		t.Fatalf("another tenant naming this account: SQLSTATE %s; want 23503", code)
+	}
+	if code := sqlState(t, s.RecordBankFile(ctxFor(1, ""), entry(ids.New()))); code != "23503" {
+		t.Fatalf("same tenant, account of another legal entity: SQLSTATE %s; want 23503", code)
+	}
+	if code := sqlState(t, s.RecordBankFile(ctxFor(1, ids.New()), entry(le))); code != "42501" {
+		t.Fatalf("caller scoped to a different legal entity: SQLSTATE %s; want 42501", code)
 	}
 }

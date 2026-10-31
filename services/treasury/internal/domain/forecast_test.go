@@ -114,9 +114,10 @@ func TestBuild_AdditivityProperty(t *testing.T) {
 }
 
 // TestBuild_BucketEqualsSumOfSourcesProperty checks AC2 / AC-36.7 bucket by
-// bucket: for every source type, bucket key and currency the bucket's net equals
-// the sum of that source's contributions dated in the bucket, with the bucket
-// key and membership derived here from the calendar, not from Build.
+// bucket: for every bucket key and currency the bucket's net equals the sum of
+// the contributions of all source types dated in the bucket, with the bucket key
+// and membership derived here from the calendar, not from Build. Build buckets
+// by date and currency only, so source types are mixed freely.
 func TestBuild_BucketEqualsSumOfSourcesProperty(t *testing.T) {
 	sources := []string{"AP", "AR", "PO", "SO", "Recurring", "Manual", "Payroll", "Project"}
 	rapid.Check(t, func(t *rapid.T) {

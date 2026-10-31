@@ -1,12 +1,15 @@
 -- Wave 36 (PSG-36) AC4: audit of every bank file sent. Append-only: a 'prepared' row is
--- written before a file is signed and sent, then a 'sent' or 'failed' row for the same file_id.
+-- written before a file is signed and sent, then a 'sent', 'failed' or 'unknown' (the bank may have received it) row for the same file_id.
+-- The foreign key includes legal_entity_id, so an audit row cannot name another entity's account.
+alter table bank_account add constraint bank_account_tenant_id_legal_entity_key unique (tenant_id, id, legal_entity_id);
+
 create table bank_file_audit (
   tenant_id uuid not null,
   id uuid not null,
   file_id uuid not null,
   legal_entity_id uuid not null,
   bank_account_id uuid not null,
-  event text not null check (event in ('prepared', 'sent', 'failed')),
+  event text not null check (event in ('prepared', 'sent', 'failed', 'unknown')),
   protocol text not null check (protocol in ('ebics', 'sftp')),
   file_name text not null,
   order_type text not null,
@@ -19,7 +22,7 @@ create table bank_file_audit (
   sent_by text not null,
   created_at timestamptz not null default now(),
   primary key (tenant_id, id),
-  foreign key (tenant_id, bank_account_id) references bank_account (tenant_id, id)
+  foreign key (tenant_id, bank_account_id, legal_entity_id) references bank_account (tenant_id, id, legal_entity_id)
 );
 create index ix_bank_file_audit_file on bank_file_audit (tenant_id, file_id, created_at);
 alter table bank_file_audit enable row level security;
