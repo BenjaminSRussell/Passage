@@ -32,6 +32,9 @@ deterministic baselines, not an LLM agent, and the vendor-history baseline
 scores top-1 0.625 against the 0.92 AP coding gate. The output names each
 dataset's version so a CI job can record what it measured.
 
+CI (the `agents` job in `.github/workflows/ci.yml`) runs typecheck, `npm test`
+and build; it does not run `npm run eval` for the reason above.
+
 The tests need no network or database. They check that the gate fails each
 threshold, that a regression of more than one point fails, and that the metrics
 match hand-computed values.
