@@ -437,3 +437,63 @@ func TestDirectReceiptRequiresPrincipal(t *testing.T) {
 		t.Fatal("want error without a principal")
 	}
 }
+
+func TestArrivalPersistsPOLineNo(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	in := arrival(p, "PS-PO-LINE")
+	in.Lines[0].POLineNo = 3
+	created, err := st.CreateArrival(ctxOf(p), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetReceipt(ctxOf(p), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lines[0].POLineNo != 3 {
+		t.Fatalf("po line number %d, want 3", got.Lines[0].POLineNo)
+	}
+	plain, err := st.CreateArrival(ctxOf(p), arrival(p, "PS-NO-PO-LINE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Lines[0].POLineNo != 0 {
+		t.Fatalf("a line keyed without a PO line number reads back %d", plain.Lines[0].POLineNo)
+	}
+}
+
+func TestRegisterSeesWhatOtherReceiptsTookFromThePOLine(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	seen := func(slip string, qty int64) decimal.Decimal {
+		t.Helper()
+		in := arrival(p, slip)
+		in.Lines[0].POLineNo, in.Lines[0].SerialTracked = 2, false
+		r, err := st.CreateArrival(ctxOf(p), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var other decimal.Decimal
+		_, err = st.Register(ctxOf(p), r.ID, func(cur store.Receipt, _ map[domain.SerialKey]struct{}) ([]store.Line, error) {
+			other = cur.Lines[0].OtherReceived
+			l := cur.Lines[0]
+			l.Qty, l.LocationID = decimal.NewFromInt(qty), "00000000-0000-0000-0000-0000000000f1"
+			return []store.Line{l}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return other
+	}
+	if got := seen("PS-OTHER-1", 3); !got.IsZero() {
+		t.Fatalf("first receipt saw %s", got)
+	}
+	if got := seen("PS-OTHER-2", 2); !got.Equal(decimal.NewFromInt(3)) {
+		t.Fatalf("second receipt saw %s, want 3", got)
+	}
+	got, err := st.ReceivedOnPurchaseOrder(ctxOf(p), poID)
+	if err != nil || !got[2].Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("received on the order %v err %v", got, err)
+	}
+}

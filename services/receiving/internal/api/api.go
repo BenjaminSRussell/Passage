@@ -47,6 +47,7 @@ type Ports struct {
 	Profile domain.PostingProfile
 
 	PurchaseOrders domain.PurchaseOrders
+	RequirePOLine  bool
 	InvoicingPlans domain.InvoicingPlans
 
 	PlanRowSettlements domain.PlanRowSettlements

@@ -15,6 +15,7 @@ const (
 type postedLineData struct {
 	LineNo          int      `json:"line_no"`
 	POLineID        string   `json:"po_line_id"`
+	POLineNo        int      `json:"po_line_no,omitempty"`
 	ProductID       string   `json:"product_id"`
 	Unit            string   `json:"unit"`
 	Qty             string   `json:"qty"`
@@ -177,7 +178,7 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 		}
 		a := byLine[l.LineNo]
 		data.Lines = append(data.Lines, postedLineData{
-			LineNo: l.LineNo, POLineID: l.POLineID, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
+			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: l.POLineNo, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
 			LocationID: l.LocationID, InventoryStatus: l.InventoryStatus, Amount: a.Amount.String(), AmountAcct: a.AmountAcct.String(),
 		})
 	}

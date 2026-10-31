@@ -43,6 +43,7 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	case url != "":
 		client := purchasing.New(url, nil).WithSigner(signer)
 		ports.PurchaseOrders, ports.InvoicingPlans, ports.PlanRowSettlements = client, client, client
+		ports.RequirePOLine = getenv("RECEIVING_ALLOW_LEGACY_PO_LINE") != "1"
 	case allowFakes:
 		slog.Warn("PURCHASING_URL is empty: purchase order and invoicing plan lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.PurchaseOrders, ports.InvoicingPlans = domain.FakePurchaseOrders{}, domain.FakeInvoicingPlans{}

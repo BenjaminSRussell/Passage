@@ -17,6 +17,7 @@ spec:
           repository: ghcr.io/benjaminsrussell/receiving
           digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
         migrateOnStart: true
+        allowLegacyPoLine: true
         serviceUrls:
           ledger: http://ledger.hello-ledger.svc:8080
           close: http://close.hello-ledger.svc:8080

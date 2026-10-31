@@ -183,6 +183,7 @@ components:
             properties:
               line_no: { type: integer, minimum: 1 }
               po_line_id: { type: string }
+              po_line_no: { type: integer, minimum: 1, description: "Purchase order line number; omitted when the receipt line was keyed without one" }
               product_id: { type: string, format: uuid }
               unit: { type: string }
               qty: { type: string, description: "decimal string" }
