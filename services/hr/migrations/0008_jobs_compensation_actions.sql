@@ -131,3 +131,28 @@ BEGIN
   END IF;
 END
 $$;
+
+DO $$
+DECLARE
+  schema_name text := current_schema();
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hr_loan_gate' AND rolbypassrls AND NOT rolcanlogin) THEN
+    RAISE EXCEPTION 'role hr_loan_gate must exist as NOLOGIN BYPASSRLS (create it in the database bootstrap before migrating)';
+  END IF;
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO hr_loan_gate', schema_name);
+  EXECUTE format('GRANT SELECT ON employment TO hr_loan_gate');
+  EXECUTE format($f$
+    CREATE OR REPLACE FUNCTION hr_worker_has_other_employment(p_worker uuid, p_excluding uuid, p_at timestamptz) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %I, pg_temp AS $body$
+      SELECT EXISTS (SELECT 1 FROM employment
+        WHERE tenant_id = current_setting('passage.tenant_id', true)::uuid AND worker_id = p_worker AND id <> p_excluding
+          AND (valid_to IS NULL OR valid_to > p_at))
+    $body$
+  $f$, schema_name);
+  EXECUTE 'ALTER FUNCTION hr_worker_has_other_employment(uuid, uuid, timestamptz) OWNER TO hr_loan_gate';
+  EXECUTE 'REVOKE ALL ON FUNCTION hr_worker_has_other_employment(uuid, uuid, timestamptz) FROM PUBLIC';
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION hr_worker_has_other_employment(uuid, uuid, timestamptz) TO passage_app';
+  END IF;
+END
+$$;

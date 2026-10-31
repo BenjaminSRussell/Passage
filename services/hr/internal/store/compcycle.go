@@ -375,11 +375,6 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 		if c.Status != cycleManagerInput {
 			return problem(http.StatusConflict, CodeCycleState, "worksheets can be submitted only while the cycle is in MANAGER_INPUT")
 		}
-		if all, err := scopeIsAll(ctx, tx); err != nil {
-			return err
-		} else if !all {
-			return problem(http.StatusForbidden, "AUTH-0003", "submitting a worksheet checks department budgets across every legal entity and needs access to all of them")
-		}
 		rows, err := listWorksheet(ctx, tx, p.TenantID, cycleID, managerID)
 		if err != nil {
 			return err

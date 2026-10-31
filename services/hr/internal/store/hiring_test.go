@@ -245,8 +245,6 @@ func TestCompensationCycleBudgetBlocksAndAppliesAC4213(t *testing.T) {
 	if _, err = f.s.SaveWorksheet(f.ctx, cycle.ID, manager.ID, rows("3", nil)); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.SubmitWorksheet(f.ctx, cycle.ID, manager.ID)
-	requireCode(t, err, "AUTH-0003")
 	if _, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID); err != nil {
 		t.Fatalf("submit at 5,400 of 6,000: %v", err)
 	}

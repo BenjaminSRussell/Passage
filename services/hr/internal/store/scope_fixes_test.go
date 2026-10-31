@@ -65,11 +65,11 @@ func TestTerminationEndsBenefitsOnlyWhenNoOtherEmploymentRemains(t *testing.T) {
 	scopedWorker, a1, b1, _ := enrolled("TermScoped")
 	terminate(inA, scopedWorker, a1)
 	if !open(scopedWorker) {
-		t.Fatal("a user scoped to one legal entity ended the benefits the worker still holds through another entity")
+		t.Fatal("ending one of two employments ended the benefits")
 	}
-	terminate(all, scopedWorker, b1)
+	terminate(scoped(entityB), scopedWorker, b1)
 	if open(scopedWorker) {
-		t.Fatal("terminating the last employment under every entity left the enrollment open")
+		t.Fatal("a user scoped to one entity ended the worker's last employment and the benefits stayed open")
 	}
 
 	both, a2, _, _ := enrolled("TermBoth")

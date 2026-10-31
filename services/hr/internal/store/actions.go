@@ -394,16 +394,11 @@ func (s *Postgres) applyTerminate(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if validTo != nil && !end.Before(utc(*validTo)) {
 		return problem(http.StatusUnprocessableEntity, CodeActionInactive, "the employment already ends on or before the termination date")
 	}
-	allEntities, err := scopeIsAll(ctx, tx)
-	if err != nil {
-		return err
-	}
 	var lastEmployment, future bool
-	if err := tx.QueryRow(ctx, `select not exists (select 1 from employment where tenant_id = $1 and worker_id = $2 and id <> $3 and (valid_to is null or valid_to > $4))`,
-		p.TenantID, a.WorkerID, employmentID, end).Scan(&lastEmployment); err != nil {
+	if err := tx.QueryRow(ctx, `select not hr_worker_has_other_employment($1::uuid, $2::uuid, $3::timestamptz)`,
+		a.WorkerID, employmentID, end).Scan(&lastEmployment); err != nil {
 		return err
 	}
-	lastEmployment = lastEmployment && allEntities
 	if err := tx.QueryRow(ctx, `select exists (select 1 from position_assignment where tenant_id = $1 and employment_id = $2 and valid_from >= $3)
 		or exists (select 1 from hr_fixed_compensation where tenant_id = $1 and employment_id = $2 and valid_from >= $3)
 		or ($4 and exists (select 1 from benefit_enrollment where tenant_id = $1 and worker_id = $5 and valid_to is null and valid_from > $6))`,
