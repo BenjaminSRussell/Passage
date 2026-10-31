@@ -84,8 +84,8 @@ func TestCashApp500_Composition(t *testing.T) {
 
 // Composition per source: category and count (500 in all).
 var (
-	lockboxMix = []mix{{CatSingle, 215}, {CatDiscount, 30}, {CatMulti, 30}, {CatShortNoReason, 10}, {CatUnidentified, 10}, {CatWrongReference, 5}}
-	camtMix    = []mix{{CatSingle, 110}, {CatDiscount, 15}, {CatMulti, 15}, {CatShortNoReason, 5}, {CatUnidentified, 5}}
+	lockboxMix = []mix{{CatSingle, 210}, {CatDiscount, 30}, {CatMulti, 30}, {CatShortNoReason, 10}, {CatUnidentified, 10}, {CatWrongReference, 10}}
+	camtMix    = []mix{{CatSingle, 100}, {CatDiscount, 15}, {CatMulti, 15}, {CatShortNoReason, 5}, {CatUnidentified, 5}, {CatWrongReference, 10}}
 	remitMix   = []mix{{CatMulti, 25}, {CatShortWithReason, 15}, {CatDiscount, 10}}
 )
 

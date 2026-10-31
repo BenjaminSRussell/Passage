@@ -1,4 +1,4 @@
-# dunning-60 (AC-30.3): 60 customers, run date 2027-03-31, grace 5 days, interval 10 days.
+# dunning-60 (AC-30.3): 65 customers, run date 2027-03-31, grace 5 days, interval 10 days.
 # BR-30.2 levels by days overdue: <=5 none, 6-14 L1, 15-29 L2, 30-44 L3, >=45 L4; one level per run.
 # Days overdue at 2027-03-31: 03-25=6, 03-21=10, 03-16=15, 03-15=16, 03-11=20, 03-01=30,
 # 02-24=35, 02-19=40, 02-14=45, 02-09=50, 01-30=60, 2026-12-31=90.
@@ -84,3 +84,13 @@ C59,INV-D6159,USD,500.00,0.00,2027-02-19,0,N,,,
 # C60 two small items, together 45.00: below the minimum as a group
 C60,INV-D6060,USD,20.00,20.00,2027-03-21,0,N,,,
 C60,INV-D6110,USD,25.00,25.00,2027-03-11,0,N,,,
+# C61-C62 EUR fees: level 2 -> 3 (35 days) is 20.00, level 3 -> 4 (50 days) is 40.00
+C61,INV-D6061,EUR,700.00,700.00,2027-02-24,2,N,,,
+C62,INV-D6063,EUR,1200.00,1200.00,2027-02-09,3,N,,,
+# C63 broken promise: promise 2027-03-28 held until 2027-03-30, so the item is dunned (20 days, level 1 -> 2)
+C63,INV-D6064,USD,400.00,400.00,2027-03-11,1,N,,2027-03-28,
+# C64 customer-level block: every item of the customer carries the block
+C64,INV-D6065,USD,800.00,800.00,2027-03-11,1,Y,,,
+C64,INV-D6066,USD,950.00,950.00,2027-02-24,2,Y,,,
+# C65 promise 2027-03-29 still holds on the run date (last held day is promise + 2 = 2027-03-31)
+C65,INV-D6067,USD,500.00,500.00,2027-03-11,1,N,,2027-03-29,

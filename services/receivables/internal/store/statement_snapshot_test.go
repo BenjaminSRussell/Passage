@@ -246,7 +246,8 @@ func latestBalanceEvent(t *testing.T, s *Postgres, ctx context.Context, cust str
 
 // BR-30.1 R4 and R5: applying a payment teaches the payer's account hash and
 // name for the customer; the next payment from that account, naming the invoice,
-// then reaches the auto-apply threshold although it is unidentified.
+// then scores at the auto-apply threshold although it is unidentified. Its amount
+// differs from the invoice, so it stays a suggestion (reference-only never auto-applies).
 func TestPayerIdentity_LearnedOnApplyLiftsTheNextMatch(t *testing.T) {
 	s := setup(t)
 	ctx := tenantCtx(25)
@@ -285,8 +286,8 @@ func TestPayerIdentity_LearnedOnApplyLiftsTheNextMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match after learning: %v", err)
 	}
-	if res.Decision != domain.DecisionAutoApply || res.Top[0].ItemIDs[0] != second.ID {
-		t.Fatalf("match after learning = %+v, want AUTO_APPLY to INV-P2", res)
+	if res.Decision != domain.DecisionSuggested || res.Top[0].ItemIDs[0] != second.ID {
+		t.Fatalf("match after learning = %+v, want SUGGESTED for INV-P2", res)
 	}
 	rules := map[string]bool{}
 	for _, r := range res.Top[0].Rules {

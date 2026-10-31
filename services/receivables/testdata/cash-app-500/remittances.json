@@ -2,140 +2,86 @@
   {
     "key": "RMT001",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000109",
+    "customerId": "00000000-0000-0000-0001-000000000054",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "46999.15",
+    "amount": "19388.17",
     "lines": [
       {
-        "reference": "INV-20360",
-        "amount": "642.76"
-      },
-      {
-        "reference": "INV-20361",
-        "amount": "20576.61"
-      },
-      {
-        "reference": "INV-20362",
-        "amount": "14607.79"
-      },
-      {
-        "reference": "INV-20363",
-        "amount": "11171.99"
+        "reference": "INV-20373",
+        "amount": "19388.17"
       }
     ]
   },
   {
     "key": "RMT002",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000009",
+    "customerId": "00000000-0000-0000-0001-000000000039",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "14859.32",
+    "amount": "15911.11",
+    "shortPayReason": "DAMAGED GOODS",
     "lines": [
       {
-        "reference": "INV-20364",
-        "amount": "5575.02"
-      },
-      {
-        "reference": "INV-20365",
-        "amount": "9284.3"
+        "reference": "INV-20374",
+        "amount": "15911.11"
       }
     ]
   },
   {
     "key": "RMT003",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000035",
+    "customerId": "00000000-0000-0000-0001-000000000044",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "45817.17",
+    "amount": "3059.07",
     "lines": [
       {
-        "reference": "INV-20366",
-        "amount": "23763.33"
-      },
-      {
-        "reference": "INV-20367",
-        "amount": "11256.03"
-      },
-      {
-        "reference": "INV-20368",
-        "amount": "10797.81"
+        "reference": "INV-20375",
+        "amount": "3059.07"
       }
     ]
   },
   {
     "key": "RMT004",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000070",
+    "customerId": "00000000-0000-0000-0001-000000000103",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "47438.25",
+    "amount": "20372.11",
     "lines": [
       {
-        "reference": "INV-20369",
-        "amount": "11235.32"
-      },
-      {
-        "reference": "INV-20370",
-        "amount": "12807.97"
-      },
-      {
-        "reference": "INV-20371",
-        "amount": "8068.4"
-      },
-      {
-        "reference": "INV-20372",
-        "amount": "15326.56"
+        "reference": "INV-20376",
+        "amount": "20372.11"
       }
     ]
   },
   {
     "key": "RMT005",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000101",
+    "customerId": "00000000-0000-0000-0001-000000000098",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "26658.27",
+    "amount": "12999.95",
+    "shortPayReason": "DAMAGED GOODS",
     "lines": [
       {
-        "reference": "INV-20373",
-        "amount": "3121.5"
-      },
-      {
-        "reference": "INV-20374",
-        "amount": "2748.9"
-      },
-      {
-        "reference": "INV-20375",
-        "amount": "20787.87"
+        "reference": "INV-20377",
+        "amount": "12999.95"
       }
     ]
   },
   {
     "key": "RMT006",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000006",
+    "customerId": "00000000-0000-0000-0001-000000000100",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "60573.2",
+    "amount": "19875.62",
     "lines": [
       {
-        "reference": "INV-20376",
-        "amount": "13041.56"
-      },
-      {
-        "reference": "INV-20377",
-        "amount": "22896.83"
-      },
-      {
         "reference": "INV-20378",
-        "amount": "20831.65"
-      },
-      {
-        "reference": "INV-20379",
-        "amount": "3803.16"
+        "amount": "19875.62"
       }
     ]
   },
@@ -149,7 +95,7 @@
     "shortPayReason": "PROMO ALLOWANCE",
     "lines": [
       {
-        "reference": "INV-20380",
+        "reference": "INV-20379",
         "amount": "10569.33"
       }
     ]
@@ -163,11 +109,11 @@
     "amount": "24689.58",
     "lines": [
       {
-        "reference": "INV-20381",
+        "reference": "INV-20380",
         "amount": "15975.09"
       },
       {
-        "reference": "INV-20382",
+        "reference": "INV-20381",
         "amount": "8714.49"
       }
     ]
@@ -181,11 +127,11 @@
     "amount": "30736.18",
     "lines": [
       {
-        "reference": "INV-20383",
+        "reference": "INV-20382",
         "amount": "24413.85"
       },
       {
-        "reference": "INV-20384",
+        "reference": "INV-20383",
         "amount": "6322.33"
       }
     ]
@@ -199,11 +145,11 @@
     "amount": "27587.64",
     "lines": [
       {
-        "reference": "INV-20385",
+        "reference": "INV-20384",
         "amount": "10109.12"
       },
       {
-        "reference": "INV-20386",
+        "reference": "INV-20385",
         "amount": "17478.52"
       }
     ]
@@ -217,19 +163,19 @@
     "amount": "65907.6",
     "lines": [
       {
-        "reference": "INV-20387",
+        "reference": "INV-20386",
         "amount": "20019.82"
       },
       {
-        "reference": "INV-20388",
+        "reference": "INV-20387",
         "amount": "20768.32"
       },
       {
-        "reference": "INV-20389",
+        "reference": "INV-20388",
         "amount": "6737.24"
       },
       {
-        "reference": "INV-20390",
+        "reference": "INV-20389",
         "amount": "18382.22"
       }
     ]
@@ -244,7 +190,7 @@
     "shortPayReason": "FREIGHT DEDUCTED",
     "lines": [
       {
-        "reference": "INV-20391",
+        "reference": "INV-20390",
         "amount": "889.76"
       }
     ]
@@ -255,123 +201,129 @@
     "customerId": "00000000-0000-0000-0001-000000000064",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "13530.19",
-    "shortPayReason": "PROMO ALLOWANCE",
+    "amount": "33051.97",
     "lines": [
       {
+        "reference": "INV-20391",
+        "amount": "3348.98"
+      },
+      {
         "reference": "INV-20392",
-        "amount": "13530.19"
+        "amount": "6436.16"
+      },
+      {
+        "reference": "INV-20393",
+        "amount": "23266.83"
       }
     ]
   },
   {
     "key": "RMT014",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000089",
+    "customerId": "00000000-0000-0000-0001-000000000056",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "36020.58",
+    "amount": "8069.69",
     "lines": [
       {
-        "reference": "INV-20393",
-        "amount": "10165.26"
-      },
-      {
         "reference": "INV-20394",
-        "amount": "8234.38"
-      },
-      {
-        "reference": "INV-20395",
-        "amount": "900.56"
-      },
-      {
-        "reference": "INV-20396",
-        "amount": "16720.38"
+        "amount": "8069.69"
       }
     ]
   },
   {
     "key": "RMT015",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000055",
+    "customerId": "00000000-0000-0000-0001-000000000086",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "16399.45",
+    "amount": "16385.97",
     "lines": [
       {
-        "reference": "INV-20397",
-        "amount": "5603.12"
-      },
-      {
-        "reference": "INV-20398",
-        "amount": "10796.33"
+        "reference": "INV-20395",
+        "amount": "16385.97"
       }
     ]
   },
   {
     "key": "RMT016",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000036",
+    "customerId": "00000000-0000-0000-0001-000000000011",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "60765.02",
+    "amount": "5491.06",
     "lines": [
       {
-        "reference": "INV-20399",
-        "amount": "22148.73"
-      },
-      {
-        "reference": "INV-20400",
-        "amount": "18980.19"
-      },
-      {
-        "reference": "INV-20401",
-        "amount": "19636.1"
+        "reference": "INV-20396",
+        "amount": "5491.06"
       }
     ]
   },
   {
     "key": "RMT017",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000074",
+    "customerId": "00000000-0000-0000-0001-000000000006",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "74979.53",
+    "amount": "7504.91",
+    "shortPayReason": "DAMAGED GOODS",
     "lines": [
       {
-        "reference": "INV-20402",
-        "amount": "23422.47"
-      },
-      {
-        "reference": "INV-20403",
-        "amount": "13253.96"
-      },
-      {
-        "reference": "INV-20404",
-        "amount": "22478.2"
-      },
-      {
-        "reference": "INV-20405",
-        "amount": "15824.9"
+        "reference": "INV-20397",
+        "amount": "7504.91"
       }
     ]
   },
   {
     "key": "RMT018",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000019",
+    "customerId": "00000000-0000-0000-0001-000000000091",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "13661.71",
+    "amount": "58381.12",
     "lines": [
       {
-        "reference": "INV-20406",
-        "amount": "13661.71"
+        "reference": "INV-20398",
+        "amount": "19636.1"
+      },
+      {
+        "reference": "INV-20399",
+        "amount": "15322.55"
+      },
+      {
+        "reference": "INV-20400",
+        "amount": "23422.47"
       }
     ]
   },
   {
     "key": "RMT019",
+    "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
+    "customerId": "00000000-0000-0000-0001-000000000064",
+    "currency": "USD",
+    "valueDate": "2027-03-15",
+    "amount": "57316.75",
+    "lines": [
+      {
+        "reference": "INV-20401",
+        "amount": "22478.2"
+      },
+      {
+        "reference": "INV-20402",
+        "amount": "15824.9"
+      },
+      {
+        "reference": "INV-20403",
+        "amount": "4022.05"
+      },
+      {
+        "reference": "INV-20404",
+        "amount": "14991.6"
+      }
+    ]
+  },
+  {
+    "key": "RMT020",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
     "customerId": "00000000-0000-0000-0001-000000000003",
     "currency": "USD",
@@ -380,13 +332,13 @@
     "shortPayReason": "PROMO ALLOWANCE",
     "lines": [
       {
-        "reference": "INV-20407",
+        "reference": "INV-20405",
         "amount": "21542.06"
       }
     ]
   },
   {
-    "key": "RMT020",
+    "key": "RMT021",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
     "customerId": "00000000-0000-0000-0001-000000000044",
     "currency": "USD",
@@ -395,13 +347,13 @@
     "shortPayReason": "PRICING DIFFERENCE",
     "lines": [
       {
-        "reference": "INV-20408",
+        "reference": "INV-20406",
         "amount": "1543.14"
       }
     ]
   },
   {
-    "key": "RMT021",
+    "key": "RMT022",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
     "customerId": "00000000-0000-0000-0001-000000000016",
     "currency": "USD",
@@ -409,150 +361,144 @@
     "amount": "26833.39",
     "lines": [
       {
-        "reference": "INV-20409",
+        "reference": "INV-20407",
         "amount": "10137.88"
       },
       {
-        "reference": "INV-20410",
+        "reference": "INV-20408",
         "amount": "16695.51"
-      }
-    ]
-  },
-  {
-    "key": "RMT022",
-    "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000075",
-    "currency": "USD",
-    "valueDate": "2027-03-15",
-    "amount": "13693.92",
-    "shortPayReason": "DAMAGED GOODS",
-    "lines": [
-      {
-        "reference": "INV-20411",
-        "amount": "13693.92"
       }
     ]
   },
   {
     "key": "RMT023",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000057",
+    "customerId": "00000000-0000-0000-0001-000000000075",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "11353.4",
-    "shortPayReason": "DAMAGED GOODS",
+    "amount": "31196.35",
     "lines": [
       {
-        "reference": "INV-20412",
-        "amount": "11353.4"
+        "reference": "INV-20409",
+        "amount": "19606"
+      },
+      {
+        "reference": "INV-20410",
+        "amount": "199"
+      },
+      {
+        "reference": "INV-20411",
+        "amount": "11391.35"
       }
     ]
   },
   {
     "key": "RMT024",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000072",
+    "customerId": "00000000-0000-0000-0001-000000000099",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "31364.67",
+    "amount": "18169.25",
     "lines": [
+      {
+        "reference": "INV-20412",
+        "amount": "14881.97"
+      },
       {
         "reference": "INV-20413",
         "amount": "3287.28"
-      },
-      {
-        "reference": "INV-20414",
-        "amount": "7700.78"
-      },
-      {
-        "reference": "INV-20415",
-        "amount": "19417.1"
-      },
-      {
-        "reference": "INV-20416",
-        "amount": "959.51"
       }
     ]
   },
   {
     "key": "RMT025",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000024",
+    "customerId": "00000000-0000-0000-0001-000000000037",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "3963.84",
+    "amount": "2453.41",
+    "shortPayReason": "PROMO ALLOWANCE",
     "lines": [
       {
-        "reference": "INV-20417",
-        "amount": "3963.84"
+        "reference": "INV-20414",
+        "amount": "2453.41"
       }
     ]
   },
   {
     "key": "RMT026",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000098",
+    "customerId": "00000000-0000-0000-0001-000000000069",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "3137.42",
+    "amount": "17788.74",
     "lines": [
       {
-        "reference": "INV-20418",
-        "amount": "3137.42"
+        "reference": "INV-20415",
+        "amount": "4044.73"
+      },
+      {
+        "reference": "INV-20416",
+        "amount": "13744.01"
       }
     ]
   },
   {
     "key": "RMT027",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000049",
+    "customerId": "00000000-0000-0000-0001-000000000015",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "6967.57",
+    "amount": "13158.91",
     "lines": [
       {
+        "reference": "INV-20417",
+        "amount": "1007.93"
+      },
+      {
+        "reference": "INV-20418",
+        "amount": "7109.77"
+      },
+      {
         "reference": "INV-20419",
-        "amount": "6967.57"
+        "amount": "5041.21"
       }
     ]
   },
   {
     "key": "RMT028",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000060",
+    "customerId": "00000000-0000-0000-0001-000000000116",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "23521.57",
+    "amount": "50768.76",
     "lines": [
       {
         "reference": "INV-20420",
-        "amount": "23521.57"
+        "amount": "18268.4"
+      },
+      {
+        "reference": "INV-20421",
+        "amount": "20089.02"
+      },
+      {
+        "reference": "INV-20422",
+        "amount": "12411.34"
       }
     ]
   },
   {
     "key": "RMT029",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000067",
+    "customerId": "00000000-0000-0000-0001-000000000115",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "31413.73",
+    "amount": "6378.45",
+    "shortPayReason": "PROMO ALLOWANCE",
     "lines": [
       {
-        "reference": "INV-20421",
-        "amount": "1384.94"
-      },
-      {
-        "reference": "INV-20422",
-        "amount": "20786.41"
-      },
-      {
         "reference": "INV-20423",
-        "amount": "6387.8"
-      },
-      {
-        "reference": "INV-20424",
-        "amount": "2854.58"
+        "amount": "6378.45"
       }
     ]
   },
@@ -562,266 +508,289 @@
     "customerId": "00000000-0000-0000-0001-000000000089",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "27025.28",
+    "amount": "15592.44",
+    "shortPayReason": "PRICING DIFFERENCE",
     "lines": [
       {
-        "reference": "INV-20425",
-        "amount": "8968.67"
-      },
-      {
-        "reference": "INV-20426",
-        "amount": "11460.5"
-      },
-      {
-        "reference": "INV-20427",
-        "amount": "6596.11"
+        "reference": "INV-20424",
+        "amount": "15592.44"
       }
     ]
   },
   {
     "key": "RMT031",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000065",
+    "customerId": "00000000-0000-0000-0001-000000000038",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "23669.88",
+    "amount": "17707.74",
     "lines": [
       {
-        "reference": "INV-20428",
-        "amount": "16078.13"
+        "reference": "INV-20425",
+        "amount": "15925.96"
       },
       {
-        "reference": "INV-20429",
-        "amount": "7591.75"
+        "reference": "INV-20426",
+        "amount": "1781.78"
       }
     ]
   },
   {
     "key": "RMT032",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000047",
+    "customerId": "00000000-0000-0000-0001-000000000078",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "24408.8",
+    "amount": "43283.52",
     "lines": [
       {
-        "reference": "INV-20430",
-        "amount": "24408.8"
+        "reference": "INV-20427",
+        "amount": "18376.58"
+      },
+      {
+        "reference": "INV-20428",
+        "amount": "24906.94"
       }
     ]
   },
   {
     "key": "RMT033",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000051",
+    "customerId": "00000000-0000-0000-0001-000000000083",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "29429.57",
+    "amount": "10507.19",
+    "shortPayReason": "FREIGHT DEDUCTED",
     "lines": [
       {
-        "reference": "INV-20431",
-        "amount": "12230.05"
-      },
-      {
-        "reference": "INV-20432",
-        "amount": "17199.52"
+        "reference": "INV-20429",
+        "amount": "10507.19"
       }
     ]
   },
   {
     "key": "RMT034",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000005",
+    "customerId": "00000000-0000-0000-0001-000000000083",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "1183.6",
-    "shortPayReason": "PROMO ALLOWANCE",
+    "amount": "30264.59",
     "lines": [
       {
+        "reference": "INV-20430",
+        "amount": "984.05"
+      },
+      {
+        "reference": "INV-20431",
+        "amount": "5689.15"
+      },
+      {
+        "reference": "INV-20432",
+        "amount": "22482.88"
+      },
+      {
         "reference": "INV-20433",
-        "amount": "1183.6"
+        "amount": "1108.51"
       }
     ]
   },
   {
     "key": "RMT035",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000025",
+    "customerId": "00000000-0000-0000-0001-000000000080",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "20901.01",
+    "amount": "12078.66",
     "lines": [
       {
         "reference": "INV-20434",
-        "amount": "8575.85"
-      },
-      {
-        "reference": "INV-20435",
-        "amount": "12325.16"
+        "amount": "12078.66"
       }
     ]
   },
   {
     "key": "RMT036",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000025",
+    "customerId": "00000000-0000-0000-0001-000000000115",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "23928.42",
-    "shortPayReason": "PRICING DIFFERENCE",
+    "amount": "28332.41",
     "lines": [
       {
+        "reference": "INV-20435",
+        "amount": "2053.74"
+      },
+      {
         "reference": "INV-20436",
-        "amount": "23928.42"
+        "amount": "11620.25"
+      },
+      {
+        "reference": "INV-20437",
+        "amount": "14658.42"
       }
     ]
   },
   {
     "key": "RMT037",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000056",
+    "customerId": "00000000-0000-0000-0001-000000000018",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "1232.13",
-    "shortPayReason": "FREIGHT DEDUCTED",
+    "amount": "56990.65",
     "lines": [
       {
-        "reference": "INV-20437",
-        "amount": "1232.13"
+        "reference": "INV-20438",
+        "amount": "22009.65"
+      },
+      {
+        "reference": "INV-20439",
+        "amount": "12625.42"
+      },
+      {
+        "reference": "INV-20440",
+        "amount": "18807.29"
+      },
+      {
+        "reference": "INV-20441",
+        "amount": "3548.29"
       }
     ]
   },
   {
     "key": "RMT038",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000104",
+    "customerId": "00000000-0000-0000-0001-000000000083",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "21569.46",
+    "amount": "12488.81",
     "lines": [
       {
-        "reference": "INV-20438",
-        "amount": "21569.46"
+        "reference": "INV-20442",
+        "amount": "12488.81"
       }
     ]
   },
   {
     "key": "RMT039",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000009",
+    "customerId": "00000000-0000-0000-0001-000000000093",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "18796.82",
-    "shortPayReason": "DAMAGED GOODS",
+    "amount": "8300.11",
+    "shortPayReason": "PROMO ALLOWANCE",
     "lines": [
       {
-        "reference": "INV-20439",
-        "amount": "18796.82"
+        "reference": "INV-20443",
+        "amount": "8300.11"
       }
     ]
   },
   {
     "key": "RMT040",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000083",
+    "customerId": "00000000-0000-0000-0001-000000000085",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "12706.1",
+    "amount": "19419.39",
     "shortPayReason": "FREIGHT DEDUCTED",
     "lines": [
       {
-        "reference": "INV-20440",
-        "amount": "12706.1"
+        "reference": "INV-20444",
+        "amount": "19419.39"
       }
     ]
   },
   {
     "key": "RMT041",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000040",
+    "customerId": "00000000-0000-0000-0001-000000000018",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "75228.65",
+    "amount": "4063.04",
     "lines": [
       {
-        "reference": "INV-20441",
-        "amount": "15202.21"
-      },
-      {
-        "reference": "INV-20442",
-        "amount": "17573.28"
-      },
-      {
-        "reference": "INV-20443",
-        "amount": "19400.36"
-      },
-      {
-        "reference": "INV-20444",
-        "amount": "23052.8"
+        "reference": "INV-20445",
+        "amount": "4063.04"
       }
     ]
   },
   {
     "key": "RMT042",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000020",
+    "customerId": "00000000-0000-0000-0001-000000000110",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "22766.97",
+    "amount": "29278.34",
     "lines": [
       {
-        "reference": "INV-20445",
-        "amount": "22766.97"
+        "reference": "INV-20446",
+        "amount": "1766.03"
+      },
+      {
+        "reference": "INV-20447",
+        "amount": "10513.01"
+      },
+      {
+        "reference": "INV-20448",
+        "amount": "16999.3"
       }
     ]
   },
   {
     "key": "RMT043",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000079",
+    "customerId": "00000000-0000-0000-0001-000000000024",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "1730.71",
+    "amount": "42621.06",
     "lines": [
       {
-        "reference": "INV-20446",
-        "amount": "1730.71"
+        "reference": "INV-20449",
+        "amount": "9256.15"
+      },
+      {
+        "reference": "INV-20450",
+        "amount": "15030.34"
+      },
+      {
+        "reference": "INV-20451",
+        "amount": "18334.57"
       }
     ]
   },
   {
     "key": "RMT044",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000027",
+    "customerId": "00000000-0000-0000-0001-000000000014",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "16659.31",
+    "amount": "38595.25",
     "lines": [
       {
-        "reference": "INV-20447",
-        "amount": "16659.31"
+        "reference": "INV-20452",
+        "amount": "17491.4"
+      },
+      {
+        "reference": "INV-20453",
+        "amount": "21103.85"
       }
     ]
   },
   {
     "key": "RMT045",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000064",
+    "customerId": "00000000-0000-0000-0001-000000000003",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "29832.48",
+    "amount": "35680.07",
     "lines": [
       {
-        "reference": "INV-20448",
-        "amount": "20597.28"
+        "reference": "INV-20454",
+        "amount": "24636.1"
       },
       {
-        "reference": "INV-20449",
-        "amount": "2060.67"
-      },
-      {
-        "reference": "INV-20450",
-        "amount": "7174.53"
+        "reference": "INV-20455",
+        "amount": "11043.97"
       }
     ]
   },
@@ -831,94 +800,85 @@
     "customerId": "00000000-0000-0000-0001-000000000025",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "43109.45",
+    "amount": "11882.81",
     "lines": [
       {
-        "reference": "INV-20451",
-        "amount": "22722.95"
+        "reference": "INV-20456",
+        "amount": "10235.92"
       },
       {
-        "reference": "INV-20452",
-        "amount": "6874"
-      },
-      {
-        "reference": "INV-20453",
-        "amount": "527.41"
-      },
-      {
-        "reference": "INV-20454",
-        "amount": "12985.09"
+        "reference": "INV-20457",
+        "amount": "1646.89"
       }
     ]
   },
   {
     "key": "RMT047",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000109",
+    "customerId": "00000000-0000-0000-0001-000000000113",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "5115.8",
-    "shortPayReason": "DAMAGED GOODS",
+    "amount": "8240.5",
+    "shortPayReason": "PRICING DIFFERENCE",
     "lines": [
       {
-        "reference": "INV-20455",
-        "amount": "5115.8"
+        "reference": "INV-20458",
+        "amount": "8240.5"
       }
     ]
   },
   {
     "key": "RMT048",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000008",
+    "customerId": "00000000-0000-0000-0001-000000000003",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "10150.05",
-    "shortPayReason": "PRICING DIFFERENCE",
+    "amount": "23734.38",
+    "shortPayReason": "FREIGHT DEDUCTED",
     "lines": [
       {
-        "reference": "INV-20456",
-        "amount": "10150.05"
+        "reference": "INV-20459",
+        "amount": "23734.38"
       }
     ]
   },
   {
     "key": "RMT049",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000106",
+    "customerId": "00000000-0000-0000-0001-000000000104",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "24395.5",
-    "shortPayReason": "PRICING DIFFERENCE",
+    "amount": "27030.24",
     "lines": [
       {
-        "reference": "INV-20457",
-        "amount": "24395.5"
+        "reference": "INV-20460",
+        "amount": "13812.35"
+      },
+      {
+        "reference": "INV-20461",
+        "amount": "13217.89"
       }
     ]
   },
   {
     "key": "RMT050",
     "legalEntityId": "00000000-0000-0000-0000-0000000000a1",
-    "customerId": "00000000-0000-0000-0001-000000000006",
+    "customerId": "00000000-0000-0000-0001-000000000040",
     "currency": "USD",
     "valueDate": "2027-03-15",
-    "amount": "56866.79",
+    "amount": "12923.27",
     "lines": [
       {
-        "reference": "INV-20458",
-        "amount": "21566.5"
+        "reference": "INV-20462",
+        "amount": "6929.87"
       },
       {
-        "reference": "INV-20459",
-        "amount": "13812.35"
+        "reference": "INV-20463",
+        "amount": "3801.44"
       },
       {
-        "reference": "INV-20460",
-        "amount": "13217.89"
-      },
-      {
-        "reference": "INV-20461",
-        "amount": "8270.05"
+        "reference": "INV-20464",
+        "amount": "2191.96"
       }
     ]
   }

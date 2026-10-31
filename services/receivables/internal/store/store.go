@@ -458,9 +458,10 @@ func (s *Postgres) MatchPayment(ctx context.Context, id string) (domain.Result, 
 		// Items whose document number appears in the remittance are read first, so
 		// the MatchPoolLimit cap never drops a referenced invoice of an unidentified
 		// payer; the matcher still checks each reference as a whole token (R1).
+		// The strpos substring test below only orders the read; it never decides a match.
 		refs := make([]string, 0, len(pay.Remittance))
 		for _, line := range pay.Remittance {
-			refs = append(refs, line.Reference)
+			refs = append(refs, strings.TrimSpace(line.Reference))
 		}
 		rows, err := tx.Query(ctx, `select `+openItemColumns+` from open_item
 			where legal_entity_id = $1 and currency = $2 and ($3::text = '' or customer_id::text = $3::text) and status in `+openStatuses+`

@@ -172,12 +172,21 @@ func Match(p Payment, open []Item) Result {
 		}
 	}
 	switch {
-	case top.Score >= AutoThreshold && atThreshold == 1 && runnerUp <= top.Score-AutoMargin:
+	case top.Score >= AutoThreshold && agreesOnAmount(top) && atThreshold == 1 && runnerUp <= top.Score-AutoMargin:
 		res.Decision = DecisionAutoApply
 	case top.Score >= SuggestThreshold:
 		res.Decision = DecisionSuggested
 	}
 	return res
+}
+
+// agreesOnAmount reports whether a candidate's amount is explained by the
+// payment: exact (R2, or an exact subset), net of the cash discount (R3) or
+// within the explained short-pay band (R7). A reference and payer identity alone
+// (R1, R4, R5) never auto-apply, because a payer who quotes the wrong invoice
+// would settle the quoted one.
+func agreesOnAmount(c Candidate) bool {
+	return hasRule(c.Rules, "R2") || hasRule(c.Rules, "R2-SUBSET") || hasRule(c.Rules, "R3") || hasRule(c.Rules, "R7")
 }
 
 // scoreSingle scores one open item as the whole settlement. It is a candidate

@@ -1,5 +1,5 @@
-# Hand-derived from items.csv and BR-30.2 (not from the engine). 31 letters.
-# Fee: level 3 25.00 USD, level 4 50.00 USD, once when the letter first reaches the level.
+# Hand-derived from items.csv and BR-30.2 (not from the engine). 34 letters.
+# Fee: level 3 25.00 USD / 20.00 EUR, level 4 50.00 USD / 40.00 EUR, once when the letter first reaches the level.
 customer,currency,level,fee,amount,documents
 C08,USD,2,0,600.00,INV-D6058
 C09,USD,1,0,350.00,INV-D6059
@@ -32,3 +32,6 @@ C37,USD,4,50.00,3000.00,INV-D6037
 C38,USD,4,50.00,1750.00,INV-D6038
 C39,EUR,2,0,300.00,INV-D6039
 C40,EUR,2,0,45.00,INV-D6040
+C61,EUR,3,20.00,700.00,INV-D6061
+C62,EUR,4,40.00,1200.00,INV-D6063
+C63,USD,2,0,400.00,INV-D6064

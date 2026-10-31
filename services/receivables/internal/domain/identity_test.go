@@ -189,7 +189,9 @@ func TestSubsets_OneCustomerAndPayerIdentity(t *testing.T) {
 	}
 }
 
-// R1 with R4 and R5 reaches the auto-apply threshold: a known payer quoting the invoice.
+// R1 with R4 and R5 reaches the auto-apply threshold only when the amount agrees:
+// a known payer quoting the invoice for its exact amount auto-applies, while a
+// different amount stays a suggestion (the payer may have quoted the wrong invoice).
 func TestPayerIdentity_LiftsReferenceToAutoApply(t *testing.T) {
 	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 	it := Item{ID: "i-1", CustomerID: "c1", Currency: "USD", DocumentNumber: "INV-30001", DueDate: due, OpenAmount: decimal.RequireFromString("1000")}
@@ -197,9 +199,14 @@ func TestPayerIdentity_LiftsReferenceToAutoApply(t *testing.T) {
 		Remittance: []RemittanceLine{{Reference: "INV-30001"}}, PayerName: "Acme Inc.",
 		PayerCustomers: map[string]bool{"c1": true}, LearnedNames: map[string][]string{"c1": {"ACME INC"}}}
 	res := Match(p, []Item{it})
-	if res.Decision != DecisionAutoApply || res.Top[0].Score != weightR1+weightR4+weightR5 {
-		t.Fatalf("result = %+v, want AUTO_APPLY at 85", res)
+	if res.Decision != DecisionSuggested || res.Top[0].Score != weightR1+weightR4+weightR5 {
+		t.Fatalf("result = %+v, want SUGGESTED at 85 for a reference-only match", res)
 	}
+	p.Amount = it.OpenAmount
+	if res := Match(p, []Item{it}); res.Decision != DecisionAutoApply || res.Top[0].Score != weightR1+weightR2Single+weightR4+weightR5 {
+		t.Fatalf("exact amount: result = %+v, want AUTO_APPLY at 115", res)
+	}
+	p.Amount = decimal.RequireFromString("400")
 	// Without the payer identity the reference alone is a suggestion.
 	p.PayerCustomers, p.LearnedNames = nil, nil
 	if res := Match(p, []Item{it}); res.Decision != DecisionSuggested {

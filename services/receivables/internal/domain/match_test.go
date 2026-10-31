@@ -64,6 +64,16 @@ func TestMatch_Decisions(t *testing.T) {
 			topScore: 60,
 		},
 		{
+			name: "known payer quoting the wrong invoice is suggested, not auto-applied",
+			payment: Payment{Amount: amt("100.00"), ValueDate: day("2027-06-01"), Remittance: []RemittanceLine{{Reference: "INV-20002"}},
+				PayerCustomers: map[string]bool{"c1": true}, PayerName: "ACME INC", LearnedNames: map[string][]string{"c1": {"ACME INC"}}},
+			open: []Item{{ID: "a", CustomerID: "c1", DocumentNumber: "INV-20001", DueDate: day("2027-03-12"), OpenAmount: amt("100.00")},
+				{ID: "b", CustomerID: "c1", DocumentNumber: "INV-20002", DueDate: day("2027-03-12"), OpenAmount: amt("250.00")}},
+			decision: DecisionSuggested,
+			topIDs:   []string{"b"},
+			topScore: 85,
+		},
+		{
 			name:     "exact subset with one referenced item auto-applies over its single",
 			payment:  Payment{Amount: amt("300.00"), ValueDate: day("2027-06-01"), Remittance: []RemittanceLine{{Reference: "INV-A001"}}},
 			open:     []Item{item("a", "INV-A001", "2027-03-12", "100.00"), item("b", "INV-B001", "2027-03-12", "200.00")},
