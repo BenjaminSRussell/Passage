@@ -144,11 +144,17 @@ func AllocateShares(b BookAmounts, pcts []decimal.Decimal, currency string) ([]B
 }
 
 // allocate rounds each non-final share and gives the last one the residual.
+// A share never takes more than is left, so rounding several small shares up
+// cannot leave the last target negative (0.07 split 7.15 / 7.15 / 78.58 /
+// 7.12% rounds to 0.01 + 0.01 + 0.05 + 0.00, not 0.01 + 0.01 + 0.06 - 0.01).
 func allocate(total decimal.Decimal, pcts []decimal.Decimal, minor int32) []decimal.Decimal {
 	out := make([]decimal.Decimal, len(pcts))
 	rest := total
 	for i := 0; i < len(pcts)-1; i++ {
 		out[i] = total.Mul(pcts[i]).Div(hundred).Round(minor)
+		if !total.IsNegative() {
+			out[i] = decimal.Min(out[i], rest)
+		}
 		rest = rest.Sub(out[i])
 	}
 	out[len(pcts)-1] = rest

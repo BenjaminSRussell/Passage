@@ -62,6 +62,14 @@ type Disposal struct {
 
 var hundred = decimal.NewFromInt(100)
 
+// DisposedShare is percent of amount rounded half-up to the currency minor
+// unit: the part of a book balance (cost, accumulated depreciation or the
+// impairment within it) that leaves with a disposal; the residual stays on
+// the remaining asset (BR-37.7).
+func DisposedShare(amount, percent decimal.Decimal, currency string) decimal.Decimal {
+	return amount.Mul(percent).Div(hundred).Round(money.MinorUnits(currency))
+}
+
 // Dispose splits cost and accumulated depreciation by percent, rounding the
 // disposed share once; residual cents stay on the remaining asset (BR-37.7).
 // Gain or loss is proceeds minus the NBV of the disposed share.
@@ -75,9 +83,8 @@ func Dispose(cost, accumulated, proceeds, percent decimal.Decimal, currency stri
 	if len(currency) != 3 {
 		return Disposal{}, fail(CodeInvalidDisposal, "currency must be an ISO 4217 code")
 	}
-	minor := money.MinorUnits(currency)
-	dc := cost.Mul(percent).Div(hundred).Round(minor)
-	da := accumulated.Mul(percent).Div(hundred).Round(minor)
+	dc := DisposedShare(cost, percent, currency)
+	da := DisposedShare(accumulated, percent, currency)
 	nbv := dc.Sub(da)
 	return Disposal{
 		DisposedCost:         dc,

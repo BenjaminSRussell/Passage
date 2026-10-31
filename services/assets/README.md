@@ -40,8 +40,10 @@ migrations/            0001_assets.sql (RLS on every table, append-only asset_tr
                        0002 adjustments, runs and additions, 0003 insurance and capex,
                        0004 lease modifications, rate method and count sessions,
                        0005 MidQuarter convention, capex creator and decision trail,
-                       0006 transfers and splits, group assets and their members
-testdata/              worked-examples.json: PRD fixtures (AC-37.1, AC-37.2)
+                       0006 transfers and splits, group assets and their members,
+                       0008 the MACRS method
+testdata/              worked-examples.json: PRD fixtures (AC-37.1, AC-37.2); dep-100, disposal-30
+                       and lease-25 proof fixtures with their gen_*.py reference generators
 api/openapi.yaml       HTTP contract for every route (checked by TestRoutesMatchOpenAPI)
 events/asyncapi.yaml   events published through the outbox (checked by TestEventsMatchAsyncAPI)
 charts/assets/         Helm chart (liveness /healthz, readiness /readyz, ServiceMonitor toggle)
@@ -150,11 +152,16 @@ and `authz` until OPA is wired (wave 2 kernel).
   CapexRequestApprove) and AssetCount respectively.
 - A disposal applies to every Open book of the asset (as SAP retirements post to
   all depreciation areas): each book records its own transaction with the
-  disposed share of cost and accumulated depreciation, rounded once with the
+  disposed share of cost, accumulated depreciation and the impairment within
+  it, rounded once with the
   residual cents left on the asset (BR-37.7), and its own gain or loss against
   the same proceeds. 100% closes the asset and its books as Sold or Scrapped
   (BR-37.2). Scrap takes no proceeds.
-- Straight-line life is in months; declining-balance life is in years.
+- Straight-line life is in months; declining-balance and MACRS life is in years.
+  `MACRS` applies the IRS Pub. 946 GDS percentage tables (A-1 HalfYear, A-2
+  to A-5 MidQuarter by in-service quarter) to the cost for a 3, 5, 7, 10, 15
+  or 20-year recovery period, rounded half-up per year with the last year
+  taking the remainder; salvage must be 0 and the factor is ignored.
   Conventions: None, FullMonth, MidMonth15 (half of the first and last month,
   the PRD worked example) for straight line; None, HalfYear and MidQuarter
   for declining balance. MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of
@@ -227,7 +234,13 @@ duplicate membership, class / year / book checks, members as AST-0035 run
 exceptions, live basis after a partial sale), all also under RLS as the
 application role.
 Domain tests are pure: table-driven, `pgregory.net/rapid` properties (life totals,
-lease closing), and the worked-example fixtures.
+lease closing), the worked-example fixtures and the Wave 37 proof fixtures:
+`dep-100` (100 books against the Pub. 946 tables and straight-line edge cases),
+`disposal-30` (successive partial disposals) and `lease-25` (IFRS 16
+schedules), each computed by an independent `testdata/gen_*.py` (regenerate
+with `python3 testdata/gen_dep100.py > testdata/dep-100.json` and likewise).
+The store test `TestStore_PartialDisposalsPostGainLossOnEveryBook` posts a
+hand-derived disposal chain on an IFRS and a MACRS book.
 
 ## Dependencies
 

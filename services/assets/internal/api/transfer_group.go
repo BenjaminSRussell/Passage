@@ -201,7 +201,7 @@ func (a *API) createGroupAsset(w http.ResponseWriter, r *http.Request) {
 		fields["taxYear"] = "must be a four-digit year"
 	}
 	if !validMeth[req.Method] {
-		fields["method"] = "must be StraightLine or DecliningBalance"
+		fields["method"] = "must be StraightLine, DecliningBalance or MACRS"
 	}
 	if !validConv[req.Convention] {
 		fields["convention"] = "must be None, FullMonth, MidMonth15, HalfYear or MidQuarter"

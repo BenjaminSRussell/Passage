@@ -105,7 +105,8 @@ func (s *Postgres) MidQuarterTest(ctx context.Context, f MidQuarterFilter) (MidQ
 	out.MidQuarterResult = domain.MidQuarterTest(f.Year, additions)
 	for _, b := range books {
 		midQuarter := b.Convention == string(domain.ConventionMidQuarter)
-		if out.Applies && b.Method == string(domain.MethodDecliningBalance) && !midQuarter || !out.Applies && midQuarter {
+		annual := b.Method == string(domain.MethodDecliningBalance) || b.Method == string(domain.MethodMACRS)
+		if out.Applies && annual && !midQuarter || !out.Applies && midQuarter {
 			out.ReviewCount++
 			if len(out.Review) < maxReviewBooks {
 				out.Review = append(out.Review, b)

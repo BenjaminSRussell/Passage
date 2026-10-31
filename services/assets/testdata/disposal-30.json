@@ -1,0 +1,1197 @@
+{
+ "books": [
+  {
+   "name": "disposal-01",
+   "currency": "USD",
+   "cost": "815834.26",
+   "accumulated": "448708.84",
+   "impairment": "0.00",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "60",
+     "proceeds": "0.00",
+     "disposedCost": "489500.56",
+     "disposedAccumulated": "269225.30",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "220275.26",
+     "gainLoss": "-220275.26",
+     "remainingCost": "326333.70",
+     "remainingAccumulated": "179483.54",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "75",
+     "proceeds": "646570.96",
+     "disposedCost": "244750.28",
+     "disposedAccumulated": "134612.66",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "110137.62",
+     "gainLoss": "536433.34",
+     "remainingCost": "81583.42",
+     "remainingAccumulated": "44870.88",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-02",
+   "currency": "USD",
+   "cost": "962406.24",
+   "accumulated": "846917.49",
+   "impairment": "846917.49",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "0.01",
+     "proceeds": "0.00",
+     "disposedCost": "96.24",
+     "disposedAccumulated": "84.69",
+     "disposedImpairment": "84.69",
+     "nbvDisposed": "11.55",
+     "gainLoss": "-11.55",
+     "remainingCost": "962310.00",
+     "remainingAccumulated": "846832.80",
+     "remainingImpairment": "846832.80"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "60",
+     "proceeds": "0.00",
+     "disposedCost": "577386.00",
+     "disposedAccumulated": "508099.68",
+     "disposedImpairment": "508099.68",
+     "nbvDisposed": "69286.32",
+     "gainLoss": "-69286.32",
+     "remainingCost": "384924.00",
+     "remainingAccumulated": "338733.12",
+     "remainingImpairment": "338733.12"
+    },
+    {
+     "kind": "sale",
+     "percentage": "0.01",
+     "proceeds": "239316.54",
+     "disposedCost": "38.49",
+     "disposedAccumulated": "33.87",
+     "disposedImpairment": "33.87",
+     "nbvDisposed": "4.62",
+     "gainLoss": "239311.92",
+     "remainingCost": "384885.51",
+     "remainingAccumulated": "338699.25",
+     "remainingImpairment": "338699.25"
+    }
+   ]
+  },
+  {
+   "name": "disposal-03",
+   "currency": "USD",
+   "cost": "1470676.00",
+   "accumulated": "176481.12",
+   "impairment": "44120.28",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "10",
+     "proceeds": "0.00",
+     "disposedCost": "147067.60",
+     "disposedAccumulated": "17648.11",
+     "disposedImpairment": "4412.03",
+     "nbvDisposed": "129419.49",
+     "gainLoss": "-129419.49",
+     "remainingCost": "1323608.40",
+     "remainingAccumulated": "158833.01",
+     "remainingImpairment": "39708.25"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "66.67",
+     "proceeds": "0.00",
+     "disposedCost": "882449.72",
+     "disposedAccumulated": "105893.97",
+     "disposedImpairment": "26473.49",
+     "nbvDisposed": "776555.75",
+     "gainLoss": "-776555.75",
+     "remainingCost": "441158.68",
+     "remainingAccumulated": "52939.04",
+     "remainingImpairment": "13234.76"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "515324.60",
+     "disposedCost": "441158.68",
+     "disposedAccumulated": "52939.04",
+     "disposedImpairment": "13234.76",
+     "nbvDisposed": "388219.64",
+     "gainLoss": "127104.96",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-04",
+   "currency": "EUR",
+   "cost": "945753.92",
+   "accumulated": "236438.48",
+   "impairment": "118219.24",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "50",
+     "proceeds": "1453399.75",
+     "disposedCost": "472876.96",
+     "disposedAccumulated": "118219.24",
+     "disposedImpairment": "59109.62",
+     "nbvDisposed": "354657.72",
+     "gainLoss": "1098742.03",
+     "remainingCost": "472876.96",
+     "remainingAccumulated": "118219.24",
+     "remainingImpairment": "59109.62"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "50",
+     "proceeds": "0.00",
+     "disposedCost": "236438.48",
+     "disposedAccumulated": "59109.62",
+     "disposedImpairment": "29554.81",
+     "nbvDisposed": "177328.86",
+     "gainLoss": "-177328.86",
+     "remainingCost": "236438.48",
+     "remainingAccumulated": "59109.62",
+     "remainingImpairment": "29554.81"
+    },
+    {
+     "kind": "sale",
+     "percentage": "0.01",
+     "proceeds": "398244.16",
+     "disposedCost": "23.64",
+     "disposedAccumulated": "5.91",
+     "disposedImpairment": "2.96",
+     "nbvDisposed": "17.73",
+     "gainLoss": "398226.43",
+     "remainingCost": "236414.84",
+     "remainingAccumulated": "59103.71",
+     "remainingImpairment": "29551.85"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "412384.35",
+     "disposedCost": "236414.84",
+     "disposedAccumulated": "59103.71",
+     "disposedImpairment": "29551.85",
+     "nbvDisposed": "177311.13",
+     "gainLoss": "235073.22",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-05",
+   "currency": "JPY",
+   "cost": "1919405",
+   "accumulated": "307105",
+   "impairment": "30711",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "40",
+     "proceeds": "1738554",
+     "disposedCost": "767762",
+     "disposedAccumulated": "122842",
+     "disposedImpairment": "12284",
+     "nbvDisposed": "644920",
+     "gainLoss": "1093634",
+     "remainingCost": "1151643",
+     "remainingAccumulated": "184263",
+     "remainingImpairment": "18427"
+    },
+    {
+     "kind": "sale",
+     "percentage": "33.33",
+     "proceeds": "1778903",
+     "disposedCost": "383843",
+     "disposedAccumulated": "61415",
+     "disposedImpairment": "6142",
+     "nbvDisposed": "322428",
+     "gainLoss": "1456475",
+     "remainingCost": "767800",
+     "remainingAccumulated": "122848",
+     "remainingImpairment": "12285"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "33.33",
+     "proceeds": "0",
+     "disposedCost": "255908",
+     "disposedAccumulated": "40945",
+     "disposedImpairment": "4095",
+     "nbvDisposed": "214963",
+     "gainLoss": "-214963",
+     "remainingCost": "511892",
+     "remainingAccumulated": "81903",
+     "remainingImpairment": "8190"
+    },
+    {
+     "kind": "sale",
+     "percentage": "10",
+     "proceeds": "144387",
+     "disposedCost": "51189",
+     "disposedAccumulated": "8190",
+     "disposedImpairment": "819",
+     "nbvDisposed": "42999",
+     "gainLoss": "101388",
+     "remainingCost": "460703",
+     "remainingAccumulated": "73713",
+     "remainingImpairment": "7371"
+    }
+   ]
+  },
+  {
+   "name": "disposal-06",
+   "currency": "KWD",
+   "cost": "683377.316",
+   "accumulated": "369023.751",
+   "impairment": "36902.375",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "40",
+     "proceeds": "115052.788",
+     "disposedCost": "273350.926",
+     "disposedAccumulated": "147609.500",
+     "disposedImpairment": "14760.950",
+     "nbvDisposed": "125741.426",
+     "gainLoss": "-10688.638",
+     "remainingCost": "410026.390",
+     "remainingAccumulated": "221414.251",
+     "remainingImpairment": "22141.425"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "762780.877",
+     "disposedCost": "410026.390",
+     "disposedAccumulated": "221414.251",
+     "disposedImpairment": "22141.425",
+     "nbvDisposed": "188612.139",
+     "gainLoss": "574168.738",
+     "remainingCost": "0.000",
+     "remainingAccumulated": "0.000",
+     "remainingImpairment": "0.000"
+    }
+   ]
+  },
+  {
+   "name": "disposal-07",
+   "currency": "USD",
+   "cost": "639317.51",
+   "accumulated": "332445.11",
+   "impairment": "83111.28",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "100",
+     "proceeds": "0.00",
+     "disposedCost": "639317.51",
+     "disposedAccumulated": "332445.11",
+     "disposedImpairment": "83111.28",
+     "nbvDisposed": "306872.40",
+     "gainLoss": "-306872.40",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-08",
+   "currency": "USD",
+   "cost": "1279201.19",
+   "accumulated": "562848.52",
+   "impairment": "56284.85",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "66.67",
+     "proceeds": "0.00",
+     "disposedCost": "852843.43",
+     "disposedAccumulated": "375251.11",
+     "disposedImpairment": "37525.11",
+     "nbvDisposed": "477592.32",
+     "gainLoss": "-477592.32",
+     "remainingCost": "426357.76",
+     "remainingAccumulated": "187597.41",
+     "remainingImpairment": "18759.74"
+    },
+    {
+     "kind": "sale",
+     "percentage": "40",
+     "proceeds": "334038.19",
+     "disposedCost": "170543.10",
+     "disposedAccumulated": "75038.96",
+     "disposedImpairment": "7503.90",
+     "nbvDisposed": "95504.14",
+     "gainLoss": "238534.05",
+     "remainingCost": "255814.66",
+     "remainingAccumulated": "112558.45",
+     "remainingImpairment": "11255.84"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "100",
+     "proceeds": "0.00",
+     "disposedCost": "255814.66",
+     "disposedAccumulated": "112558.45",
+     "disposedImpairment": "11255.84",
+     "nbvDisposed": "143256.21",
+     "gainLoss": "-143256.21",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-09",
+   "currency": "USD",
+   "cost": "1154106.16",
+   "accumulated": "1084859.79",
+   "impairment": "108485.98",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "100",
+     "proceeds": "0.00",
+     "disposedCost": "1154106.16",
+     "disposedAccumulated": "1084859.79",
+     "disposedImpairment": "108485.98",
+     "nbvDisposed": "69246.37",
+     "gainLoss": "-69246.37",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-10",
+   "currency": "EUR",
+   "cost": "1290510.19",
+   "accumulated": "167766.32",
+   "impairment": "167766.32",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "99.99",
+     "proceeds": "0.00",
+     "disposedCost": "1290381.14",
+     "disposedAccumulated": "167749.54",
+     "disposedImpairment": "167749.54",
+     "nbvDisposed": "1122631.60",
+     "gainLoss": "-1122631.60",
+     "remainingCost": "129.05",
+     "remainingAccumulated": "16.78",
+     "remainingImpairment": "16.78"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "100",
+     "proceeds": "0.00",
+     "disposedCost": "129.05",
+     "disposedAccumulated": "16.78",
+     "disposedImpairment": "16.78",
+     "nbvDisposed": "112.27",
+     "gainLoss": "-112.27",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-11",
+   "currency": "JPY",
+   "cost": "1390517",
+   "accumulated": "1195845",
+   "impairment": "0",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "1361555",
+     "disposedCost": "1390517",
+     "disposedAccumulated": "1195845",
+     "disposedImpairment": "0",
+     "nbvDisposed": "194672",
+     "gainLoss": "1166883",
+     "remainingCost": "0",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    }
+   ]
+  },
+  {
+   "name": "disposal-12",
+   "currency": "KWD",
+   "cost": "1858274.042",
+   "accumulated": "1523784.714",
+   "impairment": "380946.179",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "12.5",
+     "proceeds": "850595.934",
+     "disposedCost": "232284.255",
+     "disposedAccumulated": "190473.089",
+     "disposedImpairment": "47618.272",
+     "nbvDisposed": "41811.166",
+     "gainLoss": "808784.768",
+     "remainingCost": "1625989.787",
+     "remainingAccumulated": "1333311.625",
+     "remainingImpairment": "333327.907"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "2354850.535",
+     "disposedCost": "1625989.787",
+     "disposedAccumulated": "1333311.625",
+     "disposedImpairment": "333327.907",
+     "nbvDisposed": "292678.162",
+     "gainLoss": "2062172.373",
+     "remainingCost": "0.000",
+     "remainingAccumulated": "0.000",
+     "remainingImpairment": "0.000"
+    }
+   ]
+  },
+  {
+   "name": "disposal-13",
+   "currency": "USD",
+   "cost": "482584.05",
+   "accumulated": "168904.42",
+   "impairment": "42226.11",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "25",
+     "proceeds": "605014.57",
+     "disposedCost": "120646.01",
+     "disposedAccumulated": "42226.11",
+     "disposedImpairment": "10556.53",
+     "nbvDisposed": "78419.90",
+     "gainLoss": "526594.67",
+     "remainingCost": "361938.04",
+     "remainingAccumulated": "126678.31",
+     "remainingImpairment": "31669.58"
+    },
+    {
+     "kind": "sale",
+     "percentage": "12.5",
+     "proceeds": "42539.91",
+     "disposedCost": "45242.26",
+     "disposedAccumulated": "15834.79",
+     "disposedImpairment": "3958.70",
+     "nbvDisposed": "29407.47",
+     "gainLoss": "13132.44",
+     "remainingCost": "316695.78",
+     "remainingAccumulated": "110843.52",
+     "remainingImpairment": "27710.88"
+    },
+    {
+     "kind": "sale",
+     "percentage": "0.01",
+     "proceeds": "609412.76",
+     "disposedCost": "31.67",
+     "disposedAccumulated": "11.08",
+     "disposedImpairment": "2.77",
+     "nbvDisposed": "20.59",
+     "gainLoss": "609392.17",
+     "remainingCost": "316664.11",
+     "remainingAccumulated": "110832.44",
+     "remainingImpairment": "27708.11"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "570993.85",
+     "disposedCost": "316664.11",
+     "disposedAccumulated": "110832.44",
+     "disposedImpairment": "27708.11",
+     "nbvDisposed": "205831.67",
+     "gainLoss": "365162.18",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-14",
+   "currency": "USD",
+   "cost": "1939467.42",
+   "accumulated": "19394.67",
+   "impairment": "9697.34",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "40",
+     "proceeds": "0.00",
+     "disposedCost": "775786.97",
+     "disposedAccumulated": "7757.87",
+     "disposedImpairment": "3878.94",
+     "nbvDisposed": "768029.10",
+     "gainLoss": "-768029.10",
+     "remainingCost": "1163680.45",
+     "remainingAccumulated": "11636.80",
+     "remainingImpairment": "5818.40"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "75",
+     "proceeds": "0.00",
+     "disposedCost": "872760.34",
+     "disposedAccumulated": "8727.60",
+     "disposedImpairment": "4363.80",
+     "nbvDisposed": "864032.74",
+     "gainLoss": "-864032.74",
+     "remainingCost": "290920.11",
+     "remainingAccumulated": "2909.20",
+     "remainingImpairment": "1454.60"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "176131.03",
+     "disposedCost": "290920.11",
+     "disposedAccumulated": "2909.20",
+     "disposedImpairment": "1454.60",
+     "nbvDisposed": "288010.91",
+     "gainLoss": "-111879.88",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-15",
+   "currency": "USD",
+   "cost": "1368206.19",
+   "accumulated": "588328.66",
+   "impairment": "0.00",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "75",
+     "proceeds": "1531573.38",
+     "disposedCost": "1026154.64",
+     "disposedAccumulated": "441246.50",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "584908.14",
+     "gainLoss": "946665.24",
+     "remainingCost": "342051.55",
+     "remainingAccumulated": "147082.16",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "203023.58",
+     "disposedCost": "342051.55",
+     "disposedAccumulated": "147082.16",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "194969.39",
+     "gainLoss": "8054.19",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-16",
+   "currency": "EUR",
+   "cost": "1267279.38",
+   "accumulated": "722349.25",
+   "impairment": "361174.63",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "801146.60",
+     "disposedCost": "1267279.38",
+     "disposedAccumulated": "722349.25",
+     "disposedImpairment": "361174.63",
+     "nbvDisposed": "544930.13",
+     "gainLoss": "256216.47",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-17",
+   "currency": "JPY",
+   "cost": "765236",
+   "accumulated": "183657",
+   "impairment": "0",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "1516396",
+     "disposedCost": "765236",
+     "disposedAccumulated": "183657",
+     "disposedImpairment": "0",
+     "nbvDisposed": "581579",
+     "gainLoss": "934817",
+     "remainingCost": "0",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    }
+   ]
+  },
+  {
+   "name": "disposal-18",
+   "currency": "KWD",
+   "cost": "311939.541",
+   "accumulated": "34313.350",
+   "impairment": "3431.335",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "75",
+     "proceeds": "316207.620",
+     "disposedCost": "233954.656",
+     "disposedAccumulated": "25735.013",
+     "disposedImpairment": "2573.501",
+     "nbvDisposed": "208219.643",
+     "gainLoss": "107987.977",
+     "remainingCost": "77984.885",
+     "remainingAccumulated": "8578.337",
+     "remainingImpairment": "857.834"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "50",
+     "proceeds": "0.000",
+     "disposedCost": "38992.443",
+     "disposedAccumulated": "4289.169",
+     "disposedImpairment": "428.917",
+     "nbvDisposed": "34703.274",
+     "gainLoss": "-34703.274",
+     "remainingCost": "38992.442",
+     "remainingAccumulated": "4289.168",
+     "remainingImpairment": "428.917"
+    }
+   ]
+  },
+  {
+   "name": "disposal-19",
+   "currency": "USD",
+   "cost": "497884.14",
+   "accumulated": "49788.41",
+   "impairment": "4978.84",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "60",
+     "proceeds": "290028.05",
+     "disposedCost": "298730.48",
+     "disposedAccumulated": "29873.05",
+     "disposedImpairment": "2987.30",
+     "nbvDisposed": "268857.43",
+     "gainLoss": "21170.62",
+     "remainingCost": "199153.66",
+     "remainingAccumulated": "19915.36",
+     "remainingImpairment": "1991.54"
+    },
+    {
+     "kind": "sale",
+     "percentage": "12.5",
+     "proceeds": "44261.11",
+     "disposedCost": "24894.21",
+     "disposedAccumulated": "2489.42",
+     "disposedImpairment": "248.94",
+     "nbvDisposed": "22404.79",
+     "gainLoss": "21856.32",
+     "remainingCost": "174259.45",
+     "remainingAccumulated": "17425.94",
+     "remainingImpairment": "1742.60"
+    }
+   ]
+  },
+  {
+   "name": "disposal-20",
+   "currency": "USD",
+   "cost": "240265.41",
+   "accumulated": "19221.23",
+   "impairment": "1922.12",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "25",
+     "proceeds": "203668.22",
+     "disposedCost": "60066.35",
+     "disposedAccumulated": "4805.31",
+     "disposedImpairment": "480.53",
+     "nbvDisposed": "55261.04",
+     "gainLoss": "148407.18",
+     "remainingCost": "180199.06",
+     "remainingAccumulated": "14415.92",
+     "remainingImpairment": "1441.59"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "265945.48",
+     "disposedCost": "180199.06",
+     "disposedAccumulated": "14415.92",
+     "disposedImpairment": "1441.59",
+     "nbvDisposed": "165783.14",
+     "gainLoss": "100162.34",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-21",
+   "currency": "USD",
+   "cost": "302072.72",
+   "accumulated": "0.00",
+   "impairment": "0.00",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "10",
+     "proceeds": "33144.38",
+     "disposedCost": "30207.27",
+     "disposedAccumulated": "0.00",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "30207.27",
+     "gainLoss": "2937.11",
+     "remainingCost": "271865.45",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "66.67",
+     "proceeds": "4901.90",
+     "disposedCost": "181252.70",
+     "disposedAccumulated": "0.00",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "181252.70",
+     "gainLoss": "-176350.80",
+     "remainingCost": "90612.75",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "120463.23",
+     "disposedCost": "90612.75",
+     "disposedAccumulated": "0.00",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "90612.75",
+     "gainLoss": "29850.48",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-22",
+   "currency": "EUR",
+   "cost": "313247.48",
+   "accumulated": "231803.14",
+   "impairment": "23180.31",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "10",
+     "proceeds": "581554.16",
+     "disposedCost": "31324.75",
+     "disposedAccumulated": "23180.31",
+     "disposedImpairment": "2318.03",
+     "nbvDisposed": "8144.44",
+     "gainLoss": "573409.72",
+     "remainingCost": "281922.73",
+     "remainingAccumulated": "208622.83",
+     "remainingImpairment": "20862.28"
+    },
+    {
+     "kind": "sale",
+     "percentage": "66.67",
+     "proceeds": "218315.34",
+     "disposedCost": "187957.88",
+     "disposedAccumulated": "139088.84",
+     "disposedImpairment": "13908.88",
+     "nbvDisposed": "48869.04",
+     "gainLoss": "169446.30",
+     "remainingCost": "93964.85",
+     "remainingAccumulated": "69533.99",
+     "remainingImpairment": "6953.40"
+    }
+   ]
+  },
+  {
+   "name": "disposal-23",
+   "currency": "JPY",
+   "cost": "587178",
+   "accumulated": "0",
+   "impairment": "0",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "75",
+     "proceeds": "0",
+     "disposedCost": "440384",
+     "disposedAccumulated": "0",
+     "disposedImpairment": "0",
+     "nbvDisposed": "440384",
+     "gainLoss": "-440384",
+     "remainingCost": "146794",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "40",
+     "proceeds": "0",
+     "disposedCost": "58718",
+     "disposedAccumulated": "0",
+     "disposedImpairment": "0",
+     "nbvDisposed": "58718",
+     "gainLoss": "-58718",
+     "remainingCost": "88076",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "10",
+     "proceeds": "0",
+     "disposedCost": "8808",
+     "disposedAccumulated": "0",
+     "disposedImpairment": "0",
+     "nbvDisposed": "8808",
+     "gainLoss": "-8808",
+     "remainingCost": "79268",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "100",
+     "proceeds": "0",
+     "disposedCost": "79268",
+     "disposedAccumulated": "0",
+     "disposedImpairment": "0",
+     "nbvDisposed": "79268",
+     "gainLoss": "-79268",
+     "remainingCost": "0",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    }
+   ]
+  },
+  {
+   "name": "disposal-24",
+   "currency": "KWD",
+   "cost": "1711592.471",
+   "accumulated": "342318.494",
+   "impairment": "0.000",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "3140381.664",
+     "disposedCost": "1711592.471",
+     "disposedAccumulated": "342318.494",
+     "disposedImpairment": "0.000",
+     "nbvDisposed": "1369273.977",
+     "gainLoss": "1771107.687",
+     "remainingCost": "0.000",
+     "remainingAccumulated": "0.000",
+     "remainingImpairment": "0.000"
+    }
+   ]
+  },
+  {
+   "name": "disposal-25",
+   "currency": "USD",
+   "cost": "1443001.65",
+   "accumulated": "1255411.44",
+   "impairment": "0.00",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "25",
+     "proceeds": "2795857.46",
+     "disposedCost": "360750.41",
+     "disposedAccumulated": "313852.86",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "46897.55",
+     "gainLoss": "2748959.91",
+     "remainingCost": "1082251.24",
+     "remainingAccumulated": "941558.58",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-26",
+   "currency": "USD",
+   "cost": "287190.06",
+   "accumulated": "246983.45",
+   "impairment": "246983.45",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "10",
+     "proceeds": "387577.89",
+     "disposedCost": "28719.01",
+     "disposedAccumulated": "24698.35",
+     "disposedImpairment": "24698.35",
+     "nbvDisposed": "4020.66",
+     "gainLoss": "383557.23",
+     "remainingCost": "258471.05",
+     "remainingAccumulated": "222285.10",
+     "remainingImpairment": "222285.10"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "60",
+     "proceeds": "0.00",
+     "disposedCost": "155082.63",
+     "disposedAccumulated": "133371.06",
+     "disposedImpairment": "133371.06",
+     "nbvDisposed": "21711.57",
+     "gainLoss": "-21711.57",
+     "remainingCost": "103388.42",
+     "remainingAccumulated": "88914.04",
+     "remainingImpairment": "88914.04"
+    },
+    {
+     "kind": "sale",
+     "percentage": "1",
+     "proceeds": "174936.71",
+     "disposedCost": "1033.88",
+     "disposedAccumulated": "889.14",
+     "disposedImpairment": "889.14",
+     "nbvDisposed": "144.74",
+     "gainLoss": "174791.97",
+     "remainingCost": "102354.54",
+     "remainingAccumulated": "88024.90",
+     "remainingImpairment": "88024.90"
+    },
+    {
+     "kind": "sale",
+     "percentage": "60",
+     "proceeds": "121179.05",
+     "disposedCost": "61412.72",
+     "disposedAccumulated": "52814.94",
+     "disposedImpairment": "52814.94",
+     "nbvDisposed": "8597.78",
+     "gainLoss": "112581.27",
+     "remainingCost": "40941.82",
+     "remainingAccumulated": "35209.96",
+     "remainingImpairment": "35209.96"
+    }
+   ]
+  },
+  {
+   "name": "disposal-27",
+   "currency": "USD",
+   "cost": "1752948.10",
+   "accumulated": "1069298.34",
+   "impairment": "0.00",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "33.33",
+     "proceeds": "673047.53",
+     "disposedCost": "584257.60",
+     "disposedAccumulated": "356397.14",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "227860.46",
+     "gainLoss": "445187.07",
+     "remainingCost": "1168690.50",
+     "remainingAccumulated": "712901.20",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "0.01",
+     "proceeds": "1412407.63",
+     "disposedCost": "116.87",
+     "disposedAccumulated": "71.29",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "45.58",
+     "gainLoss": "1412362.05",
+     "remainingCost": "1168573.63",
+     "remainingAccumulated": "712829.91",
+     "remainingImpairment": "0.00"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "705528.85",
+     "disposedCost": "1168573.63",
+     "disposedAccumulated": "712829.91",
+     "disposedImpairment": "0.00",
+     "nbvDisposed": "455743.72",
+     "gainLoss": "249785.13",
+     "remainingCost": "0.00",
+     "remainingAccumulated": "0.00",
+     "remainingImpairment": "0.00"
+    }
+   ]
+  },
+  {
+   "name": "disposal-28",
+   "currency": "EUR",
+   "cost": "1255784.79",
+   "accumulated": "1079974.92",
+   "impairment": "269993.73",
+   "steps": [
+    {
+     "kind": "scrap",
+     "percentage": "66.67",
+     "proceeds": "0.00",
+     "disposedCost": "837231.72",
+     "disposedAccumulated": "720019.28",
+     "disposedImpairment": "180004.82",
+     "nbvDisposed": "117212.44",
+     "gainLoss": "-117212.44",
+     "remainingCost": "418553.07",
+     "remainingAccumulated": "359955.64",
+     "remainingImpairment": "89988.91"
+    },
+    {
+     "kind": "scrap",
+     "percentage": "1",
+     "proceeds": "0.00",
+     "disposedCost": "4185.53",
+     "disposedAccumulated": "3599.56",
+     "disposedImpairment": "899.89",
+     "nbvDisposed": "585.97",
+     "gainLoss": "-585.97",
+     "remainingCost": "414367.54",
+     "remainingAccumulated": "356356.08",
+     "remainingImpairment": "89089.02"
+    }
+   ]
+  },
+  {
+   "name": "disposal-29",
+   "currency": "JPY",
+   "cost": "464520",
+   "accumulated": "427358",
+   "impairment": "0",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "50",
+     "proceeds": "451953",
+     "disposedCost": "232260",
+     "disposedAccumulated": "213679",
+     "disposedImpairment": "0",
+     "nbvDisposed": "18581",
+     "gainLoss": "433372",
+     "remainingCost": "232260",
+     "remainingAccumulated": "213679",
+     "remainingImpairment": "0"
+    },
+    {
+     "kind": "sale",
+     "percentage": "100",
+     "proceeds": "94192",
+     "disposedCost": "232260",
+     "disposedAccumulated": "213679",
+     "disposedImpairment": "0",
+     "nbvDisposed": "18581",
+     "gainLoss": "75611",
+     "remainingCost": "0",
+     "remainingAccumulated": "0",
+     "remainingImpairment": "0"
+    }
+   ]
+  },
+  {
+   "name": "disposal-30",
+   "currency": "KWD",
+   "cost": "813163.331",
+   "accumulated": "748110.265",
+   "impairment": "748110.265",
+   "steps": [
+    {
+     "kind": "sale",
+     "percentage": "99.99",
+     "proceeds": "862809.731",
+     "disposedCost": "813082.015",
+     "disposedAccumulated": "748035.454",
+     "disposedImpairment": "748035.454",
+     "nbvDisposed": "65046.561",
+     "gainLoss": "797763.170",
+     "remainingCost": "81.316",
+     "remainingAccumulated": "74.811",
+     "remainingImpairment": "74.811"
+    },
+    {
+     "kind": "sale",
+     "percentage": "25",
+     "proceeds": "153.355",
+     "disposedCost": "20.329",
+     "disposedAccumulated": "18.703",
+     "disposedImpairment": "18.703",
+     "nbvDisposed": "1.626",
+     "gainLoss": "151.729",
+     "remainingCost": "60.987",
+     "remainingAccumulated": "56.108",
+     "remainingImpairment": "56.108"
+    },
+    {
+     "kind": "sale",
+     "percentage": "40",
+     "proceeds": "76.651",
+     "disposedCost": "24.395",
+     "disposedAccumulated": "22.443",
+     "disposedImpairment": "22.443",
+     "nbvDisposed": "1.952",
+     "gainLoss": "74.699",
+     "remainingCost": "36.592",
+     "remainingAccumulated": "33.665",
+     "remainingImpairment": "33.665"
+    },
+    {
+     "kind": "sale",
+     "percentage": "50",
+     "proceeds": "10.675",
+     "disposedCost": "18.296",
+     "disposedAccumulated": "16.833",
+     "disposedImpairment": "16.833",
+     "nbvDisposed": "1.463",
+     "gainLoss": "9.212",
+     "remainingCost": "18.296",
+     "remainingAccumulated": "16.832",
+     "remainingImpairment": "16.832"
+    }
+   ]
+  }
+ ]
+}
