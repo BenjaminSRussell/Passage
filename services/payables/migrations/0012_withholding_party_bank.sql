@@ -34,3 +34,5 @@ END
 $$;
 
 ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS paid_base numeric(20,6) CHECK (paid_base IS NULL OR paid_base >= 0);
+ALTER TABLE ap_payment_proposal_group DROP CONSTRAINT IF EXISTS ap_payment_proposal_group_withheld_has_base;
+ALTER TABLE ap_payment_proposal_group ADD CONSTRAINT ap_payment_proposal_group_withheld_has_base CHECK (withheld_amount = 0 OR paid_base IS NOT NULL);

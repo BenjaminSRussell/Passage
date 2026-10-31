@@ -556,6 +556,14 @@ func (s *Postgres) PaidToDate(ctx context.Context, legalEntityID, vendorID, curr
 }
 
 func verifyPaidBases(ctx context.Context, tx pgx.Tx, proposalID, legalEntityID string, runYear int) error {
+	var unbased bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from ap_payment_proposal_group g where g.proposal_id = $1::uuid and g.paid_base is null
+		and (g.withheld_amount > 0 or exists(select 1 from ap_payment_proposal_line l where l.group_id = g.id and l.tenant_id = g.tenant_id and (l.withholding_code is not null or l.withheld_amount > 0))))`, proposalID).Scan(&unbased); err != nil {
+		return err
+	}
+	if unbased {
+		return ErrPaidChanged
+	}
 	rows, err := tx.Query(ctx, `select vendor_id::text, currency, paid_base::text from ap_payment_proposal_group where proposal_id = $1::uuid and paid_base is not null order by vendor_id, currency, id`, proposalID)
 	if err != nil {
 		return err

@@ -875,3 +875,39 @@ func TestApproval_RefusesWhenAConcurrentDraftOfTheSameVendorWasApprovedFirst(t *
 		t.Fatalf("status = %s", p.Status)
 	}
 }
+
+func TestVerifyPaidBases_RefusesAGroupWithAWithholdingLineButNoBase(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	in := proposalFor(t, s, alice, leA, "run-1")
+	for gi := range in.Groups {
+		g := &in.Groups[gi]
+		if g.VendorID == vendor1 {
+			g.Lines[0].WithholdingCode = "WHT30"
+		}
+	}
+	created, _, err := s.CreateProposal(alice, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); !errors.Is(err, ErrPaidChanged) {
+		t.Fatalf("approval = %v, want ErrPaidChanged for a withholding line without a base", err)
+	}
+}
+
+func TestGroupInsert_RefusesWithheldAmountWithoutBase(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	in := proposalFor(t, s, alice, leA, "run-1")
+	for gi := range in.Groups {
+		g := &in.Groups[gi]
+		if g.VendorID == vendor1 {
+			g.Withhold(0, "WHT30", dec("1.00"), 2)
+		}
+	}
+	if _, _, err := s.CreateProposal(alice, in); err == nil {
+		t.Fatal("a group that withholds tax without a stored base must be refused by the database")
+	}
+}
