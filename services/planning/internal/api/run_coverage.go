@@ -57,6 +57,7 @@ func storedCoverageDTO(c store.RunCoverage) coverageDTO {
 		CoverageFenceDays: c.CoverageFenceDays,
 		FirmingFenceDays:  c.FirmingFenceDays,
 		AutoFirm:          c.AutoFirm,
+		SafetyStockPolicy: c.SafetyStockPolicy,
 	}
 }
 

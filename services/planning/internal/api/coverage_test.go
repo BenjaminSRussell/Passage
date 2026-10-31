@@ -94,7 +94,7 @@ func TestCreateCoverageGroup_AppliesFR222Defaults(t *testing.T) {
 	}
 	g := decodeGroup(t, rec)
 	if g.CoverageTimeFenceDays != 100 || g.NegativeDays != 1 || g.PositiveDays != 0 || g.FirmingFenceDays != 0 ||
-		g.FreezeFenceDays != 0 || g.AutoFirm || !g.GenerateActions || !g.GenerateFutures || g.Version != 1 {
+		g.FreezeFenceDays != 0 || g.AutoFirm || g.SafetyStockPolicy != "today" || !g.GenerateActions || !g.GenerateFutures || g.Version != 1 {
 		t.Fatalf("FR-22.2 defaults not applied: %+v", g)
 	}
 }
@@ -108,6 +108,8 @@ func TestCreateCoverageGroup_Refusals(t *testing.T) {
 	}{
 		{"invalid fields are named", `{"code":"x","coverageCode":"weekly","autoFirm":true}`, dutySetup, http.StatusBadRequest, codeValidation,
 			[]string{"code", "coverageCode", "autoFirm"}},
+		{"unknown safety policy", `{"code":"REQ","coverageCode":"requirement","safetyStockPolicy":"monthly"}`, dutySetup, http.StatusBadRequest, codeValidation,
+			[]string{"safetyStockPolicy"}},
 		{"period coverage needs period days", `{"code":"PER","coverageCode":"period"}`, dutySetup, http.StatusBadRequest, codeValidation,
 			[]string{"periodDays"}},
 		{"fence out of range", `{"code":"REQ","coverageCode":"requirement","firmingFenceDays":3651}`, dutySetup, http.StatusBadRequest, codeValidation,

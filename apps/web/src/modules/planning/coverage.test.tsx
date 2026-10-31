@@ -14,6 +14,7 @@ const autoFirm: CoverageGroup = {
   version: 3,
   firmingFenceDays: 5,
   autoFirm: true,
+  safetyStockPolicy: "first-issue",
 };
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -79,10 +80,13 @@ describe("Coverage groups page", () => {
     const table = await findTable({ name: "Coverage groups" });
     await waitFor(() => expect(within(table).getByText("FIRM5")).toBeInTheDocument());
     expect(within(table).getByText("Auto-firm, 5 d")).toBeInTheDocument();
+    expect(within(table).getByText("First issue")).toBeInTheDocument();
+    expect(within(table).getByText("Today")).toBeInTheDocument();
     expect(within(table).getAllByText("Requirement (lot-for-lot)")).toHaveLength(2);
     fireEvent.click(within(table).getByRole("button", { name: "REQ" }));
     expect(screen.getByTestId("location")).toHaveTextContent("/planning/coverage-groups/REQ");
     expect(await screen.findByLabelText("Freeze fence (days)")).toHaveValue("0");
+    expect(screen.getByLabelText("Safety-stock policy")).toHaveValue("today");
   });
 
   it("shows the empty state", async () => {
@@ -121,6 +125,19 @@ describe("New coverage group page", () => {
     expect(init?.method).toBe("POST");
     expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
     expect(JSON.parse(String(init?.body))).toEqual({ ...COVERAGE_DEFAULTS, code: "FIRM5", firmingFenceDays: 5, autoFirm: true });
+  });
+
+  it("sends the safety-stock policy chosen on the form", async () => {
+    const fetchMock = stubApi(
+      ["/coverage-groups/SAFE", () => json({ ...req, code: "SAFE", safetyStockPolicy: "first-issue" })],
+      ["/coverage-groups", () => json({ ...req, code: "SAFE", safetyStockPolicy: "first-issue" }, 201)],
+    );
+    renderAt("/planning/coverage-groups/new");
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "safe" } });
+    fireEvent.change(screen.getByLabelText("Safety-stock policy"), { target: { value: "first-issue" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create coverage group" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/planning/coverage-groups/SAFE"));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ ...COVERAGE_DEFAULTS, code: "SAFE", safetyStockPolicy: "first-issue" });
   });
 
   it("shows a taken code", async () => {

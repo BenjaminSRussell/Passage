@@ -351,14 +351,15 @@ func TestRun_RejectsInvalidSnapshot(t *testing.T) {
 		return Item{ID: "V-1", Coverage: CoverageRequirement, OrderType: OrderPurchase}
 	}
 	cases := map[string]func(*Item){
-		"unknown coverage":   func(it *Item) { it.Coverage = "lot-for-lot" },
-		"unknown order type": func(it *Item) { it.OrderType = "kanban" },
-		"negative lead time": func(it *Item) { it.LeadTimeDays = -1 },
-		"negative on hand":   func(it *Item) { it.OnHand = d("-1") },
-		"zero demand":        func(it *Item) { it.Demand = []Requirement{{Ref: "S", Date: 1, Qty: d("0")}} },
-		"demand without ref": func(it *Item) { it.Demand = []Requirement{{Date: 1, Qty: d("1")}} },
-		"negative receipt":   func(it *Item) { it.Receipts = []Requirement{{Ref: "PO", Date: 1, Qty: d("-5")}} },
-		"zero component qty": func(it *Item) { it.Components = []BOMLine{{ItemID: "V-1", Qty: d("0")}} },
+		"unknown coverage":      func(it *Item) { it.Coverage = "lot-for-lot" },
+		"unknown order type":    func(it *Item) { it.OrderType = "kanban" },
+		"unknown safety policy": func(it *Item) { it.SafetyPolicy = "monthly" },
+		"negative lead time":    func(it *Item) { it.LeadTimeDays = -1 },
+		"negative on hand":      func(it *Item) { it.OnHand = d("-1") },
+		"zero demand":           func(it *Item) { it.Demand = []Requirement{{Ref: "S", Date: 1, Qty: d("0")}} },
+		"demand without ref":    func(it *Item) { it.Demand = []Requirement{{Date: 1, Qty: d("1")}} },
+		"negative receipt":      func(it *Item) { it.Receipts = []Requirement{{Ref: "PO", Date: 1, Qty: d("-5")}} },
+		"zero component qty":    func(it *Item) { it.Components = []BOMLine{{ItemID: "V-1", Qty: d("0")}} },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

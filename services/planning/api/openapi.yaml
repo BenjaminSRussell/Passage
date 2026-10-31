@@ -1665,6 +1665,7 @@ components:
         autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
         generateActions: {type: boolean, default: true}
         generateFutures: {type: boolean, default: true}
+        safetyStockPolicy: {type: string, enum: [today, first-issue], default: today, description: 'BR-22.5. today nets the safety stock as a demand at today; first-issue as a demand on the item first issue date (today when the item has no demand).'}
     CoverageGroup:
       allOf:
         - type: object
@@ -1898,6 +1899,7 @@ components:
             coverageFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'FR-22.2 coverage time fence: existing supply at or beyond it that demand does not need raises cancel (nothing pegged) or decrease (by the unpegged part), inside the action fence. 0 raises neither.'}
             firmingFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4 firming time fence. With autoFirm, planned orders whose order date falls inside it are firmed by the run (grouping vendor-date, one plannedorder.firmed.v1 each). 0 firms nothing.'}
             autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
+            safetyStockPolicy: {type: string, enum: [today, first-issue], description: 'BR-22.5 safety-stock policy. Left out, the run takes the policy of the stored coverage group, else today.'}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer], description: Required unless the item has a stored site-scope item coverage}

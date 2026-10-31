@@ -457,6 +457,10 @@ export async function forecastConsensus(modelCode: string, step: ConsensusStep, 
 export const CoverageCode = z.enum(["requirement", "period", "minmax", "manual"]);
 export type CoverageCode = z.infer<typeof CoverageCode>;
 
+/** Safety-stock policies of BR-22.5: demand at today, or at the first issue date. */
+export const SafetyStockPolicy = z.enum(["today", "first-issue"]);
+export type SafetyStockPolicy = z.infer<typeof SafetyStockPolicy>;
+
 /** The settings of a coverage group, as a create or update sends them (CoverageSettings in the OpenAPI). */
 export const CoverageSettings = z.object({
   coverageCode: CoverageCode,
@@ -472,6 +476,7 @@ export const CoverageSettings = z.object({
   autoFirm: z.boolean(),
   generateActions: z.boolean(),
   generateFutures: z.boolean(),
+  safetyStockPolicy: SafetyStockPolicy,
 });
 export type CoverageSettings = z.infer<typeof CoverageSettings>;
 
@@ -497,6 +502,7 @@ export const COVERAGE_DEFAULTS: CoverageSettings = {
   autoFirm: false,
   generateActions: true,
   generateFutures: true,
+  safetyStockPolicy: "today",
 };
 
 export async function listCoverageGroups(init?: RequestInit): Promise<CoverageGroup[]> {

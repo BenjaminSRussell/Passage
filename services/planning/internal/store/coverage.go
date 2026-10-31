@@ -41,14 +41,14 @@ type CoverageCreate struct {
 }
 
 const coverageSelect = `select id::text, version, code, coverage_code, coverage_time_fence_days, negative_days, positive_days, period_days,
-	freeze_fence_days, action_fence_days, futures_fence_days, firming_fence_days, auto_firm, generate_actions, generate_futures
+	freeze_fence_days, action_fence_days, futures_fence_days, firming_fence_days, auto_firm, generate_actions, generate_futures, safety_stock_policy
 	from coverage_group`
 
 func scanCoverageGroup(row pgx.Row) (CoverageGroup, error) {
 	var g CoverageGroup
 	s := &g.Spec
 	err := row.Scan(&g.ID, &g.Version, &s.Code, &s.CoverageCode, &s.CoverageTimeFenceDays, &s.NegativeDays, &s.PositiveDays, &s.PeriodDays,
-		&s.FreezeFenceDays, &s.ActionFenceDays, &s.FuturesFenceDays, &s.FirmingFenceDays, &s.AutoFirm, &s.GenerateActions, &s.GenerateFutures)
+		&s.FreezeFenceDays, &s.ActionFenceDays, &s.FuturesFenceDays, &s.FirmingFenceDays, &s.AutoFirm, &s.GenerateActions, &s.GenerateFutures, &s.SafetyStockPolicy)
 	return g, err
 }
 
@@ -124,11 +124,11 @@ func (s *Postgres) CreateCoverageGroup(ctx context.Context, req CoverageCreate) 
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into coverage_group (tenant_id, id, code, coverage_code, coverage_time_fence_days, negative_days,
 			positive_days, period_days, freeze_fence_days, action_fence_days, futures_fence_days, firming_fence_days, auto_firm,
-			generate_actions, generate_futures, idempotency_key, input_hash)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+			generate_actions, generate_futures, safety_stock_policy, idempotency_key, input_hash)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 			p.TenantID, id, g.Code, g.CoverageCode, g.CoverageTimeFenceDays, g.NegativeDays, g.PositiveDays,
 			g.PeriodDays, g.FreezeFenceDays, g.ActionFenceDays, g.FuturesFenceDays, g.FirmingFenceDays,
-			g.AutoFirm, g.GenerateActions, g.GenerateFutures, key, hash); err != nil {
+			g.AutoFirm, g.GenerateActions, g.GenerateFutures, g.SafetyStockPolicy, key, hash); err != nil {
 			return err
 		}
 		out = CoverageGroup{ID: id, Version: 1, Spec: g}
@@ -169,11 +169,11 @@ func (s *Postgres) UpdateCoverageGroup(ctx context.Context, expectedVersion int,
 		}
 		if _, err := tx.Exec(ctx, `update coverage_group set coverage_code = $3, coverage_time_fence_days = $4, negative_days = $5,
 			positive_days = $6, period_days = $7, freeze_fence_days = $8, action_fence_days = $9, futures_fence_days = $10,
-			firming_fence_days = $11, auto_firm = $12, generate_actions = $13, generate_futures = $14, version = version + 1, updated_at = now()
+			firming_fence_days = $11, auto_firm = $12, generate_actions = $13, generate_futures = $14, safety_stock_policy = $15, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`,
 			p.TenantID, id, spec.CoverageCode, spec.CoverageTimeFenceDays, spec.NegativeDays, spec.PositiveDays, spec.PeriodDays,
 			spec.FreezeFenceDays, spec.ActionFenceDays, spec.FuturesFenceDays, spec.FirmingFenceDays, spec.AutoFirm,
-			spec.GenerateActions, spec.GenerateFutures); err != nil {
+			spec.GenerateActions, spec.GenerateFutures, spec.SafetyStockPolicy); err != nil {
 			return err
 		}
 		out = CoverageGroup{ID: id, Version: version + 1, Spec: spec}

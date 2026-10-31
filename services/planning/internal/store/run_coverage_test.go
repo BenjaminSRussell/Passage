@@ -22,6 +22,7 @@ func TestRunCoverages(t *testing.T) {
 
 	spec := domain.DefaultCoverageGroup("PER", domain.CoveragePeriod)
 	spec.PeriodDays, spec.FreezeFenceDays, spec.FirmingFenceDays, spec.AutoFirm = 7, 3, 5, true
+	spec.SafetyStockPolicy = domain.SafetyFirstIssue
 	period, _, err := st.CreateCoverageGroup(ctx, store.CoverageCreate{Spec: spec})
 	if err != nil {
 		t.Fatal(err)
@@ -71,14 +72,14 @@ func TestRunCoverages(t *testing.T) {
 		t.Fatal("item has no stored coverage")
 	}
 	if r.GroupCode != "PER" || r.CoverageCode != domain.CoveragePeriod || r.PeriodDays != 7 || r.FreezeFenceDays != 3 ||
-		r.FirmingFenceDays != 5 || !r.AutoFirm || r.CoverageFenceDays != 100 || r.NegativeDays != 1 {
+		r.FirmingFenceDays != 5 || !r.AutoFirm || r.CoverageFenceDays != 100 || r.NegativeDays != 1 || r.SafetyStockPolicy != domain.SafetyFirstIssue {
 		t.Fatalf("group settings: %+v", r)
 	}
 	if !r.MinQty.Equal(decimal.RequireFromString("100.5")) || !r.MaxQty.Equal(decimal.RequireFromString("400.000001")) ||
 		r.MarginDays != 2 || r.LeadTimeDays == nil || *r.LeadTimeDays != 5 || r.PlannedOrderType != domain.OrderProduction {
 		t.Fatalf("item coverage values: %+v", r)
 	}
-	if n := got[noLead]; n.LeadTimeDays != nil || n.CoverageCode != domain.CoverageMinMax || n.PlannedOrderType != domain.OrderPurchase {
+	if n := got[noLead]; n.LeadTimeDays != nil || n.CoverageCode != domain.CoverageMinMax || n.PlannedOrderType != domain.OrderPurchase || n.SafetyStockPolicy != domain.SafetyToday {
 		t.Fatalf("coverage without lead-time override: %+v", n)
 	}
 

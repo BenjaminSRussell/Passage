@@ -21,6 +21,7 @@ import {
   listCoverageGroups,
   updateCoverageGroup,
   type CoverageCode,
+  type SafetyStockPolicy,
   type CoverageGroup,
   type CoverageSettings,
 } from "./api/client";
@@ -51,7 +52,7 @@ const DAY_FIELDS = [
 type DayKey = (typeof DAY_FIELDS)[number]["key"];
 
 /** The form as typed: day fields stay strings until validated. */
-export type CoverageDraft = { code: string; coverageCode: CoverageCode; autoFirm: boolean; generateActions: boolean; generateFutures: boolean } & Record<
+export type CoverageDraft = { code: string; coverageCode: CoverageCode; safetyStockPolicy: SafetyStockPolicy; autoFirm: boolean; generateActions: boolean; generateFutures: boolean } & Record<
   DayKey,
   string
 >;
@@ -60,7 +61,7 @@ type DraftErrors = Partial<Record<keyof CoverageDraft, string>>;
 
 export function draftOf(code: string, s: CoverageSettings): CoverageDraft {
   const days = Object.fromEntries(DAY_FIELDS.map((f) => [f.key, String(s[f.key])])) as Record<DayKey, string>;
-  return { code, coverageCode: s.coverageCode, autoFirm: s.autoFirm, generateActions: s.generateActions, generateFutures: s.generateFutures, ...days };
+  return { code, coverageCode: s.coverageCode, safetyStockPolicy: s.safetyStockPolicy, autoFirm: s.autoFirm, generateActions: s.generateActions, generateFutures: s.generateFutures, ...days };
 }
 
 /** Checks a coverage group draft with the service's rules and returns the settings or the field errors. */
@@ -81,6 +82,7 @@ export function validateCoverage(d: CoverageDraft, checkCode: boolean): { errors
     errors,
     settings: {
       coverageCode: d.coverageCode,
+      safetyStockPolicy: d.safetyStockPolicy,
       autoFirm: d.autoFirm,
       generateActions: d.generateActions,
       generateFutures: d.generateFutures,
@@ -94,6 +96,7 @@ function newKey(): string {
   return c?.randomUUID ? c.randomUUID() : `cg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+const safetyLabel: Record<SafetyStockPolicy, string> = { today: "Today", "first-issue": "First issue" };
 const onOff = (on: boolean) => (on ? "On" : "Off");
 const fence = (days: number, zero: string) => (days === 0 ? zero : `${days} d`);
 
@@ -108,6 +111,7 @@ const columns: DataTableColumn<CoverageGroup>[] = [
     render: (g) =>
       g.autoFirm ? <Badge tone="info">{`Auto-firm, ${g.firmingFenceDays} d`}</Badge> : fence(g.firmingFenceDays, "None"),
   },
+  { key: "safety", header: "Safety stock", render: (g) => safetyLabel[g.safetyStockPolicy] },
   { key: "messages", header: "Actions / futures", render: (g) => `${onOff(g.generateActions)} / ${onOff(g.generateFutures)}` },
 ];
 
@@ -222,6 +226,17 @@ function CoverageGroupForm({ group, onSaved, onReload }: FormProps) {
             {(Object.keys(coverageLabel) as CoverageCode[]).map((c) => (
               <option key={c} value={c}>
                 {coverageLabel[c]}
+              </option>
+            ))}
+          </Select>
+        )}
+      </FormField>
+      <FormField id="cg-safety" label="Safety-stock policy" hint="When the safety stock counts as a demand: at today, or on the item's first issue date.">
+        {(a11y) => (
+          <Select {...a11y} value={draft.safetyStockPolicy} onChange={(e) => set("safetyStockPolicy", e.target.value as SafetyStockPolicy)}>
+            {(Object.keys(safetyLabel) as SafetyStockPolicy[]).map((s) => (
+              <option key={s} value={s}>
+                {safetyLabel[s]}
               </option>
             ))}
           </Select>

@@ -90,10 +90,13 @@ type Item struct {
 	// FirmingDays is the firming time fence of FR-22.2 in days from today; 0
 	// means no fence. With AutoFirm set, a planned order whose order date
 	// falls inside it is firmed by the run itself (BR-22.4).
-	FirmingDays              int
-	AutoFirm                 bool
-	ReorderMin, ReorderMax   decimal.Decimal
-	OnHand, SafetyStock      decimal.Decimal
+	FirmingDays            int
+	AutoFirm               bool
+	ReorderMin, ReorderMax decimal.Decimal
+	OnHand, SafetyStock    decimal.Decimal
+	// SafetyPolicy is SafetyToday (also when empty) or SafetyFirstIssue: the
+	// safety stock is a demand at today or at the item's first issue date (BR-22.5).
+	SafetyPolicy             string
 	OrderType                string
 	LeadTimeDays             int
 	MinOrderQty, MultipleQty decimal.Decimal
@@ -251,6 +254,11 @@ func validate(it *Item) error {
 	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
 	}
+	switch it.SafetyPolicy {
+	case "", SafetyToday, SafetyFirstIssue:
+	default:
+		return fmt.Errorf("%w: %q safety-stock policy %q", ErrInvalidItem, it.ID, it.SafetyPolicy)
+	}
 	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 || it.CoverageDays < 0 || it.FirmingDays < 0 {
 		return fmt.Errorf("%w: %q time fences must not be negative", ErrInvalidItem, it.ID)
 	}
@@ -329,7 +337,7 @@ func (rs *runState) plan(item *Item) error {
 		demands = append(demands, d)
 	}
 	if item.SafetyStock.IsPositive() {
-		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.demandDate(rs.today), Qty: item.SafetyStock, Priority: PrioritySafety})
+		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.safetyDate(item), Qty: item.SafetyStock, Priority: PrioritySafety})
 	}
 	sort.SliceStable(demands, func(a, b int) bool { return reqLess(demands[a], demands[b]) })
 	receipts := slices.Clone(item.Receipts)
@@ -1029,4 +1037,20 @@ func hashResult(r Result) string {
 		fmt.Fprintf(h, "M|%s|%s|%s|%s|%d|%d|%s\n", m.Action, m.ItemID, m.SupplyRef, m.DemandRef, m.SuggestedDate, m.DelayDays, m.Qty)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// safetyDate is the day an item's safety stock is netted as a demand (BR-22.5):
+// today, or with policy first-issue the earliest day of its other demands. An
+// item with no other demand keeps the safety stock at today so the buffer is
+// still built.
+func (rs *runState) safetyDate(it *Item) int {
+	day := rs.demandDate(rs.today)
+	if it.SafetyPolicy != SafetyFirstIssue || len(it.Demand) == 0 {
+		return day
+	}
+	first := rs.demandDate(it.Demand[0].Date)
+	for _, d := range it.Demand[1:] {
+		first = min(first, rs.demandDate(d.Date))
+	}
+	return first
 }

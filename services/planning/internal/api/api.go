@@ -240,6 +240,9 @@ type coverageDTO struct {
 	// (BR-22.4). AutoFirm needs a fence of at least 1 day.
 	FirmingFenceDays int  `json:"firmingFenceDays"`
 	AutoFirm         bool `json:"autoFirm"`
+	// SafetyStockPolicy is today (default) or first-issue (BR-22.5): the day
+	// the item's safety stock is a demand.
+	SafetyStockPolicy string `json:"safetyStockPolicy"`
 }
 
 type lotDTO struct {
@@ -300,6 +303,9 @@ func (req runRequest) validate() map[string]string {
 				fields[prefix+".coverage."+name] = "must be 0 to 3650"
 			}
 		}
+		if c.SafetyStockPolicy != "" && c.SafetyStockPolicy != domain.SafetyToday && c.SafetyStockPolicy != domain.SafetyFirstIssue {
+			fields[prefix+".coverage.safetyStockPolicy"] = "must be today or first-issue"
+		}
 		if c.AutoFirm && c.FirmingFenceDays < 1 {
 			fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
 		}
@@ -339,7 +345,7 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
 			CoverageDays: it.Coverage.CoverageFenceDays, FirmingDays: it.Coverage.FirmingFenceDays, AutoFirm: it.Coverage.AutoFirm,
-			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: deref(it.LeadTimeDays),
+			SafetyPolicy: it.Coverage.SafetyStockPolicy, OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: deref(it.LeadTimeDays),
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
 		var err error

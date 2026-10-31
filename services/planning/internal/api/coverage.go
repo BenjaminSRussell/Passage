@@ -38,6 +38,8 @@ type coverageSettings struct {
 	AutoFirm              bool   `json:"autoFirm"`
 	GenerateActions       bool   `json:"generateActions"`
 	GenerateFutures       bool   `json:"generateFutures"`
+	// SafetyStockPolicy is today or first-issue (BR-22.5).
+	SafetyStockPolicy string `json:"safetyStockPolicy"`
 }
 
 type createCoverageGroupRequest struct {
@@ -48,14 +50,14 @@ type createCoverageGroupRequest struct {
 func defaultSettings() coverageSettings {
 	d := domain.DefaultCoverageGroup("", "")
 	return coverageSettings{CoverageTimeFenceDays: d.CoverageTimeFenceDays, NegativeDays: d.NegativeDays,
-		GenerateActions: d.GenerateActions, GenerateFutures: d.GenerateFutures}
+		GenerateActions: d.GenerateActions, GenerateFutures: d.GenerateFutures, SafetyStockPolicy: d.SafetyStockPolicy}
 }
 
 func (c coverageSettings) spec(code string) domain.CoverageGroupSpec {
 	return domain.CoverageGroupSpec{Code: code, CoverageCode: c.CoverageCode, CoverageTimeFenceDays: c.CoverageTimeFenceDays,
 		NegativeDays: c.NegativeDays, PositiveDays: c.PositiveDays, PeriodDays: c.PeriodDays, FreezeFenceDays: c.FreezeFenceDays,
 		ActionFenceDays: c.ActionFenceDays, FuturesFenceDays: c.FuturesFenceDays, FirmingFenceDays: c.FirmingFenceDays,
-		AutoFirm: c.AutoFirm, GenerateActions: c.GenerateActions, GenerateFutures: c.GenerateFutures}
+		AutoFirm: c.AutoFirm, GenerateActions: c.GenerateActions, GenerateFutures: c.GenerateFutures, SafetyStockPolicy: c.SafetyStockPolicy}
 }
 
 func coverageDTOOf(g store.CoverageGroup) coverageGroupDTO {
@@ -64,7 +66,7 @@ func coverageDTOOf(g store.CoverageGroup) coverageGroupDTO {
 		CoverageCode: s.CoverageCode, CoverageTimeFenceDays: s.CoverageTimeFenceDays, NegativeDays: s.NegativeDays,
 		PositiveDays: s.PositiveDays, PeriodDays: s.PeriodDays, FreezeFenceDays: s.FreezeFenceDays, ActionFenceDays: s.ActionFenceDays,
 		FuturesFenceDays: s.FuturesFenceDays, FirmingFenceDays: s.FirmingFenceDays, AutoFirm: s.AutoFirm,
-		GenerateActions: s.GenerateActions, GenerateFutures: s.GenerateFutures}}
+		GenerateActions: s.GenerateActions, GenerateFutures: s.GenerateFutures, SafetyStockPolicy: s.SafetyStockPolicy}}
 }
 
 func writeCoverageGroup(w http.ResponseWriter, status int, g store.CoverageGroup) {
