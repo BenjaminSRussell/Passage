@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -18,7 +19,7 @@ const maxQuery = 100
 
 // UsersAPI serves the read-only user directory of the caller's tenant. Users belong to the tenant, not to a
 // legal entity, so every caller holding Maintain users sees the whole tenant; the optional legalEntityId filter
-// narrows to users with an assignment for that entity, and is further bounded by the caller's own scope.
+// narrows to users with an active assignment for that entity, and is further bounded by the caller's own scope.
 type UsersAPI struct {
 	pool *pgxpool.Pool
 }
@@ -70,7 +71,7 @@ func (a *UsersAPI) list(w http.ResponseWriter, r *http.Request) {
 			fields["legalEntityId"] = "must be a UUID"
 		}
 	}
-	if len(q) > maxQuery {
+	if utf8.RuneCountInString(q) > maxQuery {
 		fields["q"] = "must be at most 100 characters"
 	}
 	if len(fields) > 0 {
@@ -84,7 +85,8 @@ where u.tenant_id = $1
   and ($2::text = '' or u.status = $2::text)
   and ($3::text = '' or strpos(lower(u.display_name || ' ' || coalesce(u.email, '') || ' ' || u.idp_subject), lower($3::text)) > 0)
   and ($4::text = '' or exists (select 1 from identity_role_assignments a
-       where a.tenant_id = u.tenant_id and a.user_id = u.user_id and a.legal_entity_id = nullif($4::text, '')::uuid))
+       where a.tenant_id = u.tenant_id and a.user_id = u.user_id and a.legal_entity_id = nullif($4::text, '')::uuid
+	       and a.valid_from <= now() and (a.valid_to is null or a.valid_to > now())))
   and ($5::text is null or u.user_id > $5::uuid)
 order by u.user_id limit $6`, p.TenantID, status, q, legalEntityID, after, limit+1)
 		if err != nil {

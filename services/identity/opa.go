@@ -121,6 +121,16 @@ func (c *OPAClient) Decide(ctx context.Context, p tenant.Principal, action, reso
 // RequireOPA enforces an OPA decision on a route. Policy outages fail with
 // 503, missing principals with 401, and denied decisions with 403.
 func RequireOPA(client *OPAClient, action, resource string) func(http.Handler) http.Handler {
+	return requireOPA(client, func(*http.Request) (string, string) { return action, resource })
+}
+
+// RequireOPAForRequest is RequireOPA for a route family: the action is the request method and the resource is
+// the request path, so one middleware guards every route beneath a prefix.
+func RequireOPAForRequest(client *OPAClient) func(http.Handler) http.Handler {
+	return requireOPA(client, func(r *http.Request) (string, string) { return r.Method, r.URL.Path })
+}
+
+func requireOPA(client *OPAClient, resolve func(*http.Request) (string, string)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if verified, _ := r.Context().Value(verifiedPrincipalKey{}).(bool); !verified {
@@ -132,6 +142,7 @@ func RequireOPA(client *OPAClient, action, resource string) func(http.Handler) h
 				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
 				return
 			}
+			action, resource := resolve(r)
 			decision, err := client.Decide(r.Context(), principal, action, resource)
 			if err != nil {
 				httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "AUTH-0503", "authorization policy is unavailable"))

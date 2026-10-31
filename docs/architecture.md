@@ -443,19 +443,19 @@ Privilege codes follow `<entity>.<action>` with action in `read | write | post |
 | PATCH | `/v1/platform/users/{id}` | Update user | User:`user.write` |
 | POST | `/v1/platform/users/{id}:deactivate` | Deactivate; revokes sessions and grants | User:`user.admin` |
 | POST | `/v1/platform/users/{id}:reactivate` | Reactivate | User:`user.admin` |
-| GET | `/scim/v2/Users` | SCIM 2.0 list/filter (facade over Keycloak Admin API; Q3) | Svc:`scim.provision` |
-| POST | `/scim/v2/Users` | SCIM create | Svc:`scim.provision` |
-| GET | `/scim/v2/Users/{id}` | SCIM read | Svc:`scim.provision` |
-| PUT | `/scim/v2/Users/{id}` | SCIM replace | Svc:`scim.provision` |
-| PATCH | `/scim/v2/Users/{id}` | SCIM patch (RFC 7644 PatchOp) | Svc:`scim.provision` |
-| DELETE | `/scim/v2/Users/{id}` | SCIM deprovision (deactivate) | Svc:`scim.provision` |
-| GET | `/scim/v2/Groups` | SCIM groups (mapped to roles by assignment rules) | Svc:`scim.provision` |
-| POST | `/scim/v2/Groups` | SCIM group create | Svc:`scim.provision` |
-| PATCH | `/scim/v2/Groups/{id}` | SCIM membership patch | Svc:`scim.provision` |
-| DELETE | `/scim/v2/Groups/{id}` | SCIM group delete | Svc:`scim.provision` |
-| GET | `/scim/v2/ServiceProviderConfig` | SCIM capability document | Svc:`scim.provision` |
-| GET | `/scim/v2/ResourceTypes` | SCIM resource types | Svc:`scim.provision` |
-| GET | `/scim/v2/Schemas` | SCIM schemas | Svc:`scim.provision` |
+| GET | `/scim/v2/Users` | SCIM 2.0 list/filter (`attr eq "value"` on userName/externalId; served by the identity service from its own tables, bearer JWT per tenant, #83) | Duty:`Provision users via SCIM` |
+| POST | `/scim/v2/Users` | SCIM create | Duty:`Provision users via SCIM` |
+| GET | `/scim/v2/Users/{id}` | SCIM read | Duty:`Provision users via SCIM` |
+| PUT | `/scim/v2/Users/{id}` | SCIM replace | Duty:`Provision users via SCIM` |
+| PATCH | `/scim/v2/Users/{id}` | SCIM patch (RFC 7644 PatchOp) | Duty:`Provision users via SCIM` |
+| DELETE | `/scim/v2/Users/{id}` | SCIM deprovision: sets the user `deprovisioned` and ends active and future role assignments in one transaction; 409 when the user holds the tenant's last active `tenant.administer` assignment | Duty:`Provision users via SCIM` |
+| GET | `/scim/v2/Groups` | SCIM groups (provisioning records only; never mapped to roles, because role assignments are dated, scoped and audited) | Duty:`Provision users via SCIM` |
+| POST | `/scim/v2/Groups` | SCIM group create | Duty:`Provision users via SCIM` |
+| PATCH | `/scim/v2/Groups/{id}` | SCIM membership patch | Duty:`Provision users via SCIM` |
+| DELETE | `/scim/v2/Groups/{id}` | SCIM group delete | Duty:`Provision users via SCIM` |
+| GET | `/scim/v2/ServiceProviderConfig` | SCIM capability document | Duty:`Provision users via SCIM` |
+| GET | `/scim/v2/ResourceTypes` | SCIM resource types | Duty:`Provision users via SCIM` |
+| GET | `/scim/v2/Schemas` | SCIM schemas | Duty:`Provision users via SCIM` |
 | GET | `/v1/platform/service-accounts` | List service accounts (partners, internal, agents) | User:`serviceaccount.read` |
 | POST | `/v1/platform/service-accounts` | Create client-credentials client with scoped duties | User:`serviceaccount.write` |
 | POST | `/v1/platform/service-accounts/{id}:rotate-secret` | Rotate secret; old secret valid for a grace window | User:`serviceaccount.admin` |
@@ -1373,7 +1373,7 @@ Enforced at Envoy Gateway (per Appendix D.7), not in business code: descriptors 
 |---|---|---|---|
 | Q1 | Period control ownership: B.1 puts fiscal calendars under `platform`, B.3 puts `PeriodControl` under `ledger`, C.7 lists `periodcontrol.changed.v1` under platform/org and `period.closed.v1` under ledger | Where the authoritative "may I post" check lives | Settled: ledger owns PeriodControl state and the authoritative check, taken as `FOR SHARE` on the period-control row inside the posting transaction (`:close` takes the exclusive lock; no cache, no two-phase state); platform owns calendars. `ledger` is the producer of `periodcontrol.changed.v1` |
 | Q2 | Gap-free sequence implementation across databases (Section 7.18) | NFR-D3 (0 gaps under 10k concurrent) cannot hold if the counter is a remote service | Settled: `platform.number_sequence` is the definition table; every posting database carries `<ctx>.number_sequence_counter` operated by a kernel `sequence` package (kernel-owner work); definitions propagate by `numbersequence.changed` |
-| Q3 | SCIM 2.0 server: Keycloak core has no SCIM endpoint; no confirmed Keycloak SCIM extension | FR-0.2 requires SCIM | Build a thin SCIM facade over the Keycloak Admin API in `platform-ts`; evaluate maintained community extensions before wave 2 |
+| Q3 | SCIM 2.0 server: Keycloak core has no SCIM endpoint; no confirmed Keycloak SCIM extension | FR-0.2 requires SCIM | Build a thin SCIM facade over the Keycloak Admin API in `platform-ts`; evaluate maintained community extensions before wave 2 Resolved for #83: the identity service serves SCIM itself (Users, Groups, discovery) against its own tables; the Keycloak push (#80) later binds `idp_subject`. |
 | Q4 | Shared cache and the rate-limit counter store: ADR-0001 names neither | Envoy global rate limiting needs a Redis-protocol store | Propose Valkey in-cluster via an ADR addendum; otherwise only local per-pod limits (weaker tier enforcement) |
 | Q5 | Per-tenant Kafka ACLs on shared topics (L.2 vs C.2) | External consumers cannot be isolated on shared topics | Egress-topic relay (Section 7.7); confirm acceptable overhead |
 | Q6 | Posting ownership matrix in Section 3.4 (B.3 assigns `journal_entry_id` fields to receipts, packing slips and production orders without saying who posts) | Determines sync vs event posting and the dependency graph | Settled (decision C1): the valuation owner posts synchronously inside its own database transaction through `ledger.Post`; see Section 3.4 |

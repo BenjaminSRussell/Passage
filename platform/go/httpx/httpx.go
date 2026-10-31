@@ -45,11 +45,26 @@ func NewProblem(status int, code, detail string) *Problem {
 // NewRouter returns a chi router with request id, real IP, structured logging,
 // panic recovery, a 30s timeout and tenant-context extraction installed.
 func NewRouter() *chi.Mux {
+	return newRouter(tenant.Middleware)
+}
+
+// NewRouterWithoutTenant is NewRouter without tenant-context extraction, for services that authenticate some
+// routes themselves (a bearer token) and mount the header-based tenant middleware only on the others.
+func NewRouterWithoutTenant() *chi.Mux {
+	return newRouter()
+}
+
+func newRouter(extra ...func(http.Handler) http.Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(RequestTimeout))
-	r.Use(logRequests, tenant.Middleware)
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { JSON(w, http.StatusOK, map[string]string{"status": "ok"}) })
-	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) { JSON(w, http.StatusOK, map[string]string{"status": "ready"}) })
+	r.Use(logRequests)
+	r.Use(extra...)
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	})
 	return r
 }
 

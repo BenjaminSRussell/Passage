@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -64,7 +65,7 @@ func catalogueQuery(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(q) > maxQuery {
+	if utf8.RuneCountInString(q) > maxQuery {
 		invalidFields(w, r, "invalid catalogue filter", map[string]string{"q": "must be at most 100 characters"})
 		return "", false
 	}

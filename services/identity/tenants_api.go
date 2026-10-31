@@ -229,7 +229,7 @@ func (a *TenantsAPI) grantAdmin(w http.ResponseWriter, r *http.Request) {
 		if tenantStatus != "active" {
 			return httpx.NewProblem(http.StatusConflict, codeTenantInactive, "tenant is not active")
 		}
-		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2`, id, req.UserID).Scan(&status, &idpSubject)
+		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2 for share`, id, req.UserID).Scan(&status, &idpSubject)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, codeUserNotFound, "user not found in the tenant")
 		}
