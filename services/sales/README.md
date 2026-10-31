@@ -43,7 +43,10 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # run store and RLS tes
 
 - `internal/domain`: table-driven and property tests (`pgregory.net/rapid`) for
   ATP cumulative propagation, the BR-27.1 worked example, the 100 fixtures of
-  `testdata/atp-100.json` (AC-27.1, AC-27.2), the 40 credit fixtures of
+  `testdata/atp-100.json` (AC-27.1, AC-27.2; regenerate with
+  `python3 -I testdata/gen_atp100.py`, the independent reference a test compares
+  the file with), the no-over-promise property over over-committed projections,
+  the 40 credit fixtures of
   `testdata/credit-40.json` (CR-1..CR-6 with tolerance edges), line nets and
   quantity rules; the field-level diff, line-status and re-promise rules of
   change management; the scheduling-release reconciliation (AC-27.13); and the
@@ -52,7 +55,9 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # run store and RLS tes
   only at or above the threshold).
 - `internal/api`: request validation, duty routing per hold type, list filters,
   PATCH/cancel/history contracts, the release check and backorder preview, wire
-  formats, and that every route is in `api/openapi.yaml` and back.
+  formats, and that every route is in `api/openapi.yaml` and back; with the
+  database, the intake load proof (500 orders/min open loop, p99 < 500 ms,
+  exactly once; `-short` skips it, `PASSAGE_SALES_INTAKE_MINUTES` lengthens it).
 - `internal/events`: every event type is in `events/asyncapi.yaml` and back.
 - `internal/store`: create with idempotent replay and key reuse, the CREDIT hold
   and the release that confirms the order (AC-27.3) with the outbox rows each
