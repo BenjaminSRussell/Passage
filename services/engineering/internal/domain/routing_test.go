@@ -115,6 +115,18 @@ func versionOp(no, next int, reqs ...domain.OperationRequirement) domain.Version
 	return domain.VersionOperation{RouteOperation: op(no, next, "", "1", "1"), LinkType: domain.LinkHard, Requirements: reqs}
 }
 
+func secondaryOp(no, next int) domain.VersionOperation {
+	o := versionOp(no, next)
+	o.Priority = "secondary1"
+	return o
+}
+
+func TestValidateRouteVersionAcceptsSecondaryBesidePrimary(t *testing.T) {
+	if err := domain.ValidateRouteVersion(routeVersion(versionOp(10, 30), secondaryOp(20, 30), versionOp(30, 0))); err != nil {
+		t.Fatalf("parallel branch joining at 30: %v", err)
+	}
+}
+
 func TestValidateRouteVersionAcceptsLeadTimeFixtures(t *testing.T) {
 	for _, f := range loadFixtures(t) {
 		v := routeVersion()
@@ -150,6 +162,7 @@ func TestValidateRouteVersionRejects(t *testing.T) {
 		{"no operations", routeVersion(), domain.CodeRouteQty},
 		{"five decimal hours", mutated(func(o *domain.VersionOperation) { o.RunH = dec("1.00001") }), domain.CodeRouteQty},
 		{"bad priority", mutated(func(o *domain.VersionOperation) { o.Priority = "secondary9" }), domain.CodeRouteQty},
+		{"secondary without primary at its join", routeVersion(versionOp(10, 40), secondaryOp(20, 30), versionOp(30, 40), versionOp(40, 0)), domain.CodeRouteNoPrimary},
 		{"bad link type", mutated(func(o *domain.VersionOperation) { o.LinkType = "firm" }), domain.CodeRouteQty},
 		{"operation id too long", mutated(func(o *domain.VersionOperation) { o.OperationID = "123456789012345678901" }), domain.CodeRouteQty},
 		{"skill requirement", routeVersion(versionOp(10, 0, domain.OperationRequirement{Kind: "skill", RefID: "x", Quantity: 1})), domain.CodeRouteReqKind},

@@ -172,3 +172,42 @@ func TestPostgres_RouteVersions_RLSHidesOtherTenant(t *testing.T) {
 		t.Fatalf("tenant 1 version = %+v, %v; want untouched draft", got, err)
 	}
 }
+
+func TestPostgres_CreateRouteVersion_NumbersTheNextVersionPerRoute(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	for want := 1; want <= 3; want++ {
+		got, err := s.CreateRouteVersion(ctx, newRoute("BIKE", "S1", 0, releaseDay, routeOp(10, 0)), store.Idem{})
+		if err != nil || got.VersionNo != want {
+			t.Fatalf("version %d = %+v, %v", want, got, err)
+		}
+	}
+	other, err := s.CreateRouteVersion(ctx, newRoute("TRIKE", "S1", 0, releaseDay, routeOp(10, 0)), store.Idem{})
+	if err != nil || other.VersionNo != 1 {
+		t.Fatalf("another product = %+v, %v; want version 1", other, err)
+	}
+}
+
+func TestPostgres_CreateRouteVersion_ConcurrentCreatesTakeDistinctNumbers(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	const drafts = 6
+	numbers := make(chan int, drafts)
+	errs := make(chan error, drafts)
+	for range drafts {
+		go func() {
+			got, err := s.CreateRouteVersion(ctx, newRoute("BIKE", "S1", 0, releaseDay, routeOp(10, 0)), store.Idem{Key: ids.New(), Hash: "h"})
+			numbers <- got.VersionNo
+			errs <- err
+		}()
+	}
+	var got []int
+	for range drafts {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent create: %v", err)
+		}
+		got = append(got, <-numbers)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, []int{1, 2, 3, 4, 5, 6}) {
+		t.Fatalf("version numbers = %v; want 1 to %d once each", got, drafts)
+	}
+}

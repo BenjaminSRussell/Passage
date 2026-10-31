@@ -88,6 +88,16 @@ export interface RouteVersion extends RouteVersionHeader {
   operations: RouteVersionOperation[];
 }
 
+export interface RouteVersionInput {
+  productId: string;
+  siteId: string;
+  routeCode: string;
+  versionNo?: number;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  operations: RouteVersionOperation[];
+}
+
 export interface LeadTime {
   hours: string;
   calendarDays: number;
@@ -243,6 +253,14 @@ export function listRouteVersions(filters: RouteVersionFilters, cursor?: string)
 
 export function getRouteVersion(id: string): Promise<RouteVersion> {
   return request(`/route-versions/${encodeURIComponent(id)}`);
+}
+
+export function createRouteVersion(body: RouteVersionInput, idempotencyKey: string): Promise<RouteVersion> {
+  return request("/route-versions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
 }
 
 export function activateRouteVersion(id: string): Promise<RouteVersion> {

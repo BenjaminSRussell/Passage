@@ -52,7 +52,7 @@ export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-export function RouteVersionsPage({ onOpen }: { onOpen?: (id: string) => void }) {
+export function RouteVersionsPage({ onOpen, onCreate }: { onOpen?: (id: string) => void; onCreate?: () => void }) {
   const [draft, setDraft] = useState(emptyFilters);
   const [applied, setApplied] = useState(emptyFilters);
   const [rows, setRows] = useState<RouteVersionHeader[]>([]);
@@ -116,7 +116,15 @@ export function RouteVersionsPage({ onOpen }: { onOpen?: (id: string) => void })
   return (
     <>
       <PageHeader title="Routings" description="Route versions by product and site." />
-      <Card>
+      <Card
+        actions={
+          onCreate ? (
+            <Button size="sm" variant="primary" onClick={onCreate}>
+              New route version
+            </Button>
+          ) : undefined
+        }
+      >
         <form className={styles.form} onSubmit={applyFilters}>
           {filterInputs.map(({ key, id, label, type }) => (
             <div key={key} className={styles.field}>

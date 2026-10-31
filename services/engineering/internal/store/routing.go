@@ -92,6 +92,16 @@ func getRouteVersion(ctx context.Context, tx pgx.Tx, tenantID, id string) (domai
 }
 
 func insertRouteVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.RouteVersion) error {
+	if v.VersionNo == 0 && v.ProductID != "" && v.SiteID != "" && v.RouteCode != "" {
+		// The product lock serialises concurrent creates so two drafts never read the same max(version_no).
+		if err := lockProducts(ctx, tx, tenantID, v.ProductID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `select coalesce(max(version_no), 0) + 1 from route_version where tenant_id = $1 and product_id = $2 and site_id = $3 and route_code = $4`,
+			tenantID, v.ProductID, v.SiteID, v.RouteCode).Scan(&v.VersionNo); err != nil {
+			return err
+		}
+	}
 	if err := domain.ValidateRouteVersion(v); err != nil {
 		return err
 	}

@@ -83,6 +83,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions", a.createRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)

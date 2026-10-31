@@ -223,11 +223,15 @@ func ValidateRouteVersion(v RouteVersion) error {
 		return errf(CodeRouteOpsLimit, "route version has %d operations, the limit is %d", len(v.Operations), maxRouteOperations)
 	}
 	next := make(map[int]int, len(v.Operations))
+	primaryJoins := make(map[int]bool, len(v.Operations))
 	for _, o := range v.Operations {
 		if _, dup := next[o.No]; dup {
 			return errf(CodeRouteOpDup, "operation number %d appears more than once", o.No)
 		}
 		next[o.No] = o.NextNo
+		if o.isPrimary() {
+			primaryJoins[o.NextNo] = true
+		}
 	}
 	for _, o := range v.Operations {
 		if _, ok := next[o.NextNo]; o.NextNo != 0 && !ok {
@@ -235,6 +239,12 @@ func ValidateRouteVersion(v RouteVersion) error {
 		}
 		if err := validateVersionOperation(o); err != nil {
 			return err
+		}
+	}
+	// BR-9.7: a secondary operation runs alongside a primary that joins the same next operation.
+	for _, o := range v.Operations {
+		if !o.isPrimary() && !primaryJoins[o.NextNo] {
+			return errf(CodeRouteNoPrimary, "Secondary operation %d has no primary at its join.", o.No)
 		}
 	}
 	for start := range next {

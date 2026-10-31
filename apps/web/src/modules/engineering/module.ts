@@ -6,6 +6,7 @@ import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupD
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
 import { BomVersionCreatePage, BomVersionPage, BomVersionsPage } from "./bom";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
+import { RouteVersionCreatePage } from "./routeCreate";
 
 function EngineeringRoute() {
   const navigate = useNavigate();
@@ -54,7 +55,18 @@ function WhereUsedRoute() {
 
 function RouteVersionsRoute() {
   const navigate = useNavigate();
-  return createElement(RouteVersionsPage, { onOpen: (id: string) => navigate(`/engineering/routes/${encodeURIComponent(id)}`) });
+  return createElement(RouteVersionsPage, {
+    onOpen: (id: string) => navigate(`/engineering/routes/${encodeURIComponent(id)}`),
+    onCreate: () => navigate("/engineering/routes/new"),
+  });
+}
+
+function RouteVersionCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(RouteVersionCreatePage, {
+    onCreated: (id: string) => navigate(`/engineering/routes/${encodeURIComponent(id)}`),
+    onCancel: () => navigate("/engineering/routes"),
+  });
 }
 
 function RouteVersionRoute() {
@@ -114,6 +126,7 @@ const engineering: PassageModule = {
     { path: "/engineering/boms/new", element: createElement(BomVersionCreateRoute), handle: { title: "New BOM version" } },
     { path: "/engineering/boms/:id", element: createElement(BomVersionRoute), handle: { title: "BOM version" } },
     { path: "/engineering/routes", element: createElement(RouteVersionsRoute) },
+    { path: "/engineering/routes/new", element: createElement(RouteVersionCreateRoute), handle: { title: "New route version" } },
     { path: "/engineering/routes/:id", element: createElement(RouteVersionRoute), handle: { title: "Route version" } },
     { path: "/engineering/resources", element: createElement(ResourcesRoute), handle: { title: "Resources" } },
     { path: "/engineering/resources/:id", element: createElement(ResourceRoute), handle: { title: "Resource" } },
