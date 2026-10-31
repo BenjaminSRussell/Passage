@@ -37,48 +37,43 @@ for (const [net, prefix] of [
 ] as const) {
   blocked.addSubnet(net, prefix, "ipv4");
 }
-for (const [net, prefix] of [
-  ["::", 128],
-  ["::1", 128],
-  ["64:ff9b::", 96],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["ff00::", 8],
-] as const) {
-  blocked.addSubnet(net, prefix, "ipv6");
+
+function ipv6Groups(address: string): number[] {
+  const [head = "", tail] = new URL(`http://[${address}]`).hostname.slice(1, -1).split("::");
+  const side = (part: string) => (part === "" ? [] : part.split(":").map((g) => parseInt(g, 16)));
+  const front = side(head);
+  const back = tail === undefined ? [] : side(tail);
+  return tail === undefined ? front : [...front, ...Array<number>(8 - front.length - back.length).fill(0), ...back];
 }
 
-function mappedIPv4(address: string): string | null {
-  const m = /^::ffff:(.+)$/i.exec(address);
-  if (m === null) {
-    return null;
-  }
-  if (isIP(m[1] as string) === 4) {
-    return m[1] as string;
-  }
-  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(m[1] as string);
-  if (hex === null) {
-    return null;
-  }
-  const hi = parseInt(hex[1] as string, 16);
-  const lo = parseInt(hex[2] as string, 16);
+function dotted(hi: number, lo: number): string {
   return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
 }
 
-/** True for loopback, private, link-local, CGNAT, unspecified, multicast, reserved and metadata addresses. */
+function isBlockedIPv6(address: string): boolean {
+  const g = ipv6Groups(address) as [number, number, number, number, number, number, number, number];
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) {
+    return blocked.check(dotted(g[6], g[7]), "ipv4");
+  }
+  if ((g[0] & 0xe000) !== 0x2000) {
+    return true;
+  }
+  if (g[0] === 0x2001 && (g[1] < 0x200 || g[1] === 0x0db8)) {
+    return true;
+  }
+  if (g[0] === 0x2002) {
+    return blocked.check(dotted(g[1], g[2]), "ipv4");
+  }
+  return false;
+}
+
+/** True for loopback, private, link-local, CGNAT, unspecified, multicast, reserved and metadata addresses, including IPv4 embedded in IPv6. */
 export function isBlockedAddress(address: string): boolean {
-  const family = isIP(address);
+  const family = address.includes("%") ? 0 : isIP(address);
   if (family === 0) {
     return true;
   }
-  if (family === 6) {
-    const v4 = mappedIPv4(address);
-    if (v4 !== null) {
-      return blocked.check(v4, "ipv4");
-    }
-    return blocked.check(address, "ipv6");
-  }
-  return blocked.check(address, "ipv4");
+  return family === 6 ? isBlockedIPv6(address) : blocked.check(address, "ipv4");
 }
 
 const systemResolver: Resolver = async (hostname) => (await lookup(hostname, { all: true })).map((r) => r.address);

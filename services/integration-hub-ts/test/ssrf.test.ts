@@ -25,6 +25,8 @@ test("every private, loopback, link-local, CGNAT, unspecified, multicast and met
     "127.0.0.1", "127.1.2.3", "10.0.0.1", "10.255.255.255", "172.16.0.1", "172.31.255.255", "192.168.1.1",
     "169.254.169.254", "169.254.170.2", "100.64.0.1", "100.127.255.255", "0.0.0.0", "224.0.0.1", "255.255.255.255",
     "::", "::1", "fc00::1", "fd00:ec2::254", "fe80::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254", "::ffff:7f00:1", "64:ff9b::a00:1",
+    "2002:7f00:0001::", "2002:a9fe:a9fe::1", "2002:0a00:0001::", "64:ff9b:1::a9fe:a9fe", "::127.0.0.1", "::7f00:1", "::a9fe:a9fe",
+    "::ffff:0:a9fe:a9fe", "fe80::1%eth0", "FE80::1%en0", "FD00:EC2::254", "::FFFF:7F00:1", "2002:7F00:0001::", "2001:db8::1", "2001:2::1", "2001:10::1", "2001:20::1", "2001:1ff::1", "::ffff:0:127.0.0.1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001::1", "::ffff:10.0.0.1",
   ];
   for (const address of blockedAddresses) {
     assert.equal(isBlockedAddress(address), true, address);
@@ -32,7 +34,7 @@ test("every private, loopback, link-local, CGNAT, unspecified, multicast and met
 });
 
 test("public addresses are not blocked", () => {
-  for (const address of ["93.184.216.34", "8.8.8.8", "172.15.255.255", "172.32.0.1", "100.63.255.255", "2606:4700::1111", "::ffff:8.8.8.8"]) {
+  for (const address of ["93.184.216.34", "8.8.8.8", "172.15.255.255", "172.32.0.1", "100.63.255.255", "2606:4700::1111", "::ffff:8.8.8.8", "2002:0808:0808::1", "2a00:1450:4001::200e"]) {
     assert.equal(isBlockedAddress(address), false, address);
   }
 });
@@ -119,4 +121,56 @@ test("a redirect is not followed and is a failed delivery that retries", async (
     target.server.close();
     redirector.server.close();
   }
+});
+
+test("httpTransport enforces a total deadline against a slow-drip body", async () => {
+  const { server, port } = await listen((_req, res) => {
+    res.writeHead(200);
+    const timer = setInterval(() => res.write("x"), 20);
+    res.on("close", () => clearInterval(timer));
+  });
+  try {
+    const transport = httpTransport({
+      timeoutMs: 300,
+      validate: async (url) => ({ url: new URL(url), address: "127.0.0.1", family: 4 }),
+    });
+    const started = Date.now();
+    const status = await transport(`http://127.0.0.1:${port}/`, {}, "{}");
+    assert.equal(status, 200);
+    assert.ok(Date.now() - started < 1500);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test("httpTransport resolves null within the deadline when the server trickles headers forever", async () => {
+  const { server, port } = await listen((req) => {
+    req.socket.write("HTTP/1.1 200 OK\r\n");
+    const timer = setInterval(() => req.socket.write("x-a: b\r\n"), 20);
+    req.socket.on("close", () => clearInterval(timer));
+  });
+  try {
+    const transport = httpTransport({
+      timeoutMs: 300,
+      validate: async (url) => ({ url: new URL(url), address: "127.0.0.1", family: 4 }),
+    });
+    const started = Date.now();
+    assert.equal(await transport(`http://127.0.0.1:${port}/`, {}, "{}"), null);
+    assert.ok(Date.now() - started < 1500);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test("httpTransport counts a slow DNS resolver inside the total deadline", async () => {
+  const transport = httpTransport({
+    timeoutMs: 200,
+    allowHttp: true,
+    resolve: () => new Promise<string[]>((resolve) => setTimeout(() => resolve(["93.184.216.34"]), 5000).unref()),
+  });
+  const started = Date.now();
+  assert.equal(await transport("http://slow.example/", {}, "{}"), null);
+  assert.ok(Date.now() - started < 1500);
 });
