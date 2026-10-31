@@ -133,7 +133,7 @@ cd services/planning
 go test ./...                # domain + API; store tests skip without a database
 PASSAGE_TEST_DATABASE_URL=postgres://admin@host/db \
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tests as the RLS-bound app role
-DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_HORIZON_DAYS (365, 30 to 1095), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the

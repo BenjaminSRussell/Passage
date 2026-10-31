@@ -106,7 +106,21 @@ export interface RunPlanRequest {
   calendar?: WorkCalendar;
   /** Adds the plan's undelivered firmed orders as scheduled receipts (FR-22.1). */
   carryForward?: boolean;
+  /** Demand dated beyond this many days from asOf is ignored (30 to 1095); omitted takes the service default. */
+  horizonDays?: number;
+  /** Restricts the items the version reports (FR-22.13). */
+  scope?: PlanScope;
   items: unknown[];
+}
+
+/** Plan scope filter (FR-22.13): every given criterion must match; the whole snapshot is still planned. */
+export interface PlanScope {
+  itemIds?: string[];
+  itemGroups?: string[];
+  planners?: string[];
+  /** Low-level code range, inclusive; 0 is an end item. */
+  llcMin?: number;
+  llcMax?: number;
 }
 
 /** One day of the MD04-style net requirements view of an item (FR-22.12). Quantities are decimal strings. */

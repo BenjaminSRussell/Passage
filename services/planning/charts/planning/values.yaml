@@ -3,6 +3,8 @@ databaseSecret: planning-db
 migrateOnStart: false
 # PLANNING_MAX_VERSIONS: plan versions a run keeps (2 to 100).
 maxVersions: 20
+# PLANNING_HORIZON_DAYS: demand beyond this many days is ignored by a run (30 to 1095).
+horizonDays: 365
 # PLANNING_FEATURE_FLAGS: comma-separated planning.dynamic, planning.statistical-forecast,
 # planning.mps-scope; an unknown name stops the service at startup.
 featureFlags: ""

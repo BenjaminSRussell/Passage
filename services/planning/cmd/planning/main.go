@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/api"
+	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
 	"github.com/BenjaminSRussell/passage/services/planning/migrations"
 )
@@ -20,6 +21,8 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+	// defaultHorizonDays is the default of PLANNING_HORIZON_DAYS (PRD 4.22.13).
+	defaultHorizonDays = 365
 )
 
 func main() {
@@ -50,6 +53,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	horizon, err := intEnv(getenv, "PLANNING_HORIZON_DAYS", defaultHorizonDays, domain.MinHorizonDays, domain.MaxHorizonDays)
+	if err != nil {
+		return err
+	}
 	flags, err := featureFlags(getenv("PLANNING_FEATURE_FLAGS"))
 	if err != nil {
 		return err
@@ -65,7 +72,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool).WithMaxVersions(maxVersions))
+	a := api.New(store.New(pool).WithMaxVersions(maxVersions)).WithHorizon(horizon)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

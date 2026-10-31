@@ -64,6 +64,9 @@ type API struct {
 	runsCompleted atomic.Int64
 	runsReplayed  atomic.Int64
 	runsRefused   atomic.Int64
+
+	// horizonDays is the default planning horizon (0: none), see WithHorizon.
+	horizonDays int
 }
 
 // New returns an API over st.
@@ -155,8 +158,13 @@ type runRequest struct {
 	// delivered, and the approved orders of the current version that the run
 	// firms (FR-22.11), as scheduled receipts of the run (FR-22.1, FR-22.10),
 	// so a firmed order is supply and is not planned a second time.
-	CarryForward bool      `json:"carryForward,omitempty"`
-	Items        []itemDTO `json:"items"`
+	CarryForward bool `json:"carryForward,omitempty"`
+	// HorizonDays ignores demand dated beyond that many days from asOf (30 to
+	// 1,095); 0 takes the service default (PLANNING_HORIZON_DAYS).
+	HorizonDays int `json:"horizonDays,omitempty"`
+	// Scope restricts the items the version reports (FR-22.13).
+	Scope *scopeDTO `json:"scope,omitempty"`
+	Items []itemDTO `json:"items"`
 }
 
 // calendarDTO names the closed days of the site: whole weekdays (0 Sunday to
@@ -207,7 +215,10 @@ func (c *calendarDTO) toDomain(asOf time.Time) *domain.Calendar {
 }
 
 type itemDTO struct {
-	ItemID      string          `json:"itemId"`
+	ItemID string `json:"itemId"`
+	// ItemGroup and Planner are item master attributes the plan scope filters on (FR-22.13).
+	ItemGroup   string          `json:"itemGroup,omitempty"`
+	Planner     string          `json:"planner,omitempty"`
 	Coverage    coverageDTO     `json:"coverage"`
 	OnHand      decimal.Decimal `json:"onHand"`
 	SafetyStock decimal.Decimal `json:"safetyStock"`
@@ -288,6 +299,8 @@ func (req runRequest) validate() map[string]string {
 			fields["calendar"] = msg
 		}
 	}
+	validateHorizon(fields, req.HorizonDays)
+	req.Scope.validate(fields)
 	if len(req.Items) == 0 || len(req.Items) > maxItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
 	}
@@ -295,6 +308,9 @@ func (req runRequest) validate() map[string]string {
 		prefix := fmt.Sprintf("items[%d]", i)
 		if !ids.Valid(it.ItemID) {
 			fields[prefix+".itemId"] = "must be a UUID"
+		}
+		if len(it.ItemGroup) > maxAttrLen || len(it.Planner) > maxAttrLen {
+			fields[prefix+".itemGroup"] = "itemGroup and planner must be at most 64 characters"
 		}
 		if it.LeadTimeDays != nil && (*it.LeadTimeDays < 0 || *it.LeadTimeDays > 3650) {
 			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
@@ -481,7 +497,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := a.now()
-	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
+	result, planned, err := a.plan(req, asOf, items)
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
@@ -489,7 +505,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
-		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: len(items), DurationMs: elapsed,
+		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,
 		InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
 	})
 	if err != nil {

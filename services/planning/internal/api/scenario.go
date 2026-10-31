@@ -262,14 +262,14 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := a.now()
-	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
+	result, planned, err := a.plan(req, asOf, items)
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
 		return
 	}
 	v, replayed, err := a.store.RunSimulation(r.Context(), store.SimulationRequest{
-		ScenarioCode: code, LegalEntityID: req.LegalEntityID, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: len(items),
+		ScenarioCode: code, LegalEntityID: req.LegalEntityID, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: planned,
 		DurationMs: a.now().Sub(started).Milliseconds(), InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
 	})
 	if err != nil {

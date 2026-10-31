@@ -26,7 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
-      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18).'
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope.'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -1876,16 +1876,35 @@ components:
           type: boolean
           default: false
           description: 'When true the plan''s firmed planned orders at the site whose delivery date is on or after asOf are added as scheduled receipts (refType planned-order, ref FP:<planned order id>) of their items, so a firmed order is supply of the run and is not planned a second time (FR-22.1, FR-22.10). The approved planned orders of the current version are carried the same way, since an operational run firms them (FR-22.11). Leave it false when the target orders already arrive in receipts. Orders of simulation versions are never carried.'
+        horizonDays:
+          type: integer
+          minimum: 0
+          maximum: 1095
+          default: 0
+          description: 'Demand dated more than this many days after asOf is ignored (planning horizon, 30 to 1,095). 0 takes the service default PLANNING_HORIZON_DAYS (365 unless configured). Supply is never dropped, and supply dated beyond the horizon raises no cancel or decrease message.'
+        scope:
+          $ref: '#/components/schemas/PlanScope'
         items:
           type: array
           minItems: 1
           maxItems: 100000
           items: {$ref: '#/components/schemas/RunItem'}
+    PlanScope:
+      type: object
+      description: 'Plan scope filter (FR-22.13). The version reports only the items that match every given criterion; the whole snapshot is still exploded and netted, so a component inside the scope is sized by parents outside it. Omitted or empty criteria restrict nothing.'
+      properties:
+        itemIds: {type: array, maxItems: 1000, items: {type: string, format: uuid}, description: Only these items}
+        itemGroups: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 64}, description: 'Only items whose itemGroup is one of these'}
+        planners: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 64}, description: 'Only items whose planner is one of these'}
+        llcMin: {type: integer, minimum: 0, maximum: 99, description: Lowest low-level code reported, 0 is an end item}
+        llcMax: {type: integer, minimum: 0, maximum: 99, description: Highest low-level code reported, at least llcMin}
     RunItem:
       type: object
       required: [itemId]
       properties:
         itemId: {type: string, format: uuid}
+        itemGroup: {type: string, maxLength: 64, description: 'Item group, matched by scope.itemGroups (FR-22.13)'}
+        planner: {type: string, maxLength: 64, description: 'Planner, matched by scope.planners (FR-22.13)'}
         coverage:
           type: object
           description: Omit it, or send it without a code, to use the stored item coverage of the item at the site; a block without a code is replaced whole.
@@ -2002,7 +2021,7 @@ components:
         kind: {type: string, enum: [static, simulation], description: 'A simulation version is written by a scenario run, is never current and cannot be firmed (FR-22.15)'}
         scenarioCode: {type: string, description: Set on a simulation version}
         asOf: {type: string, format: date}
-        itemsPlanned: {type: integer}
+        itemsPlanned: {type: integer, description: 'Items the version reports: every item of the snapshot, or those inside the run''s scope (FR-22.13)'}
         plannedOrders: {type: integer}
         approvedFirmed: {type: integer, description: 'Planned orders approved in the previous version that this run firmed (FR-22.11), in one firming batch with one plannedorder.firmed.v1 each'}
         messages: {type: integer}
