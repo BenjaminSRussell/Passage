@@ -54,6 +54,13 @@ channels:
     messages:
       countSheetChanged:
         $ref: '#/components/messages/CountSheetChanged'
+  journalName:
+    address: passage.inventory.journalname
+    messages:
+      journalNameCreated:
+        $ref: '#/components/messages/JournalNameCreated'
+      journalNameUpdated:
+        $ref: '#/components/messages/JournalNameUpdated'
   reconciliationDiff:
     address: passage.inventory.reconciliation
     messages:
@@ -92,6 +99,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/countSheet' }
     summary: A count sheet was submitted for review, approved, had a recount requested, was cancelled or was posted (FR-16.9); POSTED and CANCELLED lift the stock freeze
+  publishJournalName:
+    action: send
+    channel: { $ref: '#/channels/journalName' }
+    summary: A journal name was created or changed (PRD 3.16.13); consumers refresh their copy of the approval rule
   publishReconciliationDiff:
     action: send
     channel: { $ref: '#/channels/reconciliationDiff' }
@@ -154,6 +165,22 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
+    JournalNameCreated:
+      title: Journal name created
+      summary: A journal name was created for a legal entity.
+      name: dev.passage.inventory.journalname.created.v1
+      x-passage-type: dev.passage.inventory.journalname.created.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalNameData'
+    JournalNameUpdated:
+      title: Journal name updated
+      summary: The description, approval rule, offset account or active flag of a journal name changed.
+      name: dev.passage.inventory.journalname.updated.v1
+      x-passage-type: dev.passage.inventory.journalname.updated.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalNameData'
     TransferShipped:
       title: Transfer shipped
       summary: A transfer order shipped and stock moved into the in-transit warehouse.
@@ -326,6 +353,19 @@ components:
         demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); empty when unsegmented (FR-16.20)' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+    JournalNameData:
+      type: object
+      required: [active, code, description, journalNameId, journalType, legalEntityId, offsetAccountId, requiresApproval, version]
+      properties:
+        journalNameId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE, TRANSFER] }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: [string, 'null'] }
+        active: { type: boolean }
+        version: { type: integer }
     BlockingData:
       type: object
       required: [blockingId, legalEntityId, productId, dimensionSet, qty, targetStatus, reason, state, disposition]

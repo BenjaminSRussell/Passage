@@ -14,10 +14,12 @@ import { CountSheetsPage } from "./CountSheetsPage";
 import { CountTagsPage } from "./CountTagsPage";
 import { InTransitPage } from "./InTransitPage";
 import { JournalDetailPage } from "./JournalDetailPage";
+import { JournalNamesPage } from "./JournalNamesPage";
 import { JournalsPage } from "./JournalsPage";
 import { NewBlockingPage } from "./NewBlockingPage";
 import { NewConsignmentPage } from "./NewConsignmentPage";
 import { NewCountPlanPage } from "./NewCountPlanPage";
+import { NewJournalNamePage } from "./NewJournalNamePage";
 import { NewJournalPage } from "./NewJournalPage";
 import { NewAbcRunPage } from "./NewAbcRunPage";
 import { NewReservationPage } from "./NewReservationPage";
@@ -47,6 +49,8 @@ const inventory: PassageModule = {
     { path: "/inventory/journals", element: createElement(JournalsPage) },
     { path: "/inventory/journals/new", element: createElement(NewJournalPage) },
     { path: "/inventory/journals/:id", element: createElement(JournalDetailPage), handle: { title: "Journal details" } },
+    { path: "/inventory/journal-names", element: createElement(JournalNamesPage) },
+    { path: "/inventory/journal-names/new", element: createElement(NewJournalNamePage) },
     { path: "/inventory/transactions", element: createElement(TransactionsPage) },
     { path: "/inventory/transactions/:id", element: createElement(TransactionPage), handle: { title: "Transaction" } },
     { path: "/inventory/status-changes", element: createElement(StatusChangesPage) },
@@ -83,6 +87,7 @@ const inventory: PassageModule = {
     { label: "On-hand", to: "/inventory/onhand", duty: "inventory.read" },
     { label: "Journals", to: "/inventory/journals", duty: "inventory.read" },
     { label: "New journal", to: "/inventory/journals/new", duty: "inventory.journal.write" },
+    { label: "Journal names", to: "/inventory/journal-names", duty: "inventory.read" },
     { label: "Transactions", to: "/inventory/transactions", duty: "inventory.read" },
     { label: "Status changes", to: "/inventory/status-changes", duty: "inventory.read" },
     { label: "Reservations", to: "/inventory/reservations", duty: "inventory.read" },

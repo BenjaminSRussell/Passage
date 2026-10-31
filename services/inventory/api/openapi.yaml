@@ -27,7 +27,9 @@ paths:
         post to the posting-profile account and must leave it empty. A repeated Idempotency-Key
         with the same body returns the original journal (200, Idempotent-Replayed: true); with a
         different body it is idempotency_key_reuse (422). A legal entity outside the caller's
-        scope is AUTH-0003 (403).
+        scope is AUTH-0003 (403). With journalNameId the name must exist in the caller's scope
+        (404 INV-JNLN-NOT-FOUND) and be active, of the journal's legal entity and type (422
+        INV-JNL-007); a MOVEMENT journal without offsetAccountId takes the name's default.
       x-passage-duty: inventory.journal.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -55,6 +57,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listInventoryJournals
@@ -144,6 +147,8 @@ paths:
         transaction. Rejections roll everything back. Posting a POSTED journal returns it
         unchanged.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        A journal whose journal name requires approval posts only from APPROVED; a post from DRAFT
+        is refused (422 INV-JNL-008).
       x-passage-duty: inventory.journal.post
       parameters:
         - $ref: '#/components/parameters/JournalId'
@@ -447,6 +452,117 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journal-names:
+    post:
+      operationId: createInventoryJournalName
+      summary: Create a journal name (PRD 3.16.13)
+      description: |
+        A journal name is the setup a keyed journal is created under. It fixes the journal type and
+        legal entity, may require the approval workflow before posting (BR-16.11; a post from DRAFT
+        is then refused with INV-JNL-008) and, for MOVEMENT, may carry a default offset account. The
+        code is upper-cased and unique per legal entity (409 INV-JNLN-001). The code, legal entity
+        and journal type cannot change afterwards.
+      x-passage-duty: inventory.journal-name.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalNameRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryJournalNames
+      summary: List journal names by legal entity and code (at most 200)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: journalType, in: query, schema: { $ref: '#/components/schemas/JournalType' } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+      responses:
+        '200':
+          description: Journal names
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journal-names/{id}:
+    get:
+      operationId: getInventoryJournalName
+      summary: Read one journal name
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The journal name
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateInventoryJournalName
+      summary: Change a journal name's description, approval rule, offset account or active flag
+      description: |
+        Requires If-Match. An inactive name refuses new journals (INV-JNL-007); journals already
+        created under it keep it. A DRAFT journal under a name that now requires approval must be
+        approved before it posts.
+      x-passage-duty: inventory.journal-name.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalNamePatch' }
+      responses:
+        '200':
+          description: The journal name after the change
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
   /v1/inventory/count-plans:
     post:
@@ -2122,6 +2238,41 @@ components:
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    JournalNameRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, code, journalType]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,19}$', description: Upper-cased on save }
+        description: { type: string, maxLength: 200 }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        requiresApproval: { type: boolean, default: false }
+        offsetAccountId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$', description: Default offset account; MOVEMENT names only }
+    JournalNamePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        description: { type: string, maxLength: 200 }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: string, description: 'Empty string clears the default' }
+        active: { type: boolean }
+    JournalName:
+      type: object
+      required: [id, legalEntityId, code, description, journalType, requiresApproval, active, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: string }
+        active: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     CreateJournalRequest:
       type: object
       additionalProperties: false
@@ -2135,6 +2286,13 @@ components:
           pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
           description: Ledger account id. Required for MOVEMENT, rejected for the other types.
         currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency of the legal entity }
+        journalNameId:
+          type: string
+          format: uuid
+          description: |
+            Journal name to create the journal under (PRD 3.16.13). It must be active, of the same legal entity
+            and journal type (INV-JNL-007). A MOVEMENT journal then defaults its offset account to the name's. If the
+            name requires approval, the journal posts only once APPROVED (INV-JNL-008).
     AddLinesRequest:
       type: object
       additionalProperties: false
@@ -2208,6 +2366,7 @@ components:
         postingDate: { type: string, format: date }
         offsetAccountId: { type: string }
         currency: { type: string }
+        journalNameId: { type: string, format: uuid }
         version: { type: integer }
         lineCount: { type: integer }
         createdAt: { type: string, format: date-time }

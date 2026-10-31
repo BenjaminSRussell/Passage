@@ -80,6 +80,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReports(r)
 	a.registerTags(r)
 	a.registerJournalWorkflow(r)
+	a.registerJournalNames(r)
 	a.registerConsignment(r)
 	a.registerOps(r)
 	a.registerStatusSteps(r)
@@ -95,6 +96,7 @@ type createJournalRequest struct {
 	PostingDate     string `json:"postingDate"`
 	OffsetAccountID string `json:"offsetAccountId"`
 	Currency        string `json:"currency"`
+	JournalNameID   string `json:"journalNameId"`
 }
 
 type lineRequest struct {
@@ -147,6 +149,7 @@ type journalSummary struct {
 	PostingDate     string     `json:"postingDate"`
 	OffsetAccountID string     `json:"offsetAccountId,omitempty"`
 	Currency        string     `json:"currency"`
+	JournalNameID   string     `json:"journalNameId,omitempty"`
 	Version         int        `json:"version"`
 	LineCount       int        `json:"lineCount"`
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -230,12 +233,15 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	req.OffsetAccountID = strings.TrimSpace(req.OffsetAccountID)
 	switch {
-	case req.JournalType == string(domain.JournalMovement) && req.OffsetAccountID == "":
-		fields["offsetAccountId"] = "is required for a MOVEMENT journal"
+	case req.JournalType == string(domain.JournalMovement) && req.OffsetAccountID == "" && req.JournalNameID == "":
+		fields["offsetAccountId"] = "is required for a MOVEMENT journal (or a journal name with a default offset account)"
 	case req.JournalType != string(domain.JournalMovement) && req.OffsetAccountID != "":
 		fields["offsetAccountId"] = "only MOVEMENT journals take an offset account; the posting profile supplies the others"
 	case req.OffsetAccountID != "" && !accountCode.MatchString(req.OffsetAccountID):
 		fields["offsetAccountId"] = "must be an account id of 1 to 64 letters, digits, '.', '_' or '-'"
+	}
+	if req.JournalNameID != "" && !ids.Valid(req.JournalNameID) {
+		fields["journalNameId"] = "must be a UUID"
 	}
 	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
 	if key == "" || len(key) > maxKeyLength {
@@ -249,7 +255,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalType(req.JournalType), PostingDate: date,
-		OffsetAccountID: req.OffsetAccountID, Currency: req.Currency}
+		OffsetAccountID: req.OffsetAccountID, Currency: req.Currency, JournalNameID: req.JournalNameID}
 	j, inserted, err := a.store.CreateJournal(r.Context(), in, key)
 	if err != nil {
 		a.failed(w, r, "create journal", err)
@@ -476,7 +482,7 @@ func splitList(raw string) []string {
 
 func summaryOf(j domain.Journal) journalSummary {
 	return journalSummary{ID: j.ID, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type), Status: string(j.Status),
-		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, Version: j.Version,
+		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, JournalNameID: j.JournalNameID, Version: j.Version,
 		LineCount: j.LineCount, CreatedAt: j.CreatedAt, PostedAt: j.PostedAt, ReversesJournalID: j.ReversesJournalID, ReversedByJournalID: j.ReversedByJournalID}
 }
 

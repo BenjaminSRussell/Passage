@@ -142,6 +142,7 @@ type Journal struct {
 	LegalEntityID       string
 	ReversesJournalID   string
 	ReversedByJournalID string
+	JournalNameID       string
 	Type                JournalType
 	Status              JournalStatus
 	PostingDate         time.Time

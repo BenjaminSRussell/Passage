@@ -36,6 +36,7 @@ type fakeStore struct {
 	keys        map[string]domain.Journal
 	lines       []domain.JournalLine
 	err         error
+	jn          journalNameFake
 
 	reserveIn        store.ReserveInput
 	reserveOut       store.ReserveResult
@@ -615,8 +616,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 67 {
-		t.Fatalf("router walk yielded %d operations, want 67: %v", len(served), served)
+	if len(served) != 71 {
+		t.Fatalf("router walk yielded %d operations, want 71: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

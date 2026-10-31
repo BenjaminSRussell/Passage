@@ -83,6 +83,7 @@ func TestPayloadsMatchAsyncAPISchemas(t *testing.T) {
 		"OwnershipChangedData":   OwnershipChangedData{},
 		"OwnershipLineData":      OwnershipLineData{},
 		"ReconciliationDiffData": ReconciliationDiffData{},
+		"JournalNameData":        JournalNameData{},
 	}
 	for schema, payload := range payloads {
 		if got, want := jsonKeys(t, payload), requiredFields(t, spec, schema); !slices.Equal(got, want) {

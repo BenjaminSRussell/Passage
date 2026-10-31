@@ -92,6 +92,10 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/journals/{id}:reject` | `inventory.journal.post` | InventoryJournalPost (approval task) |
 | POST | `/v1/inventory/journals/{id}:reopen` | `inventory.journal.write` | InventoryJournalMaintain |
 | POST | `/v1/inventory/journals/{id}:cancel` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/journal-names` | `inventory.journal-name.write` | InventorySetupMaintain (journal names) |
+| GET | `/v1/inventory/journal-names` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/journal-names/{id}` | `inventory.read` | InventoryInquire |
+| PATCH | `/v1/inventory/journal-names/{id}` | `inventory.journal-name.write` | InventorySetupMaintain (journal names) |
 | POST | `/v1/inventory/consignment-orders` | `inventory.consignment.write` | ConsignmentMaintain |
 | GET | `/v1/inventory/consignment-orders` | `inventory.read` | InventoryInquire |
 | GET | `/v1/inventory/consignment-orders/{id}` | `inventory.read` | InventoryInquire |

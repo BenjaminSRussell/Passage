@@ -36,6 +36,8 @@ export interface JournalSummary {
   postingDate: string;
   offsetAccountId?: string;
   currency: string;
+  /** Journal name the journal was created under (PRD 3.16.13). */
+  journalNameId?: string;
   version: number;
   lineCount: number;
   createdAt: string;
@@ -84,6 +86,7 @@ export interface CreateJournalInput {
   postingDate: string;
   currency: string;
   offsetAccountId?: string;
+  journalNameId?: string;
 }
 
 export interface LineInput {
@@ -228,6 +231,7 @@ export async function getJournal(id: string, signal?: AbortSignal): Promise<Jour
 export async function createJournal(input: CreateJournalInput, key: string = newKey()): Promise<Journal> {
   const body: CreateJournalInput = { ...input };
   if (!body.offsetAccountId) delete body.offsetAccountId;
+  if (!body.journalNameId) delete body.journalNameId;
   return (await send<Journal>("/journals", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
 }
 
@@ -1364,4 +1368,66 @@ export async function listReconciliations(
 
 export async function getReconciliation(id: string, signal?: AbortSignal): Promise<Reconciliation> {
   return (await send<Reconciliation>(`/reconciliations/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+// ---- Journal names (PRD 3.16.13) ----
+
+export interface JournalName {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  description: string;
+  journalType: KeyedJournalType;
+  requiresApproval: boolean;
+  offsetAccountId?: string;
+  active: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalNameInput {
+  legalEntityId: string;
+  code: string;
+  description?: string;
+  journalType: KeyedJournalType;
+  requiresApproval: boolean;
+  offsetAccountId?: string;
+}
+
+export interface JournalNamePatch {
+  description?: string;
+  requiresApproval?: boolean;
+  offsetAccountId?: string;
+  active?: boolean;
+}
+
+export interface JournalNameQuery {
+  legalEntityId?: string;
+  journalType?: string;
+  active?: "true" | "false" | "";
+}
+
+export async function listJournalNames(q: JournalNameQuery = {}, signal?: AbortSignal): Promise<JournalName[]> {
+  const { body } = await send<{ items?: JournalName[] }>(`/journal-names${query({ legalEntityId: q.legalEntityId, journalType: q.journalType, active: q.active })}`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Creates a journal name; the key makes a retried click replay the same create. */
+export async function createJournalName(input: JournalNameInput, key: string = newKey()): Promise<JournalName> {
+  const body: JournalNameInput = { ...input };
+  if (!body.description) delete body.description;
+  if (!body.offsetAccountId) delete body.offsetAccountId;
+  return (await send<JournalName>("/journal-names", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+/** Changes a journal name at the version the screen shows (If-Match). */
+export async function updateJournalName(id: string, version: number, patch: JournalNamePatch): Promise<JournalName> {
+  return (
+    await send<JournalName>(`/journal-names/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify(patch),
+    })
+  ).body;
 }

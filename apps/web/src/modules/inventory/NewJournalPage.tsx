@@ -1,9 +1,10 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createJournal, describeProblem, KEYED_JOURNAL_TYPES, type KeyedJournalType, type Problem } from "./api/client";
+import { createJournal, describeProblem, KEYED_JOURNAL_TYPES, listJournalNames, type JournalName, type KeyedJournalType, type Problem } from "./api/client";
 import { today, typeLabels, UUID } from "./format";
 import styles from "./pages.module.css";
+import { useLoad } from "./useLoad";
 
 interface Values {
   journalType: KeyedJournalType;
@@ -11,6 +12,7 @@ interface Values {
   postingDate: string;
   currency: string;
   offsetAccountId: string;
+  journalNameId?: string;
 }
 
 type Errors = Partial<Record<keyof Values, string>>;
@@ -24,12 +26,12 @@ const typeHints: Record<KeyedJournalType, string> = {
 };
 
 /** Client-side checks that mirror the service, so most mistakes never leave the form. */
-export function validateJournal(values: Values): Errors {
+export function validateJournal(values: Values, name?: JournalName): Errors {
   const errors: Errors = {};
   if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(values.postingDate)) errors.postingDate = "Choose a posting date.";
   if (!/^[A-Z]{3}$/.test(values.currency.trim())) errors.currency = "Enter a three-letter currency code, such as USD.";
-  if (values.journalType === "MOVEMENT" && values.offsetAccountId.trim() === "") {
+  if (values.journalType === "MOVEMENT" && values.offsetAccountId.trim() === "" && !name?.offsetAccountId) {
     errors.offsetAccountId = "A movement journal needs an offset account.";
   }
   return errors;
@@ -41,6 +43,7 @@ const fieldNames: Record<string, keyof Values> = {
   postingDate: "postingDate",
   currency: "currency",
   offsetAccountId: "offsetAccountId",
+  journalNameId: "journalNameId",
 };
 
 /** New journal header (DRAFT). On success the user lands on the journal to add lines. */
@@ -49,7 +52,11 @@ export function NewJournalPage() {
   const [params] = useSearchParams();
   // ?type=OWNERSHIP_CHANGE (from the consignment stock report) preselects the type.
   const requested = KEYED_JOURNAL_TYPES.find((t) => t === params.get("type")) ?? "MOVEMENT";
-  const [values, setValues] = useState<Values>({ journalType: requested, legalEntityId: "", postingDate: today(), currency: "", offsetAccountId: "" });
+  const [values, setValues] = useState<Values>({ journalType: requested, legalEntityId: "", postingDate: today(), currency: "", offsetAccountId: "", journalNameId: "" });
+  // Active journal names; the form offers those of the chosen type and legal entity.
+  const names = useLoad((signal) => listJournalNames({ active: "true" }, signal), "names");
+  const choices = (names.data ?? []).filter((n) => n.journalType === values.journalType && n.legalEntityId === values.legalEntityId.trim());
+  const chosen = choices.find((n) => n.id === values.journalNameId);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +66,7 @@ export function NewJournalPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const found = validateJournal(values);
+    const found = validateJournal(values, chosen);
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
@@ -72,6 +79,7 @@ export function NewJournalPage() {
           postingDate: values.postingDate,
           currency: values.currency.trim(),
           offsetAccountId: values.journalType === "MOVEMENT" ? values.offsetAccountId.trim() : undefined,
+          journalNameId: chosen?.id,
         },
         key.current,
       );
@@ -96,7 +104,9 @@ export function NewJournalPage() {
 
   const set = (name: keyof Values) => (event: { target: { value: string } }) => {
     const value = name === "currency" ? event.target.value.toUpperCase() : event.target.value;
-    setValues({ ...values, [name]: value });
+    // A name belongs to one type and legal entity, so changing either drops the choice.
+    const dropName = name === "journalType" || name === "legalEntityId" ? { journalNameId: "" } : {};
+    setValues({ ...values, [name]: value, ...dropName });
     key.current = crypto.randomUUID();
   };
 
@@ -125,8 +135,28 @@ export function NewJournalPage() {
           <FormField id="journal-currency" label="Currency" hint="The legal entity's accounting currency." error={errors.currency}>
             {(control) => <Input {...control} value={values.currency} maxLength={3} onChange={set("currency")} invalid={Boolean(errors.currency)} />}
           </FormField>
+          {choices.length > 0 ? (
+            <FormField
+              id="journal-name"
+              label="Journal name"
+              optional
+              hint={chosen?.requiresApproval ? "This name requires the journal to be approved before it posts." : "Journal names of this type for the legal entity."}
+              error={errors.journalNameId}
+            >
+              {(control) => (
+                <Select {...control} value={values.journalNameId ?? ""} onChange={set("journalNameId")}>
+                  <option value="">None</option>
+                  {choices.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.description ? `${n.code} (${n.description})` : n.code}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          ) : null}
           {values.journalType === "MOVEMENT" ? (
-            <FormField id="journal-offset" label="Offset account" hint="Ledger account the movement posts against." error={errors.offsetAccountId}>
+            <FormField id="journal-offset" label="Offset account" hint={chosen?.offsetAccountId ? `Leave empty to use ${chosen.offsetAccountId} from the journal name.` : "Ledger account the movement posts against."} error={errors.offsetAccountId}>
               {(control) => <Input {...control} value={values.offsetAccountId} onChange={set("offsetAccountId")} invalid={Boolean(errors.offsetAccountId)} />}
             </FormField>
           ) : null}

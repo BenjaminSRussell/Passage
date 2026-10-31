@@ -14,6 +14,7 @@ describe("inventory module", () => {
       "/inventory/onhand": "inventory.read",
       "/inventory/journals": "inventory.read",
       "/inventory/journals/new": "inventory.journal.write",
+      "/inventory/journal-names": "inventory.read",
       "/inventory/transactions": "inventory.read",
       "/inventory/status-changes": "inventory.read",
       "/inventory/reservations": "inventory.read",

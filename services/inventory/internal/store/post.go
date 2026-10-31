@@ -114,6 +114,9 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 		if j.Status != domain.JournalDraft && j.Status != domain.JournalApproved {
 			return problem(http.StatusConflict, CodeJournalState, "journal cannot be posted from status "+string(j.Status))
 		}
+		if err := checkNamePostable(ctx, tx, j); err != nil {
+			return err
+		}
 		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p, ""); err != nil {
 			return err
 		}
