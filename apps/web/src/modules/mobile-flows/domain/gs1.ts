@@ -44,20 +44,23 @@ interface AIDef {
   kind: AIKind;
   length: number; // fixed length, or maximum length for variable
   charset: "numeric" | "set82";
+  /** Last digit is a GS1 mod-10 check digit (SSCC, GTIN, GLN). */
+  checkDigit?: boolean;
 }
 
 // Supported AI table. 310n (net weight) is handled separately because its AI is four digits.
 const AI_TABLE: AIDef[] = [
-  { ai: "00", kind: "fixedNumeric", length: 18, charset: "numeric" },
-  { ai: "01", kind: "fixedNumeric", length: 14, charset: "numeric" },
+  { ai: "00", kind: "fixedNumeric", length: 18, charset: "numeric", checkDigit: true },
+  { ai: "01", kind: "fixedNumeric", length: 14, charset: "numeric", checkDigit: true },
   { ai: "10", kind: "variable", length: 20, charset: "set82" },
   { ai: "11", kind: "fixedDate", length: 6, charset: "numeric" },
   { ai: "17", kind: "fixedDate", length: 6, charset: "numeric" },
   { ai: "21", kind: "variable", length: 20, charset: "set82" },
   { ai: "37", kind: "variable", length: 8, charset: "numeric" },
   { ai: "400", kind: "variable", length: 30, charset: "set82" },
-  { ai: "410", kind: "fixedNumeric", length: 13, charset: "numeric" },
-  { ai: "412", kind: "fixedNumeric", length: 13, charset: "numeric" },
+  // GLNs carry a check digit like SSCC and GTIN (GS1 syntax dictionary: N13,csum).
+  { ai: "410", kind: "fixedNumeric", length: 13, charset: "numeric", checkDigit: true },
+  { ai: "412", kind: "fixedNumeric", length: 13, charset: "numeric", checkDigit: true },
   // AI 420: ship-to postal code, printed on the GS1 carton label (§6.32.15).
   { ai: "420", kind: "variable", length: 20, charset: "set82" },
   // AI 91 to 99: company-internal information, variable up to 90 characters.
@@ -170,10 +173,21 @@ export function parseGS1(raw: string, opts: ParseOptions = {}): GS1Parse {
     result.errors.push(e);
     result.ok = false;
   };
-  const setField = (ai: string, value: string) => {
+  // An AI may repeat only with the identical element string (GS1 General Specifications 4.14).
+  const seen: Record<string, string> = {};
+  const setField = (ai: string, value: string, raw: string, at: number) => {
+    if (ai in seen) {
+      if (seen[ai] !== raw) fail({ code: ErrorCode.Malformed, ai, position: at, message: `AI ${ai} appears twice with different values.` });
+      return;
+    }
+    seen[ai] = raw;
     result.fields[ai] = value;
     result.order.push(ai);
   };
+  if (s.split(GS).join("") === "") {
+    fail({ code: ErrorCode.Malformed, position: sym.offset, message: "The barcode holds no GS1 element string." });
+    return result;
+  }
   let pos = 0;
 
   while (pos < s.length) {
@@ -196,7 +210,7 @@ export function parseGS1(raw: string, opts: ParseOptions = {}): GS1Parse {
         fail({ code: ErrorCode.Malformed, ai: m.ai, position: at, message: `AI ${m.ai} needs 6 digits.` });
         break;
       }
-      setField(m.ai, implyDecimals(data, Number(m.ai[3])));
+      setField(m.ai, implyDecimals(data, Number(m.ai[3])), data, at);
       continue;
     }
 
@@ -213,7 +227,7 @@ export function parseGS1(raw: string, opts: ParseOptions = {}): GS1Parse {
         fail({ code: ErrorCode.Malformed, ai: def.ai, position: at, message: `AI ${def.ai} has characters outside its charset.` });
         continue;
       }
-      setField(def.ai, value);
+      setField(def.ai, value, value, at);
       continue;
     }
 
@@ -229,14 +243,14 @@ export function parseGS1(raw: string, opts: ParseOptions = {}): GS1Parse {
         fail({ code: ErrorCode.InvalidDate, ai: def.ai, position: at, message: `Invalid date ${value} for AI ${def.ai}.` });
         continue;
       }
-      setField(def.ai, iso);
+      setField(def.ai, iso, value, at);
       continue;
     }
-    if ((def.ai === "00" || def.ai === "01") && !mod10Valid(value)) {
+    if (def.checkDigit && !mod10Valid(value)) {
       fail({ code: ErrorCode.CheckDigit, ai: def.ai, position: at, message: `Check digit invalid for AI ${def.ai}.` });
       continue;
     }
-    setField(def.ai, value);
+    setField(def.ai, value, value, at);
   }
   return result;
 }
