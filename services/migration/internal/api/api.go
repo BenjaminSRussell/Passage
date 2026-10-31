@@ -30,6 +30,7 @@ const (
 	readyTimeout        = 500 * time.Millisecond
 	runTimeout          = 35 * time.Minute
 	idempotencyHeader   = "Idempotency-Key"
+	defaultPage         = 50
 	dutyRun             = "migration.run"
 	dutySpecWrite       = "migration.spec.write"
 	runsPath            = "/v1/integration/migration-runs"
@@ -146,6 +147,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/integration/parallel-run-diffs", a.parallelRunDiffs)
 	r.With(authz.RequireDuty(dutyRun)).Get(runsPath+"/{id}/ledger", a.runLedger)
 	a.registerTemplates(r)
+	a.registerXref(r)
 	a.registerPackages(r)
 }
 

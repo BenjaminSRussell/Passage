@@ -213,3 +213,44 @@ export const diffPackage = (pkg: unknown, signature: string) =>
 
 export const applyPackage = (pkg: unknown, signature: string, key: string = newKey()) =>
   send<PackageApplied>("/config-packages:apply", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ package: pkg, signature }) });
+
+export interface XrefEntry {
+  sourceSystem: SourceSystem;
+  entity: string;
+  sourceKey: string;
+  targetId: string;
+  contentHash?: string;
+  /** Set when the legacy record was merged into another Passage record. */
+  mergedIntoTargetId?: string;
+  updatedAt: string;
+}
+
+export interface XrefCount {
+  sourceSystem: SourceSystem;
+  entity: string;
+  count: number;
+}
+
+export interface XrefFilter {
+  sourceSystem?: string;
+  entity?: string;
+  sourceKey?: string;
+  keyPrefix?: string;
+  targetId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface XrefPage {
+  items: XrefEntry[];
+  nextCursor?: string;
+}
+
+export async function listXref(filter: XrefFilter, signal?: AbortSignal): Promise<XrefPage> {
+  const { limit, ...rest } = filter;
+  const body = await send<XrefPage>(`/xref${query({ ...rest, limit: limit ? String(limit) : undefined })}`, {}, signal);
+  if (!Array.isArray(body.items)) throw new MigrationApiError(0, "COM-0001", "The response has no items");
+  return body;
+}
+
+export const xrefSummary = (signal?: AbortSignal) => items<XrefCount>("/xref/summary", signal);

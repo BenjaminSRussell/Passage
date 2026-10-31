@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { NewPackagePage, PackageDetailPage, PackagesPage } from "./PackagePages";
 import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
 import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePages";
+import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
 // migration.run, migration.spec.write and migration.package.apply are enforced by the service but not seeded in
@@ -25,12 +26,14 @@ const migration: PassageModule = {
     { path: "/migration/packages", element: createElement(PackagesPage), handle: { title: "Configuration packages" } },
     { path: "/migration/packages/new", element: createElement(NewPackagePage), handle: { title: "Apply configuration package", duty: "migration.package.apply" } },
     { path: "/migration/packages/:id", element: createElement(PackageDetailPage), handle: { title: "Configuration package" } },
+    { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
     { label: "Migration runs", to: "/migration" },
     { label: "Mapping specs", to: "/migration/specs" },
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },
+    { label: "Legacy key cross-reference", to: "/migration/xref" },
   ],
 };
 

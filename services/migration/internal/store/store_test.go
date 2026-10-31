@@ -416,3 +416,77 @@ func TestMem_SpecContract(t *testing.T) {
 		t.Fatalf("limit = %d", len(l))
 	}
 }
+
+// The browse runs on the app role, so the 0001 grants and the xref RLS policies are what it exercises.
+func TestPostgres_XrefBrowseKeysetFiltersAndSummary(t *testing.T) {
+	s, pool := newAppStore(t)
+	ctx := principalContext(1)
+	x := s.Xref()
+	for i := 0; i < 5; i++ {
+		key := domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: fmt.Sprintf("C%d_%d", i, i)}
+		if err := x.Put(ctx, key, domain.XrefEntry{TargetID: fmt.Sprintf("00000000-0000-7000-8000-%012d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = x.Put(ctx, domain.XrefKey{SourceSystem: "sap_ecc", Entity: "vendor", SourceKey: "V%1"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000aa"})
+	_ = x.Put(principalContext(2), domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: "OTHER"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000bb"})
+
+	first, err := s.ListXref(ctx, store.XrefFilter{Limit: 4})
+	if err != nil || len(first) != 4 || first[0].SourceKey != "C0_0" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	last := first[3]
+	rest, err := s.ListXref(ctx, store.XrefFilter{After: &store.XrefCursor{SourceSystem: last.SourceSystem, Entity: last.Entity, SourceKey: last.SourceKey}, Limit: 10})
+	if err != nil || len(rest) != 2 || rest[0].SourceKey != "C4_4" || rest[1].SourceKey != "V%1" {
+		t.Fatalf("second page = %+v, %v", rest, err)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{KeyPrefix: "V%"}); len(got) != 1 {
+		t.Fatalf("a literal percent in a prefix must not act as a wildcard: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{KeyPrefix: "C_"}); len(got) != 0 {
+		t.Fatalf("a literal underscore must not act as a wildcard: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{TargetID: "00000000-0000-7000-8000-000000000002"}); len(got) != 1 || got[0].SourceKey != "C2_2" {
+		t.Fatalf("reverse lookup = %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{TargetID: "not-a-uuid"}); len(got) != 0 {
+		t.Fatalf("malformed id = %+v", got)
+	}
+	counts, err := s.XrefSummary(ctx)
+	if err != nil || len(counts) != 2 || counts[0].Count != 5 || counts[1].Entity != "vendor" {
+		t.Fatalf("summary = %+v, %v", counts, err)
+	}
+	if got, _ := s.ListXref(principalContext(2), store.XrefFilter{}); len(got) != 1 || got[0].SourceKey != "OTHER" {
+		t.Fatalf("tenant 2 sees %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{SourceSystem: "ax2012", Entity: "customer", SourceKey: "C1_1", KeyPrefix: "C1"}); len(got) != 1 {
+		t.Fatalf("filters combine with and: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{SourceSystem: "ax2012", Entity: "vendor"}); len(got) != 0 {
+		t.Fatalf("entity filter = %+v", got)
+	}
+
+	// The party merge flow sets merged_into_target_id; a lookup by the survivor finds the merged legacy key too.
+	survivor := "00000000-0000-7000-8000-000000000001"
+	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update migration.xref set merged_into_target_id = $1 where source_key = 'C3_3'`, survivor)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListXref(ctx, store.XrefFilter{TargetID: survivor})
+	if err != nil || len(got) != 2 || got[0].SourceKey != "C1_1" || got[1].SourceKey != "C3_3" || got[1].MergedIntoTargetID != survivor || got[0].MergedIntoTargetID != "" {
+		t.Fatalf("survivor lookup = %+v, %v", got, err)
+	}
+	if got, _ := s.ListXref(principalContext(2), store.XrefFilter{TargetID: survivor}); len(got) != 0 {
+		t.Fatalf("another tenant finds the survivor: %+v", got)
+	}
+
+	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	if got, err := s.ListXref(scoped, store.XrefFilter{}); err != nil || len(got) != 0 {
+		t.Fatalf("a legal-entity-scoped caller sees %+v, %v", got, err)
+	}
+	if got, err := s.XrefSummary(scoped); err != nil || len(got) != 0 {
+		t.Fatalf("a legal-entity-scoped summary = %+v, %v", got, err)
+	}
+}

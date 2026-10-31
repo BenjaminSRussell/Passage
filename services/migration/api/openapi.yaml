@@ -197,6 +197,36 @@ paths:
           description: The template with its defaults.
           content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref:
+    get:
+      operationId: listXref
+      summary: Look up legacy keys in the cross-reference
+      description: Answers where a legacy record went. Filter by exact legacy key, key prefix (literal, no wildcards) or Passage id (a target id or the survivor a record was merged into), and page in source system, entity and key order with the opaque nextCursor. Callers scoped to one legal entity are refused.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: sourceSystem, in: query, schema: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] } }
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: sourceKey, in: query, description: Exact legacy key., schema: { type: string } }
+        - { name: keyPrefix, in: query, description: Legacy keys starting with this text., schema: { type: string } }
+        - { name: targetId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of mappings; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/XrefEntry' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref/summary:
+    get:
+      operationId: summarizeXref
+      summary: Count mapped legacy keys
+      description: The number of mapped legacy keys per source system and entity, for checking a cutover against the legacy record counts.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: One row per source system and entity.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/XrefCount' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
     get:
       operationId: listConfigPackages
@@ -382,6 +412,24 @@ components:
         entity: { type: string }
         version: { type: integer, minimum: 1 }
         defaults: { type: object, minProperties: 1, maxProperties: 200, additionalProperties: { type: string, maxLength: 500 }, description: Mapping target to default value; each value must satisfy the target's type. }
+    XrefEntry:
+      type: object
+      required: [sourceSystem, entity, sourceKey, targetId, updatedAt]
+      properties:
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        entity: { type: string }
+        sourceKey: { type: string }
+        targetId: { type: string, format: uuid }
+        contentHash: { type: string }
+        mergedIntoTargetId: { type: string, format: uuid, description: Set when the record was merged into another Passage record. }
+        updatedAt: { type: string, format: date-time }
+    XrefCount:
+      type: object
+      required: [sourceSystem, entity, count]
+      properties:
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        entity: { type: string }
+        count: { type: integer, minimum: 1 }
     DataTemplate:
       type: object
       required: [id, entity, name, version, checksum, defaultCount, createdAt]

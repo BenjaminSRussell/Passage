@@ -112,6 +112,7 @@ Legal-entity copy (`domain.CopyRun`) copies one entity through the migration pip
 
 - Idempotency key is `sha256(source_system|source_entity|source_key|content_hash)`, independent of the run.
 - The target id is minted once and stored in the xref before the loader is called; the content hash is recorded only after a successful load, so a failed row retries with the same target id.
+- `GET /v1/integration/xref` browses the cross-reference read-only (exact legacy key, literal key prefix, Passage id; keyset `nextCursor`) and `/xref/summary` counts keys per source system and entity.
 - Loads go through `TargetLoader` in batches of at most 1000; no direct SQL into target contexts.
 - Source rows missing since the last run are reported in `Report.Absent`, never deleted.
 - `Rerun` reprocesses only the keys in the previous report's exception queue and skips reconciliation.

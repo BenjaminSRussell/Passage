@@ -95,6 +95,9 @@ type Store interface {
 	ListConfigPackages(ctx context.Context, limit int) ([]ConfigPackage, error)
 	SaveRewriteRules(ctx context.Context, projectID string, rules []domain.KeyRewrite) error
 	RewriteRules(ctx context.Context, projectID string) ([]domain.KeyRewrite, error)
+	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
+	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
+	XrefSummary(ctx context.Context) ([]XrefCount, error)
 	Xref() domain.XrefStore
 	Ping(ctx context.Context) error
 }
