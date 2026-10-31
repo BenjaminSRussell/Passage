@@ -1039,3 +1039,122 @@ export function putOpenItemAccount(ledgerId: string, account: string, enabled: b
     { enabled },
   );
 }
+
+/** Criteria a rule may group by (FR-11.20); dim.{ATTRIBUTE} is accepted as well. */
+export const AUTO_CRITERION = /^(assignment|source_line_ref|document_id|amount_txn|posting_date|dim\.[A-Z][A-Z0-9_]{0,19})$/;
+export const MAX_AUTO_CRITERIA = 5;
+
+export const autoClearingRuleSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  name: z.string(),
+  accountFrom: z.string(),
+  accountTo: z.string(),
+  criteria: z.array(z.string()),
+  allowTolerance: z.boolean(),
+  toleranceGroup: z.string().optional(),
+  sequence: z.number(),
+  active: z.boolean(),
+  version: z.number(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AutoClearingRule = z.infer<typeof autoClearingRuleSchema>;
+
+export interface AutoClearingRuleInput {
+  name: string;
+  accountFrom: string;
+  accountTo: string;
+  criteria: string[];
+  allowTolerance: boolean;
+  toleranceGroup?: string;
+  sequence: number;
+  active: boolean;
+}
+
+const autoRuleListSchema = z.object({ items: z.array(autoClearingRuleSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/auto-clearing-rules, in run order. */
+export async function fetchAutoClearingRules(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRule[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules`, autoRuleListSchema, fetchImpl)).items;
+}
+
+/** GET .../auto-clearing-rules/{id} */
+export function fetchAutoClearingRule(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRule> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules/${encodeURIComponent(id)}`, autoClearingRuleSchema, fetchImpl);
+}
+
+/** PUT .../auto-clearing-rules/{id}: creates under a client-chosen id, or replaces at `version` (If-Match) when given. */
+export function putAutoClearingRule(
+  ledgerId: string,
+  id: string,
+  input: AutoClearingRuleInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<AutoClearingRule> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules/${encodeURIComponent(id)}`,
+    autoClearingRuleSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const autoClearingGroupSchema = z.object({
+  no: z.number(),
+  ruleId: z.string(),
+  account: z.string(),
+  itemCount: z.number(),
+  net: z.string(),
+  status: z.enum(["proposed", "cleared", "skipped"]),
+  reasonCode: z.string().optional(),
+  reason: z.string().optional(),
+  clearingDocumentId: z.string().optional(),
+  itemIds: z.array(z.string()).optional(),
+});
+export type AutoClearingGroup = z.infer<typeof autoClearingGroupSchema>;
+
+export const autoClearingRunSchema = z.object({
+  id: z.string().optional(),
+  ledgerId: z.string(),
+  ruleId: z.string().optional(),
+  mode: z.enum(["simulate", "clear"]),
+  clearingDate: z.string(),
+  groupsFound: z.number(),
+  groupsCleared: z.number(),
+  groupsSkipped: z.number(),
+  itemsCleared: z.number(),
+  unmatchedItems: z.number(),
+  truncated: z.boolean(),
+  createdBy: z.string().optional(),
+  createdAt: z.string().optional(),
+  groups: z.array(autoClearingGroupSchema).optional(),
+});
+export type AutoClearingRun = z.infer<typeof autoClearingRunSchema>;
+
+export interface AutoClearingRunInput {
+  ledgerId: string;
+  ruleId?: string;
+  mode: "simulate" | "clear";
+  clearingDate?: string;
+}
+
+/** POST /api/v1/ledger/auto-clearing:run. Simulation needs no key; a clear carries one key per user-intended run. */
+export function runAutoClearing(input: AutoClearingRunInput, idempotencyKey?: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun> {
+  return sendJSON("POST", "/api/v1/ledger/auto-clearing:run", autoClearingRunSchema, fetchImpl, input, idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {});
+}
+
+const autoRunListSchema = z.object({ items: z.array(autoClearingRunSchema) });
+
+/** GET /api/v1/ledger/auto-clearing-runs, newest first. */
+export async function fetchAutoClearingRuns(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun[]> {
+  return (await getJSON(`/api/v1/ledger/auto-clearing-runs?ledger=${encodeURIComponent(ledgerId)}`, autoRunListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/auto-clearing-runs/{id} with its group log. */
+export function fetchAutoClearingRun(id: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun> {
+  return getJSON(`/api/v1/ledger/auto-clearing-runs/${encodeURIComponent(id)}`, autoClearingRunSchema, fetchImpl);
+}

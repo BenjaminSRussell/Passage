@@ -123,6 +123,12 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/ledger/clearings":                                            dutyClearingWrite,
 		"GET /v1/ledger/clearings/{id}":                                        dutyRead,
 		"POST /v1/ledger/clearings/{id}/reset":                                 dutyClearingReset,
+		"GET /v1/ledger/ledgers/{ledger}/auto-clearing-rules":                  dutyRead,
+		"GET /v1/ledger/ledgers/{ledger}/auto-clearing-rules/{id}":             dutyRead,
+		"PUT /v1/ledger/ledgers/{ledger}/auto-clearing-rules/{id}":             dutyClearingRules,
+		"POST /v1/ledger/auto-clearing:run":                                    dutyClearingRun,
+		"GET /v1/ledger/auto-clearing-runs":                                    dutyRead,
+		"GET /v1/ledger/auto-clearing-runs/{id}":                               dutyRead,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

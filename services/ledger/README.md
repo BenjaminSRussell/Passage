@@ -209,7 +209,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
@@ -224,7 +224,8 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.setup.write` | `PUT /description-templates/{id}`, `PUT /journal-names/{code}` (PRD duty "Maintain ledger setup") |
 | `ledger.clearing.write` | `POST /clearings`, `POST /clearings:simulate` (PRD duty "Clear open items"; not yet in the policy bundle, issue #313) |
 | `ledger.clearing.reset` | `POST /clearings/{id}/reset` (PRD duty "Reset clearings"; issue #313) |
-| `ledger.clearing.rules` | `PUT /ledgers/{ledger}/tolerance-groups/{code}` (PRD duty "Maintain clearing rules"; issue #313) |
+| `ledger.clearing.rules` | `PUT /ledgers/{ledger}/tolerance-groups/{code}`, `PUT /ledgers/{ledger}/auto-clearing-rules/{id}` (PRD duty "Maintain clearing rules"; issue #313) |
+| `ledger.clearing.run` | `POST /auto-clearing:run` (PRD duty "Run automatic clearing"; issue #313) |
 
 ## Recurring journals (slice 7, FR-11.10)
 
@@ -277,6 +278,27 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 - Event `dev.passage.ledger.openitem.cleared.v1` (status `cleared` or `reset`), aggregate type `clearing`.
 - Web: open items (filters, selection, preview, clear), clearing documents list and detail with
   reset, tolerance group list and form, open-item account list with switch.
+
+## Automatic clearing (slice 9, FR-11.20, AC-11.13)
+
+- `PUT/GET /ledgers/{ledger}/auto-clearing-rules[/{id}]` maintain rules under a caller-chosen id (`ETag`,
+  optional `If-Match`, 412 `LEDGER_VERSION_CONFLICT`; deactivated, never deleted). A rule has an account
+  range (compared as text), 1 to 5 ordered criteria (`assignment`, `source_line_ref`, `document_id` as the entry's `documentId`,
+  `amount_txn` as the absolute amount, `posting_date` as the month, `dim.{ATTRIBUTE}`), an optional
+  tolerance group (`allowTolerance`) and a `sequence` that orders the rules.
+- `POST /auto-clearing:run` (`ledgerId`, optional `ruleId`, `mode` simulate or clear, optional `clearingDate`)
+  groups the open and reset-open items of each active rule by account and criteria; an item with no value for a
+  criterion, and a group of one item, are left alone (`unmatchedItems`). A group that nets to zero, or within
+  the rule's tolerance group, clears as one `clearing_document` of mode `auto` through the manual clearing
+  code (same date, tolerance and difference-account checks) in its own transaction, idempotency key
+  `auto:{rule}:{hash of account and item ids}` (with a `:{n}` suffix when the same items were cleared under it and
+  that clearing was reset, so they clear again as a new document). It never makes a residual item. A group that cannot clear is
+  logged as skipped with the reason and the run goes on. Items taken by an earlier rule are not offered to a
+  later one. Simulation reads only. A rule reads at most 100,000 items per run (`truncated`).
+- A committed run (`Idempotency-Key` required) is stored in `auto_clearing_run` with its group log
+  (`auto_clearing_run_group`, migration 0015, RLS, grants); `GET /auto-clearing-runs[/{id}]` reads them (the log
+  returns the first 1,000 groups). Each cleared group emits `dev.passage.ledger.openitem.cleared.v1` with mode `auto`.
+- Web: automatic clearing rule list and form, run page (simulate, clear, earlier runs) and run detail.
 
 ## Error codes
 

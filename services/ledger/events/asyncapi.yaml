@@ -208,8 +208,8 @@ components:
               clearingDocumentId: { type: string, format: uuid }
               ledgerId: { type: string, format: uuid }
               account: { type: string, description: Account number of the cleared items }
-              mode: { type: string, enum: [manual] }
-              itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected }
+              mode: { type: string, enum: [manual, auto], description: auto when an automatic clearing run made the document }
+              itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected, or the items of the automatic group }
               differenceAmount: { type: string, description: Residual written off to the tolerance difference account, decimal string, signed (debit positive); 0 when none }
               differenceEntryId: { type: string, format: uuid, description: Journal entry of the difference lines }
               residualItemId: { type: string, format: uuid, description: New open item carrying a residual outside tolerance }

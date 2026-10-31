@@ -330,76 +330,82 @@ func (s *Postgres) ClearItems(ctx context.Context, in ClearingInput) (ClearingDo
 	var out ClearingDocument
 	var created bool
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, true)
-		if err != nil {
-			return err
-		}
-		existing, err := scanClearing(tx.QueryRow(ctx, clearingSelect+` where d.tenant_id = $1 and d.ledger_id = $2 and d.idempotency_key = $3`,
-			p.TenantID, ledger.ID, in.Key))
-		if err == nil {
-			if !bytes.Equal(existing.hash, in.Hash) {
-				return httpx.NewProblem(http.StatusConflict, CodeIdempotencyConflict, "Idempotency-Key was already used with a different request body")
-			}
-			out = existing
-			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		sel, err := evaluate(ctx, tx, p.TenantID, ledger, in, true)
-		if err != nil {
-			return err
-		}
-		if sel.outcome == domain.OutcomeUnbalanced {
-			return sel.unbalanced()
-		}
-		docID := ids.New()
-		clearedItems := make([]string, 0, len(sel.items)+1)
-		clearedItems = append(clearedItems, in.ItemIDs...)
-		var diffEntryID, residualID *string
-		diffAmount := decimal.Zero
-		switch sel.outcome {
-		case domain.OutcomeDifference:
-			entryID, itemID, err := postClearingDifference(ctx, tx, p, ledger, sel, docID, in)
-			if err != nil {
-				return err
-			}
-			diffEntryID, diffAmount = &entryID, sel.net
-			clearedItems = append(clearedItems, itemID)
-		case domain.OutcomeResidual:
-			id, err := insertResidual(ctx, tx, p.TenantID, ledger, sel, in.ClearingDate)
-			if err != nil {
-				return err
-			}
-			residualID = &id
-		}
-		var tol *string
-		if in.ToleranceGroup != "" {
-			tol = &in.ToleranceGroup
-		}
-		if _, err := tx.Exec(ctx, `insert into clearing_document (tenant_id, id, legal_entity_id, ledger_id, main_account_id, clearing_date, mode,
-				item_ids, tolerance_group_code, difference_amount, difference_entry_id, residual_item_id, status, idempotency_key, payload_hash, created_by)
-			values ($1, $2, $3, $4, $5, $6::text::date, 'manual', $7::uuid[], $8, $9::text::numeric, $10, $11, 'cleared', $12, $13, $14)`,
-			p.TenantID, docID, ledger.LegalEntityID, ledger.ID, sel.accountID, dateText(in.ClearingDate), in.ItemIDs, tol,
-			diffAmount.String(), diffEntryID, residualID, in.Key, in.Hash, p.UserID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update open_item set status = 'cleared', clearing_document_id = $3
-			where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, clearedItems, docID); err != nil {
-			return err
-		}
-		if err := enqueueFor(ctx, tx, clearingAggregate, docID, ledgerevents.OpenItemCleared, p.TenantID, ledgerevents.OpenItemClearedData{
-			ClearingDocumentID: docID, LedgerID: ledger.ID, Account: sel.account, Mode: "manual", ItemIDs: in.ItemIDs,
-			DifferenceAmount: diffAmount.StringFixed(money.MinorUnits(ledger.Currency)), DifferenceEntryID: deref(diffEntryID),
-			ResidualItemID: deref(residualID), Status: "cleared", Actor: p.UserID,
-		}); err != nil {
-			return err
-		}
-		created = true
-		out, err = loadClearing(ctx, tx, p.TenantID, docID, false)
+		out, created, err = clearInTx(ctx, tx, p, in, "manual")
 		return err
 	})
 	return out, created, err
+}
+
+// clearInTx is the body of a clearing inside the caller's transaction; mode is
+// manual or auto.
+func clearInTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ClearingInput, mode string) (ClearingDocument, bool, error) {
+	var out ClearingDocument
+	ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, true)
+	if err != nil {
+		return out, false, err
+	}
+	existing, err := scanClearing(tx.QueryRow(ctx, clearingSelect+` where d.tenant_id = $1 and d.ledger_id = $2 and d.idempotency_key = $3`,
+		p.TenantID, ledger.ID, in.Key))
+	if err == nil {
+		if !bytes.Equal(existing.hash, in.Hash) {
+			return out, false, httpx.NewProblem(http.StatusConflict, CodeIdempotencyConflict, "Idempotency-Key was already used with a different request body")
+		}
+		return existing, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return out, false, err
+	}
+	sel, err := evaluate(ctx, tx, p.TenantID, ledger, in, true)
+	if err != nil {
+		return out, false, err
+	}
+	if sel.outcome == domain.OutcomeUnbalanced {
+		return out, false, sel.unbalanced()
+	}
+	docID := ids.New()
+	clearedItems := make([]string, 0, len(sel.items)+1)
+	clearedItems = append(clearedItems, in.ItemIDs...)
+	var diffEntryID, residualID *string
+	diffAmount := decimal.Zero
+	switch sel.outcome {
+	case domain.OutcomeDifference:
+		entryID, itemID, err := postClearingDifference(ctx, tx, p, ledger, sel, docID, in)
+		if err != nil {
+			return out, false, err
+		}
+		diffEntryID, diffAmount = &entryID, sel.net
+		clearedItems = append(clearedItems, itemID)
+	case domain.OutcomeResidual:
+		id, err := insertResidual(ctx, tx, p.TenantID, ledger, sel, in.ClearingDate)
+		if err != nil {
+			return out, false, err
+		}
+		residualID = &id
+	}
+	var tol *string
+	if in.ToleranceGroup != "" {
+		tol = &in.ToleranceGroup
+	}
+	if _, err := tx.Exec(ctx, `insert into clearing_document (tenant_id, id, legal_entity_id, ledger_id, main_account_id, clearing_date, mode,
+			item_ids, tolerance_group_code, difference_amount, difference_entry_id, residual_item_id, status, idempotency_key, payload_hash, created_by)
+		values ($1, $2, $3, $4, $5, $6::text::date, $15, $7::uuid[], $8, $9::text::numeric, $10, $11, 'cleared', $12, $13, $14)`,
+		p.TenantID, docID, ledger.LegalEntityID, ledger.ID, sel.accountID, dateText(in.ClearingDate), in.ItemIDs, tol,
+		diffAmount.String(), diffEntryID, residualID, in.Key, in.Hash, p.UserID, mode); err != nil {
+		return out, false, err
+	}
+	if _, err := tx.Exec(ctx, `update open_item set status = 'cleared', clearing_document_id = $3
+		where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, clearedItems, docID); err != nil {
+		return out, false, err
+	}
+	if err := enqueueFor(ctx, tx, clearingAggregate, docID, ledgerevents.OpenItemCleared, p.TenantID, ledgerevents.OpenItemClearedData{
+		ClearingDocumentID: docID, LedgerID: ledger.ID, Account: sel.account, Mode: mode, ItemIDs: in.ItemIDs,
+		DifferenceAmount: diffAmount.StringFixed(money.MinorUnits(ledger.Currency)), DifferenceEntryID: deref(diffEntryID),
+		ResidualItemID: deref(residualID), Status: "cleared", Actor: p.UserID,
+	}); err != nil {
+		return out, false, err
+	}
+	out, err = loadClearing(ctx, tx, p.TenantID, docID, false)
+	return out, true, err
 }
 
 func deref(s *string) string {

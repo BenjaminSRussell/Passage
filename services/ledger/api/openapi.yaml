@@ -802,7 +802,7 @@ components:
         ledgerId: { type: string, format: uuid }
         account: { type: string }
         clearingDate: { type: string, format: date }
-        mode: { type: string, enum: [manual] }
+        mode: { type: string, enum: [manual, auto], description: auto for documents made by an automatic clearing run }
         itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected }
         toleranceGroup: { type: string }
         differenceAmount: { type: string, description: Residual written off, debit minus credit; 0 when none }
@@ -822,6 +822,82 @@ components:
       properties:
         reasonCode: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: "Active shared reason code that applies to ledger (FR-11.15); also the reason of the reversal of the difference entry when the clearing posted one" }
         comment: { type: string, maxLength: 255 }
+    AutoClearingRuleBody:
+      type: object
+      required: [name, accountFrom, accountTo, criteria]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        accountFrom: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: First account number of the range, compared as text }
+        accountTo: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: Last account number of the range, compared as text; not before accountFrom }
+        criteria:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items: { type: string, description: "assignment, source_line_ref, document_id (the documentId of the posting request), amount_txn (absolute amount in the ledger currency), posting_date (month) or dim.{ATTRIBUTE}" }
+          description: Ordered fields that group the open items of one account; an item with no value for a field is never grouped
+        allowTolerance: { type: boolean, default: false, description: A group within the tolerance group also clears, the residual going to its difference account }
+        toleranceGroup: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: Required with allowTolerance and refused without }
+        sequence: { type: integer, minimum: 1, maximum: 9999, default: 100, description: Rules run in ascending sequence, then name }
+        active: { type: boolean, default: true }
+    AutoClearingRule:
+      type: object
+      required: [id, ledgerId, name, accountFrom, accountTo, criteria, allowTolerance, sequence, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        name: { type: string }
+        accountFrom: { type: string }
+        accountTo: { type: string }
+        criteria: { type: array, items: { type: string } }
+        allowTolerance: { type: boolean }
+        toleranceGroup: { type: string }
+        sequence: { type: integer }
+        active: { type: boolean }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AutoClearingRunRequest:
+      type: object
+      required: [ledgerId, mode]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid, description: Run only this active rule; every active rule of the ledger when absent }
+        mode: { type: string, enum: [simulate, clear], description: simulate returns the proposed groups and writes nothing }
+        clearingDate: { type: string, format: date, description: Defaults to today; a group whose latest item posted later clears on that date }
+    AutoClearingGroup:
+      type: object
+      required: [no, ruleId, account, itemCount, net, status]
+      properties:
+        no: { type: integer, description: Position in the run log }
+        ruleId: { type: string, format: uuid }
+        account: { type: string }
+        itemCount: { type: integer }
+        net: { type: string, description: Debit minus credit of the group }
+        status: { type: string, enum: [proposed, cleared, skipped] }
+        reasonCode: { type: string, description: Why a group was skipped, for example LEDGER_CLEARING_UNBALANCED }
+        reason: { type: string }
+        clearingDocumentId: { type: string, format: uuid, description: The document a cleared group made }
+        itemIds: { type: array, items: { type: string, format: uuid }, description: Members of a proposed or skipped group in a simulation }
+    AutoClearingRun:
+      type: object
+      required: [ledgerId, mode, clearingDate, groupsFound, groupsCleared, groupsSkipped, itemsCleared, unmatchedItems, truncated]
+      properties:
+        id: { type: string, format: uuid, description: Absent on a simulation }
+        ledgerId: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid }
+        mode: { type: string, enum: [simulate, clear] }
+        clearingDate: { type: string, format: date }
+        groupsFound: { type: integer, description: Groups of two or more items }
+        groupsCleared: { type: integer, description: Groups cleared, or proposed in a simulation }
+        groupsSkipped: { type: integer }
+        itemsCleared: { type: integer }
+        unmatchedItems: { type: integer, description: Items that no group of two or more took }
+        truncated: { type: boolean, description: A rule had more than 100,000 open items; the rest wait for the next run }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        groups: { type: array, items: { $ref: "#/components/schemas/AutoClearingGroup" }, description: The first 1,000 groups }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -892,6 +968,26 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
+    AutoRuleProblem409:
+      description: LEDGER_AUTO_CLEARING_RULE_ID_CONFLICT, the id is used by another rule (a concurrent create, or a rule outside the caller's legal entities); nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AutoRuleProblem422:
+      description: LEDGER_TOLERANCE_GROUP_NOT_FOUND or LEDGER_TOLERANCE_GROUP_INACTIVE, the named tolerance group is not an active group of the ledger; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
+    AutoRunProblem409:
+      description: LEDGER_IDEMPOTENCY_CONFLICT, the Idempotency-Key was used with another body; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AutoRunProblem422:
+      description: LEDGER_AUTO_CLEARING_RULE_INACTIVE, the ruleId names an inactive rule; nothing changed. Groups that cannot clear do not fail the run, they are logged as skipped.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
     RecurringETag:
       description: The recurring journal version as an entity tag, for If-Match on the next change
@@ -899,6 +995,9 @@ components:
     BatchETag:
       description: The batch version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"3"' }
+    AutoRuleETag:
+      description: The automatic clearing rule version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
     ToleranceETag:
       description: The tolerance group version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"2"' }
@@ -2628,3 +2727,193 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/ClearingProblem409" }
         "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/auto-clearing-rules:
+    get:
+      tags: [clearing]
+      operationId: listAutoClearingRules
+      summary: List automatic clearing rules of a ledger
+      x-passage-duty: ledger.journal.read
+      description: In run order (sequence, then name).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AutoClearingRule" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/auto-clearing-rules/{id}:
+    get:
+      tags: [clearing]
+      operationId: getAutoClearingRule
+      summary: Get an automatic clearing rule
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The rule; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [clearing]
+      operationId: putAutoClearingRule
+      summary: Create or replace an automatic clearing rule
+      x-passage-duty: ledger.clearing.rules
+      description: |
+        A rule (OB74 semantics, FR-11.20) names an account range and up to five ordered criteria that
+        group the open items of each account. The id is chosen by the caller. A group that nets to zero
+        clears as one document; with allowTolerance the named active tolerance group also lets a
+        group with a small net clear. Rules are deactivated, never deleted. A replace is checked
+        against If-Match when sent (412 LEDGER_VERSION_CONFLICT).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: false
+          description: The rule version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoClearingRuleBody" }
+      responses:
+        "200":
+          description: Rule replaced
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "201":
+          description: Rule created
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AutoRuleProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/AutoRuleProblem422" }
+  /v1/ledger/auto-clearing:run:
+    post:
+      tags: [clearing]
+      operationId: runAutoClearing
+      summary: Run automatic clearing
+      x-passage-duty: ledger.clearing.run
+      description: |
+        Groups the open items of every active rule (or one rule) and clears each group that nets to
+        zero, or within the rule's tolerance, as its own clearing document (mode auto, idempotency key
+        auto:{rule}:{group hash}, suffixed when the same group was cleared and reset before). It never makes a residual item. A group that cannot clear, for
+        example because another clearing took an item meanwhile, is logged as skipped with the reason
+        and the run continues. simulate writes nothing and returns the proposed and skipped groups
+        (200). clear stores the run and its group log under the Idempotency-Key (201; a repeat with the
+        same body returns the stored run with 200, another body is LEDGER_IDEMPOTENCY_CONFLICT, 409).
+        Each cleared group emits dev.passage.ledger.openitem.cleared.v1.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required for mode clear; trimmed, 1 to 128 characters
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoClearingRunRequest" }
+      responses:
+        "200":
+          description: A simulation, or the stored run of a repeated Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "201":
+          description: The run was stored; groups are cleared or skipped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AutoRunProblem409" }
+        "422": { $ref: "#/components/responses/AutoRunProblem422" }
+  /v1/ledger/auto-clearing-runs:
+    get:
+      tags: [clearing]
+      operationId: listAutoClearingRuns
+      summary: List stored automatic clearing runs
+      x-passage-duty: ledger.journal.read
+      description: Newest first, at most 100, without the group log.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AutoClearingRun" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/auto-clearing-runs/{id}:
+    get:
+      tags: [clearing]
+      operationId: getAutoClearingRun
+      summary: Get an automatic clearing run with its group log
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The run and its first 1,000 groups
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }

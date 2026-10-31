@@ -21,11 +21,14 @@ import { ClearingsPage } from "./ClearingsPage";
 import { ClearingPage } from "./ClearingPage";
 import { EditToleranceGroupPage, NewToleranceGroupPage } from "./ToleranceGroupFormPage";
 import { ToleranceGroupsPage } from "./ToleranceGroupsPage";
+import { AutoClearingRulesPage } from "./AutoClearingRulesPage";
+import { EditAutoClearingRulePage, NewAutoClearingRulePage } from "./AutoClearingRuleFormPage";
+import { AutoClearingRunDetailPage, AutoClearingRunPage } from "./AutoClearingRunPage";
 
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual clearing, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values and default description templates.",
+  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -43,6 +46,11 @@ const ledger: PassageModule = {
     { path: "/ledger/tolerance-groups", element: createElement(ToleranceGroupsPage), handle: { title: "Tolerance groups" } },
     { path: "/ledger/tolerance-groups/new", element: createElement(NewToleranceGroupPage), handle: { title: "New tolerance group" } },
     { path: "/ledger/tolerance-groups/:code", element: createElement(EditToleranceGroupPage), handle: { title: "Tolerance group" } },
+    { path: "/ledger/auto-clearing", element: createElement(AutoClearingRunPage), handle: { title: "Automatic clearing" } },
+    { path: "/ledger/auto-clearing-runs/:id", element: createElement(AutoClearingRunDetailPage), handle: { title: "Automatic clearing run", duty: "ledger.journal.read" } },
+    { path: "/ledger/auto-clearing-rules", element: createElement(AutoClearingRulesPage), handle: { title: "Automatic clearing rules" } },
+    { path: "/ledger/auto-clearing-rules/new", element: createElement(NewAutoClearingRulePage), handle: { title: "New automatic clearing rule" } },
+    { path: "/ledger/auto-clearing-rules/:id", element: createElement(EditAutoClearingRulePage), handle: { title: "Automatic clearing rule" } },
     { path: "/ledger/trial-balance", element: createElement(TrialBalanceScreen), handle: { title: "Trial balance" } },
     { path: "/ledger/transactions", element: createElement(LedgerLinesPage), handle: { title: "Ledger transactions" } },
     { path: "/ledger/entries/:id", element: createElement(EntryScreen), handle: { title: "Journal entry", duty: "ledger.journal.read" } },
@@ -64,6 +72,8 @@ const ledger: PassageModule = {
     { label: "Clearing documents", to: "/ledger/clearings", duty: "ledger.journal.read" },
     { label: "Open-item accounts", to: "/ledger/open-item-accounts", duty: "ledger.journal.read" },
     { label: "Tolerance groups", to: "/ledger/tolerance-groups", duty: "ledger.journal.read" },
+    { label: "Automatic clearing", to: "/ledger/auto-clearing", duty: "ledger.journal.read" },
+    { label: "Clearing rules", to: "/ledger/auto-clearing-rules", duty: "ledger.journal.read" },
     { label: "Trial balance", to: "/ledger/trial-balance", duty: "ledger.balance.read" },
     { label: "Ledger transactions", to: "/ledger/transactions", duty: "ledger.journal.read" },
     { label: "Journal names", to: "/ledger/journal-names", duty: "ledger.journal.read" },

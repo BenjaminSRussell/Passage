@@ -85,6 +85,12 @@ type Store interface {
 	ListClearings(ctx context.Context, ledgerID, status string) ([]ClearingDocument, error)
 	GetClearing(ctx context.Context, id string) (ClearingDocument, error)
 	ResetClearing(ctx context.Context, in ResetInput) (ClearingDocument, error)
+	ListAutoClearingRules(ctx context.Context, ledgerID string) ([]AutoClearingRule, error)
+	GetAutoClearingRule(ctx context.Context, ledgerID, id string) (AutoClearingRule, error)
+	PutAutoClearingRule(ctx context.Context, ledgerID, id string, version int, in AutoClearingRule) (AutoClearingRule, bool, error)
+	RunAutoClearing(ctx context.Context, in AutoClearingInput) (AutoClearingRun, bool, error)
+	ListAutoClearingRuns(ctx context.Context, ledgerID string) ([]AutoClearingRun, error)
+	GetAutoClearingRun(ctx context.Context, id string) (AutoClearingRun, error)
 	Ping(ctx context.Context) error
 }
 

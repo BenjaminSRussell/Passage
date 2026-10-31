@@ -44,6 +44,11 @@ describe("ledger module", () => {
       "/ledger/tolerance-groups",
       "/ledger/tolerance-groups/new",
       "/ledger/tolerance-groups/:code",
+      "/ledger/auto-clearing",
+      "/ledger/auto-clearing-runs/:id",
+      "/ledger/auto-clearing-rules",
+      "/ledger/auto-clearing-rules/new",
+      "/ledger/auto-clearing-rules/:id",
       "/ledger/trial-balance",
       "/ledger/transactions",
       "/ledger/entries/:id",
@@ -75,7 +80,7 @@ describe("ledger module", () => {
     // GET /api/v1/ledger/recurring-journals requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/recurring-journals")?.duty).toBe("ledger.journal.read");
     // GET /api/v1/ledger/open-items, /clearings, .../open-item-accounts and .../tolerance-groups require ledger.journal.read.
-    for (const to of ["/ledger/open-items", "/ledger/clearings", "/ledger/open-item-accounts", "/ledger/tolerance-groups"]) {
+    for (const to of ["/ledger/open-items", "/ledger/clearings", "/ledger/open-item-accounts", "/ledger/tolerance-groups", "/ledger/auto-clearing", "/ledger/auto-clearing-rules"]) {
       expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
     }
     // GET /api/v1/ledger/journal-lines requires ledger.journal.read.
