@@ -47,8 +47,10 @@ type JobScheduledData struct {
 	ChangeoverCost     string `json:"changeoverCost,omitempty"`
 	ChangeoverCurrency string `json:"changeoverCurrency,omitempty"`
 	CleaningSetID      string `json:"cleaningSetId,omitempty"`
-	RunID              string `json:"runId"`
-	Firmed             bool   `json:"firmed"`
+	// SecondaryResourceIDs are the resources booked with the job (BR-23.4).
+	SecondaryResourceIDs []string `json:"secondaryResourceIds,omitempty"`
+	RunID                string   `json:"runId"`
+	Firmed               bool     `json:"firmed"`
 }
 
 type OrderDatesChangedData struct {

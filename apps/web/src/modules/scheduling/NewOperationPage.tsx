@@ -7,6 +7,9 @@ import { CODE, optionalWhole, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
+/** The service books at most this many secondary resources per operation (BR-23.4). */
+export const MAX_SECONDARIES = 5;
+
 export interface Values {
   orderId: string;
   operNumber: string;
@@ -15,6 +18,7 @@ export interface Values {
   readyAt: string;
   priority: string;
   resourceIds: string[];
+  secondaryResourceIds: string[];
   setupGroup: string;
   setupMinutes: string;
   attributes: string;
@@ -31,6 +35,7 @@ export const emptyOperation: Values = {
   readyAt: "",
   priority: "",
   resourceIds: [],
+  secondaryResourceIds: [],
   setupGroup: "",
   setupMinutes: "",
   attributes: "",
@@ -77,6 +82,8 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   const priority = values.priority === "" ? undefined : wholeNumber(values.priority, 0, 1000);
   if (priority === null) errors.priority = "Enter 0 to 1000.";
   if (values.resourceIds.length === 0) errors.resourceIds = "Choose at least one resource.";
+  if (values.secondaryResourceIds.length > MAX_SECONDARIES) errors.secondaryResourceIds = `Choose at most ${MAX_SECONDARIES} secondary resources.`;
+  else if (values.secondaryResourceIds.some((id) => values.resourceIds.includes(id))) errors.secondaryResourceIds = "A candidate resource cannot also be a secondary resource.";
   const setupGroup = values.setupGroup.trim();
   if (setupGroup !== "" && !CODE.test(setupGroup)) errors.setupGroup = "Use 1 to 32 capital letters, digits, _ or -.";
   const setupMinutes = optionalWhole(values.setupMinutes, 0, WEEK_MINUTES);
@@ -88,6 +95,7 @@ export function validateOperation(values: Values): { errors: Errors; input?: New
   if (dueAt) input.dueAt = dueAt;
   if (readyAt) input.readyAt = readyAt;
   if (priority !== undefined && priority !== null) input.priority = priority;
+  if (values.secondaryResourceIds.length > 0) input.secondaryResourceIds = values.secondaryResourceIds;
   if (setupGroup !== "") input.setupGroup = setupGroup;
   if (setupMinutes !== undefined && setupMinutes !== null) input.setupMinutes = setupMinutes;
   if (Object.keys(attributes).length > 0) input.attributes = attributes;
@@ -101,6 +109,7 @@ const fieldNames: Record<string, keyof Values> = {
   minutes: "minutes",
   priority: "priority",
   resourceIds: "resourceIds",
+  secondaryResourceIds: "secondaryResourceIds",
   setupGroup: "setupGroup",
   setupMinutes: "setupMinutes",
   attributes: "attributes",
@@ -134,7 +143,16 @@ export function NewOperationPage() {
 
   /** Checked resources keep the order they were checked in: the first is preferred. */
   function toggle(id: string) {
-    update({ resourceIds: values.resourceIds.includes(id) ? values.resourceIds.filter((r) => r !== id) : [...values.resourceIds, id] });
+    const has = values.resourceIds.includes(id);
+    update({
+      resourceIds: has ? values.resourceIds.filter((r) => r !== id) : [...values.resourceIds, id],
+      secondaryResourceIds: values.secondaryResourceIds.filter((r) => r !== id),
+    });
+  }
+
+  function toggleSecondary(id: string) {
+    const has = values.secondaryResourceIds.includes(id);
+    update({ secondaryResourceIds: has ? values.secondaryResourceIds.filter((r) => r !== id) : [...values.secondaryResourceIds, id] });
   }
 
   async function submit(event: FormEvent) {
@@ -232,6 +250,32 @@ export function NewOperationPage() {
               {errors.resourceIds ? (
                 <p id="operation-resources-error" role="alert" className={styles.fieldError}>
                   {errors.resourceIds}
+                </p>
+              ) : null}
+            </fieldset>
+            <fieldset className={styles.groups} aria-describedby={errors.secondaryResourceIds ? "operation-secondary-error" : "operation-secondary-hint"}>
+              <legend className={styles.groupsLegend}>Secondary resources (optional)</legend>
+              <p id="operation-secondary-hint" className={styles.muted}>
+                Tools or crews booked for the whole job alongside the machine. The scheduler skips a slot when one of them is busy or closed.
+              </p>
+              {(resources.data ?? []).map((r) => {
+                const candidate = values.resourceIds.includes(r.id);
+                return (
+                  <span key={r.id} className={styles.check}>
+                    <Input
+                      type="checkbox"
+                      id={`operation-secondary-${r.id}`}
+                      checked={values.secondaryResourceIds.includes(r.id)}
+                      disabled={candidate}
+                      onChange={() => toggleSecondary(r.id)}
+                    />
+                    <label htmlFor={`operation-secondary-${r.id}`}>{candidate ? `${r.code} (candidate)` : `${r.code} (secondary)`}</label>
+                  </span>
+                );
+              })}
+              {errors.secondaryResourceIds ? (
+                <p id="operation-secondary-error" role="alert" className={styles.fieldError}>
+                  {errors.secondaryResourceIds}
                 </p>
               ) : null}
             </fieldset>

@@ -100,10 +100,13 @@ func affectedJobs(ctx context.Context, tx pgx.Tx, o CapacityOverride) ([]Affecte
 		return out, nil
 	}
 	// Start and end span every segment of the job, not only those inside the
-	// downtime; a job's segments all lie on one resource.
+	// downtime; a job's segments all lie on one primary resource, and a downtime on a
+	// secondary resource affects the jobs that book it.
 	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, min(start_at), max(end_at), bool_or(firmed)
-		from scheduled_job where resource_id = $1::uuid and job_id in (
-			select job_id from scheduled_job where resource_id = $1::uuid and start_at < $3 and end_at > $2)
+		from scheduled_job where job_id in (
+			select job_id from scheduled_job where resource_id = $1::uuid and start_at < $3 and end_at > $2
+			union
+			select job_id from scheduled_job_secondary where resource_id = $1::uuid and start_at < $3 and end_at > $2)
 		group by job_id, order_id, oper_number order by min(start_at), oper_number limit $4`, o.ResourceID, o.StartAt, o.EndAt, maxAffectedJobs)
 	if err != nil {
 		return nil, err

@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent } from "react";
 import { cx } from "../../shell/ui/cx";
 import type { GanttBar } from "./api/client";
-import { formatAmount, formatDateTime } from "./format";
+import { formatAmount, formatDateTime, shortId } from "./format";
 import { barPosition, changeoverSpan, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
 import styles from "./GanttView.module.css";
 
@@ -139,6 +139,10 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const setup = changeover
                   ? `, starts with a ${bar.changeoverMinutes} min changeover${bar.setupGroup ? ` to ${bar.setupGroup}` : ""}${priced.length > 0 ? ` (${priced.join(", ")})` : ""}`
                   : "";
+                const tools =
+                  bar.secondaryResourceIds.length > 0
+                    ? `, with secondary ${bar.secondaryResourceIds.map((id) => resources.find((r) => r.id === id)?.code ?? shortId(id)).join(", ")}`
+                    : "";
                 return (
                   <g key={`${bar.jobId}-${bar.segment}`}>
                     <rect
@@ -165,7 +169,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

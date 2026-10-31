@@ -18,7 +18,7 @@ import (
 
 const (
 	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at"
-	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
+	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
 	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
 )
 
@@ -145,7 +145,7 @@ func scanOperation(row pgx.Row, fp *string) (Operation, error) {
 	var o Operation
 	var due, ready *time.Time
 	var attrs []byte
-	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs,
+	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs, &o.SecondaryResourceIDs,
 		&o.SetupGroup, &o.SetupMinutes, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
@@ -155,6 +155,9 @@ func scanOperation(row pgx.Row, fp *string) (Operation, error) {
 	}
 	o.DueAt, o.ReadyAt = due, ready
 	o.Attributes = map[string]string{}
+	if o.SecondaryResourceIDs == nil {
+		o.SecondaryResourceIDs = []string{}
+	}
 	return o, json.Unmarshal(attrs, &o.Attributes)
 }
 
@@ -193,6 +196,17 @@ func (s *Postgres) CreateOperation(ctx context.Context, in Operation, idem Idem)
 		if known != len(uniqueStrings(in.ResourceIDs)) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnknownResource, "every candidate resource must exist")
 		}
+		if in.SecondaryResourceIDs == nil {
+			in.SecondaryResourceIDs = []string{}
+		}
+		if len(in.SecondaryResourceIDs) > 0 {
+			if err := tx.QueryRow(ctx, `select count(*) from scheduling_resource where id = any($1::uuid[])`, in.SecondaryResourceIDs).Scan(&known); err != nil {
+				return err
+			}
+			if known != len(uniqueStrings(in.SecondaryResourceIDs)) {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnknownResource, "every secondary resource must exist")
+			}
+		}
 		if in.NetworkID != nil {
 			var exists bool
 			if err := tx.QueryRow(ctx, `select exists(select 1 from scheduling_resource_network where id = $1)`, *in.NetworkID).Scan(&exists); err != nil {
@@ -203,9 +217,9 @@ func (s *Postgres) CreateOperation(ctx context.Context, in Operation, idem Idem)
 			}
 		}
 		row, err := scanOperation(tx.QueryRow(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority,
-				candidate_resource_ids, setup_group, setup_minutes, attributes, network_id, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, $14, $15) returning `+opCols,
-			tenantOf(ctx), ids.New(), in.OrderID, in.OperNumber, in.Minutes, in.DueAt, in.ReadyAt, in.Priority, in.ResourceIDs,
+				candidate_resource_ids, secondary_resource_ids, setup_group, setup_minutes, attributes, network_id, idempotency_key, idempotency_fingerprint)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11, $12, $13, $14, $15, $16) returning `+opCols,
+			tenantOf(ctx), ids.New(), in.OrderID, in.OperNumber, in.Minutes, in.DueAt, in.ReadyAt, in.Priority, in.ResourceIDs, in.SecondaryResourceIDs,
 			in.SetupGroup, in.SetupMinutes, attrs, in.NetworkID, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
 		if err != nil {
 			return err
@@ -361,7 +375,7 @@ func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[strin
 // the network each names. lock takes row locks on the operations so
 // concurrent runs and moves over the same operations serialize.
 func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, args ...any) ([]domain.Operation, error) {
-	q := `select o.id::text, o.order_id::text, o.oper_number, o.minutes, o.due_at, o.ready_at, o.priority, o.candidate_resource_ids::text[],
+	q := `select o.id::text, o.order_id::text, o.oper_number, o.minutes, o.due_at, o.ready_at, o.priority, o.candidate_resource_ids::text[], o.secondary_resource_ids::text[],
 			coalesce(o.setup_group, ''), o.setup_minutes, o.attributes, coalesce(n.code, '')
 		from scheduling_operation o
 		left join scheduling_resource_network n on n.tenant_id = o.tenant_id and n.id = o.network_id
@@ -379,7 +393,7 @@ func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, arg
 		var op domain.Operation
 		var due, ready *time.Time
 		var attrs []byte
-		if err := rows.Scan(&op.ID, &op.OrderID, &op.OperNumber, &op.Minutes, &due, &ready, &op.Priority, &op.Candidates,
+		if err := rows.Scan(&op.ID, &op.OrderID, &op.OperNumber, &op.Minutes, &due, &ready, &op.Priority, &op.Candidates, &op.Secondaries,
 			&op.SetupGroup, &op.SetupMinutes, &attrs, &op.Network); err != nil {
 			return nil, err
 		}
@@ -403,7 +417,10 @@ func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, arg
 func loadBooked(ctx context.Context, tx pgx.Tx, from time.Time) ([]domain.Busy, error) {
 	rows, err := tx.Query(ctx, `select j.resource_id::text, j.job_id::text, j.start_at, j.end_at, coalesce(o.setup_group, ''), o.setup_minutes, j.changeover_minutes
 		from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
-		where j.finite and j.end_at > $1`, from)
+		where j.finite and j.end_at > $1
+		union all
+		select s.resource_id::text, s.job_id::text, s.start_at, s.end_at, '', 0, 0
+		from scheduled_job_secondary s where s.finite and s.end_at > $1`, from)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +480,39 @@ func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[
 		pl.End = end
 		out[jobID] = pl
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return withSecondaries(ctx, tx, out)
+}
+
+// withSecondaries fills in the resources each placement books besides its
+// primary (BR-23.4), in resource id order.
+func withSecondaries(ctx context.Context, tx pgx.Tx, pls map[string]domain.Placement) (map[string]domain.Placement, error) {
+	if len(pls) == 0 {
+		return pls, nil
+	}
+	jobs := make([]string, 0, len(pls))
+	for id := range pls {
+		jobs = append(jobs, id)
+	}
+	rows, err := tx.Query(ctx, `select distinct job_id::text, resource_id::text from scheduled_job_secondary
+		where job_id = any($1::uuid[]) order by 1, 2`, jobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var jobID, rid string
+		if err := rows.Scan(&jobID, &rid); err != nil {
+			return nil, err
+		}
+		pl := pls[jobID]
+		pl.Secondaries = append(pl.Secondaries, rid)
+		pls[jobID] = pl
+	}
+	return pls, rows.Err()
 }
 
 // firmedJobs returns the firmed operations of the given orders.

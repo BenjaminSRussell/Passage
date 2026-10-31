@@ -78,8 +78,8 @@ const resources: Resource[] = [
 const day = dayStart(today());
 const at = (h: number) => new Date(Date.parse(day) + h * 3_600_000).toISOString().replace(".000Z", "Z");
 const bars: GanttBar[] = [
-  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null, outsideCapacity: false },
-  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30, changeoverCost: "45.5", changeoverCurrency: "EUR", cleaningSetId: "WET-CLEAN", outsideCapacity: true },
+  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null, secondaryResourceIds: [], outsideCapacity: false },
+  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30, changeoverCost: "45.5", changeoverCurrency: "EUR", cleaningSetId: "WET-CLEAN", secondaryResourceIds: [MIX], outsideCapacity: true },
 ];
 
 const run: Run = {
@@ -106,6 +106,7 @@ const operation: Operation = {
   minutes: 60,
   priority: 100,
   resourceIds: [FILL, MIX],
+  secondaryResourceIds: [],
   setupGroup: null,
   setupMinutes: 0,
   attributes: {},
@@ -157,6 +158,9 @@ describe("Scheduling workspace", () => {
     expect(rows[2]).toHaveTextContent("45.50 EUR");
     expect(rows[2]).toHaveTextContent("WET-CLEAN");
     expect(rows[1]).not.toHaveTextContent("EUR");
+    // BR-23.4: the jobs table and the bar title name the secondary resources booked with the job.
+    expect(rows[2]).toHaveTextContent("MIX-1");
+    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("with secondary MIX-1");
     // AC-23.7: a job outside open capacity (a downtime added after booking) is flagged in the table and on the bar.
     expect(rows[2]).toHaveTextContent("Outside open capacity");
     expect(rows[1]).not.toHaveTextContent("Outside open capacity");
@@ -594,6 +598,46 @@ describe("Operations", () => {
       attributes: { color: "white", grade: "2" },
       networkId: NETWORK,
     });
+  });
+
+  it("adds an operation with secondary resources booked alongside the primary (BR-23.4)", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, { ...operation, secondaryResourceIds: [MIX] });
+      if (url.pathname.endsWith("/operations")) return json(200, { items: [operation] });
+      return json(200, { items: resources });
+    };
+    const { container } = renderAt("/scheduling/operations/new");
+    fireEvent.click(await screen.findByLabelText("FILL-1"));
+    expect(pageViolations(container)).toEqual([]);
+    // A candidate cannot be picked as its own secondary.
+    expect(screen.getByLabelText("FILL-1 (candidate)")).toBeDisabled();
+    fireEvent.click(document.getElementById(`operation-secondary-${MIX}`)!);
+    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
+    expect(await findTable({ name: "Operations" })).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({ orderId: ORDER, operNumber: 10, minutes: 60, resourceIds: [FILL], secondaryResourceIds: [MIX] });
+  });
+
+  it("drops a resource from the secondaries when it becomes a candidate", async () => {
+    handler = () => json(200, { items: resources });
+    renderAt("/scheduling/operations/new");
+    await screen.findByLabelText("FILL-1");
+    const secondary = document.getElementById(`operation-secondary-${MIX}`) as HTMLInputElement;
+    fireEvent.click(secondary);
+    expect(secondary.checked).toBe(true);
+    fireEvent.click(screen.getByLabelText("MIX-1"));
+    expect(secondary.checked).toBe(false);
+    expect(secondary).toBeDisabled();
+  });
+
+  it("validates secondary resources", () => {
+    const base = { ...emptyOperation, orderId: ORDER, minutes: "30", resourceIds: [FILL] };
+    expect(validateOperation({ ...base, secondaryResourceIds: [FILL] }).errors.secondaryResourceIds).toBe("A candidate resource cannot also be a secondary resource.");
+    const many = ["1", "2", "3", "4", "5", "6"].map((n) => `3f1c0000-0000-4000-8000-00000000010${n}`);
+    expect(validateOperation({ ...base, secondaryResourceIds: many }).errors.secondaryResourceIds).toBe("Choose at most 5 secondary resources.");
+    expect(validateOperation({ ...base, secondaryResourceIds: [MIX] }).input?.secondaryResourceIds).toEqual([MIX]);
+    expect(validateOperation(base).input?.secondaryResourceIds).toBeUndefined();
   });
 
   it("shows a vanished network on its field", async () => {

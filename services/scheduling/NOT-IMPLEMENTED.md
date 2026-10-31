@@ -26,6 +26,28 @@ run selection), and a dependent behind an unplaced parent (placed in this run,
 or outside it with an operation stored as unplaced) is unplaced. No migration,
 no new endpoint; the createRun description and README say so.
 
+Slice 12 builds secondary resources booked with the primary (FR-23.4,
+BR-23.4, SCHED-0005). `POST /operations` takes `secondaryResourceIds` (at most
+5, distinct, existing, none a candidate; migration `0009_secondary_resources.sql`
+adds `scheduling_operation.secondary_resource_ids` and the
+`scheduled_job_secondary` table with its own GiST exclusion constraint, RLS and
+grants). A run books each secondary for the same segments as the primary: a
+slot whose secondary is booked or has no open capacity for a segment is
+skipped and the next start tried, in forward and backward runs; an infinite run
+ignores secondary bookings but still needs open time. A move and every job it
+pushes (including pegged dependents) needs its secondaries free, otherwise
+SCHED-0005; the booking moves with the job. Secondary bookings count in the
+weekly capacity load and in the `affectedJobs` of a downtime on a secondary,
+and a bar is flagged `outsideCapacity` when its secondary is closed for it.
+Back-to-back intervals on the secondary (two adjacent shifts, midnight on a
+24-hour calendar) count as one open stretch. An operation that never finds its
+secondaries free in the horizon is unplaced with a SCHED-0005 reason.
+The Gantt bars, `job.scheduled` and the jobs table carry
+`secondaryResourceIds`. Web: secondary resource pickers on the new-operation
+form (a candidate cannot be picked), a Secondary column on the operations list
+and the jobs table, and the bar title. No new duty. The OpenAPI and AsyncAPI
+specs have no FAIL lines on the doc gates.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -220,7 +242,7 @@ moved-out handoff rows.
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
 | 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
-| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | later slice of PSG-23 | No `secondary_resource_ids` on operations or jobs yet. |
+| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
 | 1 | Changeover kept in one piece: BR-23.3 says setup is never split across closed time and moves to the next open interval when it does not fit | built | `fillSlot` in `domain/constraints.go`; an exact move start that would split it is SCHED-0002. Route setup without a matrix is not laid as a separate block (see the job scheduling row above). |
@@ -240,7 +262,7 @@ moved-out handoff rows.
 | 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |
 | 6 | Capacity block windows and changeovers in the CP-SAT model | later slice of PSG-23 | The job-shop model has no calendars, blocks or setup times; the heuristic applies them. |
-| 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; secondary resources in general (BR-23.4) are a later slice. |
+| 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; operation secondaries (BR-23.4) are built in slice 12, the edge's transfer line is still not booked for the transfer window. |
 | 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks are create-and-read; update and deactivation are a later slice of PSG-23. |
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
@@ -279,7 +301,7 @@ moved-out handoff rows.
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
-| `ScheduledJob.overlap_qty`, `secondary_resource_ids`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
+| `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
 | Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources have a `version` column but no update endpoint yet. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |

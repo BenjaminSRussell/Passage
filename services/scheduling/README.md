@@ -85,6 +85,18 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   parent (in the run, or outside it with an unplaced operation) is unplaced.
   Forward and backward runs both apply it.
 
+Secondary resources (slice 12, BR-23.4): an operation's `secondaryResourceIds`
+(at most 5, distinct, none a candidate) are booked for the same segments as the
+primary in `scheduled_job_secondary`, which carries its own exclusion
+constraint. A slot whose secondary is booked or closed is skipped; moves and the
+jobs they push need their secondaries free (SCHED-0005). Secondary bookings
+count in the capacity load and in downtime `affectedJobs`, and a bar is flagged
+`outsideCapacity` when a secondary is closed for it. Adjacent open intervals on
+a secondary (back-to-back shifts, midnight on a 24-hour calendar) count as one.
+An operation whose secondaries are never free in the horizon is unplaced with a
+SCHED-0005 reason. A primary job and a secondary booking on the same resource
+are kept apart by the scheduler, not by a database constraint.
+
 Rules the heuristic applies: orders sorted by (earliest due date, priority,
 order id), operations in number order; each operation starts after its
 predecessor ends and at or after its ready time and the run start; it goes to
@@ -245,6 +257,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0001` | 409 / 422 | Overlaps a booked job on a finite resource (a move conflict, or a concurrent booking caught by the exclusion constraint) |
 | `SCHED-0002` | 422 | Move start is outside open capacity, would split a changeover across closed time (BR-23.3), or no capacity is left in the horizon |
 | `SCHED-0004` | 422 | Target resource is not a candidate of the operation |
+| `SCHED-0005` | 422 / run message | A move needs a secondary resource that is booked or closed for the job's segments (BR-23.4); in a run the primary slot is skipped instead, and an operation with no free slot in the horizon is unplaced with this code |
 | `SCHED-0007` | move run message / `truncated` | Propagation stopped at 500 orders or 5 pegging levels; run the site schedule |
 | `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor or a firmed job of a pegged order |
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |

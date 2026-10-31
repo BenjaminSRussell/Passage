@@ -17,6 +17,7 @@ const base: GanttBar = {
   changeoverCost: null,
   changeoverCurrency: null,
   cleaningSetId: null,
+  secondaryResourceIds: [],
   outsideCapacity: false,
 };
 

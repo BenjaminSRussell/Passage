@@ -156,6 +156,12 @@ export function WorkspacePage() {
       render: (row) => (row.changeoverCost !== null && row.changeoverCurrency !== null ? formatAmount(row.changeoverCost, row.changeoverCurrency) : dash),
     },
     { key: "cleaningSetId", header: "Cleaning set", mono: true, render: (row) => row.cleaningSetId ?? dash },
+    {
+      key: "secondaryResourceIds",
+      header: "Secondary",
+      mono: true,
+      render: (row) => (row.secondaryResourceIds.length > 0 ? row.secondaryResourceIds.map(codeOf).join(", ") : dash),
+    },
     { key: "lateMinutes", header: "Late", render: (row) => (row.lateMinutes > 0 ? <Badge tone="warning">{`${row.lateMinutes} min`}</Badge> : "On time") },
     {
       key: "outsideCapacity",

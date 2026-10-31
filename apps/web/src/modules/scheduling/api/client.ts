@@ -41,6 +41,8 @@ export interface Operation {
   readyAt?: string;
   priority: number;
   resourceIds: string[];
+  /** Resources booked for the same segments as the primary (BR-23.4). */
+  secondaryResourceIds: string[];
   /** Setup group that drives changeovers against the resource's setup matrix (FR-23.15). */
   setupGroup: string | null;
   /** Route setup time, used when the matrix has no entry for a pair (SCHED-0012). */
@@ -61,6 +63,8 @@ export interface NewOperation {
   readyAt?: string;
   priority?: number;
   resourceIds: string[];
+  /** At most 5, none of them a candidate (BR-23.4). */
+  secondaryResourceIds?: string[];
   setupGroup?: string;
   setupMinutes?: number;
   attributes?: Record<string, string>;
@@ -133,6 +137,8 @@ export interface GanttBar {
   changeoverCurrency: string | null;
   /** Cleaning standard operation set the matrix entry requires; null when none. */
   cleaningSetId: string | null;
+  /** Resources booked with the job's primary resource for the same segments (BR-23.4). */
+  secondaryResourceIds: string[];
   /**
    * Part of the segment lies outside the resource's open capacity as it is
    * now, e.g. inside a downtime added after it was booked (SCHED-0002, AC-23.7).

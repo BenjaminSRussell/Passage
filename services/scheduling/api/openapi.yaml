@@ -233,7 +233,14 @@ paths:
         operation starts no earlier than the last end of its parents, whether
         the parent is scheduled in this run or already holds jobs; an order
         whose parent could not be placed (in this run, or holding an unplaced
-        operation outside it) is unplaced too.
+        operation outside it) is unplaced too. Secondary resources (BR-23.4)
+        are booked for the same segments as the primary: a finite secondary is
+        never held by two jobs at once, and when one is not free, or closed,
+        the primary slot is skipped and the next start tried (an operation
+        with no such slot in the horizon is unplaced with a SCHED-0005
+        message). An infinite run
+        books no capacity on secondaries either, but each segment must still
+        lie in the secondary's open time.
       x-passage-duty: scheduling.run
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -339,6 +346,8 @@ paths:
         with their successors, parents first, up to 500 orders or 5 pegging
         levels (BR-23.10); truncated reports a walk cut at a limit
         (SCHED-0007), and a conflict in any dependent refuses the whole move.
+        A move also needs each secondary resource of the operation (and of every
+        job it pushes) free for the same segments, otherwise SCHED-0005.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -1024,6 +1033,16 @@ components:
           maxItems: 50
           items: { type: string, format: uuid }
           description: Candidate resources, named resource first (FR-23.2).
+        secondaryResourceIds:
+          type: array
+          maxItems: 5
+          items: { type: string, format: uuid }
+          description: >
+            Secondary resources (tools, crews) booked for the same segments as
+            the primary resource (BR-23.4). Distinct, existing, and not among
+            the candidates. A finite secondary is never held by two jobs at once;
+            when one is not free the primary slot is skipped. Unknown resources
+            are refused with SCHED-0107 (422).
         setupGroup: { type: string, minLength: 1, maxLength: 32, description: "Setup group that drives changeovers against the resource's setup matrix (FR-23.15)." }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: 'Route setup time, used when the matrix has no entry for a pair (SCHED-0012).' }
         attributes:
@@ -1043,6 +1062,9 @@ components:
         readyAt: { type: string, format: date-time }
         priority: { type: integer }
         resourceIds:
+          type: array
+          items: { type: string, format: uuid }
+        secondaryResourceIds:
           type: array
           items: { type: string, format: uuid }
         setupGroup: { type: [string, 'null'] }
@@ -1130,7 +1152,11 @@ components:
             - { type: 'null' }
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
-        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7).' }
+        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment.' }
+        secondaryResourceIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: Resources booked for the same segments as the primary resource (BR-23.4); empty when the operation needs none.
     MoveRequest:
       type: object
       required: [start]

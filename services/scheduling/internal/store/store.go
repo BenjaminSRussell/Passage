@@ -70,20 +70,23 @@ type Resource struct {
 // NetworkID names the resource network governing the step from the order's
 // previous operation into this one (FR-23.13).
 type Operation struct {
-	ID           string            `json:"id"`
-	OrderID      string            `json:"orderId"`
-	OperNumber   int               `json:"operNumber"`
-	Minutes      int               `json:"minutes"`
-	DueAt        *time.Time        `json:"dueAt,omitempty"`
-	ReadyAt      *time.Time        `json:"readyAt,omitempty"`
-	Priority     int               `json:"priority"`
-	ResourceIDs  []string          `json:"resourceIds"`
-	SetupGroup   *string           `json:"setupGroup"`
-	SetupMinutes int               `json:"setupMinutes"`
-	Attributes   map[string]string `json:"attributes"`
-	NetworkID    *string           `json:"networkId"`
-	Status       string            `json:"status"`
-	CreatedAt    time.Time         `json:"createdAt"`
+	ID          string     `json:"id"`
+	OrderID     string     `json:"orderId"`
+	OperNumber  int        `json:"operNumber"`
+	Minutes     int        `json:"minutes"`
+	DueAt       *time.Time `json:"dueAt,omitempty"`
+	ReadyAt     *time.Time `json:"readyAt,omitempty"`
+	Priority    int        `json:"priority"`
+	ResourceIDs []string   `json:"resourceIds"`
+	// SecondaryResourceIDs are booked with the primary for the whole job
+	// (BR-23.4).
+	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
+	SetupGroup           *string           `json:"setupGroup"`
+	SetupMinutes         int               `json:"setupMinutes"`
+	Attributes           map[string]string `json:"attributes"`
+	NetworkID            *string           `json:"networkId"`
+	Status               string            `json:"status"`
+	CreatedAt            time.Time         `json:"createdAt"`
 }
 
 // RunWarning is a finding about a placed operation that did not stop the run
@@ -136,6 +139,9 @@ type Bar struct {
 	// resource's open capacity as it is now, for example inside a downtime
 	// added after the job was booked (SCHED-0002, AC-23.7).
 	OutsideCapacity bool `json:"outsideCapacity"`
+	// SecondaryResourceIDs are the resources booked with the job's primary for
+	// the same segments (BR-23.4).
+	SecondaryResourceIDs []string `json:"secondaryResourceIds"`
 }
 
 type RunRequest struct {
@@ -337,6 +343,9 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 			return err
 		}
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[]) and not firmed`, opIDs); err != nil {
+			return err
+		}
+		if err := dropOrphanSecondaries(ctx, tx, opIDs); err != nil {
 			return err
 		}
 		kept, err := placementsOfOrders(ctx, tx, orderIDs)
@@ -543,6 +552,9 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[])`, changed); err != nil {
 			return err
 		}
+		if err := dropOrphanSecondaries(ctx, tx, changed); err != nil {
+			return err
+		}
 		if err := writePlacements(ctx, tx, run.ID, plan.Changes, finite); err != nil {
 			return err
 		}
@@ -627,6 +639,9 @@ func (s *Postgres) CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.Wee
 			return err
 		}
 		rows, err := tx.Query(ctx, `select resource_id::text, job_id::text, start_at, end_at from scheduled_job
+			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))
+			union all
+			select resource_id::text, job_id::text, start_at, end_at from scheduled_job_secondary
 			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))`, from, to, len(rids) == 0, rids)
 		if err != nil {
 			return err
@@ -663,7 +678,8 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 	bars := []Bar{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.segment_no, j.start_at, j.end_at,
-				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id
+				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id,
+				o.secondary_resource_ids::text[]
 			from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
 			where j.end_at > $1 and j.start_at < $2 and ($3::boolean or j.resource_id = any($4::uuid[]))
 			order by j.start_at, j.resource_id, j.segment_no limit $5`,
@@ -675,7 +691,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 			var b Bar
 			var cost *string
 			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
-				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID); err != nil {
+				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID, &b.SecondaryResourceIDs); err != nil {
 				rows.Close()
 				return err
 			}
@@ -704,7 +720,8 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 }
 
 // flagOutsideCapacity marks the bars that are no longer inside their
-// resource's open capacity, calendar and overrides applied (AC-23.7).
+// resource's open capacity, or that of a secondary resource booked with them,
+// calendar and overrides applied (AC-23.7).
 func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
 	resources, _, err := loadResources(ctx, tx)
 	if err != nil {
@@ -727,7 +744,15 @@ func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
 		open[r.ID] = r.Open(from, days)
 	}
 	for i := range bars {
-		bars[i].OutsideCapacity = domain.OutsideOpen(open[bars[i].ResourceID], bars[i].Start, bars[i].End)
+		b := &bars[i]
+		b.OutsideCapacity = domain.OutsideOpen(open[b.ResourceID], b.Start, b.End)
+		// A secondary resource is booked for the same segment, so a downtime
+		// on it (or a calendar that no longer covers it) flags the bar too.
+		for _, sid := range b.SecondaryResourceIDs {
+			if iv, ok := open[sid]; ok && domain.OutsideOpen(iv, b.Start, b.End) {
+				b.OutsideCapacity = true
+			}
+		}
 	}
 	return nil
 }
@@ -758,7 +783,25 @@ func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.P
 				runID, finite[pl.ResourceID], pl.LateMinutes, changeover, cost, currency, cleaning)
 		}
 	}
+	for _, pl := range ps {
+		for _, sid := range pl.Secondaries {
+			for i, seg := range pl.Segments {
+				batch.Queue(`insert into scheduled_job_secondary (tenant_id, id, job_id, resource_id, segment_no, start_at, end_at, run_id, finite)
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+					tenantID, ids.New(), pl.OperationID, sid, i+1, seg.Start, seg.End, runID, finite[sid])
+			}
+		}
+	}
 	return tx.SendBatch(ctx, batch).Close()
+}
+
+// dropOrphanSecondaries deletes the secondary bookings of operations that no
+// longer hold a primary placement: called after their scheduled_job rows are
+// deleted, so the secondaries of firmed jobs, which stay, are kept.
+func dropOrphanSecondaries(ctx context.Context, tx pgx.Tx, opIDs []string) error {
+	_, err := tx.Exec(ctx, `delete from scheduled_job_secondary s where s.job_id = any($1::uuid[])
+		and not exists (select 1 from scheduled_job j where j.tenant_id = s.tenant_id and j.job_id = s.job_id)`, opIDs)
+	return err
 }
 
 func setStatus(ctx context.Context, tx pgx.Tx, opIDs []string, status string) error {
@@ -792,7 +835,7 @@ func enqueuePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain
 		evt, err := newEvent(ctx, schedevents.JobScheduled, pl.OperationID, schedevents.JobScheduledData{JobID: pl.OperationID,
 			OrderID: pl.OrderID, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
 			ChangeoverMinutes: pl.ChangeoverMinutes, ChangeoverCost: costOf(pl), ChangeoverCurrency: currencyOf(pl),
-			CleaningSetID: pl.CleaningSetID, RunID: runID, Firmed: firmed})
+			CleaningSetID: pl.CleaningSetID, SecondaryResourceIDs: pl.Secondaries, RunID: runID, Firmed: firmed})
 		if err != nil {
 			return err
 		}

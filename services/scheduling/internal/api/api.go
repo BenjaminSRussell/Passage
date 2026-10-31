@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -83,17 +84,20 @@ type resourceRequest struct {
 }
 
 type operationRequest struct {
-	OrderID      string            `json:"orderId"`
-	OperNumber   int               `json:"operNumber"`
-	Minutes      int               `json:"minutes"`
-	DueAt        *time.Time        `json:"dueAt"`
-	ReadyAt      *time.Time        `json:"readyAt"`
-	Priority     *int              `json:"priority"`
-	ResourceIDs  []string          `json:"resourceIds"`
-	SetupGroup   *string           `json:"setupGroup"`
-	SetupMinutes *int              `json:"setupMinutes"`
-	Attributes   map[string]string `json:"attributes"`
-	NetworkID    *string           `json:"networkId"`
+	OrderID     string     `json:"orderId"`
+	OperNumber  int        `json:"operNumber"`
+	Minutes     int        `json:"minutes"`
+	DueAt       *time.Time `json:"dueAt"`
+	ReadyAt     *time.Time `json:"readyAt"`
+	Priority    *int       `json:"priority"`
+	ResourceIDs []string   `json:"resourceIds"`
+	// SecondaryResourceIds are booked for the same segments as the primary
+	// (BR-23.4); none of them may be a candidate.
+	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
+	SetupGroup           *string           `json:"setupGroup"`
+	SetupMinutes         *int              `json:"setupMinutes"`
+	Attributes           map[string]string `json:"attributes"`
+	NetworkID            *string           `json:"networkId"`
 }
 
 // Operation attribute limits: block conditions match on these (FR-23.17).
@@ -361,9 +365,15 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	for i, id := range req.ResourceIDs {
 		req.ResourceIDs[i] = strings.ToLower(id)
 	}
+	for i, id := range req.SecondaryResourceIDs {
+		req.SecondaryResourceIDs[i] = strings.ToLower(id)
+	}
 	fields := map[string]string{}
 	if !ids.Valid(req.OrderID) {
 		fields["orderId"] = "must be a UUID"
+	}
+	if msg := validSecondaries(req.SecondaryResourceIDs, req.ResourceIDs); msg != "" {
+		fields["secondaryResourceIds"] = msg
 	}
 	if req.OperNumber < 1 {
 		fields["operNumber"] = "must be at least 1"
@@ -417,7 +427,7 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
 		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
-		SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
+		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -430,6 +440,27 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
 	httpx.JSON(w, status, op)
+}
+
+// validSecondaries checks the secondary resources of an operation: at most
+// domain.MaxSecondaries distinct UUIDs, none of them a candidate (BR-23.4).
+func validSecondaries(secondary, candidates []string) string {
+	if len(secondary) > domain.MaxSecondaries {
+		return fmt.Sprintf("must list at most %d resources", domain.MaxSecondaries)
+	}
+	seen := map[string]bool{}
+	for _, id := range secondary {
+		switch {
+		case !ids.Valid(id):
+			return "every entry must be a UUID"
+		case seen[id]:
+			return "must not repeat a resource"
+		case slices.Contains(candidates, id):
+			return "a candidate resource cannot also be a secondary resource"
+		}
+		seen[id] = true
+	}
+	return ""
 }
 
 // validAttributes checks the attributes block conditions match on: at most 20
