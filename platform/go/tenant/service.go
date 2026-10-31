@@ -47,6 +47,8 @@ const (
 var (
 	ErrServiceToken   = errors.New("invalid service token")
 	ErrNoServiceGrant = errors.New("no service grant")
+
+	ErrReplayStoreUnavailable = errors.New("service token replay store unavailable")
 )
 
 // serviceGrants is the static per-service duty table: caller -> target -> duties.
@@ -420,29 +422,33 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	if !v.remember(c.Jti, c.Exp, now) {
 		return ServiceClaims{}, ErrServiceToken
 	}
-	if v.shared != nil && !v.rememberShared(ctx, c) {
-		return ServiceClaims{}, ErrServiceToken
+	if v.shared != nil {
+		if err := v.rememberShared(ctx, c); err != nil {
+			return ServiceClaims{}, err
+		}
 	}
 	return c, nil
 }
 
-// rememberShared reports false on a token id another replica already accepted,
-// and fails closed: a store error refuses the token (logged and counted), since
+// rememberShared returns ErrServiceToken for a token id another replica already
+// accepted, and fails closed: a store error returns ErrReplayStoreUnavailable
+// (logged and counted, and answered 503 so callers retry), since
 // the store is the service's own database and a token that cannot be recorded
 // cannot be proven fresh.
-func (v *ServiceVerifier) rememberShared(ctx context.Context, c ServiceClaims) bool {
+func (v *ServiceVerifier) rememberShared(ctx context.Context, c ServiceClaims) error {
 	ctx, cancel := context.WithTimeout(ctx, sharedReplayTimeout)
 	defer cancel()
 	fresh, err := v.shared.Remember(ctx, c.Tid, c.Iss+":"+c.Jti, time.Unix(c.Exp, 0))
 	if err != nil {
 		replayStoreFailures.Add(1)
 		slog.ErrorContext(ctx, "shared service token replay store failed; token refused", "err", err, "service", c.Iss)
-		return false
+		return ErrReplayStoreUnavailable
 	}
 	if !fresh {
 		replaysRefused.Add(1)
+		return ErrServiceToken
 	}
-	return fresh
+	return nil
 }
 
 // remember records jti until exp and reports false on a replay or a full cache.

@@ -17,6 +17,11 @@ import (
 
 const insufficientPrivilege = "42501"
 
+// ServiceTokenReplayTable is exempt from the FORCE check: RLS is enabled but not
+// forced so its SECURITY DEFINER purge can delete every tenant's expired ids
+// (allowlisted in tools/rlscheck).
+const ServiceTokenReplayTable = "service_token_replay"
+
 // AssertTenantRLS fails the test for every table in the current schema with a
 // tenant_id column that lacks ENABLE and FORCE row-level security, a permissive
 // tenant policy with USING and WITH CHECK, or (when it carries legal_entity_id)
@@ -49,7 +54,7 @@ order by c.relname`)
 			t.Fatal(err)
 		}
 		tables++
-		if !enabled || !forced {
+		if !enabled || (!forced && name != ServiceTokenReplayTable) {
 			t.Errorf("%s: row-level security enabled=%v forced=%v", name, enabled, forced)
 		}
 		if !tenantPolicy {

@@ -65,9 +65,6 @@ func (s *PostgresReplayStore) Remember(ctx context.Context, tenantID, id string,
 		}
 		return results.Close()
 	})
-	if err != nil && purge {
-		s.nextPurge.Store(0)
-	}
 	return fresh, err
 }
 

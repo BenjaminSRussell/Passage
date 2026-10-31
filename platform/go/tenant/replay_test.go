@@ -107,8 +107,17 @@ func TestVerifierFailsClosedWhenTheSharedStoreFailsAndCountsIt(t *testing.T) {
 	token, _ := signer.Mint("ledger", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "u"}, "")
 	var before, after bytes.Buffer
 	tenant.WriteReplayMetrics(&before)
-	if _, err := verifier.Verify(token); !errors.Is(err, tenant.ErrServiceToken) {
-		t.Fatalf("a store failure must refuse the token: %v", err)
+	if _, err := verifier.Verify(token); !errors.Is(err, tenant.ErrReplayStoreUnavailable) || errors.Is(err, tenant.ErrServiceToken) {
+		t.Fatalf("a store failure must refuse the token as unavailable, not as invalid: %v", err)
+	}
+	handler := tenant.MiddlewareWith(verifier.WithClock(time.Now))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	other, _ := signer.Mint("ledger", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "u"}, "")
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set(tenant.HeaderServiceToken, other)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("a store failure must be a retryable 503, got %d %v", rec.Code, rec.Header())
 	}
 	tenant.WriteReplayMetrics(&after)
 	if before.String() == after.String() || !strings.Contains(after.String(), "passage_service_token_replay_store_failures_total") {
