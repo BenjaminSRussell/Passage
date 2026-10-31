@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode, type RefObject } from "react";
-import { Alert } from "../../../shell/ui";
+import { Alert, Button } from "../../../shell/ui";
 import {
   ASSIGNMENT_ENDED,
   ASSIGNMENT_OVERLAP,
@@ -104,4 +104,12 @@ export function ApiFailure({ error, title, duty, scopeNote, action }: ApiFailure
       {notice.hint ? <p>{notice.hint}</p> : null}
     </Alert>
   );
+}
+
+export function retryAction(error: unknown, fetching: boolean, refetch: () => void) {
+  return canRetry(error) ? (
+    <Button variant="secondary" loading={fetching} onClick={refetch}>
+      Try again
+    </Button>
+  ) : undefined;
 }

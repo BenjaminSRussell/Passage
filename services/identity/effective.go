@@ -161,7 +161,7 @@ func (c *Catalogue) Duty(name string) (DutyInfo, bool) {
 	if !ok {
 		return DutyInfo{}, false
 	}
-	return DutyInfo{Name: name, ServiceOnly: d.serviceOnly, Permissions: slices.Clone(d.declared)}, true
+	return DutyInfo{Name: name, ServiceOnly: d.serviceOnly, Permissions: append([]DutyPermission{}, d.declared...)}, true
 }
 
 // Routes lists every distinct resource pattern and method, sorted.

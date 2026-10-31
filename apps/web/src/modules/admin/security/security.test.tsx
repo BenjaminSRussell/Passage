@@ -51,10 +51,13 @@ describe("admin security nav", () => {
       "/admin/security/permissions": "View effective permissions",
       "/admin/security/assignments": "Maintain security roles",
       "/admin/security/legal-entities": "Maintain legal entities",
+      "/admin/security/users": "Maintain users",
+      "/admin/security/roles": "Maintain security roles",
     });
     const shown = (held: string[]) => visibleNav(admin.nav, held).map((n) => n.to).filter((to) => to.startsWith("/admin/security"));
     expect(shown([])).toEqual([]);
-    expect(shown(["Maintain security roles"])).toEqual(["/admin/security/assignments"]);
+    expect(shown(["Maintain security roles"])).toEqual(["/admin/security/assignments", "/admin/security/roles"]);
+    expect(shown(["Maintain users"])).toEqual(["/admin/security/users"]);
   });
 });
 
