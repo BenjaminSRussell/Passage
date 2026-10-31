@@ -104,6 +104,20 @@ func TestWithholding_Failures(t *testing.T) {
 	}
 }
 
+func TestWithholding_ScopeRefusalAndMissingPrincipalAreConfigFaults(t *testing.T) {
+	signer, _ := signed(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+	c := tax.New(srv.URL, nil).WithSigner(signer)
+	if _, err := c.Withholding(ctx(), "00000000-0000-0000-0000-0000000000b2", request()); !errors.Is(err, tax.ErrConfig) || called {
+		t.Fatalf("scope refusal = %v called=%v", err, called)
+	}
+	if _, err := c.Withholding(context.Background(), entity, request()); !errors.Is(err, tax.ErrConfig) || called {
+		t.Fatalf("no principal = %v called=%v", err, called)
+	}
+}
+
 func TestWithholding_NeedsASignerAndNeverFollowsRedirects(t *testing.T) {
 	leaked := false
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))

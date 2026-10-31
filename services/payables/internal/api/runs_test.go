@@ -591,7 +591,7 @@ func TestPaymentRun_PartyRefusalsAreNonRetryableConfigFaultsAndOutagesStayRetrya
 		f.party.status = status
 		f.party.mu.Unlock()
 		rec := f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", "")
-		wantProblem(t, rec, http.StatusInternalServerError, "COM-0500")
+		wantProblem(t, rec, http.StatusUnprocessableEntity, "AP-RUN-013")
 		if rec.Header().Get("Retry-After") != "" {
 			t.Fatalf("status %d: a refusal must not be retried", status)
 		}

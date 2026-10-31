@@ -26,7 +26,10 @@ const (
 	maxResponseSize = 1 << 20
 )
 
-var ErrUnsigned = errors.New("tax: withholding needs a service signing key")
+var (
+	ErrConfig   = errors.New("tax: the service identity cannot be used for this request")
+	ErrUnsigned = errors.New("tax: withholding needs a service signing key")
+)
 
 type StatusError struct{ Status int }
 
@@ -96,7 +99,7 @@ func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Reque
 	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return decimal.Zero, errors.New("tax: no principal in context")
+		return decimal.Zero, fmt.Errorf("%w: no principal in context", ErrConfig)
 	}
 	payload, err := json.Marshal(requestBody{
 		Currency: in.Currency, PartyType: "vendor", PaymentDate: in.PaymentDate, Code: in.Code.Code,
@@ -111,7 +114,7 @@ func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Reque
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyWithholding}); err != nil {
-		return decimal.Zero, fmt.Errorf("tax: %w", err)
+		return decimal.Zero, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

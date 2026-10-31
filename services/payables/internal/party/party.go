@@ -28,6 +28,7 @@ const (
 
 var (
 	ErrVendorNotFound = errors.New("party: vendor not found")
+	ErrConfig         = errors.New("party: the service identity cannot be used for this request")
 	ErrUnsigned       = errors.New("party: bank details need a service signing key; the end user's headers are never forwarded for a reveal")
 )
 
@@ -99,14 +100,14 @@ func (c *Client) BankAccounts(ctx context.Context, legalEntityID, vendorID strin
 	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return nil, errors.New("party: no principal in context")
+		return nil, fmt.Errorf("%w: no principal in context", ErrConfig)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+fmt.Sprintf(revealPath, url.PathEscape(vendorID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("party: %w", err)
 	}
 	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyBankReveal}); err != nil {
-		return nil, fmt.Errorf("party: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

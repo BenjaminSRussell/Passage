@@ -113,7 +113,14 @@ func TestBankAccounts_RefusesToSignForAnEntityOutsideTheUsersScope(t *testing.T)
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer srv.Close()
-	if _, err := party.New(srv.URL, nil).WithSigner(signer).BankAccounts(ctx(), "00000000-0000-0000-0000-0000000000b2", vendor); err == nil || called {
+	if _, err := party.New(srv.URL, nil).WithSigner(signer).BankAccounts(ctx(), "00000000-0000-0000-0000-0000000000b2", vendor); !errors.Is(err, party.ErrConfig) || called {
 		t.Fatalf("err %v called %v: a token for an entity the user cannot act in must never be sent", err, called)
+	}
+}
+
+func TestBankAccounts_NoPrincipalIsAConfigFault(t *testing.T) {
+	signer, _ := signed(t)
+	if _, err := party.New("http://unused", nil).WithSigner(signer).BankAccounts(context.Background(), entity, vendor); !errors.Is(err, party.ErrConfig) {
+		t.Fatalf("err = %v", err)
 	}
 }

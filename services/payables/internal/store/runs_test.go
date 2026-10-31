@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -909,5 +910,40 @@ func TestGroupInsert_RefusesWithheldAmountWithoutBase(t *testing.T) {
 	}
 	if _, _, err := s.CreateProposal(alice, in); err == nil {
 		t.Fatal("a group that withholds tax without a stored base must be refused by the database")
+	}
+}
+
+func TestApproval_TakesTheVendorLockEvenForAProposalWithoutWithholding(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	threeItems(t, s)(alice)
+	created, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := s.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	key := "ap-withholding:" + leA + ":" + vendor1 + ":USD:2027"
+	if _, err := holder.Exec(context.Background(), `select pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("approval finished (%v) while another transaction held the vendor lock", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := holder.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("approval after the lock was released: %v", err)
 	}
 }

@@ -564,11 +564,14 @@ func verifyPaidBases(ctx context.Context, tx pgx.Tx, proposalID, legalEntityID s
 	if unbased {
 		return ErrPaidChanged
 	}
-	rows, err := tx.Query(ctx, `select vendor_id::text, currency, paid_base::text from ap_payment_proposal_group where proposal_id = $1::uuid and paid_base is not null order by vendor_id, currency, id`, proposalID)
+	rows, err := tx.Query(ctx, `select vendor_id::text, currency, paid_base::text from ap_payment_proposal_group where proposal_id = $1::uuid order by vendor_id, currency, id`, proposalID)
 	if err != nil {
 		return err
 	}
-	type tracked struct{ vendor, currency, base string }
+	type tracked struct {
+		vendor, currency string
+		base             *string
+	}
 	var groups []tracked
 	for rows.Next() {
 		var t tracked
@@ -586,11 +589,14 @@ func verifyPaidBases(ctx context.Context, tx pgx.Tx, proposalID, legalEntityID s
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "ap-withholding:"+legalEntityID+":"+g.vendor+":"+g.currency+":"+strconv.Itoa(runYear)); err != nil {
 			return err
 		}
+		if g.base == nil {
+			continue
+		}
 		now, err := paidToDateTx(ctx, tx, legalEntityID, g.vendor, g.currency, runYear)
 		if err != nil {
 			return err
 		}
-		stored, err := decimal.NewFromString(g.base)
+		stored, err := decimal.NewFromString(*g.base)
 		if err != nil {
 			return err
 		}

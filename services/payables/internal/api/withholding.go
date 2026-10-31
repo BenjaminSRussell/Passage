@@ -103,7 +103,7 @@ func (a *API) withholdingFailure(w http.ResponseWriter, r *http.Request, err err
 		return
 	}
 	a.withholding.faults.Add(1)
-	a.upstreamFailure(w, r, "withholding calculation", err)
+	a.upstreamFailure(w, r, "withholding calculation", err, false)
 }
 
 func (a *API) writeWithholdingMetrics(w http.ResponseWriter) {

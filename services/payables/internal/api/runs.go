@@ -609,14 +609,14 @@ func selectAccount(g domain.ProposalGroup, accounts []party.BankAccount) (party.
 
 func (a *API) partyUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	a.runs.partyFaults.Add(1)
-	a.upstreamFailure(w, r, "party service", err)
+	a.upstreamFailure(w, r, "party service", err, true)
 }
 
 func retryableStatus(status int) bool {
 	return status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
 }
 
-func (a *API) upstreamFailure(w http.ResponseWriter, r *http.Request, what string, err error) {
+func (a *API) upstreamFailure(w http.ResponseWriter, r *http.Request, what string, err error, terminal4xx bool) {
 	var ps *party.StatusError
 	var ts *tax.StatusError
 	retryable := true
@@ -625,11 +625,15 @@ func (a *API) upstreamFailure(w http.ResponseWriter, r *http.Request, what strin
 		retryable = retryableStatus(ps.Status)
 	case errors.As(err, &ts):
 		retryable = retryableStatus(ts.Status)
-	case errors.Is(err, party.ErrUnsigned), errors.Is(err, tax.ErrUnsigned):
+	case errors.Is(err, party.ErrUnsigned), errors.Is(err, tax.ErrUnsigned), errors.Is(err, party.ErrConfig), errors.Is(err, tax.ErrConfig):
 		retryable = false
 	}
 	if !retryable {
 		slog.Error(what+" refused the request; service identity or grants are misconfigured", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		if terminal4xx {
+			a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, what+" refused the request; this is a configuration fault and retrying will not help")
+			return
+		}
 		fail(w, r, httpx.NewProblem(http.StatusInternalServerError, "COM-0500", what+" refused the request; this is a configuration fault and retrying will not help"))
 		return
 	}
