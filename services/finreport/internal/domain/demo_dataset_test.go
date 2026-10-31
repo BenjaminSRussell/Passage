@@ -19,10 +19,11 @@ func cents(v int64) decimal.Decimal { return decimal.New(v, -2) }
 
 func demoFY2026Journals() []demoJournal {
 	js := []demoJournal{{0, "100100", "300100", cents(500000000), false}}
-	revenue, expenses := decimal.Zero, decimal.Zero
+	revenue := decimal.Zero
 	for p := 1; p <= 12; p++ {
 		sale := cents(10000037 + int64(p)*111111)
 		collect := cents(8000013 + int64(p)*50007)
+		revenue = revenue.Add(sale)
 		cogs := cents(4000041 + int64(p)*22222)
 		opex := cents(1200005 + int64(p)*333)
 		js = append(js,
@@ -30,13 +31,13 @@ func demoFY2026Journals() []demoJournal {
 			demoJournal{p, "100100", "110100", collect, false},
 			demoJournal{p, "500100", "200100", cogs, false},
 			demoJournal{p, "200100", "100100", cents(3000029), false},
-			demoJournal{p, "610100", "100100", opex, false})
-		revenue, expenses = revenue.Add(sale), expenses.Add(cogs).Add(opex)
+			demoJournal{p, "610100", "100100", opex, false},
+			demoJournal{p, "610100", "155100", cents(2083333), false})
 		switch p {
 		case 3:
-			js = append(js, demoJournal{p, "155100", "100100", cents(25000099), false})
+			js = append(js, demoJournal{p, "150100", "100100", cents(25000099), false})
 		case 6:
-			js = append(js, demoJournal{p, "100100", "230100", cents(10000000), false})
+			js = append(js, demoJournal{p, "100100", "220100", cents(10000000), false})
 		}
 	}
 	cogsTotal, opexTotal := decimal.Zero, decimal.Zero
@@ -152,6 +153,34 @@ func TestDemoDataset_StatementsTieToTrialBalanceAndCashFlowReconciles(t *testing
 			requireValue(t, cf, "CF_NET", "YTD", journalSum(js, 1, at, "100100", true))
 			requireValue(t, cf, "CF_CHK", "YTD", decimal.Zero)
 			requireValue(t, cf, "CF_CHK", "P", decimal.Zero)
+
+			requireValue(t, cf, "CF_ADJ", "P", cents(2083333))
+			requireValue(t, cf, "CF_ADJ", "YTD", cents(2083333*int64(at)))
+			requireValue(t, cf, "CF_INV", "YTD", journalSum(js, 1, at, "150100", true).Neg())
+			requireValue(t, cf, "CF_FIN", "YTD", journalSum(js, 1, at, "220100", true).Neg())
+			wantInv, wantFin := decimal.Zero, decimal.Zero
+			if at == 3 {
+				wantInv = cents(25000099).Neg()
+			}
+			if at == 6 {
+				wantFin = cents(10000000)
+			}
+			requireValue(t, cf, "CF_INV", "P", wantInv)
+			requireValue(t, cf, "CF_FIN", "P", wantFin)
+			if at >= 3 && cellAt(t, cf, "CF_INV", "YTD").Value.IsZero() {
+				t.Fatal("investing section is empty after the equipment purchase")
+			}
+			if at >= 6 && cellAt(t, cf, "CF_FIN", "YTD").Value.IsZero() {
+				t.Fatal("financing section is empty after the loan")
+			}
+
+			requireValue(t, bs, "ASSETS", "CUR", cellAt(t, tb, "ASSETS", "CLOSE").Value)
+			tbPL := cellAt(t, tb, "REVENUE", "CLOSE").Value.Add(cellAt(t, tb, "EXPENSE", "CLOSE").Value)
+			if at < 12 {
+				requireValue(t, pl, "RES", "YTD", tbPL.Neg())
+			} else if !tbPL.IsZero() {
+				t.Fatalf("closed year: trial balance P&L accounts = %s, want 0.00 after closing entries", tbPL)
+			}
 			if err := CheckCashFlow(cfIn, cf); err != nil {
 				t.Fatalf("cash flow does not reconcile: %v", err)
 			}
