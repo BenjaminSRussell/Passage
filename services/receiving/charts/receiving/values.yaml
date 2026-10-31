@@ -20,7 +20,6 @@ postingProfile:
   grirAccount: ""
   ppvAccount: ""
   vendorControlAccount: ""
-allowLegacyPoLine: false
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }

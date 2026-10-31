@@ -782,8 +782,8 @@ components:
         With poLineNo the line is validated against the purchase order line (same legal entity, vendor, currency,
         product and unit, open quantity above zero), orderedRemaining is the order quantity not yet received and
         unitPrice the net price per unit, and poLineId is derived from the order line; supplying any of them is 400. The open quantity is the order line
-        quantity less what non-cancelled registered or posted receipts here already took. poLineNo is required unless the deployment sets
-        RECEIVING_ALLOW_LEGACY_PO_LINE=1; without it poLineId, orderedRemaining and unitPrice are required and trusted as sent. Either every line carries poLineNo or none does.
+        quantity less what non-cancelled registered or posted receipts here already took. poLineNo is required whenever the purchase order lookup is configured
+        (PURCHASING_URL); only a local deployment with fakes takes a line without it, and then poLineId, orderedRemaining and unitPrice are required and trusted as sent. Either every line carries poLineNo or none does.
       properties:
         poLineId: { type: string, format: uuid }
         poLineNo: { type: integer, minimum: 1 }

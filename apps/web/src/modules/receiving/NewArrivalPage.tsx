@@ -1,19 +1,18 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
-import { createArrival, newKey, type ArrivalInput } from "./api/client";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { createArrival, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
 import { DECIMAL, describeFailure, fieldErrors, UUID } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
 
 const MAX_LINES = 500;
+const LINE_NO = /^[1-9]\d*$/;
 
 export interface ArrivalLineDraft {
-  poLineId: string;
+  poLineNo: string;
   productId: string;
-  orderedRemaining: string;
   overDeliveryPct: string;
-  unitPrice: string;
   unit: string;
   batchTracked: boolean;
   serialTracked: boolean;
@@ -34,11 +33,9 @@ export interface ArrivalDraft {
 type Errors = Record<string, string>;
 
 export const emptyLine: ArrivalLineDraft = {
-  poLineId: "",
+  poLineNo: "",
   productId: "",
-  orderedRemaining: "",
   overDeliveryPct: "0",
-  unitPrice: "",
   unit: "",
   batchTracked: false,
   serialTracked: false,
@@ -70,15 +67,22 @@ export function validateArrival(v: ArrivalDraft): Errors {
   if (v.lines.length < 1 || v.lines.length > MAX_LINES) errors.lines = `Enter 1 to ${MAX_LINES} lines.`;
   v.lines.forEach((l, i) => {
     const at = (field: string) => `lines[${i}].${field}`;
-    if (!UUID.test(l.poLineId)) errors[at("poLineId")] = "Enter a UUID.";
+    if (!LINE_NO.test(l.poLineNo)) errors[at("poLineNo")] = "Choose the purchase order line.";
+    else if (v.lines.findIndex((o) => o.poLineNo === l.poLineNo) !== i) errors[at("poLineNo")] = "Use each purchase order line once.";
     if (!UUID.test(l.productId)) errors[at("productId")] = "Enter a UUID.";
-    if (!DECIMAL.test(l.orderedRemaining) || Number(l.orderedRemaining) <= 0) errors[at("orderedRemaining")] = "Enter a quantity above zero.";
     if (!DECIMAL.test(l.overDeliveryPct) || Number(l.overDeliveryPct) > 100) errors[at("overDeliveryPct")] = "Enter a percent from 0 to 100.";
-    if (!DECIMAL.test(l.unitPrice)) errors[at("unitPrice")] = "Enter a price of zero or more.";
     if (l.unit.trim() === "" || l.unit.length > 16) errors[at("unit")] = "Enter a unit of up to 16 characters.";
   });
   return errors;
 }
+
+/** Copies the product and unit of the picked purchase order line, which the service checks the arrival line against. */
+export function pickPOLine(line: ArrivalLineDraft, poLineNo: string, poLines: PurchaseOrderLine[]): ArrivalLineDraft {
+  const picked = poLines.find((l) => String(l.lineNo) === poLineNo);
+  return picked ? { ...line, poLineNo, productId: picked.productId ?? line.productId, unit: picked.unit } : { ...line, poLineNo };
+}
+
+const poLineLabel = (l: PurchaseOrderLine) => `${l.lineNo}: ${l.description ?? l.productId ?? "line"} (${l.qty} ${l.unit})`;
 
 export function toArrivalInput(v: ArrivalDraft): ArrivalInput {
   return {
@@ -91,11 +95,9 @@ export function toArrivalInput(v: ArrivalDraft): ArrivalInput {
     receiptDate: v.receiptDate,
     currency: v.currency,
     lines: v.lines.map((l) => ({
-      poLineId: l.poLineId,
+      poLineNo: Number(l.poLineNo),
       productId: l.productId,
-      orderedRemaining: l.orderedRemaining,
       overDeliveryPct: l.overDeliveryPct,
-      unitPrice: l.unitPrice,
       unit: l.unit.trim(),
       batchTracked: l.batchTracked,
       serialTracked: l.serialTracked,
@@ -112,6 +114,12 @@ export function NewArrivalPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const purchaseOrder = useQuery({
+    queryKey: ["receiving", "purchase-order-lines", values.purchaseOrderId],
+    queryFn: () => fetchPurchaseOrderLines(values.purchaseOrderId),
+    enabled: UUID.test(values.purchaseOrderId),
+  });
+  const poLines = purchaseOrder.data?.filter((l) => l.status !== "CANCELLED");
 
   const update = (patch: Partial<ArrivalDraft>) => setValues((prev) => ({ ...prev, ...patch }));
   const updateLine = (index: number, patch: Partial<ArrivalLineDraft>) =>
@@ -176,11 +184,29 @@ export function NewArrivalPage() {
             return (
               <fieldset key={i} className={styles.group}>
                 <legend className={styles.legend}>Line {n}</legend>
-                {field("poLineId", "PO line ID", { mono: true })}
+                <FormField
+                  id={`line-${i}-poLineNo`}
+                  label={`Line ${n} PO line`}
+                  hint={poLines ? "Fills in the product and unit; the service takes the open quantity and price from it." : purchaseOrder.isError ? "Could not read the purchase order's lines; enter the line number." : "Enter the purchase order ID to choose from its lines."}
+                  error={errors[at("poLineNo")]}
+                >
+                  {(c) =>
+                    poLines ? (
+                      <Select {...c} value={line.poLineNo} onChange={(e) => updateLine(i, pickPOLine(line, e.target.value, poLines))} invalid={Boolean(errors[at("poLineNo")])}>
+                        <option value="">Choose a line</option>
+                        {poLines.map((l) => (
+                          <option key={l.lineNo} value={String(l.lineNo)}>
+                            {poLineLabel(l)}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input {...c} inputMode="numeric" value={line.poLineNo} onChange={(e) => updateLine(i, { poLineNo: e.target.value })} invalid={Boolean(errors[at("poLineNo")])} />
+                    )
+                  }
+                </FormField>
                 {field("productId", "product ID", { mono: true })}
-                {field("orderedRemaining", "ordered remaining")}
                 {field("overDeliveryPct", "over-delivery percent")}
-                {field("unitPrice", "unit price")}
                 {field("unit", "unit")}
                 <span className={styles.check}>
                   <Input id={`line-${i}-batchTracked`} type="checkbox" checked={line.batchTracked} onChange={(e) => updateLine(i, { batchTracked: e.target.checked })} />
