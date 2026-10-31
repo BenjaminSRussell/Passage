@@ -47,6 +47,9 @@ spec:
       # set by the secret rotation job, not here.
       postInitApplicationSQL:
         - CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS
+        - CREATE ROLE hr_loan_gate NOLOGIN NOSUPERUSER BYPASSRLS
+        - GRANT hr_loan_gate TO passage_app
+        - GRANT CREATE ON SCHEMA public TO hr_loan_gate
   {{- else }}
   bootstrap:
     pg_basebackup:

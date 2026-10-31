@@ -16,6 +16,9 @@ data:
   10-app-role.sh: |
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
     CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$APP_PASSWORD';
+    CREATE ROLE hr_loan_gate NOLOGIN NOSUPERUSER BYPASSRLS;
+    GRANT hr_loan_gate TO passage_app;
+    GRANT CREATE ON SCHEMA public TO hr_loan_gate;
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
   20-receiving-db.sh: |
@@ -57,7 +60,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "4"
+        passage.dev/init-rev: "5"
     spec:
       securityContext:
         runAsNonRoot: true

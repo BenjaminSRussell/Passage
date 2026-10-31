@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	hrevents "github.com/BenjaminSRussell/passage/services/hr/internal/events"
 	"github.com/BenjaminSRussell/passage/services/hr/migrations"
 )
@@ -271,4 +273,61 @@ func TestClosingCompensationEmitsAnEvent(t *testing.T) {
 	if n := f.outboxTypes(t)[hrevents.CompensationChanged]; n != 3 {
 		t.Fatalf("compensation events = %d, want open, close and reopen (3)", n)
 	}
+}
+
+func TestWorksheetSubmitSeesBudgetUsedInOtherEntities(t *testing.T) {
+	if os.Getenv(testkit.EnvURL) == "" || os.Getenv(testkit.EnvAppURL) == "" {
+		t.Skip("PASSAGE_TEST_DATABASE_URL and PASSAGE_TEST_APP_DATABASE_URL are needed for the RLS test")
+	}
+	admin, app := testkit.DBWithApp(t)
+	bg := context.Background()
+	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := New(app, testSealer(t), 10)
+	at(s, day(time.February, 1))
+	entityA, entityB, dept := ids.New(), ids.New(), ids.New()
+	scoped := func(le string) context.Context {
+		return tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "user-test", Duties: testkit.ScopeDuties(le)})
+	}
+	all, inA := scoped(""), scoped(entityA)
+	plan, _, err := s.CreateCompensationPlan(all, CompensationPlan{Code: "SAL", Name: "Salary", PayBasis: "ANNUAL", Currency: "USD"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, lo, hi := "USD", "50000", "70000"
+	if _, _, err := s.CreateJob(all, Job{Code: "MGR", Title: "Manager", JobType: "EXEMPT", PayCurrency: &cur, PayMin: &lo, PayMax: &hi}, ""); err != nil {
+		t.Fatal(err)
+	}
+	hire := func(entity, number, name string) Worker {
+		pos := mustPosition(t, s, all, number, dept, entity, "1.00", false, day(time.January, 1), nil)
+		w := mustWorker(t, s, all, name)
+		if _, _, err := s.SubmitAction(all, ActionInput{ActionType: hrevents.ActionHire, WorkerID: w.ID, EffectiveDate: day(time.January, 5),
+			Payload: ActionPayload{LegalEntityID: entity, EmploymentType: "FULL_TIME", PositionID: pos.ID, CompPlanID: plan.ID, Amount: "60000.00", Currency: "USD"}}, ""); err != nil {
+			t.Fatalf("hire %s: %v", name, err)
+		}
+		return w
+	}
+	inB, inAWorker := hire(entityB, "POS-B", "BudgetB"), hire(entityA, "POS-A", "BudgetA")
+	matrix := []domain.GuidelineRow{{Rating: 3, CompaMin: decimal.RequireFromString("0.9"), CompaMax: decimal.RequireFromString("1.1"), PctMin: decimal.NewFromInt(3), PctMax: decimal.NewFromInt(5)}}
+	cycle, _, err := s.CreateCompCycle(all, CompCycle{Name: "Merit", Kind: "MERIT", EffectiveDate: "2026-07-01", Currency: "USD", GuidelineMatrix: matrix,
+		Budgets: []CycleBudget{{DepartmentID: dept, BudgetAmount: "3000"}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdvanceCompCycle(all, cycle.ID, "MANAGER_INPUT"); err != nil {
+		t.Fatal(err)
+	}
+	managerB, managerA := mustWorker(t, s, all, "MgrB"), mustWorker(t, s, all, "MgrA")
+	if _, err := s.SaveWorksheet(all, cycle.ID, managerB.ID, []WorksheetRowInput{{WorkerID: inB.ID, Rating: 3, ProposedPct: "5"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SubmitWorksheet(all, cycle.ID, managerB.ID); err != nil {
+		t.Fatalf("entity B submit at exactly the budget: %v", err)
+	}
+	if _, err := s.SaveWorksheet(inA, cycle.ID, managerA.ID, []WorksheetRowInput{{WorkerID: inAWorker.ID, Rating: 3, ProposedPct: "3"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SubmitWorksheet(inA, cycle.ID, managerA.ID)
+	requireCode(t, err, domain.CodeCompOverBudget)
 }

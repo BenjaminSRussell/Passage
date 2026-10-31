@@ -63,7 +63,40 @@ channels:
     messages:
       requisitionChanged:
         $ref: "#/components/messages/RequisitionChanged"
+  incidentChanged:
+    address: passage.hr.incident
+    messages:
+      incidentChanged:
+        $ref: "#/components/messages/IncidentChanged"
+  loanedItemChanged:
+    address: passage.hr.loaneditem
+    messages:
+      loanedItemChanged:
+        $ref: "#/components/messages/LoanedItemChanged"
+  checklistChanged:
+    address: passage.hr.checklist
+    messages:
+      checklistChanged:
+        $ref: "#/components/messages/ChecklistChanged"
 operations:
+  publishIncidentChanged:
+    action: send
+    channel:
+      $ref: "#/channels/incidentChanged"
+    messages:
+      - $ref: "#/channels/incidentChanged/messages/incidentChanged"
+  publishLoanedItemChanged:
+    action: send
+    channel:
+      $ref: "#/channels/loanedItemChanged"
+    messages:
+      - $ref: "#/channels/loanedItemChanged/messages/loanedItemChanged"
+  publishChecklistChanged:
+    action: send
+    channel:
+      $ref: "#/channels/checklistChanged"
+    messages:
+      - $ref: "#/channels/checklistChanged/messages/checklistChanged"
   publishWorkerSkillChanged:
     action: send
     channel:
@@ -226,7 +259,62 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CourseCompletedData"
+    IncidentChanged:
+      name: dev.passage.hr.incident.changed.v1
+      description: Published in the same transaction as an incident is reported, moved to UNDER_REVIEW or CLOSED (FR-42.16, BR-42.11). Ids, codes and counts only; the worker's name and the sealed medical details never leave the service in an event.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/IncidentChangedData"
+    LoanedItemChanged:
+      name: dev.passage.hr.loaneditem.changed.v1
+      description: Published in the same transaction as an item is issued, returned or recorded lost (FR-42.17). asset_id is the wave-44 asset when the item is one.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/LoanedItemChangedData"
+    ChecklistChanged:
+      name: dev.passage.hr.checklist.changed.v1
+      description: Published in the same transaction as a checklist is started (its worker tasks are created) or completed (FR-42.19, BR-42.12).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ChecklistChangedData"
   schemas:
+    IncidentChangedData:
+      type: object
+      description: worker_id, incident_type and outcome are omitted for a privacy case.
+      required: [id, case_no, legal_entity_id, site_id, status, osha_recordable, occurred_at]
+      properties:
+        id: {type: string, format: uuid}
+        case_no: {type: integer}
+        worker_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        incident_type: {type: string, enum: [INJURY, SKIN_DISORDER, RESPIRATORY, POISONING, HEARING_LOSS, OTHER_ILLNESS]}
+        status: {type: string, enum: [REPORTED, UNDER_REVIEW, CLOSED]}
+        outcome: {type: string, enum: [DEATH, DAYS_AWAY, RESTRICTED, OTHER_RECORDABLE, NONE]}
+        osha_recordable: {type: boolean}
+        occurred_at: {type: string, format: date-time}
+    LoanedItemChangedData:
+      type: object
+      required: [id, worker_id, loan_type, asset_id, status, issued_on, due_on, closed_on]
+      properties:
+        id: {type: string, format: uuid}
+        worker_id: {type: string, format: uuid}
+        loan_type: {type: string}
+        asset_id: {type: [string, "null"], format: uuid}
+        status: {type: string, enum: [OUT, RETURNED, LOST]}
+        issued_on: {type: string, format: date}
+        due_on: {type: [string, "null"], format: date}
+        closed_on: {type: [string, "null"], format: date}
+    ChecklistChangedData:
+      type: object
+      required: [id, worker_id, kind, effective_date, status, task_count]
+      properties:
+        id: {type: string, format: uuid}
+        worker_id: {type: string, format: uuid}
+        kind: {type: string, enum: [ONBOARDING, OFFBOARDING, TRANSFER]}
+        effective_date: {type: string, format: date}
+        status: {type: string, enum: [OPEN, COMPLETED]}
+        task_count: {type: integer}
     CourseCompletedData:
       type: object
       description: |

@@ -145,7 +145,7 @@ BEGIN
     CREATE OR REPLACE FUNCTION hr_worker_has_other_employment(p_worker uuid, p_excluding uuid, p_at timestamptz) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %I, pg_temp AS $body$
       SELECT EXISTS (SELECT 1 FROM employment
-        WHERE tenant_id = current_setting('passage.tenant_id', true)::uuid AND worker_id = p_worker AND id <> p_excluding
+        WHERE tenant_id = nullif(current_setting('passage.tenant_id', true), '')::uuid AND worker_id = p_worker AND id <> p_excluding
           AND (valid_to IS NULL OR valid_to > p_at))
     $body$
   $f$, schema_name);

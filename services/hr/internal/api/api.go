@@ -50,34 +50,43 @@ var (
 
 // API holds the store and the counters rendered at /metrics.
 type API struct {
-	store            *store.Postgres
-	workersCreated   atomic.Int64
-	employments      atomic.Int64
-	assignments      atomic.Int64
-	positionsCreated atomic.Int64
-	piiReveals       atomic.Int64
-	piiMaskedReads   atomic.Int64
-	asOfQueries      atomic.Int64
-	plansCreated     atomic.Int64
-	accrualRuns      atomic.Int64
-	requestsCreated  atomic.Int64
-	decisions        atomic.Int64
-	yearCloses       atomic.Int64
-	benefitPlans     atomic.Int64
-	simulations      atomic.Int64
-	enrollments      atomic.Int64
-	enrollmentsEnded atomic.Int64
-	skillsCreated    atomic.Int64
-	skillRatings     atomic.Int64
-	certsIssued      atomic.Int64
-	skillSearches    atomic.Int64
-	coursesCreated   atomic.Int64
-	sessionsCreated  atomic.Int64
-	registrations    atomic.Int64
-	cancellations    atomic.Int64
-	passes           atomic.Int64
-	personnel        personnelCounters
-	purgeEnabled     bool
+	store                *store.Postgres
+	workersCreated       atomic.Int64
+	employments          atomic.Int64
+	assignments          atomic.Int64
+	positionsCreated     atomic.Int64
+	piiReveals           atomic.Int64
+	piiMaskedReads       atomic.Int64
+	asOfQueries          atomic.Int64
+	plansCreated         atomic.Int64
+	accrualRuns          atomic.Int64
+	requestsCreated      atomic.Int64
+	decisions            atomic.Int64
+	yearCloses           atomic.Int64
+	benefitPlans         atomic.Int64
+	simulations          atomic.Int64
+	enrollments          atomic.Int64
+	enrollmentsEnded     atomic.Int64
+	skillsCreated        atomic.Int64
+	skillRatings         atomic.Int64
+	certsIssued          atomic.Int64
+	skillSearches        atomic.Int64
+	coursesCreated       atomic.Int64
+	sessionsCreated      atomic.Int64
+	registrations        atomic.Int64
+	cancellations        atomic.Int64
+	passes               atomic.Int64
+	personnel            personnelCounters
+	purgeEnabled         bool
+	incidentsReported    atomic.Int64
+	incidentTransitions  atomic.Int64
+	oshaExtracts         atomic.Int64
+	loansIssued          atomic.Int64
+	loansClosed          atomic.Int64
+	checklistsStarted    atomic.Int64
+	checklistsCompleted  atomic.Int64
+	tasksFinished        atomic.Int64
+	questionnaireAnswers atomic.Int64
 }
 
 // New builds the API over a store.
@@ -140,6 +149,31 @@ func (a *API) Register(r chi.Router) {
 	a.registerPersonnel(r)
 	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/courses/registrations/{id}/approve", registrationRoute(a.approveRegistration))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/registrations/{id}/cancel", registrationRoute(a.cancelRegistration))
+	r.With(authz.RequireDuty(dutyIncidentReport)).Post("/v1/hr/incidents", a.reportIncident)
+	r.With(authz.RequireDuty(dutyIncidentAdmin)).Get("/v1/hr/incidents", a.listIncidents)
+	r.With(authz.RequireDuty(dutyIncidentAdmin)).Get("/v1/hr/incidents/osha-extract", a.oshaExtract)
+	r.With(authz.RequireDuty(dutyIncidentAdmin)).Get("/v1/hr/incidents/{id}", incidentRoute(a.getIncident))
+	r.With(authz.RequireDuty(dutyIncidentAdmin)).Post("/v1/hr/incidents/{id}/status", incidentRoute(a.advanceIncident))
+	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/workers/{id}/loaned-items", workerRoute(a.issueLoanedItem))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/loaned-items", workerRoute(a.listWorkerLoans))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/loaned-items/outstanding", a.outstandingLoans)
+	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/loaned-items/{id}/close", loanRoute(a.closeLoanedItem))
+	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/checklist-templates", a.createChecklistTemplate)
+	r.With(authz.RequireDuty(dutySetupAdmin)).Get("/v1/hr/checklist-templates", a.listChecklistTemplates)
+	r.With(authz.RequireDuty(dutyActionMaintain)).Post("/v1/hr/workers/{id}/checklists", workerRoute(a.startChecklist))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/checklists", workerRoute(a.listWorkerChecklists))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/checklists/{id}", checklistRoute(a.getChecklist))
+	r.With(authz.RequireDuty(dutyActionMaintain)).Post("/v1/hr/checklists/{id}/complete", checklistRoute(a.completeChecklist))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/tasks", a.listOwnedTasks)
+	r.With(authz.RequireDuty(dutyActionMaintain)).Post("/v1/hr/tasks/{id}/finish", taskRoute(a.finishTask))
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Post("/v1/hr/questionnaires", a.createQuestionnaire)
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires", a.listQuestionnaires)
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/{id}", questionnaireRoute(a.getQuestionnaire))
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Post("/v1/hr/questionnaires/schedules", a.createSchedule)
+	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Get("/v1/hr/questionnaires/schedules/open", a.openSchedules)
+	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Get("/v1/hr/questionnaires/schedules/{id}", scheduleRoute(a.getSchedule))
+	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Post("/v1/hr/questionnaires/schedules/{id}/answers", scheduleRoute(a.submitAnswers))
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}/results", scheduleRoute(a.scheduleResults))
 	a.registerSelfService(r)
 }
 
@@ -191,6 +225,15 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_course_cancellations_total", "Course registrations canceled; repeated cancels are not counted.", a.cancellations.Load())
 		counter("hr_course_passes_total", "Completions newly recorded with a PASS result.", a.passes.Load())
 		a.personnel.write(counter)
+		counter("hr_incidents_reported_total", "Incidents reported; idempotent replays are not counted.", a.incidentsReported.Load())
+		counter("hr_incident_transitions_total", "Incident status changes (review, close).", a.incidentTransitions.Load())
+		counter("hr_osha_extracts_total", "OSHA extracts produced.", a.oshaExtracts.Load())
+		counter("hr_loaned_items_issued_total", "Loaned items issued; replays are not counted.", a.loansIssued.Load())
+		counter("hr_loaned_items_closed_total", "Loaned items returned or recorded lost.", a.loansClosed.Load())
+		counter("hr_checklists_started_total", "Checklists instantiated; repeats are not counted.", a.checklistsStarted.Load())
+		counter("hr_checklists_completed_total", "Checklists completed.", a.checklistsCompleted.Load())
+		counter("hr_worker_tasks_finished_total", "Worker tasks marked done or skipped.", a.tasksFinished.Load())
+		counter("hr_questionnaire_answers_total", "Questionnaire answer sessions recorded.", a.questionnaireAnswers.Load())
 	})
 }
 

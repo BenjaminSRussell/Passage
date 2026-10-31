@@ -797,6 +797,11 @@
       {"resource": "/v1/hr/benefits/plans/*", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/benefits", "methods": ["GET"]}
     ]},
+    "EssQuestionnaire": {"permissions": [
+      {"resource": "/v1/hr/questionnaires/schedules/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/questionnaires/schedules/*/answers", "methods": ["POST"]},
+      {"resource": "/v1/hr/questionnaires/schedules/open", "methods": ["GET"]}
+    ]},
     "EssLearning": {"permissions": [
       {"resource": "/v1/hr/courses", "methods": ["GET"]},
       {"resource": "/v1/hr/courses/*", "methods": ["GET"]},
@@ -818,8 +823,11 @@
       {"resource": "/v1/hr/actions/*", "methods": ["GET"]},
       {"resource": "/v1/hr/actions/*/withdraw", "methods": ["POST"]},
       {"resource": "/v1/hr/actions/apply-due", "methods": ["POST"]},
+      {"resource": "/v1/hr/checklists/*/complete", "methods": ["POST"]},
       {"resource": "/v1/hr/offers/*/hire", "methods": ["POST"]},
-      {"resource": "/v1/hr/positions/*/assignments", "methods": ["POST"]}
+      {"resource": "/v1/hr/positions/*/assignments", "methods": ["POST"]},
+      {"resource": "/v1/hr/tasks/*/finish", "methods": ["POST"]},
+      {"resource": "/v1/hr/workers/*/checklists", "methods": ["POST"]}
     ]},
     "HcmCompAdmin": {"permissions": [
       {"resource": "/v1/hr/compensation/cycles", "methods": ["GET", "POST"]},
@@ -832,6 +840,13 @@
       {"resource": "/v1/hr/jobs", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/compensation", "methods": ["GET"]}
     ]},
+    "HcmIncidentAdmin": {"permissions": [
+      {"resource": "/v1/hr/incidents", "methods": ["GET"]},
+      {"resource": "/v1/hr/incidents/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/incidents/*/status", "methods": ["POST"]},
+      {"resource": "/v1/hr/incidents/osha-extract", "methods": ["GET"]}
+    ]},
+    "HcmIncidentReport": {"permissions": [{"resource": "/v1/hr/incidents", "methods": ["POST"]}]},
     "HcmLearningAdmin": {"permissions": [
       {"resource": "/v1/hr/courses", "methods": ["POST"]},
       {"resource": "/v1/hr/courses/*/sessions", "methods": ["POST"]},
@@ -866,29 +881,43 @@
       {"resource": "/v1/hr/requisitions/*/transition", "methods": ["POST"]}
     ]},
     "HcmPIIRead": {"permissions": [{"resource": "/v1/hr/workers/*/pii", "methods": ["GET"]}]},
+    "HcmQuestionnaireAdmin": {"permissions": [
+      {"resource": "/v1/hr/questionnaires", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/questionnaires/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/questionnaires/schedules", "methods": ["POST"]},
+      {"resource": "/v1/hr/questionnaires/schedules/*/results", "methods": ["GET"]}
+    ]},
     "HcmSetupAdmin": {"permissions": [
       {"resource": "/v1/hr/candidates/purge", "methods": ["POST"]},
       {"resource": "/v1/hr/retention-policies", "methods": ["GET"]},
       {"resource": "/v1/hr/retention-policies/*", "methods": ["PUT"]},
+      {"resource": "/v1/hr/checklist-templates", "methods": ["GET", "POST"]},
       {"resource": "/v1/hr/benefits/plans", "methods": ["POST"]},
       {"resource": "/v1/hr/benefits/plans/*/simulate", "methods": ["GET"]},
       {"resource": "/v1/hr/skills", "methods": ["POST"]}
     ]},
     "HcmWorkerInquire": {"permissions": [
       {"resource": "/v1/hr/certifications/expiring", "methods": ["GET"]},
+      {"resource": "/v1/hr/checklists/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/loaned-items/outstanding", "methods": ["GET"]},
       {"resource": "/v1/hr/skills", "methods": ["GET"]},
+      {"resource": "/v1/hr/tasks", "methods": ["GET"]},
       {"resource": "/v1/hr/workers", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/as-of", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/certifications", "methods": ["GET"]},
+      {"resource": "/v1/hr/workers/*/checklists", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/employments", "methods": ["GET"]},
+      {"resource": "/v1/hr/workers/*/loaned-items", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/skills", "methods": ["GET"]}
     ]},
     "HcmWorkerMaintain": {"permissions": [
       {"resource": "/v1/hr/benefits/enrollments/*/end", "methods": ["POST"]},
+      {"resource": "/v1/hr/loaned-items/*/close", "methods": ["POST"]},
       {"resource": "/v1/hr/workers", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/certifications", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/employments", "methods": ["POST"]},
+      {"resource": "/v1/hr/workers/*/loaned-items", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/skills", "methods": ["POST"]}
     ]},
     "IntercompanyConfigure": {"permissions": [

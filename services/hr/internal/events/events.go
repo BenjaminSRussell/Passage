@@ -36,12 +36,56 @@ var (
 	CompensationChanged      = events.Type(Context, "compensation", "changed", 1)
 	CompensationCycleApplied = events.Type(Context, "compensationcycle", "applied", 1)
 	RequisitionChanged       = events.Type(Context, "requisition", "changed", 1)
+	// IncidentChanged is written when an incident is reported or moves to
+	// UNDER_REVIEW or CLOSED (FR-42.16). It carries ids, codes and counts only:
+	// no worker name and none of the sealed medical details.
+	IncidentChanged = events.Type(Context, "incident", "changed", 1)
+	// LoanedItemChanged is written when an item is issued, returned or lost
+	// (FR-42.17); wave-44 assets and the offboarding checklist consume it.
+	LoanedItemChanged = events.Type(Context, "loaneditem", "changed", 1)
+	// ChecklistChanged is written when a checklist is started or completed
+	// (FR-42.19); notifications and MSS consume it.
+	ChecklistChanged = events.Type(Context, "checklist", "changed", 1)
 )
 
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
 	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
-		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, RequisitionChanged}
+		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, RequisitionChanged,
+		IncidentChanged, LoanedItemChanged, ChecklistChanged}
+}
+
+type IncidentChangedData struct {
+	ID             string `json:"id"`
+	CaseNo         int    `json:"case_no"`
+	WorkerID       string `json:"worker_id,omitempty"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	SiteID         string `json:"site_id"`
+	IncidentType   string `json:"incident_type,omitempty"`
+	Status         string `json:"status"`
+	Outcome        string `json:"outcome,omitempty"`
+	OSHARecordable bool   `json:"osha_recordable"`
+	OccurredAt     string `json:"occurred_at"`
+}
+
+type LoanedItemChangedData struct {
+	ID       string  `json:"id"`
+	WorkerID string  `json:"worker_id"`
+	LoanType string  `json:"loan_type"`
+	AssetID  *string `json:"asset_id"`
+	Status   string  `json:"status"`
+	IssuedOn string  `json:"issued_on"`
+	DueOn    *string `json:"due_on"`
+	ClosedOn *string `json:"closed_on"`
+}
+
+type ChecklistChangedData struct {
+	ID            string `json:"id"`
+	WorkerID      string `json:"worker_id"`
+	Kind          string `json:"kind"`
+	EffectiveDate string `json:"effective_date"`
+	Status        string `json:"status"`
+	TaskCount     int    `json:"task_count"`
 }
 
 // employment.changed actions: a new employment, a transfer between positions,

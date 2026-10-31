@@ -414,8 +414,7 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 		sort.Strings(departments)
 		for _, d := range departments {
 			var others, budget string
-			if err := tx.QueryRow(ctx, `select coalesce(sum(proposed_amount), 0)::text from hr_comp_worksheet_row
-				where tenant_id = $1 and cycle_id = $2 and department_id = $3 and status = 'SUBMITTED'`, p.TenantID, cycleID, d).Scan(&others); err != nil {
+			if err := tx.QueryRow(ctx, `select hr_dept_submitted_total($1::uuid, $2::uuid)::text`, cycleID, d).Scan(&others); err != nil {
 				return err
 			}
 			err := tx.QueryRow(ctx, `select budget_amount::text from hr_comp_cycle_budget where tenant_id = $1 and cycle_id = $2 and department_id = $3`, p.TenantID, cycleID, d).Scan(&budget)
