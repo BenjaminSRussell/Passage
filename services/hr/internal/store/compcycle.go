@@ -414,10 +414,17 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 		sort.Strings(departments)
 		for _, d := range departments {
 			var others, budget string
-			if err := tx.QueryRow(ctx, `select hr_dept_submitted_total($1::uuid, $2::uuid)::text`, cycleID, d).Scan(&others); err != nil {
+			var err error
+			others, err = withAllEntities(ctx, tx, func() (string, error) {
+				var sum string
+				err := tx.QueryRow(ctx, `select coalesce(sum(proposed_amount), 0)::text from hr_comp_worksheet_row
+					where tenant_id = $1 and cycle_id = $2 and department_id = $3 and status = 'SUBMITTED'`, p.TenantID, cycleID, d).Scan(&sum)
+				return sum, err
+			})
+			if err != nil {
 				return err
 			}
-			err := tx.QueryRow(ctx, `select budget_amount::text from hr_comp_cycle_budget where tenant_id = $1 and cycle_id = $2 and department_id = $3`, p.TenantID, cycleID, d).Scan(&budget)
+			err = tx.QueryRow(ctx, `select budget_amount::text from hr_comp_cycle_budget where tenant_id = $1 and cycle_id = $2 and department_id = $3`, p.TenantID, cycleID, d).Scan(&budget)
 			if errors.Is(err, pgx.ErrNoRows) {
 				budget = "0"
 			} else if err != nil {

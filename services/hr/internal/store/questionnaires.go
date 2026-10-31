@@ -327,8 +327,9 @@ func eligibleEntity(emps []benEmployment, rule domain.Rule) *string {
 //
 // On an anonymous questionnaire the response marker and the answer session are
 // written in two separate transactions, and the session gets a random v4 id and
-// only a date, no worker id: nothing in the session row (xmin, id order, time)
-// links it to the marker. Answers are fully validated before the marker is
+// only a date, no worker id: this stops the application from linking them. Anyone
+// with raw database access can still pair them by xmin or ctid order; that is out
+// of scope (see NOT-IMPLEMENTED.md). Answers are fully validated before the marker is
 // written, so a failure between the two transactions needs a database outage;
 // the worker then cannot answer again (no delete grant), which is the safe side.
 func (s *Postgres) SubmitAnswers(ctx context.Context, scheduleID, workerID string, raw map[string]json.RawMessage) error {

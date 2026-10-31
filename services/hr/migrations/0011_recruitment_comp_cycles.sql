@@ -216,28 +216,3 @@ BEGIN
   END IF;
 END
 $$;
-
-DO $$
-DECLARE
-  schema_name text := current_schema();
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hr_loan_gate' AND rolbypassrls AND NOT rolcanlogin) THEN
-    RAISE EXCEPTION 'role hr_loan_gate must exist as NOLOGIN BYPASSRLS (create it in the database bootstrap before migrating)';
-  END IF;
-  EXECUTE format('GRANT USAGE ON SCHEMA %I TO hr_loan_gate', schema_name);
-  EXECUTE 'GRANT SELECT ON hr_comp_worksheet_row TO hr_loan_gate';
-  EXECUTE format($f$
-    CREATE OR REPLACE FUNCTION hr_dept_submitted_total(p_cycle uuid, p_dept uuid) RETURNS numeric
-    LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, %I, pg_temp AS $body$
-      SELECT coalesce(sum(proposed_amount), 0) FROM hr_comp_worksheet_row
-      WHERE tenant_id = nullif(current_setting('passage.tenant_id', true), '')::uuid
-        AND cycle_id = p_cycle AND department_id = p_dept AND status = 'SUBMITTED'
-    $body$
-  $f$, schema_name);
-  EXECUTE 'ALTER FUNCTION hr_dept_submitted_total(uuid, uuid) OWNER TO hr_loan_gate';
-  EXECUTE 'REVOKE ALL ON FUNCTION hr_dept_submitted_total(uuid, uuid) FROM PUBLIC';
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
-    EXECUTE 'GRANT EXECUTE ON FUNCTION hr_dept_submitted_total(uuid, uuid) TO passage_app';
-  END IF;
-END
-$$;

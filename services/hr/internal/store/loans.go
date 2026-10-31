@@ -260,7 +260,9 @@ func workerEntity(ctx context.Context, tx pgx.Tx, tenantID, workerID, on string,
 }
 
 func outstandingLoans(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (int, error) {
-	var n int
-	err := tx.QueryRow(ctx, `select hr_outstanding_loan_count($1, $2)`, tenantID, workerID).Scan(&n)
-	return n, err
+	return withAllEntities(ctx, tx, func() (int, error) {
+		var n int
+		err := tx.QueryRow(ctx, `select count(*)::int from hr_loaned_item where tenant_id = $1 and worker_id = $2 and status = 'OUT'`, tenantID, workerID).Scan(&n)
+		return n, err
+	})
 }

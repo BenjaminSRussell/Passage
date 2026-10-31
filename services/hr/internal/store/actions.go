@@ -395,8 +395,13 @@ func (s *Postgres) applyTerminate(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		return problem(http.StatusUnprocessableEntity, CodeActionInactive, "the employment already ends on or before the termination date")
 	}
 	var lastEmployment, future bool
-	if err := tx.QueryRow(ctx, `select not hr_worker_has_other_employment($1::uuid, $2::uuid, $3::timestamptz)`,
-		a.WorkerID, employmentID, end).Scan(&lastEmployment); err != nil {
+	lastEmployment, err = withAllEntities(ctx, tx, func() (bool, error) {
+		var last bool
+		err := tx.QueryRow(ctx, `select not exists (select 1 from employment where tenant_id = $1 and worker_id = $2 and id <> $3 and (valid_to is null or valid_to > $4))`,
+			p.TenantID, a.WorkerID, employmentID, end).Scan(&last)
+		return last, err
+	})
+	if err != nil {
 		return err
 	}
 	if err := tx.QueryRow(ctx, `select exists (select 1 from position_assignment where tenant_id = $1 and employment_id = $2 and valid_from >= $3)
@@ -676,4 +681,23 @@ func scopeIsAll(ctx context.Context, tx pgx.Tx) (bool, error) {
 		return false, err
 	}
 	return scopes == "*", nil
+}
+
+func withAllEntities[T any](ctx context.Context, tx pgx.Tx, fn func() (T, error)) (T, error) {
+	var zero T
+	var saved string
+	if err := tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&saved); err != nil {
+		return zero, err
+	}
+	if _, err := tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', '*', true)`); err != nil {
+		return zero, err
+	}
+	out, err := fn()
+	if err != nil {
+		return zero, err
+	}
+	if _, err := tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', $1, true)`, saved); err != nil {
+		return zero, err
+	}
+	return out, nil
 }
