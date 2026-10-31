@@ -52,8 +52,8 @@ paths:
       x-passage-duty: Maintain users
       description: >-
         Lists the caller's tenant's users by id, keyset-paged. Users belong to the tenant, so every caller holding
-        Maintain users sees all of them; legalEntityId narrows to users with a role assignment for that legal
-        entity that the caller's own legal-entity scope can see. q is a case-insensitive substring match on display
+        Maintain users sees all of them; legalEntityId narrows to users with an active role assignment for that
+        legal entity that the caller's own legal-entity scope can see. q is a case-insensitive substring match on display
         name, email and IdP subject.
       security: [{ gatewayHeaders: [] }]
       parameters:

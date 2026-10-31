@@ -199,3 +199,51 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 		}
 	})
 }
+
+func TestUsersListIsTenantWideAndFiltersOnActiveAssignments(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	const unassigned = "20000000-0000-0000-0000-000000000002"
+	if _, err := f.admin.Exec(ctx, `insert into identity_users (tenant_id, user_id, idp_subject) values ($1, $2, 'subject-unassigned')`, f.tenantA, unassigned); err != nil {
+		t.Fatal(err)
+	}
+	scoped := caller{tenantID: f.tenantA, legalEntity: legalA, user: "scoped", duties: []string{dutyUsers}}
+
+	t.Run("a legal-entity-scoped caller without the filter sees every user of the tenant", func(t *testing.T) {
+		all := decode[pageOf[userRow]](t, f.do(scoped, http.MethodGet, "/v1/identity/users", nil), http.StatusOK)
+		if len(all.Items) != 2 {
+			t.Fatalf("scoped listing = %+v, want both tenant users (the accepted tenant-wide decision)", all)
+		}
+	})
+
+	t.Run("the legal-entity filter drops ended and cancelled assignments", func(t *testing.T) {
+		list := func() int {
+			return len(decode[pageOf[userRow]](t, f.do(f.adminOf(f.tenantA, dutyUsers), http.MethodGet, "/v1/identity/users?legalEntityId="+legalB, nil), http.StatusOK).Items)
+		}
+		if list() != 1 {
+			t.Fatal("user with a current legal entity B assignment is not listed")
+		}
+		if _, err := f.admin.Exec(ctx, `update identity_role_assignments set valid_to = valid_from where tenant_id = $1 and legal_entity_id = $2`, f.tenantA, legalB); err != nil {
+			t.Fatal(err)
+		}
+		if list() != 0 {
+			t.Fatal("a cancelled assignment still lists the user under legal entity B")
+		}
+		if _, err := f.admin.Exec(ctx, `update identity_role_assignments set valid_from = now() + interval '1 day', valid_to = null where tenant_id = $1 and legal_entity_id = $2`, f.tenantA, legalB); err != nil {
+			t.Fatal(err)
+		}
+		if list() != 0 {
+			t.Fatal("a future assignment already lists the user under legal entity B")
+		}
+	})
+
+	t.Run("q is limited in characters, not bytes", func(t *testing.T) {
+		c := f.adminOf(f.tenantA, dutyUsers, dutyRoles)
+		for _, path := range []string{"/v1/identity/users?q=", "/v1/authz/duties?q=", "/v1/authz/roles?q="} {
+			if rec := f.do(c, http.MethodGet, path+url.QueryEscape(strings.Repeat("é", 100)), nil); rec.Code != http.StatusOK {
+				t.Errorf("%s with 100 two-byte characters = %d", path, rec.Code)
+			}
+			wantProblem(t, f.do(c, http.MethodGet, path+url.QueryEscape(strings.Repeat("é", 101)), nil), http.StatusBadRequest, "COM-0001")
+		}
+	})
+}
