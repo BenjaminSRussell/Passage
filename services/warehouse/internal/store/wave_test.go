@@ -268,3 +268,81 @@ func TestStore_Simulation10kLinesPerDay(t *testing.T) {
 		t.Error("the day never triggered a replenishment")
 	}
 }
+
+// TestStore_WaitingPickIsNeverAssignedBeforeItsRefillCompletes: a 60 EA pick
+// against 50 EA at the forward location comes out WAITING on the refill. Two
+// pickers poll for work while the refill is confirmed line by line; whoever
+// receives the pick must find the refill COMPLETED, and the pick must confirm.
+func TestStore_WaitingPickIsNeverAssignedBeforeItsRefillCompletes(t *testing.T) {
+	st, ctx, wh := setup(t)
+	locs := []domain.Location{loc("F-01", "FWD", 1, domain.Capacity{}), loc("R-01", "RES", 2, domain.Capacity{}), loc("R-02", "RES", 3, domain.Capacity{})}
+	mustLocations(t, st, ctx, wh, locs...)
+	mustDirective(t, st, ctx, pickDirective(wh))
+	seedStock(t, st, ctx, "F-01", locs, "A", "50")
+	seedStock(t, st, ctx, "R-01", locs, "A", "20")
+	seedStock(t, st, ctx, "R-02", locs, "A", "5000")
+	rule := domain.ReplenishRule{ItemID: "A", PickZone: "FWD", ReserveZone: "RES", MinQty: dq("40"), MaxQty: dq("150")}
+	rel, _, err := st.ReleaseWave(ctx, key("wave"), WaveInput{WarehouseID: wh, Rules: []domain.ReplenishRule{rule},
+		Orders: []domain.WaveOrder{{ID: "SO", Lines: []domain.NewLine{{ItemID: "A", Direction: domain.DirectionPick, Qty: dq("60")}}}}})
+	if err != nil || len(rel.Replenishment) != 1 || len(rel.Picks) != 1 {
+		t.Fatalf("ReleaseWave: %+v err=%v", rel, err)
+	}
+	pick, refill := rel.Picks[0], rel.Replenishment[0]
+	stored, err := st.GetWork(ctx, pick.ID)
+	if err != nil || stored.Status != domain.WorkWaiting || len(stored.DependsOn) != 1 || stored.DependsOn[0] != refill.ID {
+		t.Fatalf("stored pick = %+v err=%v", stored, err)
+	}
+
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		errs   []error
+		picked atomic.Bool
+	)
+	fail := func(format string, args ...any) {
+		mu.Lock()
+		errs = append(errs, fmt.Errorf(format, args...))
+		mu.Unlock()
+	}
+	for _, user := range []string{"u1", "u2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 400 {
+				if picked.Load() {
+					return
+				}
+				w := assign(t, st, ctx, wh, user, time.Now())
+				if w == nil {
+					time.Sleep(2 * time.Millisecond)
+					continue
+				}
+				if w.ID == pick.ID {
+					if r, err := st.GetWork(ctx, refill.ID); err != nil || r.Status != domain.WorkCompleted {
+						fail("pick assigned while the refill is %s (err %v)", r.Status, err)
+					}
+				}
+				for _, l := range w.Lines {
+					time.Sleep(2 * time.Millisecond)
+					if _, _, err := st.ConfirmLine(ctx, key("c-"+ids.New()), ConfirmInput{WorkID: w.ID, LineNo: l.LineNo, Qty: l.Qty, User: user, Now: time.Now()}); err != nil {
+						fail("confirm %s line %d: %v", w.WorkType, l.LineNo, err)
+						return
+					}
+				}
+				if w.ID == pick.ID {
+					picked.Store(true)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if len(errs) > 0 {
+		t.Fatal(errs[0])
+	}
+	if !picked.Load() {
+		t.Fatal("the pick never became assignable after the refill completed")
+	}
+	if got := stockAt(t, st, ctx, wh, "F-01", "A"); !got.Equal(dq("150")) {
+		t.Fatalf("forward = %s, want 150 (50 + 160 - 60)", got)
+	}
+}

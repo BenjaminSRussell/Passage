@@ -61,16 +61,17 @@ func validateRules(rules []ReplenishRule) error {
 
 // ReleaseWave plans the picks of every order against locs, each order's
 // reservations counting for the next, and the replenishment they need. A pick
-// location is refilled when its stock, less the pick demand no location could
-// cover, plus refills already open (Reserve), is below the rule's minimum; the
-// refill goes up to the maximum, limited by the destination's remaining weight
-// and volume, from the reserve zone in pick sequence, never overdrawn. The
-// picks are then planned again with the refill counted as stock, so a pick the
-// forward location could not cover gets its location (the refill work has the
-// higher priority, so it runs first). Only pick-zone locations that held the
-// item before the wave are refilled (slotting is not modeled), and the unmet
-// demand of an item is charged to the first of them. locs is not modified.
-// newID supplies the work ids.
+// location is refilled when its stock, counting refills already open (Reserve)
+// and less the pick demand no location could cover, is below the rule's
+// minimum; the refill goes up to the maximum, limited by the destination's
+// remaining weight and volume, from the reserve zone in pick sequence, never
+// overdrawn. The picks are then planned against the real stock; an order that
+// stock cannot cover but the stock plus the open and new refills can is planned
+// against that and comes out WAITING on those refill works (DependsOn): it
+// must not be assigned before they complete. Only pick-zone locations that held
+// the item before the wave are refilled (slotting is not modeled), and the
+// unmet demand of an item is charged to the first of them. locs is not
+// modified. newID supplies the work ids.
 func ReleaseWave(warehouseID string, newID func() string, orders []WaveOrder, rules []ReplenishRule, dirs []Directive, locs []Location) (WaveRelease, error) {
 	if err := validateRules(rules); err != nil {
 		return WaveRelease{}, err
@@ -79,6 +80,7 @@ func ReleaseWave(warehouseID string, newID func() string, orders []WaveOrder, ru
 		return WaveRelease{}, errors.New("a wave needs at least one order")
 	}
 	dry := CloneLocations(locs)
+	addIncoming(dry)
 	unmet := map[string]decimal.Decimal{}
 	for _, o := range orders {
 		w, _, err := Plan("", warehouseID, "SALES_PICK", 0, o.Lines, dirs, dry, Compliance{})
@@ -94,11 +96,6 @@ func ReleaseWave(warehouseID string, newID func() string, orders []WaveOrder, ru
 	}
 
 	var out WaveRelease
-	pool := CloneLocations(locs)
-	index := make(map[string]int, len(pool))
-	for i := range pool {
-		index[pool[i].ID] = i
-	}
 	for _, r := range rules {
 		charged := false
 		for i := range dry {
@@ -114,26 +111,73 @@ func ReleaseWave(warehouseID string, newID func() string, orders []WaveOrder, ru
 			}
 		}
 	}
+
+	now := CloneLocations(locs)
+	soon := CloneLocations(locs)
+	addIncoming(soon)
+	index := make(map[string]int, len(soon))
+	refills := map[string][]string{}
+	for i := range soon {
+		index[soon[i].ID] = i
+		for item, from := range locs[i].incomingFrom {
+			refills[soon[i].ID+"|"+item] = from
+		}
+	}
 	for _, w := range out.Replenishment {
 		for _, l := range w.Lines {
 			if l.Direction == DirectionPut {
-				at := &pool[index[l.ToLocationID]]
-				if at.Stock == nil {
-					at.Stock = map[string]decimal.Decimal{}
-				}
+				at := &soon[index[l.ToLocationID]]
 				at.Stock[l.ItemID] = at.Stock[l.ItemID].Add(l.Qty)
+				refills[l.ToLocationID+"|"+l.ItemID] = append(refills[l.ToLocationID+"|"+l.ItemID], w.ID)
 			}
 		}
+		Reserve(now, w.Lines)
+		Reserve(soon, w.Lines)
 	}
 	for _, o := range orders {
-		w, _, err := Plan(newID(), warehouseID, "SALES_PICK", 0, o.Lines, dirs, pool, Compliance{})
+		w, _, err := Plan(newID(), warehouseID, "SALES_PICK", 0, o.Lines, dirs, now, Compliance{})
 		if err != nil {
 			return WaveRelease{}, fmt.Errorf("order %s: %w", o.ID, err)
 		}
-		Reserve(pool, w.Lines)
+		if w.Status == WorkBlockedNoLocation {
+			if later, _, err := Plan(w.ID, warehouseID, "SALES_PICK", 0, o.Lines, dirs, soon, Compliance{}); err == nil && later.Status == WorkOpen {
+				if deps := dependencies(later.Lines, refills); len(deps) > 0 {
+					later.Status, later.DependsOn = WorkWaiting, deps
+					w = later
+				}
+			}
+		}
+		Reserve(now, w.Lines)
+		Reserve(soon, w.Lines)
 		out.Picks = append(out.Picks, w)
 	}
 	return out, nil
+}
+
+func addIncoming(locs []Location) {
+	for i := range locs {
+		for item, qty := range locs[i].incoming {
+			if locs[i].Stock == nil {
+				locs[i].Stock = map[string]decimal.Decimal{}
+			}
+			locs[i].Stock[item] = locs[i].Stock[item].Add(qty)
+		}
+	}
+}
+
+func dependencies(lines []WorkLine, refills map[string][]string) []string {
+	var deps []string
+	for _, l := range lines {
+		if l.Direction != DirectionPick {
+			continue
+		}
+		for _, id := range refills[l.FromLocationID+"|"+l.ItemID] {
+			if !slices.Contains(deps, id) {
+				deps = append(deps, id)
+			}
+		}
+	}
+	return deps
 }
 
 func (r ReplenishRule) room(l Location) (decimal.Decimal, bool) {
@@ -156,7 +200,7 @@ func (r ReplenishRule) room(l Location) (decimal.Decimal, bool) {
 }
 
 func replenishment(newID func() string, warehouseID string, r ReplenishRule, dry []Location, target int, short decimal.Decimal) (Work, bool) {
-	have := dry[target].Stock[r.ItemID].Add(dry[target].incoming[r.ItemID]).Sub(short)
+	have := dry[target].Stock[r.ItemID].Sub(short)
 	if !have.LessThan(r.MinQty) {
 		return Work{}, false
 	}
@@ -182,7 +226,7 @@ func replenishment(newID func() string, warehouseID string, r ReplenishRule, dry
 			at  string
 		}{{DirectionPick, dry[s].ID}, {DirectionPut, dry[target].ID}} {
 			line := WorkLine{LineNo: len(w.Lines) + 1, ItemID: r.ItemID, Direction: l.dir, Qty: take, ConfirmedQty: decimal.Zero,
-				Weight: take.Mul(r.UnitWeight), Volume: take.Mul(r.UnitVolume), Status: LineOpen}
+				Weight: take.Mul(r.UnitWeight), Volume: take.Mul(r.UnitVolume), Status: LineOpen, WorkID: w.ID, Refill: true}
 			if l.dir == DirectionPick {
 				line.FromLocationID = l.at
 			} else {

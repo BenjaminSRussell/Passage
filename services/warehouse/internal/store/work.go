@@ -83,9 +83,9 @@ func planWork(ctx context.Context, tx pgx.Tx, in PlanInput) (Planned, error) {
 // reservations BR-31.2 subtracts from remaining capacity and stock.
 func openLines(ctx context.Context, tx pgx.Tx, warehouseID string) ([]domain.WorkLine, error) {
 	rows, err := tx.Query(ctx, `select l.item_id, l.direction, l.qty::text, l.weight::text, l.volume::text, l.lps,
-		coalesce(l.from_location_id::text, ''), coalesce(l.to_location_id::text, '')
+		coalesce(l.from_location_id::text, ''), coalesce(l.to_location_id::text, ''), w.id::text, w.work_type = 'REPLENISHMENT'
 		from work_line l join work w on w.tenant_id = l.tenant_id and w.id = l.work_id
-		where w.warehouse_id = $1 and l.status = 'OPEN' and w.status in ('OPEN', 'ASSIGNED', 'IN_PROGRESS')`, warehouseID)
+		where w.warehouse_id = $1 and l.status = 'OPEN' and w.status in ('OPEN', 'WAITING', 'ASSIGNED', 'IN_PROGRESS')`, warehouseID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func openLines(ctx context.Context, tx pgx.Tx, warehouseID string) ([]domain.Wor
 	for rows.Next() {
 		l := domain.WorkLine{Status: domain.LineOpen}
 		var dir, qty, weight, volume string
-		if err := rows.Scan(&l.ItemID, &dir, &qty, &weight, &volume, &l.LPs, &l.FromLocationID, &l.ToLocationID); err != nil {
+		if err := rows.Scan(&l.ItemID, &dir, &qty, &weight, &volume, &l.LPs, &l.FromLocationID, &l.ToLocationID, &l.WorkID, &l.Refill); err != nil {
 			return nil, err
 		}
 		l.Direction = domain.Direction(dir)
@@ -264,6 +264,9 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 				if err := enqueue(ctx, tx, w.ID, evts.WorkCompleted, completedData(w, in.Now)); err != nil {
 					return w, err
 				}
+				if err := releaseDependents(ctx, tx, w); err != nil {
+					return w, err
+				}
 			}
 			return w, nil
 		})
@@ -394,12 +397,12 @@ func moveStock(ctx context.Context, tx pgx.Tx, line domain.WorkLine) error {
 }
 
 const workColumns = `id::text, warehouse_id::text, work_type, status, priority, coalesce(parent_work_id::text, ''),
-	assigned_user, assigned_at, version, created_at, updated_at`
+	assigned_user, assigned_at, version, created_at, updated_at, coalesce(depends_on::text[], '{}')`
 
 func scanWork(row scanner, w *domain.Work) error {
 	var status string
 	if err := row.Scan(&w.ID, &w.WarehouseID, &w.WorkType, &status, &w.Priority, &w.ParentID,
-		&w.AssignedUser, &w.AssignedAt, &w.Version, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&w.AssignedUser, &w.AssignedAt, &w.Version, &w.CreatedAt, &w.UpdatedAt, &w.DependsOn); err != nil {
 		return err
 	}
 	w.Status = domain.WorkStatus(status)
@@ -457,9 +460,9 @@ func readWork(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.Work
 // version and timestamps on w.
 func insertWork(ctx context.Context, tx pgx.Tx, w *domain.Work) error {
 	if err := tx.QueryRow(ctx, `insert into work (tenant_id, id, warehouse_id, work_type, status, priority, parent_work_id,
-		assigned_user, assigned_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning version, created_at, updated_at`,
+		assigned_user, assigned_at, depends_on) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[]::uuid[]) returning version, created_at, updated_at`,
 		tenantID(ctx), w.ID, w.WarehouseID, w.WorkType, string(w.Status), w.Priority, nullable(w.ParentID),
-		w.AssignedUser, w.AssignedAt).Scan(&w.Version, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		w.AssignedUser, w.AssignedAt, append([]string{}, w.DependsOn...)).Scan(&w.Version, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return err
 	}
 	for _, l := range w.Lines {
@@ -521,4 +524,18 @@ func eventLines(lines []domain.WorkLine) []evts.Line {
 			FromLocationID: l.FromLocationID, ToLocationID: l.ToLocationID})
 	}
 	return out
+}
+
+// releaseDependents removes a completed refill from the DependsOn of the work
+// waiting for it; a WAITING work with nothing left to wait for becomes OPEN.
+// Only a fully COMPLETED refill releases: a short refill leaves its dependents
+// waiting for a supervisor.
+func releaseDependents(ctx context.Context, tx pgx.Tx, w domain.Work) error {
+	if w.WorkType != "REPLENISHMENT" || w.Status != domain.WorkCompleted {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `update work set depends_on = array_remove(depends_on, $1::uuid),
+		status = case when status = 'WAITING' and cardinality(array_remove(depends_on, $1::uuid)) = 0 then 'OPEN' else status end,
+		version = version + 1, updated_at = now() where $1::uuid = any(depends_on)`, w.ID)
+	return err
 }

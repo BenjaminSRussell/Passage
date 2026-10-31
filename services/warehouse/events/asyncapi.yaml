@@ -88,7 +88,7 @@ components:
         work_type: { type: string }
         warehouse_id: { type: string, format: uuid }
         priority: { type: integer, minimum: 1, maximum: 99 }
-        status: { type: string, enum: [OPEN, BLOCKED_NO_LOCATION] }
+        status: { type: string, enum: [OPEN, BLOCKED_NO_LOCATION, WAITING] }
         parent_work_id: { type: string, format: uuid }
         lines: { type: array, items: { $ref: "#/components/schemas/Line" } }
     WorkCompleted:

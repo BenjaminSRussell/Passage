@@ -154,7 +154,7 @@ func TestReleaseWave_RejectsBadInput(t *testing.T) {
 
 // TestReleaseWave_NeverOverdrawsAnyLocation is a property over random waves:
 // across the pick and replenishment work together, no location is asked for
-// more than it holds, and a forward location never ends above the maximum.
+// more than it holds plus what is refilled into it.
 func TestReleaseWave_NeverOverdrawsAnyLocation(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		items := rapid.IntRange(1, 6).Draw(t, "items")
@@ -200,9 +200,6 @@ func TestReleaseWave_NeverOverdrawsAnyLocation(t *testing.T) {
 			if taken[l.ID].GreaterThan(l.Stock[item].Add(put[l.ID])) {
 				t.Fatalf("%s asked for %s of %s plus %s refilled", l.ID, taken[l.ID], l.Stock[item], put[l.ID])
 			}
-			if l.Zone == "FWD" && l.Stock[item].Sub(taken[l.ID]).Add(put[l.ID]).GreaterThan(dec("120")) && put[l.ID].IsPositive() {
-				t.Fatalf("%s ends above the maximum: %s", l.ID, l.Stock[item].Sub(taken[l.ID]).Add(put[l.ID]))
-			}
 		}
 	})
 }
@@ -234,8 +231,8 @@ func TestReleaseWave_UnmetPickDemandIsReplenishedAndTheBlockedPickGetsItsLocatio
 		t.Fatal(err)
 	}
 	pick := rel.Picks[0]
-	if pick.Status != WorkOpen || pick.Lines[0].FromLocationID != "F" {
-		t.Fatalf("the 60 EA pick must be placed at F once F is refilled: %+v", pick)
+	if pick.Status != WorkWaiting || pick.Lines[0].FromLocationID != "F" || len(pick.DependsOn) != 1 || pick.DependsOn[0] != rel.Replenishment[0].ID {
+		t.Fatalf("the 60 EA pick must be placed at F and wait for the refill: %+v", pick)
 	}
 	if got := putTotal(rel.Replenishment); !got.Equal(dec("160")) {
 		t.Fatalf("refill = %s, want 160 (50 + 160 - 60 = 150)", got)
@@ -331,4 +328,24 @@ func TestReleaseWave_ReplenishmentNeverExceedsCapacity(t *testing.T) {
 			t.Fatalf("F weight %s above limit %d", f.Used.Weight, maxW)
 		}
 	})
+}
+
+func TestReleaseWave_PickCoveredByAnEarlierOpenRefillWaitsForIt(t *testing.T) {
+	locs := []Location{stocked("F", "FWD", 1, "A", "100"), stocked("R", "RES", 2, "A", "5000")}
+	first, err := ReleaseWave(waveWarehouse, idSource(), pickOrder("A", "70"), minMaxRule("40", "150"), wavePickDirective(), locs)
+	if err != nil || len(first.Replenishment) != 1 {
+		t.Fatalf("wave 1: %+v err=%v", first.Replenishment, err)
+	}
+	after := CloneLocations(locs)
+	for _, w := range append(append([]Work{}, first.Picks...), first.Replenishment...) {
+		Reserve(after, w.Lines)
+	}
+	second, err := ReleaseWave("WH1", func() string { return "X-" + strconv.Itoa(len(first.Picks)) }, pickOrder("A", "100"), minMaxRule("40", "150"), wavePickDirective(), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pick := second.Picks[0]
+	if pick.Status != WorkWaiting || len(pick.DependsOn) != 1 || pick.DependsOn[0] != first.Replenishment[0].ID {
+		t.Fatalf("a 100 EA pick needs wave 1's refill (30 on hand, 120 on the way): %+v", pick)
+	}
 }

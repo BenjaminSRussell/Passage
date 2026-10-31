@@ -110,6 +110,8 @@ type Location struct {
 	inbound map[string]bool
 	// incoming is the quantity of each item that open PUT lines will bring.
 	incoming map[string]decimal.Decimal
+	// incomingFrom names the open refill works behind incoming, by item.
+	incomingFrom map[string][]string
 }
 
 // load returns the current usage with Items derived from the stock map.
