@@ -79,7 +79,14 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # runs the store tests
 ```
 
 Domain tests are table-driven plus a rapid property test (AC-29.1: gross equals the
-sum of line nets, charges and tax, on the minor unit, for USD, EUR and JPY). API
+sum of line nets, charges and tax, on the minor unit, for USD, EUR and JPY), and two
+§5.29.9 fixtures whose expected amounts come from exact rational Python references
+under `internal/domain/testdata/` (no shared code with the engine):
+`invoices-random-1k.json` (1,000 invoices in nine currencies with 0, 2, 3 and 4
+decimals, half-unit ties included; `TestComputeTotals_InvoicesRandom1k`) and
+`subscription-edges-25.json` (proration around mid-period start and cancel, the leap
+day, annual and quarterly periods; `TestProrate_SubscriptionEdges25`). Regenerate
+them with `python3 gen_*.py` in that directory. API
 tests run through the platform router (tenant headers, duties). Store tests use
 `platform/testkit` and skip without the database; the row-level-security test also
 needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without it.

@@ -1,0 +1,5392 @@
+{
+ "seed": 606,
+ "scenarios": [
+  {
+   "id": "A606-01",
+   "description": "BR-29.1 bundle at its SSP total less 10%, AC-29.4 March",
+   "currency": "USD",
+   "transactionPrice": "10800.00",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-03-10",
+   "asOf": "2027-03-31",
+   "obligations": [
+    {
+     "id": "hardware",
+     "ssp": "8000",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-03-10"
+    },
+    {
+     "id": "installation",
+     "ssp": "1500",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-03-25"
+    },
+    {
+     "id": "support",
+     "ssp": "2500",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-03-10",
+     "termEnd": "2028-03-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "7200.00",
+     "1350.00",
+     "2250.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-03-10",
+       "amount": "7200.00"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "1350.00"
+      }
+     ],
+     [
+      {
+       "date": "2027-03-31",
+       "amount": "133.06"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-03-09",
+       "amount": "54.44"
+      }
+     ]
+    ],
+    "recognizedAsOf": "8683.06",
+    "deferredAdditions": "3600.00",
+    "deferredAsOf": "2116.94"
+   }
+  },
+  {
+   "id": "A606-02",
+   "description": "BR-29.1 bundle with a one-cent residual to the largest SSP",
+   "currency": "USD",
+   "transactionPrice": "10799.99",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-03-10",
+   "asOf": "2027-03-31",
+   "obligations": [
+    {
+     "id": "hardware",
+     "ssp": "8000",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-03-10"
+    },
+    {
+     "id": "installation",
+     "ssp": "1500",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-03-25"
+    },
+    {
+     "id": "support",
+     "ssp": "2500",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-03-10",
+     "termEnd": "2028-03-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "7200.01",
+     "1349.99",
+     "2249.99"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-03-10",
+       "amount": "7200.01"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "1349.99"
+      }
+     ],
+     [
+      {
+       "date": "2027-03-31",
+       "amount": "133.06"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-03-09",
+       "amount": "54.43"
+      }
+     ]
+    ],
+    "recognizedAsOf": "8683.06",
+    "deferredAdditions": "3599.98",
+    "deferredAsOf": "2116.93"
+   }
+  },
+  {
+   "id": "A606-03",
+   "description": "BR-29.1 bundle on the MONTHLY ratable basis, through August",
+   "currency": "USD",
+   "transactionPrice": "10800.00",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-03-10",
+   "asOf": "2027-08-31",
+   "obligations": [
+    {
+     "id": "hardware",
+     "ssp": "8000",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-03-10"
+    },
+    {
+     "id": "installation",
+     "ssp": "1500",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-03-25"
+    },
+    {
+     "id": "support",
+     "ssp": "2500",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-03-10",
+     "termEnd": "2028-03-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "7200.00",
+     "1350.00",
+     "2250.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-03-10",
+       "amount": "7200.00"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "1350.00"
+      }
+     ],
+     [
+      {
+       "date": "2027-03-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "173.08"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "173.08"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "173.08"
+      },
+      {
+       "date": "2028-03-09",
+       "amount": "173.04"
+      }
+     ]
+    ],
+    "recognizedAsOf": "9588.48",
+    "deferredAdditions": "3600.00",
+    "deferredAsOf": "1211.52"
+   }
+  },
+  {
+   "id": "A606-04",
+   "description": "BR-29.1 bundle with the residual to the LAST obligation, fully recognized",
+   "currency": "USD",
+   "transactionPrice": "10799.99",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-03-10",
+   "asOf": "2028-03-31",
+   "obligations": [
+    {
+     "id": "hardware",
+     "ssp": "8000",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-03-10"
+    },
+    {
+     "id": "installation",
+     "ssp": "1500",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-03-25"
+    },
+    {
+     "id": "support",
+     "ssp": "2500",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-03-10",
+     "termEnd": "2028-03-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "7199.99",
+     "1349.99",
+     "2250.01"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-03-10",
+       "amount": "7199.99"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "1349.99"
+      }
+     ],
+     [
+      {
+       "date": "2027-03-31",
+       "amount": "133.07"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "187.50"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "187.50"
+      },
+      {
+       "date": "2028-03-09",
+       "amount": "54.44"
+      }
+     ]
+    ],
+    "recognizedAsOf": "10799.99",
+    "deferredAdditions": "3600.00",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-05",
+   "description": "JPY software, implementation and 24-month support at 15% discount",
+   "currency": "JPY",
+   "transactionPrice": "1275000",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-02-29",
+   "asOf": "2028-12-31",
+   "obligations": [
+    {
+     "id": "license",
+     "ssp": "900000",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-02-29"
+    },
+    {
+     "id": "implementation",
+     "ssp": "300000",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-06-15"
+    },
+    {
+     "id": "support",
+     "ssp": "300000",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2028-02-29",
+     "termEnd": "2030-02-27"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "765000",
+     "255000",
+     "255000"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-02-29",
+       "amount": "765000"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "255000"
+      }
+     ],
+     [
+      {
+       "date": "2028-02-29",
+       "amount": "366"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "10626"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "10626"
+      },
+      {
+       "date": "2030-02-27",
+       "amount": "10236"
+      }
+     ]
+    ],
+    "recognizedAsOf": "1126626",
+    "deferredAdditions": "510000",
+    "deferredAsOf": "148374"
+   }
+  },
+  {
+   "id": "A606-06",
+   "description": "KWD equipment with a residual-priced service plan",
+   "currency": "KWD",
+   "transactionPrice": "1000.000",
+   "residualRule": "FIRST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-01-17",
+   "asOf": "2027-06-30",
+   "obligations": [
+    {
+     "id": "equipment",
+     "ssp": "700.000",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-01-17"
+    },
+    {
+     "id": "service",
+     "ssp": "333.333",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2027-01-17",
+     "termEnd": "2027-12-31"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "677.420",
+     "322.580"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-01-17",
+       "amount": "677.420"
+      }
+     ],
+     [
+      {
+       "date": "2027-01-31",
+       "amount": "13.592"
+      },
+      {
+       "date": "2027-02-28",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "28.090"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "28.088"
+      }
+     ]
+    ],
+    "recognizedAsOf": "831.462",
+    "deferredAdditions": "322.580",
+    "deferredAsOf": "168.538"
+   }
+  },
+  {
+   "id": "A606-07",
+   "description": "free promotional bundle (zero transaction price)",
+   "currency": "EUR",
+   "transactionPrice": "0.00",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-05-01",
+   "asOf": "2027-07-31",
+   "obligations": [
+    {
+     "id": "device",
+     "ssp": "199.00",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-05-01"
+    },
+    {
+     "id": "subscription",
+     "ssp": "120.00",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-05-01",
+     "termEnd": "2028-04-30"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "0.00",
+     "0.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-05-01",
+       "amount": "0.00"
+      }
+     ],
+     [
+      {
+       "date": "2027-05-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "0.00"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "0.00"
+      }
+     ]
+    ],
+    "recognizedAsOf": "0.00",
+    "deferredAdditions": "0.00",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-08",
+   "description": "premium price above the SSP total with an unsatisfied milestone",
+   "currency": "GBP",
+   "transactionPrice": "5500.00",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-11-20",
+   "asOf": "2028-02-29",
+   "obligations": [
+    {
+     "id": "design",
+     "ssp": "2000.00",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-04-02"
+    },
+    {
+     "id": "build",
+     "ssp": "2000.00",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-01-10"
+    },
+    {
+     "id": "hosting",
+     "ssp": "1000.00",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-12-01",
+     "termEnd": "2028-11-30"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "2200.00",
+     "2200.00",
+     "1100.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "2200.00"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "2200.00"
+      }
+     ],
+     [
+      {
+       "date": "2027-12-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "91.67"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "91.63"
+      }
+     ]
+    ],
+    "recognizedAsOf": "2475.01",
+    "deferredAdditions": "5500.00",
+    "deferredAsOf": "3024.99"
+   }
+  },
+  {
+   "id": "A606-09",
+   "description": "one-cent price over three equal obligations",
+   "currency": "USD",
+   "transactionPrice": "0.01",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-06-30",
+   "asOf": "2027-06-30",
+   "obligations": [
+    {
+     "id": "a",
+     "ssp": "100",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-06-30"
+    },
+    {
+     "id": "b",
+     "ssp": "100",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "c",
+     "ssp": "100",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-06-30",
+     "termEnd": "2027-09-29"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "0.01",
+     "0.00",
+     "0.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "0.01"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "0.00"
+      }
+     ],
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "0.00"
+      },
+      {
+       "date": "2027-09-29",
+       "amount": "0.00"
+      }
+     ]
+    ],
+    "recognizedAsOf": "0.01",
+    "deferredAdditions": "0.00",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-10",
+   "description": "single-day ratable term on the leap day",
+   "currency": "USD",
+   "transactionPrice": "29.00",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-02-29",
+   "asOf": "2028-02-29",
+   "obligations": [
+    {
+     "id": "day-pass",
+     "ssp": "29",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-02-29",
+     "termEnd": "2028-02-29"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "29.00"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-02-29",
+       "amount": "29.00"
+      }
+     ]
+    ],
+    "recognizedAsOf": "29.00",
+    "deferredAdditions": "29.00",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-11",
+   "description": "seeded bundle: 5 obligations, EUR, price 69% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "121110.09",
+   "residualRule": "FIRST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-01-13",
+   "asOf": "2028-07-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "39818.98",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-01-13"
+    },
+    {
+     "id": "po-2",
+     "ssp": "15076.73",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-08-19"
+    },
+    {
+     "id": "po-3",
+     "ssp": "28353.84",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-02-05"
+    },
+    {
+     "id": "po-4",
+     "ssp": "45168.15",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-05-21"
+    },
+    {
+     "id": "po-5",
+     "ssp": "47104.18",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-01-13"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "27475.11",
+     "10402.94",
+     "19564.14",
+     "31166.02",
+     "32501.88"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-01-13",
+       "amount": "27475.11"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "10402.94"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "19564.14"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "31166.02"
+      }
+     ],
+     [
+      {
+       "date": "2028-01-13",
+       "amount": "32501.88"
+      }
+     ]
+    ],
+    "recognizedAsOf": "110707.15",
+    "deferredAdditions": "61133.10",
+    "deferredAsOf": "10402.94"
+   }
+  },
+  {
+   "id": "A606-12",
+   "description": "seeded bundle: 2 obligations, GBP, price 109% of SSP total",
+   "currency": "GBP",
+   "transactionPrice": "63110.14",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-05-22",
+   "asOf": "2029-07-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "30686.48",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-2",
+     "ssp": "27212.73",
+     "sspSource": "RESIDUAL",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-05-22"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "33448.27",
+     "29661.87"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "33448.27"
+      }
+     ],
+     [
+      {
+       "date": "2028-05-22",
+       "amount": "29661.87"
+      }
+     ]
+    ],
+    "recognizedAsOf": "29661.87",
+    "deferredAdditions": "33448.27",
+    "deferredAsOf": "33448.27"
+   }
+  },
+  {
+   "id": "A606-13",
+   "description": "seeded bundle: 5 obligations, JPY, price 109% of SSP total",
+   "currency": "JPY",
+   "transactionPrice": "124293",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-04-24",
+   "asOf": "2028-04-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "41069",
+     "sspSource": "RESIDUAL",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-2",
+     "ssp": "1555",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-05-06"
+    },
+    {
+     "id": "po-3",
+     "ssp": "47831",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-05-13",
+     "termEnd": "2027-05-29"
+    },
+    {
+     "id": "po-4",
+     "ssp": "22030",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-08-11"
+    },
+    {
+     "id": "po-5",
+     "ssp": "1546",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-05-05",
+     "termEnd": "2027-08-05"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "44764",
+     "1694",
+     "52138",
+     "24012",
+     "1685"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "44764"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "1694"
+      }
+     ],
+     [
+      {
+       "date": "2027-05-29",
+       "amount": "52138"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "24012"
+      }
+     ],
+     [
+      {
+       "date": "2027-05-31",
+       "amount": "484"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "556"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "556"
+      },
+      {
+       "date": "2027-08-05",
+       "amount": "89"
+      }
+     ]
+    ],
+    "recognizedAsOf": "79529",
+    "deferredAdditions": "124293",
+    "deferredAsOf": "44764"
+   }
+  },
+  {
+   "id": "A606-14",
+   "description": "seeded bundle: 5 obligations, JPY, price 74% of SSP total",
+   "currency": "JPY",
+   "transactionPrice": "113109",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-10-17",
+   "asOf": "2028-06-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "16272",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-10-17"
+    },
+    {
+     "id": "po-2",
+     "ssp": "39558",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-10-30",
+     "termEnd": "2028-10-30"
+    },
+    {
+     "id": "po-3",
+     "ssp": "40560",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-05-06"
+    },
+    {
+     "id": "po-4",
+     "ssp": "34215",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2027-10-21",
+     "termEnd": "2029-10-20"
+    },
+    {
+     "id": "po-5",
+     "ssp": "22245",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-10-17",
+     "termEnd": "2027-11-16"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "12041",
+     "29272",
+     "30014",
+     "25319",
+     "16463"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-10-17",
+       "amount": "12041"
+      }
+     ],
+     [
+      {
+       "date": "2027-10-31",
+       "amount": "157"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "2433"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "2433"
+      },
+      {
+       "date": "2028-10-30",
+       "amount": "2352"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "30014"
+      }
+     ],
+     [
+      {
+       "date": "2027-10-31",
+       "amount": "374"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "1055"
+      },
+      {
+       "date": "2029-10-20",
+       "amount": "680"
+      }
+     ],
+     [
+      {
+       "date": "2027-10-31",
+       "amount": "7831"
+      },
+      {
+       "date": "2027-11-16",
+       "amount": "8632"
+      }
+     ]
+    ],
+    "recognizedAsOf": "86953",
+    "deferredAdditions": "101068",
+    "deferredAsOf": "26156"
+   }
+  },
+  {
+   "id": "A606-15",
+   "description": "seeded bundle: 5 obligations, USD, price 84% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "137984.99",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-02-09",
+   "asOf": "2028-01-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "16281.31",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-02-09"
+    },
+    {
+     "id": "po-2",
+     "ssp": "42183.18",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-02-09"
+    },
+    {
+     "id": "po-3",
+     "ssp": "45495.07",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-02-24",
+     "termEnd": "2027-03-23"
+    },
+    {
+     "id": "po-4",
+     "ssp": "26546.62",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-02-22",
+     "termEnd": "2029-02-22"
+    },
+    {
+     "id": "po-5",
+     "ssp": "33761.67",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-02-16",
+     "termEnd": "2028-02-01"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "13676.30",
+     "35433.87",
+     "38215.86",
+     "22299.16",
+     "28359.80"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-02-09",
+       "amount": "13676.30"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-09",
+       "amount": "35433.87"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-28",
+       "amount": "7413.59"
+      },
+      {
+       "date": "2027-03-23",
+       "amount": "30802.27"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-28",
+       "amount": "231.94"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "927.75"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "927.75"
+      },
+      {
+       "date": "2029-02-22",
+       "amount": "728.97"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-28",
+       "amount": "1145.08"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "2466.33"
+      },
+      {
+       "date": "2028-02-01",
+       "amount": "85.09"
+      }
+     ]
+    ],
+    "recognizedAsOf": "126037.93",
+    "deferredAdditions": "88874.82",
+    "deferredAsOf": "11947.06"
+   }
+  },
+  {
+   "id": "A606-16",
+   "description": "seeded bundle: 4 obligations, USD, price 93% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "83925.88",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-02-11",
+   "asOf": "2027-12-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "22819.25",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-02-11"
+    },
+    {
+     "id": "po-2",
+     "ssp": "5979.95",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-3",
+     "ssp": "24339.47",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2027-02-25",
+     "termEnd": "2030-02-10"
+    },
+    {
+     "id": "po-4",
+     "ssp": "37104.21",
+     "sspSource": "LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-05-24"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "21221.90",
+     "5561.35",
+     "22635.70",
+     "34506.93"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-02-11",
+       "amount": "21221.90"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "5561.35"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-28",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "611.78"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "611.78"
+      },
+      {
+       "date": "2030-02-10",
+       "amount": "611.62"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "34506.93"
+      }
+     ]
+    ],
+    "recognizedAsOf": "62458.41",
+    "deferredAdditions": "62703.98",
+    "deferredAsOf": "21467.47"
+   }
+  },
+  {
+   "id": "A606-17",
+   "description": "seeded bundle: 2 obligations, EUR, price 92% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "32471.70",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-09-08",
+   "asOf": "2029-05-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "8610.67",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-09-08"
+    },
+    {
+     "id": "po-2",
+     "ssp": "26684.66",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2029-05-01"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "7921.81",
+     "24549.89"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-09-08",
+       "amount": "7921.81"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "24549.89"
+      }
+     ]
+    ],
+    "recognizedAsOf": "32471.70",
+    "deferredAdditions": "24549.89",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-18",
+   "description": "seeded bundle: 3 obligations, EUR, price 108% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "87687.58",
+   "residualRule": "FIRST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-10-16",
+   "asOf": "2029-10-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "24444.28",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-10-16"
+    },
+    {
+     "id": "po-2",
+     "ssp": "37389.56",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2029-06-10"
+    },
+    {
+     "id": "po-3",
+     "ssp": "19358.37",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2028-10-18",
+     "termEnd": "2029-10-17"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "26399.83",
+     "40380.72",
+     "20907.03"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-10-16",
+       "amount": "26399.83"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "40380.72"
+      }
+     ],
+     [
+      {
+       "date": "2028-10-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "1608.23"
+      },
+      {
+       "date": "2029-10-17",
+       "amount": "1608.27"
+      }
+     ]
+    ],
+    "recognizedAsOf": "87687.58",
+    "deferredAdditions": "61287.75",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-19",
+   "description": "seeded bundle: 2 obligations, EUR, price 85% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "42300.40",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-10-14",
+   "asOf": "2028-04-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "46645.88",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-10-14"
+    },
+    {
+     "id": "po-2",
+     "ssp": "3119.30",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-10-21",
+     "termEnd": "2028-10-06"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "39648.99",
+     "2651.41"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-10-14",
+       "amount": "39648.99"
+      }
+     ],
+     [
+      {
+       "date": "2027-10-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "203.95"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "203.95"
+      },
+      {
+       "date": "2028-10-06",
+       "amount": "204.01"
+      }
+     ]
+    ],
+    "recognizedAsOf": "41076.64",
+    "deferredAdditions": "2651.41",
+    "deferredAsOf": "1223.76"
+   }
+  },
+  {
+   "id": "A606-20",
+   "description": "seeded bundle: 4 obligations, KWD, price 108% of SSP total",
+   "currency": "KWD",
+   "transactionPrice": "102043.679",
+   "residualRule": "FIRST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-05-23",
+   "asOf": "2028-01-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "5633.310",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-06-09",
+     "termEnd": "2027-12-08"
+    },
+    {
+     "id": "po-2",
+     "ssp": "37638.327",
+     "sspSource": "LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-07-28"
+    },
+    {
+     "id": "po-3",
+     "ssp": "42060.029",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2027-06-10",
+     "termEnd": "2030-06-09"
+    },
+    {
+     "id": "po-4",
+     "ssp": "9153.222",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2027-05-23",
+     "termEnd": "2028-05-22"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "6083.976",
+     "40649.393",
+     "45424.831",
+     "9885.479"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "869.139"
+      },
+      {
+       "date": "2027-12-08",
+       "amount": "869.142"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "40649.393"
+      }
+     ],
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "1227.698"
+      },
+      {
+       "date": "2030-06-09",
+       "amount": "1227.703"
+      }
+     ],
+     [
+      {
+       "date": "2027-05-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "760.421"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "760.421"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "760.421"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "760.421"
+      },
+      {
+       "date": "2028-05-22",
+       "amount": "760.427"
+      }
+     ]
+    ],
+    "recognizedAsOf": "63398.742",
+    "deferredAdditions": "102043.679",
+    "deferredAsOf": "38644.937"
+   }
+  },
+  {
+   "id": "A606-21",
+   "description": "seeded bundle: 3 obligations, USD, price 95% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "79082.06",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-01-13",
+   "asOf": "2029-02-28",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "31168.67",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2028-01-19",
+     "termEnd": "2028-02-18"
+    },
+    {
+     "id": "po-2",
+     "ssp": "38877.25",
+     "sspSource": "LIST",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-3",
+     "ssp": "13198.36",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2028-01-27",
+     "termEnd": "2028-02-26"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "29610.23",
+     "36933.38",
+     "12538.45"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-01-31",
+       "amount": "14805.12"
+      },
+      {
+       "date": "2028-02-18",
+       "amount": "14805.11"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "36933.38"
+      }
+     ],
+     [
+      {
+       "date": "2028-01-31",
+       "amount": "6269.22"
+      },
+      {
+       "date": "2028-02-26",
+       "amount": "6269.23"
+      }
+     ]
+    ],
+    "recognizedAsOf": "42148.68",
+    "deferredAdditions": "79082.06",
+    "deferredAsOf": "36933.38"
+   }
+  },
+  {
+   "id": "A606-22",
+   "description": "seeded bundle: 5 obligations, GBP, price 80% of SSP total",
+   "currency": "GBP",
+   "transactionPrice": "69107.78",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-09-30",
+   "asOf": "2029-01-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "5702.70",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2028-10-04",
+     "termEnd": "2029-01-03"
+    },
+    {
+     "id": "po-2",
+     "ssp": "31710.21",
+     "sspSource": "RESIDUAL",
+     "method": "MILESTONE",
+     "satisfiedOn": "2029-04-30"
+    },
+    {
+     "id": "po-3",
+     "ssp": "3290.41",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-09-30"
+    },
+    {
+     "id": "po-4",
+     "ssp": "3843.63",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-10-06",
+     "termEnd": "2030-10-05"
+    },
+    {
+     "id": "po-5",
+     "ssp": "41837.78",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2028-10-10",
+     "termEnd": "2029-01-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "4562.15",
+     "25368.16",
+     "2632.32",
+     "3074.90",
+     "33470.25"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-10-31",
+       "amount": "1140.54"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1140.54"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1140.54"
+      },
+      {
+       "date": "2029-01-03",
+       "amount": "1140.53"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "25368.16"
+      }
+     ],
+     [
+      {
+       "date": "2028-09-30",
+       "amount": "2632.32"
+      }
+     ],
+     [
+      {
+       "date": "2028-10-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-06-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-07-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-08-31",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-09-30",
+       "amount": "123.00"
+      },
+      {
+       "date": "2030-10-05",
+       "amount": "122.90"
+      }
+     ],
+     [
+      {
+       "date": "2028-10-31",
+       "amount": "8367.56"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "8367.56"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "8367.56"
+      },
+      {
+       "date": "2029-01-09",
+       "amount": "8367.57"
+      }
+     ]
+    ],
+    "recognizedAsOf": "41156.72",
+    "deferredAdditions": "66475.46",
+    "deferredAsOf": "27951.06"
+   }
+  },
+  {
+   "id": "A606-23",
+   "description": "seeded bundle: 5 obligations, USD, price 79% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "64250.98",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-11-13",
+   "asOf": "2028-09-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "2475.93",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-05-19"
+    },
+    {
+     "id": "po-2",
+     "ssp": "15154.79",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2027-11-19",
+     "termEnd": "2028-11-18"
+    },
+    {
+     "id": "po-3",
+     "ssp": "24635.21",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2027-11-26",
+     "termEnd": "2029-11-25"
+    },
+    {
+     "id": "po-4",
+     "ssp": "1013.32",
+     "sspSource": "RESIDUAL",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-11-13"
+    },
+    {
+     "id": "po-5",
+     "ssp": "38051.11",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-11-13"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "1955.98",
+     "11972.28",
+     "19461.81",
+     "800.52",
+     "30060.39"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "1955.98"
+      }
+     ],
+     [
+      {
+       "date": "2027-11-30",
+       "amount": "399.08"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "997.69"
+      },
+      {
+       "date": "2028-11-18",
+       "amount": "598.61"
+      }
+     ],
+     [
+      {
+       "date": "2027-11-30",
+       "amount": "135.15"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "810.91"
+      },
+      {
+       "date": "2029-11-25",
+       "amount": "675.73"
+      }
+     ],
+     [
+      {
+       "date": "2027-11-13",
+       "amount": "800.52"
+      }
+     ],
+     [
+      {
+       "date": "2027-11-13",
+       "amount": "30060.39"
+      }
+     ]
+    ],
+    "recognizedAsOf": "51437.12",
+    "deferredAdditions": "33390.07",
+    "deferredAsOf": "12813.86"
+   }
+  },
+  {
+   "id": "A606-24",
+   "description": "seeded bundle: 3 obligations, KWD, price 60% of SSP total",
+   "currency": "KWD",
+   "transactionPrice": "62293.305",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2026-02-05",
+   "asOf": "2026-10-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "44007.814",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-02-05"
+    },
+    {
+     "id": "po-2",
+     "ssp": "37693.210",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2026-04-24"
+    },
+    {
+     "id": "po-3",
+     "ssp": "22121.152",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2026-02-17",
+     "termEnd": "2026-05-02"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "26404.688",
+     "22615.925",
+     "13272.692"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-02-05",
+       "amount": "26404.688"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "22615.925"
+      }
+     ],
+     [
+      {
+       "date": "2026-02-28",
+       "amount": "3318.173"
+      },
+      {
+       "date": "2026-03-31",
+       "amount": "3318.173"
+      },
+      {
+       "date": "2026-04-30",
+       "amount": "3318.173"
+      },
+      {
+       "date": "2026-05-02",
+       "amount": "3318.173"
+      }
+     ]
+    ],
+    "recognizedAsOf": "62293.305",
+    "deferredAdditions": "35888.617",
+    "deferredAsOf": "0.000"
+   }
+  },
+  {
+   "id": "A606-25",
+   "description": "seeded bundle: 4 obligations, JPY, price 96% of SSP total",
+   "currency": "JPY",
+   "transactionPrice": "79075",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-06-07",
+   "asOf": "2027-08-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "23105",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-10-03"
+    },
+    {
+     "id": "po-2",
+     "ssp": "4002",
+     "sspSource": "LIST",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-3",
+     "ssp": "34595",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2027-06-08",
+     "termEnd": "2027-12-07"
+    },
+    {
+     "id": "po-4",
+     "ssp": "20668",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-06-20",
+     "termEnd": "2028-06-05"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "22180",
+     "3841",
+     "33211",
+     "19843"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "22180"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "3841"
+      }
+     ],
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "4249"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "5542"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "5542"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "5542"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "5542"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "5542"
+      },
+      {
+       "date": "2027-12-07",
+       "amount": "1252"
+      }
+     ],
+     [
+      {
+       "date": "2027-06-30",
+       "amount": "631"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "1720"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "1720"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "1720"
+      },
+      {
+       "date": "2028-06-05",
+       "amount": "292"
+      }
+     ]
+    ],
+    "recognizedAsOf": "19404",
+    "deferredAdditions": "79075",
+    "deferredAsOf": "59671"
+   }
+  },
+  {
+   "id": "A606-26",
+   "description": "seeded bundle: 3 obligations, USD, price 90% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "49748.60",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-01-19",
+   "asOf": "2027-02-28",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "40411.18",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-01-19"
+    },
+    {
+     "id": "po-2",
+     "ssp": "8696.78",
+     "sspSource": "LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-05-23"
+    },
+    {
+     "id": "po-3",
+     "ssp": "6168.26",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2027-02-04",
+     "termEnd": "2028-01-20"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "36370.07",
+     "7827.10",
+     "5551.43"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-01-19",
+       "amount": "36370.07"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "7827.10"
+      }
+     ],
+     [
+      {
+       "date": "2027-02-28",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "462.62"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "462.62"
+      },
+      {
+       "date": "2028-01-20",
+       "amount": "462.61"
+      }
+     ]
+    ],
+    "recognizedAsOf": "36832.69",
+    "deferredAdditions": "13378.53",
+    "deferredAsOf": "12915.91"
+   }
+  },
+  {
+   "id": "A606-27",
+   "description": "seeded bundle: 4 obligations, USD, price 103% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "129863.99",
+   "residualRule": "FIRST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-04-09",
+   "asOf": "2027-11-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "46009.42",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-07-03"
+    },
+    {
+     "id": "po-2",
+     "ssp": "41657.79",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-07-31"
+    },
+    {
+     "id": "po-3",
+     "ssp": "30554.76",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2027-04-28",
+     "termEnd": "2028-04-28"
+    },
+    {
+     "id": "po-4",
+     "ssp": "7859.58",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-04-12",
+     "termEnd": "2029-04-11"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "47389.71",
+     "42907.52",
+     "31471.40",
+     "8095.36"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "47389.71"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "42907.52"
+      }
+     ],
+     [
+      {
+       "date": "2027-04-30",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "2420.88"
+      },
+      {
+       "date": "2028-04-28",
+       "amount": "2420.84"
+      }
+     ],
+     [
+      {
+       "date": "2027-04-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "323.81"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "323.81"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "323.81"
+      },
+      {
+       "date": "2029-04-11",
+       "amount": "323.92"
+      }
+     ]
+    ],
+    "recognizedAsOf": "112254.75",
+    "deferredAdditions": "129863.99",
+    "deferredAsOf": "17609.24"
+   }
+  },
+  {
+   "id": "A606-28",
+   "description": "seeded bundle: 2 obligations, JPY, price 74% of SSP total",
+   "currency": "JPY",
+   "transactionPrice": "51474",
+   "residualRule": "FIRST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-07-09",
+   "asOf": "2029-03-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "29542",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-07-09"
+    },
+    {
+     "id": "po-2",
+     "ssp": "40018",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-07-17",
+     "termEnd": "2030-07-16"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "21861",
+     "29613"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-07-09",
+       "amount": "21861"
+      }
+     ],
+     [
+      {
+       "date": "2028-07-31",
+       "amount": "597"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-06-30",
+       "amount": "1234"
+      },
+      {
+       "date": "2030-07-16",
+       "amount": "634"
+      }
+     ]
+    ],
+    "recognizedAsOf": "32330",
+    "deferredAdditions": "29613",
+    "deferredAsOf": "19144"
+   }
+  },
+  {
+   "id": "A606-29",
+   "description": "seeded bundle: 3 obligations, EUR, price 86% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "80440.13",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2026-02-22",
+   "asOf": "2027-04-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "42797.39",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2026-02-27",
+     "termEnd": "2026-08-12"
+    },
+    {
+     "id": "po-2",
+     "ssp": "2958.17",
+     "sspSource": "LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2026-04-06"
+    },
+    {
+     "id": "po-3",
+     "ssp": "47779.48",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2026-03-13",
+     "termEnd": "2026-04-12"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "36805.75",
+     "2544.02",
+     "41090.36"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-02-28",
+       "amount": "481.63"
+      },
+      {
+       "date": "2026-03-31",
+       "amount": "6742.80"
+      },
+      {
+       "date": "2026-04-30",
+       "amount": "6742.80"
+      },
+      {
+       "date": "2026-05-31",
+       "amount": "6742.80"
+      },
+      {
+       "date": "2026-06-30",
+       "amount": "6742.80"
+      },
+      {
+       "date": "2026-07-31",
+       "amount": "6742.80"
+      },
+      {
+       "date": "2026-08-12",
+       "amount": "2610.12"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "2544.02"
+      }
+     ],
+     [
+      {
+       "date": "2026-03-31",
+       "amount": "24863.59"
+      },
+      {
+       "date": "2026-04-12",
+       "amount": "16226.77"
+      }
+     ]
+    ],
+    "recognizedAsOf": "80440.13",
+    "deferredAdditions": "80440.13",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-30",
+   "description": "seeded bundle: 5 obligations, EUR, price 68% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "73411.69",
+   "residualRule": "FIRST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-01-06",
+   "asOf": "2027-09-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "8627.38",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-01-06"
+    },
+    {
+     "id": "po-2",
+     "ssp": "3697.78",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-3",
+     "ssp": "45686.17",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-01-13",
+     "termEnd": "2028-01-12"
+    },
+    {
+     "id": "po-4",
+     "ssp": "36543.90",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-5",
+     "ssp": "13403.15",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-01-23"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "5866.63",
+     "2514.49",
+     "31066.59",
+     "24849.84",
+     "9114.14"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-01-06",
+       "amount": "5866.63"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "2514.49"
+      }
+     ],
+     [
+      {
+       "date": "2027-01-31",
+       "amount": "1586.73"
+      },
+      {
+       "date": "2027-02-28",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "2588.88"
+      },
+      {
+       "date": "2028-01-12",
+       "amount": "1002.18"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "24849.84"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "9114.14"
+      }
+     ]
+    ],
+    "recognizedAsOf": "37278.54",
+    "deferredAdditions": "67545.06",
+    "deferredAsOf": "36133.15"
+   }
+  },
+  {
+   "id": "A606-31",
+   "description": "seeded bundle: 5 obligations, EUR, price 77% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "86165.70",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2026-01-02",
+   "asOf": "2026-10-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "11784.55",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-01-02"
+    },
+    {
+     "id": "po-2",
+     "ssp": "10063.33",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2026-01-18",
+     "termEnd": "2026-02-17"
+    },
+    {
+     "id": "po-3",
+     "ssp": "1968.62",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2026-01-08",
+     "termEnd": "2026-04-07"
+    },
+    {
+     "id": "po-4",
+     "ssp": "47016.63",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2026-07-28"
+    },
+    {
+     "id": "po-5",
+     "ssp": "41070.38",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-01-02"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "9074.10",
+     "7748.76",
+     "1515.83",
+     "36202.80",
+     "31624.21"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-01-02",
+       "amount": "9074.10"
+      }
+     ],
+     [
+      {
+       "date": "2026-01-31",
+       "amount": "3874.38"
+      },
+      {
+       "date": "2026-02-17",
+       "amount": "3874.38"
+      }
+     ],
+     [
+      {
+       "date": "2026-01-31",
+       "amount": "378.96"
+      },
+      {
+       "date": "2026-02-28",
+       "amount": "378.96"
+      },
+      {
+       "date": "2026-03-31",
+       "amount": "378.96"
+      },
+      {
+       "date": "2026-04-07",
+       "amount": "378.95"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "36202.80"
+      }
+     ],
+     [
+      {
+       "date": "2026-01-02",
+       "amount": "31624.21"
+      }
+     ]
+    ],
+    "recognizedAsOf": "86165.70",
+    "deferredAdditions": "45467.39",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-32",
+   "description": "seeded bundle: 4 obligations, USD, price 88% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "22439.81",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-08-31",
+   "asOf": "2029-09-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "865.45",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-09-05",
+     "termEnd": "2028-12-04"
+    },
+    {
+     "id": "po-2",
+     "ssp": "13102.23",
+     "sspSource": "LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-09-13"
+    },
+    {
+     "id": "po-3",
+     "ssp": "1042.79",
+     "sspSource": "LIST",
+     "method": "RATABLE",
+     "termStart": "2028-09-19",
+     "termEnd": "2031-09-18"
+    },
+    {
+     "id": "po-4",
+     "ssp": "10489.32",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-09-03",
+     "termEnd": "2029-08-19"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "761.59",
+     "11529.95",
+     "917.65",
+     "9230.62"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-09-30",
+       "amount": "220.33"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "254.23"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "254.23"
+      },
+      {
+       "date": "2028-12-04",
+       "amount": "32.80"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "11529.95"
+      }
+     ],
+     [
+      {
+       "date": "2028-09-30",
+       "amount": "10.20"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-06-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-07-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-08-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-09-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-10-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-11-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2030-12-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-01-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-02-28",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-03-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-04-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-05-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-06-30",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-07-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-08-31",
+       "amount": "25.49"
+      },
+      {
+       "date": "2031-09-18",
+       "amount": "15.30"
+      }
+     ],
+     [
+      {
+       "date": "2028-09-30",
+       "amount": "746.15"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "799.45"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "799.45"
+      },
+      {
+       "date": "2029-08-19",
+       "amount": "489.97"
+      }
+     ]
+    ],
+    "recognizedAsOf": "21838.24",
+    "deferredAdditions": "22439.81",
+    "deferredAsOf": "601.57"
+   }
+  },
+  {
+   "id": "A606-33",
+   "description": "seeded bundle: 3 obligations, EUR, price 90% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "74437.32",
+   "residualRule": "LARGEST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2028-04-25",
+   "asOf": "2029-02-28",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "38327.24",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-04-25"
+    },
+    {
+     "id": "po-2",
+     "ssp": "30324.21",
+     "sspSource": "RESIDUAL",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-09-09"
+    },
+    {
+     "id": "po-3",
+     "ssp": "14056.69",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-05-08",
+     "termEnd": "2031-04-23"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "34494.53",
+     "27291.78",
+     "12651.01"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-04-25",
+       "amount": "34494.53"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "27291.78"
+      }
+     ],
+     [
+      {
+       "date": "2028-05-31",
+       "amount": "275.58"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-06-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-07-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-08-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-09-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-10-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-11-30",
+       "amount": "355.96"
+      },
+      {
+       "date": "2030-12-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2031-01-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2031-02-28",
+       "amount": "355.96"
+      },
+      {
+       "date": "2031-03-31",
+       "amount": "355.96"
+      },
+      {
+       "date": "2031-04-23",
+       "amount": "272.79"
+      }
+     ]
+    ],
+    "recognizedAsOf": "65265.53",
+    "deferredAdditions": "39942.79",
+    "deferredAsOf": "9171.79"
+   }
+  },
+  {
+   "id": "A606-34",
+   "description": "seeded bundle: 3 obligations, USD, price 105% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "86315.87",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2027-08-08",
+   "asOf": "2028-10-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "27357.05",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-08-12"
+    },
+    {
+     "id": "po-2",
+     "ssp": "19674.34",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-11-09"
+    },
+    {
+     "id": "po-3",
+     "ssp": "35174.21",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-02-16"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "28724.89",
+     "20658.05",
+     "36932.93"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "28724.89"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "20658.05"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "36932.93"
+      }
+     ]
+    ],
+    "recognizedAsOf": "86315.87",
+    "deferredAdditions": "86315.87",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-35",
+   "description": "seeded bundle: 3 obligations, EUR, price 66% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "47936.27",
+   "residualRule": "FIRST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2026-11-24",
+   "asOf": "2027-08-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "28848.98",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-11-24"
+    },
+    {
+     "id": "po-2",
+     "ssp": "22921.64",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-11-24"
+    },
+    {
+     "id": "po-3",
+     "ssp": "20860.09",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2026-12-06",
+     "termEnd": "2029-11-21"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "19040.34",
+     "15128.28",
+     "13767.65"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-11-24",
+       "amount": "19040.34"
+      }
+     ],
+     [
+      {
+       "date": "2026-11-24",
+       "amount": "15128.28"
+      }
+     ],
+     [
+      {
+       "date": "2026-12-31",
+       "amount": "324.92"
+      },
+      {
+       "date": "2027-01-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-02-28",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-08-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-09-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-10-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-11-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2027-12-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-01-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "387.40"
+      },
+      {
+       "date": "2029-11-21",
+       "amount": "271.13"
+      }
+     ]
+    ],
+    "recognizedAsOf": "37592.74",
+    "deferredAdditions": "13767.65",
+    "deferredAsOf": "10343.53"
+   }
+  },
+  {
+   "id": "A606-36",
+   "description": "seeded bundle: 3 obligations, GBP, price 71% of SSP total",
+   "currency": "GBP",
+   "transactionPrice": "45058.13",
+   "residualRule": "FIRST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2027-08-27",
+   "asOf": "2028-01-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "35562.38",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2027-08-27"
+    },
+    {
+     "id": "po-2",
+     "ssp": "24701.73",
+     "sspSource": "RESIDUAL",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-12-15"
+    },
+    {
+     "id": "po-3",
+     "ssp": "3198.05",
+     "sspSource": "PCT_OF_LIST",
+     "method": "RATABLE",
+     "termStart": "2027-09-10",
+     "termEnd": "2027-10-09"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "25249.30",
+     "17538.22",
+     "2270.61"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2027-08-27",
+       "amount": "25249.30"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "17538.22"
+      }
+     ],
+     [
+      {
+       "date": "2027-09-30",
+       "amount": "1604.96"
+      },
+      {
+       "date": "2027-10-09",
+       "amount": "665.65"
+      }
+     ]
+    ],
+    "recognizedAsOf": "45058.13",
+    "deferredAdditions": "19808.83",
+    "deferredAsOf": "0.00"
+   }
+  },
+  {
+   "id": "A606-37",
+   "description": "seeded bundle: 4 obligations, EUR, price 91% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "74838.05",
+   "residualRule": "LARGEST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-01-25",
+   "asOf": "2028-07-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "22717.31",
+     "sspSource": "EXPLICIT",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-01-25"
+    },
+    {
+     "id": "po-2",
+     "ssp": "16070.62",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-02-12",
+     "termEnd": "2028-03-11"
+    },
+    {
+     "id": "po-3",
+     "ssp": "1019.09",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2028-02-13",
+     "termEnd": "2028-07-29"
+    },
+    {
+     "id": "po-4",
+     "ssp": "42432.60",
+     "sspSource": "RESIDUAL",
+     "method": "RATABLE",
+     "termStart": "2028-01-25",
+     "termEnd": "2031-01-24"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "20672.75",
+     "14624.26",
+     "927.37",
+     "38613.67"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2028-01-25",
+       "amount": "20672.75"
+      }
+     ],
+     [
+      {
+       "date": "2028-02-29",
+       "amount": "7312.13"
+      },
+      {
+       "date": "2028-03-11",
+       "amount": "7312.13"
+      }
+     ],
+     [
+      {
+       "date": "2028-02-29",
+       "amount": "154.56"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "154.56"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "154.56"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "154.56"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "154.56"
+      },
+      {
+       "date": "2028-07-29",
+       "amount": "154.57"
+      }
+     ],
+     [
+      {
+       "date": "2028-01-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-02-29",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-03-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-04-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-05-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-06-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-07-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-08-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-09-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-10-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-11-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2028-12-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-01-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-02-28",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-03-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-04-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-05-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-06-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-07-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-08-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-09-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-10-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-11-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2029-12-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-01-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-02-28",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-03-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-04-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-05-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-06-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-07-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-08-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-09-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-10-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-11-30",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2030-12-31",
+       "amount": "1043.61"
+      },
+      {
+       "date": "2031-01-24",
+       "amount": "1043.71"
+      }
+     ]
+    ],
+    "recognizedAsOf": "43529.65",
+    "deferredAdditions": "54165.30",
+    "deferredAsOf": "31308.40"
+   }
+  },
+  {
+   "id": "A606-38",
+   "description": "seeded bundle: 4 obligations, USD, price 83% of SSP total",
+   "currency": "USD",
+   "transactionPrice": "51145.62",
+   "residualRule": "LAST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2028-05-30",
+   "asOf": "2028-10-31",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "603.90",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-2",
+     "ssp": "11678.43",
+     "sspSource": "PCT_OF_LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2028-05-30"
+    },
+    {
+     "id": "po-3",
+     "ssp": "35663.11",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE"
+    },
+    {
+     "id": "po-4",
+     "ssp": "13675.80",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2028-11-10"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "501.23",
+     "9693.09",
+     "29600.37",
+     "11350.93"
+    ],
+    "schedules": [
+     [
+      {
+       "date": null,
+       "amount": "501.23"
+      }
+     ],
+     [
+      {
+       "date": "2028-05-30",
+       "amount": "9693.09"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "29600.37"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "11350.93"
+      }
+     ]
+    ],
+    "recognizedAsOf": "9693.09",
+    "deferredAdditions": "41452.53",
+    "deferredAsOf": "41452.53"
+   }
+  },
+  {
+   "id": "A606-39",
+   "description": "seeded bundle: 3 obligations, EUR, price 109% of SSP total",
+   "currency": "EUR",
+   "transactionPrice": "102450.09",
+   "residualRule": "LAST",
+   "ratableBasis": "DAILY",
+   "contractDate": "2026-08-17",
+   "asOf": "2027-02-28",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "16922.06",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-08-17"
+    },
+    {
+     "id": "po-2",
+     "ssp": "35612.58",
+     "sspSource": "PCT_OF_LIST",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-01-07"
+    },
+    {
+     "id": "po-3",
+     "ssp": "41456.27",
+     "sspSource": "EXPLICIT",
+     "method": "RATABLE",
+     "termStart": "2026-08-17",
+     "termEnd": "2027-08-17"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "18445.04",
+     "38817.71",
+     "45187.34"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-08-17",
+       "amount": "18445.04"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "38817.71"
+      }
+     ],
+     [
+      {
+       "date": "2026-08-31",
+       "amount": "1817.19"
+      },
+      {
+       "date": "2026-09-30",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2026-10-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2026-11-30",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2026-12-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-01-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-02-28",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-03-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-04-30",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-05-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-06-30",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-07-31",
+       "amount": "3755.52"
+      },
+      {
+       "date": "2027-08-17",
+       "amount": "2059.43"
+      }
+     ]
+    ],
+    "recognizedAsOf": "81613.06",
+    "deferredAdditions": "84005.05",
+    "deferredAsOf": "20837.03"
+   }
+  },
+  {
+   "id": "A606-40",
+   "description": "seeded bundle: 2 obligations, KWD, price 94% of SSP total",
+   "currency": "KWD",
+   "transactionPrice": "55996.951",
+   "residualRule": "FIRST",
+   "ratableBasis": "MONTHLY",
+   "contractDate": "2026-11-21",
+   "asOf": "2026-11-30",
+   "obligations": [
+    {
+     "id": "po-1",
+     "ssp": "33893.660",
+     "sspSource": "LIST",
+     "method": "POINT_IN_TIME",
+     "satisfiedOn": "2026-11-21"
+    },
+    {
+     "id": "po-2",
+     "ssp": "25677.565",
+     "sspSource": "EXPLICIT",
+     "method": "MILESTONE",
+     "satisfiedOn": "2027-06-05"
+    }
+   ],
+   "expected": {
+    "allocated": [
+     "31860.041",
+     "24136.910"
+    ],
+    "schedules": [
+     [
+      {
+       "date": "2026-11-21",
+       "amount": "31860.041"
+      }
+     ],
+     [
+      {
+       "date": null,
+       "amount": "24136.910"
+      }
+     ]
+    ],
+    "recognizedAsOf": "31860.041",
+    "deferredAdditions": "24136.910",
+    "deferredAsOf": "24136.910"
+   }
+  }
+ ]
+}
