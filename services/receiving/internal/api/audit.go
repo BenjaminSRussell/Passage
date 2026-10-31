@@ -185,6 +185,12 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	vendorID, err := a.store.InvoiceVendor(ctx, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	vendorGroupID := a.vendorGroupID(ctx, nil, id, req.LegalEntityID, vendorID)
 	released, err := a.store.ReleaseInvoice(ctx, id, req.LegalEntityID, p.UserID, func(inv store.Invoice) (store.InvoiceOutcome, error) {
 		lines := make([]domain.HeldLine, len(inv.Lines))
 		subjects := []string{inv.ID}
@@ -200,7 +206,7 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
-		evt, err := invoicePostedEvent(p.TenantID, inv, entry.LedgerEntryID, total, entry.GrirCleared)
+		evt, err := invoicePostedEvent(p.TenantID, inv, vendorGroupID, entry.LedgerEntryID, total, entry.GrirCleared)
 		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
 	})
 	if err != nil {

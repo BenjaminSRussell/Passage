@@ -79,6 +79,7 @@ type ersRun struct {
 	base      settlementRunBase
 	orders    map[string]ersOrder
 	vendors   map[string]bool
+	groups    groupMemo
 	body      ersRunBody
 }
 
@@ -245,7 +246,7 @@ func (r *ersRun) receipt(receiptID string) error {
 		r.skipWithDetail(ref, reason, detail)
 		return nil
 	}
-	posted, err := r.api.submitInvoice(r.ctx, r.principal, in)
+	posted, err := r.api.submitInvoice(r.ctx, r.groups, r.principal, in)
 	var domainErr *domain.Error
 	if errors.As(err, &domainErr) {
 		reasons := map[string]string{domain.CodeDuplicateInvoice: skipAlreadySettled, domain.CodePlanSettled: skipPlanSettled, domain.CodeOverInvoice: skipLineInvoiced}
@@ -289,7 +290,7 @@ func (a *API) runErsSettlement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run := &ersRun{
-		api: a, ctx: r.Context(), principal: p, base: start.req, orders: map[string]ersOrder{}, vendors: map[string]bool{},
+		api: a, ctx: r.Context(), principal: p, base: start.req, orders: map[string]ersOrder{}, vendors: map[string]bool{}, groups: groupMemo{},
 		body: ersRunBody{Settled: []ersSettledBody{}, Skipped: []skippedBody{}},
 	}
 	if err := run.scan(req); err != nil {

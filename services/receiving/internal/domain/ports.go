@@ -162,6 +162,27 @@ func (f FakePurchaseOrders) Get(_ context.Context, _, id string) (PurchaseOrder,
 	return PurchaseOrder{}, ErrPurchaseOrderNotFound
 }
 
+var ErrVendorNotFound = errors.New("vendor not found")
+
+type VendorGroups interface {
+	VendorGroupID(ctx context.Context, legalEntityID, vendorID string) (string, error)
+}
+
+type FakeVendorGroups struct {
+	Groups map[string]string
+	Err    error
+}
+
+func (f FakeVendorGroups) VendorGroupID(_ context.Context, _, vendorID string) (string, error) {
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if g, ok := f.Groups[vendorID]; ok {
+		return g, nil
+	}
+	return "", ErrVendorNotFound
+}
+
 const FakeFiscalPeriodID = "99999999-9999-4999-8999-999999999999"
 
 type FakePeriods struct {

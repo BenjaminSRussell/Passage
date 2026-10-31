@@ -237,6 +237,7 @@ components:
         source: { type: string, enum: [MANUAL, ERS] }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
+        vendor_group_id: { type: string, format: uuid, description: "the vendor's group from the party vendor master; omitted when party is unreachable, refuses the lookup or does not know the vendor, because AP posting does not depend on party availability" }
         invoice_number: { type: string }
         invoice_date: { type: string, format: date }
         posting_date: { type: string, format: date }

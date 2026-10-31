@@ -41,9 +41,13 @@ type rig struct {
 func newRig(periods domain.PeriodStatus) *rig { return newRigOn(memstore.New(), periods) }
 
 func newRigOn(st *memstore.Store, periods domain.PeriodStatus) *rig {
+	return newRigWithGroups(st, periods, nil)
+}
+
+func newRigWithGroups(st *memstore.Store, periods domain.PeriodStatus, groups domain.VendorGroups) *rig {
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
-		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger,
+		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger, VendorGroups: groups,
 		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 		ResolveMinAge: time.Nanosecond,
 	})
@@ -463,6 +467,45 @@ func TestInvoice_PostsClearsGrirAndEmits(t *testing.T) {
 	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
 	if page.Items[0].Status != "CLEARED" || page.Items[0].OpenAmount != "0.00" {
 		t.Fatalf("grir %+v", page.Items)
+	}
+}
+
+func TestInvoice_EventCarriesVendorGroupFromParty(t *testing.T) {
+	const group = "00000000-0000-4000-8000-0000000000c1"
+	cases := []struct {
+		name   string
+		groups domain.VendorGroups
+		want   string
+		failed string
+	}{
+		{"known vendor", domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}}, `"vendor_group_id":"` + group + `"`, "0"},
+		{"party unreachable", domain.FakeVendorGroups{Err: errors.New("party down")}, "", "1"},
+		{"unknown vendor", domain.FakeVendorGroups{}, "", "1"},
+		{"group is not a uuid", domain.FakeVendorGroups{Groups: map[string]string{vendorID: "not-a-uuid"}}, "", "1"},
+		{"party not configured", nil, "", "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rg := newRigWithGroups(memstore.New(), domain.PeriodOpen, tc.groups)
+			r := rg.posted(t, "PS-1", 10, 4)
+			decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 4, ""), rg.apPoster()), http.StatusCreated)
+			evts := rg.st.Events()
+			data := string(evts[len(evts)-1].Data)
+			if evts[len(evts)-1].Type != "dev.passage.payables.invoice.posted.v1" {
+				t.Fatalf("last event %s", evts[len(evts)-1].Type)
+			}
+			if tc.want != "" && !strings.Contains(data, tc.want) {
+				t.Fatalf("event %s lacks %s", data, tc.want)
+			}
+			if tc.want == "" && strings.Contains(data, "vendor_group_id") {
+				t.Fatalf("event %s carries a vendor group the lookup did not return", data)
+			}
+			metrics := httptest.NewRecorder()
+			rg.api.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+			if !strings.Contains(metrics.Body.String(), "receiving_vendor_group_lookups_failed_total "+tc.failed+"\n") {
+				t.Fatalf("metrics %s, want failed lookups %s", metrics.Body.String(), tc.failed)
+			}
+		})
 	}
 }
 
