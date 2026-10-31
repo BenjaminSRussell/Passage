@@ -16,8 +16,14 @@ type compiledPermission struct {
 	methods []string
 }
 
+type DutyPermission struct {
+	Resource string   `json:"resource"`
+	Methods  []string `json:"methods"`
+}
+
 type catalogueDuty struct {
 	permissions []compiledPermission
+	declared    []DutyPermission
 	size        int
 	serviceOnly bool
 }
@@ -102,6 +108,7 @@ func LoadCatalogue(raw []byte) (*Catalogue, error) {
 			}
 			duty.permissions = append(duty.permissions, compiledPermission{pattern: pattern, methods: p.Methods})
 			duty.size += len(p.Methods)
+			duty.declared = append(duty.declared, DutyPermission{Resource: p.Resource, Methods: slices.Clone(p.Methods)})
 			for _, method := range p.Methods {
 				if route := (Route{p.Resource, method}); !seen[route] {
 					seen[route] = true
@@ -130,6 +137,31 @@ func (c *Catalogue) HasDuty(name string) bool { _, ok := c.duties[name]; return 
 func (c *Catalogue) ServiceOnly(name string) bool {
 	d, ok := c.duties[name]
 	return ok && d.serviceOnly
+}
+
+// DutyInfo describes one seeded duty and the routes it grants.
+type DutyInfo struct {
+	Name        string
+	ServiceOnly bool
+	Permissions []DutyPermission
+}
+
+// Duties lists every seeded duty sorted by name.
+func (c *Catalogue) Duties() []DutyInfo {
+	out := make([]DutyInfo, len(c.names))
+	for i, name := range c.names {
+		out[i], _ = c.Duty(name)
+	}
+	return out
+}
+
+// Duty returns the named duty and whether it is seeded.
+func (c *Catalogue) Duty(name string) (DutyInfo, bool) {
+	d, ok := c.duties[name]
+	if !ok {
+		return DutyInfo{}, false
+	}
+	return DutyInfo{Name: name, ServiceOnly: d.serviceOnly, Permissions: slices.Clone(d.declared)}, true
 }
 
 // Routes lists every distinct resource pattern and method, sorted.

@@ -46,6 +46,20 @@ type page[T any] struct {
 	Next  string `json:"next,omitempty"`
 }
 
+const uuidTextLength = 36
+
+func canonicalUUID(s string) (string, bool) {
+	if len(s) != uuidTextLength {
+		return "", false
+	}
+	return ids.Canonical(s)
+}
+
+func validUUID(s string) bool {
+	_, ok := canonicalUUID(s)
+	return ok
+}
+
 func pgCode(err error) string {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -99,7 +113,7 @@ func latest(first time.Time, rest ...time.Time) time.Time {
 
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.FromContext(r.Context())
-	if !ok || !ids.Valid(p.TenantID) {
+	if !ok || !validUUID(p.TenantID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return p, false
 	}
@@ -127,7 +141,7 @@ func pageParams(r *http.Request, fields map[string]string) (int, *string) {
 	}
 	var after *string
 	if raw := r.URL.Query().Get("after"); raw != "" {
-		if !ids.Valid(raw) {
+		if !validUUID(raw) {
 			fields["after"] = "must be a UUID"
 		} else {
 			after = &raw

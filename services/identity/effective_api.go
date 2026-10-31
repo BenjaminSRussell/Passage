@@ -9,7 +9,6 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -79,7 +78,7 @@ order by role`
 
 func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 	p, ok := tenant.FromContext(r.Context())
-	if !ok || !ids.Valid(p.TenantID) {
+	if !ok || !validUUID(p.TenantID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return
 	}
@@ -90,10 +89,10 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 	legalEntityID := r.URL.Query().Get("legalEntityId")
 	fields := map[string]string{}
-	if !ids.Valid(userID) {
+	if !validUUID(userID) {
 		fields["id"] = "must be a UUID"
 	}
-	if legalEntityID != "" && !ids.Valid(legalEntityID) {
+	if legalEntityID != "" && !validUUID(legalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if len(fields) > 0 {
