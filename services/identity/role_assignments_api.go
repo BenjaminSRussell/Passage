@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -87,10 +88,12 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if !ids.Valid(req.UserID) {
+	if userID, ok := canonicalUUID(req.UserID); ok {
+		req.UserID = userID
+	} else {
 		fields["userId"] = "must be a UUID"
 	}
-	if req.LegalEntityID != "" && !ids.Valid(req.LegalEntityID) {
+	if req.LegalEntityID != "" && !validUUID(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !a.catalogue.HasDuty(req.Role) {
@@ -98,18 +101,18 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	} else if a.catalogue.ServiceOnly(req.Role) {
 		fields["role"] = "is held by a service grant only and cannot be assigned to a user"
 	}
-	oldest := time.Now().Add(-clockSkew)
-	if req.ValidFrom != nil && req.ValidFrom.Before(oldest) {
+	now := time.Now()
+	if req.ValidFrom != nil && req.ValidFrom.Before(now.Add(-clockSkew)) {
 		fields["validFrom"] = "must not be in the past"
 	}
-	if req.ValidTo != nil && req.ValidTo.Before(oldest) {
-		fields["validTo"] = "must not be in the past"
+	if req.ValidTo != nil && !req.ValidTo.After(now) {
+		fields["validTo"] = "must be in the future"
 	}
 	if fields["validTo"] == "" && req.ValidFrom != nil && req.ValidTo != nil && !req.ValidTo.After(*req.ValidFrom) {
 		fields["validTo"] = "must be after validFrom"
 	}
 	req.Reason = strings.TrimSpace(req.Reason)
-	if len(req.Reason) > maxReason {
+	if utf8.RuneCountInString(req.Reason) > maxReason {
 		fields["reason"] = "must be at most 500 characters"
 	}
 	if len(fields) > 0 {
@@ -136,7 +139,7 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if p.UserID == req.UserID || p.UserID == idpSubject {
+		if strings.EqualFold(p.UserID, req.UserID) || strings.EqualFold(p.UserID, idpSubject) {
 			return httpx.NewProblem(http.StatusForbidden, codeSelfGrant, "You cannot grant a role to yourself")
 		}
 		if status != "active" {
@@ -193,7 +196,7 @@ func (a *RoleAssignmentsAPI) list(w http.ResponseWriter, r *http.Request) {
 	limit, after := pageParams(r, fields)
 	if userID == "" && role == "" {
 		fields["userId"] = "userId or role is required"
-	} else if userID != "" && !ids.Valid(userID) {
+	} else if userID != "" && !validUUID(userID) {
 		fields["userId"] = "must be a UUID"
 	}
 	if raw := q.Get("active"); raw != "" && raw != "true" && raw != "false" {
@@ -229,7 +232,7 @@ func (a *RoleAssignmentsAPI) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
+	if !validUUID(id) {
 		invalidFields(w, r, "assignment id must be a UUID", map[string]string{"id": "must be a UUID"})
 		return
 	}
@@ -263,7 +266,7 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
+	if !validUUID(id) {
 		invalidFields(w, r, "assignment id must be a UUID", map[string]string{"id": "must be a UUID"})
 		return
 	}

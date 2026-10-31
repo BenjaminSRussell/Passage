@@ -44,4 +44,14 @@ Tenant-level writes (creating a legal entity, a tenant-wide assignment, ending o
 
 An assigned role must be a seeded duty name. The no-overlap rule for one user, role and legal entity is the `identity_role_assignments_no_overlap` exclusion constraint (409 `IDN-ASSIGNMENT-OVERLAP`); a revoke is `end` (never a delete), which only shortens; ending a future-dated assignment sets `valid_to = valid_from`, an empty range that overlaps nothing and grants nothing. Every mutation writes an `identity_audit` row (actor from `X-Passage-User`) and an `outbox` event (`dev.passage.identity.{tenant,legalentity,roleassignment}.{created,assigned,ended}.v1`) in the same transaction as the change.
 
-Not implemented (issue #83 remainder): SCIM 2.0 `/Users` and `/Groups`, OPA bundle build and distribution, Keycloak push (#80), gateway host-to-tenant mapping (#213), and a `cmd/identity` server binary (needs per-tenant JWT verifier and OPA wiring).
+## User directory and role/duty catalogue
+
+`NewUsersAPI(pool)` serves `GET /v1/identity/users` (filters `status`, `q`, `legalEntityId`; keyset paging) and `GET /v1/identity/users/{id}` under the seeded duty `Maintain users`. Users belong to the tenant, not to a legal entity, so every holder sees the whole tenant; `legalEntityId` narrows to users with an assignment for that entity and is bounded by the caller's own scope through the assignments' RLS.
+
+`NewCatalogueAPI(catalogue)` serves `GET /v1/authz/roles[/{name}]` and `GET /v1/authz/duties[/{name}]` under `Maintain security roles`. Until roles are first-class, a role is an assignable duty (the same names `POST /v1/authz/assignments` accepts); duty detail lists the routes a duty grants. The catalogue is global, read from `data.json`, so it needs no database.
+
+## Server binary
+
+`cmd/identity` wires every API above on `httpx.NewRouter()` (gateway-asserted `X-Passage-*` headers). Settings: `DATABASE_URL`, `IDENTITY_DUTY_CATALOGUE_PATH` (the `policies/authz/data.json` the bundle is built from), `IDENTITY_OPERATOR_TENANT_ID` (optional; without it the tenant routes and `Maintain tenants` grants are refused), `MIGRATE_ON_START` with optional `MIGRATE_DATABASE_URL` for the schema owner, `HTTP_ADDR`. `identity_operator` is limited to a single row by a constraint; seeding it with the operator tenant id stays a deploy prerequisite. There is no Dockerfile, chart or gateway route yet.
+
+Not implemented (issue #83 remainder): SCIM 2.0 `/Users` and `/Groups`, OPA bundle build and distribution, Keycloak push (#80), and gateway host-to-tenant mapping (#213).

@@ -42,7 +42,7 @@ func NewTenantsAPI(pool *pgxpool.Pool, operatorTenantID string) *TenantsAPI {
 func (a *TenantsAPI) operatorOnly(next http.Handler) http.Handler {
 	return requireAnyDuty(dutyMaintainTenants)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, _ := tenant.FromContext(r.Context())
-		if !ids.Valid(p.TenantID) {
+		if !validUUID(p.TenantID) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 			return
 		}
@@ -174,7 +174,7 @@ func (a *TenantsAPI) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
+	if !validUUID(id) {
 		invalidFields(w, r, "tenant id must be a UUID", map[string]string{"id": "must be a UUID"})
 		return
 	}

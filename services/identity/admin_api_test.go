@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -25,6 +27,7 @@ const (
 	dutyLegalEntities = "Maintain legal entities"
 	dutyRoles         = "Maintain security roles"
 	dutyAllScope      = "org.switcher.all_scope"
+	dutyUsers         = "Maintain users"
 )
 
 type caller struct {
@@ -66,6 +69,8 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	identity.NewLegalEntitiesAPI(app).Register(r)
 	identity.NewRoleAssignmentsAPI(app, catalogue, f.operator).Register(r)
 	identity.NewEffectivePermissionsAPI(app, catalogue).Register(r)
+	identity.NewUsersAPI(app).Register(r)
+	identity.NewCatalogueAPI(catalogue).Register(r)
 	f.router = r
 	return f
 }
@@ -283,6 +288,9 @@ func TestOperatorTableIsOperatorReadOnly(t *testing.T) {
 	}
 	if got := count(t, f.app, f.operator, "", `select count(*) from identity_tenants`); got != 3 {
 		t.Errorf("operator sees %d tenants, want all 3", got)
+	}
+	if _, err := f.admin.Exec(context.Background(), `insert into identity_operator (tenant_id) values ($1)`, f.tenantA); pgCode(err) != "23505" {
+		t.Errorf("a second identity_operator row: err = %v, want a unique violation", err)
 	}
 	for _, stmt := range []string{`insert into identity_operator (tenant_id) values ($1)`, `delete from identity_operator where tenant_id = $1`, `update identity_tenants set status = 'suspended' where tenant_id = $1`} {
 		err := asTenant(t, f.app, f.operator, "*", func(tx pgx.Tx) error {
@@ -689,6 +697,45 @@ func TestRoleAssignmentGuards(t *testing.T) {
 		if p.Errors["reason"] == "" {
 			t.Fatalf("errors = %v", p.Errors)
 		}
+		multibyte := decode[assignmentRow](t, assign(c, map[string]any{"userId": userID, "role": "View batch history", "reason": strings.Repeat("é", 500)}), http.StatusCreated)
+		if len([]rune(multibyte.Reason)) != 500 {
+			t.Fatalf("reason has %d characters, want 500 accepted", len([]rune(multibyte.Reason)))
+		}
+		wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View number sequences", "reason": strings.Repeat("é", 501)}), http.StatusBadRequest, "COM-0001")
+	})
+
+	t.Run("uppercase user ids are canonicalised and still hit the self-grant guard", func(t *testing.T) {
+		self := c
+		self.user = userID
+		wantProblem(t, assign(self, map[string]any{"userId": strings.ToUpper(userID), "role": "View vendors"}), http.StatusForbidden, "IAM-0416")
+		viaSubject := c
+		viaSubject.user = strings.ToUpper("subject-" + f.tenantA)
+		wantProblem(t, assign(viaSubject, map[string]any{"userId": userID, "role": "View vendors"}), http.StatusForbidden, "IAM-0416")
+		created := decode[assignmentRow](t, assign(c, map[string]any{"userId": strings.ToUpper(userID), "role": "View platform releases"}), http.StatusCreated)
+		if created.UserID != userID {
+			t.Fatalf("userId = %q, want canonical %q", created.UserID, userID)
+		}
+	})
+
+	t.Run("non-canonical UUID spellings are refused", func(t *testing.T) {
+		for _, id := range []string{"urn:uuid:" + userID, "{" + userID + "}", strings.ReplaceAll(userID, "-", "")} {
+			p := wantProblem(t, assign(c, map[string]any{"userId": id, "role": "View vendors"}), http.StatusBadRequest, "COM-0001")
+			if p.Errors["userId"] == "" {
+				t.Errorf("%q: errors = %v", id, p.Errors)
+			}
+			wantProblem(t, f.do(c, http.MethodGet, "/v1/authz/assignments/"+id, nil), http.StatusBadRequest, "COM-0001")
+		}
+	})
+
+	t.Run("a window that has already closed is refused even inside the clock skew", func(t *testing.T) {
+		now := time.Now().UTC()
+		p := wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View vendors", "validFrom": now.Add(-4 * time.Minute), "validTo": now.Add(-time.Minute)}), http.StatusBadRequest, "COM-0001")
+		if p.Errors["validTo"] == "" {
+			t.Fatalf("errors = %v", p.Errors)
+		}
+		if got := count(t, f.app, f.tenantA, "*", `select count(*) from identity_role_assignments where role = 'View vendors' and valid_to is not null`); got != 0 {
+			t.Fatalf("a refused past window left %d rows", got)
+		}
 	})
 
 	t.Run("an inactive legal entity cannot receive an assignment", func(t *testing.T) {
@@ -715,4 +762,12 @@ func TestRoleAssignmentGuards(t *testing.T) {
 		}
 		wantProblem(t, f.do(c, http.MethodDelete, "/v1/authz/assignments/"+created.AssignmentID, nil), http.StatusConflict, "IDN-ASSIGNMENT-ENDED")
 	})
+}
+
+func pgCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
 }

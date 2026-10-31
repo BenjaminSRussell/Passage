@@ -144,7 +144,7 @@ func (a *LegalEntitiesAPI) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
+	if !validUUID(id) {
 		invalidFields(w, r, "legal entity id must be a UUID", map[string]string{"id": "must be a UUID"})
 		return
 	}
