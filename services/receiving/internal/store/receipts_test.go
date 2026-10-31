@@ -437,3 +437,28 @@ func TestDirectReceiptRequiresPrincipal(t *testing.T) {
 		t.Fatal("want error without a principal")
 	}
 }
+
+func TestArrivalPersistsPOLineNo(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	in := arrival(p, "PS-PO-LINE")
+	in.Lines[0].POLineNo = 3
+	created, err := st.CreateArrival(ctxOf(p), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetReceipt(ctxOf(p), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lines[0].POLineNo != 3 {
+		t.Fatalf("po line number %d, want 3", got.Lines[0].POLineNo)
+	}
+	plain, err := st.CreateArrival(ctxOf(p), arrival(p, "PS-NO-PO-LINE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Lines[0].POLineNo != 0 {
+		t.Fatalf("a line keyed without a PO line number reads back %d", plain.Lines[0].POLineNo)
+	}
+}

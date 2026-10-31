@@ -214,6 +214,10 @@ func (a *API) directReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if err := a.bindPurchaseOrder(r.Context(), &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	created, err := a.store.DirectReceipt(r.Context(), in, registerFn(inputs, 0))
 	if err != nil {
 		writeError(w, r, err)
@@ -281,6 +285,15 @@ func (a *API) registerReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
+	arrived, err := a.store.GetReceipt(r.Context(), cmd.id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := a.recheckOpenQuantity(r.Context(), arrived, inputs); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	registered, err := a.store.Register(r.Context(), cmd.id, registerFn(inputs, cmd.version))

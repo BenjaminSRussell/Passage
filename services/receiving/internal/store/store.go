@@ -35,6 +35,7 @@ func (e *DuplicatePackingSlipError) Error() string {
 type Line struct {
 	LineNo           int
 	POLineID         string
+	POLineNo         int
 	ProductID        string
 	Qty              decimal.Decimal
 	InvoicedQty      decimal.Decimal

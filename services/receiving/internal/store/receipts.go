@@ -28,7 +28,7 @@ const (
 	receiptColumns = `id::text, COALESCE(receipt_number, ''), legal_entity_id::text, vendor_id::text, purchase_order_id::text, packing_slip,
 		COALESCE(carrier, ''), pallet_count, state, receipt_date, COALESCE(currency, ''), exchange_rate, posting_date, posted_at,
 		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq`
-	lineColumns = `line_no, COALESCE(po_line_id::text, ''), product_id::text, qty, invoiced_qty,
+	lineColumns = `line_no, COALESCE(po_line_id::text, ''), COALESCE(po_line_no, 0), product_id::text, qty, invoiced_qty,
 		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
@@ -85,7 +85,7 @@ func scanReceipt(row scanner) (Receipt, error) {
 
 func scanLine(row scanner) (Line, error) {
 	var l Line
-	err := row.Scan(&l.LineNo, &l.POLineID, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
+	err := row.Scan(&l.LineNo, &l.POLineID, &l.POLineNo, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
 		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct)
 	return l, err
 }
@@ -202,11 +202,11 @@ func insertArrival(ctx context.Context, tx pgx.Tx, tenantID string, in Receipt) 
 			currency = in.Currency
 		}
 		rows[i] = []any{tenantID, in.ID, lineNo, in.LegalEntityID, l.ProductID, l.OrderedRemaining, l.UnitPrice, currency,
-			l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked}
+			l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked, l.POLineNo}
 	}
 	return execBatch(ctx, tx, `INSERT INTO receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency,
-		po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14)`, rows)
+		po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked, po_line_no)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14, NULLIF($15, 0))`, rows)
 }
 
 func (s *Postgres) mapWriteError(ctx context.Context, tenantID string, in Receipt, err error) error {

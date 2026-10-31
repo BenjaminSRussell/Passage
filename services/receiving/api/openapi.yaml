@@ -734,9 +734,15 @@ components:
     ArrivalLine:
       type: object
       additionalProperties: false
-      required: [poLineId, productId, orderedRemaining, unitPrice, unit]
+      required: [poLineId, productId, unit]
+      description: |
+        With poLineNo the line is validated against the purchase order line (same legal entity, vendor, currency,
+        product and unit, open quantity above zero), orderedRemaining is the order quantity not yet received and
+        unitPrice the net price per unit, both taken from purchasing; supplying either is 400. Without poLineNo
+        both are required and trusted as sent. Either every line carries poLineNo or none does.
       properties:
         poLineId: { type: string, format: uuid }
+        poLineNo: { type: integer, minimum: 1 }
         productId: { type: string, format: uuid }
         orderedRemaining: { type: [number, string], exclusiveMinimum: 0 }
         overDeliveryPct: { type: [number, string], minimum: 0, maximum: 100, default: 0 }
@@ -769,6 +775,7 @@ components:
       properties:
         lineNo: { type: integer }
         poLineId: { type: string, format: uuid }
+        poLineNo: { type: integer, minimum: 1, description: Purchase order line number; absent when the line was keyed without a purchase order line. }
         productId: { type: string, format: uuid }
         orderedRemaining: { type: string }
         overDeliveryPct: { type: string }
@@ -827,9 +834,11 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [poLineId, productId, orderedRemaining, unitPrice, unit, qty, locationId]
+            required: [poLineId, productId, unit, qty, locationId]
+            description: Same purchase order line rules as ArrivalLine.
             properties:
               poLineId: { type: string, format: uuid }
+              poLineNo: { type: integer, minimum: 1 }
               productId: { type: string, format: uuid }
               orderedRemaining: { type: [number, string], exclusiveMinimum: 0 }
               overDeliveryPct: { type: [number, string], minimum: 0, maximum: 100, default: 0 }
