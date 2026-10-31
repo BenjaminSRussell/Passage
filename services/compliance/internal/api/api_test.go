@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -110,7 +111,11 @@ func (f *fakeStore) AcceptRisk(_ context.Context, id string, expected int, reaso
 }
 
 func newAPI(f *fakeStore, blockHigh bool) *API {
-	a := New(f, Config{BlockHigh: blockHigh, MaxMitigationDays: 365})
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		panic(err)
+	}
+	a := New(f, Config{BlockHigh: blockHigh, MaxMitigationDays: 365, Keys: keys})
 	a.now = func() time.Time { return now }
 	return a
 }

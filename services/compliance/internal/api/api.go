@@ -28,6 +28,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -88,6 +89,7 @@ type Config struct {
 	BreakGlassReviewDays   int
 	ScreeningThreshold     float64
 	LicenseCheck           string
+	Keys                   *fieldcrypt.Keys
 }
 
 // API holds the handler dependencies and counters.
@@ -482,6 +484,9 @@ func invalid(fields map[string]string) error {
 func domainProblem(err error) error {
 	var de *domain.Error
 	if errors.As(err, &de) {
+		if de.Code == domain.CodePrivacyKey {
+			return httpx.NewProblem(http.StatusServiceUnavailable, de.Code, de.Detail)
+		}
 		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
 	}
 	return err

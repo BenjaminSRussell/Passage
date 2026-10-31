@@ -127,3 +127,24 @@ func TestFromEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestMACIsKeyedPerTenantAndSeparateFromSeal(t *testing.T) {
+	k := keysWith(t, "k1", "k1")
+	a, err := k.MAC("tenant-a", []byte("subject|email"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := k.MAC("tenant-a", []byte("subject|email"))
+	other, _ := k.MAC("tenant-b", []byte("subject|email"))
+	diff, _ := k.MAC("tenant-a", []byte("subject|phone"))
+	rotated, _ := keysWith(t, "k2", "k1", "k2").MAC("tenant-a", []byte("subject|email"))
+	if len(a) != 32 || !bytes.Equal(a, again) {
+		t.Fatal("mac must be 32 bytes and deterministic")
+	}
+	if bytes.Equal(a, other) || bytes.Equal(a, diff) || bytes.Equal(a, rotated) {
+		t.Fatal("mac must differ across tenants, messages and master keys")
+	}
+	if _, err := k.MAC("", []byte("x")); err == nil {
+		t.Fatal("mac without a tenant id must fail")
+	}
+}

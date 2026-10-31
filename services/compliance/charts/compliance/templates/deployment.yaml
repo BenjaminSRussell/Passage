@@ -19,6 +19,16 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- if .Values.fieldCrypt.keysSecret }}
+        fsGroup: 65532
+        {{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+      volumes:
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: compliance
           {{- if .Values.image.digest }}
@@ -59,6 +69,10 @@ spec:
               value: {{ .Values.config.screeningThreshold | quote }}
             - name: TRADE_LICENSE_CHECK
               value: {{ .Values.config.tradeLicenseCheck | quote }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+{{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -74,6 +88,10 @@ spec:
               path: /readyz
               port: http
             periodSeconds: 5
+{{- if .Values.fieldCrypt.keysSecret }}
+          volumeMounts:
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:

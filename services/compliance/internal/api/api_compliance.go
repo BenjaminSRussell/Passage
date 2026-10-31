@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/store"
 )
@@ -28,9 +29,6 @@ const (
 	maxRecordFields   = 200
 	maxCampaignLines  = 5000
 	maxReadFields     = 1000
-	maxReadRules      = 500
-	maxPolicyClasses  = 10
-	maxPolicyActions  = 6
 	maxNotifiedRegime = 20
 )
 
@@ -74,12 +72,11 @@ type IncidentTransitionResponse struct {
 	AsOf time.Time `json:"asOf"`
 }
 
-// ReadClassifyRequest is the body of POST /v1/compliance/read-log:classify. Rules
-// default to the shipped read-log policy; retentionDays 0 means 730.
+// ReadClassifyRequest is the body of POST /v1/compliance/read-log:classify. The
+// shipped read-log rules always apply; retentionDays 0 means 730.
 type ReadClassifyRequest struct {
-	Fields        []string          `json:"fields"`
-	Rules         []domain.ReadRule `json:"rules,omitempty"`
-	RetentionDays int               `json:"retentionDays"`
+	Fields        []string `json:"fields"`
+	RetentionDays int      `json:"retentionDays"`
 }
 
 var (
@@ -276,7 +273,8 @@ func (a *API) previewErasure(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodePrivacyTransition, fmt.Sprintf("an erasure can be previewed once scope is discovered, not in %s", req.State)))
 		return
 	}
-	out, err := domain.PseudonymizeSubject(domain.PseudonymizeInput{SubjectRef: req.SubjectRef, HoldIDs: req.HoldIDs, Record: in.Record})
+	p, _ := tenant.FromContext(r.Context())
+	out, err := domain.PseudonymizeSubject(domain.PseudonymizeInput{Keys: a.cfg.Keys, TenantID: p.TenantID, SubjectRef: req.SubjectRef, HoldIDs: req.HoldIDs, Record: in.Record})
 	if err != nil {
 		httpx.Fail(w, r, domainProblem(err))
 		return
@@ -430,14 +428,6 @@ func (a *API) evaluateExportGovernance(w http.ResponseWriter, r *http.Request) {
 	if len(in.Reason) > maxText {
 		fields["reason"] = fmt.Sprintf("at most %d characters", maxText)
 	}
-	if len(in.Policy) > maxPolicyClasses {
-		fields["policy"] = fmt.Sprintf("at most %d classifications", maxPolicyClasses)
-	}
-	for _, actions := range in.Policy {
-		if len(actions) > maxPolicyActions {
-			fields["policy"] = fmt.Sprintf("at most %d actions per classification", maxPolicyActions)
-		}
-	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, invalid(fields))
 		return
@@ -463,19 +453,11 @@ func (a *API) classifyReadLog(w http.ResponseWriter, r *http.Request) {
 	if len(req.Fields) == 0 || len(req.Fields) > maxReadFields || !allValidIDs(req.Fields) {
 		fields["fields"] = fmt.Sprintf("give 1..%d field names", maxReadFields)
 	}
-	if len(req.Rules) > maxReadRules {
-		fields["rules"] = fmt.Sprintf("at most %d rules", maxReadRules)
-	}
-	for _, rule := range req.Rules {
-		if !validID(rule.FieldFQN) {
-			fields["rules"] = "every rule needs a fieldFqn"
-		}
-	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, invalid(fields))
 		return
 	}
-	out, err := domain.ClassifyRead(req.Fields, req.Rules, req.RetentionDays)
+	out, err := domain.ClassifyRead(req.Fields, nil, req.RetentionDays)
 	if err != nil {
 		httpx.Fail(w, r, domainProblem(err))
 		return

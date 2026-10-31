@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -23,6 +24,7 @@ const (
 	envelopeV1    = 1
 	maxKeyIDBytes = 64
 	kdfInfo       = "passage.fieldcrypt.v1"
+	macKDFInfo    = "passage.fieldcrypt.mac.v1"
 )
 
 var ErrOpen = errors.New("fieldcrypt: cannot open value")
@@ -127,4 +129,19 @@ func (k *Keys) Open(tenantID, field string, sealed []byte) ([]byte, error) {
 		return nil, ErrOpen
 	}
 	return plain, nil
+}
+
+// MAC returns HMAC-SHA256(message) under a tenant key derived from the current master key with a purpose
+// separate from Seal, so a pseudonym can neither be recomputed without the key nor decrypt anything.
+func (k *Keys) MAC(tenantID string, message []byte) ([]byte, error) {
+	if tenantID == "" {
+		return nil, errors.New("fieldcrypt: mac needs a tenant id")
+	}
+	derived, err := hkdf.Key(sha256.New, k.keys[k.current], []byte(tenantID), macKDFInfo, keySize)
+	if err != nil {
+		return nil, err
+	}
+	mac := hmac.New(sha256.New, derived)
+	mac.Write(message)
+	return mac.Sum(nil), nil
 }

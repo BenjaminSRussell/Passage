@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -47,6 +48,21 @@ func TestDecideExport(t *testing.T) {
 				t.Fatalf("flags wrong: %+v", out)
 			}
 		})
+	}
+}
+
+func TestExportRequestBodyCannotRelaxPolicy(t *testing.T) {
+	var req ExportRequest
+	body := `{"classification":"CONFIDENTIAL","channel":"GRID","rows":1,"policy":{"CONFIDENTIAL":["ALLOW"]}}`
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Policy != nil {
+		t.Fatalf("policy must not bind from JSON: %v", req.Policy)
+	}
+	out, err := DecideExport(req)
+	if err != nil || len(out.Actions) != 1 || out.Actions[0] != ActionAudit {
+		t.Fatalf("CONFIDENTIAL must keep its default AUDIT control: %+v %v", out, err)
 	}
 }
 

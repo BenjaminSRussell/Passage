@@ -252,6 +252,37 @@ func TestPreviewErasure(t *testing.T) {
 	}
 }
 
+func TestPreviewErasureFailsClosedWithoutKey(t *testing.T) {
+	req := storedRequest(domain.RequestErasure, domain.PrivacyApproved)
+	a := newAPI(&fakeStore{privacy: fakePrivacy{req: req}}, true)
+	a.cfg.Keys = nil
+	rec := serve(t, router(a), call{method: http.MethodPost, path: "/v1/privacy/requests/" + req.RequestID + "/erasure-preview",
+		duties: []string{DutyPrivacyOfficer}, body: map[string]any{"record": map[string]string{"email": "ada@example.com"}}})
+	if rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != domain.CodePrivacyKey {
+		t.Fatalf("no key: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestGovernanceRequestBodyCannotSupplyPolicyOrRules(t *testing.T) {
+	h := router(newAPI(&fakeStore{}, true))
+	view := []string{DutyComplianceView}
+	relaxed := map[string]any{"classification": "CONFIDENTIAL", "channel": "GRID", "rows": 1, "policy": map[string][]string{"CONFIDENTIAL": {"ALLOW"}}}
+	if rec := serve(t, h, call{method: http.MethodPost, path: "/v1/compliance/export-governance:evaluate", duties: view, body: relaxed}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("policy in body: %d %s", rec.Code, rec.Body)
+	}
+	delete(relaxed, "policy")
+	rec := serve(t, h, call{method: http.MethodPost, path: "/v1/compliance/export-governance:evaluate", duties: view, body: relaxed})
+	var dec domain.ExportDecision
+	decodeInto(t, rec.Body.Bytes(), &dec)
+	if rec.Code != http.StatusOK || len(dec.Actions) != 1 || dec.Actions[0] != domain.ActionAudit {
+		t.Fatalf("CONFIDENTIAL default controls: %d %s", rec.Code, rec.Body)
+	}
+	narrowed := map[string]any{"fields": []string{"hr.worker.salary"}, "rules": []map[string]string{{"fieldFqn": "nothing.matches"}}}
+	if rec := serve(t, h, call{method: http.MethodPost, path: "/v1/compliance/read-log:classify", duties: view, body: narrowed}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("rules in body: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestPurgeCheckEndpoint(t *testing.T) {
 	h := router(newAPI(&fakeStore{}, true))
 	c := call{method: http.MethodPost, path: "/v1/privacy/retention:purge-check", duties: []string{DutyPrivacyOfficer}}
