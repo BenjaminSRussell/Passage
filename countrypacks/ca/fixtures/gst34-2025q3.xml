@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CA_GST34 fixture: GST/HST return for the quarter July to September 2025, the GST34 form lines.
+     Line 101 is in whole dollars; lines 103 to 109 carry cents.
+     105 = 103 + 104 = 13000.00 + 125.40 = 13125.40; 108 = 106 + 107 = 4210.55 + 0.00 = 4210.55;
+     109 = 105 - 108 = 8914.85. -->
+<GST34>
+  <businessNumber>123456782RT0001</businessNumber>
+  <reportingPeriod start="2025-07-01" end="2025-09-30"/>
+  <line101>260000</line101>
+  <line103>13000.00</line103>
+  <line104>125.40</line104>
+  <line105>13125.40</line105>
+  <line106>4210.55</line106>
+  <line107>0.00</line107>
+  <line108>4210.55</line108>
+  <line109>8914.85</line109>
+</GST34>
