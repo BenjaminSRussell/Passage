@@ -204,3 +204,17 @@ func TestWithStoredCoverage_LeavesUnknownItemsAlone(t *testing.T) {
 		t.Fatalf("unknown item changed: %+v", items[0])
 	}
 }
+
+// TestRun_StoredMarginsShiftTheOrder (FR-22.5): the stored issue margin moves
+// the demand 3 days earlier and the reorder margin adds 2 days to the lead
+// time, so the order is delivered 3 days earlier and released 5 days earlier.
+func TestRun_StoredMarginsShiftTheOrder(t *testing.T) {
+	_, base := runVersion(t, &fakeStore{runCovs: map[string]store.RunCoverage{fgID: requirementCoverage()}}, bareBody, "k-base")
+	c := requirementCoverage()
+	c.IssueMarginDays, c.ReorderMarginDays = 3, 2
+	_, req := runVersion(t, &fakeStore{runCovs: map[string]store.RunCoverage{fgID: c}}, bareBody, "k-margins")
+	b, o := onlyOrder(t, base), onlyOrder(t, req)
+	if o.DeliveryDate != b.DeliveryDate-3 || o.OrderDate != b.OrderDate-5 {
+		t.Fatalf("with margins %+v; without %+v; want delivery -3 and order -5", o, b)
+	}
+}

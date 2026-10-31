@@ -559,6 +559,8 @@ export interface ItemCoverageInput {
   minQty: string;
   maxQty: string;
   safetyMarginReceiptDays: number;
+  safetyMarginIssueDays: number;
+  safetyMarginReorderDays: number;
   leadTimeDays: number | null;
   plannedOrderType: z.infer<typeof OrderType>;
   planningStrategy: PlanningStrategy;
@@ -581,6 +583,8 @@ export const ItemCoverage = z.object({
   minQty: z.string(),
   maxQty: z.string(),
   safetyMarginReceiptDays: z.number().int(),
+  safetyMarginIssueDays: z.number().int(),
+  safetyMarginReorderDays: z.number().int(),
   leadTimeDays: z.number().int().nullable(),
   vendorId: z.string().nullable(),
   plannedOrderType: OrderType,

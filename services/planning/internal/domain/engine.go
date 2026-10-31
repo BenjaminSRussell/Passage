@@ -74,11 +74,15 @@ type BOMLine struct {
 
 // Item is the planning snapshot of one item at one site.
 type Item struct {
-	ID                         string
-	Coverage                   string
-	PeriodDays                 int
-	MarginDays                 int
-	PositiveDays, NegativeDays int
+	ID         string
+	Coverage   string
+	PeriodDays int
+	MarginDays int
+	// IssueMarginDays moves each demand of the item earlier by that many working
+	// days (FR-22.5); ReorderMarginDays adds working days to the lead time of its
+	// planned orders, so they are released earlier. Safety stock is not an issue.
+	IssueMarginDays, ReorderMarginDays int
+	PositiveDays, NegativeDays         int
 	// FreezeDays, ActionDays and FuturesDays are the time fences of BR-22.4 in
 	// days from today. FreezeDays 0 freezes nothing; ActionDays and
 	// FuturesDays 0 mean the fence is unlimited.
@@ -104,6 +108,9 @@ type Item struct {
 	Demand, Receipts         []Requirement
 	Components               []BOMLine
 }
+
+// leadTotal is the lead time plus the reorder margin (FR-22.5).
+func (it *Item) leadTotal() int { return it.LeadTimeDays + it.ReorderMarginDays }
 
 // PlannedOrder is a proposed purchase, production or transfer order.
 type PlannedOrder struct {
@@ -251,7 +258,7 @@ func validate(it *Item) error {
 	default:
 		return fmt.Errorf("%w: %q order type %q", ErrInvalidItem, it.ID, it.OrderType)
 	}
-	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
+	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.IssueMarginDays < 0 || it.ReorderMarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
 	}
 	switch it.SafetyPolicy {
@@ -333,7 +340,7 @@ func reqLess(a, b Requirement) bool {
 func (rs *runState) plan(item *Item) error {
 	demands := make([]Requirement, 0, len(item.Demand)+1)
 	for _, d := range item.Demand {
-		d.Date = rs.demandDate(d.Date)
+		d.Date = rs.issueDate(item, d.Date)
 		demands = append(demands, d)
 	}
 	if item.SafetyStock.IsPositive() {
@@ -630,11 +637,11 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 		L.rs.seq++
 		number := fmt.Sprintf("PLN-%06d", L.rs.seq)
 		delivery := L.rs.back(t, it.MarginDays)
-		orderDate := L.rs.back(delivery, it.LeadTimeDays)
+		orderDate := L.rs.back(delivery, it.leadTotal())
 		if safetyOnly {
 			// BR-22.5: the safety-stock order is dated today + lead time.
 			orderDate = L.rs.demandDate(today)
-			delivery = L.rs.forward(orderDate, it.LeadTimeDays)
+			delivery = L.rs.forward(orderDate, it.leadTotal())
 		}
 		po := PlannedOrder{Number: number, ItemID: it.ID, OrderType: it.OrderType, Qty: q, OrderDate: orderDate, DeliveryDate: delivery, LotRule: rule,
 			AutoFirmed: it.AutoFirm && insideFirmingFence(today, orderDate, it.FirmingDays)}
@@ -642,7 +649,7 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 			// BR-22.1 step 7: the order cannot be placed in the past, so it is
 			// expected at today + lead time. The delay message is raised by
 			// propagateFutures once delays from components are known.
-			futures := L.rs.forward(today, it.LeadTimeDays)
+			futures := L.rs.forward(today, it.leadTotal())
 			po.FuturesDate = &futures
 			po.DelayDays = futures - delivery
 		}
@@ -779,7 +786,14 @@ func (rs *runState) propagateFutures(levels []*Item) {
 						continue
 					}
 					parent := &orders[pi]
-					delivery := rs.forward(ready, rs.index[parent.ItemID].LeadTimeDays)
+					// The component's issue margin is a cushion before the
+					// parent starts (FR-22.5): the parent can start that many
+					// working days after the component is ready.
+					start := rs.forward(ready, it.IssueMarginDays)
+					delivery := rs.forward(start, rs.index[parent.ItemID].leadTotal())
+					if delivery <= parent.DeliveryDate {
+						continue
+					}
 					if parent.FuturesDate == nil || delivery > *parent.FuturesDate {
 						parent.FuturesDate = &delivery
 						parent.DelayDays = delivery - parent.DeliveryDate
@@ -1048,9 +1062,19 @@ func (rs *runState) safetyDate(it *Item) int {
 	if it.SafetyPolicy != SafetyFirstIssue || len(it.Demand) == 0 {
 		return day
 	}
-	first := rs.demandDate(it.Demand[0].Date)
+	first := rs.issueDate(it, it.Demand[0].Date)
 	for _, d := range it.Demand[1:] {
-		first = min(first, rs.demandDate(d.Date))
+		first = min(first, rs.issueDate(it, d.Date))
 	}
 	return first
+}
+
+// issueDate is the day a demand of it is netted on: the issue margin moves it
+// that many working days earlier (FR-22.5), counted from the working day the
+// demand would fall on without a margin, and never before today (BR-22.8).
+func (rs *runState) issueDate(it *Item, day int) int {
+	if it.IssueMarginDays > 0 {
+		day = rs.back(rs.demandDate(day), it.IssueMarginDays)
+	}
+	return rs.demandDate(day)
 }

@@ -57,6 +57,8 @@ const orderTypeLabel: Record<OrderType, string> = { purchase: "Purchase", produc
 /** Whole-number fields of an item coverage with their label, range and help. */
 const DAY_FIELDS = [
   { key: "safetyMarginReceiptDays", label: "Receipt margin (days)", min: 0, max: 365, hint: "Days added before a receipt is available.", optional: false },
+  { key: "safetyMarginIssueDays", label: "Issue margin (days)", min: 0, max: 365, hint: "Working days each demand is moved earlier (FR-22.5).", optional: false },
+  { key: "safetyMarginReorderDays", label: "Reorder margin (days)", min: 0, max: 365, hint: "Working days added to the lead time of planned orders (FR-22.5).", optional: false },
   { key: "leadTimeDays", label: "Lead time override (days)", min: 0, max: 3650, hint: "Blank uses the item's lead time.", optional: true },
   { key: "requiredShelfLifeDays", label: "Required shelf life (days)", min: 0, max: 3650, hint: "Remaining shelf life a demand needs (FR-22.20).", optional: false },
 ] as const;
@@ -97,6 +99,8 @@ export const EMPTY_DRAFT: ItemCoverageDraft = {
   decouplingPoint: false,
   priorityBased: false,
   safetyMarginReceiptDays: "0",
+  safetyMarginIssueDays: "0",
+  safetyMarginReorderDays: "0",
   leadTimeDays: "",
   requiredShelfLifeDays: "0",
 };
@@ -117,6 +121,8 @@ export function draftOf(c: ItemCoverage): ItemCoverageDraft {
     decouplingPoint: c.decouplingPoint,
     priorityBased: c.priorityBased,
     safetyMarginReceiptDays: String(c.safetyMarginReceiptDays),
+    safetyMarginIssueDays: String(c.safetyMarginIssueDays),
+    safetyMarginReorderDays: String(c.safetyMarginReorderDays),
     leadTimeDays: c.leadTimeDays === null ? "" : String(c.leadTimeDays),
     requiredShelfLifeDays: String(c.requiredShelfLifeDays),
   };
@@ -186,6 +192,8 @@ export function validateItemCoverage(d: ItemCoverageDraft): { errors: DraftError
       decouplingPoint: d.decouplingPoint,
       priorityBased: d.priorityBased,
       safetyMarginReceiptDays: days.safetyMarginReceiptDays ?? 0,
+      safetyMarginIssueDays: days.safetyMarginIssueDays ?? 0,
+      safetyMarginReorderDays: days.safetyMarginReorderDays ?? 0,
       leadTimeDays: days.leadTimeDays,
       requiredShelfLifeDays: days.requiredShelfLifeDays ?? 0,
     },

@@ -29,6 +29,8 @@ type itemCoverageDTO struct {
 	MinQty                  string  `json:"minQty"`
 	MaxQty                  string  `json:"maxQty"`
 	SafetyMarginReceiptDays int     `json:"safetyMarginReceiptDays"`
+	SafetyMarginIssueDays   int     `json:"safetyMarginIssueDays"`
+	SafetyMarginReorderDays int     `json:"safetyMarginReorderDays"`
 	LeadTimeDays            *int    `json:"leadTimeDays"`
 	VendorID                *string `json:"vendorId"`
 	PlannedOrderType        string  `json:"plannedOrderType"`
@@ -51,7 +53,7 @@ func itemCoverageDTOOf(c store.ItemCoverage) itemCoverageDTO {
 	s := c.Spec
 	return itemCoverageDTO{ID: c.ID, Version: c.Version, ItemID: s.ItemID, SiteID: s.SiteID, WarehouseID: optionalString(s.WarehouseID),
 		CoverageGroupID: s.CoverageGroupID, CoverageGroupCode: c.CoverageGroupCode, MinQty: s.MinQty.String(), MaxQty: s.MaxQty.String(),
-		SafetyMarginReceiptDays: s.SafetyMarginReceiptDays, LeadTimeDays: s.LeadTimeDays, VendorID: optionalString(s.VendorID),
+		SafetyMarginReceiptDays: s.SafetyMarginReceiptDays, SafetyMarginIssueDays: s.SafetyMarginIssueDays, SafetyMarginReorderDays: s.SafetyMarginReorderDays, LeadTimeDays: s.LeadTimeDays, VendorID: optionalString(s.VendorID),
 		PlannedOrderType: s.PlannedOrderType, PlanningStrategy: s.PlanningStrategy, PlanningScope: s.PlanningScope,
 		DecouplingPoint: s.DecouplingPoint, BufferProfileID: optionalString(s.BufferProfileID),
 		RequiredShelfLifeDays: s.RequiredShelfLifeDays, PriorityBased: s.PriorityBased}
@@ -75,6 +77,8 @@ type itemCoverageRequest struct {
 	MinQty                  string `json:"minQty"`
 	MaxQty                  string `json:"maxQty"`
 	SafetyMarginReceiptDays int    `json:"safetyMarginReceiptDays"`
+	SafetyMarginIssueDays   int    `json:"safetyMarginIssueDays"`
+	SafetyMarginReorderDays int    `json:"safetyMarginReorderDays"`
 	LeadTimeDays            *int   `json:"leadTimeDays"`
 	VendorID                string `json:"vendorId"`
 	PlannedOrderType        string `json:"plannedOrderType"`
@@ -98,6 +102,7 @@ func decodeItemCoverage(w http.ResponseWriter, r *http.Request) (domain.ItemCove
 	}
 	spec := domain.ItemCoverageSpec{ItemID: req.ItemID, SiteID: req.SiteID, WarehouseID: req.WarehouseID,
 		CoverageGroupID: req.CoverageGroupID, SafetyMarginReceiptDays: req.SafetyMarginReceiptDays,
+		SafetyMarginIssueDays: req.SafetyMarginIssueDays, SafetyMarginReorderDays: req.SafetyMarginReorderDays,
 		LeadTimeDays: req.LeadTimeDays, VendorID: req.VendorID, PlannedOrderType: req.PlannedOrderType,
 		PlanningStrategy: req.PlanningStrategy, PlanningScope: req.PlanningScope, DecouplingPoint: req.DecouplingPoint,
 		BufferProfileID: req.BufferProfileID, RequiredShelfLifeDays: req.RequiredShelfLifeDays, PriorityBased: req.PriorityBased}

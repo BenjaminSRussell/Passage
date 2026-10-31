@@ -24,6 +24,8 @@ const siteCoverage: ItemCoverage = {
   minQty: "100.500000",
   maxQty: "0.000000",
   safetyMarginReceiptDays: 0,
+  safetyMarginIssueDays: 0,
+  safetyMarginReorderDays: 0,
   leadTimeDays: null,
   vendorId: null,
   plannedOrderType: "purchase",
@@ -104,6 +106,8 @@ describe("validateItemCoverage", () => {
       decouplingPoint: false,
       priorityBased: false,
       safetyMarginReceiptDays: 0,
+      safetyMarginIssueDays: 0,
+      safetyMarginReorderDays: 0,
       leadTimeDays: null,
       requiredShelfLifeDays: 0,
     });
@@ -117,6 +121,8 @@ describe("validateItemCoverage", () => {
       minQty: "1.0000001",
       maxQty: "-1",
       safetyMarginReceiptDays: "366",
+      safetyMarginIssueDays: "-1",
+      safetyMarginReorderDays: "1.5",
       leadTimeDays: "2.5",
       bufferProfileId: "BP-1",
     });
@@ -129,7 +135,9 @@ describe("validateItemCoverage", () => {
       "maxQty",
       "minQty",
       "plannedOrderType",
+      "safetyMarginIssueDays",
       "safetyMarginReceiptDays",
+      "safetyMarginReorderDays",
       "siteId",
       "vendorId",
     ]);
@@ -279,12 +287,21 @@ describe("Item coverage page", () => {
     const lead = await screen.findByLabelText(/Lead time override/);
     expect(screen.getByLabelText("Minimum quantity")).toHaveValue("100.5");
     fireEvent.change(lead, { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText(/Issue margin/), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/Reorder margin/), { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("Saved. Version 2.")).toBeInTheDocument();
     const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
     expect(put?.[0]).toBe(`/api/v1/planning/item-coverages/${siteCoverage.id}`);
     expect((put?.[1]?.headers as Record<string, string>)["If-Match"]).toBe('"1"');
-    expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ leadTimeDays: 4, minQty: "100.5", maxQty: "0", warehouseId: null });
+    expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({
+      leadTimeDays: 4,
+      safetyMarginIssueDays: 2,
+      safetyMarginReorderDays: 6,
+      minQty: "100.5",
+      maxQty: "0",
+      warehouseId: null,
+    });
   });
 
   it("offers a reload when someone else changed the coverage", async () => {

@@ -97,13 +97,15 @@ func TestItemCoverages(t *testing.T) {
 	changed := spec
 	changed.CoverageGroupID, changed.LeadTimeDays, changed.MaxQty = minmax.ID, nil, decimal.Zero
 	changed.PlanningStrategy, changed.RequiredShelfLifeDays, changed.DecouplingPoint = domain.StrategyMTO, 30, true
+	changed.SafetyMarginIssueDays, changed.SafetyMarginReorderDays = 2, 7
 	updated, err := st.UpdateItemCoverage(ctx, created.ID, 1, changed)
 	if err != nil || updated.Version != 2 || updated.CoverageGroupCode != "MIN" || updated.Spec.LeadTimeDays != nil {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
 	read, err := st.GetItemCoverage(ctx, created.ID)
 	if err != nil || read.Version != 2 || read.Spec.PlanningStrategy != domain.StrategyMTO || !read.Spec.DecouplingPoint ||
-		read.Spec.RequiredShelfLifeDays != 30 || !read.Spec.MaxQty.IsZero() {
+		read.Spec.RequiredShelfLifeDays != 30 || !read.Spec.MaxQty.IsZero() ||
+		read.Spec.SafetyMarginIssueDays != 2 || read.Spec.SafetyMarginReorderDays != 7 {
 		t.Fatalf("read back = %+v, %v", read, err)
 	}
 	if _, err := st.UpdateItemCoverage(ctx, created.ID, 1, changed); problemCode(err) != store.CodeVersionConflict {
@@ -136,6 +138,13 @@ func TestItemCoverages(t *testing.T) {
 	bad.MinQty, bad.MaxQty = decimal.NewFromInt(10), decimal.NewFromInt(5)
 	if _, _, err := st.CreateItemCoverage(ctx, store.ItemCoverageCreate{Spec: bad}); err == nil {
 		t.Fatal("max below min was stored")
+	}
+	for _, margins := range [][2]int{{366, 0}, {0, -1}} {
+		bad = domain.DefaultItemCoverage(ids.New(), site, group.ID)
+		bad.SafetyMarginIssueDays, bad.SafetyMarginReorderDays = margins[0], margins[1]
+		if _, _, err := st.CreateItemCoverage(ctx, store.ItemCoverageCreate{Spec: bad}); err == nil {
+			t.Fatalf("issue/reorder margins %v were stored", margins)
+		}
 	}
 
 	other := testkit.Ctx(testkit.TenantID(2), "planning.setup.maintain", "planning.read")

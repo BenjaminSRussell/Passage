@@ -274,7 +274,7 @@ func TestItemCoverage_ListGetAndUpdate(t *testing.T) {
 		}
 	}
 
-	update := itemCoverageBody(fgID, g, `,"planningScope":"warehouse","warehouseId":"`+testkit.TenantID(7)+`","minQty":"10","maxQty":"40","leadTimeDays":3`)
+	update := itemCoverageBody(fgID, g, `,"planningScope":"warehouse","warehouseId":"`+testkit.TenantID(7)+`","minQty":"10","maxQty":"40","leadTimeDays":3,"safetyMarginIssueDays":2,"safetyMarginReorderDays":6`)
 	if rec := doIfMatch(t, st, http.MethodPut, path, update, "", dutySetup); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("update without If-Match: %d", rec.Code)
 	}
@@ -286,7 +286,8 @@ func TestItemCoverage_ListGetAndUpdate(t *testing.T) {
 		t.Fatalf("update: %d %s etag %q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
 	}
 	if c := decodeItemCoverageDTO(t, rec); c.PlanningScope != domain.PlanScopeWarehouse || c.WarehouseID == nil ||
-		c.MinQty != "10" || c.LeadTimeDays == nil || *c.LeadTimeDays != 3 || c.Version != 2 {
+		c.MinQty != "10" || c.LeadTimeDays == nil || *c.LeadTimeDays != 3 || c.Version != 2 ||
+		c.SafetyMarginIssueDays != 2 || c.SafetyMarginReorderDays != 6 {
 		t.Fatalf("updated coverage: %+v", c)
 	}
 	stale := doIfMatch(t, st, http.MethodPut, path, update, `"1"`, dutySetup)

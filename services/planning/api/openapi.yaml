@@ -1688,6 +1688,8 @@ components:
         minQty: {type: string, default: '0', description: 'Decimal string, at most 6 decimals'}
         maxQty: {type: string, default: '0', description: 'Decimal string; 0 means no maximum, otherwise at least minQty'}
         safetyMarginReceiptDays: {type: integer, minimum: 0, maximum: 365, default: 0}
+        safetyMarginIssueDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 'Working days each demand of the item is moved earlier (FR-22.5 issue margin)'}
+        safetyMarginReorderDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 'Working days added to the lead time of the item''s planned orders (FR-22.5 reorder margin)'}
         leadTimeDays: {type: [integer, 'null'], minimum: 0, maximum: 3650, description: Lead time override; null uses the item lead time}
         vendorId: {type: [string, 'null'], format: uuid, description: Default vendor; the subcontractor for subcontractor scope}
         plannedOrderType: {type: string, enum: [purchase, production, transfer], default: purchase, description: Must be transfer (provision) for subcontractor scope}
@@ -1701,7 +1703,7 @@ components:
       type: object
       required: [id, version, itemId, siteId, warehouseId, coverageGroupId, coverageGroupCode, minQty, maxQty, safetyMarginReceiptDays,
         leadTimeDays, vendorId, plannedOrderType, planningStrategy, planningScope, decouplingPoint, bufferProfileId,
-        requiredShelfLifeDays, priorityBased]
+        requiredShelfLifeDays, priorityBased, safetyMarginIssueDays, safetyMarginReorderDays]
       properties:
         id: {type: string, format: uuid}
         version: {type: integer, minimum: 1, description: Same as the ETag}
@@ -1713,6 +1715,8 @@ components:
         minQty: {type: string, description: Decimal string in inventory UoM}
         maxQty: {type: string, description: Decimal string; 0 means no maximum}
         safetyMarginReceiptDays: {type: integer}
+        safetyMarginIssueDays: {type: integer, description: Issue margin in working days}
+        safetyMarginReorderDays: {type: integer, description: Reorder margin in working days}
         leadTimeDays: {type: [integer, 'null']}
         vendorId: {type: [string, 'null'], format: uuid}
         plannedOrderType: {type: string, enum: [purchase, production, transfer]}
@@ -1888,7 +1892,9 @@ components:
           properties:
             code: {type: string, enum: [requirement, period, minmax, manual], description: Required unless the item has a stored site-scope item coverage}
             periodDays: {type: integer, minimum: 0}
-            marginDays: {type: integer, minimum: 0}
+            marginDays: {type: integer, minimum: 0, maximum: 365, description: Receipt margin in working days (FR-22.5)}
+            issueMarginDays: {type: integer, minimum: 0, maximum: 365, description: Working days each demand of the item is moved earlier (FR-22.5)}
+            reorderMarginDays: {type: integer, minimum: 0, maximum: 365, description: Working days added to the lead time of planned orders (FR-22.5)}
             positiveDays: {type: integer, minimum: 0}
             negativeDays: {type: integer, minimum: 0}
             reorderMin: {type: string, description: Decimal string}

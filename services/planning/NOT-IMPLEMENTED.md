@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 16)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 17)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 16 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 17 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -76,6 +76,17 @@ transaction (migration `0016` adds `plan_version.approved_firmed_count`, shown a
 With `carryForward` the approved orders of the current version are read as supply of the run that
 firms them, so their demand is not planned a second time. A simulation run does not firm approved
 orders, but with `carryForward` counts them as supply like the operational run would.
+Slice 17 adds the FR-22.5 issue and reorder margins beside the receipt margin: item coverage carries
+`safetyMarginIssueDays` and `safetyMarginReorderDays` (migration `0017`, 0 to 365 working days), a run
+reads them from the stored coverage or from `coverage.issueMarginDays` / `reorderMarginDays` on the input.
+The issue margin moves each demand of the item earlier before netting, counted in working days from the day
+the demand is netted on without it and never before today, so a delay is measured against the earlier date;
+safety stock is not an issue, but under `first-issue` it is due at the first issue as moved. A component's
+issue margin is a cushion before its parent starts, so a component that misses it delays the parent by the
+shortfall. The reorder margin lengthens the lead time of its planned orders (order date earlier, also for the
+today-plus-lead futures date and delay propagation to parents). On the run input `marginDays`,
+`issueMarginDays` and `reorderMarginDays` are 0 to 365 like the stored margins. The item-coverage screens edit
+both.
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -91,7 +102,7 @@ not edit that code).
 | 1 | Item coverage setup (data model ItemCoverage, 4.22.4; FR-22.16..FR-22.20 fields) | partly built | `item_coverage` (migration `0007`, RLS) with `GET`/`POST /item-coverages` (filter by item, optional Idempotency-Key) and `GET`/`PUT /item-coverages/{id}` under If-Match, duty `planning.setup.maintain`; min/max as numeric decimal strings, receipt margin, lead-time override, default vendor, planned order type, strategy, scope, decoupling point, buffer profile id, required shelf life, priority-based. One coverage per item, site and scope (per warehouse, per subcontractor vendor): 409 `PLAN-ITEM-COVERAGE-EXISTS`; an unknown coverage group is 422 `PLAN-COVERAGE-GROUP-UNKNOWN`; a subcontractor scope must plan provision transfers. Screens in the web module. Tests: `domain/itemcoverage_test.go`, `api/itemcoverage_test.go`, `store/itemcoverage_test.go` (database). Since slice 11 the run reads the site-scope item coverage at its site (`store/run_coverage.go`, `api/run_coverage.go`): an item without a coverage code takes the whole coverage block (group code and fences, period, positive and negative days, auto-firm, with the item coverage's min, max and receipt margin), an item without `orderType` the planned order type, and an item without `leadTimeDays` the lead-time override; inline values always win, including an explicit lead time of 0, and the Idempotency-Key fingerprint is the request as sent, so a retry replays after the stored coverage changed (`api/run_coverage_test.go`, `store/run_coverage_test.go` on the database with RLS). Not built: the run using the default vendor (planned orders carry no vendor from the run), the planning strategy, decoupling point, buffer profile, required shelf life and priority-based fields (deliverables 7 to 9), warehouse and subcontractor scopes (never read at site level, FR-22.18 below), recording which stored coverage a version used (the plan hash and input hash cover the result and the request only), checking item, site, warehouse and vendor ids against their owning contexts (w6, w9, w16, w17: handoff, ids are checked as UUIDs only), and deleting a coverage. Since slice 10 `bufferProfileId` refers to a stored profile (422 `PLAN-PROFILE-NOT-FOUND`; the constraint is `NOT VALID`, so slice 9 rows naming no stored profile are kept until edited); a decoupling point without a profile is still accepted. |
 | 1 | Coverage time fence (default 100 days) and `PLANNING_HORIZON_DAYS` | partly built | `coverage.coverageFenceDays` on the run input drives Cancel and Decrease (deliverable 3). Not built: requirements beyond the fence or the horizon are still netted, and the 100-day default is not applied (0 means off) because a default fence that raises Cancel without also limiting netting would flag supply the plan still counts on. Since slice 11 an item whose coverage comes from a stored group carries that group's fence (stored with the 100-day default unless the planner changed it), so Cancel and Decrease apply there as configured; netting is still not limited by it. |
 | 1 | Safety-stock policy `first-issue` (BR-22.1 step 4, BR-22.5) | built | Slice 15: `coverage_group.safety_stock_policy` (migration `0015`, check constraint) and `coverage.safetyStockPolicy` on the run (an unknown value is 400 on the API and `ErrInvalidItem` in the engine). The first issue date is the earliest demand of the item after the explosion, so a component's first dependent (BOM) demand counts; past-due demand counts at today. With no demand the safety stock stays at today so the buffer is still built. Tests: `domain/safety_policy_test.go` (orders, net requirements view, dependent demand), `api/safety_policy_test.go`, `store/coverage_test.go` and `store/run_coverage_test.go` (database). Not built: AX's third option `today + procurement time` (the PRD names only `today` and `first-issue`). |
-| 1 | Issue and reorder margins (FR-22.5) | later slice of PSG-22 | Only the receipt margin (`coverage.marginDays`) is applied. |
+| 1 | Issue and reorder margins (FR-22.5) | built | Slice 17: `item_coverage.safety_margin_issue_days` and `safety_margin_reorder_days` with the receipt margin; tests `domain/margins_test.go` (calendar, first-issue safety stock, component delay), `TestRun_StoredMarginsShiftTheOrder` and `TestRun_RejectsInvalidLines` (API), `TestItemCoverages` and `TestRunCoverages` (store, database). Margins are per item coverage; coverage groups do not carry them. |
 | 1 | Vendor-specific purchase lead time from trade agreements (FR-22.5) and default vendor on planned purchases (`PLAN-0008`) | handoff (PSG-17) | Vendors and trade agreements are not modelled; the item lead time applies. |
 | 1 | Working calendars for lead-time offsets (BR-22.8) | partly built | `calendar` on the run (closed weekdays, up to 1,000 closed dates; one weekday must stay open): receipt margins, lead times, futures dates and delay propagation count working days, demand on a closed day moves forward and supply backward (`domain/calendar.go`, tests in `calendar_test.go` with a property that every planned order is ordered, delivered and expected on a working day). Not built: reading the site calendar from w6 (handoff PSG-6, the calendar travels on the run until then), country holiday packs (w48), and period, positive and negative days in working days (they stay calendar days). |
 | 1 | Low-level-code recompute on BOM change (w9 event) | later slice of PSG-22 | LLCs are computed per run from the snapshot; no BOM event consumer yet. |
@@ -177,7 +188,7 @@ not edit that code).
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql` to `0015_safety_stock_policy.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql` to `0017_issue_reorder_margins.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)

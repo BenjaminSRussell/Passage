@@ -40,6 +40,7 @@ const (
 	dateLayout     = "2006-01-02"
 	maxItems       = 100000
 	maxClosedDates = 1000
+	maxMarginDays  = 365
 	maxPegDepth    = 20
 	defaultDepth   = 5
 	readyTimeout   = 2 * time.Second
@@ -221,13 +222,17 @@ type itemDTO struct {
 }
 
 type coverageDTO struct {
-	Code         string          `json:"code"`
-	PeriodDays   int             `json:"periodDays"`
-	MarginDays   int             `json:"marginDays"`
-	PositiveDays int             `json:"positiveDays"`
-	NegativeDays int             `json:"negativeDays"`
-	ReorderMin   decimal.Decimal `json:"reorderMin"`
-	ReorderMax   decimal.Decimal `json:"reorderMax"`
+	Code       string `json:"code"`
+	PeriodDays int    `json:"periodDays"`
+	MarginDays int    `json:"marginDays"`
+	// IssueMarginDays moves demand earlier and ReorderMarginDays lengthens the
+	// lead time of planned orders, in working days (FR-22.5).
+	IssueMarginDays   int             `json:"issueMarginDays"`
+	ReorderMarginDays int             `json:"reorderMarginDays"`
+	PositiveDays      int             `json:"positiveDays"`
+	NegativeDays      int             `json:"negativeDays"`
+	ReorderMin        decimal.Decimal `json:"reorderMin"`
+	ReorderMax        decimal.Decimal `json:"reorderMax"`
 	// Time fences in days from asOf (BR-22.4): freezeFenceDays 0 freezes
 	// nothing; actionFenceDays and futuresFenceDays 0 are unlimited.
 	FreezeFenceDays  int `json:"freezeFenceDays"`
@@ -295,8 +300,15 @@ func (req runRequest) validate() map[string]string {
 			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
 		}
 		c := it.Coverage
-		if c.PeriodDays < 0 || c.MarginDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
-			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
+		if c.PeriodDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
+			fields[prefix+".coverage"] = "periodDays, positiveDays and negativeDays must be 0 or more"
+		}
+		// Margins are stepped day by day over the working calendar, so they
+		// are bounded like the item coverage's margins (FR-22.5).
+		for name, days := range map[string]int{"marginDays": c.MarginDays, "issueMarginDays": c.IssueMarginDays, "reorderMarginDays": c.ReorderMarginDays} {
+			if days < 0 || days > maxMarginDays {
+				fields[prefix+".coverage."+name] = "must be 0 to 365"
+			}
 		}
 		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
 			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays, "firmingFenceDays": c.FirmingFenceDays} {
@@ -342,6 +354,7 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 	for _, it := range req.Items {
 		item := domain.Item{
 			ID: it.ItemID, Coverage: it.Coverage.Code, PeriodDays: it.Coverage.PeriodDays, MarginDays: it.Coverage.MarginDays,
+			IssueMarginDays: it.Coverage.IssueMarginDays, ReorderMarginDays: it.Coverage.ReorderMarginDays,
 			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,

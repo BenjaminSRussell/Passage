@@ -304,12 +304,15 @@ func TestListVersions(t *testing.T) {
 
 func TestRun_RejectsInvalidLines(t *testing.T) {
 	cases := map[string]struct{ from, to, field string }{
-		"negative receipt": {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"2026-11-10","qty":"-5"}]`, "items[0].receipts"},
-		"receipt bad date": {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"10/11/2026","qty":"5"}]`, "items[0].receipts.date"},
-		"unknown ref type": {`"refType":"sales-line"`, `"refType":"wish"`, "items[0].demand"},
-		"bad component":    {`"components":[]`, `"components":[{"itemId":"x","qty":"1"}]`, "items[0].components"},
-		"negative on hand": {`"onHand":"20"`, `"onHand":"-1"`, "items[0].quantities"},
-		"negative days":    {`"marginDays":0`, `"marginDays":-1`, "items[0].coverage"},
+		"negative receipt":         {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"2026-11-10","qty":"-5"}]`, "items[0].receipts"},
+		"receipt bad date":         {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"10/11/2026","qty":"5"}]`, "items[0].receipts.date"},
+		"unknown ref type":         {`"refType":"sales-line"`, `"refType":"wish"`, "items[0].demand"},
+		"bad component":            {`"components":[]`, `"components":[{"itemId":"x","qty":"1"}]`, "items[0].components"},
+		"negative on hand":         {`"onHand":"20"`, `"onHand":"-1"`, "items[0].quantities"},
+		"negative days":            {`"marginDays":0`, `"marginDays":0,"positiveDays":-1`, "items[0].coverage"},
+		"negative margin":          {`"marginDays":0`, `"marginDays":-1`, "items[0].coverage.marginDays"},
+		"issue margin over a year": {`"marginDays":0`, `"marginDays":0,"issueMarginDays":366`, "items[0].coverage.issueMarginDays"},
+		"negative reorder margin":  {`"marginDays":0`, `"marginDays":0,"reorderMarginDays":-1`, "items[0].coverage.reorderMarginDays"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

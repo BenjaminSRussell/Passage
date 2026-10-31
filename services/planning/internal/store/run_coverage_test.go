@@ -38,6 +38,7 @@ func TestRunCoverages(t *testing.T) {
 	c := domain.DefaultItemCoverage(item, site, period.ID)
 	c.MinQty, c.MaxQty, c.SafetyMarginReceiptDays, c.LeadTimeDays = decimal.RequireFromString("100.5"), decimal.RequireFromString("400.000001"), 2, &lead
 	c.PlannedOrderType = domain.OrderProduction
+	c.SafetyMarginIssueDays, c.SafetyMarginReorderDays = 3, 4
 	mustCreate := func(spec domain.ItemCoverageSpec) {
 		t.Helper()
 		if _, _, err := st.CreateItemCoverage(ctx, store.ItemCoverageCreate{Spec: spec}); err != nil {
@@ -76,7 +77,7 @@ func TestRunCoverages(t *testing.T) {
 		t.Fatalf("group settings: %+v", r)
 	}
 	if !r.MinQty.Equal(decimal.RequireFromString("100.5")) || !r.MaxQty.Equal(decimal.RequireFromString("400.000001")) ||
-		r.MarginDays != 2 || r.LeadTimeDays == nil || *r.LeadTimeDays != 5 || r.PlannedOrderType != domain.OrderProduction {
+		r.MarginDays != 2 || r.IssueMarginDays != 3 || r.ReorderMarginDays != 4 || r.LeadTimeDays == nil || *r.LeadTimeDays != 5 || r.PlannedOrderType != domain.OrderProduction {
 		t.Fatalf("item coverage values: %+v", r)
 	}
 	if n := got[noLead]; n.LeadTimeDays != nil || n.CoverageCode != domain.CoverageMinMax || n.PlannedOrderType != domain.OrderPurchase || n.SafetyStockPolicy != domain.SafetyToday {
