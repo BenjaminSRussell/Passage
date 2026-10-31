@@ -199,15 +199,18 @@ func etag(version int) string { return fmt.Sprintf(`"%d"`, version) }
 
 // ifMatch reads the campaign version the caller last saw. Commands on a
 // campaign need it so a stale screen cannot overwrite another planner's change.
-func ifMatch(w http.ResponseWriter, r *http.Request) (int, bool) {
+func ifMatch(w http.ResponseWriter, r *http.Request) (int, bool) { return ifMatchOf(w, r, "campaign") }
+
+// ifMatchOf reads the version of the named record from If-Match.
+func ifMatchOf(w http.ResponseWriter, r *http.Request, what string) (int, bool) {
 	raw := r.Header.Get("If-Match")
 	if raw == "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, "precondition_required", "If-Match with the campaign version is required"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, "precondition_required", "If-Match with the "+what+" version is required"))
 		return 0, false
 	}
 	v, err := strconv.Atoi(strings.Trim(strings.TrimPrefix(raw, "W/"), `"`))
 	if err != nil || v < 1 {
-		invalid(w, r, map[string]string{"If-Match": "must be the campaign version"})
+		invalid(w, r, map[string]string{"If-Match": "must be the " + what + " version"})
 		return 0, false
 	}
 	return v, true

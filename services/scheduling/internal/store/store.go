@@ -246,6 +246,7 @@ type Store interface {
 	SetupStore
 	PegStore
 	OverrideStore
+	ResourceUpdateStore
 	CampaignStore
 	Ping(ctx context.Context) error
 }

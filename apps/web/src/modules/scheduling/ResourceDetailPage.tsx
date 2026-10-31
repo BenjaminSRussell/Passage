@@ -105,6 +105,9 @@ export function ResourceDetailPage() {
         meta={<Badge tone={resource.finite ? "info" : "neutral"}>{resource.finite ? "Finite" : "Infinite"}</Badge>}
         actions={
           <>
+            <Link className={buttonClassName("secondary")} to={`/scheduling/resources/${resource.id}/edit`}>
+              Edit calendar
+            </Link>
             <Link className={buttonClassName("secondary")} to={`/scheduling/capacity-overrides?resourceId=${resource.id}`}>
               Downtimes and extra shifts
             </Link>

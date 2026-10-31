@@ -30,6 +30,11 @@ channels:
         $ref: '#/components/messages/CampaignSequenced'
       campaignStarted:
         $ref: '#/components/messages/CampaignStarted'
+  resource:
+    address: passage.scheduling.resource
+    messages:
+      resourceUpdated:
+        $ref: '#/components/messages/ResourceUpdated'
   capacityOverride:
     address: passage.scheduling.capacityoverride
     messages:
@@ -74,8 +79,21 @@ operations:
     messages:
       - $ref: '#/channels/capacityOverride/messages/capacityOverrideDeleted'
     summary: A downtime or extra shift was removed from a resource calendar
+  publishResourceUpdated:
+    action: send
+    channel: { $ref: '#/channels/resource' }
+    messages:
+      - $ref: '#/channels/resource/messages/resourceUpdated'
+    summary: A resource name, time zone or weekly calendar changed, with the booked jobs it no longer covers
 components:
   messages:
+    ResourceUpdated:
+      title: Resource updated
+      summary: A resource name, time zone or weekly calendar changed; lists the booked jobs the new calendar no longer covers.
+      name: dev.passage.scheduling.resource.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ResourceUpdatedData'
     CapacityOverrideCreated:
       title: Capacity override created
       summary: A downtime or extra shift was added to a resource calendar; lists the booked jobs a downtime overlaps.
@@ -189,6 +207,28 @@ components:
               minutes: { type: integer }
               reason: { type: string, enum: [batches, run-time, campaign-end] }
         version: { type: integer }
+    ResourceUpdatedData:
+      type: object
+      required: [resourceId, code, name, timeZone, shifts, version, affectedJobs]
+      properties:
+        resourceId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        timeZone: { type: string }
+        shifts:
+          type: array
+          items:
+            type: object
+            required: [weekday, startMinute, endMinute]
+            properties:
+              weekday: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
+              startMinute: { type: integer }
+              endMinute: { type: integer }
+        version: { type: integer }
+        affectedJobs:
+          type: array
+          description: Booked jobs the new calendar no longer covers.
+          items: { type: string, format: uuid }
     CapacityOverrideData:
       type: object
       required: [overrideId, resourceId, kind, start, end, reason, affectedJobs]

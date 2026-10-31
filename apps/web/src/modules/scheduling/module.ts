@@ -7,6 +7,7 @@ import { CapacityBlocksPage } from "./CapacityBlocksPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
 import { CapacityOverridesPage } from "./CapacityOverridesPage";
 import { CleanoutRulesPage } from "./CleanoutRulesPage";
+import { EditResourcePage } from "./EditResourcePage";
 import { NetworkDetailPage } from "./NetworkDetailPage";
 import { NetworksPage } from "./NetworksPage";
 import { NewCampaignPage } from "./NewCampaignPage";
@@ -43,6 +44,7 @@ const scheduling: PassageModule = {
     { path: "/scheduling/resources", element: createElement(ResourcesPage), handle: { title: "Resources" } },
     { path: "/scheduling/resources/new", element: createElement(NewResourcePage), handle: { title: "New resource" } },
     { path: "/scheduling/resources/:id", element: createElement(ResourceDetailPage), handle: { title: "Resource" } },
+    { path: "/scheduling/resources/:id/edit", element: createElement(EditResourcePage), handle: { title: "Edit resource" } },
     { path: "/scheduling/operations", element: createElement(OperationsPage), handle: { title: "Operations" } },
     { path: "/scheduling/operations/new", element: createElement(NewOperationPage), handle: { title: "New operation" } },
     { path: "/scheduling/order-pegs", element: createElement(OrderPegsPage), handle: { title: "Order pegs" } },

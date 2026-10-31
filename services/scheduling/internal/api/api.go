@@ -161,6 +161,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources", a.createResource)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources", a.listResources)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}", a.getResource)
+	r.With(authz.RequireDuty(dutyCapacity)).Patch("/v1/scheduling/resources/{id}", a.updateResource)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity", a.resourceCapacity)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/operations", a.createOperation)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/operations", a.listOperations)
@@ -330,6 +331,7 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
+	w.Header().Set("ETag", etag(res.Version))
 	httpx.JSON(w, status, res)
 }
 
@@ -824,6 +826,7 @@ func (a *API) getResource(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", etag(res.Version))
 	httpx.JSON(w, http.StatusOK, res)
 }
 

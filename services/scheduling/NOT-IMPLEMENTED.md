@@ -48,6 +48,25 @@ form (a candidate cannot be picked), a Secondary column on the operations list
 and the jobs table, and the bar title. No new duty. The OpenAPI and AsyncAPI
 specs have no FAIL lines on the doc gates.
 
+Slice 13 builds resource calendar maintenance (FR-23.1, AC-23.7).
+`PATCH /resources/{id}` (duty `scheduling.capacity.write`, Idempotency-Key and
+If-Match with the resource version, stale version 412 SCHED-0124) changes the
+name, time zone and the whole weekly calendar; the code and the finite flag
+stay. The answer carries `affectedJobs`, the booked jobs whose booking after
+the request time now lies outside the resource's open capacity (calendar and
+overrides applied; hours a running job already used do not count), as primary
+or as secondary resource, each with the span of all its segments; they stay
+where they are until moved or re-run, and every Gantt bar outside open
+capacity is flagged as before. A retry that races the first request waits on
+the resource lock and replays its answer. `resource.updated`
+goes through the outbox with the new calendar, version and affected job ids.
+`GET` and `POST` on resources now send an ETag. No migration (the table and
+its UPDATE grant exist). Web: an Edit calendar screen
+(`/scheduling/resources/:id/edit`: name, time zone, add and remove shifts,
+affected jobs after saving, stale-version message with a reload of the
+latest version), linked from the resource detail. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
+No new duty.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -287,7 +306,7 @@ moved-out handoff rows.
 | Item | Status | Reason |
 |---|---|---|
 | FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and per-day capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar plus downtimes and extra shifts (slice 9) on every read and run (`GET /resources/{id}/capacity`). A stored table is not needed while nothing else reads it; efficiency % and calendar events are wave 9. |
-| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself needs wave 9 calendar events (scheduling resources have no calendar update endpoint), and no per-job warning rows are stored. |
+| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself is built (slice 13, `PATCH /resources/{id}`, affected jobs returned and flagged on the Gantt); calendar events from wave 9 and per-job warning rows are not, and a calendar change does not re-run the schedule. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |
 | Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | built (slice 11) | `domain.Schedule` places parents first (`pegPlan`) and floors the dependent's first operation at the parents' last end (`pegFloor`; `store.pegsForRun` loads pegs and the ends of parents outside the run); an unplaced parent (in the run, or outside it with an operation stored as unplaced) leaves the dependent unplaced. Not yet: a peg-forced delay is not reported as a warning; `:move` without propagate still ignores pegs; a selection run that moves a parent later does not push its dependents outside the selection (run them too, or the site); a parent outside the run that was never scheduled sets no floor; a backward run schedules a parent against its own due date, not back from its dependent's start. |
@@ -303,7 +322,7 @@ moved-out handoff rows.
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
-| Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources have a `version` column but no update endpoint yet. |
+| Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
 | Playwright Gantt move + propagate test (4.23.9) | later slice of PSG-23 | Covered by the store move and propagation tests and the page tests. |
 | `sched-propagation` fixture (pegged chains 5 deep, 4.23.9) | partial | The store test builds a 7-order chain in code and checks the 5-level cut; no fixture file under testdata. |

@@ -312,6 +312,25 @@ export function createResource(input: NewResource, key: string = newKey()): Prom
   return post<Resource>("/resources", input, key);
 }
 
+export interface ResourcePatch {
+  name?: string;
+  timeZone?: string;
+  shifts?: Shift[];
+}
+
+export interface ResourceUpdate extends Resource {
+  affectedJobs: AffectedJob[];
+}
+
+/** Changes a resource under the version the planner saw (If-Match); the answer lists the jobs the new calendar no longer covers. */
+export function updateResource(id: string, version: number, patch: ResourcePatch, key: string = newKey()): Promise<ResourceUpdate> {
+  return send<ResourceUpdate>(`/resources/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
 export function listOperations(filter: { status?: OperationStatus | ""; orderId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<Operation[]> {
   return items<Operation>(`/operations${query({ status: filter.status, orderId: filter.orderId, limit: filter.limit })}`, signal);
 }

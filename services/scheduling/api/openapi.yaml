@@ -26,7 +26,7 @@ paths:
             schema: { $ref: '#/components/schemas/ResourceRequest' }
       responses:
         '201':
-          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          description: 'Created, with ETag "<version>". An idempotent replay returns 200 with Idempotent-Replayed: true.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Resource' }
@@ -57,11 +57,50 @@ paths:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: The resource
+          description: 'The resource, with ETag "<version>" for the If-Match of an update'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Resource' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateResource
+      summary: Change a resource's name, time zone or weekly calendar and list the jobs it no longer covers (FR-23.1, AC-23.7)
+      description: >
+        Send at least one of name, timeZone or shifts; shifts replace the whole
+        weekly calendar. The code and the finite flag never change. The change
+        needs the resource version in If-Match (the ETag of a read) so a stale
+        screen cannot overwrite another planner. Booked jobs whose booking after
+        the request time now lies outside the resource's open capacity (calendar
+        and downtimes applied), as the primary or as a secondary resource, are
+        returned in affectedJobs and listed in resource.updated; hours a running
+        job has already used do not count. The jobs stay where they are until
+        they are moved or the schedule is run again.
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The resource version from its ETag, for example "3". A stale version gets 412 SCHED-0124.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResourcePatch' }
+      responses:
+        '200':
+          description: 'The updated resource with ETag "<version>" and its affected jobs. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResourceUpdate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/resources/{id}/capacity:
     get:
       operationId: getResourceCapacity
@@ -1017,6 +1056,27 @@ components:
           items: { $ref: '#/components/schemas/Shift' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+    ResourcePatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        timeZone: { type: string, description: IANA time zone name. }
+        shifts:
+          type: array
+          minItems: 1
+          maxItems: 14
+          items: { $ref: '#/components/schemas/Shift' }
+    ResourceUpdate:
+      allOf:
+        - $ref: '#/components/schemas/Resource'
+        - type: object
+          required: [affectedJobs]
+          properties:
+            affectedJobs:
+              type: array
+              description: Booked jobs outside the new open capacity, by start (at most 500), each with the span of all its segments.
+              items: { $ref: '#/components/schemas/AffectedJob' }
     OperationRequest:
       type: object
       required: [orderId, operNumber, minutes, resourceIds]

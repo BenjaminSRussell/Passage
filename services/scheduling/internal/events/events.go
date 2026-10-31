@@ -1,7 +1,10 @@
 // Package events holds the scheduling event types and payloads.
 package events
 
-import "github.com/BenjaminSRussell/passage/platform/events"
+import (
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
+)
 
 // Context is the bounded context name used in event types.
 const Context = "scheduling"
@@ -15,11 +18,13 @@ var (
 
 	CapacityOverrideCreated = events.Type(Context, "capacityoverride", "created", 1)
 	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
+
+	ResourceUpdated = events.Type(Context, "resource", "updated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CapacityOverrideCreated, CapacityOverrideDeleted}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated}
 }
 
 type RunCompletedData struct {
@@ -106,4 +111,16 @@ type CapacityOverrideData struct {
 	End          string   `json:"end"`
 	Reason       string   `json:"reason"`
 	AffectedJobs []string `json:"affectedJobs"`
+}
+
+// ResourceUpdatedData announces a changed resource calendar or name (AC-23.7).
+// AffectedJobs are the booked jobs the new calendar no longer covers.
+type ResourceUpdatedData struct {
+	ResourceID   string         `json:"resourceId"`
+	Code         string         `json:"code"`
+	Name         string         `json:"name"`
+	TimeZone     string         `json:"timeZone"`
+	Shifts       []domain.Shift `json:"shifts"`
+	Version      int            `json:"version"`
+	AffectedJobs []string       `json:"affectedJobs"`
 }
