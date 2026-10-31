@@ -174,7 +174,7 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 			return store.Invoice{}, reason, ""
 		}
 		price := poLine.NetUnitPrice()
-		if confirmedPrice, ok := confirmed[l.LineNo]; !samePrice(l.UnitPrice, price) && !(ok && samePrice(confirmedPrice, price)) {
+		if confirmedPrice, ok := confirmed[l.LineNo]; !samePrice(l.UnitPrice, price) && (!ok || !samePrice(confirmedPrice, price)) {
 			return store.Invoice{}, skipPriceChange, fmt.Sprintf("AP-ERS-001: PO price changed since receipt (%s -> %s) on line %d", l.UnitPrice.StringFixed(priceScale), price.Round(priceScale).StringFixed(priceScale), l.LineNo)
 		}
 		in.Lines = append(in.Lines, store.InvoiceLine{
