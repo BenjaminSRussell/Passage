@@ -76,6 +76,7 @@ type ProposalGroup struct {
 	BankAccountID   string `json:"bankAccountId,omitempty"`
 	BankLast4       string `json:"bankLast4,omitempty"`
 	BankFingerprint string `json:"-"`
+	BankKeyID       string `json:"-"`
 }
 
 func discountFor(c ProposalCandidate, runDate time.Time) decimal.Decimal {

@@ -263,7 +263,7 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error)
 }
 
 func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.ProposalGroup, error) {
-	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text, withheld_amount::text, coalesce(bank_account_id, ''), coalesce(bank_fingerprint, ''), coalesce(bank_last4, '')
+	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text, withheld_amount::text, coalesce(bank_account_id, ''), coalesce(bank_fingerprint, ''), coalesce(bank_key_id, ''), coalesce(bank_last4, '')
 		from ap_payment_proposal_group where proposal_id = $1::uuid order by vendor_id, currency, payment_method`, proposalID)
 	if err != nil {
 		return nil, err
@@ -273,7 +273,7 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	for rows.Next() {
 		var g domain.ProposalGroup
 		var gross, discount, net, valued, withheld string
-		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued, &withheld, &g.BankAccountID, &g.BankFingerprint, &g.BankLast4); err != nil {
+		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued, &withheld, &g.BankAccountID, &g.BankFingerprint, &g.BankKeyID, &g.BankLast4); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -352,7 +352,7 @@ func verifyLines(ctx context.Context, tx pgx.Tx, proposalID string) error {
 	return nil
 }
 
-type GroupBank struct{ GroupID, AccountID, Fingerprint, Last4 string }
+type GroupBank struct{ GroupID, AccountID, Fingerprint, KeyID, Last4 string }
 
 func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today string, banks ...GroupBank) (Proposal, error) {
 	p, _ := tenant.FromContext(ctx)
@@ -379,8 +379,8 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today stri
 			return err
 		}
 		for _, b := range banks {
-			tag, err := tx.Exec(ctx, `update ap_payment_proposal_group set bank_account_id = $3, bank_fingerprint = $4, bank_last4 = $5 where id = $1::uuid and proposal_id = $2::uuid`,
-				b.GroupID, id, b.AccountID, b.Fingerprint, b.Last4)
+			tag, err := tx.Exec(ctx, `update ap_payment_proposal_group set bank_account_id = $3, bank_fingerprint = $4, bank_key_id = $5, bank_last4 = $6 where id = $1::uuid and proposal_id = $2::uuid`,
+				b.GroupID, id, b.AccountID, b.Fingerprint, b.KeyID, b.Last4)
 			if err != nil {
 				return err
 			}

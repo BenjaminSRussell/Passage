@@ -218,6 +218,7 @@ type runFixture struct {
 	party    *fakeParty
 	tax      *fakeTax
 	signer   *tenant.ServiceSigner
+	keys     *fieldcrypt.Keys
 	verify   ed25519.PublicKey
 	partyURL string
 	pg       *store.Postgres
@@ -287,9 +288,10 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 		t.Fatal(err)
 	}
 	pg := store.New(app)
+	var keys *fieldcrypt.Keys
 	if !opts.noKeys {
-		keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{9}, 32)})
-		if err != nil {
+		var err error
+		if keys, err = fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{9}, 32)}); err != nil {
 			t.Fatal(err)
 		}
 		pg.WithFieldCrypt(keys)
@@ -343,14 +345,14 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	if !opts.noParty {
 		banks = party.New(partySrv.URL, nil).WithSigner(signer)
 	}
-	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks)
+	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys)
 	if !opts.noTax {
 		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)
 
-	f := &runFixture{t: t, router: router, api: a, ledger: fl, party: fp, tax: ft, signer: signer, verify: verifyKey, partyURL: partySrv.URL, pg: pg, itemA: itemA, clock: &clock,
+	f := &runFixture{t: t, router: router, api: a, ledger: fl, party: fp, tax: ft, keys: keys, signer: signer, verify: verifyKey, partyURL: partySrv.URL, pg: pg, itemA: itemA, clock: &clock,
 		erin: caller{duties: runDuties, user: "erin", entity: entityA}, alice: caller{duties: approveAll, user: "alice", entity: entityA}, bob: caller{duties: approveAll, user: "bob", entity: entityA}}
 	if opts.skipProposal {
 		return f
@@ -1006,7 +1008,7 @@ func TestPaymentRun_FileUsesTheProfileSnapshotTakenAtStart(t *testing.T) {
 	profile.File.DebtorBIC = "EVILUS33"
 	profile.BankAccount = "9999"
 	changed[entityA] = profile
-	f.api.WithPaymentRuns(f.pg, nil, changed).WithVendorBanks(party.New(f.partyURL, nil).WithSigner(f.signer))
+	f.api.WithPaymentRuns(f.pg, nil, changed).WithVendorBanks(party.New(f.partyURL, nil).WithSigner(f.signer), f.keys)
 	f.step(f.erin, runID, "generate-file")
 	file := f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID+"/file", "").Body.String()
 	if !strings.Contains(file, "CHASUS33") || strings.Contains(file, "EVILUS33") {

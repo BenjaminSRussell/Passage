@@ -134,10 +134,21 @@ func (k *Keys) Open(tenantID, field string, sealed []byte) ([]byte, error) {
 // MAC returns HMAC-SHA256(message) under a tenant key derived from the current master key with a purpose
 // separate from Seal, so a pseudonym can neither be recomputed without the key nor decrypt anything.
 func (k *Keys) MAC(tenantID string, message []byte) ([]byte, error) {
+	return k.MACWithKey(k.current, tenantID, message)
+}
+
+func (k *Keys) CurrentID() string { return k.current }
+
+// MACWithKey is MAC under a named master key, so a value tagged with its key id still verifies after rotation.
+func (k *Keys) MACWithKey(keyID, tenantID string, message []byte) ([]byte, error) {
 	if tenantID == "" {
 		return nil, errors.New("fieldcrypt: mac needs a tenant id")
 	}
-	derived, err := hkdf.Key(sha256.New, k.keys[k.current], []byte(tenantID), macKDFInfo, keySize)
+	master, ok := k.keys[keyID]
+	if !ok {
+		return nil, ErrOpen
+	}
+	derived, err := hkdf.Key(sha256.New, master, []byte(tenantID), macKDFInfo, keySize)
 	if err != nil {
 		return nil, err
 	}

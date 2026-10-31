@@ -11,8 +11,9 @@ DROP FUNCTION IF EXISTS ap_payment_proposal_payee_guard();
 ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS bank_account_id text CHECK (bank_account_id IS NULL OR bank_account_id <> '');
 ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS bank_fingerprint text;
 ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS bank_last4 text;
+ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS bank_key_id text;
 ALTER TABLE ap_payment_proposal_group DROP CONSTRAINT IF EXISTS ap_payment_proposal_group_bank_bound_together;
-ALTER TABLE ap_payment_proposal_group ADD CONSTRAINT ap_payment_proposal_group_bank_bound_together CHECK ((bank_account_id IS NULL) = (bank_fingerprint IS NULL));
+ALTER TABLE ap_payment_proposal_group ADD CONSTRAINT ap_payment_proposal_group_bank_bound_together CHECK ((bank_account_id IS NULL) = (bank_fingerprint IS NULL) AND (bank_account_id IS NULL) = (bank_key_id IS NULL));
 CREATE OR REPLACE FUNCTION ap_payment_proposal_group_bank_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF OLD.bank_account_id IS NOT NULL
@@ -27,7 +28,7 @@ CREATE TRIGGER ap_payment_proposal_group_bank_guard BEFORE UPDATE ON ap_payment_
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
-    EXECUTE 'GRANT UPDATE (bank_account_id, bank_fingerprint, bank_last4) ON ap_payment_proposal_group TO passage_app';
+    EXECUTE 'GRANT UPDATE (bank_account_id, bank_fingerprint, bank_key_id, bank_last4) ON ap_payment_proposal_group TO passage_app';
   END IF;
 END
 $$;

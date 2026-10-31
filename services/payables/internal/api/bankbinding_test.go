@@ -1,9 +1,13 @@
 package api_test
 
 import (
+	"bytes"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 )
 
 func TestBankBinding_ApprovalRecordsAccountIdAndLast4ButNoPlaintext(t *testing.T) {
@@ -77,5 +81,37 @@ func TestBankBinding_SelfApprovalNeverRevealsBankDetails(t *testing.T) {
 	wantProblem(t, f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", ""), http.StatusForbidden, "AP-PRP-003")
 	if f.party.callCount() != 0 {
 		t.Fatalf("party calls = %d", f.party.callCount())
+	}
+}
+
+func TestBankBinding_ApprovalWithoutFieldKeysFailsClosed(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.api.WithVendorBanks(party.New(f.partyURL, nil).WithSigner(f.signer), nil)
+	wantProblem(t, f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", ""), http.StatusServiceUnavailable, "COM-0503")
+	if f.proposalStatus() != "DRAFT" {
+		t.Fatalf("proposal = %s: an unkeyed binding must never be stored", f.proposalStatus())
+	}
+}
+
+func TestBankBinding_KeyRotationStillMatchesAndARemovedKeyDoesNotPass(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	rotated, err := fieldcrypt.NewKeys("k2", map[string][]byte{"k1": bytes.Repeat([]byte{9}, 32), "k2": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.api.WithVendorBanks(party.New(f.partyURL, nil).WithSigner(f.signer), rotated)
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("generate-file after rotation: %d %s", rec.Code, rec.Body)
+	}
+
+	g := newRunFixture(t, fixtureOptions{})
+	g.approve()
+	gone, _ := fieldcrypt.NewKeys("k2", map[string][]byte{"k2": bytes.Repeat([]byte{7}, 32)})
+	runID = g.start()["id"].(string)
+	g.api.WithVendorBanks(party.New(g.partyURL, nil).WithSigner(g.signer), gone)
+	if rec := g.step(g.erin, runID, "generate-file"); rec.Code == http.StatusOK {
+		t.Fatal("a binding whose key id is no longer configured must not pass")
 	}
 }

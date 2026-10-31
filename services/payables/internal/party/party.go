@@ -2,8 +2,6 @@ package party
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,12 +52,12 @@ func (b BankAccount) Last4() string {
 	return n[len(n)-4:]
 }
 
-func (b BankAccount) Fingerprint() string {
-	h := sha256.New()
+func (b BankAccount) FingerprintInput() []byte {
+	var out []byte
 	for _, f := range []string{b.AccountNumber, b.RoutingNumber, b.AccountHolder, b.BankCountry} {
-		_, _ = fmt.Fprintf(h, "%d:%s|", len(f), strings.TrimSpace(f))
+		out = fmt.Appendf(out, "%d:%s|", len(f), strings.TrimSpace(f))
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return out
 }
 
 func (b BankAccount) Creditor() domain.CreditorDTO {

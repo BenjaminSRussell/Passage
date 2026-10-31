@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -66,6 +69,7 @@ type runDeps struct {
 	store        RunStore
 	ledger       LedgerPoster
 	banks        VendorBanks
+	keys         *fieldcrypt.Keys
 	profiles     PostingProfiles
 	partyFaults  atomic.Int64
 	started      atomic.Int64
@@ -82,9 +86,9 @@ func (a *API) WithPaymentRuns(s RunStore, l LedgerPoster, profiles PostingProfil
 	return a
 }
 
-func (a *API) WithVendorBanks(b VendorBanks) *API {
+func (a *API) WithVendorBanks(b VendorBanks, keys *fieldcrypt.Keys) *API {
 	if a.runs != nil {
-		a.runs.banks = b
+		a.runs.banks, a.runs.keys = b, keys
 	}
 	return a
 }
@@ -532,14 +536,25 @@ func (a *API) bankBindings(w http.ResponseWriter, r *http.Request, proposal stor
 	if a.runs == nil || a.runs.banks == nil {
 		return nil, true
 	}
+	if a.runs.keys == nil {
+		a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "field encryption keys are not configured; bank details cannot be bound at approval")
+		return nil, false
+	}
 	chosen, ok := a.groupAccounts(w, r, proposal.LegalEntityID, proposal.Groups)
 	if !ok {
 		return nil, false
 	}
+	principal, _ := tenant.FromContext(r.Context())
 	binds := make([]store.GroupBank, 0, len(chosen))
 	for _, g := range proposal.Groups {
 		acct := chosen[g.ID]
-		binds = append(binds, store.GroupBank{GroupID: g.ID, AccountID: acct.ID, Fingerprint: acct.Fingerprint(), Last4: acct.Last4()})
+		keyID := a.runs.keys.CurrentID()
+		mac, err := a.runs.keys.MACWithKey(keyID, principal.TenantID, acct.FingerprintInput())
+		if err != nil {
+			a.fault(w, r, "bank account fingerprint failed", err)
+			return nil, false
+		}
+		binds = append(binds, store.GroupBank{GroupID: g.ID, AccountID: acct.ID, Fingerprint: hex.EncodeToString(mac), KeyID: keyID, Last4: acct.Last4()})
 	}
 	return binds, true
 }
@@ -549,10 +564,20 @@ func (a *API) vendorCreditors(w http.ResponseWriter, r *http.Request, legalEntit
 	if !ok {
 		return nil, false
 	}
+	if a.runs.keys == nil {
+		a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "field encryption keys are not configured")
+		return nil, false
+	}
+	principal, _ := tenant.FromContext(r.Context())
 	creditors := map[string]domain.CreditorDTO{}
 	for _, g := range groups {
 		acct := chosen[g.ID]
-		if g.BankAccountID == "" || g.BankAccountID != acct.ID || g.BankFingerprint != acct.Fingerprint() {
+		mac, err := a.runs.keys.MACWithKey(g.BankKeyID, principal.TenantID, acct.FingerprintInput())
+		if g.BankAccountID != "" && err != nil {
+			a.fault(w, r, "bank account fingerprint failed", err)
+			return nil, false
+		}
+		if g.BankAccountID == "" || g.BankAccountID != acct.ID || !hmac.Equal([]byte(g.BankFingerprint), []byte(hex.EncodeToString(mac))) {
 			a.reject(w, r, &domain.Error{Code: domain.CodeRunPayee, Detail: "the bank details of vendor " + g.VendorID + " are not the ones approved (changed or never bound); create and approve a new proposal"})
 			return nil, false
 		}

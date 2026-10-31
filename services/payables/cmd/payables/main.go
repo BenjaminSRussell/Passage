@@ -99,7 +99,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		withholding = nil
 	}
 	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rates).WithPaymentRuns(items, poster, profiles).
-		WithVendorBanks(banks).WithWithholding(withholding, items, profiles)
+		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
