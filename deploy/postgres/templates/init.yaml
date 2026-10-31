@@ -11,5 +11,6 @@ data:
       -v app_password="$(cat $secrets/APP_PASSWORD)" -v cdc_password="$(cat $secrets/CDC_PASSWORD)" <<'SQL'
     CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';
     CREATE ROLE debezium_cdc LOGIN NOSUPERUSER REPLICATION BYPASSRLS PASSWORD :'cdc_password';
+    CREATE ROLE hr_loan_gate NOLOGIN NOSUPERUSER BYPASSRLS;
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL

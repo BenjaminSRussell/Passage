@@ -180,6 +180,27 @@ func TestRowLevelSecurity(t *testing.T) {
 	if _, _, err := s.CloseLoanedItem(one, loanB.ID, "RETURNED", "2026-03-06", nil); err != nil {
 		t.Fatal(err)
 	}
+	for _, task := range off.Tasks {
+		if task.TaskCode == domain.ReturnLoanedItemsCode {
+			if _, _, err := s.FinishTask(scopedA, task.ID, "DONE", nil); err != nil {
+				t.Fatalf("return task with nothing out: %v", err)
+			}
+		}
+	}
+	late := laptop
+	late.ItemDescription = "late laptop"
+	loanC, _, err := s.IssueLoanedItem(one, late, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.CompleteChecklist(scopedA, off.ID)
+	requireCode(t, err, domain.CodeLoanedItemsOut)
+	if _, _, err := s.CloseLoanedItem(one, loanC.ID, "RETURNED", "2026-03-07", nil); err != nil {
+		t.Fatal(err)
+	}
+	if done, _, err := s.CompleteChecklist(scopedA, off.ID); err != nil || done.Status != domain.ChecklistCompleted {
+		t.Fatalf("complete once nothing is out: %+v %v", done, err)
+	}
 	if _, err := s.GetIncident(scoped(testkit.TenantID(2), ""), rlsIncident.ID); err == nil {
 		t.Error("tenant 2 read tenant 1's incident")
 	}
