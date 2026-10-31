@@ -210,3 +210,52 @@ func TestPostSetEntry_LedgerLinesValidation(t *testing.T) {
 		t.Errorf("empty common lines with ledger lines: status %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestPostSetEntry_HashIgnoresLedgerLinesGroupOrderAndIdCase(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	path := "/v1/ledger/ledger-sets/" + testSet + "/journal-entries"
+	line := `"lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]`
+	a := `{"ledgerId":"` + testLedger + `",` + line + `}`
+	b := `{"ledgerId":"` + testDoc + `",` + line + `}`
+	upperA := `{"ledgerId":"` + strings.ToUpper(testLedger) + `",` + line + `}`
+	head := strings.TrimSuffix(strings.SplitN(setLedgerLinesBody, `"ledgerLines"`, 2)[0], ",\n  ")
+	for _, groups := range []string{a + "," + b, b + "," + a, a, upperA} {
+		call(h, http.MethodPost, path, head+`,"ledgerLines":[`+groups+`]}`, dutyPost+","+store.DutyPostLedgerSpecific, map[string]string{"Idempotency-Key": "k"})
+	}
+	if len(fs.setPosts) != 4 || string(fs.setPosts[0].in.Hash) != string(fs.setPosts[1].in.Hash) || string(fs.setPosts[2].in.Hash) != string(fs.setPosts[3].in.Hash) {
+		t.Fatalf("group order must not change the hash: %+v", fs.setPosts)
+	}
+}
+
+func TestPostSetEntry_WithoutLedgerLinesKeepsTheLegacyHash(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	call(h, http.MethodPost, "/v1/ledger/ledger-sets/"+testSet+"/journal-entries", setEntryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
+	req := postEntryRequest{LedgerID: testSet, DocumentID: testDoc, PostingDate: "2026-03-31",
+		Source: sourceDTO{System: "ap", Type: "vendor_invoice", ID: "7F3A"},
+		Lines: []lineDTO{
+			{Account: "6010", DebitCredit: "D", Amount: amountDTO{Currency: "USD", Value: "10.00"}},
+			{Account: "2100", DebitCredit: "C", Amount: amountDTO{Currency: "USD", Value: "10.00"}},
+		}}
+	want, err := domain.HashPayload(req)
+	if err != nil || len(fs.setPosts) != 1 || string(fs.setPosts[0].in.Hash) != string(want) {
+		t.Fatalf("a request without ledgerLines must hash as before ledgerLines existed: %v", err)
+	}
+}
+
+func TestListLedgerSetsAndAccountMappings(t *testing.T) {
+	h := server(&fakeStore{})
+	for _, path := range []string{"/v1/ledger/ledger-sets", "/v1/ledger/ledgers/" + testLedger + "/account-mappings"} {
+		rec := call(h, http.MethodGet, path, "", dutyRead, nil)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items"`) {
+			t.Errorf("%s: status %d: %s", path, rec.Code, rec.Body.String())
+		}
+		if rec := call(h, http.MethodGet, path, "", dutyPost, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("%s without the read duty: status %d", path, rec.Code)
+		}
+	}
+	if rec := call(h, http.MethodGet, "/v1/ledger/ledgers/nope/account-mappings", "", dutyRead, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("malformed ledger id: status %d", rec.Code)
+	}
+}
