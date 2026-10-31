@@ -122,7 +122,10 @@ function dispatcher(receiver: Receiver, clock: Clock, store: DeliveryStore = new
   return new Dispatcher({
     subscription: { id: "sub-1", url: receiver.url, secret: SECRET },
     store,
-    transport: httpTransport(2000),
+    transport: httpTransport({
+      timeoutMs: 2000,
+      validate: async (url) => ({ url: new URL(url), address: "127.0.0.1", family: 4 }),
+    }),
     clock: () => clock.now,
   });
 }

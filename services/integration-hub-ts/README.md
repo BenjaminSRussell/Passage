@@ -61,7 +61,7 @@ BR-35.16), pure like the rest:
 
 `src/dispatcher.ts` is the webhook dispatcher over those rules (AC-35.3, AC-35.4):
 `Dispatcher.tick` sends each aggregate's lowest pending event when due, signed, as a
-CloudEvents JSON body over HTTP (`httpTransport`, fetch with a timeout; no response is
+CloudEvents JSON body over HTTPS (`httpTransport`, node:https with a timeout; no response is
 `null`), applies `nextStep`, and records the outcome; an event leaves the pending set
 only after a 2xx was recorded, so delivery is at-least-once. After the 8th retry the
 event goes to the dead-letter list (HUB-0115); a 410 pauses the subscription until
@@ -74,6 +74,18 @@ replay into an empty consumer and from a timestamp).
 
 The Postgres store, the outbox consumer, the `next_retry_at` poller and Kafka are
 later work. See `NOT-IMPLEMENTED.md`.
+
+### Webhook SSRF guard
+
+`src/ssrf.ts` `validateWebhookUrl` runs on every delivery attempt (and must run when a
+subscription is created): https only (`http` only with `INTEGRATION_HUB_ALLOW_HTTP=1`,
+default off), no URL credentials, every address the host resolves to must be public
+(loopback, 10/8, 172.16/12, 192.168/16, fc00::/7, 169.254/16 incl. cloud metadata,
+fe80::/10, CGNAT 100.64/10, unspecified, multicast and reserved ranges, IPv4-mapped
+IPv6 and NAT64 are rejected). The connection is pinned to the validated address, so a
+DNS change between check and connect has no effect; SNI and Host stay the hostname.
+Redirects are never followed: a 3xx is a failed delivery and retries on the schedule.
+A rejected URL is "no response". `test/ssrf.test.ts` covers each range with a stub resolver.
 
 ## Run and test
 

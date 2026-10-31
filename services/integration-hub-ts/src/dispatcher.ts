@@ -10,7 +10,11 @@
 // process. The Postgres store and the outbox consumer that feeds `enqueue` are
 // later work (NOT-IMPLEMENTED.md).
 
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+
 import { nextStep, planReplay, replayHeaders, REPLAY_MAX_EVENTS, type ReplayCandidate } from "./dispatch.ts";
+import { validateWebhookUrl, type GuardOptions, type PinnedTarget } from "./ssrf.ts";
 import { deliverableHeads, sign } from "./webhook.ts";
 
 /** An event as archived by the hub: replay metadata plus the CloudEvents type and data. */
@@ -88,16 +92,55 @@ export class MemoryDeliveryStore implements DeliveryStore {
 /** Sends one request and returns the receiver's status, or null when no response arrived. */
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<number | null>;
 
-/** A fetch-based transport; a network error or a timeout is "no response". */
-export function httpTransport(timeoutMs = 10_000): Transport {
+export interface HttpTransportOptions extends GuardOptions {
+  timeoutMs?: number;
+  validate?: (url: string) => Promise<PinnedTarget>;
+}
+
+/**
+ * Validates the URL on every attempt, connects to the validated address only
+ * (DNS cannot change it between check and connect; SNI and Host keep the
+ * hostname) and never follows a redirect: a 3xx status is returned as it is and
+ * the state machine retries it as a failed delivery. A rejected URL, a network
+ * error or a timeout is "no response".
+ */
+export function httpTransport(options: HttpTransportOptions = {}): Transport {
+  const { timeoutMs = 10_000, validate = (url: string) => validateWebhookUrl(url, options) } = options;
   return async (url, headers, body) => {
+    let target: PinnedTarget;
     try {
-      const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs) });
-      await res.arrayBuffer();
-      return res.status;
+      target = await validate(url);
     } catch {
       return null;
     }
+    const send = target.url.protocol === "https:" ? httpsRequest : httpRequest;
+    return new Promise<number | null>((resolve) => {
+      const req = send(
+        target.url,
+        {
+          method: "POST",
+          headers: { ...headers, "content-length": String(Buffer.byteLength(body)) },
+          timeout: timeoutMs,
+          lookup: (_host, lookupOptions, callback) => {
+            if (lookupOptions.all) {
+              (callback as unknown as (e: null, a: { address: string; family: number }[]) => void)(null, [
+                { address: target.address, family: target.family },
+              ]);
+            } else {
+              callback(null, target.address, target.family);
+            }
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode ?? null));
+          res.on("error", () => resolve(null));
+        },
+      );
+      req.on("timeout", () => req.destroy());
+      req.on("error", () => resolve(null));
+      req.end(body);
+    });
   };
 }
 
