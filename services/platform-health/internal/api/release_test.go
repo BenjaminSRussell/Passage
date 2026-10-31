@@ -138,6 +138,18 @@ func TestReplayedReleaseIsNotCountedAsRecorded(t *testing.T) {
 	}
 }
 
+func TestChainBreakIsCountedAndReplaysAreNot(t *testing.T) {
+	r, a := newRouter(&fakeStore{chainBreak: true})
+	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "Maintain platform releases", ""); rec.Code != http.StatusCreated {
+		t.Fatalf("a chain break is flagged, not refused: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "hello_ledger_release_chain_breaks_total 1") {
+		t.Fatalf("metrics missing the chain break:\n%s", rec.Body.String())
+	}
+}
+
 func TestListReleasesFiltersAndValidates(t *testing.T) {
 	f := &fakeStore{releases: []store.Release{
 		{ID: "1", Service: "hello-ledger", Environment: "stage"},
@@ -204,6 +216,15 @@ func TestReleasesRequireDuty(t *testing.T) {
 				t.Fatalf("want AUTH-0003 and no write, got %s with %d rows", rec.Body.String(), len(f.releases))
 			}
 		})
+	}
+}
+
+func TestRecordReleaseForbiddenNamesEveryAcceptedDuty(t *testing.T) {
+	rec := doRelease(newRouterOnly(&fakeStore{}), http.MethodPost, releasesPath, releaseBody(nil), "View platform releases", "")
+	for _, duty := range []string{"Maintain platform releases", "Approve production promotion", "Rollback environment"} {
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), duty) {
+			t.Fatalf("got %d %s; want 403 naming %q", rec.Code, rec.Body.String(), duty)
+		}
 	}
 }
 

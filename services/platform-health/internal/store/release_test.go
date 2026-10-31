@@ -227,3 +227,63 @@ func TestReleases_RollbackToDigestRunningBeforeTheRegistryIsAccepted(t *testing.
 		t.Fatalf("go-live A->B->A rollback to the pre-registry digest: %v", err)
 	}
 }
+
+func TestReleases_ReusedKeyConflictsBeforeTheRollbackTargetCheck(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), "key-1"); err != nil {
+		t.Fatal(err)
+	}
+	unseen := "sha256:" + strings.Repeat("c", 64)
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionRollback, unseen, digestB), "key-1"); !errors.Is(err, store.ErrIdempotencyConflict) {
+		t.Fatalf("reused key on an unseen rollback: err = %v, want ErrIdempotencyConflict", err)
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionRollback, digestA, digestB), "key-1"); !errors.Is(err, store.ErrIdempotencyConflict) {
+		t.Fatalf("reused key on a valid rollback: err = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+func TestReleases_RollbackToUnregisteredEnvironmentIsUnknownEnvironment(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	if _, err := s.RecordRelease(principal(1, "zach"), release("nowhere", store.ActionRollback, digestA, digestB), ""); !errors.Is(err, store.ErrUnknownEnvironment) {
+		t.Fatalf("err = %v, want ErrUnknownEnvironment", err)
+	}
+}
+
+func TestReleases_PreviousDigestMustContinueTheRecordedChain(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	digestC := "sha256:" + strings.Repeat("c", 64)
+	first, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), "")
+	if err != nil || first.ChainBreak {
+		t.Fatalf("the first row has nothing to chain to, got %+v, %v", first, err)
+	}
+	linked, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestC, digestB), "")
+	if err != nil || linked.ChainBreak {
+		t.Fatalf("previousDigest equal to the newest image is a continuous chain, got %+v, %v", linked, err)
+	}
+	broken, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "")
+	if err != nil || !broken.ChainBreak {
+		t.Fatalf("previousDigest %s differs from the newest image %s: want ChainBreak, got %+v, %v", digestB, digestC, broken, err)
+	}
+	otherEnv, err := s.RecordRelease(ctx, release("prod", store.ActionPromote, digestB, digestA), "")
+	if err != nil || otherEnv.ChainBreak {
+		t.Fatalf("chains are per environment, got %+v, %v", otherEnv, err)
+	}
+	replay, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "")
+	if err != nil || !replay.ChainBreak {
+		t.Fatalf("unkeyed repeat is a new row and a new break, got %+v, %v", replay, err)
+	}
+}

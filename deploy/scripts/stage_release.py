@@ -31,7 +31,7 @@ WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 IDENTITY_REGEXP = r"^https://github\.com/BenjaminSRussell/Passage/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$"
 GIT_SHA = re.compile(r"[0-9a-f]{40}")
-DIGEST_LINE = re.compile(r"(?m)^(\s*digest:\s*)(sha256:[0-9a-f]{64})(\s*)$")
+DIGEST_LINE = re.compile(r"""(?m)^(\s*digest:\s*)(["']?)(sha256:[0-9a-f]{64})\2(\s*)$""")
 
 
 class ReleaseError(Exception):
@@ -58,7 +58,7 @@ def read_digest(manifest):
         raise ReleaseError(
             f"app manifest must contain exactly one lowercase sha256 digest; found {len(matches)}"
         )
-    return matches[0].group(2)
+    return matches[0].group(3)
 
 
 def _manifest_path(root, env):
@@ -95,7 +95,7 @@ def _require_working_branch(root):
 
 def _write_digest(path, text, digest):
     updated, replacements = DIGEST_LINE.subn(
-        lambda match: match.group(1) + digest + match.group(3), text, count=1
+        lambda match: match.group(1) + match.group(2) + digest + match.group(2) + match.group(4), text, count=1
     )
     if replacements != 1:
         raise ReleaseError("could not update the image digest safely")
@@ -315,9 +315,8 @@ def _is_ancestor(root, ancestor, descendant):
     return result.returncode == 0
 
 
-def registry_cursor(root, base, env):
+def registry_cursor(root, releases):
     """Return (cursor, registry_ahead): the newest registry gitSha that is a valid commit on HEAD's history, skipping rows that are not."""
-    releases = _list_releases(base, env)
     if not releases:
         return None, False
     reason = ""
@@ -365,41 +364,54 @@ def record_release(base, env, action, digest, previous, git_sha, signed):
 
 def _digest_at(root, env, revision):
     try:
-        return read_digest(_git(root, "show", f"{revision}:{MANIFESTS[env].as_posix()}"))
+        manifest = _git(root, "show", f"{revision}:{MANIFESTS[env].as_posix()}")
     except ReleaseError:
         return PLACEHOLDER_DIGEST
+    try:
+        return read_digest(manifest)
+    except ReleaseError:
+        return None
 
 
-def _was_pinned_before(root, env, digest, revision):
-    path = MANIFESTS[env].as_posix()
-    for line in _git(root, "log", "--first-parent", "--format=%H", revision, "--", path).splitlines():
-        if _digest_at(root, env, line) == digest:
-            return True
-    return False
+def registry_known_digests(releases):
+    """Digests the registry accepts as rollback targets: promoted images and every previous digest."""
+    known = set()
+    for release in releases:
+        if not isinstance(release, dict):
+            continue
+        if release.get("action") == "promote":
+            known.add(release.get("imageDigest"))
+        known.add(release.get("previousDigest"))
+    return known
 
 
-def merged_releases(root, env, since):
-    """Return (action, digest, previous, git_sha) for each commit after `since` that changed the manifest digest, oldest first."""
+def merged_releases(root, env, since, known=()):
+    """Return ((action, digest, previous, git_sha) oldest first, unreadable commits) for commits after `since` that changed the manifest digest.
+
+    A commit is a rollback only when `known` (registry digests plus those recorded earlier in this walk) holds its digest."""
     _read_manifest(_manifest_path(root, env))
     commits = _git(
         root, "rev-list", "--first-parent", "--reverse", "--end-of-options", f"{since}..HEAD", "--", MANIFESTS[env].as_posix()
     ).splitlines()
+    known = set(known)
     releases = []
-    before = since
+    unreadable = []
+    last = _digest_at(root, env, since) or PLACEHOLDER_DIGEST
     for commit in commits:
         digest = _digest_at(root, env, commit)
-        previous = _digest_at(root, env, before)
-        if digest != previous:
+        if digest is None:
+            print(f"WARNING: {env} manifest at {commit} is unreadable; recording the rest and exiting 3", file=sys.stderr)
+            unreadable.append(commit)
+            continue
+        if digest != last:
             if digest == PLACEHOLDER_DIGEST:
-                print(
-                    f"WARNING: {env} pins the placeholder or an unreadable digest at {commit}; skipping that commit",
-                    file=sys.stderr,
-                )
+                print(f"WARNING: {env} pins the placeholder digest at {commit}; skipping that commit", file=sys.stderr)
             else:
-                action = "rollback" if _was_pinned_before(root, env, digest, before) else "promote"
-                releases.append((action, digest, previous, commit))
-        before = commit
-    return releases
+                action = "rollback" if digest in known else "promote"
+                releases.append((action, digest, last, commit))
+                known.update({digest, last} if action == "promote" else {last})
+        last = digest
+    return releases, unreadable
 
 
 def record(root, env, since):
@@ -407,7 +419,8 @@ def record(root, env, since):
     base = _api_base()
     if base:
         try:
-            cursor, registry_ahead = registry_cursor(root, base, env)
+            registry = _list_releases(base, env)
+            cursor, registry_ahead = registry_cursor(root, registry)
             if registry_ahead:
                 print(f"{env} registry is ahead of this checkout; nothing to record")
                 return 0
@@ -416,17 +429,20 @@ def record(root, env, since):
         except ReleaseError as error:
             print(f"release not recorded: {error}", file=sys.stderr)
             return 3
+    else:
+        registry = []
     since = since if since and set(since) != {"0"} else "HEAD~1"
-    releases = merged_releases(root, env, since)
+    releases, unreadable = merged_releases(root, env, since, registry_known_digests(registry))
+    status = 3 if unreadable else 0
     if not releases:
         print(f"{env} digest unchanged since {since}; nothing to record")
-        return 0
+        return status
     if not base:
         print(
             f"WARNING: {API_URL_VARIABLE} is not set; {len(releases)} {env} release(s) were NOT recorded in the release registry",
             file=sys.stderr,
         )
-        return 0
+        return status
     for action, digest, previous, git_sha in releases:
         try:
             verify_image(digest)
@@ -440,7 +456,9 @@ def record(root, env, since):
             print(f"release not recorded: {error}", file=sys.stderr)
             return 3
         print(f"recorded {action} release {release_id} for {env} at {git_sha}")
-    return 0
+    if unreadable:
+        print(f"release not recorded: {len(unreadable)} {env} manifest commit(s) unreadable: {' '.join(unreadable)}", file=sys.stderr)
+    return status
 
 
 def main(argv=None, repo_root=None):
