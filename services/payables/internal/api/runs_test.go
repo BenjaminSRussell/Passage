@@ -157,6 +157,7 @@ type fakeParty struct {
 	mu       sync.Mutex
 	accounts map[string][]map[string]any
 	failures int
+	status   int
 	calls    []string
 	tokens   []string
 }
@@ -178,6 +179,10 @@ func (f *fakeParty) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.tokens = append(f.tokens, r.Header.Get(tenant.HeaderServiceToken))
 	vendor := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/party/vendors/"), "/bank-accounts:reveal")
 	f.calls = append(f.calls, vendor)
+	if f.status != 0 {
+		w.WriteHeader(f.status)
+		return
+	}
 	if f.failures > 0 {
 		f.failures--
 		w.WriteHeader(http.StatusInternalServerError)
@@ -565,10 +570,41 @@ func TestPaymentRun_VendorWithoutAUsableBankAccountIsRefusedWithAPCode(t *testin
 	}
 }
 
-func TestPaymentRun_PartyNotConfiguredRefusesStartAndFileGeneration(t *testing.T) {
+func TestPaymentRun_PartyNotConfiguredRefusesApprovalStartAndFileGeneration(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{noParty: true})
-	f.approve()
-	wantProblem(t, f.erin.send(f.router, http.MethodPost, runsPath, f.startBody()), http.StatusUnprocessableEntity, "AP-RUN-013")
+	wantProblem(t, f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", ""), http.StatusServiceUnavailable, "COM-0503")
+	if f.proposalStatus() != "DRAFT" {
+		t.Fatalf("proposal = %s: an approved proposal that cannot be paid must not exist", f.proposalStatus())
+	}
+	g := newRunFixture(t, fixtureOptions{})
+	g.approve()
+	runID := g.start()["id"].(string)
+	g.api.WithVendorBanks(nil, g.keys)
+	wantProblem(t, g.step(g.erin, runID, "generate-file"), http.StatusServiceUnavailable, "COM-0503")
+	wantProblem(t, g.erin.send(g.router, http.MethodPost, runsPath, g.startBody()), http.StatusUnprocessableEntity, "AP-RUN-013")
+}
+
+func TestPaymentRun_PartyRefusalsAreNonRetryableConfigFaultsAndOutagesStayRetryable(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden} {
+		f := newRunFixture(t, fixtureOptions{})
+		f.party.mu.Lock()
+		f.party.status = status
+		f.party.mu.Unlock()
+		rec := f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", "")
+		wantProblem(t, rec, http.StatusInternalServerError, "COM-0500")
+		if rec.Header().Get("Retry-After") != "" {
+			t.Fatalf("status %d: a refusal must not be retried", status)
+		}
+	}
+	f := newRunFixture(t, fixtureOptions{})
+	f.party.mu.Lock()
+	f.party.status = http.StatusServiceUnavailable
+	f.party.mu.Unlock()
+	rec := f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+f.proposal+":approve", "")
+	wantProblem(t, rec, http.StatusBadGateway, "COM-0502")
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("a 503 from party is retryable")
+	}
 }
 
 func TestPaymentRun_StartRefusesAnythingTheRequestCouldRedirect(t *testing.T) {

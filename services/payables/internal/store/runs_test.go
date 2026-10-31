@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -311,6 +312,8 @@ func TestPaymentRun_StartAfterTheRunDateIsRefused(t *testing.T) {
 	}
 }
 
+var zeroBase = decimal.Zero
+
 func withheldProposal(t *testing.T, s *Postgres) (Proposal, context.Context) {
 	t.Helper()
 	alice := ctxAs(1, leA, "alice")
@@ -321,6 +324,7 @@ func withheldProposal(t *testing.T, s *Postgres) (Proposal, context.Context) {
 		if g.VendorID != vendor1 {
 			continue
 		}
+		g.PaidBase = &zeroBase
 		for li := range g.Lines {
 			g.Withhold(li, "WHT30", g.Lines[li].Pay.Mul(dec("0.3")).Round(2), 2)
 		}
@@ -341,7 +345,7 @@ func TestProposalWithholding_IsStoredPerLineAndGroupAndEmitted(t *testing.T) {
 			group = g
 		}
 	}
-	if !group.Withheld.Equal(dec("44.40")) || !group.Net.Equal(dec("103.60")) || !created.TotalWithheld.Equal(dec("44.40")) {
+	if !group.Withheld.Equal(dec("44.40")) || !group.Net.Equal(dec("103.60")) || !created.TotalWithheld["USD"].Equal(dec("44.40")) || len(created.TotalWithheld) != 1 {
 		t.Fatalf("group %+v total withheld %s, want 30%% of 98 and 50 withheld", group, created.TotalWithheld)
 	}
 	for _, l := range group.Lines {
@@ -350,7 +354,7 @@ func TestProposalWithholding_IsStoredPerLineAndGroupAndEmitted(t *testing.T) {
 		}
 	}
 	events := outboxPayloads(t, s, alice, ProposalCreatedType)
-	if len(events) != 1 || events[0]["total_withheld"] != "44.4" {
+	if len(events) != 1 || fmt.Sprint(events[0]["total_withheld"]) != "map[USD:44.4]" {
 		t.Fatalf("created events = %v, want total_withheld 44.4", events)
 	}
 }
@@ -843,5 +847,31 @@ func TestProposalParties_ReadsMetadataWithoutFieldKeys(t *testing.T) {
 	}
 	if _, err := s.ProposalParties(ctxAs(2, leA, "x"), proposal.ID); !errors.Is(err, ErrProposalNotFound) {
 		t.Fatalf("another tenant = %v", err)
+	}
+}
+
+func TestApproval_RefusesWhenAConcurrentDraftOfTheSameVendorWasApprovedFirst(t *testing.T) {
+	s := setup(t)
+	first, alice := withheldProposal(t, s)
+	seed(t, s, alice, leA, vendor1, 4, "2027-03-13", "USD", "40.00")
+	in := proposalFor(t, s, alice, leA, "run-2")
+	for gi := range in.Groups {
+		if in.Groups[gi].VendorID == vendor1 {
+			in.Groups[gi].PaidBase = &zeroBase
+		}
+	}
+	second, _, err := s.CreateProposal(alice, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob := ctxAs(1, leA, "bob")
+	if _, err := s.ApproveProposal(bob, first.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(bob, second.ID, "bob", runDay); !errors.Is(err, ErrPaidChanged) {
+		t.Fatalf("second approval = %v, want ErrPaidChanged: its threshold base ignored the first proposal's 148", err)
+	}
+	if p, _ := s.GetProposal(bob, second.ID); p.Status != domain.ProposalDraft {
+		t.Fatalf("status = %s", p.Status)
 	}
 }

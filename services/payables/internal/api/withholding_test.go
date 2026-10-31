@@ -14,6 +14,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
 )
 
@@ -86,7 +87,7 @@ func TestWithholding_TaxIsCalledPerLineWithASignedTokenAndTheAmountsAreRecorded(
 	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
 	proposal := decode(t, f.created)
 	group := vendorGroup(t, proposal, vendorOne)
-	if group["withheld"] != "44.4" || group["net"] != "103.6" || group["gross"] != "150" || group["discount"] != "2" || proposal["totalWithheld"] != "44.4" || proposal["totalValued"] != "303.6" {
+	if group["withheld"] != "44.4" || group["net"] != "103.6" || group["gross"] != "150" || group["discount"] != "2" || fmt.Sprint(proposal["totalWithheld"]) != "map[USD:44.4]" || proposal["totalValued"] != "303.6" {
 		t.Fatalf("group %v proposal %v, want 30%% of 98 and 50 withheld", group, proposal)
 	}
 	lines := group["lines"].([]any)
@@ -247,4 +248,32 @@ func TestLoadPostingProfiles_WithholdingCodesAndAccount(t *testing.T) {
 	if _, err := api.LoadPostingProfiles(profile(`"withholdingCodes":[{"code":"X","rate":30}]`)); err == nil {
 		t.Error("an unknown withholding code field must fail")
 	}
+}
+
+func TestWithholding_TaxRefusalIsANonRetryableConfigFault(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{skipProposal: true})
+	f.tax.mu.Lock()
+	f.tax.status = http.StatusForbidden
+	f.tax.mu.Unlock()
+	rec := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", runProposalBody("run-1", map[string]string{vendorOne: "WHT30"}))
+	wantProblem(t, rec, http.StatusInternalServerError, "COM-0500")
+	if rec.Header().Get("Retry-After") != "" {
+		t.Fatal("a refusal must not be retried")
+	}
+}
+
+func TestWithholding_SecondDraftForTheSameVendorIsRefusedAtApprovalAfterTheFirstWasApproved(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT10T"}})
+	in := store.OpenItem{LegalEntityID: entityA, VendorID: vendorOne, SourceInvoiceID: "00000000-0000-0000-0000-0000000000f9", InvoiceNumber: "INV-F9",
+		InvoiceDate: "2025-12-01", DueDate: "2026-01-04", Currency: "USD", Amount: decimal.RequireFromString("40.00")}
+	if _, _, err := f.pg.CreateFromInvoice(f.ctx(), in); err != nil {
+		t.Fatal(err)
+	}
+	second := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", runProposalBody("run-2", map[string]string{vendorOne: "WHT10T"}))
+	if second.Code != http.StatusCreated {
+		t.Fatalf("second draft: %d %s", second.Code, second.Body)
+	}
+	secondID := decode(t, second)["id"].(string)
+	f.approve()
+	wantProblem(t, f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+secondID+":approve", ""), http.StatusConflict, "AP-PRP-001")
 }

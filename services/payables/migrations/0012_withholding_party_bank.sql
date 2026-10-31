@@ -32,3 +32,5 @@ BEGIN
   END IF;
 END
 $$;
+
+ALTER TABLE ap_payment_proposal_group ADD COLUMN IF NOT EXISTS paid_base numeric(20,6) CHECK (paid_base IS NULL OR paid_base >= 0);

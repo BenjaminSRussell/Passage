@@ -140,8 +140,9 @@ func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Reque
 	var body struct {
 		Withheld string `json:"withholding_amount"`
 	}
-	withheld, err := decimal.NewFromString("")
-	if jerr := json.Unmarshal(raw, &body); jerr == nil {
+	err = json.Unmarshal(raw, &body)
+	var withheld decimal.Decimal
+	if err == nil {
 		withheld, err = decimal.NewFromString(body.Withheld)
 	}
 	if err != nil || withheld.IsNegative() || withheld.GreaterThan(in.Gross) {

@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
@@ -60,8 +57,7 @@ func (a *API) applyWithholding(w http.ResponseWriter, r *http.Request, le string
 	}
 	ctx := r.Context()
 	minor := money.MinorUnits(req.LegalEntityCurrency)
-	paidSoFar := map[string]decimal.Decimal{}
-	// ponytail: one tax call per withheld line in sequence, bounded by the 5000-item proposal cap; batch per vendor when the tax API takes several lines.
+	paidSoFar, external := map[string]decimal.Decimal{}, map[string]decimal.Decimal{}
 	for gi := range groups {
 		g := &groups[gi]
 		code, ok := req.WithholdingCodes[g.VendorID]
@@ -76,7 +72,10 @@ func (a *API) applyWithholding(w http.ResponseWriter, r *http.Request, le string
 				a.fault(w, r, "withholding paid-to-date failed", err)
 				return false
 			}
+			external[key] = base
 		}
+		tracked := external[key]
+		g.PaidBase = &tracked
 		for li := range g.Lines {
 			pay := g.Lines[li].Pay
 			amount, err := a.withholding.calc.Withholding(ctx, le, tax.Request{
@@ -104,9 +103,7 @@ func (a *API) withholdingFailure(w http.ResponseWriter, r *http.Request, err err
 		return
 	}
 	a.withholding.faults.Add(1)
-	slog.Error("withholding calculation unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
-	w.Header().Set("Retry-After", "1")
-	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", "withholding calculation unavailable"))
+	a.upstreamFailure(w, r, "withholding calculation", err)
 }
 
 func (a *API) writeWithholdingMetrics(w http.ResponseWriter) {

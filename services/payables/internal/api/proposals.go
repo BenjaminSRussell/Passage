@@ -579,7 +579,11 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var binds []store.GroupBank
-	if a.runs != nil && a.runs.banks != nil {
+	if a.runs != nil && a.runs.ledger != nil {
+		if a.runs.banks == nil {
+			a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "payment runs are enabled but the party service is not configured; an approved proposal could not be paid")
+			return
+		}
 		draft, err := a.proposals.store.GetProposal(r.Context(), id)
 		switch {
 		case errors.Is(err, store.ErrProposalNotFound):
@@ -606,6 +610,8 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, changed.Error())
 	case errors.Is(err, store.ErrProposalNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+	case errors.Is(err, store.ErrPaidChanged):
+		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; create a new proposal")
 	case errors.Is(err, store.ErrNotDraft):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
 	case errors.Is(err, store.ErrRunDateElapsed):

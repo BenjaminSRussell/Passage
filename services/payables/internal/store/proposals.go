@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,15 +30,15 @@ var (
 )
 
 type proposalEvent struct {
-	ProposalID    string `json:"proposal_id"`
-	LegalEntityID string `json:"legal_entity_id"`
-	RunDate       string `json:"run_date"`
-	RunID         string `json:"run_id"`
-	Status        string `json:"status"`
-	Actor         string `json:"actor"`
-	Currency      string `json:"currency,omitempty"`
-	TotalValued   string `json:"total_valued,omitempty"`
-	TotalWithheld string `json:"total_withheld,omitempty"`
+	ProposalID    string            `json:"proposal_id"`
+	LegalEntityID string            `json:"legal_entity_id"`
+	RunDate       string            `json:"run_date"`
+	RunID         string            `json:"run_id"`
+	Status        string            `json:"status"`
+	Actor         string            `json:"actor"`
+	Currency      string            `json:"currency,omitempty"`
+	TotalValued   string            `json:"total_valued,omitempty"`
+	TotalWithheld map[string]string `json:"total_withheld,omitempty"`
 }
 
 var (
@@ -57,27 +58,27 @@ func (e *LinesChangedError) Error() string {
 }
 
 type Proposal struct {
-	ID                  string                 `json:"id"`
-	LegalEntityID       string                 `json:"legalEntityId"`
-	RunDate             string                 `json:"runDate"`
-	RunID               string                 `json:"runId"`
-	DueBy               string                 `json:"dueBy"`
-	RateDate            string                 `json:"rateDate"`
-	LegalEntityCurrency string                 `json:"legalEntityCurrency"`
-	PaymentMethod       string                 `json:"paymentMethod"`
-	Status              string                 `json:"status"`
-	CreatedBy           string                 `json:"createdBy"`
-	CreatedAt           time.Time              `json:"createdAt"`
-	ApprovedBy          *string                `json:"approvedBy,omitempty"`
-	ApprovedAt          *time.Time             `json:"approvedAt,omitempty"`
-	CancelledBy         *string                `json:"cancelledBy,omitempty"`
-	CancelledAt         *time.Time             `json:"cancelledAt,omitempty"`
-	ExecutedAt          *time.Time             `json:"executedAt,omitempty"`
-	FailedAt            *time.Time             `json:"failedAt,omitempty"`
-	Groups              []domain.ProposalGroup `json:"groups"`
-	TotalValued         decimal.Decimal        `json:"totalValued"`
-	TotalWithheld       decimal.Decimal        `json:"totalWithheld"`
-	RequestHash         string                 `json:"-"`
+	ID                  string                     `json:"id"`
+	LegalEntityID       string                     `json:"legalEntityId"`
+	RunDate             string                     `json:"runDate"`
+	RunID               string                     `json:"runId"`
+	DueBy               string                     `json:"dueBy"`
+	RateDate            string                     `json:"rateDate"`
+	LegalEntityCurrency string                     `json:"legalEntityCurrency"`
+	PaymentMethod       string                     `json:"paymentMethod"`
+	Status              string                     `json:"status"`
+	CreatedBy           string                     `json:"createdBy"`
+	CreatedAt           time.Time                  `json:"createdAt"`
+	ApprovedBy          *string                    `json:"approvedBy,omitempty"`
+	ApprovedAt          *time.Time                 `json:"approvedAt,omitempty"`
+	CancelledBy         *string                    `json:"cancelledBy,omitempty"`
+	CancelledAt         *time.Time                 `json:"cancelledAt,omitempty"`
+	ExecutedAt          *time.Time                 `json:"executedAt,omitempty"`
+	FailedAt            *time.Time                 `json:"failedAt,omitempty"`
+	Groups              []domain.ProposalGroup     `json:"groups"`
+	TotalValued         decimal.Decimal            `json:"totalValued"`
+	TotalWithheld       map[string]decimal.Decimal `json:"totalWithheld"`
+	RequestHash         string                     `json:"-"`
 }
 
 type NewProposal struct {
@@ -172,14 +173,20 @@ func (s *Postgres) CreateProposal(ctx context.Context, in NewProposal) (Proposal
 		if err := insertGroups(ctx, tx, p.TenantID, id, in); err != nil {
 			return err
 		}
-		total, withheld := decimal.Zero, decimal.Zero
+		total, withheld := decimal.Zero, map[string]decimal.Decimal{}
 		for _, g := range in.Groups {
 			total = total.Add(g.Valued)
-			withheld = withheld.Add(g.Withheld)
+			if g.Withheld.IsPositive() {
+				withheld[g.Currency] = withheld[g.Currency].Add(g.Withheld)
+			}
+		}
+		withheldText := map[string]string{}
+		for currency, amount := range withheld {
+			withheldText[currency] = amount.String()
 		}
 		return enqueueEvent(ctx, tx, ProposalCreatedType, "paymentproposal", id, p.TenantID, proposalEvent{
 			ProposalID: id, LegalEntityID: in.LegalEntityID, RunDate: in.RunDate, RunID: in.RunID, Status: domain.ProposalDraft, Actor: in.CreatedBy,
-			Currency: in.LegalEntityCurrency, TotalValued: total.String(), TotalWithheld: withheld.String(),
+			Currency: in.LegalEntityCurrency, TotalValued: total.String(), TotalWithheld: withheldText,
 		})
 	})
 	if isUnique(err) {
@@ -206,8 +213,8 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 	lines := 0
 	for _, g := range in.Groups {
 		batch.Queue(`insert into ap_payment_proposal_group (tenant_id, id, proposal_id, legal_entity_id, vendor_id, currency, payment_method,
-			gross_amount, discount_amount, net_amount, valued_amount, withheld_amount) values ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11, $12)`,
-			tenantID, g.ID, proposalID, in.LegalEntityID, g.VendorID, g.Currency, g.Method, g.Gross.String(), g.Discount.String(), g.Net.String(), g.Valued.String(), g.Withheld.String())
+			gross_amount, discount_amount, net_amount, valued_amount, withheld_amount, paid_base) values ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13::numeric)`,
+			tenantID, g.ID, proposalID, in.LegalEntityID, g.VendorID, g.Currency, g.Method, g.Gross.String(), g.Discount.String(), g.Net.String(), g.Valued.String(), g.Withheld.String(), nullableDecimal(g.PaidBase))
 	}
 	for _, g := range in.Groups {
 		for _, l := range g.Lines {
@@ -239,7 +246,7 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 }
 
 func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error) {
-	var out Proposal
+	out := Proposal{TotalWithheld: map[string]decimal.Decimal{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = scanProposal(tx.QueryRow(ctx, `select `+proposalColumns+` from ap_payment_proposal where id = $1::uuid`, id))
@@ -249,13 +256,16 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error)
 		if err != nil {
 			return err
 		}
+		out.TotalWithheld = map[string]decimal.Decimal{}
 		out.Groups, err = loadGroups(ctx, tx, id)
 		if err != nil {
 			return err
 		}
 		for _, g := range out.Groups {
 			out.TotalValued = out.TotalValued.Add(g.Valued)
-			out.TotalWithheld = out.TotalWithheld.Add(g.Withheld)
+			if g.Withheld.IsPositive() {
+				out.TotalWithheld[g.Currency] = out.TotalWithheld[g.Currency].Add(g.Withheld)
+			}
 		}
 		return nil
 	})
@@ -263,7 +273,7 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error)
 }
 
 func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.ProposalGroup, error) {
-	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text, withheld_amount::text, coalesce(bank_account_id, ''), coalesce(bank_fingerprint, ''), coalesce(bank_key_id, ''), coalesce(bank_last4, '')
+	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text, withheld_amount::text, coalesce(bank_account_id, ''), coalesce(bank_fingerprint, ''), coalesce(bank_key_id, ''), coalesce(bank_last4, ''), paid_base::text
 		from ap_payment_proposal_group where proposal_id = $1::uuid order by vendor_id, currency, payment_method`, proposalID)
 	if err != nil {
 		return nil, err
@@ -273,13 +283,22 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	for rows.Next() {
 		var g domain.ProposalGroup
 		var gross, discount, net, valued, withheld string
-		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued, &withheld, &g.BankAccountID, &g.BankFingerprint, &g.BankKeyID, &g.BankLast4); err != nil {
+		var paidBase *string
+		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued, &withheld, &g.BankAccountID, &g.BankFingerprint, &g.BankKeyID, &g.BankLast4, &paidBase); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if err := parseDecimals([]*decimal.Decimal{&g.Gross, &g.Discount, &g.Net, &g.Valued, &g.Withheld}, gross, discount, net, valued, withheld); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if paidBase != nil {
+			base, err := decimal.NewFromString(*paidBase)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			g.PaidBase = &base
 		}
 		g.Lines = []domain.ProposalLine{}
 		index[g.ID] = len(groups)
@@ -376,6 +395,13 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today stri
 			return ErrRunDateElapsed
 		}
 		if err := verifyLines(ctx, tx, id); err != nil {
+			return err
+		}
+		runYear, err := strconv.Atoi(runDate[:4])
+		if err != nil {
+			return err
+		}
+		if err := verifyPaidBases(ctx, tx, id, entity, runYear); err != nil {
 			return err
 		}
 		for _, b := range banks {
@@ -495,18 +521,74 @@ func (s *Postgres) ListProposals(ctx context.Context, f ProposalFilter, limit in
 	return out, err
 }
 
-func (s *Postgres) PaidToDate(ctx context.Context, legalEntityID, vendorID, currency string, year int) (decimal.Decimal, error) {
+func nullableDecimal(d *decimal.Decimal) *string {
+	if d == nil {
+		return nil
+	}
+	text := d.String()
+	return &text
+}
+
+var ErrPaidChanged = errors.New("the vendor's year-to-date payments changed since the withholding was calculated")
+
+func paidToDateTx(ctx context.Context, tx pgx.Tx, legalEntityID, vendorID, currency string, year int) (decimal.Decimal, error) {
 	var total string
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select coalesce(sum(l.pay_amount), 0)::text
-			from ap_payment_proposal_line l
-			join ap_payment_proposal_group g on g.tenant_id = l.tenant_id and g.id = l.group_id
-			join ap_payment_proposal p on p.tenant_id = l.tenant_id and p.id = l.proposal_id
-			where p.legal_entity_id = $1::uuid and g.vendor_id = $2::uuid and g.currency = $3
-			and p.status in ('APPROVED', 'EXECUTING', 'EXECUTED') and extract(year from p.run_date) = $4`, legalEntityID, vendorID, currency, year).Scan(&total)
-	})
+	err := tx.QueryRow(ctx, `select coalesce(sum(l.pay_amount), 0)::text
+		from ap_payment_proposal_line l
+		join ap_payment_proposal_group g on g.tenant_id = l.tenant_id and g.id = l.group_id
+		join ap_payment_proposal p on p.tenant_id = l.tenant_id and p.id = l.proposal_id
+		where p.legal_entity_id = $1::uuid and g.vendor_id = $2::uuid and g.currency = $3
+		and p.status in ('APPROVED', 'EXECUTING', 'EXECUTED') and extract(year from p.run_date) = $4`, legalEntityID, vendorID, currency, year).Scan(&total)
 	if err != nil {
 		return decimal.Zero, err
 	}
 	return decimal.NewFromString(total)
+}
+
+func (s *Postgres) PaidToDate(ctx context.Context, legalEntityID, vendorID, currency string, year int) (decimal.Decimal, error) {
+	var out decimal.Decimal
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = paidToDateTx(ctx, tx, legalEntityID, vendorID, currency, year)
+		return err
+	})
+	return out, err
+}
+
+func verifyPaidBases(ctx context.Context, tx pgx.Tx, proposalID, legalEntityID string, runYear int) error {
+	rows, err := tx.Query(ctx, `select vendor_id::text, currency, paid_base::text from ap_payment_proposal_group where proposal_id = $1::uuid and paid_base is not null order by vendor_id, currency, id`, proposalID)
+	if err != nil {
+		return err
+	}
+	type tracked struct{ vendor, currency, base string }
+	var groups []tracked
+	for rows.Next() {
+		var t tracked
+		if err := rows.Scan(&t.vendor, &t.currency, &t.base); err != nil {
+			rows.Close()
+			return err
+		}
+		groups = append(groups, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, g := range groups {
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "ap-withholding:"+legalEntityID+":"+g.vendor+":"+g.currency+":"+strconv.Itoa(runYear)); err != nil {
+			return err
+		}
+		now, err := paidToDateTx(ctx, tx, legalEntityID, g.vendor, g.currency, runYear)
+		if err != nil {
+			return err
+		}
+		stored, err := decimal.NewFromString(g.base)
+		if err != nil {
+			return err
+		}
+		if !now.Equal(stored) {
+			return ErrPaidChanged
+		}
+	}
+	return nil
 }

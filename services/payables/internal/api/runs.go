@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
 )
 
 const (
@@ -608,9 +609,33 @@ func selectAccount(g domain.ProposalGroup, accounts []party.BankAccount) (party.
 
 func (a *API) partyUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	a.runs.partyFaults.Add(1)
-	slog.Error("party unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	a.upstreamFailure(w, r, "party service", err)
+}
+
+func retryableStatus(status int) bool {
+	return status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
+}
+
+func (a *API) upstreamFailure(w http.ResponseWriter, r *http.Request, what string, err error) {
+	var ps *party.StatusError
+	var ts *tax.StatusError
+	retryable := true
+	switch {
+	case errors.As(err, &ps):
+		retryable = retryableStatus(ps.Status)
+	case errors.As(err, &ts):
+		retryable = retryableStatus(ts.Status)
+	case errors.Is(err, party.ErrUnsigned), errors.Is(err, tax.ErrUnsigned):
+		retryable = false
+	}
+	if !retryable {
+		slog.Error(what+" refused the request; service identity or grants are misconfigured", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		fail(w, r, httpx.NewProblem(http.StatusInternalServerError, "COM-0500", what+" refused the request; this is a configuration fault and retrying will not help"))
+		return
+	}
+	slog.Error(what+" unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 	w.Header().Set("Retry-After", "1")
-	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", "party service unavailable"))
+	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", what+" unavailable"))
 }
 
 func ledgerRejected(err error) bool {
