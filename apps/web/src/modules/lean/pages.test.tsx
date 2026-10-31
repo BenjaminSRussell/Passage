@@ -101,6 +101,8 @@ const flow: Flow = {
   activeFrom: null,
   activeTo: null,
   version: 1,
+  flowVersion: 1,
+  previousFlowId: null,
   activityCount: 2,
   createdAt: "2026-10-20T08:00:00Z",
   updatedAt: "2026-10-20T08:00:00Z",
@@ -261,6 +263,70 @@ describe("production flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Activate flow" })).toBeNull());
     expect(screen.getByRole("list", { name: "Flow facts" })).toHaveTextContent("Active from 2026-11-02");
+  });
+});
+
+describe("flow versions", () => {
+  const active: Flow = { ...flow, status: "active", activeFrom: "2026-11-02", version: 2 };
+
+  it("creates the next version of an active flow and opens its draft (FR-24.8)", async () => {
+    const next: Flow = { ...flow, id: "f1000000-0000-4000-8000-000000000002", flowVersion: 2, previousFlowId: FLOW, taktTimeS: 50 };
+    handler = (url, init) => {
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}`) return json(200, active);
+      if (url.pathname === `/api/v1/lean/flows/${next.id}`) return json(200, next);
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}:new-version` && init.method === "POST") return json(201, next);
+      return undefined;
+    };
+    renderAt(`/lean/flows/${FLOW}`);
+    expect(await screen.findByText("Version 1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Takt time/), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create new version" }));
+    expect(await screen.findByText("Version 2")).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.body).toEqual({ version: 2, taktTimeS: 50 });
+    expect(header(post, "Idempotency-Key")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "the previous version" })).toHaveAttribute("href", `/lean/flows/${FLOW}`);
+    expect(screen.queryByRole("button", { name: "Create new version" })).toBeNull();
+  });
+
+  it("checks the takt time and shows a refusal", async () => {
+    handler = (url, init) => {
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}`) return json(200, active);
+      if (url.pathname.endsWith(":new-version") && init.method === "POST") return json(409, { code: "LEAN-0115", detail: "production flow Sauce line already has a newer version" });
+      return undefined;
+    };
+    renderAt(`/lean/flows/${FLOW}`);
+    const field = await screen.findByLabelText(/Takt time/);
+    fireEvent.change(field, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create new version" }));
+    expect(await screen.findByText("Enter whole seconds, 1 or more.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create new version" }));
+    expect(await findAlert()).toHaveTextContent("already has a newer version (LEAN-0115)");
+  });
+
+  it("activates a new version, refuses a start that is too early, and shows the replaced version's end", async () => {
+    const draft: Flow = { ...flow, id: "f1000000-0000-4000-8000-000000000002", flowVersion: 2, previousFlowId: FLOW };
+    const expired: Flow = { ...active, status: "expired", activeTo: "2026-11-30", version: 3 };
+    handler = (url, init) => {
+      if (url.pathname === `/api/v1/lean/flows/${draft.id}`) return json(200, draft);
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}`) return json(200, expired);
+      if (url.pathname === `/api/v1/lean/flows/${draft.id}:activate` && init.method === "POST") {
+        return json(422, { code: "LEAN-0116", detail: "version 2 of Sauce line must start after version 1 started on 2026-11-02" });
+      }
+      return undefined;
+    };
+    renderAt(`/lean/flows/${draft.id}`);
+    expect(await screen.findByText(/expires the version it replaces/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Active from"), { target: { value: "2026-11-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
+    expect(await findAlert()).toHaveTextContent("must start after version 1 started on 2026-11-02 (LEAN-0116)");
+    fireEvent.click(screen.getByRole("link", { name: "the previous version" }));
+    expect(await screen.findByText("Version 1")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Flow facts" })).toHaveTextContent("Active to 2026-11-30");
+    expect(screen.queryByRole("button", { name: "Create new version" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Activate flow" })).toBeNull();
   });
 });
 

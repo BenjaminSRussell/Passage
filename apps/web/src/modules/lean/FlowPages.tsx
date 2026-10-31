@@ -24,6 +24,7 @@ import {
   describeProblem,
   getFlow,
   listFlows,
+  newFlowVersion,
   newKey,
   type Activity,
   type ActivityKind,
@@ -38,6 +39,7 @@ import { useLoad } from "./useLoad";
 
 const listColumns: DataTableColumn<Flow>[] = [
   { key: "name", header: "Flow" },
+  { key: "flowVersion", header: "Version", align: "end" },
   { key: "status", header: "Status", render: (f) => <StatusPill status={f.status} /> },
   { key: "activityCount", header: "Activities", align: "end" },
   { key: "taktTimeS", header: "Takt (s)", align: "end", render: (f) => f.taktTimeS ?? dash },
@@ -329,6 +331,12 @@ export function FlowDetailPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const [takt, setTakt] = useState("");
+  const [taktError, setTaktError] = useState("");
+  const [versionFailure, setVersionFailure] = useState<Problem | null>(null);
+  const [versionBusy, setVersionBusy] = useState(false);
+  const versionKey = useRef(newKey());
+  const navigate = useNavigate();
 
   if (state.error) {
     return (
@@ -365,11 +373,38 @@ export function FlowDetailPage() {
     }
   }
 
+  async function createVersion(event: FormEvent) {
+    event.preventDefault();
+    setVersionFailure(null);
+    if (takt !== "" && !/^[1-9]\d{0,6}$/.test(takt)) {
+      setTaktError("Enter whole seconds, 1 or more.");
+      return;
+    }
+    setTaktError("");
+    setVersionBusy(true);
+    try {
+      const next = await newFlowVersion(flow.id, { version: flow.version, ...(takt === "" ? {} : { taktTimeS: Number(takt) }) }, versionKey.current);
+      setTakt("");
+      versionKey.current = newKey();
+      navigate(`/lean/flows/${next.id}`);
+    } catch (error) {
+      setVersionFailure(describeProblem(error));
+      versionKey.current = newKey();
+    } finally {
+      setVersionBusy(false);
+    }
+  }
+
   return (
     <div className={styles.stack}>
       <PageHeader
         title={flow.name}
-        meta={<StatusPill status={flow.status} />}
+        meta={
+          <>
+            <StatusPill status={flow.status} />
+            <Badge tone="neutral">{`Version ${flow.flowVersion}`}</Badge>
+          </>
+        }
         actions={
           <>
             <Link className={buttonClassName("secondary")} to={`/lean/rules?flowId=${flow.id}`}>
@@ -388,6 +423,7 @@ export function FlowDetailPage() {
         <StatTile label="Activities" value={flow.activityCount} />
         <StatTile label="Takt (s)" value={flow.taktTimeS ?? dash} />
         <StatTile label="Active from" value={flow.activeFrom ?? dash} />
+        <StatTile label="Active to" value={flow.activeTo ?? dash} />
       </StatGroup>
       <DataTable
         label="Flow activities"
@@ -399,6 +435,11 @@ export function FlowDetailPage() {
       {flow.status === "draft" ? (
         <Card title="Activate">
           <div className={styles.stack}>
+            {flow.previousFlowId ? (
+              <p className={styles.muted}>
+                Activating this version expires the version it replaces the day before the date below, which must be after that version started.
+              </p>
+            ) : null}
             <form className={styles.toolbar} onSubmit={activate} noValidate>
               <FormField id="activate-from" label="Active from">
                 {(c) => <Input {...c} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />}
@@ -414,6 +455,33 @@ export function FlowDetailPage() {
             ) : null}
           </div>
         </Card>
+      ) : null}
+      {flow.status === "active" ? (
+        <Card title="New version">
+          <div className={styles.stack}>
+            <p className={styles.muted}>
+              A new version starts as a draft copy of these activities. Activating it expires this version the day before it starts.
+            </p>
+            <form className={styles.toolbar} onSubmit={createVersion} noValidate>
+              <FormField id="version-takt" label="Takt time (seconds)" optional hint="Leave empty to keep the current takt time." error={taktError}>
+                {(c) => <Input {...c} inputMode="numeric" value={takt} onChange={(e) => { setTakt(e.target.value); versionKey.current = newKey(); }} invalid={Boolean(taktError)} />}
+              </FormField>
+              <Button type="submit" variant="primary" loading={versionBusy}>
+                Create new version
+              </Button>
+            </form>
+            {versionFailure ? (
+              <Alert tone="danger" title="Could not create a new version" live="alert">
+                {versionFailure.message} ({versionFailure.code})
+              </Alert>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+      {flow.previousFlowId ? (
+        <p className={styles.muted}>
+          Replaces <Link to={`/lean/flows/${flow.previousFlowId}`}>the previous version</Link>.
+        </p>
       ) : null}
       <p className={styles.muted}>{`Value stream ${flow.valueStreamId} · site ${flow.siteId} · created ${formatDateTime(flow.createdAt)} · version ${flow.version}`}</p>
     </div>

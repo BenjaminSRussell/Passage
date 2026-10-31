@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7, 8 and 9 (lean)
+# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7, 8, 9 and 10 (lean)
 
 Built in slice 1: production flows with activities, connectivity check and activation
 (FR-24.8, LEAN-0004); kanban rules (FR-24.9); kanban generation for fixed rules with the
@@ -69,9 +69,25 @@ and called a `kanbans:generate-preview` route the service does not serve.
 Slice 9 changed no lean behavior; it gave every message of events/asyncapi.yaml a summary so the
 AsyncAPI documentation gate has no FAIL lines.
 
+Built in slice 10: flow versions (Deliverable 3, FR-24.8). `POST /flows/{id}:new-version` (duty
+`lean.flow.write`, flow version, Idempotency-Key) copies an active flow into a draft with the next
+`flowVersion` and `previousFlowId`, optionally with a new takt time and a full replacement
+activity list; only an active flow can be revised (LEAN-0114) and only once (LEAN-0115, a unique
+index). Activating the draft expires the version it replaces the day before it starts, in the same
+transaction, and writes `dev.passage.lean.flow.expired.v1`; `flow.activated` carries
+`flowVersion` and `previousFlowId`. A version must start after the one it replaces (LEAN-0116).
+Migration 0005 widens the name uniqueness to (value stream, name, flow version). The flow list and
+detail screens show the version and the active-to date, and the detail screen of an active flow
+creates the next version (takt time only; the activity editor for a new version is below). The
+replaced version turns `expired` when the new one is activated, even when the new one starts later;
+its `activeTo` (the day before, or an earlier end it already had) bounds its validity. The PRD lists
+versioning under `POST /flows`; the slice uses a separate `:new-version` route so a create never
+silently revises an existing flow.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Deliverable 3: flow versions (a new version of an active flow, expiry of the previous one) | later slice of PSG-24 | slice 1 creates draft flows and activates them; flows cannot be edited or versioned yet. `value_stream_id` refers to the wave-6 operating unit by id only |
+| Deliverable 3: editing the activities of a new flow version on screen | later slice of PSG-24 | the API accepts a full activity list on `:new-version`; the screen copies the activities and changes the takt time only. A draft cannot be edited after it is created. `value_stream_id` refers to the wave-6 operating unit by id only |
+| Deliverable 3: moving kanban rules from an expired flow version to the new one | later slice of PSG-24 | rules keep pointing at the flow id they were made with; a rule of an expired version still generates cards. Repointing needs rule editing, which does not exist yet |
 | Deliverable 3: KanbanJob `planned_start` and the job schedule (KanbanJobSchedule), the board's ordering by planned start | later slice of PSG-24 | jobs carry their card's due date; planned start comes with job scheduling (auto plan and firm, `flow_activity_sequence`) and the wave-23 scheduler |
 | Deliverable 3: a card's jobs from a subset of the flow (`flow_activity_sequence` on the rule) | later slice of PSG-24 | every activity of the rule's flow gets a job, in sequence order; cards of a rule without a flow have no jobs and are moved by hand through every state |
 | Deliverable 3: GS1 DataMatrix card print | handoff | wave-5 document service and wave-32 print service |

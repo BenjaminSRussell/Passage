@@ -122,6 +122,7 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/lean/flows` | `lean.read` | Flows, newest first; `status`, `limit` |
 | GET | `/v1/lean/flows/{id}` | `lean.read` | One flow with its activities |
 | POST | `/v1/lean/flows/{id}:activate` | `lean.flow.write` | Validate connectivity and activate; `version`; Idempotency-Key |
+| POST | `/v1/lean/flows/{id}:new-version` | `lean.flow.write` | Draft copy of an active flow as its next `flowVersion` with `previousFlowId`; optional `taktTimeS` and full `activities`; `version`; Idempotency-Key. Activating the draft expires the version it replaces the day before it starts |
 | POST | `/v1/lean/kanban-rules` | `lean.kanban-rule.write` | Create a kanban rule (FR-24.9); Idempotency-Key |
 | GET | `/v1/lean/kanban-rules` | `lean.read` | Rules by code with active card count; `flowId`, `limit` |
 | GET | `/v1/lean/kanban-rules/{id}` | `lean.read` | One rule |
@@ -148,7 +149,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 
 | Type | When |
 |---|---|
-| `dev.passage.lean.flow.activated.v1` | a flow is activated |
+| `dev.passage.lean.flow.activated.v1` | a flow is activated; with `flowVersion` and `previousFlowId` |
+| `dev.passage.lean.flow.expired.v1` | a flow version is replaced by a newer version that went active (`activeTo`, `supersededBy`), in the same transaction |
 | `dev.passage.lean.kanban.created.v1` | a card is generated (one event per card) |
 | `dev.passage.lean.kanban.statechanged.v1` | a card moves (PRD `kanban.state-changed`); when a job moved it, with `jobId` and, on completion, the job's quantities and handling units |
 | `dev.passage.lean.kanbanjob.statechanged.v1` | a job is started or completed on the work-cell board |
@@ -177,6 +179,9 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `LEAN-0111` | 409 | Costing period is already settled |
 | `LEAN-0112` | 409 | Costing period has not ended (its last day, UTC, has not passed) |
 | `LEAN-0113` | 422 | Count check of a rule that is not fixed: only a fixed rule has a number of kanbans to check (BR-24.7) |
+| `LEAN-0114` | 409 | Only an active flow can get a new version |
+| `LEAN-0115` | 409 | The flow already has a newer version (draft or active) |
+| `LEAN-0116` | 422 | A new flow version must start after the version it replaces started |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |
