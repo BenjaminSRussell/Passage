@@ -43,8 +43,9 @@ export interface MigrationRun {
   dryRun: boolean;
   mappingVersion: number;
   mappingSpecId?: string;
+  dataTemplateId?: string;
   parentRunId?: string;
-  counts: { extracted: number; mapped: number; created: number; updated: number; unchanged: number; rejected: number; warned: number };
+  counts: { extracted: number; mapped: number; created: number; updated: number; unchanged: number; templated?: number; rejected: number; warned: number };
   rejects: { sourceKey: string; rejects: RowIssue[] }[];
   warnings: { sourceKey: string; warnings: RowIssue[] }[];
   absent: string[];
@@ -63,11 +64,39 @@ export interface MappingSpec {
   mapping?: unknown;
 }
 
+export interface DataTemplate {
+  id: string;
+  entity: string;
+  name: string;
+  version: number;
+  checksum: string;
+  defaultCount: number;
+  createdAt: string;
+  /** Present on the single-template read and on publish only. */
+  defaults?: Record<string, string>;
+}
+
+export interface PublishTemplateInput {
+  name: string;
+  entity: string;
+  version: number;
+  defaults: Record<string, string>;
+}
+
+export interface LedgerRow {
+  sourceKey: string;
+  targetId?: string;
+  action: "created" | "updated" | "unchanged";
+  defaultFromTemplate: string[];
+}
+
 export interface CreateRunInput {
   sourceSystem: SourceSystem;
   mode: RunMode;
   dryRun: boolean;
   mappingSpecId: string;
+  /** Omitted when no data template applies. */
+  dataTemplateId?: string;
 }
 
 export function newKey(): string {
@@ -125,6 +154,17 @@ export const getSpec = (id: string, signal?: AbortSignal) => send<MappingSpec>(`
 
 export const publishSpec = (mapping: unknown, key: string = newKey()) =>
   send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ mapping }) });
+
+export const listTemplates = (entity: string | undefined, signal?: AbortSignal) => items<DataTemplate>(`/data-templates${query({ entity })}`, signal);
+
+export const getTemplate = (id: string, signal?: AbortSignal) => send<DataTemplate>(`/data-templates/${encodeURIComponent(id)}`, {}, signal);
+
+export const publishTemplate = (input: PublishTemplateInput, key: string = newKey()) =>
+  send<DataTemplate>("/data-templates", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+/** Lineage rows of a run; templatedOnly keeps the rows that took a data template default. */
+export const listLedger = (runId: string, templatedOnly: boolean, signal?: AbortSignal) =>
+  items<LedgerRow>(`/migration-runs/${encodeURIComponent(runId)}/ledger${query({ templated: templatedOnly ? "true" : undefined, limit: "200" })}`, signal);
 
 export interface PackageCounts {
   create: number;

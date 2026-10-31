@@ -64,6 +64,7 @@ type Run struct {
 	Mapping        json.RawMessage `json:"-"`
 	ParentRunID    string          `json:"parentRunId,omitempty"`
 	MappingSpecID  string          `json:"mappingSpecId,omitempty"`
+	DataTemplateID string          `json:"dataTemplateId,omitempty"`
 	Report         domain.Report   `json:"report"`
 	CreatedAt      time.Time       `json:"createdAt"`
 }
@@ -77,6 +78,13 @@ type Store interface {
 	// (entity, version) already holds the same checksum; a different checksum is a conflict.
 	SaveMappingSpec(ctx context.Context, spec MappingSpec, idempotencyKey string) (saved MappingSpec, created bool, err error)
 	GetMappingSpec(ctx context.Context, id string) (MappingSpec, error)
+	// SaveDataTemplate stores an immutable template version (FR-10.18). created is false when the same
+	// (entity, name, version) already holds the same checksum; a different checksum is a conflict.
+	SaveDataTemplate(ctx context.Context, tmpl DataTemplate, idempotencyKey string) (saved DataTemplate, created bool, err error)
+	GetDataTemplate(ctx context.Context, id string) (DataTemplate, error)
+	ListDataTemplates(ctx context.Context, entity string, limit int) ([]DataTemplate, error)
+	// RunLedger lists a run's per-row lineage in source key order; templatedOnly keeps rows that took a template default.
+	RunLedger(ctx context.Context, runID string, templatedOnly bool, limit int) ([]LedgerRow, error)
 	ListMappingSpecs(ctx context.Context, entity string, limit int) ([]MappingSpec, error)
 	// SaveConfigPackage records an applied package once; a repeated Idempotency-Key returns the stored row
 	// (created false) or a 422 when the stored package differs.
@@ -103,12 +111,12 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 func (s *Postgres) Xref() domain.XrefStore { return pgXref{s.pool} }
 
-const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), report, created_at`
+const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), coalesce(data_template_id::text, ''), report, created_at`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var report []byte
-	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &report, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &r.DataTemplateID, &report, &r.CreatedAt); err != nil {
 		return Run{}, err
 	}
 	return r, json.Unmarshal(report, &r.Report)
@@ -116,7 +124,7 @@ func scanRun(row pgx.Row) (Run, error) {
 
 func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) (Run, error) {
 	p, _ := tenant.FromContext(ctx)
-	var key, parent, specID *string
+	var key, parent, specID, templateID *string
 	if idempotencyKey != "" {
 		key = &idempotencyKey
 	}
@@ -126,6 +134,9 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 	if run.MappingSpecID != "" {
 		specID = &run.MappingSpecID
 	}
+	if run.DataTemplateID != "" {
+		templateID = &run.DataTemplateID
+	}
 	report, err := json.Marshal(run.Report)
 	if err != nil {
 		return Run{}, err
@@ -133,10 +144,10 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 	run.ID = ids.New()
 	replayed := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id, data_template_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			on conflict (tenant_id, idempotency_key) do nothing`,
-			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID)
+			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID, templateID)
 		if err != nil {
 			return err
 		}
@@ -158,14 +169,25 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 
 func insertLedger(ctx context.Context, tx pgx.Tx, tenantID, runID string, ledger []domain.LedgerEntry) error {
 	n := len(ledger)
-	keys, targets, idem, hashes, actions := make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n)
+	keys, targets, idem, hashes, actions, fields := make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n)
 	for i, e := range ledger {
 		keys[i], targets[i], idem[i], hashes[i], actions[i] = e.SourceKey, e.TargetID, e.IdempotencyKey, e.ContentHash, e.Action
+		// Mapping targets are free text (a comma is legal), so each row's template targets travel as a JSON array.
+		tf := e.TemplateFields
+		if tf == nil {
+			tf = []string{}
+		}
+		encoded, err := json.Marshal(tf)
+		if err != nil {
+			return err
+		}
+		fields[i] = string(encoded)
 	}
-	_, err := tx.Exec(ctx, `insert into migration.run_ledger (tenant_id, run_id, source_key, target_id, idempotency_key, content_hash, action)
-		select $1, $2, l.source_key, nullif(l.target_id, '')::uuid, l.idempotency_key, l.content_hash, l.action
-		from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) as l(source_key, target_id, idempotency_key, content_hash, action)`,
-		tenantID, runID, keys, targets, idem, hashes, actions)
+	_, err := tx.Exec(ctx, `insert into migration.run_ledger (tenant_id, run_id, source_key, target_id, idempotency_key, content_hash, action, template_fields)
+		select $1, $2, l.source_key, nullif(l.target_id, '')::uuid, l.idempotency_key, l.content_hash, l.action,
+		  array(select f.v from jsonb_array_elements_text(l.template_fields::jsonb) with ordinality as f(v, i) order by f.i)
+		from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[]) as l(source_key, target_id, idempotency_key, content_hash, action, template_fields)`,
+		tenantID, runID, keys, targets, idem, hashes, actions, fields)
 	return err
 }
 
@@ -455,21 +477,23 @@ func (x pgXref) Keys(ctx context.Context, sourceSystem, entity string) ([]string
 }
 
 type Mem struct {
-	mu      sync.Mutex
-	runs    []Run
-	specs   []MappingSpec
-	specKey map[string]string
-	byKey   map[string]string
-	xref    *domain.MemXref
-	PingErr error
-	SaveErr error
+	mu          sync.Mutex
+	runs        []Run
+	specs       []MappingSpec
+	specKey     map[string]string
+	templates   []DataTemplate
+	templateKey map[string]string
+	byKey       map[string]string
+	xref        *domain.MemXref
+	PingErr     error
+	SaveErr     error
 
 	pkgOnce  sync.Once
 	pkgState *memPackages
 }
 
 func NewMem() *Mem {
-	return &Mem{byKey: map[string]string{}, specKey: map[string]string{}, xref: domain.NewMemXref()}
+	return &Mem{byKey: map[string]string{}, specKey: map[string]string{}, templateKey: map[string]string{}, xref: domain.NewMemXref()}
 }
 
 func (m *Mem) Ping(context.Context) error { return m.PingErr }

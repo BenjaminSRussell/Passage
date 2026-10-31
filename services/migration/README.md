@@ -16,6 +16,9 @@ Test: `go vet ./... && go test ./...` (`-short` skips the full-size 50k/20k/100k
 | `GET /v1/integration/mapping-specs`, `GET .../{id}` | `migration.run` | published versions; the single read includes the mapping |
 | `POST /v1/integration/config-packages:diff` | `migration.run` | verifies a signed package and reports per file, in dependency order, the records apply would create or update; writes nothing |
 | `POST /v1/integration/config-packages:apply` | `migration.package.apply` | verifies, writes created and updated records in dependency order, never deletes, appends an `applied` entry; `Idempotency-Key` is required and a replay returns the original answer; `version` is required and at most 20 characters (400 otherwise) |
+| `POST /v1/integration/data-templates` | `migration.spec.write` | stores an immutable (entity, name, version) of default values for mapping targets; same content returns 200, different content under a used version 409 `MIG-TEMPLATE-VERSION-EXISTS`; a bad shape is 422 `MIG-TEMPLATE-INVALID` |
+| `GET /v1/integration/data-templates`, `GET .../{id}` | `migration.run` | published templates (filter `entity`, `limit`); the single read includes the defaults |
+| `GET /v1/integration/migration-runs/{id}/ledger` | `migration.run` | per-row lineage in source key order; `templated=true` keeps only rows that took a template default (`defaultFromTemplate`) |
 | `GET /v1/integration/config-packages`, `GET .../{id}` | `migration.run` | applied packages newest first; the single read includes the manifest files |
 | `POST /v1/integration/parallel-run-diffs` | `migration.run` | 501 `MIG-PARALLEL-RUN-DEFERRED` (wave 49) |
 
@@ -60,6 +63,10 @@ Mapping options:
 
 Warnings are reported per row in `warnings` and counted in `counts.warned` on the run view; warned rows are still loaded. Rejects remain the exception queue.
 
+## Data templates
+
+A data template (`domain.DataTemplate`, FR-10.18) is `{name, entity, version, defaults: {target: value}}`. `POST /migration-runs` may name one with `dataTemplateId`. Per row, a mapping target whose source is absent (or a null marker) takes the template value instead of the rule `default`; a source value always wins, and a template value satisfies `required`. Template values skip `enum` like rule defaults do and must satisfy the target's type. `CheckTemplate` runs when a run starts: the template must be for the mapping's entity and name only mapping targets that are filled from a source column (a `const` rule is never absent), else 422 `MIG-TEMPLATE-INVALID`; an unknown id is 422 `MIG-TEMPLATE-UNKNOWN`. Template values are part of the content hash, so a re-run over unchanged rows is unchanged. The run pins `dataTemplateId` (kept on `:rerun`), `counts.templated` counts the mapped rows that took a default, and `migration.run_ledger.template_fields` records the targets per row (`default_from_template`).
+
 ## Error codes
 
 | Code | Meaning |
@@ -83,6 +90,9 @@ Warnings are reported per row in `warnings` and counted in `counts.warned` on th
 | COPY-KEY-EXISTS | row rejected: rewritten key already exists in the target and was not created by this copy project |
 | MIG-COPY-INVALID | copy into the same legal entity or one of another tenant, missing project, entity, legal entities or tenants, or no target reader to detect existing keys without `Upsert` |
 | MIG-PARALLEL-RUN-DEFERRED | parallel-run diffs not built (501) |
+| MIG-TEMPLATE-INVALID | data template shape wrong, or it does not fit the mapping of the run (422) |
+| MIG-TEMPLATE-UNKNOWN | `dataTemplateId` names no published template (422) |
+| MIG-TEMPLATE-VERSION-EXISTS | the entity, name and version already hold a different template (409) |
 | AUTH-0404 | unknown run, or a run of another tenant (404) |
 | idempotency_key_reuse | `Idempotency-Key` replayed with a different request (422) |
 

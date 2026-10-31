@@ -76,6 +76,8 @@ type RunSpec struct {
 	OnlyKeys     map[string]bool
 	// Passthrough loads extracted fields unchanged (copy projects); Mapping is then ignored.
 	Passthrough bool
+	// Template supplies default values for absent source fields (FR-10.18); nil applies none.
+	Template *DataTemplate
 }
 
 type RowReject struct {
@@ -89,6 +91,8 @@ type LedgerEntry struct {
 	IdempotencyKey string
 	ContentHash    string
 	Action         string
+	// TemplateFields are the targets filled from the data template (lineage default_from_template).
+	TemplateFields []string
 }
 
 type Report struct {
@@ -99,6 +103,7 @@ type Report struct {
 	Created        int              `json:"created"`
 	Updated        int              `json:"updated"`
 	Unchanged      int              `json:"unchanged"`
+	Templated      int              `json:"templated"`
 	Rejects        []RowReject      `json:"rejects"`
 	Warnings       []RowWarning     `json:"warnings"`
 	Ledger         []LedgerEntry    `json:"-"`
@@ -148,6 +153,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	rep.Extracted = len(rows)
 	seen := make(map[string]bool, len(rows))
 	var mapped []Record
+	templated := map[string][]string{}
 	for _, r := range rows {
 		if spec.OnlyKeys != nil && !spec.OnlyKeys[r.Key] {
 			continue
@@ -158,8 +164,9 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 		seen[r.Key] = true
 		out, warnings, rejects := r.Fields, []Warning(nil), []Reject(nil)
+		var fromTemplate []string
 		if !spec.Passthrough {
-			out, warnings, rejects = spec.Mapping.ApplyWithWarnings(r.Fields)
+			out, warnings, rejects, fromTemplate = spec.Mapping.ApplyTemplate(r.Fields, spec.Template)
 		}
 		if len(rejects) > 0 {
 			rep.Rejects = append(rep.Rejects, RowReject{r.Key, rejects})
@@ -169,6 +176,10 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			rep.Warnings = append(rep.Warnings, RowWarning{r.Key, warnings})
 		}
 		rep.Mapped++
+		if len(fromTemplate) > 0 {
+			templated[r.Key] = fromTemplate
+			rep.Templated++
+		}
 		mapped = append(mapped, Record{r.Key, out})
 	}
 	known, err := p.knownXrefs(ctx, spec, mapped)
@@ -183,7 +194,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		idemKey := IdempotencyKey(spec.SourceSystem, spec.Entity, r.Key, hash)
 		if found && x.ContentHash == hash {
 			rep.Unchanged++
-			rep.Ledger = append(rep.Ledger, LedgerEntry{r.Key, x.TargetID, idemKey, hash, ActionUnchanged})
+			rep.Ledger = append(rep.Ledger, LedgerEntry{r.Key, x.TargetID, idemKey, hash, ActionUnchanged, templated[r.Key]})
 			continue
 		}
 		action := ActionUpdated
@@ -194,7 +205,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			x.TargetID = p.IDGen()
 			reserve = append(reserve, XrefItem{r.Key, XrefEntry{TargetID: x.TargetID}})
 		}
-		entry := LedgerEntry{r.Key, x.TargetID, idemKey, hash, action}
+		entry := LedgerEntry{r.Key, x.TargetID, idemKey, hash, action, templated[r.Key]}
 		if spec.DryRun {
 			rep.count(action)
 			rep.Ledger = append(rep.Ledger, entry)

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { createRun, describeProblem, getRun, listRuns, listSpecs, newKey, rerunRun, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
+import { createRun, describeProblem, getRun, listLedger, listRuns, listSpecs, listTemplates, newKey, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
 import { formatDateTime, MODE_LABELS, MODES, RUN_STATUSES, SOURCE_LABELS, SOURCE_SYSTEMS } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -91,10 +91,19 @@ export function NewRunPage() {
   const [mode, setMode] = useState<MigrationRun["mode"]>("rehearsal");
   const [dryRun, setDryRun] = useState(true);
   const [specId, setSpecId] = useState(search.get("spec") ?? "");
+  const [templateId, setTemplateId] = useState("");
+  const templates = useLoad((signal) => listTemplates(undefined, signal), "templates");
   const [error, setError] = useState("");
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+
+  const options: MappingSpec[] = specs.data ?? [];
+  const chosenEntity = options.find((s) => s.id === specId)?.entity;
+  // Templates are optional, so a failed template load never blocks starting a run.
+  const templateOptions = (Array.isArray(templates.data) ? templates.data : []).filter((t) => !chosenEntity || t.entity === chosenEntity);
+  // A template chosen before the spec changed to another entity no longer applies, so it is dropped, not sent.
+  const chosenTemplate = templateOptions.some((t) => t.id === templateId) ? templateId : "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -106,7 +115,7 @@ export function NewRunPage() {
     setError("");
     setBusy(true);
     try {
-      const run = await createRun({ sourceSystem, mode, dryRun, mappingSpecId: specId }, key.current);
+      const run = await createRun({ sourceSystem, mode, dryRun, mappingSpecId: specId, ...(chosenTemplate ? { dataTemplateId: chosenTemplate } : {}) }, key.current);
       navigate(`/migration/runs/${run.id}`);
     } catch (e) {
       setFailure(describeProblem(e));
@@ -116,7 +125,6 @@ export function NewRunPage() {
     }
   }
 
-  const options: MappingSpec[] = specs.data ?? [];
   return (
     <div className={styles.stack}>
       <PageHeader title="Start migration run" description="A dry run maps and validates without loading. Loaded rows are keyed by their legacy id, so a repeat load changes nothing." />
@@ -134,6 +142,22 @@ export function NewRunPage() {
                   {options.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.entity} v{s.version}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField
+              id="run-template"
+              label="Data template (optional)"
+              hint={templates.error ? "Data templates could not be loaded; the run starts without one." : "Fills fields the source leaves empty before mapping."}
+            >
+              {(control) => (
+                <Select {...control} value={chosenTemplate} disabled={templates.loading || Boolean(templates.error)} onChange={(event) => setTemplateId(event.target.value)}>
+                  <option value="">No template</option>
+                  {templateOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} v{t.version} ({t.entity})
                     </option>
                   ))}
                 </Select>
@@ -204,6 +228,38 @@ const rejectColumns: DataTableColumn<MigrationRun["rejects"][number]>[] = [
   { key: "sourceKey", header: "Source key", mono: true },
   { key: "reasons", header: "Reasons", render: (row) => issueText(row.rejects) },
 ];
+const lineageColumns: DataTableColumn<LedgerRow>[] = [
+  { key: "sourceKey", header: "Source key", mono: true },
+  { key: "action", header: "Action" },
+  { key: "fields", header: "Defaulted from template", mono: true, render: (row) => row.defaultFromTemplate.join(", ") },
+];
+
+/** The rows of a templated run that took a template default (default_from_template lineage). */
+function TemplateLineage({ runId, templateId }: { runId: string; templateId: string }) {
+  const state = useLoad((signal) => listLedger(runId, true, signal), runId);
+  return (
+    <Card title="Data template defaults">
+      <p>
+        Fields missing from the source were filled from <Link to={`/migration/templates/${templateId}`}>the data template</Link>.
+      </p>
+      {state.error ? (
+        <Alert tone="danger" title="Could not load the lineage" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      ) : (
+        <DataTable
+          label="Rows that took template defaults"
+          columns={lineageColumns}
+          rows={state.data ?? []}
+          getRowKey={(r) => r.sourceKey}
+          loading={state.loading}
+          empty={{ title: "No rows used a template default", description: "Every row had its own source values." }}
+        />
+      )}
+    </Card>
+  );
+}
+
 const warningColumns: DataTableColumn<MigrationRun["warnings"][number]>[] = [
   { key: "sourceKey", header: "Source key", mono: true },
   { key: "reasons", header: "Warnings", render: (row) => issueText(row.warnings) },
@@ -287,6 +343,7 @@ export function RunDetailPage() {
         <StatTile label="Created" value={run.counts.created} />
         <StatTile label="Updated" value={run.counts.updated} />
         <StatTile label="Unchanged" value={run.counts.unchanged} />
+        {run.dataTemplateId ? <StatTile label="Used template defaults" value={run.counts.templated ?? 0} /> : null}
         <StatTile label="Rejected" value={run.counts.rejected} tone={run.counts.rejected > 0 ? "warning" : "neutral"} />
       </StatGroup>
       {run.parentRunId ? (
@@ -299,6 +356,7 @@ export function RunDetailPage() {
           Mapping <Link to={`/migration/specs/${run.mappingSpecId}`}>{run.entity} v{run.mappingVersion}</Link>.
         </p>
       ) : null}
+      {run.dataTemplateId ? <TemplateLineage runId={run.id} templateId={run.dataTemplateId} /> : null}
       <Card title="Exception queue">
         <DataTable label="Rejected rows" columns={rejectColumns} rows={run.rejects} getRowKey={(r) => r.sourceKey} empty={{ title: "No rejected rows", description: "Every extracted row passed its mapping rules." }} />
       </Card>

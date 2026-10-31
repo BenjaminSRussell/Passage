@@ -27,18 +27,19 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	runTimeout        = 35 * time.Minute
-	idempotencyHeader = "Idempotency-Key"
-	dutyRun           = "migration.run"
-	dutySpecWrite     = "migration.spec.write"
-	runsPath          = "/v1/integration/migration-runs"
-	specsPath         = "/v1/integration/mapping-specs"
-	validationDetail  = "request failed validation"
-	CodeNotConfigured = "MIG-BACKEND-NOT-CONFIGURED"
-	CodeDeferred      = "MIG-PARALLEL-RUN-DEFERRED"
-	CodeSpecUnknown   = "MIG-SPEC-UNKNOWN"
-	codeKeyReuse      = "idempotency_key_reuse"
+	readyTimeout        = 500 * time.Millisecond
+	runTimeout          = 35 * time.Minute
+	idempotencyHeader   = "Idempotency-Key"
+	dutyRun             = "migration.run"
+	dutySpecWrite       = "migration.spec.write"
+	runsPath            = "/v1/integration/migration-runs"
+	specsPath           = "/v1/integration/mapping-specs"
+	validationDetail    = "request failed validation"
+	CodeNotConfigured   = "MIG-BACKEND-NOT-CONFIGURED"
+	CodeDeferred        = "MIG-PARALLEL-RUN-DEFERRED"
+	CodeSpecUnknown     = "MIG-SPEC-UNKNOWN"
+	CodeTemplateUnknown = "MIG-TEMPLATE-UNKNOWN"
+	codeKeyReuse        = "idempotency_key_reuse"
 )
 
 var (
@@ -73,6 +74,8 @@ type createRunRequest struct {
 	DryRun        bool            `json:"dryRun"`
 	Mapping       json.RawMessage `json:"mapping"`
 	MappingSpecID string          `json:"mappingSpecId"`
+	// DataTemplateID applies a published data template's defaults before mapping (FR-10.18).
+	DataTemplateID string `json:"dataTemplateId"`
 }
 
 type publishSpecRequest struct {
@@ -106,6 +109,7 @@ type runView struct {
 	DryRun         bool                    `json:"dryRun"`
 	MappingVersion int                     `json:"mappingVersion"`
 	MappingSpecID  string                  `json:"mappingSpecId,omitempty"`
+	DataTemplateID string                  `json:"dataTemplateId,omitempty"`
 	ParentRunID    string                  `json:"parentRunId,omitempty"`
 	Counts         counts                  `json:"counts"`
 	Rejects        []domain.RowReject      `json:"rejects"`
@@ -121,6 +125,7 @@ type counts struct {
 	Created   int `json:"created"`
 	Updated   int `json:"updated"`
 	Unchanged int `json:"unchanged"`
+	Templated int `json:"templated"`
 	Rejected  int `json:"rejected"`
 	Warned    int `json:"warned"`
 }
@@ -139,6 +144,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Get(runsPath+"/{id}", a.getRun)
 	r.With(authz.RequireDuty(dutyRun)).Post(runsPath+"/{id}:rerun", a.rerun)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/integration/parallel-run-diffs", a.parallelRunDiffs)
+	r.With(authz.RequireDuty(dutyRun)).Get(runsPath+"/{id}/ledger", a.runLedger)
+	a.registerTemplates(r)
 	a.registerPackages(r)
 }
 
@@ -217,7 +224,30 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, p)
 		return
 	}
-	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: raw, MappingSpecID: specID}, mapping, nil)
+	var tmpl *domain.DataTemplate
+	templateID := ""
+	if req.DataTemplateID != "" {
+		stored, err := a.store.GetDataTemplate(r.Context(), req.DataTemplateID)
+		if err != nil {
+			var p *httpx.Problem
+			if errors.As(err, &p) && p.Status == http.StatusNotFound {
+				p = httpx.NewProblem(http.StatusUnprocessableEntity, CodeTemplateUnknown, "dataTemplateId names no published data template")
+				p.Errors = map[string]string{"dataTemplateId": "no published data template has this id"}
+				err = p
+			} else {
+				a.logFailure(r, "load data template for run failed", err)
+			}
+			fail(w, r, err)
+			return
+		}
+		t, err := templateFor(stored, mapping)
+		if err != nil {
+			fail(w, r, problemFrom(err))
+			return
+		}
+		tmpl, templateID = &t, stored.ID
+	}
+	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: raw, MappingSpecID: specID, DataTemplateID: templateID}, mapping, tmpl, nil)
 }
 
 func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
@@ -236,11 +266,26 @@ func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, problemFrom(err))
 		return
 	}
-	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, MappingSpecID: prev.MappingSpecID, ParentRunID: prev.ID}
-	a.execute(w, r, next, mapping, &prev.Report)
+	var tmpl *domain.DataTemplate
+	if prev.DataTemplateID != "" {
+		stored, err := a.store.GetDataTemplate(r.Context(), prev.DataTemplateID)
+		if err == nil {
+			var t domain.DataTemplate
+			if t, err = templateFor(stored, mapping); err == nil {
+				tmpl = &t
+			}
+		}
+		if err != nil {
+			a.logFailure(r, "stored data template no longer applies", err)
+			fail(w, r, problemFrom(err))
+			return
+		}
+	}
+	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, MappingSpecID: prev.MappingSpecID, DataTemplateID: prev.DataTemplateID, ParentRunID: prev.ID}
+	a.execute(w, r, next, mapping, tmpl, &prev.Report)
 }
 
-func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, mapping domain.Mapping, prev *domain.Report) {
+func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, mapping domain.Mapping, tmpl *domain.DataTemplate, prev *domain.Report) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), runTimeout)
 	defer cancel()
 	key := r.Header.Get(idempotencyHeader)
@@ -274,7 +319,7 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 	started := time.Now()
 	slog.InfoContext(ctx, "migration run started", "correlationId", middleware.GetReqID(ctx), "entity", run.Entity, "sourceSystem", run.SourceSystem, "mode", run.Mode, "dryRun", run.DryRun, "parentRunId", run.ParentRunID)
 	pipeline := domain.Pipeline{Extractor: backend.Extractor, Loader: backend.Loader, Reader: backend.Reader, Xref: a.store.Xref(), IDGen: ids.New}
-	spec := domain.RunSpec{SourceSystem: run.SourceSystem, Entity: run.Entity, Mapping: mapping, DryRun: run.DryRun}
+	spec := domain.RunSpec{SourceSystem: run.SourceSystem, Entity: run.Entity, Mapping: mapping, DryRun: run.DryRun, Template: tmpl}
 	if prev != nil {
 		run.Report, err = pipeline.Rerun(ctx, spec, *prev)
 	} else {
@@ -489,9 +534,9 @@ func view(run store.Run) runView {
 	rep := run.Report
 	v := runView{
 		ID: run.ID, SourceSystem: run.SourceSystem, Mode: run.Mode, Entity: run.Entity, Status: rep.Status, DryRun: run.DryRun,
-		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
+		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, DataTemplateID: run.DataTemplateID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
 		Reconciliation: rep.Reconciliation, CreatedAt: run.CreatedAt,
-		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
+		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Templated: rep.Templated, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
 	}
 	if v.Rejects == nil {
 		v.Rejects = []domain.RowReject{}
@@ -507,7 +552,7 @@ func view(run store.Run) runView {
 
 func sameRequest(a, b store.Run) bool {
 	return a.SourceSystem == b.SourceSystem && a.Mode == b.Mode && a.Entity == b.Entity && a.DryRun == b.DryRun && a.ParentRunID == b.ParentRunID &&
-		a.MappingVersion == b.MappingVersion && a.MappingSpecID == b.MappingSpecID
+		a.MappingVersion == b.MappingVersion && a.MappingSpecID == b.MappingSpecID && a.DataTemplateID == b.DataTemplateID
 }
 
 func validateRun(req createRunRequest) map[string]string {
@@ -525,6 +570,9 @@ func validateRun(req createRunRequest) map[string]string {
 		fields["mapping"] = "give either mapping or mappingSpecId, not both"
 	case req.MappingSpecID != "" && !ids.Valid(req.MappingSpecID):
 		fields["mappingSpecId"] = "must be a UUID"
+	}
+	if req.DataTemplateID != "" && !ids.Valid(req.DataTemplateID) {
+		fields["dataTemplateId"] = "must be a UUID"
 	}
 	return fields
 }

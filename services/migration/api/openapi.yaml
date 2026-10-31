@@ -41,7 +41,7 @@ paths:
           description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; idempotency_key_reuse, the key was used with a different request. No backend is called.
+          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request. No backend is called.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-runs/{id}:
@@ -125,6 +125,77 @@ paths:
         '200':
           description: The spec with its mapping.
           content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/migration-runs/{id}/ledger:
+    get:
+      operationId: listMigrationRunLedger
+      summary: List the lineage of a run
+      description: One row per source key the run created, updated or found unchanged, in source key order, with the targets that took their value from the run's data template (default_from_template).
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: templated, in: query, description: When true only rows that took at least one template default are returned., schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Lineage rows of the run.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LedgerRow' } } } } } }
+        '404':
+          description: AUTH-0404, the run does not exist for this tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/data-templates:
+    get:
+      operationId: listDataTemplates
+      summary: List data templates
+      description: Published data templates, newest version first per entity and name. The defaults are returned by the single-template read.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Templates without their defaults.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DataTemplate' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: publishDataTemplate
+      summary: Publish a data template version
+      description: Stores per-entity default values (FR-10.18) as an immutable version of its entity and name. A default fills a mapping target only when the source row has no value for it. Re-publishing identical content returns the stored template; different content under a used version is a conflict. The template is checked against the mapping when a run uses it.
+      x-passage-duty: migration.spec.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PublishDataTemplate' } } }
+      responses:
+        '201':
+          description: A new template version was stored.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
+        '200':
+          description: The same content was already stored under this entity, name and version, or the Idempotency-Key was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
+        '409':
+          description: MIG-TEMPLATE-VERSION-EXISTS, this entity, name and version already hold different content.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-TEMPLATE-INVALID, or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/data-templates/{id}:
+    get:
+      operationId: getDataTemplate
+      summary: Get a data template
+      description: Returns one published version including its default values.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The template with its defaults.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
     get:
@@ -241,6 +312,7 @@ components:
         dryRun: { type: boolean }
         mapping: { type: object, description: Mapping DSL document with entity, version and fields. }
         mappingSpecId: { type: string, format: uuid, description: A published mapping spec to run instead of an inline mapping. }
+        dataTemplateId: { type: string, format: uuid, description: A published data template whose defaults fill absent source fields before mapping. It must be for the mapping's entity and default only mapping targets filled from a source column. }
     MigrationRunAccepted:
       type: object
       required: [jobId, statusUrl, estimatedCompletionSeconds, run]
@@ -262,10 +334,11 @@ components:
         mappingVersion: { type: integer }
         parentRunId: { type: string, format: uuid }
         mappingSpecId: { type: string, format: uuid }
+        dataTemplateId: { type: string, format: uuid, description: The data template the run applied, kept on re-runs. }
         counts:
           type: object
-          required: [extracted, mapped, created, updated, unchanged, rejected, warned]
-          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
+          required: [extracted, mapped, created, updated, unchanged, templated, rejected, warned]
+          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, templated: { type: integer, description: Mapped rows that took at least one data template default. }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
         rejects:
           type: array
           items:
@@ -291,6 +364,35 @@ components:
             source: { type: integer }
             target: { type: integer }
             checks: { type: array, items: { type: object, required: [name, ok, detail], properties: { name: { type: string, enum: [row_count, hash_total, sample_compare] }, ok: { type: boolean }, detail: { type: string } } } }
+        createdAt: { type: string, format: date-time }
+    LedgerRow:
+      type: object
+      required: [sourceKey, action, defaultFromTemplate]
+      properties:
+        sourceKey: { type: string }
+        targetId: { type: string, format: uuid, description: Absent on a dry run that created the row. }
+        action: { type: string, enum: [created, updated, unchanged] }
+        defaultFromTemplate: { type: array, items: { type: string }, description: Mapping targets filled from the data template for this row. }
+    PublishDataTemplate:
+      type: object
+      additionalProperties: false
+      required: [name, entity, version, defaults]
+      properties:
+        name: { type: string, maxLength: 80 }
+        entity: { type: string }
+        version: { type: integer, minimum: 1 }
+        defaults: { type: object, minProperties: 1, maxProperties: 200, additionalProperties: { type: string, maxLength: 500 }, description: Mapping target to default value; each value must satisfy the target's type. }
+    DataTemplate:
+      type: object
+      required: [id, entity, name, version, checksum, defaultCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entity: { type: string }
+        name: { type: string }
+        version: { type: integer }
+        checksum: { type: string, description: SHA-256 of the canonical template JSON. }
+        defaultCount: { type: integer }
+        defaults: { type: object, additionalProperties: { type: string }, description: Present on the single-template read and on publish. }
         createdAt: { type: string, format: date-time }
     MappingSpec:
       type: object

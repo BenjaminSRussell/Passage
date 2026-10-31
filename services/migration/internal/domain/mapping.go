@@ -123,7 +123,15 @@ func (m Mapping) Apply(row map[string]any) (map[string]any, []Reject) {
 }
 
 func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warning, []Reject) {
+	out, warnings, rejects, _ := m.applyTemplated(row, nil)
+	return out, warnings, rejects
+}
+
+// applyTemplated maps one row. A target whose source is absent takes the data template value when the template
+// holds one (before the rule default), and is reported in fromTemplate for the lineage.
+func (m Mapping) applyTemplated(row map[string]any, template map[string]string) (map[string]any, []Warning, []Reject, []string) {
 	out := make(map[string]any, len(m.Fields))
+	var fromTemplate []string
 	var warnings []Warning
 	var rejects []Reject
 	for _, f := range m.Fields {
@@ -136,7 +144,10 @@ func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warnin
 			present = false
 		}
 		if !present {
-			if f.Default != nil {
+			if tv, ok := template[f.Target]; ok {
+				text, present = tv, true
+				fromTemplate = append(fromTemplate, f.Target)
+			} else if f.Default != nil {
 				text, present = *f.Default, true
 			} else if f.Required {
 				rejects = append(rejects, Reject{f.Target, CodeMapRequired, f.origin() + " is required"})
@@ -170,9 +181,9 @@ func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warnin
 		rejects = m.rejectConditions(out)
 	}
 	if len(rejects) > 0 {
-		return nil, nil, rejects
+		return nil, nil, rejects, nil
 	}
-	return out, warnings, nil
+	return out, warnings, nil, fromTemplate
 }
 
 func (m Mapping) location() *time.Location {
