@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -184,6 +185,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"missing freeze", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), `,"freezeTs":"2026-12-31T06:00:00Z"`, "", 1)}, 422, CodeInvalid, "freezeTs"},
 		{"empty extract", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: openItemsBody(0)}, 422, CodeInvalid, "at least one"},
 		{"bad amount", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: openItemsBody(0, `{"legacyId":"X","party":"V001","account":"2100","currency":"USD","amount":"1,5"}`)}, 422, CodeInvalid, "not a decimal"},
+		{"amount in exponent notation", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: openItemsBody(0, `{"legacyId":"X","party":"V001","account":"2100","currency":"USD","amount":"9e9999999"}`)}, 422, CodeInvalid, "not a decimal"},
 		{"quarantine pct above 10", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), `"parties"`, `"quarantineMaxPct":"11","parties"`, 1)}, 422, CodeInvalid, "0 to 10"},
 		{"quarantine share MIG-1504", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: openItemsBody(10, tooMany)}, 422, CodeInvalid, "MIG-1504"},
 		{"unknown field", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: `{"surprise":1}`}, 400, "COM-0001", ""},
@@ -248,6 +250,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"gl run without balances", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "")}, 422, CodeInvalid, "at least one balance"},
 		{"gl run bad balance", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "1.000,00"))}, 422, CodeInvalid, "not a decimal"},
 		{"gl run balance finer than numeric(28,6)", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "0.0000001"), glRec("B", "3000", "", "-0.0000001"))}, 422, CodeInvalid, "more than 6 decimal places"},
+		{"gl run balance in exponent notation", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "1e2147483647"))}, 422, CodeInvalid, "not a decimal"},
 		{"gl run late cutoff", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: strings.Replace(glBody("USMF", "", cleanGL...), "2026-12-31T00:00:00Z", "2027-01-02T00:00:00Z", 1)}, 422, CodeInvalid, "MIG-1501"},
 		{"gl run blank company", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody(" ", "", cleanGL...)}, 422, CodeInvalid, "sourceCompany"},
 		{"gl run open items run not a UUID", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", `,"openItemsRunId":"OI-RUN"`, cleanGL...)}, 422, CodeInvalid, "UUID"},
@@ -269,6 +272,37 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 				t.Fatalf("body %s does not mention %q", rec.Body, c.detail)
 			}
 		})
+	}
+}
+
+func TestParseMoney(t *testing.T) {
+	for _, raw := range []string{"9e9999999", "1e2147483647", "1E5", "+5", "1,5", "", "0x10", "1" + strings.Repeat("0", 22), "-" + strings.Repeat("9", 23) + ".5"} {
+		if _, err := parseMoney(raw); err == nil {
+			t.Errorf("%q accepted", raw)
+		}
+	}
+	if _, err := parseMoney("0.0000001"); !errors.Is(err, errTooManyDecs) {
+		t.Errorf("seven decimals: %v", err)
+	}
+	for raw, want := range map[string]string{"12.5": "12.5", " -0.000001 ": "-0.000001", strings.Repeat("9", 22): strings.Repeat("9", 22), "7": "7"} {
+		got, err := parseMoney(raw)
+		if err != nil || got.String() != want {
+			t.Errorf("%q: %v, %v", raw, got, err)
+		}
+	}
+	started := time.Now()
+	if _, err := toLines([]tupleDTO{{Area: "GL", Key: "k", Amount: "1e2147483647"}}, "legacy"); err == nil {
+		t.Error("toLines accepted a huge exponent")
+	}
+	if _, err := toPostings([]postingDTO{{Kind: "JOURNAL", Amount: "9e9999999"}}); err == nil {
+		t.Error("toPostings accepted a huge exponent")
+	}
+	_, _ = parseMoney("9e9999999")
+	if _, err := decimals("line", [2]string{"qty", "1e2147483647"}); err == nil {
+		t.Error("decimals accepted a huge exponent")
+	}
+	if time.Since(started) > time.Second {
+		t.Errorf("huge exponent took %s", time.Since(started))
 	}
 }
 

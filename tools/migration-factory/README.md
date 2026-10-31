@@ -17,7 +17,9 @@ Built and tested:
   currency).
 - **Validation and quarantine** (`validate.go`): referential (party in master data), domain
   (ISO 4217 currency, control account present), and uniqueness rules, plus the
-  `quarantine_max_pct` gate (0-10, default 1; MIG-1504).
+  `quarantine_max_pct` gate (0-10, default 1; MIG-1504). An amount with more than six decimal
+  places (the stored `numeric(28,6)` scale) rejects the open_items, gl_balances or project_wip
+  request, so a run never reconciles a value Passage stores rounded.
 - **Idempotent loading** (`loader.go`, `internal/store`): records already in `legacy_xref` by natural
   key `(system, company, table, id)` are skipped, so a re-run loads zero records (MIG-1505). Runs of
   one (system, company) serialize on an advisory lock.
@@ -94,6 +96,11 @@ partitioning, idempotent re-runs and the 100-variance classifier. Store and API 
 Postgres use `platform/go/testkit` and skip without `PASSAGE_TEST_DATABASE_URL`; the row-level
 security tests also need `PASSAGE_TEST_APP_DATABASE_URL` (the `passage_app` role), and the API tests
 run as that role when it is set.
+
+The wave proof `TestWave49_SyntheticYearCutoverRehearsal` (database) runs a synthetic AX 2012 and
+SAP ECC year (three entities each) through the generated runbook and the rollback. Its extracts
+and expected values come from `internal/api/testdata/synth/synth_reference.py`, an independent
+standard-library reference; regenerate with `python3 -I internal/api/testdata/synth/synth_reference.py`.
 
 Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc --noEmit`.
 

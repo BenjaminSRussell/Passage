@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -131,13 +133,33 @@ func toRunDTO(run domain.PackRun) runDetailDTO {
 	return out
 }
 
+var (
+	moneyPattern   = regexp.MustCompile(`^-?\d{1,22}(\.\d{1,6})?$`)
+	fineFraction   = regexp.MustCompile(`^-?\d{1,22}\.\d{7,}$`)
+	errNotDecimal  = errors.New("is not a decimal of at most 22 integer and 6 decimal digits")
+	errTooManyDecs = errors.New("has more than 6 decimal places")
+)
+
+// parseMoney validates the raw text before decimal parsing: decimal.NewFromString accepts
+// exponent notation, and a huge exponent makes Round and Equal burn CPU and memory.
+func parseMoney(raw string) (decimal.Decimal, error) {
+	raw = strings.TrimSpace(raw)
+	if !moneyPattern.MatchString(raw) {
+		if fineFraction.MatchString(raw) {
+			return decimal.Decimal{}, errTooManyDecs
+		}
+		return decimal.Decimal{}, errNotDecimal
+	}
+	return decimal.NewFromString(raw)
+}
+
 // toRecords parses wire records. Amounts are decimal strings; a bad amount is a rule violation.
 func toRecords(in []recordDTO) ([]domain.Record, error) {
 	out := make([]domain.Record, 0, len(in))
 	for _, r := range in {
-		amt, err := decimal.NewFromString(strings.TrimSpace(r.Amount))
+		amt, err := parseMoney(r.Amount)
 		if err != nil {
-			return nil, fmt.Errorf("%w: record %q amount %q is not a decimal", domain.ErrInvalid, r.LegacyID, r.Amount)
+			return nil, fmt.Errorf("%w: record %q amount %q %s", domain.ErrInvalid, r.LegacyID, r.Amount, err)
 		}
 		out = append(out, domain.Record{LegacyID: strings.TrimSpace(r.LegacyID), Party: r.Party, Account: r.Account, Currency: r.Currency, Amount: amt})
 	}

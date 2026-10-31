@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -108,9 +107,9 @@ func toLines(in []tupleDTO, side string) ([]domain.Line, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s tuple %d: %w", side, i+1, err)
 		}
-		amt, err := decimal.NewFromString(strings.TrimSpace(t.Amount))
+		amt, err := parseMoney(t.Amount)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s tuple %d amount %q is not a decimal", domain.ErrInvalid, side, i+1, t.Amount)
+			return nil, fmt.Errorf("%w: %s tuple %d amount %q %s", domain.ErrInvalid, side, i+1, t.Amount, err)
 		}
 		line := domain.Line{Area: area, Key: strings.TrimSpace(t.Key)}
 		if side == "legacy" {
@@ -143,9 +142,9 @@ func (s *Server) startParallelRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	revenue, err := decimal.NewFromString(strings.TrimSpace(req.Revenue))
+	revenue, err := parseMoney(req.Revenue)
 	if err != nil {
-		fail(w, r, invalid(fmt.Sprintf("revenue %q is not a decimal", req.Revenue)))
+		fail(w, r, invalid(fmt.Sprintf("revenue %q %s", req.Revenue, err)))
 		return
 	}
 	maxPct, err := domain.ParseExplainedMaxPct(req.ExplainedMaxPct)
