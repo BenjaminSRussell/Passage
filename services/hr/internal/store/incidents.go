@@ -20,6 +20,10 @@ import (
 const (
 	CodeIncidentNotFound  = "HCM-INC-NOT-FOUND"
 	CodeIncidentCorrected = "HCM-INC-CORRECTED"
+	CodeCorrectionDuty    = "HCM-INC-CORRECTION-DUTY"
+	CodeSelfCorrection    = "HCM-INC-SELF-CORRECT"
+
+	dutyIncidentAdmin = "HcmIncidentAdmin"
 
 	fieldIncidentDetails = "hr_incident.details"
 	maxOSHALines         = 5000
@@ -140,6 +144,9 @@ func (s *Postgres) ReportIncident(ctx context.Context, in IncidentInput, idempot
 	if rerr != nil {
 		return Incident{}, false, crsProblem(rerr, http.StatusUnprocessableEntity)
 	}
+	if in.SupersedesID != nil && !p.HasDuty(dutyIncidentAdmin) {
+		return Incident{}, false, problem(http.StatusForbidden, CodeCorrectionDuty, "correcting a closed incident needs the HcmIncidentAdmin duty")
+	}
 	var key *string
 	if idempotencyKey != "" {
 		key = &idempotencyKey
@@ -165,8 +172,9 @@ func (s *Postgres) ReportIncident(ctx context.Context, in IncidentInput, idempot
 			return problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 		}
 		if in.SupersedesID != nil {
-			var status string
-			err := tx.QueryRow(ctx, `select status from hr_incident where tenant_id = $1 and id = $2`, p.TenantID, *in.SupersedesID).Scan(&status)
+			var status, reportedBy string
+			var closedBy *string
+			err := tx.QueryRow(ctx, `select status, reported_by, closed_by from hr_incident where tenant_id = $1 and id = $2`, p.TenantID, *in.SupersedesID).Scan(&status, &reportedBy, &closedBy)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return problem(http.StatusNotFound, CodeIncidentNotFound, "the incident to correct does not exist")
 			}
@@ -175,6 +183,9 @@ func (s *Postgres) ReportIncident(ctx context.Context, in IncidentInput, idempot
 			}
 			if status != domain.IncidentClosed {
 				return problem(http.StatusUnprocessableEntity, domain.CodeIncidentState, "only a CLOSED incident is corrected by a new one; this one is "+status)
+			}
+			if p.UserID == reportedBy || (closedBy != nil && p.UserID == *closedBy) {
+				return problem(http.StatusForbidden, CodeSelfCorrection, "the person who reported or closed an incident cannot file its correction")
 			}
 		}
 		raw, err := json.Marshal(in.Details)
@@ -386,7 +397,7 @@ func (s *Postgres) OSHAExtract(ctx context.Context, year int, siteID *string) (O
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, incidentSelect+` where i.tenant_id = $1 and i.osha_recordable and i.occurred_at >= $2 and i.occurred_at < $3
 			and ($4::uuid is null or i.site_id = $4::uuid)
-			and not exists (select 1 from hr_incident c where c.tenant_id = i.tenant_id and c.supersedes_id = i.id)
+			and not exists (select 1 from hr_incident c where c.tenant_id = i.tenant_id and c.supersedes_id = i.id and c.status = 'CLOSED')
 			order by i.case_no limit $5`, p.TenantID, from, from.AddDate(1, 0, 0), siteID, maxOSHALines+1)
 		if err != nil {
 			return err

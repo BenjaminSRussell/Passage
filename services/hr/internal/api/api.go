@@ -172,6 +172,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Get("/v1/hr/questionnaires/schedules/{id}", scheduleRoute(a.getSchedule))
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Post("/v1/hr/questionnaires/schedules/{id}/answers", scheduleRoute(a.submitAnswers))
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}/results", scheduleRoute(a.scheduleResults))
+	a.registerSelfService(r)
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within

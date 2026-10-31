@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"time"
@@ -176,6 +177,60 @@ func loadLedgerSet(ctx context.Context, tx pgx.Tx, tenantID, id string) (LedgerS
 	return set, err
 }
 
+func (s *Postgres) ListLedgerSets(ctx context.Context) ([]LedgerSet, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []LedgerSet{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select s.id::text, s.legal_entity_id::text, s.code, s.name, s.leading_ledger_id::text, s.created_at,
+				array(select m.ledger_id::text from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id order by m.ledger_id)
+			from ledger_set s where s.tenant_id = $1 order by s.legal_entity_id, s.code limit 500`, p.TenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var set LedgerSet
+			if err := rows.Scan(&set.ID, &set.LegalEntityID, &set.Code, &set.Name, &set.LeadingLedgerID, &set.CreatedAt, &set.LedgerIDs); err != nil {
+				return err
+			}
+			out = append(out, set)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID string) ([]AccountMapping, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []AccountMapping{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := loadLedger(ctx, tx, p.TenantID, ledgerID, false); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select id::text, ledger_id::text, source_account, target_account, effective_from::text
+			from ledger_account_mapping where tenant_id = $1 and ledger_id = $2 order by source_account, effective_from`, p.TenantID, ledgerID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m AccountMapping
+			if err := rows.Scan(&m.ID, &m.LedgerID, &m.SourceAccount, &m.TargetAccount, &m.EffectiveFrom); err != nil {
+				return err
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (s *Postgres) CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
@@ -311,16 +366,18 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 // (422) and a non-leading ledger without the ledger-specific duty (403, FB50L).
 func checkLedgerLines(set LedgerSet, in PostInput) (map[string][]domain.LineInput, error) {
 	out := make(map[string][]domain.LineInput, len(in.LedgerLines))
-	for raw, lines := range in.LedgerLines {
+	needsDuty := false
+	for _, raw := range slices.Sorted(maps.Keys(in.LedgerLines)) {
 		id, ok := ids.Canonical(raw)
 		if !ok || !slices.Contains(set.LedgerIDs, id) {
 			return nil, setViolation(CodeLedgerLinesNotInSet, "ledgerLines", "ledger "+raw+" is not a member of ledger set "+set.Code)
 		}
-		if id != set.LeadingLedgerID && !in.CanPostLedgerSpecific {
-			return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
-				"ledger-specific lines for a parallel ledger need duty "+DutyPostLedgerSpecific)
-		}
-		out[id] = lines
+		needsDuty = needsDuty || id != set.LeadingLedgerID
+		out[id] = in.LedgerLines[raw]
+	}
+	if needsDuty && !in.CanPostLedgerSpecific {
+		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
+			"ledger-specific lines for a parallel ledger need duty "+DutyPostLedgerSpecific)
 	}
 	return out, nil
 }

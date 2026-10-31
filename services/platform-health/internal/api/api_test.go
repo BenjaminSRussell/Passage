@@ -19,9 +19,46 @@ import (
 )
 
 type fakeStore struct {
-	err     error
-	pingErr error
-	entries []store.Entry
+	err        error
+	pingErr    error
+	entries    []store.Entry
+	releases   []store.Release
+	lastKey    string
+	seenKeys   map[string]bool
+	chainBreak bool
+}
+
+func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key string) (store.Release, error) {
+	if f.err != nil {
+		return store.Release{}, f.err
+	}
+	in.ChainBreak = f.chainBreak
+	in.ID, in.Actor, in.CreatedAt, f.lastKey = "rel-1", "anonymous", time.Unix(0, 0).UTC(), key
+	if key != "" && f.seenKeys[key] {
+		in.Replayed = true
+		return in, nil
+	}
+	if key != "" {
+		if f.seenKeys == nil {
+			f.seenKeys = map[string]bool{}
+		}
+		f.seenKeys[key] = true
+	}
+	f.releases = append(f.releases, in)
+	return in, nil
+}
+
+func (f *fakeStore) ListReleases(_ context.Context, service, environment string) ([]store.Release, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := []store.Release{}
+	for _, r := range f.releases {
+		if (service == "" || r.Service == service) && (environment == "" || r.Environment == environment) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) Create(_ context.Context, message, _ string) (store.Entry, error) {
@@ -43,7 +80,7 @@ func (f *fakeStore) List(context.Context) ([]store.Entry, error) {
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 
 func newRouter(f *fakeStore) (*chi.Mux, *api.API) {
-	a := api.New(f)
+	a := api.New(f, testkit.TenantID(1))
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a

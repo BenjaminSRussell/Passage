@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	hrevents "github.com/BenjaminSRussell/passage/services/hr/internal/events"
 )
@@ -19,6 +21,16 @@ import (
 func asUser(ctx context.Context, user string) context.Context {
 	p, _ := tenant.FromContext(ctx)
 	p.UserID = user
+	return tenant.With(ctx, p)
+}
+
+func withDuty(ctx context.Context, duty string) context.Context {
+	p, _ := tenant.FromContext(ctx)
+	d := map[string]struct{}{duty: {}}
+	for k := range p.Duties {
+		d[k] = struct{}{}
+	}
+	p.Duties = d
 	return tenant.With(ctx, p)
 }
 
@@ -124,24 +136,48 @@ func scenarioIncidents(t *testing.T, s *Postgres, ctx context.Context, tag strin
 
 	open := mustIncident(t, s, ctx, incidentFor(w, le, site, domain.IncidentFacts{DaysRestricted: 4}))
 	fix := incidentFor(w, le, site, domain.IncidentFacts{DaysAway: 5})
-	fix.SupersedesID = &open.ID
+	fix.SupersedesID = &away.ID
 	_, _, err = s.ReportIncident(ctx, fix, "")
+	requireCode(t, err, CodeCorrectionDuty)
+	_, _, err = s.ReportIncident(withDuty(ctx, "HcmIncidentAdmin"), fix, "")
+	requireCode(t, err, CodeSelfCorrection)
+	_, _, err = s.ReportIncident(withDuty(admin, "HcmIncidentAdmin"), fix, "")
+	requireCode(t, err, CodeSelfCorrection)
+	lead := withDuty(asUser(ctx, "ehs-lead"), "HcmIncidentAdmin")
+	fix.SupersedesID = &open.ID
+	_, _, err = s.ReportIncident(lead, fix, "")
 	requireCode(t, err, domain.CodeIncidentState)
 	fix.SupersedesID = &away.ID
-	correction, _, err := s.ReportIncident(ctx, fix, "")
+	correction, _, err := s.ReportIncident(lead, fix, "")
 	if err != nil || correction.SupersedesID == nil {
 		t.Fatalf("correction = %+v, %v", correction, err)
 	}
-	_, _, err = s.ReportIncident(ctx, fix, "")
+	_, _, err = s.ReportIncident(lead, fix, "")
 	requireCode(t, err, CodeIncidentCorrected)
-	after, err := s.OSHAExtract(ctx, 2026, &site)
-	if err != nil {
+	onLog := func() bool {
+		x, err := s.OSHAExtract(ctx, 2026, &site)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range x.Log {
+			if l.IncidentID == away.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if !onLog() {
+		t.Fatal("a correction that is not yet CLOSED removed the original from the OSHA log")
+	}
+	chief := asUser(ctx, "ehs-chief")
+	if _, _, err := s.AdvanceIncident(chief, correction.ID, domain.IncidentUnderReview); err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range after.Log {
-		if l.IncidentID == away.ID {
-			t.Errorf("the superseded incident is still on the log")
-		}
+	if _, _, err := s.AdvanceIncident(chief, correction.ID, domain.IncidentClosed); err != nil {
+		t.Fatal(err)
+	}
+	if onLog() {
+		t.Errorf("the superseded incident is still on the log after its correction closed")
 	}
 	if _, err := s.GetIncident(ctx, ids.New()); err == nil {
 		t.Error("unknown incident found")
@@ -307,8 +343,6 @@ func scenarioOffboarding(t *testing.T, s *Postgres, ctx context.Context, tag str
 func TestLoanedItemBlocksOffboardingAC4215(t *testing.T) {
 	s, ctx := newStore(t)
 	scenarioOffboarding(t, s, ctx, "A")
-	rows := outboxFor(t, s, ctx, "")
-	_ = rows
 }
 
 func scenarioOnboarding(t *testing.T, s *Postgres, ctx context.Context, tag string) {
@@ -354,8 +388,8 @@ func scenarioOnboarding(t *testing.T, s *Postgres, ctx context.Context, tag stri
 	if _, _, err := s.StartChecklist(ctx, hire.ID, ids.New(), day(time.November, 2)); err == nil {
 		t.Error("unknown template accepted")
 	}
-	if tpls, err := s.ListChecklistTemplates(ctx, "OFFBOARDING"); err != nil || len(tpls) != 0 {
-		t.Errorf("offboarding templates = %v %v", tpls, err)
+	if tpls, err := s.ListChecklistTemplates(ctx, "ONBOARDING"); err != nil || len(tpls) < 1 {
+		t.Errorf("onboarding templates = %v %v", tpls, err)
 	}
 }
 
@@ -405,7 +439,7 @@ func TestChecklistAndLoanEvents(t *testing.T) {
 
 func peopleWorker(t *testing.T, s *Postgres, ctx context.Context, n int, le string, position Position) Worker {
 	t.Helper()
-	user := fmt.Sprintf("user-%d", n)
+	user := testkit.TenantID(100 + n)
 	w, _, err := s.CreateWorker(ctx, WorkerInput{
 		Worker:     Worker{PersonnelNumber: fmt.Sprintf("WRK-Q%02d", n), WorkerType: "EMPLOYEE", PartyPersonID: ids.New(), LegalName: fmt.Sprintf("Respondent %d", n), UserID: &user},
 		NationalID: "123-45-6789",
@@ -418,8 +452,8 @@ func peopleWorker(t *testing.T, s *Postgres, ctx context.Context, n int, le stri
 	return w
 }
 
-func answersDoc(scale int) map[string][]byte {
-	return map[string][]byte{"ENGAGE": []byte(fmt.Sprint(scale)), "NOTE": []byte(`"fine"`)}
+func answersDoc(scale int) map[string]json.RawMessage {
+	return map[string]json.RawMessage{"ENGAGE": []byte(fmt.Sprint(scale)), "NOTE": []byte(`"fine"`)}
 }
 
 func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag string) {
@@ -431,7 +465,7 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	for n := 1; n <= 12; n++ {
 		workers = append(workers, peopleWorker(t, s, ctx, n, le, pos))
 	}
-	userCtx := func(n int) context.Context { return asUser(ctx, fmt.Sprintf("user-%d", n)) }
+	userCtx := func(n int) context.Context { return asUser(ctx, testkit.TenantID(100+n)) }
 
 	design := Questionnaire{Code: "PULSE-" + tag, Name: "Pulse", Anonymous: true, Questions: []domain.Question{
 		{Code: "ENGAGE", Text: "I would recommend this team", Type: domain.QuestionScale, ScaleMax: 5, Weight: "1", Mandatory: true, ResultGroup: "ENGAGEMENT"},
@@ -461,7 +495,7 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	if err := s.SubmitAnswers(userCtx(2), sched.ID, workers[0].ID, answersDoc(4)); err == nil {
 		t.Error("answered for another worker")
 	}
-	if err := s.SubmitAnswers(userCtx(1), sched.ID, workers[0].ID, map[string][]byte{"ENGAGE": []byte("9")}); err == nil {
+	if err := s.SubmitAnswers(userCtx(1), sched.ID, workers[0].ID, map[string]json.RawMessage{"ENGAGE": []byte("9")}); err == nil {
 		t.Error("out of range answer accepted")
 	}
 	for n := 1; n <= 4; n++ {
@@ -478,11 +512,8 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 		t.Fatalf("anonymous sessions carrying a respondent id = %d, %v", withRespondent, err)
 	}
 	res, err := s.QuestionnaireResults(ctx, sched.ID, false)
-	if err != nil || res.Responded != 4 || res.Invited < 12 || res.Overall.Respondents != 4 {
-		t.Fatalf("overall = %+v %v", res, err)
-	}
-	if m := res.Overall.ResultGroups; len(m) != 1 || *m[0].MeanScore != "2.50" {
-		t.Errorf("result groups = %+v", m)
+	if err != nil || res.Responded != 4 || res.Invited < 12 || !res.Suppressed || len(res.Overall.Questions) != 0 || len(res.Overall.ResultGroups) != 0 {
+		t.Fatalf("4 of 12 anonymous responses must report counts only: %+v %v", res, err)
 	}
 	_, err = s.QuestionnaireResults(ctx, sched.ID, true)
 	requireCode(t, err, domain.CodeQuestionnaireThreshold)
@@ -490,6 +521,16 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	if err := s.SubmitAnswers(userCtx(5), sched.ID, workers[4].ID, answersDoc(5)); err != nil {
 		t.Fatal(err)
 	}
+	full, err := s.QuestionnaireResults(ctx, sched.ID, false)
+	if err != nil || full.Suppressed || len(full.Overall.ResultGroups) != 1 || *full.Overall.ResultGroups[0].MeanScore != "3.00" {
+		t.Fatalf("5 responses show the overall figures: %+v %v", full, err)
+	}
+	small, _, err := s.CreateQuestionnaire(ctx, Questionnaire{Code: "SMALL-" + tag, Name: "Small", Anonymous: true, Questions: design.Questions}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.CreateSchedule(ctx, small.ID, `legal_entity == "`+ids.New()+`"`, day(time.March, 1), day(time.March, 31), "")
+	requireCode(t, err, domain.CodeQuestionnaireThreshold)
 	grouped, err := s.QuestionnaireResults(ctx, sched.ID, true)
 	if err != nil || len(grouped.Groups) != 1 || grouped.Groups[0].Stats.Respondents != 5 || grouped.Groups[0].DepartmentID == nil || *grouped.Groups[0].DepartmentID != dept {
 		t.Fatalf("grouped = %+v %v", grouped, err)
@@ -520,7 +561,7 @@ func TestQuestionnaireNamedRespondentAndPopulation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SubmitAnswers(asUser(ctx, "user-1"), sched.ID, in.ID, map[string][]byte{"SCORE": []byte("12.5")}); err != nil {
+	if err := s.SubmitAnswers(asUser(ctx, testkit.TenantID(101)), sched.ID, in.ID, map[string]json.RawMessage{"SCORE": []byte("12.5")}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := s.QuestionnaireResults(ctx, sched.ID, true)
@@ -532,9 +573,9 @@ func TestQuestionnaireNamedRespondentAndPopulation(t *testing.T) {
 	if err != nil || other.InvitedCount != 0 {
 		t.Fatalf("schedule = %+v %v", other, err)
 	}
-	requireCode(t, s.SubmitAnswers(asUser(ctx, "user-2"), other.ID, out.ID, map[string][]byte{"SCORE": []byte("1")}), CodeNotInvited)
+	requireCode(t, s.SubmitAnswers(asUser(ctx, testkit.TenantID(102)), other.ID, out.ID, map[string]json.RawMessage{"SCORE": []byte("1")}), CodeNotInvited)
 	early, _, _ := s.CreateSchedule(ctx, q2.ID, "", day(time.April, 1), day(time.April, 30), "")
-	requireCode(t, s.SubmitAnswers(asUser(ctx, "user-2"), early.ID, out.ID, map[string][]byte{"SCORE": []byte("1")}), CodeQuestionnaireNotOpen)
+	requireCode(t, s.SubmitAnswers(asUser(ctx, testkit.TenantID(102)), early.ID, out.ID, map[string]json.RawMessage{"SCORE": []byte("1")}), CodeQuestionnaireNotOpen)
 }
 
 func TestGrants_PeopleSafetyPathsWorkAsAppRole(t *testing.T) {

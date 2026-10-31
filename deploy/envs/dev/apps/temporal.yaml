@@ -30,3 +30,31 @@ spec:
       backoff: { duration: 30s, factor: 2, maxDuration: 5m }
     syncOptions:
       - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal-postgres
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: deploy/temporal-postgres
+    helm:
+      valuesObject:
+        externalSecret:
+          environment: dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: temporal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true

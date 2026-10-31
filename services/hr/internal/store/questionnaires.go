@@ -223,9 +223,17 @@ func (s *Postgres) CreateSchedule(ctx context.Context, questionnaireID, populati
 		if err != nil {
 			return err
 		}
+		invited := len(invitedWorkers(emps, rule))
+		var anonymous bool
+		if err := tx.QueryRow(ctx, `select anonymous from hr_questionnaire where tenant_id = $1 and id = $2`, p.TenantID, questionnaireID).Scan(&anonymous); err != nil {
+			return err
+		}
+		if anonymous && invited < domain.AnonymityThreshold {
+			return problem(http.StatusUnprocessableEntity, domain.CodeQuestionnaireThreshold, "an anonymous questionnaire needs a population of at least 5 workers")
+		}
 		out, err = s.scanSchedule(tx.QueryRow(ctx, `insert into hr_questionnaire_schedule (tenant_id, id, questionnaire_id, population, opens_at, closes_at, invited_count, idempotency_key, created_by)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+scheduleColumns,
-			p.TenantID, ids.New(), questionnaireID, population, opens, closes, len(invitedWorkers(emps, rule)), key, p.UserID))
+			p.TenantID, ids.New(), questionnaireID, population, opens, closes, invited, key, p.UserID))
 		inserted = err == nil
 		return err
 	})
@@ -376,6 +384,7 @@ type QuestionnaireResults struct {
 	Responded    int           `json:"responded"`
 	ResponseRate string        `json:"responseRate"`
 	Overall      domain.Stats  `json:"overall"`
+	Suppressed   bool          `json:"suppressed"`
 	Groups       []GroupResult `json:"groups,omitempty"`
 }
 
@@ -437,6 +446,9 @@ func (s *Postgres) QuestionnaireResults(ctx context.Context, scheduleID string, 
 		}
 		res = QuestionnaireResults{ScheduleID: scheduleID, Anonymous: v.Questionnaire.Anonymous, Invited: v.InvitedCount, Responded: len(stored),
 			ResponseRate: "0.00", Overall: domain.Aggregate(qs, all)}
+		if res.Anonymous && res.Responded < domain.AnonymityThreshold {
+			res.Overall, res.Suppressed = domain.Stats{Respondents: len(stored), Questions: []domain.QuestionStat{}, ResultGroups: []domain.GroupStat{}}, true
+		}
 		if v.InvitedCount > 0 {
 			res.ResponseRate = decimal.NewFromInt(int64(len(stored))).Div(decimal.NewFromInt(int64(v.InvitedCount))).Mul(decimal.NewFromInt(100)).Round(2).StringFixed(2)
 		}

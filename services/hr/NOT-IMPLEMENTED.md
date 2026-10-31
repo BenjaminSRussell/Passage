@@ -76,7 +76,7 @@ another owner).
 | 4 | Certificate expiry notifications at 60/30/7 days (BR-42.8) | handoff (wave 5) and later slice | The expiring inquiry (`GET /certifications/expiring`, 8.42.14) and its screen are built; sending notifications needs the FR-42.20 reminder rules on the wave-5 alert engine and the `hr-cert-expiry` schedule |
 | 4 | Expired certificate removes the skill match in wave-45 dispatch | handoff (wave 45) | `certification.issued` carries `expires_on`; dispatch must stop matching on that day. HR's own skill search already ignores expired certificates |
 | 4 | Rating history | later slice of PSG-42 | Only the current rating per worker and skill is stored; the history is in the `workerskill.changed` events |
-| 4 | Goals, review templates, review cycle with sign-off (FR-42.11) | later slice of PSG-42 | Not started |
+| 4 | Goals, review templates, review cycle with sign-off (FR-42.11) | later slice of PSG-42 | Not started; needs a product decision on the review model (rating scale, calibration, who signs) before building |
 | 4 | Recruitment pipeline basics | later slice of PSG-42 | Not started (FR-42.21) |
 | 5 | Consent records, retention policies per data class, country field slots | later slice of PSG-42 | Not started; retention purge job `hr-retention-purge` not built |
 | 5 | PII vault: encrypted columns, masked reads, audited unmasked reads | **built** for national ID and bank account | `worker_pii` sealed with AES-256-GCM, masked by default, reveal needs `HcmPIIRead` and a reason, audit row in the same transaction. Date of birth and home address (FR-42.1) are not collected yet; they come with ESS personal data |
@@ -93,18 +93,18 @@ another owner).
 | 6 | Job `hr-course-completion-transfer` (8.42.16) | built differently | The transfer to skills and certificates runs in the completion transaction, so there is nothing left for a sweep to find |
 | 6 | Course browsing and self-registration in ESS, and the worker's own registrations ("My courses") | later slice of PSG-42 (ESS) and handoff (shell) | The API lets an `EssLearning` employee register and cancel for themselves; the web screens are the learning-admin ones until the shell gives the signed-in user's worker id. There is no per-worker registrations read |
 | 6 | Managers register and approve only their team | handoff (platform OPA, wave 4 workflow) | `MssApprove` registers, approves and cancels for any worker in the tenant; only self-approval is blocked |
-| 6 | Course evaluation questionnaires | later slice of PSG-42 | Comes with the questionnaire engine (FR-42.15) |
+| 6 | Course evaluation questionnaires | later slice of PSG-42 | The engine is built; scheduling to a course session's attendees (population over session facts) is not |
 | 6 | Paging of a course's sessions and a session's registrations | later slice of PSG-42 | Each read returns at most 500 rows in order; the catalog itself pages by code |
-| 6 | Questionnaire engine (design, schedules, answers, results) | later slice of PSG-42 | Not started (FR-42.15, BR-42.10) |
-| 7 | Injury and illness register, OSHA 300/300A/301 extracts | later slice of PSG-42 | Not started (FR-42.16, BR-42.11); the form layouts and ITA submission are in the wave-48 US pack |
-| 7 | Loaned items | later slice of PSG-42 | Not started (FR-42.17); the link to wave-44 assets is a handoff to wave 44 |
+| 6 | Questionnaire engine (design, schedules, answers, results) | **built** | See the service README. Not built: media attachments, answer-group/result-group tables (they are inline in the design), external respondents by wave-35 link, population over department/position/course session (only CEL over employment type, FTE, service days, legal entity), results export, reminder days, `hr-questionnaire-distribute`, edit or retire a questionnaire, the tenant anonymity-threshold parameter (fixed at 5) |
+| 7 | Injury and illness register, OSHA 300/300A/301 extracts | **built** (data) | See the service README. Not built: code tables for types, body parts, treatments, severities and outcomes (fixed enums and free text), the per-site OSHA establishment id parameter, `site_id` checked against a site master, re-sealing incident details on fieldcrypt rotation (`hr reseal-pii` covers `worker_pii` only), form layouts and ITA submission (wave-48 US pack), the incident register screens |
+| 7 | Loaned items | **built** | Loan types are a code shape, not a table; `assetId` is not checked (handoff, wave 44); due reminders need the wave-5 alert engine (LOAN_DUE) |
 | 7 | Skill mapping and gap analysis (FR-42.18) | **built** for workers and positions | Search by skills with minimum ratings and by certificates valid on the date, over workers employed on that date, at most 500 results. Gap analysis compares a worker with a position's skill profile as (skill, required, actual, delta) |
 | 7 | Skill search `availableFrom` (availability) | later slice of PSG-42 and handoff (waves 25, 45) | Refused with a field error until availability exists (absence calendars, wave-25 time, wave-45 schedules) |
 | 7 | Skill search over FR-42.21 candidates | later slice of PSG-42 | Candidates are not built |
 | 7 | Job skill profiles (gap against a job, not only a position) | later slice of PSG-42 | The `Job` entity does not exist yet; positions carry the profile |
 | 7 | Manager sees only their subtree in skill search and gap (8.42.17, OPA) | handoff (platform OPA) | `HcmOrgInquire` searches the tenant; positions follow the legal-entity scope |
 | 7 | GIN index on WorkerSkill (8.42.19) | built differently | A btree on (tenant, skill, rating) answers "at least n on skill s" as a range scan; the 500/day budget is not load-tested |
-| 8 | Onboarding and offboarding checklists, worker tasks | later slice of PSG-42 | Not started (FR-42.19, BR-42.12) |
+| 8 | Onboarding and offboarding checklists, worker tasks | **built** (API) | Instantiation is an endpoint a personnel action will call (FR-42.5 not built), so "when the action is approved" is not automatic. HR_PARTNER and IT owners stay unassigned (need the department and role mappings). Not built: one template per action type per legal entity, MSS/ESS task screens |
 | 8 | HR reminders on the wave-5 alert rules | handoff (wave 5) | The reminder rule model needs the alert rule engine; not started |
 | 8 | Requisitions, candidates, offers | later slice of PSG-42 | Not started (FR-42.21, BR-42.15) |
 | 8 | Compensation planning cycles and worksheets | later slice of PSG-42 | Not started (FR-42.22, BR-42.13) |
@@ -137,12 +137,12 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | AC-42.7 masked national ID and audited read | **built** (store and API tests) | DB test needs `PASSAGE_TEST_DATABASE_URL`; the no-DB API test covers the duty and reason gate |
 | AC-42.8 SCIM user within 60 s | handoff (platform / Keycloak) and later slice | SCIM worker not built; needs Keycloak admin access and the personnel-action events |
 | AC-42.9 course waitlist | **built** (domain and store tests) | `TestCourseWaitlistAndCompletionAC429` runs capacity 10 and waitlist 2 with 13 registrations, the promotion on cancel, and the PASS that rates FORKLIFT 3 and issues a certificate expiring 2028-06-01 for a 2026-06-01 session, through the database (needs `PASSAGE_TEST_DATABASE_URL`) |
-| AC-42.10 anonymous questionnaire threshold | later slice of PSG-42 | Questionnaires not started |
-| AC-42.11 OSHA 300 extract | later slice of PSG-42 | Incidents not started |
-| AC-42.12 onboarding task date | later slice of PSG-42 | Checklists not started |
+| AC-42.10 anonymous questionnaire threshold | **built** (domain and store tests) | `TestAnonymousQuestionnaireThresholdAC4210`: 4 of 12 anonymous responses; the department breakdown is HCM-QST-002. Deviation: with under 5 responses the overall question and result-group figures are suppressed too (counts and response rate only), after security review, because one respondent would be identifiable |
+| AC-42.11 OSHA 300 extract | **built** (store test) | `TestIncidentRegisterAndOSHAExtractAC4211`: 3 days away is recordable and on the 2026 log with days away 3; the privacy case shows "Privacy case" |
+| AC-42.12 onboarding task date | partly built | `TestOnboardingTaskDueAndOwnerAC4212`: offset -5 and effective 2026-11-02 gives 2026-10-28 owned by the manager as-of that date, through the start-checklist endpoint; the approved-action trigger is FR-42.5 |
 | AC-42.13 compensation budget block | later slice of PSG-42 | Cycles not started |
 | AC-42.14 concurrent and global as-of with pay groups | partly built | Both employments appear in `as-of` (entities are separate rows). Payroll pay-group memberships are wave 43 |
-| AC-42.15 loaned item blocks offboarding | later slice of PSG-42 | Loaned items and offboarding not started |
+| AC-42.15 loaned item blocks offboarding | partly built | `TestLoanedItemBlocksOffboardingAC4215`: the return task and the checklist cannot complete while an item is OUT; the termination action that starts the checklist is FR-42.5 |
 | AC-42.16 skill gap | **built** (domain, store and web tests) | `TestSkillGapAC4216` runs POS-200 (WELDING ≥ 3, PLC ≥ 2) against WELDING 4, PLC 1 through the database and gets only (PLC, 2, 1, −1). The DB test needs `PASSAGE_TEST_DATABASE_URL` |
 
 ## Platform and API conventions not yet used

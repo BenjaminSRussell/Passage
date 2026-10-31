@@ -10,6 +10,4 @@ helm upgrade --install temporal temporal/temporal \
   --version 0.74.0 --values deploy/temporal/values.yaml
 ```
 
-`application.yaml` is the Argo CD Application for the same chart (`0.74.0`, the last release that accepts these values). It is not in `deploy/envs/dev/apps` on purpose: root-dev would sync it before its database exists. Strimzi, Kafka, Apicurio Registry and Debezium Connect are wired in `deploy/envs/dev/apps/event-backbone.yaml`.
-
-Before moving `application.yaml` into `deploy/envs/dev/apps`, provision the `temporal-database` secret and the CloudNativePG cluster `temporal-postgres` (service `temporal-postgres-rw.temporal.svc`, databases `temporal` and `temporal_visibility`) in namespace `temporal`; neither exists in any dev app yet.
+The Argo CD Applications for this chart (`0.74.0`, the last release that accepts these values) and its database live in `deploy/envs/dev/apps/temporal.yaml`. `temporal-postgres` (chart `deploy/temporal-postgres`, wave -1) serves `temporal-postgres-rw.temporal.svc` and an ExternalSecret writes the `temporal-database` secret (key `password`) from `passage/dev/temporal-postgres/password` in the `passage` ClusterSecretStore; Temporal's schema job creates `temporal_visibility`. Strimzi, Kafka, Apicurio Registry and Debezium Connect are wired in `deploy/envs/dev/apps/event-backbone.yaml`.

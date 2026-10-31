@@ -8,7 +8,7 @@ life events and enrollments), and skills (catalog, worker ratings,
 certificates with expiry, position skill profiles, gap analysis and skill
 search), and courses (catalog, sessions with a waitlist, registrations with
 manager approval, completion into skills and certificates). Built for PSG-42,
-**slices 1 to 5**. The wave's remaining
+**slices 1 to 6**. The wave's remaining
 deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 1 does
@@ -196,6 +196,39 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `dev.passage.hr.course.completed.v1`, all in one transaction. Lines apply
   all or none.
 
+## What slice 6 does (incidents, loans, checklists, questionnaires)
+
+- **Incident register** (FR-42.16, BR-42.11): `HcmIncidentReport` files an incident; the
+  case number is a per-tenant counter. `osha_recordable` defaults from the facts (death,
+  days away, restricted days, medical treatment beyond first aid, loss of consciousness);
+  overriding it either way needs `overrideReason` (HCM-INC-001). Description, witnesses,
+  treatments, root cause and corrective action are one fieldcrypt-sealed value
+  (`hr_incident.details`); reads by id open it and write an audit row; events carry no
+  medical text. Status goes REPORTED, UNDER_REVIEW, CLOSED; the reporter cannot close
+  (HCM-INC-SELF-CLOSE). A CLOSED incident is frozen by a trigger. A correction is a new
+  incident with `supersedesId`: it needs `HcmIncidentAdmin`, cannot be filed by the
+  original's reporter or closer, and hides the original from the OSHA extract only once
+  the correction is itself CLOSED (so a second administrator must close it). Rows follow the
+  legal-entity scope. The OSHA extract (`/incidents/osha-extract?year=&siteId=`) returns the
+  300 log with 301 detail and the 300A summary; privacy cases show "Privacy case" for the
+  name and no worker id, in lists too. The extract is audited as one export row.
+- **Loaned items** (FR-42.17): issue, return or lose, per worker, and the outstanding
+  inquiry. `assetId` is stored, not checked (wave 44).
+- **Checklists** (FR-42.19, BR-42.12): templates with tasks (owner role, due offset);
+  `POST /workers/{id}/checklists` instantiates one for an effective date (the call a
+  personnel action will make): due = date + offset, MANAGER = the manager as-of the date,
+  WORKER = the worker, HR_PARTNER and IT unassigned. OFFBOARDING adds RETURN_LOANED_ITEMS,
+  which cannot be done or skipped while an item is OUT (HCM-LOAN-001), and the checklist
+  cannot complete while one is OUT.
+- **Questionnaires** (FR-42.15, BR-42.10): questions as one validated document (SINGLE,
+  MULTI, SCALE, NUMERIC, TEXT, DATE; weights; result groups), schedules over a CEL
+  population (same subset as benefits), answers by the signed-in worker only, scoring
+  per result group (weighted mean, 2 decimals), results by question, result group and
+  department. An anonymous session stores no worker id and a date, not a time; a separate
+  marker stops a second answer. Anonymous rules: a schedule needs at least 5 invited; with
+  fewer than 5 responses the overall figures are suppressed (counts only, `suppressed`);
+  a department breakdown with any group under 5 is HCM-QST-002; late answers HCM-QST-001.
+
 Domain rules that are not yet exposed by an endpoint, but are implemented and
 tested: hierarchy cycle detection (BR-42.7) and the reveal gate (`CheckReveal`).
 
@@ -355,6 +388,28 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST | `/v1/hr/courses/sessions/{id}/complete` | HcmLearningAdmin |
 | POST | `/v1/hr/courses/registrations/{id}/approve` | MssApprove |
 | POST | `/v1/hr/courses/registrations/{id}/cancel` | EssLearning (own unless HcmLearningAdmin or MssApprove) |
+| POST | `/v1/hr/incidents` | HcmIncidentReport (HcmIncidentAdmin to correct) |
+| GET | `/v1/hr/incidents?status=&limit=&cursor=` | HcmIncidentAdmin |
+| GET | `/v1/hr/incidents/osha-extract?year=&siteId=` | HcmIncidentAdmin |
+| GET | `/v1/hr/incidents/{id}` | HcmIncidentAdmin |
+| POST | `/v1/hr/incidents/{id}/status` | HcmIncidentAdmin |
+| POST | `/v1/hr/workers/{id}/loaned-items` | HcmWorkerMaintain |
+| GET | `/v1/hr/workers/{id}/loaned-items` | HcmWorkerInquire |
+| GET | `/v1/hr/loaned-items/outstanding?dueBy=` | HcmWorkerInquire |
+| POST | `/v1/hr/loaned-items/{id}/close` | HcmWorkerMaintain |
+| POST / GET | `/v1/hr/checklist-templates` | HcmSetupAdmin |
+| POST / GET | `/v1/hr/workers/{id}/checklists` | HcmActionMaintain / HcmWorkerInquire |
+| GET | `/v1/hr/checklists/{id}` | HcmWorkerInquire |
+| POST | `/v1/hr/checklists/{id}/complete` | HcmActionMaintain |
+| GET | `/v1/hr/tasks?ownerWorkerId=&status=` | HcmWorkerInquire |
+| POST | `/v1/hr/tasks/{id}/finish` | HcmActionMaintain |
+| POST / GET | `/v1/hr/questionnaires` | HcmQuestionnaireAdmin |
+| GET | `/v1/hr/questionnaires/{id}` | HcmQuestionnaireAdmin |
+| POST | `/v1/hr/questionnaires/schedules` | HcmQuestionnaireAdmin |
+| GET | `/v1/hr/questionnaires/schedules/open` | EssQuestionnaire |
+| GET | `/v1/hr/questionnaires/schedules/{id}` | EssQuestionnaire |
+| POST | `/v1/hr/questionnaires/schedules/{id}/answers` | EssQuestionnaire (own worker only) |
+| GET | `/v1/hr/questionnaires/schedules/{id}/results?by=department` | HcmQuestionnaireAdmin |
 
 ## Error codes
 
@@ -418,6 +473,18 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-CRS-DUPLICATE` | 409 | Course code already used in this tenant |
 | `HCM-CRS-SESSION-NOT-FOUND` | 404 | Session does not exist for this tenant |
 | `HCM-CRS-REG-NOT-FOUND` | 404 | Registration does not exist, or the worker is not registered for the session |
+| `HCM-INC-001` | 422 | Overriding the recordable default needs a justification |
+| `HCM-INC-STATE` | 422 | Wrong status step, or correcting an incident that is not CLOSED |
+| `HCM-INC-SELF-CLOSE` | 403 | The reporter tried to close their own incident |
+| `HCM-INC-CORRECTION-DUTY` | 403 | A correction needs HcmIncidentAdmin |
+| `HCM-INC-SELF-CORRECT` | 403 | The reporter or closer tried to correct their own incident |
+| `HCM-INC-CORRECTED` | 409 | The incident already has a correction |
+| `HCM-LOAN-001` | 422 | Items are still out for the worker (task or checklist) |
+| `HCM-LOAN-STATE` / `HCM-LOAN-DATE` | 409 / 422 | Item already closed another way / dates out of order |
+| `HCM-CHK-OPEN-TASKS`, `HCM-CHK-STATE`, `HCM-CHK-EVIDENCE` | 422 / 409 / 422 | Checklist and task rules |
+| `HCM-QST-001` | 422 | Questionnaire closed |
+| `HCM-QST-002` | 422 | Anonymous breakdown or population under 5 |
+| `HCM-QST-NOT-OPEN`, `HCM-QST-NOT-OWN`, `HCM-QST-NOT-INVITED`, `HCM-QST-ANSWERED` | 422 / 403 / 403 / 409 | Answering rules |
 | `idempotency_key_reuse` | 422 | Same key used with a different request body |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry |
 | `AUTH-0003` | 403 | Caller lacks the duty (kernel `authz`) |
@@ -433,7 +500,7 @@ internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql, 0008_incidents_loans_checklists.sql, 0009_questionnaires.sql (applied in order by dbx.Migrate)
 testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
 events/asyncapi.yaml  AsyncAPI 3 for the eight events published

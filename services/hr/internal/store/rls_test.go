@@ -94,6 +94,22 @@ func TestRowLevelSecurity(t *testing.T) {
 	crsSess := mustSession(t, s, one, crs.ID, day(time.December, 1), 5, 1)
 	mustRegister(t, s, one, crsSess.ID, w.ID)
 
+	incidentWorker := mustWorker(t, s, one, "RlsInc")
+	rlsIncident := mustIncident(t, s, one, incidentFor(incidentWorker, le, ids.New(), domain.IncidentFacts{DaysAway: 1}))
+	mustIncident(t, s, one, incidentFor(incidentWorker, otherLE, ids.New(), domain.IncidentFacts{DaysAway: 1}))
+	if _, err := s.GetIncident(scoped(testkit.TenantID(1), otherLE), rlsIncident.ID); err == nil {
+		t.Error("a caller scoped to another legal entity read an incident outside its scope")
+	}
+	if _, err := s.GetIncident(scoped(testkit.TenantID(1), "00000000-0000-0000-0000-00000000dead"), rlsIncident.ID); err == nil {
+		t.Error("a caller with an unrelated scope read an incident")
+	}
+	if _, _, err := s.IssueLoanedItem(one, LoanedItem{WorkerID: w.ID, LoanType: "BADGE", ItemDescription: "badge", IssuedOn: "2026-03-01"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetIncident(scoped(testkit.TenantID(2), ""), rlsIncident.ID); err == nil {
+		t.Error("tenant 2 read tenant 1's incident")
+	}
+
 	two := scoped(testkit.TenantID(2), "")
 	if _, err := s.GetCourse(two, crs.ID); err == nil {
 		t.Error("tenant 2 read tenant 1's course")
@@ -117,7 +133,9 @@ func TestRowLevelSecurity(t *testing.T) {
 		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request",
 		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment",
 		"hr_skill", "worker_skill", "hr_certification", "position_skill_requirement",
-		"hr_course", "hr_course_skill_outcome", "hr_course_session", "hr_course_registration"} {
+		"hr_course", "hr_course_skill_outcome", "hr_course_session", "hr_course_registration",
+		"hr_incident", "hr_incident_counter", "hr_loaned_item", "hr_checklist_template", "hr_checklist_template_task", "hr_checklist", "hr_worker_task",
+		"hr_questionnaire", "hr_questionnaire_schedule", "hr_questionnaire_responded", "hr_questionnaire_session"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}
