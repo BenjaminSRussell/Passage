@@ -483,11 +483,17 @@ func (s *Postgres) SubmitBatch(ctx context.Context, id string, version int, toda
 		if err != nil {
 			return err
 		}
-		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
+		// The same stages as posting: derivation (FR-11.22) runs before structure validation,
+		// so a dimension the active strategy fills is not reported missing.
+		lines, _, err := applyDerivation(ctx, tx, p.TenantID, ledger, accounts, in.PostingDate, in.Lines)
 		if err != nil {
 			return err
 		}
-		if res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, in.Lines); !res.Valid() {
+		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), lines)
+		if err != nil {
+			return err
+		}
+		if res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, lines); !res.Valid() {
 			return &domain.RejectedError{Violations: res.Violations}
 		}
 		if _, err := tx.Exec(ctx, `update journal_batch set submitted_by = $3, decided_by = null, last_error = null

@@ -43,6 +43,8 @@ export const entryLineSchema = z.object({
   text: z.string().optional(),
   reversalOfLineId: z.string().optional(),
   negativePosting: z.boolean().optional(),
+  /** Derivation steps that filled dimensions on the line (FR-11.22). */
+  derivedByStepIds: z.array(z.string()).optional(),
 });
 
 export const entrySchema = z.object({
@@ -1157,4 +1159,125 @@ export async function fetchAutoClearingRuns(ledgerId: string, fetchImpl: FetchLi
 /** GET /api/v1/ledger/auto-clearing-runs/{id} with its group log. */
 export function fetchAutoClearingRun(id: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun> {
   return getJSON(`/api/v1/ledger/auto-clearing-runs/${encodeURIComponent(id)}`, autoClearingRunSchema, fetchImpl);
+}
+
+/** Lookup table row (FR-11.22): a source tuple of exact values or `*`, the target value and its validity. */
+export const lookupRowSchema = z.object({
+  source: z.array(z.string()),
+  target: z.string(),
+  validFrom: z.string(),
+  validTo: z.string().optional(),
+});
+export type LookupRow = z.infer<typeof lookupRowSchema>;
+
+export const lookupTableSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  name: z.string(),
+  sourceFields: z.array(z.string()),
+  target: z.string(),
+  rowCount: z.number(),
+  version: z.number(),
+  rows: z.array(lookupRowSchema).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type LookupTable = z.infer<typeof lookupTableSchema>;
+
+export interface LookupTableInput {
+  name: string;
+  sourceFields: string[];
+  target: string;
+  rows: LookupRow[];
+}
+
+const lookupListSchema = z.object({ items: z.array(lookupTableSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/lookup-tables (without rows). */
+export async function fetchLookupTables(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables`, lookupListSchema, fetchImpl)).items;
+}
+
+/** GET .../lookup-tables/{id} (with rows). */
+export function fetchLookupTable(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables/${encodeURIComponent(id)}`, lookupTableSchema, fetchImpl);
+}
+
+/** PUT .../lookup-tables/{id}: creates, or replaces the table and all rows at `version` (If-Match) when given. */
+export function putLookupTable(ledgerId: string, id: string, input: LookupTableInput, version?: number, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables/${encodeURIComponent(id)}`,
+    lookupTableSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const DERIVATION_KINDS = ["table_lookup", "move", "clear", "constant"] as const;
+export type DerivationKind = (typeof DERIVATION_KINDS)[number];
+export const CONDITION_OPS = ["eq", "ne", "in", "blank", "notblank"] as const;
+
+export const derivationStepSchema = z.object({
+  id: z.string().optional(),
+  sequence: z.number(),
+  kind: z.enum(DERIVATION_KINDS),
+  condition: z.object({ field: z.string(), op: z.enum(CONDITION_OPS), values: z.array(z.string()).optional() }).optional(),
+  sourceFields: z.array(z.string()),
+  target: z.string(),
+  lookupTableId: z.string().optional(),
+  value: z.string().optional(),
+  overwrite: z.boolean(),
+});
+export type DerivationStep = z.infer<typeof derivationStepSchema>;
+
+export const derivationStrategySchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  version: z.number(),
+  lockVersion: z.number(),
+  name: z.string(),
+  status: z.enum(["draft", "active", "retired"]),
+  steps: z.array(derivationStepSchema),
+  activatedBy: z.string().optional(),
+  activatedAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type DerivationStrategy = z.infer<typeof derivationStrategySchema>;
+
+export interface DerivationStrategyInput {
+  name: string;
+  steps: DerivationStep[];
+}
+
+const strategyListSchema = z.object({ items: z.array(derivationStrategySchema) });
+const strategyUrl = (ledgerId: string, version: number) =>
+  `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/derivation-strategies/${version}`;
+
+/** GET /api/v1/ledger/ledgers/{ledger}/derivation-strategies (newest version first). */
+export async function fetchDerivationStrategies(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/derivation-strategies`, strategyListSchema, fetchImpl)).items;
+}
+
+/** GET .../derivation-strategies/{version}. */
+export function fetchDerivationStrategy(ledgerId: string, version: number, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy> {
+  return getJSON(strategyUrl(ledgerId, version), derivationStrategySchema, fetchImpl);
+}
+
+/** PUT .../derivation-strategies/{version}: the next draft, or a replacement of a draft at `lockVersion` (If-Match). */
+export function putDerivationStrategy(
+  ledgerId: string,
+  version: number,
+  input: DerivationStrategyInput,
+  lockVersion?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<DerivationStrategy> {
+  return sendJSON("PUT", strategyUrl(ledgerId, version), derivationStrategySchema, fetchImpl, input, lockVersion ? ifMatch(lockVersion) : {});
+}
+
+/** POST .../derivation-strategies/{version}/activate. */
+export function activateDerivationStrategy(ledgerId: string, version: number, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy> {
+  return sendJSON("POST", `${strategyUrl(ledgerId, version)}/activate`, derivationStrategySchema, fetchImpl, undefined, lockVersion ? ifMatch(lockVersion) : {});
 }

@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 6).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 10).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -226,6 +226,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.clearing.reset` | `POST /clearings/{id}/reset` (PRD duty "Reset clearings"; issue #313) |
 | `ledger.clearing.rules` | `PUT /ledgers/{ledger}/tolerance-groups/{code}`, `PUT /ledgers/{ledger}/auto-clearing-rules/{id}` (PRD duty "Maintain clearing rules"; issue #313) |
 | `ledger.clearing.run` | `POST /auto-clearing:run` (PRD duty "Run automatic clearing"; issue #313) |
+| `ledger.rules.write` | `PUT /ledgers/{ledger}/lookup-tables/{id}`, `PUT /ledgers/{ledger}/derivation-strategies/{version}`, `POST .../derivation-strategies/{version}/activate` (PRD duty "Maintain validation and derivation rules"; issue #313) |
 
 ## Recurring journals (slice 7, FR-11.10)
 
@@ -300,6 +301,34 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   returns the first 1,000 groups). Each cleared group emits `dev.passage.ledger.openitem.cleared.v1` with mode `auto`.
 - Web: automatic clearing rule list and form, run page (simulate, clear, earlier runs) and run detail.
 
+## Dimension derivation (slice 10, FR-11.22, BR-11.14, AC-11.15)
+
+- A ledger has versioned derivation strategies: `PUT/GET /ledgers/{ledger}/derivation-strategies[/{version}]`
+  (the next number is created as a draft with 201; only a draft is replaced; `ETag` is `lockVersion`, optional
+  `If-Match`, 412 `LEDGER_VERSION_CONFLICT`) and `POST .../{version}/activate`, which validates the draft against the
+  ledger's dimensions and lookup tables (422 `LEDGER_DERIVATION_INVALID`), retires the active version and activates
+  this one, one active version per ledger (partial unique index). Versions are never deleted.
+- Steps (at most 50, strictly increasing `sequence`) are `table_lookup`, `move`, `clear` and `constant`, each with an
+  optional condition (`eq`, `ne`, `in`, `blank`, `notblank` on `ACCOUNT`, `ACCOUNT_TYPE` or a dimension) and an
+  `overwrite` flag. A step may not read the dimension it writes; `clear` needs `overwrite`. The PRD's `expression`
+  (CEL) kind is not built.
+- Posting runs the active strategy after the account lookup and before structure validation, in `POST /journal-entries`,
+  batch submit and posting, set posting and `POST /validate`. Precedence (FR-11.22): a value the posting request
+  carries is never changed by any step (not even with `overwrite`, nor by `clear`); a step with `overwrite` replaces a
+  value set by an earlier step; a step without `overwrite` only fills a blank. Step ids are assigned by the service
+  and stay unique across versions (a draft keeps its own on replace). The stored line carries `derived_by_step_ids` (migration 0016, `derivedByStepIds` on entry lines),
+  and `/validate` returns each line's `dimensions`, `derivedByStepIds` and a `derivation` trace (step, before, after,
+  matched lookup row). Derived values go through the same dimension checks as typed ones.
+- Lookup tables: `PUT/GET /ledgers/{ledger}/lookup-tables[/{id}]` map a source tuple (`ACCOUNT`, `ACCOUNT_TYPE`,
+  dimensions) to one target dimension. A PUT replaces all rows (at most 5,000; `validFrom`, optional `validTo`).
+  Rows match on the full tuple with `*` wildcards: fewest wildcards wins, then the latest `validFrom`; a blank source
+  value matches only `*`. A table used by a step keeps its definition (409 `LEDGER_LOOKUP_TABLE_IN_USE`).
+- Activation and table replacement write `dev.passage.ledger.rules.changed.v1` through the outbox. Duty
+  `ledger.rules.write` maintains rules; reading uses `ledger.journal.read`.
+- Web: lookup table list and form (rows pasted as comma or tab separated lines), strategy version list and
+  step editor with save draft and save-and-activate; the journal entry screen marks lines a step derived
+  (`apps/web/src/modules/ledger`).
+
 ## Error codes
 
 Rule failures are 422 with `violations[]` (`code`, `lineIndex`, `field`,
@@ -308,6 +337,8 @@ today:
 
 | Code | Meaning |
 |---|---|
+| `LEDGER_DERIVATION_INVALID` | A derivation strategy has a shape or reference problem (BR-11.14) |
+| `LEDGER_LOOKUP_TABLE_INVALID` | A lookup table definition or row is invalid for the ledger |
 | `LEDGER_UNBALANCED` | Debits do not equal credits in the ledger currency (BR-11.1) |
 | `LEDGER_LINE_EMPTY` | Entry has no lines, or a zero-amount line without text (BR-11.2) |
 | `LEDGER_LINE_LIMIT` | More than 10,000 lines (FR-11.5); 422 problem: more batch lines than the journal name's `linesLimit` (FR-11.9) |

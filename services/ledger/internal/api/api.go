@@ -116,6 +116,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerLedgerSets(r)
 		a.registerOpenItems(r)
 		a.registerAutoClearing(r)
+		a.registerDerivation(r)
 	})
 }
 
@@ -666,6 +667,10 @@ type validatedLine struct {
 	Account                string `json:"account"`
 	DisplayName            string `json:"displayName"`
 	DimensionCombinationID string `json:"dimensionCombinationId"`
+	// Dimensions are the line's values after derivation (FR-11.22); Derivation is the trace of the steps that set them.
+	Dimensions       map[string]string        `json:"dimensions"`
+	DerivedByStepIDs []string                 `json:"derivedByStepIds"`
+	Derivation       []domain.DerivationTrace `json:"derivation"`
 }
 
 type validateResponse struct {
@@ -706,7 +711,8 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range res.Lines {
 		out.Lines = append(out.Lines, validatedLine{Index: l.Index, Account: l.Account.Number, DisplayName: l.DisplayName,
-			DimensionCombinationID: hex.EncodeToString(l.CombinationID)})
+			DimensionCombinationID: hex.EncodeToString(l.CombinationID), Dimensions: l.Dimensions,
+			DerivedByStepIDs: append([]string{}, l.DerivedBy...), Derivation: append([]domain.DerivationTrace{}, res.Derivation[l.Index]...)})
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

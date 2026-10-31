@@ -31,6 +31,7 @@ type fakeStore struct {
 	rec      recurringFake
 	oi       openItemFake
 	auto     autoFake
+	deriv    derivationFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error

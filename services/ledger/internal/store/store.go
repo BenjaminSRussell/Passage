@@ -91,6 +91,13 @@ type Store interface {
 	RunAutoClearing(ctx context.Context, in AutoClearingInput) (AutoClearingRun, bool, error)
 	ListAutoClearingRuns(ctx context.Context, ledgerID string) ([]AutoClearingRun, error)
 	GetAutoClearingRun(ctx context.Context, id string) (AutoClearingRun, error)
+	ListLookupTables(ctx context.Context, ledgerID string) ([]domain.LookupTable, error)
+	GetLookupTable(ctx context.Context, ledgerID, id string) (domain.LookupTable, error)
+	PutLookupTable(ctx context.Context, ledgerID, id string, version int, in domain.LookupTable) (domain.LookupTable, bool, error)
+	ListDerivationStrategies(ctx context.Context, ledgerID string) ([]domain.DerivationStrategy, error)
+	GetDerivationStrategy(ctx context.Context, ledgerID string, version int) (domain.DerivationStrategy, error)
+	PutDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int, in domain.DerivationStrategy) (domain.DerivationStrategy, bool, error)
+	ActivateDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int) (domain.DerivationStrategy, error)
 	Ping(ctx context.Context) error
 }
 
@@ -261,6 +268,8 @@ type Line struct {
 	SourceLineRef          string            `json:"sourceLineRef,omitempty"`
 	ReversalOfLineID       *string           `json:"reversalOfLineId,omitempty"`
 	NegativePosting        bool              `json:"negativePosting,omitempty"`
+	// DerivedByStepIDs names the derivation steps that filled dimensions on the line (FR-11.22).
+	DerivedByStepIDs []string `json:"derivedByStepIds,omitempty"`
 }
 
 // BalanceFilter selects balances for a trial balance.
@@ -398,7 +407,7 @@ func loadAccounts(ctx context.Context, tx pgx.Tx, tenantID, chart string, number
 	if len(numbers) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `select id, account_number, is_postable, suspended_from::text, reconciliation_account_type
+	rows, err := tx.Query(ctx, `select id, account_number, is_postable, suspended_from::text, reconciliation_account_type, account_type
 		from main_account where tenant_id = $1 and chart_code = $2 and account_number = any($3)`, tenantID, chart, numbers)
 	if err != nil {
 		return nil, err
@@ -407,7 +416,7 @@ func loadAccounts(ctx context.Context, tx pgx.Tx, tenantID, chart string, number
 	for rows.Next() {
 		var a domain.Account
 		var susp *string
-		if err := rows.Scan(&a.ID, &a.Number, &a.Postable, &susp, &a.ReconType); err != nil {
+		if err := rows.Scan(&a.ID, &a.Number, &a.Postable, &susp, &a.ReconType, &a.Type); err != nil {
 			return nil, err
 		}
 		if susp != nil {

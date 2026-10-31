@@ -23,12 +23,16 @@ import { EditToleranceGroupPage, NewToleranceGroupPage } from "./ToleranceGroupF
 import { ToleranceGroupsPage } from "./ToleranceGroupsPage";
 import { AutoClearingRulesPage } from "./AutoClearingRulesPage";
 import { EditAutoClearingRulePage, NewAutoClearingRulePage } from "./AutoClearingRuleFormPage";
+import { LookupTablesPage } from "./LookupTablesPage";
+import { EditLookupTablePage, NewLookupTablePage } from "./LookupTableFormPage";
+import { DerivationStrategiesPage } from "./DerivationStrategiesPage";
+import { DerivationStrategyPage, NewDerivationStrategyPage } from "./DerivationStrategyPage";
 import { AutoClearingRunDetailPage, AutoClearingRunPage } from "./AutoClearingRunPage";
 
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values and default description templates.",
+  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values, dimension derivation strategies with lookup tables and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -51,6 +55,12 @@ const ledger: PassageModule = {
     { path: "/ledger/auto-clearing-rules", element: createElement(AutoClearingRulesPage), handle: { title: "Automatic clearing rules" } },
     { path: "/ledger/auto-clearing-rules/new", element: createElement(NewAutoClearingRulePage), handle: { title: "New automatic clearing rule" } },
     { path: "/ledger/auto-clearing-rules/:id", element: createElement(EditAutoClearingRulePage), handle: { title: "Automatic clearing rule" } },
+    { path: "/ledger/lookup-tables", element: createElement(LookupTablesPage), handle: { title: "Lookup tables" } },
+    { path: "/ledger/lookup-tables/new", element: createElement(NewLookupTablePage), handle: { title: "New lookup table" } },
+    { path: "/ledger/lookup-tables/:id", element: createElement(EditLookupTablePage), handle: { title: "Lookup table" } },
+    { path: "/ledger/derivation-strategies", element: createElement(DerivationStrategiesPage), handle: { title: "Derivation strategies" } },
+    { path: "/ledger/derivation-strategies/new", element: createElement(NewDerivationStrategyPage), handle: { title: "New derivation strategy version" } },
+    { path: "/ledger/derivation-strategies/:version", element: createElement(DerivationStrategyPage), handle: { title: "Derivation strategy" } },
     { path: "/ledger/trial-balance", element: createElement(TrialBalanceScreen), handle: { title: "Trial balance" } },
     { path: "/ledger/transactions", element: createElement(LedgerLinesPage), handle: { title: "Ledger transactions" } },
     { path: "/ledger/entries/:id", element: createElement(EntryScreen), handle: { title: "Journal entry", duty: "ledger.journal.read" } },
@@ -80,6 +90,8 @@ const ledger: PassageModule = {
     { label: "Reason codes", to: "/ledger/reason-codes", duty: "ledger.journal.read" },
     { label: "Account structures", to: "/ledger/structures", duty: "ledger.journal.read" },
     { label: "Dimension values", to: "/ledger/dimension-values", duty: "ledger.journal.read" },
+    { label: "Derivation strategies", to: "/ledger/derivation-strategies", duty: "ledger.journal.read" },
+    { label: "Lookup tables", to: "/ledger/lookup-tables", duty: "ledger.journal.read" },
     { label: "Description templates", to: "/ledger/description-templates", duty: "ledger.journal.read" },
   ],
 };

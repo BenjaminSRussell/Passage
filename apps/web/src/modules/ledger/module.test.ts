@@ -49,6 +49,12 @@ describe("ledger module", () => {
       "/ledger/auto-clearing-rules",
       "/ledger/auto-clearing-rules/new",
       "/ledger/auto-clearing-rules/:id",
+      "/ledger/lookup-tables",
+      "/ledger/lookup-tables/new",
+      "/ledger/lookup-tables/:id",
+      "/ledger/derivation-strategies",
+      "/ledger/derivation-strategies/new",
+      "/ledger/derivation-strategies/:version",
       "/ledger/trial-balance",
       "/ledger/transactions",
       "/ledger/entries/:id",
@@ -85,6 +91,10 @@ describe("ledger module", () => {
     }
     // GET /api/v1/ledger/journal-lines requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/transactions")?.duty).toBe("ledger.journal.read");
+    // GET .../lookup-tables and .../derivation-strategies require ledger.journal.read; the writes need ledger.rules.write (service only).
+    for (const to of ["/ledger/lookup-tables", "/ledger/derivation-strategies"]) {
+      expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
+    }
     // GET /api/v1/ledger/description-templates requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/description-templates")?.duty).toBe("ledger.journal.read");
   });

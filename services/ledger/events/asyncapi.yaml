@@ -52,7 +52,20 @@ channels:
     messages:
       openItemCleared:
         $ref: "#/components/messages/OpenItemCleared"
+  rulesChanged:
+    address: passage.ledger.rules
+    description: |
+      A derivation strategy was activated or a lookup table was replaced (FR-11.22), written to the
+      outbox in the same transaction (aggregate type derivation_strategy or lookup_table). Posting
+      caches invalidate on it.
+    messages:
+      rulesChanged:
+        $ref: "#/components/messages/RulesChanged"
 operations:
+  publishRulesChanged:
+    action: send
+    channel: { $ref: "#/channels/rulesChanged" }
+    summary: A derivation strategy or lookup table changed.
   publishOpenItemCleared:
     action: send
     channel: { $ref: "#/channels/openItemCleared" }
@@ -238,3 +251,25 @@ components:
               rowsWritten: { type: integer, format: int64 }
               rowsDiffering: { type: integer, format: int64, description: Greater than zero raises a P1 alert }
               durationMs: { type: integer, format: int64 }
+    RulesChanged:
+      name: dev.passage.ledger.rules.changed.v1
+      title: Ledger rules changed
+      summary: A derivation strategy was activated or a lookup table was replaced.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.rules.changed.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Strategy row id or lookup table id }
+          data:
+            type: object
+            required: [ledgerId, kind, id, version, actor]
+            properties:
+              ledgerId: { type: string, format: uuid }
+              kind: { type: string, enum: [derivation_strategy, lookup_table] }
+              id: { type: string, format: uuid }
+              version: { type: integer, description: Strategy version number, or the lookup table replacement counter }
+              actor: { type: string, description: User who activated or replaced }

@@ -106,11 +106,15 @@ func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger
 	if err != nil {
 		return Entry{}, nil, err
 	}
-	rules, err := withStructures(ctx, tx, tenantID, ledger.ID, in.rules(ledger), in.Lines)
+	derived, _, err := applyDerivation(ctx, tx, tenantID, ledger, accounts, in.PostingDate, in.Lines)
 	if err != nil {
 		return Entry{}, nil, err
 	}
-	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
+	rules, err := withStructures(ctx, tx, tenantID, ledger.ID, in.rules(ledger), derived)
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, derived)
 	if !res.Valid() {
 		return Entry{}, nil, &domain.RejectedError{Violations: res.Violations}
 	}
@@ -353,11 +357,11 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	for i, wl := range ne.lines {
 		batch.Queue(`insert into journal_line (tenant_id, id, legal_entity_id, entry_id, line_number, main_account_id, dimension_combination_id,
-				debit_credit, currency_txn, amount_txn, amount_acct, negative_posting, line_text, source_line_ref, reversal_of_line_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, $14, nullif($11, ''), nullif($12, ''), $13)`,
+				debit_credit, currency_txn, amount_txn, amount_acct, negative_posting, line_text, source_line_ref, reversal_of_line_id, derived_by_step_ids)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, $14, nullif($11, ''), nullif($12, ''), $13, $15::text[]::uuid[])`,
 			tenantID, wl.id, l.LegalEntityID, entryID, i+1, wl.valid.Account.ID, wl.valid.CombinationID,
 			wl.valid.Side, l.Currency, wl.valid.Amount.String(), wl.valid.Text, wl.valid.SourceLineRef, wl.reversalOfLineID,
-			wl.valid.Negative)
+			wl.valid.Negative, derivedBy(wl.valid.DerivedBy))
 	}
 	valid := make([]domain.ValidLine, 0, len(ne.lines))
 	for _, wl := range ne.lines {
@@ -428,8 +432,16 @@ func lineView(wl writeLine, number int, currency string) Line {
 		ID: wl.id, LineNumber: number, Account: v.Account.Number, DimensionCombinationID: hex.EncodeToString(v.CombinationID),
 		DisplayName: v.DisplayName, Dimensions: v.Dimensions, DebitCredit: v.Side,
 		Amount: v.Amount.StringFixed(money.MinorUnits(currency)), Text: v.Text, SourceLineRef: v.SourceLineRef,
-		ReversalOfLineID: wl.reversalOfLineID, NegativePosting: v.Negative,
+		ReversalOfLineID: wl.reversalOfLineID, NegativePosting: v.Negative, DerivedByStepIDs: v.DerivedBy,
 	}
+}
+
+// derivedBy is the step id list as a non-nil text array (uuid[] NOT NULL).
+func derivedBy(stepIDs []string) []string {
+	if stepIDs == nil {
+		return []string{}
+	}
+	return stepIDs
 }
 
 // totals sums debit and credit lines in the ledger currency.
@@ -491,7 +503,7 @@ func loadEntryTx(ctx context.Context, tx pgx.Tx, tenantID, id string) (Entry, er
 func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency string) ([]Line, error) {
 	rows, err := tx.Query(ctx, `select l.id, l.line_number, a.account_number, l.dimension_combination_id, c.display_name, c.dimensions,
 			l.debit_credit, l.amount_acct::text, coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), l.reversal_of_line_id::text,
-			l.negative_posting
+			l.negative_posting, l.derived_by_step_ids::text[]
 		from journal_line l
 		join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
 		join dimension_combination c on c.tenant_id = l.tenant_id and c.id = l.dimension_combination_id
@@ -506,7 +518,7 @@ func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency strin
 		var combo []byte
 		var amountText string
 		if err := rows.Scan(&ln.ID, &ln.LineNumber, &ln.Account, &combo, &ln.DisplayName, &ln.Dimensions, &ln.DebitCredit,
-			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID, &ln.NegativePosting); err != nil {
+			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID, &ln.NegativePosting, &ln.DerivedByStepIDs); err != nil {
 			return nil, err
 		}
 		amount, err := decimal.NewFromString(amountText)
@@ -539,11 +551,16 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 		if err != nil {
 			return err
 		}
-		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
+		lines, traces, err := applyDerivation(ctx, tx, p.TenantID, ledger, accounts, in.PostingDate, in.Lines)
 		if err != nil {
 			return err
 		}
-		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
+		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), lines)
+		if err != nil {
+			return err
+		}
+		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, lines)
+		res.Derivation = traces
 		return nil
 	})
 	return res, err

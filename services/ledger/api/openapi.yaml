@@ -22,6 +22,7 @@ tags:
   - name: structures
   - name: recurring
   - name: clearing
+  - name: derivation
   - name: ops
 components:
   parameters:
@@ -202,6 +203,7 @@ components:
         sourceLineRef: { type: string }
         reversalOfLineId: { type: string, format: uuid }
         negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
+        derivedByStepIds: { type: array, items: { type: string, format: uuid }, description: Derivation steps that filled dimensions on the line (FR-11.22) }
     LedgerLine:
       type: object
       description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
@@ -380,6 +382,17 @@ components:
               account: { type: string }
               displayName: { type: string }
               dimensionCombinationId: { type: string }
+              dimensions:
+                type: object
+                additionalProperties: { type: string }
+                description: The line's dimension values after derivation (FR-11.22)
+              derivedByStepIds:
+                type: array
+                items: { type: string, format: uuid }
+                description: Derivation steps that changed a value on this line
+              derivation:
+                type: array
+                items: { $ref: "#/components/schemas/DerivationTrace" }
         currency: { type: string }
         debit: { type: string }
         credit: { type: string }
@@ -898,6 +911,94 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         groups: { type: array, items: { $ref: "#/components/schemas/AutoClearingGroup" }, description: The first 1,000 groups }
+    DerivationStepCondition:
+      type: object
+      required: [field, op]
+      properties:
+        field: { type: string, description: "ACCOUNT, ACCOUNT_TYPE or a dimension attribute of the ledger; never the step's own target" }
+        op: { type: string, enum: [eq, ne, in, blank, notblank] }
+        values: { type: array, maxItems: 20, items: { type: string }, description: "One value for eq and ne, 1 to 20 for in, none for blank and notblank" }
+    DerivationStep:
+      type: object
+      required: [sequence, kind, target]
+      properties:
+        id: { type: string, format: uuid, description: "Assigned by the service; replacing a draft keeps the ids of its own steps, any other id is replaced so step ids stay unique across versions" }
+        sequence: { type: integer, minimum: 1, description: Steps run in ascending sequence; must be strictly increasing }
+        kind: { type: string, enum: [table_lookup, move, clear, constant], description: "expression (CEL) is not built" }
+        condition: { $ref: "#/components/schemas/DerivationStepCondition" }
+        sourceFields: { type: array, items: { type: string }, description: "table_lookup: equals the table's source fields; move: one field; clear and constant: none" }
+        target: { type: string, description: Dimension attribute of the ledger that the step writes }
+        lookupTableId: { type: string, format: uuid, description: Required for table_lookup }
+        value: { type: string, description: Required for constant }
+        overwrite: { type: boolean, default: false, description: "With overwrite a step may replace a value set by an earlier step; no step ever changes a value the posting request carries; clear needs overwrite" }
+    DerivationStrategyBody:
+      type: object
+      required: [name, steps]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/DerivationStep" }
+    DerivationStrategy:
+      type: object
+      required: [id, ledgerId, version, lockVersion, name, status, steps]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1, description: Strategy version number, dense per ledger }
+        lockVersion: { type: integer, description: Optimistic-concurrency counter, also the ETag }
+        name: { type: string }
+        status: { type: string, enum: [draft, active, retired] }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/DerivationStep" }
+        activatedBy: { type: string }
+        activatedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DerivationTrace:
+      type: object
+      required: [stepId, sequence, kind, target, before, after]
+      properties:
+        stepId: { type: string, format: uuid }
+        sequence: { type: integer }
+        kind: { type: string, enum: [table_lookup, move, clear, constant] }
+        target: { type: string }
+        before: { type: string }
+        after: { type: string }
+        matchedRow: { type: array, items: { type: string }, description: The lookup row source tuple that matched, for table_lookup }
+    LookupRow:
+      type: object
+      required: [source, target, validFrom]
+      properties:
+        source: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: "Exact values or * per source field; a blank source value matches only *" }
+        target: { type: string, maxLength: 20 }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date, description: Inclusive; absent means open-ended }
+    LookupTableBody:
+      type: object
+      required: [name, sourceFields, target]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        sourceFields: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: ACCOUNT, ACCOUNT_TYPE or dimension attributes of the ledger }
+        target: { type: string, description: Dimension attribute of the ledger that rows fill; not a source field }
+        rows: { type: array, maxItems: 5000, items: { $ref: "#/components/schemas/LookupRow" }, description: Replaces all rows of the table }
+    LookupTable:
+      type: object
+      required: [id, ledgerId, name, sourceFields, target, rowCount, version]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        name: { type: string }
+        sourceFields: { type: array, items: { type: string } }
+        target: { type: string }
+        rowCount: { type: integer }
+        version: { type: integer, description: Counts replacements; also the ETag }
+        rows: { type: array, items: { $ref: "#/components/schemas/LookupRow" }, description: Present on GET of one table only }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -935,6 +1036,11 @@ components:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
     BatchProblem409:
       description: LEDGER_BATCH_STATE (the batch's status does not allow the action), LEDGER_BATCH_APPROVAL_REQUIRED, or an idempotency conflict on posting
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    DerivationProblem409:
+      description: LEDGER_LOOKUP_TABLE_NAME_DUPLICATE, LEDGER_LOOKUP_TABLE_IN_USE (a strategy step uses the table, so its definition cannot change) or LEDGER_DERIVATION_STRATEGY_NOT_DRAFT (only a draft is replaced or activated)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1000,6 +1106,12 @@ components:
       schema: { type: string, example: '"2"' }
     ToleranceETag:
       description: The tolerance group version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
+    LookupETag:
+      description: The lookup table version as an entity tag, for If-Match on the next replacement
+      schema: { type: string, example: '"2"' }
+    StrategyETag:
+      description: The derivation strategy lockVersion as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"2"' }
 paths:
   /v1/ledger/journal-names:
@@ -2917,3 +3029,215 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/lookup-tables:
+    get:
+      tags: [derivation]
+      operationId: listLookupTables
+      summary: List the lookup tables of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Lookup tables by name, without rows. Fetch one table to read its rows.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The lookup tables of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LookupTable" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/lookup-tables/{id}:
+    get:
+      tags: [derivation]
+      operationId: getLookupTable
+      summary: Get a lookup table with its rows
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The lookup table and its rows; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [derivation]
+      operationId: putLookupTable
+      summary: Create or replace a lookup table and its rows
+      x-passage-duty: ledger.rules.write
+      description: |
+        A lookup table maps a source tuple to one target dimension value (FR-11.22). Rows match on
+        the full tuple with * wildcards; the row with the fewest wildcards wins, then the latest
+        validFrom, and only rows valid on the posting date apply (BR-11.14). The call replaces all
+        rows (at most 5,000; CSV import is not built). A replace is checked against If-Match when
+        sent (412 LEDGER_VERSION_CONFLICT). The definition cannot change while a strategy step
+        uses the table. Announces dev.passage.ledger.rules.changed.v1.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The table version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LookupTableBody" }
+      responses:
+        "200":
+          description: Table replaced
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "201":
+          description: Table created
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies:
+    get:
+      tags: [derivation]
+      operationId: listDerivationStrategies
+      summary: List the derivation strategy versions of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Versions newest first, each with its steps and status (draft, active, retired).
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The strategy versions of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DerivationStrategy" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies/{version}:
+    get:
+      tags: [derivation]
+      operationId: getDerivationStrategy
+      summary: Get one derivation strategy version
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The strategy version; its lockVersion is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [derivation]
+      operationId: putDerivationStrategy
+      summary: Create the next draft version or replace a draft
+      x-passage-duty: ledger.rules.write
+      description: |
+        A new version number must be the highest existing one plus one. Only a draft is replaced
+        (409 LEDGER_DERIVATION_STRATEGY_NOT_DRAFT); a replace is checked against If-Match when sent.
+        Steps run in sequence before account structure validation (FR-11.22, BR-11.14). Precedence:
+        a value the posting request carries is never changed; a step with overwrite replaces a value
+        set by an earlier step; a step without overwrite only fills a blank.
+        Shape problems (unknown field, a step reading its own target, clear without overwrite,
+        more than 50 steps) are 422 LEDGER_DERIVATION_INVALID.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The lockVersion last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DerivationStrategyBody" }
+      responses:
+        "200":
+          description: Draft replaced
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "201":
+          description: Draft created
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies/{version}/activate:
+    post:
+      tags: [derivation]
+      operationId: activateDerivationStrategy
+      summary: Activate a draft derivation strategy
+      x-passage-duty: ledger.rules.write
+      description: |
+        Validates the draft against the ledger's dimension attributes and lookup tables (422
+        LEDGER_DERIVATION_INVALID), retires the active version and activates this one in one
+        transaction, and announces dev.passage.ledger.rules.changed.v1. Activating the active
+        version again changes nothing. Postings from then on run the steps and record the
+        step ids on each line they changed.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The lockVersion last read, as an entity tag ("3"); when sent and stale, 412
+          schema: { type: string }
+      responses:
+        "200":
+          description: The active strategy version
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
