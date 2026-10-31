@@ -104,7 +104,7 @@ subtotals named in `refs`). See slice 3 below.
 | `POST /v1/product-costing/versions/{id}/activate` | `CostingActivate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
-take the PRD's read duty `CostingView` (the PRD's `GET /costing/compare` and the inventory
+take the PRD's read duty `CostingView` (the PRD's `GET /product-costing/compare` and the inventory
 value report).
 
 ## Web

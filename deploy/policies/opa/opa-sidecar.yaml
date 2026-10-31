@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-sidecar-config
+data:
+  config.yaml: |
+    services:
+      identity:
+        url: https://identity-bundle:8443
+        tls:
+          ca_cert: /etc/passage/opa-bundle/ca.pem
+        credentials:
+          bearer:
+            token_path: /etc/passage/opa-bundle/token
+    bundles:
+      authz:
+        service: identity
+        resource: /v1/identity/policy/bundle
+        persist: true
+        polling:
+          min_delay_seconds: 10
+          max_delay_seconds: 20
+        signing:
+          keyid: identity-policy
+    keys:
+      identity-policy:
+        algorithm: RS256
+        key: "${OPA_BUNDLE_PUBLIC_KEY}"
