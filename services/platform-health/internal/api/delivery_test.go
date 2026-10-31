@@ -53,14 +53,41 @@ func TestEnvOverlaysArePinnedByDigestAndHoldNoSecrets(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		for _, banned := range []string{"postgres://", "password:", "tag:"} {
+		for _, banned := range []string{"postgres://", "tag:"} {
 			if strings.Contains(string(b), banned) {
 				t.Errorf("%s contains %q: overlays pin digests and hold no secret values", path, banned)
 			}
+		}
+		if hasLiteralPassword(string(b)) {
+			t.Errorf("%s contains a literal password value: overlays hold no secret values", path)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func hasLiteralPassword(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		_, value, found := strings.Cut(line, "password:")
+		if !found {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if strings.HasPrefix(value, "{{") && strings.HasSuffix(value, "}}") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func TestHasLiteralPassword(t *testing.T) {
+	if hasLiteralPassword(`password: "{{ .password }}"`) {
+		t.Error("pure template placeholder must be allowed")
+	}
+	if !hasLiteralPassword(`password: hunter2`) {
+		t.Error("literal password must be rejected")
 	}
 }
