@@ -291,6 +291,12 @@ func TestParseMoney(t *testing.T) {
 		}
 	}
 	started := time.Now()
+	if _, err := toLines([]tupleDTO{{Area: "GL", Key: "k", Amount: "1e2147483647"}}, "legacy"); err == nil {
+		t.Error("toLines accepted a huge exponent")
+	}
+	if _, err := toPostings([]postingDTO{{Kind: "JOURNAL", Amount: "9e9999999"}}); err == nil {
+		t.Error("toPostings accepted a huge exponent")
+	}
 	_, _ = parseMoney("9e9999999")
 	if _, err := decimals("line", [2]string{"qty", "1e2147483647"}); err == nil {
 		t.Error("decimals accepted a huge exponent")
