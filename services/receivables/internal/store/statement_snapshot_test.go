@@ -248,7 +248,7 @@ func latestBalanceEvent(t *testing.T, s *Postgres, ctx context.Context, cust str
 // name for the customer; the next payment from that account, naming the invoice,
 // then scores at the auto-apply threshold although it is unidentified. Its amount
 // differs from the invoice, so it stays a suggestion (reference-only never auto-applies).
-func TestPayerIdentity_LearnedOnApplyLiftsTheNextMatch(t *testing.T) {
+func TestPayerIdentity_LearnedOnApplyScoresTheNextMatchButStaysSuggested(t *testing.T) {
 	s := setup(t)
 	ctx := tenantCtx(25)
 	hash := domain.AccountHash("DE89 3704 0044 0532 0130 00")

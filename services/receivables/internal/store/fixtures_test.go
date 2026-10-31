@@ -189,6 +189,19 @@ func TestCashApp500_ImportMatchAndAutoApply(t *testing.T) {
 	if wrong != 0 {
 		t.Errorf("false matches = %d, AC-30.1 allows none", wrong)
 	}
+	const autoFloor = 438
+	if applied < autoFloor {
+		t.Errorf("auto-applied = %d, below the floor of %d", applied, autoFloor)
+	}
+	totals := map[string]int{}
+	for _, a := range fx.Key {
+		totals[a.Category]++
+	}
+	for _, cat := range []string{fixtures.CatSingle, fixtures.CatMulti, fixtures.CatDiscount} {
+		if byCategory[cat] != totals[cat] {
+			t.Errorf("%s: %d of %d auto-applied, every payment must", cat, byCategory[cat], totals[cat])
+		}
+	}
 	if byCategory[fixtures.CatWrongReference] != 0 {
 		t.Errorf("%d wrong-reference payments auto-applied", byCategory[fixtures.CatWrongReference])
 	}

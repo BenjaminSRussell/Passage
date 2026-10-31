@@ -135,6 +135,15 @@ func TestCashApp500_AutoMatchesWithNoFalseMatch(t *testing.T) {
 	if wrong != 0 {
 		t.Errorf("false matches = %d, AC-30.1 allows none", wrong)
 	}
+	const autoFloor = 438
+	if correct < autoFloor {
+		t.Errorf("auto-applied correctly = %d, below the floor of %d", correct, autoFloor)
+	}
+	for _, cat := range []string{fixtures.CatSingle, fixtures.CatMulti, fixtures.CatDiscount} {
+		if tl := byCategory[cat]; tl == nil || tl.auto != tl.total {
+			t.Errorf("%s: %+v, every payment must auto-apply", cat, tl)
+		}
+	}
 	// Hand-derived from the BR-30.1 weights with no learned payer: a short
 	// payment without a reason scores at most R1 60 + R6 5, a payment without a
 	// reference R2 30 + R6 5, and a payment quoting the wrong invoice R1 60 + R6 5
@@ -146,8 +155,8 @@ func TestCashApp500_AutoMatchesWithNoFalseMatch(t *testing.T) {
 	}
 }
 
-// AC-30.3: given dunning-60 (60 customers, 5 blocked, 4 disputed, 3 with
-// promises), the run proposes letters for exactly the 34 expected customers at
+// AC-30.3: given dunning-60 (65 customers: blocks, disputes, promises, a broken
+// promise, EUR fees), the run proposes letters for exactly the 34 expected customers at
 // the expected levels, level 3 fees are 25.00, and no disputed item is on a
 // letter. Expected letters and exclusions are hand-derived in testdata/dunning-60.
 func TestDunning60_LettersForExactlyTheExpectedCustomers(t *testing.T) {
