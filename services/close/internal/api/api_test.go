@@ -18,15 +18,18 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
 
 const checkPath = "/v1/close/period-statuses:check"
 
 type fakeStore struct {
-	rows    []domain.Row
-	spans   []domain.Span
-	readErr error
-	pingErr error
+	rows        []domain.Row
+	spans       []domain.Span
+	readErr     error
+	created     bool
+	registerErr error
+	pingErr     error
 }
 
 func (f fakeStore) PeriodRows(context.Context, string, string) ([]domain.Row, error) {
@@ -35,6 +38,10 @@ func (f fakeStore) PeriodRows(context.Context, string, string) ([]domain.Row, er
 
 func (f fakeStore) PeriodSpans(context.Context, string, string, time.Time) ([]domain.Span, error) {
 	return f.spans, f.readErr
+}
+
+func (f fakeStore) RegisterPeriod(context.Context, store.PeriodRegistration) (bool, error) {
+	return f.created, f.registerErr
 }
 
 func (f fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -221,6 +228,45 @@ func TestResolve(t *testing.T) {
 				if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 					t.Fatalf("content type %q", ct)
 				}
+			}
+		})
+	}
+}
+
+func TestRegisterPeriod(t *testing.T) {
+	ledger, entity, period := testkit.TenantID(7), testkit.TenantID(9), testkit.TenantID(8)
+	good := `{"ledgerId":"` + ledger + `","startDate":"2026-01-01","endDate":"2026-01-31"}`
+	tests := []struct {
+		name       string
+		store      fakeStore
+		payload    string
+		entity     string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"created", fakeStore{created: true}, good, entity, "period.maintain", http.StatusCreated, `"startDate":"2026-01-01"`},
+		{"replayed", fakeStore{}, good, entity, "period.maintain", http.StatusOK, `"endDate":"2026-01-31"`},
+		{"check duty is not enough", fakeStore{}, good, entity, "period.check", http.StatusForbidden, "AUTH-0003"},
+		{"no legal entity", fakeStore{}, good, "", "period.maintain", http.StatusBadRequest, `"legalEntityId"`},
+		{"end before start", fakeStore{}, `{"ledgerId":"` + ledger + `","startDate":"2026-02-01","endDate":"2026-01-31"}`, entity, "period.maintain", http.StatusBadRequest, `"endDate"`},
+		{"bad ledger", fakeStore{}, `{"ledgerId":"x","startDate":"2026-01-01","endDate":"2026-01-31"}`, entity, "period.maintain", http.StatusBadRequest, `"ledgerId"`},
+		{"overlap conflicts", fakeStore{registerErr: &domain.Error{Code: domain.CodeInvalidTransition, Detail: "overlap"}}, good, entity, "period.maintain", http.StatusConflict, `"serviceCode":"CLOSE-0001"`},
+		{"store failure is hidden", fakeStore{registerErr: errors.New("db down")}, good, entity, "period.maintain", http.StatusInternalServerError, "COM-0500"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(tc.store)
+			req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(tc.payload))
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+			req.Header.Set("X-Passage-Duties", tc.duties)
+			if tc.entity != "" {
+				req.Header.Set("X-Passage-Legal-Entity", tc.entity)
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s, want %d containing %q", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 		})
 	}

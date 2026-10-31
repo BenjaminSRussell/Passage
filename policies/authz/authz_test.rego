@@ -510,6 +510,8 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("period.check", "POST", "/v1/close/period-statuses:check")
 	allowed("period.check", "GET", "/v1/close/periods:resolve")
 	not allowed("period.check", "POST", "/v1/close/periods:resolve")
+	allowed("period.maintain", "PUT", "/v1/close/periods/p-1")
+	not allowed("period.check", "PUT", "/v1/close/periods/p-1")
 	every duty in data.service_grants.receiving.ledger {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "PUT", "/v1/ledger/charts/c1/accounts/1000")
