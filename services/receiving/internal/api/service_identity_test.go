@@ -68,7 +68,7 @@ func signedRigOn(t *testing.T, st *memstore.Store, signer *tenant.ServiceSigner,
 	t.Helper()
 	keys := map[string]ed25519.PublicKey{"receiving": pub}
 	ledgerSeen, closeSeen := &recorder{}, &recorder{}
-	ledgerSrv := downstream(t, "ledger", keys, "ledger.journal.post", "/v1/ledger/journal-entries", `{"journalEntryId":"je-1"}`, http.StatusCreated, ledgerSeen)
+	ledgerSrv := downstream(t, "ledger", keys, "ledger.entry.post", "/v1/ledger/journal-entries", `{"journalEntryId":"je-1"}`, http.StatusCreated, ledgerSeen)
 	closeSrv := downstream(t, "close", keys, "period.check", "/v1/close/period-statuses:check", `{"allowed":true,"status":"open"}`, http.StatusOK, closeSeen)
 	a := api.New(st, api.Ports{
 		Periods:       periods.New(closeSrv.URL, nil).WithSigner(signer),

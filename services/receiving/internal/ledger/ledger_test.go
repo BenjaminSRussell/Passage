@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -382,7 +383,7 @@ func TestSignedPostSendsServiceTokenInsteadOfUserDuties(t *testing.T) {
 		}
 	}
 	claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Le != entity || claims.Act != "u-1" || claims.Tid != tenantID || claims.Aud != "ledger" {
+	if err != nil || claims.Le != entity || claims.Act != "u-1" || claims.Tid != tenantID || claims.Aud != "ledger" || !slices.Equal(claims.Duties, []string{"ledger.entry.post"}) {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }
@@ -396,7 +397,7 @@ func TestSignedReverseUsesPrincipalLegalEntity(t *testing.T) {
 	if err := client.Reverse(ctx, "je-1", "rev-key", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken)); err != nil || claims.Le != entity {
+	if claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken)); err != nil || claims.Le != entity || !slices.Equal(claims.Duties, []string{"ledger.journal.reverse"}) {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

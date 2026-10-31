@@ -53,20 +53,20 @@ var serviceGrants = map[string]map[string][]string{
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
 	},
 	"receiving": {
-		"ledger":     {"ledger.journal.post", "ledger.journal.reverse"},
+		"ledger":     {"ledger.entry.post", "ledger.journal.reverse"},
 		"close":      {"period.check"},
 		"purchasing": {"procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"},
 		"inventory":  {"inventory.ownership-change.read"},
 	},
 	"payables": {
-		"ledger": {"ledger.balance.read", "ledger.journal.read", "ledger.journal.post"},
+		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
 	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
 	},
 	"party": {
-		"numbering": {"numbering.write"},
+		"numbering": {"numbering.sequence.allocate"},
 	},
 }
 
@@ -142,6 +142,9 @@ func ServiceSignerFromEnv(getenv func(string) string) (*ServiceSigner, error) {
 			return nil, fmt.Errorf("read %s: %w", EnvServiceSigningFile, err)
 		}
 		raw = strings.TrimSpace(string(b))
+		if raw == "" {
+			return nil, fmt.Errorf("%s names an empty file; refusing to run unsigned", EnvServiceSigningFile)
+		}
 	}
 	if raw == "" {
 		return nil, nil
@@ -221,7 +224,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 }
 
 var readDuties = map[string]struct{}{
-	"ledger.balance.read": {}, "ledger.journal.read": {}, "procurement.purchase-order.lookup": {},
+	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
 	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
 }
 

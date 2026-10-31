@@ -32,20 +32,20 @@ import (
 )
 
 const (
-	dutyOpenItemRead      = "open-item.read"
-	dutyProposalWrite     = "payment-proposal.write"
-	dutyProposalRead      = "payment-proposal.read"
-	dutyProposalApprove   = "payment-proposal.approve"
-	pathOpenItems         = "/v1/payables/open-items"
-	pathProposals         = "/v1/payables/payment-proposals"
-	maxVendorMethods      = 500
-	maxRunIDLength        = 64
-	defaultPageSize       = 50
-	maxPageSize           = 200
-	codeNotFound          = "COM-0404"
-	codeValidationFailed  = "COM-0001"
-	codeRatesUnconfigured = "COM-0503"
-	currencyMessage       = "must be a 3-letter upper-case ISO 4217 code"
+	dutyOpenItemRead     = "open-item.read"
+	dutyProposalWrite    = "payment-proposal.write"
+	dutyProposalRead     = "payment-proposal.read"
+	dutyProposalApprove  = "payment-proposal.approve"
+	pathOpenItems        = "/v1/payables/open-items"
+	pathProposals        = "/v1/payables/payment-proposals"
+	maxVendorMethods     = 500
+	maxRunIDLength       = 64
+	defaultPageSize      = 50
+	maxPageSize          = 200
+	codeNotFound         = "COM-0404"
+	codeValidationFailed = "COM-0001"
+	codeNotConfigured    = "COM-0503"
+	currencyMessage      = "must be a 3-letter upper-case ISO 4217 code"
 )
 
 var (
@@ -301,7 +301,7 @@ func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, legalEntityID str
 			continue
 		}
 		if a.proposals.rates == nil {
-			a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "exchange rate source is not configured")
+			a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "exchange rate source is not configured")
 			return nil, false
 		}
 		rate, err := a.proposals.rates.Rate(r.Context(), legalEntityID, c, to, date)
@@ -455,10 +455,6 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, store.ErrItemsChanged) {
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; retry the request")
-		return
-	}
-	if errors.Is(err, store.ErrNoFieldCrypt) {
-		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
 		return
 	}
 	if err != nil {

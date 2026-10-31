@@ -216,7 +216,7 @@ func TestAccountBalance_SignedSendsPayablesServiceTokenWithoutUserDuties(t *test
 		t.Fatalf("user duties sent alongside the token: %v", got)
 	}
 	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Act != "u1" || !claims.Principal().HasDuty("ledger.balance.read") || claims.Principal().HasDuty("ledger.journal.post") {
+	if err != nil || claims.Act != "u1" || !claims.Principal().HasDuty("ledger.balance.read") || claims.Principal().HasDuty("ledger.entry.post") || claims.Principal().HasDuty("ledger.entry.lookup") || len(claims.Duties) != 1 {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }
@@ -283,7 +283,7 @@ func TestPost_SignedSendsOnlyThePostingDutyForTheRunsLegalEntity(t *testing.T) {
 		t.Fatalf("headers %v", got)
 	}
 	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Act != "erin" || claims.Le != le || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.journal.post" {
+	if err != nil || claims.Act != "erin" || claims.Le != le || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.entry.post" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }
@@ -332,5 +332,39 @@ func TestPost_RefusesToSendUnsigned(t *testing.T) {
 	}
 	if _, err := client.Post(postCtx(), postEntry()); err == nil || sent {
 		t.Fatalf("a journal must never go out with forwarded user headers: err %v sent %v", err, sent)
+	}
+}
+
+func TestEntryForDocument_AsksTheLedgerForThatDocumentAndSignsOnlyTheLookupDuty(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	var got *http.Request
+	body := `{"items":[{"entryId":"entry-7"},{"entryId":"entry-8"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Clone(r.Context())
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	le := testkit.TenantID(9)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "erin"})
+	client := ledger.New(srv.URL, nil).WithSigner(signer)
+	id, err := client.EntryForDocument(ctx, le, "led-1", "doc-1")
+	if err != nil || id != "entry-7" {
+		t.Fatalf("id %q err %v", id, err)
+	}
+	if got.URL.Path != "/v1/ledger/journal-lines" || got.URL.Query().Get("ledger") != "led-1" || got.URL.Query().Get("documentId") != "doc-1" || got.URL.Query().Get("limit") != "1" {
+		t.Fatalf("request %s", got.URL)
+	}
+	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Header.Get(tenant.HeaderServiceToken))
+	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.entry.lookup" {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+	body = `{"items":[]}`
+	if id, err := client.EntryForDocument(ctx, le, "led-1", "doc-2"); err != nil || id != "" {
+		t.Fatalf("no entry: id %q err %v", id, err)
+	}
+	body = `nope`
+	if _, err := client.EntryForDocument(ctx, le, "led-1", "doc-3"); err == nil {
+		t.Fatal("an unreadable answer must be an error")
 	}
 }

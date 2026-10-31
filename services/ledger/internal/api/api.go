@@ -53,6 +53,15 @@ const (
 	dutyRebuild      = "ledger.balance.rebuild"
 	dutyReasonWrite  = "ledger.reason.write"
 
+	// Narrow duties a route also accepts beside its umbrella duty above, so a
+	// service is granted one route instead of a family.
+	dutyEntryPost     = "ledger.entry.post"
+	dutyEntryValidate = "ledger.entry.validate"
+	dutyBatchPost     = "ledger.batch.post"
+	dutySetPost       = "ledger.set.post"
+	dutyEntryLookup   = "ledger.entry.lookup"
+	dutyLedgerLookup  = "ledger.ledger.lookup"
+
 	// Maintain account structures (§2.11.17) and the dimension register.
 	dutyStructureWrite = "ledger.structure.write"
 	dutyDimensionWrite = "ledger.dimension.write"
@@ -90,14 +99,14 @@ func New(s store.Store) *API { return &API{store: s, now: time.Now} }
 func (a *API) Register(r chi.Router) {
 	r.Route("/v1/ledger", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
-		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{id}", a.getLedger)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
 		r.With(authz.RequireDuty(dutyRead)).Get("/charts/{chart}/accounts", a.listAccounts)
-		r.With(authz.RequireDuty(dutyPost)).Post("/journal-entries", a.postEntry)
+		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
-		r.With(authz.RequireDuty(dutyPost)).Post("/validate", a.validateEntry)
-		r.With(authz.RequireDuty(dutyRead)).Get("/journal-lines", a.listLines)
+		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryValidate)).Post("/validate", a.validateEntry)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyEntryLookup)).Get("/journal-lines", a.listLines)
 		r.With(authz.RequireDuty(dutyBalanceRead)).Get("/balances", a.trialBalance)
 		r.With(authz.RequireDuty(dutyRebuild)).Post("/balances:rebuild", a.rebuildBalances)
 		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes", a.listReasonCodes)

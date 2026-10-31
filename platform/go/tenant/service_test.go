@@ -65,7 +65,7 @@ func TestVerifyAcceptsFreshTokenAndMapsServicePrincipal(t *testing.T) {
 	if p.TenantID != validTenant || p.LegalEntityID != validLE || p.UserID != "warehouse-user" || p.Service != "receiving" {
 		t.Fatalf("principal %+v", p)
 	}
-	if !p.HasDuty("ledger.journal.post") || !p.HasDuty("ledger.journal.reverse") || p.HasDuty("receiving.post") || p.HasDuty("period.check") {
+	if !p.HasDuty("ledger.entry.post") || !p.HasDuty("ledger.journal.reverse") || p.HasDuty("receiving.post") || p.HasDuty("period.check") {
 		t.Fatalf("duties must be the service's grant for ledger only, got %v", p.Duties)
 	}
 }
@@ -278,6 +278,18 @@ func TestEnvLoaders(t *testing.T) {
 	if err != nil || fileWins == nil {
 		t.Fatalf("a mounted key file must win over the environment variable, got %v err %v", fileWins, err)
 	}
+	emptyFile := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(emptyFile, []byte(" \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string]map[string]string{
+		"empty file":                  {tenant.EnvServiceSigningFile: emptyFile},
+		"empty file beats a variable": {tenant.EnvServiceSigningFile: emptyFile, tenant.EnvServiceSigningKey: base64.StdEncoding.EncodeToString(priv.Seed())},
+	} {
+		if got, err := tenant.ServiceSignerFromEnv(func(k string) string { return env[k] }); got != nil || err == nil {
+			t.Fatalf("%s: a key file that is set but empty must fail startup, got %v err %v", name, got, err)
+		}
+	}
 	none, err := tenant.ServiceSignerFromEnv(func(string) string { return "" })
 	if none != nil || err != nil {
 		t.Fatalf("unset must be nil,nil, got %v %v", none, err)
@@ -357,11 +369,11 @@ func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
 	}
 	_, priv, _ := ed25519.GenerateKey(nil)
 	payables, _ := tenant.NewServiceSigner("payables", priv)
-	reads := []string{"ledger.balance.read", "ledger.journal.read"}
+	reads := []string{"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup"}
 	if _, err := payables.MintDuties("ledger", allScope, other, reads); err != nil {
 		t.Fatalf("an ALL-scope read-only token may name any entity: %v", err)
 	}
-	if _, err := payables.MintDuties("ledger", allScope, other, []string{"ledger.journal.post"}); err == nil {
+	if _, err := payables.MintDuties("ledger", allScope, other, []string{"ledger.entry.post"}); err == nil {
 		t.Fatal("an ALL-scope user must not get a posting token")
 	}
 	if _, err := payables.Mint("ledger", allScope, other); err == nil {
@@ -482,12 +494,12 @@ func TestMintDutiesRestrictsDutiesToTheGrant(t *testing.T) {
 	signer = signer.WithClock(clock)
 	verifier := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).WithClock(clock)
 	p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}
-	token, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.post"})
+	token, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.entry.post"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claims, err := verifier.Verify(token)
-	if err != nil || !claims.Principal().HasDuty("ledger.journal.post") || claims.Principal().HasDuty("ledger.balance.read") || claims.Act != "erin" {
+	if err != nil || !claims.Principal().HasDuty("ledger.entry.post") || claims.Principal().HasDuty("ledger.balance.read") || claims.Act != "erin" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 	if _, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.reverse"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
@@ -557,12 +569,12 @@ func TestTypeScriptMintedWorkflowTokenVerifies(t *testing.T) {
 
 func TestMintDutiesCarriesOnlyTheIntersectionWithTheGrant(t *testing.T) {
 	f := newFixture(t)
-	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.journal.post", "ledger.account.write", "org.switcher.all_scope"})
+	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.entry.post", "ledger.account.write", "org.switcher.all_scope"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claims, err := f.verifier.Verify(token)
-	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.journal.post" {
+	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.entry.post" {
 		t.Fatalf("claims = %+v, %v", claims, err)
 	}
 	if _, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.account.write"}); !errors.Is(err, tenant.ErrNoServiceGrant) {

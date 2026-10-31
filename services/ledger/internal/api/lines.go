@@ -41,8 +41,8 @@ func formatCursor(c *store.LineCursor) string {
 }
 
 // listLines serves the ledger transactions inquiry (FR-11.14): posted lines
-// filtered by ledger, account range, posting date, voucher, source system and
-// dimension values, in posting order, one keyset page at a time.
+// filtered by ledger, account range, posting date, voucher, source system,
+// document id and dimension values, in posting order, one keyset page at a time.
 func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
@@ -52,7 +52,7 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	f := store.LineFilter{
 		LedgerID: q.Get("ledger"), AccountFrom: q.Get("account_from"), AccountTo: q.Get("account_to"),
 		DateFrom: q.Get("date_from"), DateTo: q.Get("date_to"), Voucher: q.Get("voucher"),
-		SourceSystem: q.Get("source_system"), Dimensions: map[string]string{}, Limit: defaultLinePage,
+		SourceSystem: q.Get("source_system"), DocumentID: q.Get("documentId"), Dimensions: map[string]string{}, Limit: defaultLinePage,
 	}
 	if !ids.Valid(f.LedgerID) {
 		fields["ledger"] = "is required and must be a UUID"
@@ -78,6 +78,9 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.SourceSystem != "" && utf8.RuneCountInString(f.SourceSystem) > 64 {
 		fields["source_system"] = "must be at most 64 characters"
+	}
+	if f.DocumentID != "" && !ids.Valid(f.DocumentID) {
+		fields["documentId"] = "must be a UUID"
 	}
 	for key, values := range q {
 		attr, ok := strings.CutPrefix(key, "dim.")

@@ -124,7 +124,7 @@ func TestNext_SignedSendsPartyServiceTokenWithoutUserDuties(t *testing.T) {
 		t.Fatalf("headers %v", got)
 	}
 	claims, err := tenant.NewServiceVerifier("numbering", map[string]ed25519.PublicKey{"party": pub}).Verify(got.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("party.write") {
+	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.sequence.allocate") || claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("party.write") {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

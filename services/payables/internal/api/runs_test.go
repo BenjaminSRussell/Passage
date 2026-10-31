@@ -50,10 +50,27 @@ type fakeJournalLedger struct {
 	gate        chan struct{}
 	entered     chan struct{}
 	inflight    map[string]bool
+	existing    string
+	lookupFails bool
+	lookups     []string
 }
 
 func (f *fakeJournalLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/ledger/journal-lines" {
+		defer f.mu.Unlock()
+		f.lookups = append(f.lookups, r.URL.Query().Get("documentId"))
+		if f.lookupFails {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if f.existing == "" {
+			_, _ = w.Write([]byte(`{"items":[]}`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"items":[{"entryId":%q}]}`, f.existing)
+		return
+	}
 	if r.Method == http.MethodGet {
 		defer f.mu.Unlock()
 		_, _ = fmt.Fprintf(w, `{"legalEntityId":%q}`, f.entity)
@@ -534,6 +551,32 @@ func TestPaymentRun_LedgerRejectionIsTerminalAndFailReleasesItems(t *testing.T) 
 	again := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-2", creditors()))
 	if got := decode(t, again); again.Code != http.StatusCreated || len(got["groups"].([]any)) != 2 {
 		t.Fatalf("a new proposal must pick the released items up again: %d %s", again.Code, again.Body)
+	}
+}
+
+func TestPaymentRun_RejectionLooksUpTheRunsEntryByDocumentBeforeRecordingIt(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	f.ledger.rejectWith = http.StatusUnprocessableEntity
+
+	f.ledger.lookupFails = true
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["journalRejectedAt"] != nil {
+		t.Fatalf("a failed lookup must not record a rejection: %v", got)
+	}
+
+	f.ledger.lookupFails, f.ledger.existing = false, "entry-from-earlier-attempt"
+	rec := f.step(f.erin, runID, "post-journal")
+	if got := decode(t, rec); rec.Code != http.StatusOK || got["journalEntryId"] != "entry-from-earlier-attempt" || got["journalRejectedAt"] != nil {
+		t.Fatalf("an entry already in the ledger for the run is the journal: %d %s", rec.Code, rec.Body)
+	}
+	if len(f.ledger.lookups) != 2 || f.ledger.lookups[1] != runID {
+		t.Fatalf("lookups = %v, want the run id as document id", f.ledger.lookups)
+	}
+	if f.step(f.erin, runID, "settle").Code != http.StatusOK || f.step(f.erin, runID, "complete").Code != http.StatusOK {
+		t.Fatal("the run must finish after adopting the existing entry")
 	}
 }
 

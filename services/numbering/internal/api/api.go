@@ -24,6 +24,7 @@ const (
 	idempotencyKey = "Idempotency-Key"
 	dutyRead       = "numbering.read"
 	dutyWrite      = "numbering.write"
+	dutyAllocate   = "numbering.sequence.allocate"
 )
 
 // API is the numbering HTTP surface.
@@ -50,7 +51,7 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/numbering/sequences", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/numbering/sequences/{code}", a.get)
-	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/numbering/sequences/{code}/next", a.allocate)
+	r.With(authz.RequireAnyDuty(dutyWrite, dutyAllocate)).Post("/v1/numbering/sequences/{code}/next", a.allocate)
 }
 
 // Metrics renders Prometheus text.

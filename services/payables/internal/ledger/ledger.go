@@ -27,6 +27,7 @@ const (
 	balancesPath    = "/v1/ledger/balances"
 	ledgersPath     = "/v1/ledger/ledgers/"
 	entriesPath     = "/v1/ledger/journal-entries"
+	linesPath       = "/v1/ledger/journal-lines"
 	sourceSystem    = "payables"
 	maxResponseSize = 1 << 20
 )
@@ -78,9 +79,14 @@ func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected st
 
 const CodeIdempotencyInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
 
-var readDuties = []string{"ledger.balance.read", "ledger.journal.read"}
+const (
+	dutyBalanceRead  = "ledger.balance.read"
+	dutyLedgerLookup = "ledger.ledger.lookup"
+	dutyEntryLookup  = "ledger.entry.lookup"
+	dutyEntryPost    = "ledger.entry.post"
+)
 
-func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject, duty string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("ledger: no principal in context")
@@ -93,7 +99,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, readDuties)
+	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{duty})
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
@@ -120,7 +126,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 
 func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (Balance, error) {
 	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
-	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account)
+	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account, dutyBalanceRead)
 	if err != nil {
 		return Balance{}, err
 	}
@@ -128,7 +134,7 @@ func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, ac
 }
 
 func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
-	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
+	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID, dutyLedgerLookup)
 	if err != nil {
 		return "", err
 	}
@@ -139,6 +145,26 @@ func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string
 		return "", errors.New("ledger: response has no legalEntityId")
 	}
 	return body.LegalEntityID, nil
+}
+
+func (c *Client) EntryForDocument(ctx context.Context, legalEntityID, ledgerID, documentID string) (string, error) {
+	q := url.Values{"ledger": {ledgerID}, "documentId": {documentID}, "limit": {"1"}}
+	raw, err := c.get(ctx, legalEntityID, linesPath, q, documentID, dutyEntryLookup)
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		Items []struct {
+			EntryID string `json:"entryId"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return "", fmt.Errorf("ledger: entry lookup response unusable: %w", err)
+	}
+	if len(body.Items) == 0 {
+		return "", nil
+	}
+	return body.Items[0].EntryID, nil
 }
 
 func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
@@ -234,7 +260,7 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
-	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"}); err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{dutyEntryPost}); err != nil {
 		return "", fmt.Errorf("ledger: %w", err)
 	}
 	resp, err := c.http.Do(req)
