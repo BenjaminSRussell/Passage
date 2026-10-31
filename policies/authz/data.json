@@ -2243,6 +2243,9 @@
       "inventory": ["inventory.ownership-change.read"],
       "party": ["party.read"]
     },
+    "close": {
+      "ledger": ["ledger.ledger.lookup"]
+    },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"],
       "fx": ["fx.rate.lookup"],

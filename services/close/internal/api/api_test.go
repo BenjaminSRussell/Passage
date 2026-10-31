@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,9 +16,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
 )
 
 const checkPath = "/v1/close/period-statuses:check"
@@ -236,6 +239,25 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+type fakeLedger struct {
+	owner string
+	err   error
+}
+
+func (f fakeLedger) LegalEntity(context.Context, string, string) (string, error) {
+	return f.owner, f.err
+}
+
+func registerRouter(s fakeStore, l api.LedgerLookup) http.Handler {
+	a := api.New(s)
+	if l != nil {
+		a.WithLedgers(l)
+	}
+	r := httpx.NewRouter()
+	a.Register(r)
+	return r
+}
+
 func TestRegisterPeriod(t *testing.T) {
 	ledger, entity, period := testkit.TenantID(7), testkit.TenantID(9), testkit.TenantID(8)
 	good := `{"ledgerId":"` + ledger + `","startDate":"2026-01-01","endDate":"2026-01-31"}`
@@ -259,7 +281,7 @@ func TestRegisterPeriod(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newRouter(tc.store)
+			r := registerRouter(tc.store, fakeLedger{owner: entity})
 			req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(tc.payload))
 			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 			req.Header.Set("X-Passage-Duties", tc.duties)
@@ -278,11 +300,12 @@ func TestRegisterPeriod(t *testing.T) {
 func TestRegisterPeriod_LegalEntityComesFromTheCaller(t *testing.T) {
 	ledger, entity, period := testkit.TenantID(7), testkit.TenantID(9), testkit.TenantID(8)
 	var got domain.PeriodRegistration
-	r, _ := newRouter(fakeStore{created: true, registered: &got})
+	r := registerRouter(fakeStore{created: true, registered: &got}, fakeLedger{owner: entity})
 	send := func(payload string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(payload))
 		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 		req.Header.Set("X-Passage-Duties", "period.maintain")
+		req.Header.Set("X-Passage-User", "user-1")
 		req.Header.Set("X-Passage-Legal-Entity", entity)
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
@@ -300,4 +323,83 @@ func TestRegisterPeriod_LegalEntityComesFromTheCaller(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || got.LegalEntityID != "" {
 		t.Fatalf("a body legal entity must be refused: %d %s %+v", rec.Code, rec.Body.String(), got)
 	}
+}
+
+func TestRegisterPeriod_LedgerOwnershipIsAskedOfTheLedgerService(t *testing.T) {
+	_, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := tenant.NewServiceSigner("close", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, other, period, ledgerID := testkit.TenantID(9), testkit.TenantID(10), testkit.TenantID(8), testkit.TenantID(7)
+	payload := `{"ledgerId":"` + ledgerID + `","startDate":"2026-01-01","endDate":"2026-01-31"}`
+	tests := []struct {
+		name       string
+		ledgerSays func(w http.ResponseWriter)
+		wantStatus int
+		wantStore  bool
+	}{
+		{"owner legal entity registers", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"legalEntityId":"` + entity + `"}`)) }, http.StatusCreated, true},
+		{"foreign legal entity is 403", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"legalEntityId":"` + other + `"}`)) }, http.StatusForbidden, false},
+		{"ledger hides it from the caller", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }, http.StatusForbidden, false},
+		{"ledger fault fails closed", func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) }, http.StatusServiceUnavailable, false},
+		{"unreadable answer fails closed", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{}`)) }, http.StatusServiceUnavailable, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotToken string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotToken = r.Header.Get(tenant.HeaderServiceToken)
+				if r.URL.Path != "/v1/ledger/ledgers/"+ledgerID {
+					t.Errorf("path %s", r.URL.Path)
+				}
+				tc.ledgerSays(w)
+			}))
+			defer srv.Close()
+			var got domain.PeriodRegistration
+			r := registerRouter(fakeStore{created: true, registered: &got}, ledger.New(srv.URL, nil, signer))
+			req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(payload))
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+			req.Header.Set("X-Passage-Duties", "period.maintain")
+			req.Header.Set("X-Passage-User", "user-1")
+			req.Header.Set("X-Passage-Legal-Entity", entity)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus || (got.FiscalPeriodID != "") != tc.wantStore || gotToken == "" {
+				t.Fatalf("got %d %s stored=%+v token=%t", rec.Code, rec.Body, got, gotToken != "")
+			}
+		})
+	}
+	t.Run("ledger unreachable fails closed", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		srv.Close()
+		var got domain.PeriodRegistration
+		r := registerRouter(fakeStore{created: true, registered: &got}, ledger.New(srv.URL, nil, signer))
+		req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(payload))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", "period.maintain")
+		req.Header.Set("X-Passage-User", "user-1")
+		req.Header.Set("X-Passage-Legal-Entity", entity)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || got.FiscalPeriodID != "" {
+			t.Fatalf("got %d %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("no ledger configured fails closed", func(t *testing.T) {
+		r := registerRouter(fakeStore{created: true}, nil)
+		req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(payload))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", "period.maintain")
+		req.Header.Set("X-Passage-User", "user-1")
+		req.Header.Set("X-Passage-Legal-Entity", entity)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("got %d", rec.Code)
+		}
+	})
 }

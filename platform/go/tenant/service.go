@@ -72,6 +72,9 @@ var serviceGrants = map[string]map[string][]string{
 		"tax":    {"Calculate withholding tax"},
 		"party":  {"party.vendor_bank.reveal"},
 	},
+	"close": {
+		"ledger": {"ledger.ledger.lookup"},
+	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
 	},

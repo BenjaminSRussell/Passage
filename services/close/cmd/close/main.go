@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
+	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 	"github.com/BenjaminSRussell/passage/services/close/migrations"
 )
@@ -117,6 +118,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	a := api.New(store.New(pool))
+	if url := getenv("LEDGER_URL"); url != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		a.WithLedgers(ledger.New(url, nil, signer))
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

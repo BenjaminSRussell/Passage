@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
 )
 
 const (
@@ -34,8 +35,13 @@ type Store interface {
 	Ping(ctx context.Context) error
 }
 
+type LedgerLookup interface {
+	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
+}
+
 type API struct {
 	store      Store
+	ledgers    LedgerLookup
 	checks     atomic.Int64
 	rejections atomic.Int64
 	failures   atomic.Int64
@@ -95,6 +101,11 @@ var problemStatuses = map[string]int{
 }
 
 func New(store Store) *API { return &API{store: store} }
+
+func (a *API) WithLedgers(l LedgerLookup) *API {
+	a.ledgers = l
+	return a
+}
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
@@ -236,6 +247,9 @@ func (a *API) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, v)
 		return
 	}
+	if !a.ledgerBelongsToCaller(w, r, p.LegalEntityID, req.LedgerID) {
+		return
+	}
 	created, err := a.store.RegisterPeriod(r.Context(), domain.PeriodRegistration{
 		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalPeriodID: periodID, Start: start, End: end, Actor: p.UserID,
 	})
@@ -254,6 +268,30 @@ func (a *API) register(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", r.URL.Path)
 	}
 	httpx.JSON(w, status, map[string]string{"fiscalPeriodId": periodID, "startDate": req.StartDate, "endDate": req.EndDate})
+}
+
+func (a *API) ledgerBelongsToCaller(w http.ResponseWriter, r *http.Request, legalEntityID, ledgerID string) bool {
+	if a.ledgers == nil {
+		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "ledger lookup is not configured"))
+		return false
+	}
+	owner, err := a.ledgers.LegalEntity(r.Context(), legalEntityID, ledgerID)
+	switch {
+	case errors.Is(err, ledger.ErrNotVisible):
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the ledger does not belong to the caller's legal entity"))
+		return false
+	case err != nil:
+		a.failures.Add(1)
+		slog.Error("ledger lookup failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "ledger unavailable"))
+		return false
+	}
+	want, _ := ids.Canonical(legalEntityID)
+	if got, _ := ids.Canonical(owner); got != want {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the ledger does not belong to the caller's legal entity"))
+		return false
+	}
+	return true
 }
 
 func validate(req checkRequest) error {
