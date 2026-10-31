@@ -387,9 +387,25 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	poQty, err := a.correctionQuantities(ctx, cmd.id, deltas)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	corrected, err := a.store.Correct(ctx, cmd.id, func(rec store.Receipt) (store.Adjustment, error) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
 			return store.Adjustment{}, err
+		}
+		for _, l := range rec.Lines {
+			if delta := deltas[l.LineNo]; l.POLineNo > 0 && delta.IsPositive() {
+				ordered, known := poQty[l.LineNo]
+				if !known {
+					return store.Adjustment{}, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("line %d has no purchase order quantity to check against", l.LineNo)}
+				}
+				if err := checkOpenQuantity(l, l.Qty.Add(delta), ordered); err != nil {
+					return store.Adjustment{}, err
+				}
+			}
 		}
 		seq := rec.CorrectionSeq + 1
 		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)

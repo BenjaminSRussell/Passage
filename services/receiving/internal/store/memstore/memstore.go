@@ -716,7 +716,11 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		if current.State != domain.Posted {
 			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s, not POSTED", id, current.State)}
 		}
-		adj, err := fn(cloneReceipt(current))
+		withOthers := cloneReceipt(current)
+		for i, l := range withOthers.Lines {
+			withOthers.Lines[i].OtherReceived = t.receivedOn(current.ID, current.PurchaseOrderID, l.POLineNo)
+		}
+		adj, err := fn(withOthers)
 		if err != nil {
 			return err
 		}

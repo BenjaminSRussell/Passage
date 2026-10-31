@@ -159,3 +159,37 @@ func checkOpenQuantity(l store.Line, qty, poQty decimal.Decimal) error {
 	}
 	return nil
 }
+
+func (a *API) correctionQuantities(ctx context.Context, id string, deltas map[int]decimal.Decimal) (map[int]decimal.Decimal, error) {
+	rec, err := a.store.GetReceipt(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var upward []store.Line
+	for _, l := range rec.Lines {
+		if l.POLineNo > 0 && deltas[l.LineNo].IsPositive() {
+			upward = append(upward, l)
+		}
+	}
+	if len(upward) == 0 {
+		return nil, nil
+	}
+	po, err := a.loadPurchaseOrder(ctx, rec.LegalEntityID, rec.PurchaseOrderID)
+	if err != nil {
+		return nil, err
+	}
+	poQty := map[int]decimal.Decimal{}
+	for _, l := range upward {
+		at := -1
+		for i, pl := range po.Lines {
+			if pl.LineNo == l.POLineNo {
+				at = i
+			}
+		}
+		if at < 0 || !po.Lines[at].Usable() {
+			return nil, poProblem(http.StatusUnprocessableEntity, "RCV-PO-006", "purchase order line %d is gone or cancelled", l.POLineNo)
+		}
+		poQty[l.LineNo] = po.Lines[at].Qty
+	}
+	return poQty, nil
+}
