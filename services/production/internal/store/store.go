@@ -213,6 +213,7 @@ type Store interface {
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
 	OperationsOverview(ctx context.Context, f OperationFilter) (OperationsOverview, error)
 	JournalInquiry(ctx context.Context, f JournalFilter) (JournalInquiry, error)
+	KPIs(ctx context.Context, f KPIFilter) (KPIReport, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
 	ListOCMProfiles(ctx context.Context, legalEntityID string) ([]OCMProfile, error)
 	SaveOCMProfile(ctx context.Context, in OCMProfileSave) (OCMProfile, bool, error)

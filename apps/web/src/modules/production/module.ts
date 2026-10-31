@@ -5,6 +5,7 @@ import type { ProductionOrder } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
 import { JournalInquiryPage } from "./JournalInquiryPage";
+import { KpiPage } from "./KpiPage";
 import { OcmProfilesPage } from "./OcmProfilesPage";
 import { OperationsOverviewPage } from "./OperationsOverviewPage";
 import { OrderChangeDetailPage } from "./OrderChangeDetailPage";
@@ -114,7 +115,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview and the production journals across orders; order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders); order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -125,6 +126,7 @@ const production: PassageModule = {
     { path: `${list}/subcontract-operations`, element: createElement(SubcontractRoute), handle: { title: "Subcontract operations" } },
     { path: `${list}/operations`, element: createElement(OperationsRoute), handle: { title: "Operations overview" } },
     { path: `${list}/journals`, element: createElement(JournalsRoute), handle: { title: "Production journals" } },
+    { path: `${list}/kpi`, element: createElement(KpiPage), handle: { title: "Production KPIs" } },
     { path: `${list}/order-changes`, element: createElement(ChangesRoute), handle: { title: "Order changes" } },
     { path: `${list}/order-changes/:changeId`, element: createElement(ChangeDetailRoute), handle: { title: "Order change" } },
     { path: `${list}/ocm-profiles`, element: createElement(OcmProfilesPage), handle: { title: "Order change profiles" } },
@@ -139,6 +141,7 @@ const production: PassageModule = {
     { label: "Subcontract operations", to: `${list}/subcontract-operations`, duty: "production.order.read" },
     { label: "Operations overview", to: `${list}/operations`, duty: "production.order.read" },
     { label: "Production journals", to: `${list}/journals`, duty: "production.order.read" },
+    { label: "Production KPIs", to: `${list}/kpi`, duty: "production.order.read" },
     { label: "Order changes", to: `${list}/order-changes`, duty: "production.order.read" },
     { label: "Order change profiles", to: `${list}/ocm-profiles`, duty: "production.setup.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },

@@ -64,6 +64,8 @@ type fakeStore struct {
 	opOverview     store.OperationsOverview
 	journalFilters []store.JournalFilter
 	journalPage    store.JournalInquiry
+	kpiFilters     []store.KPIFilter
+	kpi            store.KPIReport
 	subcontract    store.SubcontractReport
 	// operation commands (FR-21.6)
 	operCommands []store.OperationCommand

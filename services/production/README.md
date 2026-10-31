@@ -420,3 +420,10 @@ Slice 13 (read-only inquiries of 4.21.14, no migration):
   posting date, posted, line count, the value consumed (issue and hours lines) and received
   (receipt and co-product lines) in the order currency once posted, journal entry id, keyset-paged by id, with
   the count over the whole filter (`production.order.read`).
+- Order KPIs: `GET /v1/production/kpi` with legal entity, site, product, the UTC date range the orders
+  ended in, an as-of date and `groupBy` site or product: orders ended, on-time % (finished, the last
+  `ReportedAsFinished` entry of the status log or the `Ended` one without it, on or before the
+  delivery date, over the ended orders that have one), mean cycle days (first `Started` entry to
+  the finish), scrap % (error ÷ finished + error) and the open orders (current status) and those
+  overdue as of the date, per group and in total; rates are null with nothing to measure
+  (`production.order.read`). Read-only; no table or event of its own.

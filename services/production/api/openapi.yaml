@@ -903,6 +903,30 @@ components:
             qtyGood: { $ref: '#/components/schemas/Decimal' }
             qtyError: { $ref: '#/components/schemas/Decimal' }
         nextCursor: { type: string }
+    OrderKpiGroup:
+      type: object
+      required: [ended, dated, onTime, onTimePct, avgCycleDays, qtyFinished, qtyError, scrapPct, open, overdue]
+      properties:
+        key: { type: string, description: The site or product id of the group; absent on the totals and without groupBy. }
+        ended: { type: integer, description: Orders that ended in the period. }
+        dated: { type: integer, description: Of those, orders with a delivery date. }
+        onTime: { type: integer, description: 'Of those, orders finished (last report as finished, or the end without one) on or before it.' }
+        onTimePct: { type: string, nullable: true, description: 'onTime ÷ dated in percent, two places; null when dated is 0.' }
+        avgCycleDays: { type: string, nullable: true, description: Mean days from the first start to the finish, two places; null when none of the ended orders was started. }
+        qtyFinished: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        scrapPct: { type: string, nullable: true, description: 'Error quantity as a percentage of finished plus error, two places; null when nothing was reported.' }
+        open: { type: integer, description: 'Orders whose current status is not Ended or Cancelled (now, not as of asOf).' }
+        overdue: { type: integer, description: Of those, with a delivery date before asOf. }
+    OrderKpis:
+      type: object
+      required: [asOf, groups, groupsTotal, totals]
+      properties:
+        asOf: { type: string, format: date }
+        groupBy: { type: string, enum: [site, product] }
+        groups: { type: array, items: { $ref: '#/components/schemas/OrderKpiGroup' } }
+        groupsTotal: { type: integer, description: Groups before the limit. }
+        totals: { $ref: '#/components/schemas/OrderKpiGroup' }
     JournalInquiryRow:
       type: object
       required: [id, orderId, orderNumber, legalEntityId, type, journalNumber, postingDate, posted, postedAt, qtyGood, qtyError, reversalOf, journalEntryId, currency, lines, consumed, received]
@@ -1875,6 +1899,40 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/JournalInquiry' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/kpi:
+    get:
+      operationId: getProductionOrderKpis
+      summary: Production order KPIs (4.21.14)
+      description: |
+        Orders ended in a period, with the share finished on or before their delivery date
+        (onTimePct, over the ended orders that have one), the mean days from the first Started
+        entry of the status log to the finish (avgCycleDays), the scrap share of the reported
+        quantities (scrapPct = error ÷ (finished + error)) and the orders still open, of which
+        overdue are those whose delivery date is before asOf (default today, UTC). An order finished
+        at its last ReportedAsFinished entry (its Ended entry when it has none): End is the cost
+        close and may come later. from and to bound the UTC date of the Ended entry and do not apply
+        to the open counts; open is the current status, and asOf only moves the overdue cut-off. Rates are null when there
+        is nothing to measure. Groups by site or product are ordered by orders ended; totals cover all
+        groups, not only the first `limit`. This is the service-side version of the order_kpi
+        projection that the analytics wave (46) will replace.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: productId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, description: First date the orders ended., schema: { type: string, format: date } }
+        - { name: to, in: query, description: Last date the orders ended., schema: { type: string, format: date } }
+        - { name: asOf, in: query, description: The date open orders are compared with their delivery date., schema: { type: string, format: date } }
+        - { name: groupBy, in: query, schema: { type: string, enum: [site, product] } }
+        - { name: limit, in: query, description: At most this many groups., schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: The groups and the totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderKpis' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
   /v1/production/orders/{id}/operations/{operNumber}:{command}:

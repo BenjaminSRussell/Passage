@@ -1211,6 +1211,67 @@ export async function getJournalInquiry({ limit = 50, ...filter }: JournalInquir
   };
 }
 
+/** One group of the order KPIs (4.21.14); rates are null when there is nothing to measure. */
+export interface OrderKpiGroup {
+  /** The site or product id of the group; absent on the totals and without grouping. */
+  key?: string;
+  ended: number;
+  dated: number;
+  onTime: number;
+  onTimePct: string | null;
+  avgCycleDays: string | null;
+  qtyFinished: string;
+  qtyError: string;
+  scrapPct: string | null;
+  open: number;
+  overdue: number;
+}
+
+export type KpiGroupBy = "site" | "product";
+
+export interface OrderKpis {
+  asOf: string;
+  groupBy?: KpiGroupBy;
+  groups: OrderKpiGroup[];
+  groupsTotal: number;
+  totals: OrderKpiGroup;
+}
+
+export interface OrderKpiQuery {
+  siteId?: string;
+  productId?: string;
+  from?: string;
+  to?: string;
+  asOf?: string;
+  groupBy?: KpiGroupBy | "";
+  limit?: number;
+}
+
+const noKpi: OrderKpiGroup = {
+  ended: 0,
+  dated: 0,
+  onTime: 0,
+  onTimePct: null,
+  avgCycleDays: null,
+  qtyFinished: "0",
+  qtyError: "0",
+  scrapPct: null,
+  open: 0,
+  overdue: 0,
+};
+
+/** Orders ended in a period with on-time %, cycle days, scrap % and the open and overdue orders (4.21.14). */
+export async function getOrderKpis({ limit = 50, ...filter }: OrderKpiQuery = {}, signal?: AbortSignal): Promise<OrderKpis> {
+  const body = await requestAt<Partial<OrderKpis>>(`${root}/kpi?${query({ ...filter, limit })}`, { signal });
+  return {
+    asOf: body.asOf ?? "",
+    groupBy: body.groupBy,
+    groups: Array.isArray(body.groups) ? body.groups : [],
+    groupsTotal: typeof body.groupsTotal === "number" ? body.groupsTotal : 0,
+    totals: body.totals ?? noKpi,
+  };
+}
+
 // ---- Order change management (FR-21.16, BR-21.12) ----
 
 export type OCMMode = "automatic" | "manual" | "none";

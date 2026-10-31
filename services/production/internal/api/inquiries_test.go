@@ -135,3 +135,65 @@ func TestJournalInquiry_RejectsBadFiltersAndStoreFailure(t *testing.T) {
 	_, h = newServer(t, &fakeStore{getErr: httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "database unavailable")})
 	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/journals", duties: []string{DutyRead}}), http.StatusServiceUnavailable, "COM-0503")
 }
+
+func (f *fakeStore) KPIs(_ context.Context, kf store.KPIFilter) (store.KPIReport, error) {
+	f.kpiFilters = append(f.kpiFilters, kf)
+	return f.kpi, f.getErr
+}
+
+func TestOrderKPIs_FormatsAndFilters(t *testing.T) {
+	site := ids.New()
+	f := &fakeStore{}
+	g := domain.KPIGroup{Ended: 3, Dated: 3, OnTime: 2, Cycled: 2, CycleDaysSum: decimal.RequireFromString("7.5"),
+		QtyFinished: decimal.RequireFromString("97"), QtyError: decimal.RequireFromString("3"), Open: 4, Overdue: 1}
+	f.kpi = store.KPIReport{Groups: []store.KPIRow{{Key: site, KPIGroup: g}, {Key: ids.New()}}, Totals: g}
+	_, h := newServer(t, f)
+	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/kpi", duties: []string{DutyCostRead}}), http.StatusForbidden, "AUTH-0003")
+
+	rec := do(h, call{method: http.MethodGet, duties: []string{DutyRead}, path: "/v1/production/kpi?groupBy=site&siteId=" + site + "&from=2026-10-01&to=2026-10-31&asOf=2026-10-20&limit=1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("kpi: %d %s", rec.Code, rec.Body.String())
+	}
+	var v kpiView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Groups) != 1 || v.GroupsTotal != 2 || v.Groups[0].Key != site || *v.Groups[0].OnTimePct != "66.67" || *v.Groups[0].AvgCycleDays != "3.75" ||
+		*v.Groups[0].ScrapPct != "3.00" || v.Groups[0].QtyFinished != "97" || v.Totals.Open != 4 || v.Totals.Overdue != 1 || v.AsOf != "2026-10-20" || v.GroupBy != "site" {
+		t.Fatalf("view = %+v", v)
+	}
+	if got := f.kpiFilters[0]; got != (store.KPIFilter{SiteID: site, From: "2026-10-01", To: "2026-10-31", AsOf: "2026-10-20", GroupBy: "site"}) {
+		t.Fatalf("filter = %+v", got)
+	}
+
+	// Nothing ended: the rates are null, not zero, and as-of defaults to today.
+	f.kpi = store.KPIReport{}
+	rec = do(h, call{method: http.MethodGet, path: "/v1/production/kpi", duties: []string{DutyRead}})
+	var empty kpiView
+	if err := json.Unmarshal(rec.Body.Bytes(), &empty); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || empty.Totals.OnTimePct != nil || empty.Totals.ScrapPct != nil || empty.Totals.AvgCycleDays != nil || len(empty.Groups) != 0 ||
+		empty.AsOf != time.Now().UTC().Format(time.DateOnly) {
+		t.Fatalf("empty: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOrderKPIs_RejectsBadFiltersAndStoreFailure(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	for _, path := range []string{"/v1/production/kpi?groupBy=month", "/v1/production/kpi?siteId=x", "/v1/production/kpi?from=2026-13-01",
+		"/v1/production/kpi?from=2026-10-31&to=2026-10-01", "/v1/production/kpi?asOf=today", "/v1/production/kpi?limit=0"} {
+		rec := do(h, call{method: http.MethodGet, path: path, duties: []string{DutyRead}})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", path, rec.Code)
+		}
+	}
+	if len(f.kpiFilters) != 0 {
+		t.Fatalf("store called for invalid input: %+v", f.kpiFilters)
+	}
+	f.getErr = context.DeadlineExceeded
+	if rec := do(h, call{method: http.MethodGet, path: "/v1/production/kpi", duties: []string{DutyRead}}); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("store failure: %d", rec.Code)
+	}
+}
