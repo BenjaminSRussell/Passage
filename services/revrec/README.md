@@ -61,9 +61,12 @@ contracts and runs from its reads.
 - **SSP source** (BR-29.2): the caller sends the resolved SSP and its source. At
   most one obligation per contract may be RESIDUAL (REV-0003). The engine derives
   a RESIDUAL obligation's SSP as the transaction price less the other SSPs (its
-  input `ssp` is ignored and may be omitted) and refuses the contract when that
-  is not positive (REV-0008). A RESIDUAL obligation is returned with the BIL-0009
-  warning.
+  input `ssp` may be omitted; one that is sent must still be a decimal, COM-0001,
+  and is ignored) and refuses the contract when that is not positive (REV-0008).
+  Responses give an SSP at the currency's minor unit, or with every fraction
+  digit beyond it, so a derived 299.876544 is not rounded to 299.88. A RESIDUAL
+  obligation is returned with the BIL-0009 warning; the web form does not ask
+  for its SSP.
 - **Schedules** (FR-29.8): POINT_IN_TIME is one line recognized at `satisfiedOn`,
   the transfer date, when the contract is created; the invoice credits that
   revenue to 4000, so no `schedule.recognized` is emitted for it. MILESTONE is

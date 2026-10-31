@@ -601,7 +601,7 @@ func toContractOut(c store.Contract) contractOut {
 	products := make([]string, 0, len(c.Obligations))
 	for _, o := range c.Obligations {
 		item := obligationOut{
-			ID: o.ID, LineNo: o.LineNo, ProductID: o.ProductID, SSP: fixed(o.SSP, c.Currency), SSPSource: o.SSPSource,
+			ID: o.ID, LineNo: o.LineNo, ProductID: o.ProductID, SSP: sspText(o.SSP, c.Currency), SSPSource: o.SSPSource,
 			Allocated: fixed(o.Allocated, c.Currency), Method: o.Method, TermStart: fmtDate(o.TermStart),
 			TermEnd: fmtDate(o.TermEnd), SatisfiedOn: fmtDate(o.SatisfiedOn), Schedule: []scheduleOut{},
 		}

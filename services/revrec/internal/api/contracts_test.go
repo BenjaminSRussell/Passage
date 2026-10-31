@@ -326,6 +326,7 @@ func TestCreateContract_ValidationProblems(t *testing.T) {
 		{"bad contract date", strings.Replace(bundleContract, `"contractDate": "2027-03-10"`, `"contractDate": "10/03/2027"`, 1), "k-date", "contractDate", "COM-0001", http.StatusBadRequest},
 		{"ratable without a term", strings.Replace(bundleContract, `"termStart": "2027-03-10", "termEnd": "2028-03-09"`, `"termStart": "2027-03-10"`, 1), "k-term", "obligations[2].term", "COM-0001", http.StatusBadRequest},
 		{"zero SSP", strings.Replace(bundleContract, `"ssp": "1500"`, `"ssp": "0"`, 1), "k-ssp", "obligations[1].ssp", "COM-0001", http.StatusBadRequest},
+		{"residual SSP not a decimal", strings.Replace(bundleContract, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"ssp": "abc", "sspSource": "RESIDUAL"`, 1), "k-resfmt", "obligations[1].ssp", "COM-0001", http.StatusBadRequest},
 		{"two residual obligations", strings.Replace(bundleContract, `"sspSource": "EXPLICIT"`, `"sspSource": "RESIDUAL"`, 2), "k-res2", "", "REV-0003", http.StatusUnprocessableEntity},
 		{"residual SSP not positive", strings.Replace(strings.Replace(bundleContract, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"ssp": "1500", "sspSource": "RESIDUAL"`, 1), `"10800.00"`, `"10500.00"`, 1), "k-resneg", "", "REV-0008", http.StatusUnprocessableEntity},
 	}
@@ -370,6 +371,23 @@ func TestCreateContract_ResidualWarns(t *testing.T) {
 	c := decodeContract(t, rec)
 	if len(c.Warnings) != 1 || c.Warnings[0].Code != "BIL-0009" || !strings.Contains(c.Warnings[0].Detail, "line 2") {
 		t.Errorf("warnings %+v, want one BIL-0009 naming line 2", c.Warnings)
+	}
+}
+
+// TestCreateContract_ResidualSSPOmittedAndPrecise: the RESIDUAL line needs no
+// ssp, and the derived 299.876544 is returned unrounded.
+func TestCreateContract_ResidualSSPOmittedAndPrecise(t *testing.T) {
+	body := strings.Replace(bundleContract, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"sspSource": "RESIDUAL"`, 1)
+	body = strings.Replace(body, `"ssp": "2500"`, `"ssp": "2500.123456"`, 1)
+	rec := postContract(t, newHandler(newFakeStore()), body, "k-residual-omitted")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	want := []string{"8000.00", "299.876544", "2500.123456"}
+	for i, o := range decodeContract(t, rec).Obligations {
+		if o.SSP != want[i] {
+			t.Errorf("line %d ssp %s, want %s", o.LineNo, o.SSP, want[i])
+		}
 	}
 }
 

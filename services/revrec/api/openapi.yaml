@@ -296,15 +296,17 @@ components:
             $ref: "#/components/schemas/Obligation"
     Obligation:
       type: object
-      required: [id, ssp, sspSource, method]
+      required: [id, sspSource, method]
       additionalProperties: false
       properties:
         id: { type: string, minLength: 1, maxLength: 64, description: "Unique within the request." }
-        ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price." }
-        sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL] }
+        ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price; required unless sspSource is RESIDUAL. A RESIDUAL obligation's ssp is derived (the transaction price less the other SSPs), so it may be omitted; one that is sent must still match the pattern and is ignored." }
+        sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL], description: "At most one RESIDUAL (REV-0003); its derived ssp must be positive (REV-0008)." }
         method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
         termStart: { type: string, format: date, description: "Required for RATABLE." }
         termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }
+      if: { properties: { sspSource: { not: { const: RESIDUAL } } } }
+      then: { required: [ssp] }
     PreviewResponse:
       type: object
       required: [currency, transactionPrice, residualRule, ratableBasis, obligations]
@@ -322,7 +324,7 @@ components:
       required: [id, ssp, sspSource, method, allocated]
       properties:
         id: { type: string }
-        ssp: { type: string }
+        ssp: { type: string, description: "At the currency's minor unit, or with every fraction digit beyond it (up to 6); for RESIDUAL the derived SSP." }
         sspSource: { type: string }
         method: { type: string }
         allocated: { type: string }
@@ -354,11 +356,13 @@ components:
           maxItems: 50
           items:
             type: object
-            required: [productId, ssp, sspSource, method]
+            required: [productId, sspSource, method]
             additionalProperties: false
+            if: { properties: { sspSource: { not: { const: RESIDUAL } } } }
+            then: { required: [ssp] }
             properties:
               productId: { type: string, format: uuid, description: "May repeat across lines." }
-              ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price." }
+              ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price; required unless sspSource is RESIDUAL, whose ssp is derived and may be omitted (one that is sent must still match the pattern and is ignored)." }
               sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL], description: "At most one RESIDUAL per contract (REV-0003); its ssp is derived as the transaction price less the other SSPs and is refused when not positive (REV-0008)." }
               method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
               termStart: { type: string, format: date, description: "Required for RATABLE." }
@@ -405,7 +409,7 @@ components:
         id: { type: string, format: uuid }
         lineNo: { type: integer }
         productId: { type: string, format: uuid }
-        ssp: { type: string }
+        ssp: { type: string, description: "At the currency's minor unit, or with every fraction digit beyond it (up to 6); for RESIDUAL the derived SSP." }
         sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL] }
         allocated: { type: string }
         recognized: { type: string }
