@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
@@ -44,18 +45,25 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "hr")
 }
 
-// sealerFromEnv reads HR_PII_KEY (base64 of 32 random bytes). The service
-// refuses to start without it: P3 values must never be stored unsealed.
+// sealerFromEnv reads the fieldcrypt keys (FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS) and
+// FIELDCRYPT_CURRENT_KEY_ID. HR_PII_KEY (base64 of 32 bytes) is optional and only opens values
+// written before fieldcrypt. The service refuses to start without fieldcrypt keys: P3 values
+// must never be stored unsealed.
 func sealerFromEnv(getenv func(string) string) (*domain.Sealer, error) {
-	raw := getenv("HR_PII_KEY")
-	if raw == "" {
-		return nil, errors.New("HR_PII_KEY is required (base64 of 32 bytes)")
-	}
-	key, err := base64.StdEncoding.DecodeString(raw)
+	keys, err := fieldcrypt.FromEnv(getenv)
 	if err != nil {
-		return nil, fmt.Errorf("HR_PII_KEY is not base64: %w", err)
+		return nil, err
 	}
-	return domain.NewSealer(key)
+	if keys == nil {
+		return nil, errors.New("FIELDCRYPT_KEYS or FIELDCRYPT_KEYS_FILE is required")
+	}
+	var legacy []byte
+	if raw := getenv("HR_PII_KEY"); raw != "" {
+		if legacy, err = base64.StdEncoding.DecodeString(raw); err != nil {
+			return nil, fmt.Errorf("HR_PII_KEY is not base64: %w", err)
+		}
+	}
+	return domain.NewSealer(keys, legacy)
 }
 
 func maxDepthFromEnv(getenv func(string) string) (int, error) {

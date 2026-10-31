@@ -52,6 +52,7 @@ type tenantData struct {
 	settlements map[string]store.Settlement
 	ersVendors  map[string]bool
 	auditRates  map[string]decimal.Decimal
+	payees      map[string]store.OneTimePayee
 
 	policyHistory []PolicyChange
 }
@@ -90,7 +91,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]decimal.Decimal{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]decimal.Decimal{}, payees: map[string]store.OneTimePayee{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -757,8 +758,27 @@ func (t *tenantData) releaseSerials(r store.Receipt) {
 
 func invoiceKey(vendorID, number string) string { return vendorID + "|" + strings.ToLower(number) }
 
+func (s *Store) CreateOneTimePayee(ctx context.Context, in store.OneTimePayee) (out store.OneTimePayee, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		in.CreatedAt = time.Now().UTC()
+		t.payees[in.ID] = in
+		out = in
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.InvoiceFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
+		if in.OneTimePayeeID != "" {
+			payee, ok := t.payees[in.OneTimePayeeID]
+			if !ok {
+				return store.ErrPayeeNotFound
+			}
+			if payee.LegalEntityID != in.LegalEntityID {
+				return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "the one-time payee belongs to another legal entity"}
+			}
+		}
 		key := invoiceKey(in.VendorID, in.InvoiceNumber)
 		if _, dup := t.invoices[key]; dup {
 			return &domain.Error{Code: domain.CodeDuplicateInvoice, Detail: fmt.Sprintf("invoice %q is already posted for the vendor", in.InvoiceNumber)}

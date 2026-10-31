@@ -3,6 +3,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"errors"
 	"testing"
 	"time"
@@ -10,12 +12,26 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/migrations"
 )
+
+func testSealer(t *testing.T) *domain.Sealer {
+	t.Helper()
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := domain.NewSealer(keys, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealer
+}
 
 // newStore runs against a fresh schema from testkit and skips without
 // PASSAGE_TEST_DATABASE_URL.
@@ -26,10 +42,7 @@ func newStore(t *testing.T) (*Postgres, context.Context) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := testSealer(t)
 	return New(pool, sealer, 10), ctx
 }
 
@@ -241,4 +254,32 @@ func TestPrimaryEmploymentOverlapIsRejectedButConcurrentIsAllowed(t *testing.T) 
 
 	mustEmployment(t, s, ctx, w.ID, le1, "CONCURRENT", day(time.January, 1))
 	mustEmployment(t, s, ctx, w.ID, le2, "PRIMARY", day(time.January, 1))
+}
+
+func TestReadPIIOpensLegacySealedValues(t *testing.T) {
+	s, ctx := newStore(t)
+	legacyKey := bytes.Repeat([]byte{9}, 32)
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sealer, err = domain.NewSealer(keys, legacyKey); err != nil {
+		t.Fatal(err)
+	}
+	w := mustWorker(t, s, ctx, "legacy")
+	block, _ := aes.NewCipher(legacyKey)
+	aead, _ := cipher.NewGCM(block)
+	nonce := bytes.Repeat([]byte{3}, aead.NonceSize())
+	legacy := aead.Seal(nonce, nonce, []byte("987-65-4321"), nil)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $1 where worker_id = $2`, legacy, w.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.ReadPII(ctx, w.ID, true, "legacy migration check", "req-legacy")
+	if err != nil || view.NationalID != "987-65-4321" {
+		t.Fatalf("legacy read = %+v, %v", view, err)
+	}
 }

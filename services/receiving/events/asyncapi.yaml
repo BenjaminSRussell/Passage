@@ -219,6 +219,7 @@ components:
       required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
       properties:
         invoice_id: { type: string, format: uuid, description: "derived from tenant, vendor and invoice number; stable across retries" }
+        one_time_payee_id: { type: string, format: uuid, description: "present when the invoice names a one-time payee (FR-18.19); the payee's data is never in an event" }
         source: { type: string, enum: [MANUAL, ERS] }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
@@ -246,6 +247,7 @@ components:
       required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct, reason]
       properties:
         invoice_id: { type: string, format: uuid }
+        one_time_payee_id: { type: string, format: uuid, description: "present when the invoice names a one-time payee" }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         invoice_number: { type: string }

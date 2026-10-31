@@ -206,7 +206,8 @@ Configuration is read from the environment and validated at startup:
 | Variable | Required | Meaning |
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres as `passage_app` (no BYPASSRLS) |
-| `HR_PII_KEY` | yes | base64 of 32 random bytes; the service refuses to start without it |
+| `FIELDCRYPT_KEYS` / `FIELDCRYPT_KEYS_FILE`, `FIELDCRYPT_CURRENT_KEY_ID` | yes | `id=base64(32 bytes)` pairs and the key id new P3 values use (platform `fieldcrypt`); the service refuses to start without keys |
+| `HR_PII_KEY` | no | legacy base64 32-byte key; only opens P3 values written before fieldcrypt. Keep it until every row is re-sealed |
 | `HR_MANAGER_MAX_DEPTH` | no | vacant-manager walk depth, 1–20, default 10 |
 | `MIGRATE_ON_START` | no | `true` applies migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | no | default `:8080` and `:9090` (`/metrics`) |

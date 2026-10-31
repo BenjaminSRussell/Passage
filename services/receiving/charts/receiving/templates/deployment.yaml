@@ -16,17 +16,25 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        {{- if .Values.serviceIdentity.signingKeySecret }}
+        {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
         fsGroup: 65532
         {{- end }}
         seccompProfile:
           type: RuntimeDefault
-      {{- if .Values.serviceIdentity.signingKeySecret }}
+      {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
       volumes:
+{{- if .Values.serviceIdentity.signingKeySecret }}
         - name: service-identity
           secret:
             secretName: {{ .Values.serviceIdentity.signingKeySecret }}
             defaultMode: 0440
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
       {{- end }}
       containers:
         - name: receiving
@@ -58,6 +66,10 @@ spec:
               value: {{ .Values.serviceIdentity.keyId | quote }}
 {{- end }}
 {{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+{{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
             - name: LEDGER_URL
@@ -78,9 +90,14 @@ spec:
               value: {{ .Values.postingProfile.ppvAccount | quote }}
             - name: POSTING_ACCOUNT_VENDOR_CONTROL
               value: {{ .Values.postingProfile.vendorControlAccount | quote }}
-          {{- if .Values.serviceIdentity.signingKeySecret }}
+          {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
           volumeMounts:
+{{- if .Values.serviceIdentity.signingKeySecret }}
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
           {{- end }}
           ports:
             - { name: http, containerPort: 8080 }

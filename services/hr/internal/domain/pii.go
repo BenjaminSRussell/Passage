@@ -3,12 +3,12 @@ package domain
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 )
 
 // PIIReadDuty is the duty that permits an unmasked read (FR-42.1).
@@ -17,47 +17,51 @@ const PIIReadDuty = "HcmPIIRead"
 // DefaultReasonMinLength is the minimum length of a PII reveal reason (8.42.13).
 const DefaultReasonMinLength = 10
 
-// Sealer encrypts P3 values column by column with AES-256-GCM. The key is
-// 32 bytes; it comes from the environment in this slice and from Vault later.
-// Output layout is nonce || ciphertext.
+// Sealer encrypts P3 values with platform fieldcrypt (tenant and field bound).
+// Values written before fieldcrypt (nonce || ciphertext under the single
+// HR_PII_KEY, no envelope) still open through the legacy key.
 type Sealer struct {
-	aead cipher.AEAD
+	keys   *fieldcrypt.Keys
+	legacy cipher.AEAD
 }
 
-// NewSealer builds a sealer from a 32-byte key.
-func NewSealer(key []byte) (*Sealer, error) {
-	if len(key) != 32 {
+// NewSealer builds a sealer. legacyKey is optional (nil) and, when set, must be 32 bytes.
+func NewSealer(keys *fieldcrypt.Keys, legacyKey []byte) (*Sealer, error) {
+	if keys == nil {
+		return nil, errors.New("fieldcrypt keys are required")
+	}
+	s := &Sealer{keys: keys}
+	if legacyKey == nil {
+		return s, nil
+	}
+	if len(legacyKey) != 32 {
 		return nil, errors.New("PII key must be 32 bytes")
 	}
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher(legacyKey)
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
+	if s.legacy, err = cipher.NewGCM(block); err != nil {
 		return nil, err
 	}
-	return &Sealer{aead: aead}, nil
+	return s, nil
 }
 
-// Seal encrypts plain with a fresh random nonce.
-func (s *Sealer) Seal(plain string) ([]byte, error) {
-	nonce := make([]byte, s.aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
-	return s.aead.Seal(nonce, nonce, []byte(plain), nil), nil
+func (s *Sealer) Seal(tenantID, field, plain string) ([]byte, error) {
+	return s.keys.Seal(tenantID, field, []byte(plain))
 }
 
-// Open decrypts a value produced by Seal.
-func (s *Sealer) Open(sealed []byte) (string, error) {
-	n := s.aead.NonceSize()
-	if len(sealed) < n {
-		return "", errors.New("sealed value too short")
+func (s *Sealer) Open(tenantID, field string, sealed []byte) (string, error) {
+	if plain, err := s.keys.Open(tenantID, field, sealed); err == nil {
+		return string(plain), nil
 	}
-	plain, err := s.aead.Open(nil, sealed[:n], sealed[n:], nil)
+	if s.legacy == nil || len(sealed) < s.legacy.NonceSize() {
+		return "", fieldcrypt.ErrOpen
+	}
+	n := s.legacy.NonceSize()
+	plain, err := s.legacy.Open(nil, sealed[:n], sealed[n:], nil)
 	if err != nil {
-		return "", err
+		return "", fieldcrypt.ErrOpen
 	}
 	return string(plain), nil
 }
