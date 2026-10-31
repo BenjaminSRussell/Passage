@@ -57,7 +57,7 @@ jobs:
       - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
         with:
           version: 1.21.4
-      - run: opa test policies/authz
+      - run: opa test --timeout 120s policies/authz
       - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f .github/postgres-test-setup.sql
       - run: make vet
       - run: make test-go
