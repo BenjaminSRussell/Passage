@@ -52,6 +52,33 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/close/periods/{fiscalPeriodId}:
+    put:
+      operationId: registerPeriod
+      x-passage-duty: period.maintain
+      description: Registers the dates of a fiscal period of one ledger and the caller's single legal entity, opening the ALL module when the period is new. Idempotent for the same dates; registered dates never move, and dates that overlap another period of the ledger are refused. The ledger's legal entity is read from the ledger service and must equal the caller's. Never changes a status.
+      parameters:
+        - { name: fiscalPeriodId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, startDate, endDate]
+              properties:
+                ledgerId: { type: string, format: uuid }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date }
+      responses:
+        '200': { description: Already registered with these dates. }
+        '201': { description: Registered. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness

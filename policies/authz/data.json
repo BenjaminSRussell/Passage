@@ -136,6 +136,7 @@
       {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
     ]},
+    "period.maintain": {"permissions": [{"resource": "/v1/close/periods/*", "methods": ["PUT"]}]},
     "reporting.statement.view": {"permissions": [
       {"resource": "/v1/reporting/definitions", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions/*", "methods": ["GET"]},
@@ -2241,6 +2242,9 @@
       "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
       "inventory": ["inventory.ownership-change.read"],
       "party": ["party.read"]
+    },
+    "close": {
+      "ledger": ["ledger.ledger.lookup"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"],
