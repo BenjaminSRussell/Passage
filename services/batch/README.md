@@ -75,6 +75,6 @@ Grants: `passage_app` may update only `status`, `ended_at`, `error`, `rows_done`
 
 Reserved handler: `metadata.usage` (Wave 03 collector, scheduled here when metadata enqueues it). The metadata registry publish and extend paths write `dev.passage.metadata.entity.published.v1` to its outbox; this service catalogs that type.
 
-CDC: migration `0004_cdc_publication` creates the `passage_outbox_batch` publication. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migration 0004.
+CDC: migration `0004_cdc_publication` creates the `passage_outbox_batch` publication. `0011_cdc_role_grants` gives the `debezium_cdc` role SELECT on `outbox` when that role exists. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migrations 0004 and 0011. The `passage_platform` database comes from the `deploy/postgres` chart (Argo app `batch-postgres`). The CDC password is per database (Vault `<prefix>/<release>-postgres/cdc-password`) and each connector reads its own `debezium-cdc-<service>` Secret. `0006`/`0011` grant only if `debezium_cdc` exists when they run: if the service migrated before the database role existed, delete that row from `schema_migrations` and restart. Rotation steps are in `deploy/postgres/README.md`.
 
 Metrics: `batch_submitted_total`, `batch_failed_total`, and the dispatcher metrics above. Extra Go dependency: `github.com/go-chi/chi/v5` (HTTP router, same as every other service).

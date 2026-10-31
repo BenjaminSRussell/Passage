@@ -1,0 +1,74 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: debezium-cdc-metadata
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: debezium-cdc-metadata
+    creationPolicy: Owner
+    template:
+      data:
+        username: debezium_cdc
+        password: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/metadata-postgres/cdc-password
+        property: value
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: debezium-cdc-batch
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: debezium-cdc-batch
+    creationPolicy: Owner
+    template:
+      data:
+        username: debezium_cdc
+        password: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/batch-postgres/cdc-password
+        property: value
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: passage-connect-read-debezium-cdc
+  namespace: kafka
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: passage-connect-read-debezium-cdc
+  namespace: kafka
+subjects:
+  - kind: ServiceAccount
+    name: passage-connect-connect
+    namespace: kafka
+roleRef:
+  kind: Role
+  name: passage-connect-read-debezium-cdc
+  apiGroup: rbac.authorization.k8s.io

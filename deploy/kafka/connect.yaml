@@ -81,8 +81,8 @@ spec:
     plugin.name: pgoutput
     database.hostname: postgres.batch.svc
     database.port: 5432
-    database.user: ${secrets:kafka/debezium-cdc:username}
-    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.user: ${secrets:kafka/debezium-cdc-batch:username}
+    database.password: ${secrets:kafka/debezium-cdc-batch:password}
     database.dbname: passage_platform
     topic.prefix: passage.platform
     slot.name: passage_outbox_batch
@@ -140,8 +140,8 @@ spec:
     plugin.name: pgoutput
     database.hostname: postgres.metadata.svc
     database.port: 5432
-    database.user: ${secrets:kafka/debezium-cdc:username}
-    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.user: ${secrets:kafka/debezium-cdc-metadata:username}
+    database.password: ${secrets:kafka/debezium-cdc-metadata:password}
     database.dbname: passage_metadata
     topic.prefix: passage.metadata
     slot.name: passage_outbox_metadata

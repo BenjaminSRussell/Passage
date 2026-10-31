@@ -1,0 +1,6 @@
+apiVersion: v2
+name: outbox-postgres
+description: Dedicated Postgres for a service whose outbox Debezium relays (logical WAL, CDC role, kafka ingress)
+type: application
+version: 0.1.0
+appVersion: "17"
