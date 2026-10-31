@@ -1856,6 +1856,691 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
+  /v1/hr/incidents:
+    post:
+      operationId: reportIncident
+      summary: Report an injury or illness incident (BR-42.11)
+      x-passage-duty: HcmIncidentReport
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-INC-001 (override needs a justification), HCM-INC-STATE (correcting an incident that is not CLOSED), HCM-WRK-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listIncidents
+      summary: Page the register, newest case first; the worker of a privacy case is hidden
+      x-passage-duty: HcmIncidentAdmin
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/IncidentStatus"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/incidents/osha-extract:
+    get:
+      operationId: oshaExtract
+      summary: OSHA 300 log, 300A summary and 301 detail for a year; privacy cases show 'Privacy case' for the name
+      x-passage-duty: HcmIncidentAdmin
+      parameters:
+        - $ref: "#/components/parameters/Year"
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OshaExtract"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/incidents/{id}:
+    get:
+      operationId: getIncident
+      summary: One incident with its opened medical details; the read is audited
+      x-passage-duty: HcmIncidentAdmin
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-INC-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/incidents/{id}/status:
+    post:
+      operationId: advanceIncident
+      summary: Move an incident to UNDER_REVIEW or CLOSED; the reporter cannot close it; a CLOSED incident is immutable
+      x-passage-duty: HcmIncidentAdmin
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentStatusRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-INC-NOT-FOUND, HCM-INC-STATE, HCM-INC-SELF-CLOSE (403)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/workers/{id}/loaned-items:
+    post:
+      operationId: issueLoanedItem
+      summary: Lend an item to a worker (FR-42.17)
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanedItemRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanedItem"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanedItem"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-LOAN-DATE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listWorkerLoans
+      summary: A worker's loaned items
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanedItemList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/loaned-items/outstanding:
+    get:
+      operationId: outstandingLoans
+      summary: Items still OUT, soonest due first
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/DueBy"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanedItemList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/loaned-items/{id}/close:
+    post:
+      operationId: closeLoanedItem
+      summary: Record an item RETURNED or LOST
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanedItemClose"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanedItem"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-LOAN-NOT-FOUND, HCM-LOAN-STATE, HCM-LOAN-DATE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/checklist-templates:
+    post:
+      operationId: createChecklistTemplate
+      summary: Define an onboarding, offboarding or transfer checklist (FR-42.19)
+      x-passage-duty: HcmSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChecklistTemplateRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistTemplate"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistTemplate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-CHK-TEMPLATE-DUPLICATE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listChecklistTemplates
+      summary: Checklist templates, optionally of one kind
+      x-passage-duty: HcmSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/TemplateKind"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistTemplateList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/checklists:
+    post:
+      operationId: startChecklist
+      summary: Instantiate a template for a worker on an effective date (BR-42.12); starting it again returns the stored checklist
+      x-passage-duty: HcmActionMaintain
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartChecklistRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checklist"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checklist"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-CHK-TEMPLATE-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listWorkerChecklists
+      summary: A worker's checklists with their tasks
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/checklists/{id}:
+    get:
+      operationId: getChecklist
+      summary: One checklist with its tasks
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checklist"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-CHK-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/checklists/{id}/complete:
+    post:
+      operationId: completeChecklist
+      summary: Complete a checklist: every task done or skipped and, offboarding, no item OUT (AC-42.15)
+      x-passage-duty: HcmActionMaintain
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checklist"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-CHK-NOT-FOUND, HCM-CHK-OPEN-TASKS, HCM-LOAN-001
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/tasks:
+    get:
+      operationId: listOwnedTasks
+      summary: Tasks owned by a worker, soonest due first
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/OwnerWorkerId"
+        - $ref: "#/components/parameters/TaskStatus"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerTaskList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/tasks/{id}/finish:
+    post:
+      operationId: finishTask
+      summary: Mark a task DONE or SKIPPED; the loaned-items task is DONE only when nothing is OUT
+      x-passage-duty: HcmActionMaintain
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinishTaskRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerTask"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-CHK-TASK-NOT-FOUND, HCM-CHK-STATE, HCM-CHK-EVIDENCE, HCM-LOAN-001
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/questionnaires:
+    post:
+      operationId: createQuestionnaire
+      summary: Design a questionnaire (FR-42.15)
+      x-passage-duty: HcmQuestionnaireAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionnaireRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Questionnaire"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Questionnaire"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-DUPLICATE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listQuestionnaires
+      summary: Questionnaires by code
+      x-passage-duty: HcmQuestionnaireAdmin
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionnaireList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/questionnaires/{id}:
+    get:
+      operationId: getQuestionnaire
+      summary: One questionnaire
+      x-passage-duty: HcmQuestionnaireAdmin
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Questionnaire"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/questionnaires/schedules:
+    post:
+      operationId: createSchedule
+      summary: Schedule a questionnaire to a CEL population; the invited count is snapshotted
+      x-passage-duty: HcmQuestionnaireAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleRequest"
+      responses:
+        "201":
+          description: OK (created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionnaireSchedule"
+        "200":
+          description: Replay of an earlier request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionnaireSchedule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/questionnaires/schedules/open:
+    get:
+      operationId: openSchedules
+      summary: Schedules open now
+      x-passage-duty: EssQuestionnaire
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/questionnaires/schedules/{id}:
+    get:
+      operationId: getSchedule
+      summary: A schedule with the questionnaire to fill in
+      x-passage-duty: EssQuestionnaire
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleView"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-SCHEDULE-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/questionnaires/schedules/{id}/answers:
+    post:
+      operationId: submitAnswers
+      summary: Answer for yourself while the schedule is open
+      x-passage-duty: EssQuestionnaire
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnswerRequest"
+      responses:
+        "201":
+          description: Recorded
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-001 (closed), HCM-QST-NOT-OPEN, HCM-QST-NOT-OWN (403), HCM-QST-NOT-INVITED (403), HCM-QST-ANSWERED (409)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/questionnaires/schedules/{id}/results:
+    get:
+      operationId: scheduleResults
+      summary: Response rate and statistics by question and result group; by=department breaks down by department
+      x-passage-duty: HcmQuestionnaireAdmin
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+        - $ref: "#/components/parameters/ResultsBy"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionnaireResults"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-QST-002 when an anonymous breakdown has a group under 5 respondents
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -1962,6 +2647,62 @@ components:
       description: nextCursor from the previous page.
       schema:
         type: string
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IncidentStatus:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [REPORTED, UNDER_REVIEW, CLOSED]
+    Year:
+      name: year
+      in: query
+      required: true
+      schema:
+        type: integer
+    SiteId:
+      name: siteId
+      in: query
+      schema:
+        type: string
+        format: uuid
+    DueBy:
+      name: dueBy
+      in: query
+      schema:
+        type: string
+        format: date
+    TemplateKind:
+      name: kind
+      in: query
+      schema:
+        type: string
+        enum: [ONBOARDING, OFFBOARDING, TRANSFER]
+    OwnerWorkerId:
+      name: ownerWorkerId
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskStatus:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [OPEN, DONE, SKIPPED]
+    ResultsBy:
+      name: by
+      in: query
+      schema:
+        type: string
+        enum: [department]
   responses:
     Problem:
       description: RFC 9457 problem
@@ -3650,3 +4391,298 @@ components:
         passed:
           type: integer
           description: Lines newly recorded with PASS
+    IncidentRequest:
+      type: object
+      required: [workerId, legalEntityId, siteId, incidentType, occurredAt, location, description]
+      properties:
+        workerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        incidentType: {type: string, enum: [INJURY, SKIN_DISORDER, RESPIRATORY, POISONING, HEARING_LOSS, OTHER_ILLNESS]}
+        occurredAt: {type: string, format: date-time}
+        reportedAt: {type: string, format: date-time}
+        location: {type: string, maxLength: 200}
+        bodyParts: {type: array, maxItems: 20, items: {type: string, enum: [HEAD, EYE, EAR, FACE, NECK, SHOULDER, ARM, ELBOW, WRIST, HAND, FINGER, CHEST, BACK, ABDOMEN, HIP, LEG, KNEE, ANKLE, FOOT, TOE, INTERNAL, MULTIPLE, OTHER]}}
+        death: {type: boolean}
+        lossOfConsciousness: {type: boolean}
+        medicalTreatment: {type: boolean, description: Medical treatment beyond first aid}
+        daysAway: {type: integer, minimum: 0, maximum: 365}
+        daysRestricted: {type: integer, minimum: 0, maximum: 365}
+        oshaRecordable: {type: boolean, description: Overrides the BR-42.11 default; needs overrideReason}
+        overrideReason: {type: string, maxLength: 500}
+        privacyCase: {type: boolean}
+        assetId: {type: string, format: uuid}
+        supersedesId: {type: string, format: uuid, description: The CLOSED incident this one corrects}
+        description: {type: string, maxLength: 4000, description: Sealed with fieldcrypt}
+        witnesses: {type: array, maxItems: 20, items: {type: string}, description: Sealed}
+        treatments: {type: array, maxItems: 20, items: {type: string}, description: Sealed}
+        rootCause: {type: string, maxLength: 2000, description: Sealed}
+        correctiveAction: {type: string, maxLength: 2000, description: Sealed}
+    Incident:
+      type: object
+      required: [id, caseNo, legalEntityId, siteId, incidentType, occurredAt, reportedAt, location, oshaRecordable, outcome, privacyCase, status, reportedBy]
+      properties:
+        id: {type: string, format: uuid}
+        caseNo: {type: integer}
+        workerId: {type: string, format: uuid, description: Omitted in lists for a privacy case}
+        workerName: {type: string}
+        legalEntityId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        incidentType: {type: string}
+        occurredAt: {type: string, format: date-time}
+        reportedAt: {type: string, format: date-time}
+        location: {type: string}
+        bodyParts: {type: array, items: {type: string}}
+        daysAway: {type: integer}
+        daysRestricted: {type: integer}
+        oshaRecordable: {type: boolean}
+        outcome: {type: string, enum: [DEATH, DAYS_AWAY, RESTRICTED, OTHER_RECORDABLE, NONE]}
+        privacyCase: {type: boolean}
+        status: {type: string, enum: [REPORTED, UNDER_REVIEW, CLOSED]}
+        supersedesId: {type: string, format: uuid}
+        reportedBy: {type: string}
+        details: {type: object, description: Opened medical details; only on GET /incidents/{id}}
+    IncidentPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Incident"}}
+        nextCursor: {type: string}
+    IncidentStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [UNDER_REVIEW, CLOSED]}
+    OshaExtract:
+      type: object
+      required: [year, log, summary, truncated]
+      properties:
+        year: {type: integer}
+        siteId: {type: string, format: uuid}
+        truncated: {type: boolean}
+        log: {type: array, items: {type: object, description: 300 line with the 301 detail; employeeName is 'Privacy case' for a privacy case}}
+        summary: {type: object, description: 300A totals}
+    LoanedItemRequest:
+      type: object
+      required: [loanType, itemDescription, issuedOn]
+      properties:
+        loanType: {type: string}
+        itemDescription: {type: string, maxLength: 200}
+        assetId: {type: string, format: uuid}
+        serial: {type: string}
+        issuedOn: {type: string, format: date}
+        dueOn: {type: string, format: date}
+        conditionOut: {type: string}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker is employed in several legal entities on issuedOn}
+    LoanedItemClose:
+      type: object
+      required: [status, closedOn]
+      properties:
+        status: {type: string, enum: [RETURNED, LOST]}
+        closedOn: {type: string, format: date}
+        conditionIn: {type: string}
+    LoanedItem:
+      type: object
+      required: [id, workerId, loanType, itemDescription, issuedOn, status]
+      properties:
+        id: {type: string, format: uuid}
+        workerId: {type: string, format: uuid}
+        loanType: {type: string}
+        itemDescription: {type: string}
+        assetId: {type: string, format: uuid}
+        serial: {type: string}
+        issuedOn: {type: string, format: date}
+        dueOn: {type: string, format: date}
+        closedOn: {type: string, format: date}
+        status: {type: string, enum: [OUT, RETURNED, LOST]}
+    LoanedItemList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoanedItem"
+    ChecklistTemplateRequest:
+      type: object
+      required: [code, kind, name, tasks]
+      properties:
+        code: {type: string}
+        kind: {type: string, enum: [ONBOARDING, OFFBOARDING, TRANSFER]}
+        name: {type: string}
+        tasks:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [code, title, ownerRole, dueOffsetDays]
+            properties:
+              code: {type: string, description: RETURN_LOANED_ITEMS is reserved}
+              title: {type: string}
+              ownerRole: {type: string, enum: [MANAGER, WORKER, HR_PARTNER, IT]}
+              dueOffsetDays: {type: integer, minimum: -365, maximum: 365}
+              instructions: {type: string}
+              evidenceRequired: {type: boolean}
+    ChecklistTemplate:
+      type: object
+      required: [id, code, kind, name, tasks]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        kind: {type: string}
+        name: {type: string}
+        tasks: {type: array, items: {type: object}}
+    ChecklistTemplateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChecklistTemplate"
+    StartChecklistRequest:
+      type: object
+      required: [templateId, effectiveDate]
+      properties:
+        templateId: {type: string, format: uuid}
+        effectiveDate: {type: string, format: date}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker is employed in several legal entities on effectiveDate}
+    WorkerTask:
+      type: object
+      required: [id, checklistId, workerId, taskCode, title, ownerRole, dueOn, status]
+      properties:
+        id: {type: string, format: uuid}
+        checklistId: {type: string, format: uuid}
+        workerId: {type: string, format: uuid}
+        taskCode: {type: string}
+        title: {type: string}
+        ownerRole: {type: string}
+        ownerWorkerId: {type: string, format: uuid, description: The MANAGER as-of the effective date (BR-42.1) or the worker; absent for HR_PARTNER and IT}
+        dueOn: {type: string, format: date}
+        evidenceRequired: {type: boolean}
+        status: {type: string, enum: [OPEN, DONE, SKIPPED]}
+        evidenceRef: {type: string}
+    FinishTaskRequest:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [DONE, SKIPPED]}
+        evidenceRef: {type: string, maxLength: 500}
+    WorkerTaskList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerTask"
+    Checklist:
+      type: object
+      required: [id, workerId, templateId, kind, effectiveDate, status, tasks]
+      properties:
+        id: {type: string, format: uuid}
+        workerId: {type: string, format: uuid}
+        templateId: {type: string, format: uuid}
+        kind: {type: string}
+        effectiveDate: {type: string, format: date}
+        status: {type: string, enum: [OPEN, COMPLETED]}
+        tasks: {type: array, items: {$ref: "#/components/schemas/WorkerTask"}}
+    ChecklistList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checklist"
+    QuestionnaireRequest:
+      type: object
+      required: [code, name, questions]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        anonymous: {type: boolean}
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [code, text, type]
+            properties:
+              code: {type: string}
+              text: {type: string, maxLength: 500}
+              type: {type: string, enum: [SINGLE, MULTI, SCALE, NUMERIC, TEXT, DATE]}
+              options: {type: array, items: {type: object, required: [value, label], properties: {value: {type: string}, label: {type: string}, score: {type: string}}}}
+              scaleMax: {type: integer, minimum: 2, maximum: 10}
+              weight: {type: string, description: Decimal above 0, at most 100; default 1}
+              mandatory: {type: boolean}
+              resultGroup: {type: string}
+    Questionnaire:
+      type: object
+      required: [id, code, name, anonymous, questions]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        anonymous: {type: boolean}
+        questions: {type: array, items: {type: object}}
+    QuestionnaireList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Questionnaire"
+    ScheduleRequest:
+      type: object
+      required: [questionnaireId, opensAt, closesAt]
+      properties:
+        questionnaireId: {type: string, format: uuid}
+        population: {type: string, description: "CEL over employment_type, fte, service_days, legal_entity; empty means every worker with a PRIMARY employment"}
+        opensAt: {type: string, format: date-time}
+        closesAt: {type: string, format: date-time}
+    QuestionnaireSchedule:
+      type: object
+      required: [id, questionnaireId, population, opensAt, closesAt, invitedCount, status]
+      properties:
+        id: {type: string, format: uuid}
+        questionnaireId: {type: string, format: uuid}
+        population: {type: string}
+        opensAt: {type: string, format: date-time}
+        closesAt: {type: string, format: date-time}
+        invitedCount: {type: integer}
+        status: {type: string, enum: [PLANNED, OPEN, CLOSED]}
+    ScheduleList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionnaireSchedule"
+    ScheduleView:
+      allOf:
+        - $ref: "#/components/schemas/QuestionnaireSchedule"
+        - type: object
+          properties:
+            questionnaire: {$ref: "#/components/schemas/Questionnaire"}
+    AnswerRequest:
+      type: object
+      required: [workerId, answers]
+      properties:
+        workerId: {type: string, format: uuid}
+        answers: {type: object, description: "Question code to value: SINGLE a string, MULTI a list, SCALE a whole number, NUMERIC a JSON number, TEXT a string, DATE YYYY-MM-DD"}
+    QuestionnaireResults:
+      type: object
+      required: [scheduleId, anonymous, invited, responded, responseRate, overall]
+      properties:
+        scheduleId: {type: string, format: uuid}
+        anonymous: {type: boolean}
+        invited: {type: integer}
+        responded: {type: integer}
+        responseRate: {type: string}
+        overall: {type: object}
+        groups: {type: array, items: {type: object}, description: Per department; present with by=department}
