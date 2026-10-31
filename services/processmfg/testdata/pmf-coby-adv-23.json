@@ -847,5 +847,254 @@
    }
   ],
   "expectedCode": "PMF-0021"
+ },
+ {
+  "name": "tiny-burdens-overshoot-spread",
+  "currency": "CLF",
+  "batchCost": "0.0002",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [],
+  "byProducts": [
+   {
+    "costType": "per-quantity",
+    "qty": "0.5",
+    "rate": "0.0001"
+   },
+   {
+    "costType": "per-quantity",
+    "qty": "0.5",
+    "rate": "0.0001"
+   },
+   {
+    "costType": "per-quantity",
+    "qty": "0.5",
+    "rate": "0.0001"
+   },
+   {
+    "costType": "per-quantity",
+    "qty": "0.5",
+    "rate": "0.0001"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "100.0000"
+   },
+   "coProducts": [],
+   "burdens": [
+    "0.0000",
+    "0.0000",
+    "0.0001",
+    "0.0001"
+   ]
+  }
+ },
+ {
+  "name": "twenty-percent-burdens-overshoot-spread",
+  "currency": "CLF",
+  "batchCost": "0.0010",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "5"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "100.0000"
+   },
+   "coProducts": [],
+   "burdens": [
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0000",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001",
+    "0.0001"
+   ]
+  }
+ },
+ {
+  "name": "tca-zero-main-tiny-co-overshoot-spread",
+  "currency": "CLF",
+  "batchCost": "0.0002",
+  "method": "tca",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "10",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "0.0000"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0000",
+     "percent": "25.0000"
+    },
+    {
+     "amount": "0.0000",
+     "percent": "25.0000"
+    },
+    {
+     "amount": "0.0001",
+     "percent": "25.0000"
+    },
+    {
+     "amount": "0.0001",
+     "percent": "25.0000"
+    }
+   ],
+   "burdens": []
+  }
  }
 ]

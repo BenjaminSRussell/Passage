@@ -11,6 +11,15 @@
 # exact, in which case the last card holds D - F x (n - 1). Completing every
 # card through the board receives the sum of the card quantities.
 #
+# The operators' reports on the work-cell boards are scenario input, chosen per
+# rule so that what is reported differs from the card quantity: Mix reports
+# scrap = card qty x mixScrapPct / 100 truncated to 6 places and good = the
+# rest; Fill processes Mix's good and reports scrap = that x fillScrapPct / 100
+# truncated, good = the rest. The engine is then expected to (FR-24.10, FR-24.12)
+#   - carry the last (Fill) job's good and scrap on the card's completion event;
+#   - total, per activity, the jobs completed and their good + scrap (the
+#     backflush input): Mix = sum of card qty, Fill = sum of Mix good.
+#
 # One sales order, SO-24, with eleven lines over three event rules. The lines
 # are adversarial: the AC-24.6 example, exact multiples (no extra card), one
 # micro-unit over and under a multiple, a micro-unit demand, an exact rule
@@ -23,9 +32,9 @@ from fractions import Fraction as F
 P = 6
 
 RULES = [
-    {"code": "SIM-FILL20", "fixedQty": "20", "exactQty": False},
-    {"code": "SIM-EXACT7_5", "fixedQty": "7.5", "exactQty": True},
-    {"code": "SIM-THIRD", "fixedQty": "3.333333", "exactQty": False},
+    {"code": "SIM-FILL20", "fixedQty": "20", "exactQty": False, "mixScrapPct": "0", "fillScrapPct": "2.5"},
+    {"code": "SIM-EXACT7_5", "fixedQty": "7.5", "exactQty": True, "mixScrapPct": "1.5", "fillScrapPct": "0"},
+    {"code": "SIM-THIRD", "fixedQty": "3.333333", "exactQty": False, "mixScrapPct": "3", "fillScrapPct": "7"},
 ]
 
 LINES = [
@@ -47,18 +56,26 @@ def ceil(x):
     return -((-x.numerator) // x.denominator)
 
 
-def fmt(x):
+def fmt(x, zero=False):
     n = x * 10**P
-    assert n.denominator == 1 and n > 0, x
+    assert n.denominator == 1 and (n > 0 or (zero and n == 0)), x
     n = n.numerator
     s = "%d.%06d" % (n // 10**P, n % 10**P)
     return s.rstrip("0").rstrip(".")
+
+
+def scrap(qty, pct):
+    # qty x pct / 100, truncated (rounded toward zero) to 6 places
+    n = qty * F(pct) / 100 * 10**P
+    return F(n.numerator // n.denominator, 10**P)
 
 
 def main():
     rules = {r["code"]: r for r in RULES}
     out_lines = []
     totals = {r["code"]: F(0) for r in RULES}
+    finished_by_rule = {r["code"]: F(0) for r in RULES}
+    mix_qty, fill_qty = F(0), F(0)
     cards_total = 0
     for ref, code, demand, note in LINES:
         r = rules[code]
@@ -71,11 +88,27 @@ def main():
         total = sum(qtys, F(0))
         totals[code] += total
         cards_total += n
+        reports, finished = [], F(0)
+        for q in qtys:
+            ms = scrap(q, r["mixScrapPct"])
+            mg = q - ms
+            fs = scrap(mg, r["fillScrapPct"])
+            fg = mg - fs
+            assert mg > 0 and fg > 0
+            reports.append({"mixReported": fmt(mg), "mixScrap": fmt(ms, True), "fillReported": fmt(fg), "fillScrap": fmt(fs, True)})
+            mix_qty += q
+            fill_qty += mg
+            finished += fg
+        finished_by_rule[code] += finished
         out_lines.append({"salesLine": ref, "rule": code, "demandQty": demand, "note": note,
-                          "expectedCards": [fmt(q) for q in qtys], "expectedReceived": fmt(total)})
+                          "expectedCards": [fmt(q) for q in qtys], "expectedReceived": fmt(total),
+                          "expectedReports": reports, "expectedFinished": fmt(finished)})
     print(json.dumps({"salesOrder": "SO-24", "rules": RULES, "lines": out_lines,
                       "expectedCardCount": cards_total,
-                      "expectedReceivedByRule": {k: fmt(v) for k, v in totals.items()}}, indent=1))
+                      "expectedReceivedByRule": {k: fmt(v) for k, v in totals.items()},
+                      "expectedFinishedByRule": {k: fmt(v) for k, v in finished_by_rule.items()},
+                      "expectedActivityWork": [{"name": "Mix", "jobs": cards_total, "qty": fmt(mix_qty)},
+                                               {"name": "Fill", "jobs": cards_total, "qty": fmt(fill_qty)}]}, indent=1))
 
 
 if __name__ == "__main__":

@@ -57,7 +57,7 @@ func TestAllocateOrder_BR243Fixture(t *testing.T) {
 }
 
 // A main product with zero standard cost and co-products whose rounded shares
-// overshoot the remainder: the overshoot comes off the largest co-product, so
+// overshoot the remainder: the overshoot comes off the largest co-product first, so
 // no share is negative and the shares still add up to the cost.
 func TestAllocateOrder_ZeroCostMainTakesNoNegativeResidual(t *testing.T) {
 	got, err := AllocateOrder(OrderAllocationInput{

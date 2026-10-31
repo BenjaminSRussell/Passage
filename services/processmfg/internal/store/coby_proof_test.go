@@ -25,14 +25,14 @@ type cobyShare struct {
 	Percent string `json:"percent"`
 }
 
-// Wave 24 proof, end to end: every case of pmf-coby-adv-20 (expected shares
+// Wave 24 proof, end to end: every case of pmf-coby-adv-23 (expected shares
 // from the independent testdata/gen_pmf_coby_adv.py) is run as a batch order
 // that is released, started, reported with the case's output quantities and
 // ended with its cost and method. The stored shares must match the reference
 // and add up to the batch cost exactly in the database; a refused case writes
 // no share and leaves the order reported.
 func TestEndBatchOrder_CobyAdversarialFixture(t *testing.T) {
-	raw, err := os.ReadFile("../../testdata/pmf-coby-adv-20.json")
+	raw, err := os.ReadFile("../../testdata/pmf-coby-adv-23.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +55,8 @@ func TestEndBatchOrder_CobyAdversarialFixture(t *testing.T) {
 			Burdens    []string    `json:"burdens"`
 		} `json:"expected"`
 	}
-	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) != 20 {
-		t.Fatalf("pmf-coby-adv-20: %d cases, %v", len(cases), err)
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) != 23 {
+		t.Fatalf("pmf-coby-adv-23: %d cases, %v", len(cases), err)
 	}
 	s, admin := setup(t)
 	ctx := ctxFor(1, "")

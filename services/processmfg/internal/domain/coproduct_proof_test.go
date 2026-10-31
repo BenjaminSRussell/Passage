@@ -9,7 +9,7 @@ import (
 	"pgregory.net/rapid"
 )
 
-// cobyCase is one case of pmf-coby-adv-20.json.
+// cobyCase is one case of pmf-coby-adv-23.json.
 type cobyCase struct {
 	Name       string `json:"name"`
 	Currency   string `json:"currency"`
@@ -47,7 +47,7 @@ func (p cobyProduct) product(id string) Product {
 
 func readCobyCases(t *testing.T) []cobyCase {
 	t.Helper()
-	raw, err := os.ReadFile("../../testdata/pmf-coby-adv-20.json")
+	raw, err := os.ReadFile("../../testdata/pmf-coby-adv-23.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,20 +55,21 @@ func readCobyCases(t *testing.T) []cobyCase {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 20 {
-		t.Fatalf("pmf-coby-adv-20 has %d cases", len(cases))
+	if len(cases) != 23 {
+		t.Fatalf("pmf-coby-adv-23 has %d cases", len(cases))
 	}
 	return cases
 }
 
-// TestAllocateCost_AdversarialFixture runs pmf-coby-adv-20 (Wave 24 proof:
+// TestAllocateCost_AdversarialFixture runs pmf-coby-adv-23 (Wave 24 proof:
 // co/by-product cost allocation sums to batch cost exactly across methods).
 // Expected shares come from testdata/gen_pmf_coby_adv.py, an exact-rational
 // reference with no code shared with the engine: thirds and sevenths, a
 // weightless main product where rounding overshoots, burdens that take the
 // whole cost, every burden type, JPY and KWD minor units, a ten-billion cost
-// over five co-products, and percent burdens totalling 100 % whose rounding
-// alone would exceed the cost.
+// over five co-products, percent burdens totalling 100 % whose rounding alone
+// would exceed the cost, and (in CLF, 4 minor units) many tiny burdens or
+// co-products whose rounding overshoot is larger than any single share.
 func TestAllocateCost_AdversarialFixture(t *testing.T) {
 	for _, c := range readCobyCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -244,7 +245,8 @@ func TestAllocateCost_ExactAndFairAcrossMethodsAndBurdens(t *testing.T) {
 
 // Regression: percent burdens totalling 100 % on USD 0.01 were refused with
 // PMF-0021 because 0.00505 and 0.00495 round to 0.0051 + 0.0050 = 0.0101. The
-// overshoot now comes off the largest burden (hand-derived: 0.0050 + 0.0050).
+// overshoot now comes off the largest burden first (hand-derived: 0.0050 +
+// 0.0050).
 func TestAllocateCost_PercentBurdenRoundingIsNotRefused(t *testing.T) {
 	by := []ByProduct{{ItemID: "P", CostType: "percent", Rate: dec("50.5")}, {ItemID: "Q", CostType: "percent", Rate: dec("49.5")}}
 	res, err := AllocateCost(dec("0.01"), MethodQuantity, Product{ItemID: "A", RafQty: dec("1")}, nil, by)
@@ -259,4 +261,53 @@ func TestAllocateCost_PercentBurdenRoundingIsNotRefused(t *testing.T) {
 	if _, err := AllocateCost(dec("100"), MethodQuantity, Product{ItemID: "A", RafQty: dec("1")}, nil, by); err == nil || err.(*Error).Code != CodeAllocation {
 		t.Fatalf("100.1 %% of burdens: %v", err)
 	}
+}
+
+// Property aimed at the corner the wide property above rarely draws: costs of
+// a few ten-thousandths, up to 40 burdens of exactly half a ten-thousandth
+// (each rounds up to 0.0001 while all of them still fit the cost exactly) and
+// up to 12 co-products under a weightless main product. The rounding overshoot
+// is then larger than any single share; no share may go negative, nothing may
+// be refused, and the parts must still add up to the cost.
+func TestAllocateCost_ManyTinySharesNeverGoNegative(t *testing.T) {
+	half := decimal.New(5, -5)
+	rapid.Check(t, func(t *rapid.T) {
+		units := rapid.Int64Range(0, 20).Draw(t, "cost")
+		cost := decimal.New(units, -4)
+		var by []ByProduct
+		for i := rapid.Int64Range(0, min(40, 2*units)).Draw(t, "by"); i > 0; i-- {
+			// a percent of the cost that is exactly half a ten-thousandth, when one
+			// exists (50 / units terminates); otherwise per-quantity 0.5 × 0.0001
+			b := ByProduct{ItemID: "by", CostType: "per-quantity", Qty: dec("0.5"), Rate: dec("0.0001")}
+			if rapid.Bool().Draw(t, "percent") && units > 0 {
+				if rate := half.Shift(2).Div(cost); cost.Mul(rate).Shift(-2).Equal(half) {
+					b = ByProduct{ItemID: "by", CostType: "percent", Rate: rate}
+				}
+			}
+			by = append(by, b)
+		}
+		var co []Product
+		for i := rapid.IntRange(1, 12).Draw(t, "co"); i > 0; i-- {
+			co = append(co, Product{ItemID: "co", StandardCost: decimal.NewFromInt(rapid.Int64Range(1, 3).Draw(t, "std")), RafQty: dec("1")})
+		}
+		res, err := AllocateCost(cost, MethodTCA, Product{ItemID: "main", RafQty: dec("1")}, co, by)
+		if err != nil {
+			t.Fatalf("cost %s, %d burdens, %d co-products: %v", cost, len(by), len(co), err)
+		}
+		sum, pct := res.Main.Amount, res.Main.Percent
+		for _, a := range append(append([]Allocated{res.Main}, res.CoProducts...), res.Burdens...) {
+			if a.Amount.IsNegative() || a.Percent.IsNegative() {
+				t.Fatalf("negative share %+v in %+v", a, res)
+			}
+		}
+		for _, c := range res.CoProducts {
+			sum, pct = sum.Add(c.Amount), pct.Add(c.Percent)
+		}
+		for _, b := range res.Burdens {
+			sum = sum.Add(b.Amount)
+		}
+		if !sum.Equal(cost) || !res.Total.Equal(cost) || !pct.Equal(decimal.NewFromInt(100)) {
+			t.Fatalf("parts %s (total %s), percent %s, cost %s", sum, res.Total, pct, cost)
+		}
+	})
 }
