@@ -30,7 +30,7 @@ func tenantCtx(tid string) context.Context {
 }
 
 func scopedCtx(tid, legalEntity string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: legalEntity, UserID: "planner-1", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: legalEntity, UserID: "planner-1", Duties: testkit.ScopeDuties(legalEntity)})
 }
 
 func migrated(t *testing.T) (*pgxpool.Pool, *Postgres) {
@@ -472,7 +472,7 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"production_order_sequence", "production_order", "production_bom_line", "production_operation",
 		"production_cost_estimate", "production_status_log", "outbox", "production_posting_profile", "production_journal_sequence",
-		"production_journal", "production_journal_line", "production_wip_posting", "production_variance", "production_as_built", "production_order_edit", "production_operation_log"} {
+		"production_journal", "production_journal_line", "production_wip_posting", "production_variance", "production_as_built", "production_order_edit", "production_operation_log", "production_ocm_profile", "production_order_change"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(context.Background(), `select relrowsecurity, relforcerowsecurity from pg_class
 			where relname = $1 and relnamespace = current_schema()::regnamespace`, table).Scan(&enabled, &forced); err != nil || !enabled || !forced {

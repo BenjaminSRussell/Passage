@@ -21,9 +21,11 @@ const (
 )
 
 var (
-	ErrPeriodClosed   = errors.New("ledger period closed")
-	ErrLedgerConflict = errors.New("ledger idempotency conflict")
-	ErrLedgerRejected = errors.New("ledger rejected the entry")
+	ErrPeriodClosed          = errors.New("ledger period closed")
+	ErrFiscalPeriodNotFound  = errors.New("no fiscal period covers the posting date")
+	ErrFiscalPeriodAmbiguous = errors.New("several fiscal periods cover the posting date")
+	ErrLedgerConflict        = errors.New("ledger idempotency conflict")
+	ErrLedgerRejected        = errors.New("ledger rejected the entry")
 
 	ErrPurchaseOrderNotFound  = errors.New("purchase order not found")
 	ErrPurchaseOrderForbidden = errors.New("purchase order is not accessible to the caller")
@@ -72,13 +74,20 @@ type PostingProfile struct {
 }
 
 type PeriodQuery struct {
+	LegalEntityID  string
 	LedgerID       string
 	FiscalPeriodID string
 	PostingDate    time.Time
 }
 
+type ResolvedPeriod struct {
+	FiscalPeriodID string
+	Status         PeriodStatus
+}
+
 type PeriodControl interface {
 	AP(ctx context.Context, q PeriodQuery) (PeriodStatus, error)
+	Resolve(ctx context.Context, q PeriodQuery) (ResolvedPeriod, error)
 }
 
 type LedgerPoster interface {
@@ -135,7 +144,7 @@ func (o PurchaseOrder) Usable() bool {
 func (l PurchaseOrderLine) Usable() bool { return l.Status != StatusCancelled }
 
 type PurchaseOrders interface {
-	Get(ctx context.Context, id string) (PurchaseOrder, error)
+	Get(ctx context.Context, legalEntityID, id string) (PurchaseOrder, error)
 }
 
 type FakePurchaseOrders struct {
@@ -143,7 +152,7 @@ type FakePurchaseOrders struct {
 	Err    error
 }
 
-func (f FakePurchaseOrders) Get(_ context.Context, id string) (PurchaseOrder, error) {
+func (f FakePurchaseOrders) Get(_ context.Context, _, id string) (PurchaseOrder, error) {
 	if f.Err != nil {
 		return PurchaseOrder{}, f.Err
 	}
@@ -153,15 +162,51 @@ func (f FakePurchaseOrders) Get(_ context.Context, id string) (PurchaseOrder, er
 	return PurchaseOrder{}, ErrPurchaseOrderNotFound
 }
 
-type FakePeriods struct {
-	Status PeriodStatus
+var ErrVendorNotFound = errors.New("vendor not found")
+
+type VendorGroups interface {
+	VendorGroupID(ctx context.Context, legalEntityID, vendorID string) (string, error)
+}
+
+type FakeVendorGroups struct {
+	Groups map[string]string
 	Err    error
+}
+
+func (f FakeVendorGroups) VendorGroupID(_ context.Context, _, vendorID string) (string, error) {
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if g, ok := f.Groups[vendorID]; ok {
+		return g, nil
+	}
+	return "", ErrVendorNotFound
+}
+
+const FakeFiscalPeriodID = "99999999-9999-4999-8999-999999999999"
+
+type FakePeriods struct {
+	Status     PeriodStatus
+	Err        error
+	PeriodID   string
+	ResolveErr error
 }
 
 func (f FakePeriods) AP(context.Context, PeriodQuery) (PeriodStatus, error) { return f.Status, f.Err }
 
+func (f FakePeriods) Resolve(context.Context, PeriodQuery) (ResolvedPeriod, error) {
+	if f.ResolveErr != nil {
+		return ResolvedPeriod{}, f.ResolveErr
+	}
+	id := f.PeriodID
+	if id == "" {
+		id = FakeFiscalPeriodID
+	}
+	return ResolvedPeriod{FiscalPeriodID: id, Status: f.Status}, f.Err
+}
+
 type LedgerReverser interface {
-	Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error
+	Reverse(ctx context.Context, entryID, idempotencyKey, legalEntityID string, postingDate time.Time) error
 }
 
 type fakePosting struct {
@@ -201,7 +246,7 @@ func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) (string, error)
 	return id, nil
 }
 
-func (f *FakeLedger) Reverse(_ context.Context, entryID, _ string, _ time.Time) error {
+func (f *FakeLedger) Reverse(_ context.Context, entryID, _, _ string, _ time.Time) error {
 	if f.Err != nil {
 		return f.Err
 	}

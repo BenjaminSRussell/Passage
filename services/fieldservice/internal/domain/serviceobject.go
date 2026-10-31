@@ -80,6 +80,6 @@ func WarrantyEnd(w WarrantyTerm, start *time.Time) *time.Time {
 	if start == nil || w.Months <= 0 {
 		return nil
 	}
-	end := start.AddDate(0, w.Months, 0)
+	end := addMonthsClamped(*start, w.Months)
 	return &end
 }

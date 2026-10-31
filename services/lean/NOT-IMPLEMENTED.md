@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7 and 8 (lean)
+# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7, 8, 9 and 10 (lean)
 
 Built in slice 1: production flows with activities, connectivity check and activation
 (FR-24.8, LEAN-0004); kanban rules (FR-24.9); kanban generation for fixed rules with the
@@ -66,9 +66,28 @@ and a separate `/lean/demand` page; both were dropped in review: the ledger dupl
 already reads, and the demand page duplicated event-kanban generation on the rule detail screen
 and called a `kanbans:generate-preview` route the service does not serve.
 
+Slice 9 changed no lean behavior; it gave every message of events/asyncapi.yaml a summary so the
+AsyncAPI documentation gate has no FAIL lines.
+
+Built in slice 10: flow versions (Deliverable 3, FR-24.8). `POST /flows/{id}:new-version` (duty
+`lean.flow.write`, flow version, Idempotency-Key) copies an active flow into a draft with the next
+`flowVersion` and `previousFlowId`, optionally with a new takt time and a full replacement
+activity list; only an active flow can be revised (LEAN-0114) and only once (LEAN-0115, a unique
+index). Activating the draft expires the version it replaces the day before it starts, in the same
+transaction, and writes `dev.passage.lean.flow.expired.v1`; `flow.activated` carries
+`flowVersion` and `previousFlowId`. A version must start after the one it replaces (LEAN-0116).
+Migration 0005 widens the name uniqueness to (value stream, name, flow version). The flow list and
+detail screens show the version and the active-to date, and the detail screen of an active flow
+creates the next version (takt time only; the activity editor for a new version is below). The
+replaced version turns `expired` when the new one is activated, even when the new one starts later;
+its `activeTo` (the day before, or an earlier end it already had) bounds its validity. The PRD lists
+versioning under `POST /flows`; the slice uses a separate `:new-version` route so a create never
+silently revises an existing flow.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Deliverable 3: flow versions (a new version of an active flow, expiry of the previous one) | later slice of PSG-24 | slice 1 creates draft flows and activates them; flows cannot be edited or versioned yet. `value_stream_id` refers to the wave-6 operating unit by id only |
+| Deliverable 3: editing the activities of a new flow version on screen | later slice of PSG-24 | the API accepts a full activity list on `:new-version`; the screen copies the activities and changes the takt time only. A draft cannot be edited after it is created. `value_stream_id` refers to the wave-6 operating unit by id only |
+| Deliverable 3: moving kanban rules from an expired flow version to the new one | later slice of PSG-24 | rules keep pointing at the flow id they were made with; a rule of an expired version still generates cards. Repointing needs rule editing, which does not exist yet |
 | Deliverable 3: KanbanJob `planned_start` and the job schedule (KanbanJobSchedule), the board's ordering by planned start | later slice of PSG-24 | jobs carry their card's due date; planned start comes with job scheduling (auto plan and firm, `flow_activity_sequence`) and the wave-23 scheduler |
 | Deliverable 3: a card's jobs from a subset of the flow (`flow_activity_sequence` on the rule) | later slice of PSG-24 | every activity of the rule's flow gets a job, in sequence order; cards of a rule without a flow have no jobs and are moved by hand through every state |
 | Deliverable 3: GS1 DataMatrix card print | handoff | wave-5 document service and wave-32 print service |
@@ -92,5 +111,5 @@ and called a `kanbans:generate-preview` route the service does not serve.
 | Jobs: flow period auto-settle (monthly), fixed-kanban count suggestion (weekly Monday 05:00) with its report of deviations above 25 % | later slice of PSG-24 | need Temporal (wave 4); the check itself is built on demand for one rule (`/kanban-rules/{id}/count-check`, slice 8), with the daily demand supplied by the caller |
 | Fixed-kanban count check: daily demand derived by the service (from sales or forecast consumption of the rule's item) | handoff | the demand history lives in sales (wave 27) and demand forecasting (wave 22); until they publish it, the caller enters the daily demand |
 | Duty entries for `lean.read`, `lean.flow.write`, `lean.kanban-rule.write`, `lean.kanban.write`, `lean.kanban.work`, `lean.flow.settle` in OPA data | handoff | policies/ is outside this wave's ownership; the service enforces duties from forwarded headers |
-| Fixture files `lean-flow-demo` and `lean-kanban-sim` under testdata/ (PRD 4.24.9) | deviation | both fixtures are built in Go where they are used: `demoFlow` in internal/store/store_test.go and the AC-24.6 simulation in internal/domain/kanban_test.go and internal/store/store_test.go |
+| Fixture file `lean-flow-demo` under testdata/ (PRD 4.24.9) | deviation | built in Go where it is used: `demoFlow` in internal/store/store_test.go. `lean-kanban-sim` is now testdata/lean-kanban-sim.json (Wave 24 proof: one sales order, eleven lines over three event rules, written by the independent `gen_lean_kanban_sim.py`), run in the domain and through both work-cell boards in the database, with planned operator reports (scrap at Mix and Fill) checked against the completion events and the per-activity period work. The sales order is fixture data passed to `kanbans:generate`; no sales-line event drives it (the wave-27 consumer in the Deliverable 3 row above) |
 | Playwright board E2E (PRD 4.24.9) | later slice of PSG-24 | needs the end-to-end stack with RAF posting; the board is covered by vitest page tests |

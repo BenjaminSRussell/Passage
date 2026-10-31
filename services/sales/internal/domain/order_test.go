@@ -79,7 +79,7 @@ func TestReleaseCovers(t *testing.T) {
 
 func TestReleaseValidUntil(t *testing.T) {
 	at := time.Date(2027, 3, 1, 9, 0, 0, 0, time.UTC)
-	if got := ReleaseValidUntil(at); !got.Equal(at.AddDate(0, 0, 7)) {
+	if got := ReleaseValidUntil(at, 7); !got.Equal(at.AddDate(0, 0, 7)) {
 		t.Fatalf("got %s", got)
 	}
 }

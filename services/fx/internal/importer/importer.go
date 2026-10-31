@@ -22,7 +22,7 @@ type RunStore interface {
 	StartRun(ctx context.Context, provider, rateType string, runDate time.Time) (store.Run, bool, error)
 	RecordAttempt(ctx context.Context, runID string, attempts int) error
 	PostRates(ctx context.Context, in []store.RateInput) ([]store.Posted, error)
-	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error
+	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int, validFrom time.Time) error
 	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
 	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
 	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
@@ -139,7 +139,11 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 			return Result{RunID: run.ID, InProgress: true, Attempts: run.Attempts}, nil
 		}
 		i.metrics.record(ctx, name, rateType, false, run.LastSuccessAt)
-		return Result{RunID: run.ID, AlreadyDone: true, Attempts: run.Attempts, Imported: run.PairsImported, Unchanged: run.PairsUnchanged}, nil
+		res := Result{RunID: run.ID, AlreadyDone: true, Attempts: run.Attempts, Imported: run.PairsImported, Unchanged: run.PairsUnchanged}
+		if run.ValidFrom != nil {
+			res.ValidFrom = *run.ValidFrom
+		}
+		return res, nil
 	}
 	points, attempts, fetchErr, storeErr := i.fetch(ctx, rateType, date, run)
 	if storeErr != nil {
@@ -189,9 +193,11 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 		if err := i.store.FinishRunAborted(finishCtx, run.ID, res.Attempts, cause); err != nil {
 			return res, fmt.Errorf("finish pending run: %w", err)
 		}
+		i.metrics.record(ctx, name, rateType, false, nil)
+		slog.Info("fx import pending provider publication", "provider", name, "rateType", rateType, "runDate", date.UTC().Format(time.DateOnly), "cubeDate", res.ValidFrom.Format(time.DateOnly))
 		return res, nil
 	}
-	if err := i.store.FinishRunSucceeded(finishCtx, run.ID, res.Imported, res.Unchanged); err != nil {
+	if err := i.store.FinishRunSucceeded(finishCtx, run.ID, res.Imported, res.Unchanged, res.ValidFrom); err != nil {
 		return res, fmt.Errorf("finish run: %w", err)
 	}
 	i.metrics.record(ctx, name, rateType, false, &now)

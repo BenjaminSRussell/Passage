@@ -26,6 +26,7 @@ const (
 	sourceBlocking        = "BLOCKING"
 	sourceOwnershipChange = "OWNERSHIP_CHANGE" // receipt leg of an ownership-change line
 	sourceConsignmentLine = "CONSIGNMENT_LINE" // vendor-owned receipt of a replenishment line
+	sourceTransferIn      = "TRANSFER_IN"      // destination receipt of a TRANSFER journal line
 )
 
 // PostParams are the posting-profile and policy inputs of a journal post.
@@ -113,7 +114,10 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 		if j.Status != domain.JournalDraft && j.Status != domain.JournalApproved {
 			return problem(http.StatusConflict, CodeJournalState, "journal cannot be posted from status "+string(j.Status))
 		}
-		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p); err != nil {
+		if err := checkNamePostable(ctx, tx, j); err != nil {
+			return err
+		}
+		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p, ""); err != nil {
 			return err
 		}
 		out, err = loadJournal(ctx, tx, id, false)
@@ -126,17 +130,32 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 // row locks, valuation, negative and serial checks, transactions, the GL
 // entry, the POSTED status and the events. Count sheets reuse it for their
 // COUNT journal.
-func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, p PostParams) error {
+//
+// countSheet is the sheet whose own COUNT journal this is (empty for any other
+// journal); only that sheet's freeze does not apply to it.
+func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, p PostParams, countSheet string) error {
 	if err := domain.ValidateJournal(j, s.rules); err != nil {
 		return domainProblem(err)
 	}
 	offset := offsetAccount(j, p)
-	if offset == "" {
+	if offset == "" && j.Type != domain.JournalTransfer {
 		return problem(http.StatusUnprocessableEntity, CodeAccountMissing, fmt.Sprintf("no offset account is configured for %s journals", j.Type))
 	}
 	plan := domain.PlanPosting(j)
 	rows, order, err := groupRows(plan)
 	if err != nil {
+		return err
+	}
+	sets := make([]domain.Dimensions, 0, len(order))
+	for _, k := range order {
+		sets = append(sets, rows[k].dims)
+	}
+	// Shared dimension sets first, in hash order, before the serial and row
+	// locks (a first insert holds its index entry until commit).
+	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
+		return err
+	}
+	if err := checkCountFreeze(ctx, tx, tenantID, j.LegalEntityID, countSheet, orderedRows(rows, order)); err != nil {
 		return err
 	}
 	serials := receiptSerials(plan)
@@ -146,6 +165,11 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	corrected, err := correctedTransactions(ctx, tx, tenantID, j)
 	if err != nil {
 		return err
+	}
+	if j.Type == domain.JournalTransfer {
+		if err := valueTransfer(ctx, tx, tenantID, j, plan, rows, order); err != nil {
+			return err
+		}
 	}
 	for _, k := range order {
 		r := rows[k]
@@ -162,6 +186,8 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			if vendorOwned {
 				// Vendor-owned stock never carries value (BR-16.14).
 				plan[i].Value = decimal.Zero
+			} else if j.Type == domain.JournalTransfer {
+				// Valued before the row locks of the loop (valueTransfer).
 			} else if orig, ok := corrected[l.ReversesLineID]; ok {
 				// A reversal line mirrors the transaction it corrects (BR-16.12).
 				plan[i].Value, plan[i].Corrects = orig.value.Neg(), orig.id
@@ -191,9 +217,13 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err := checkSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
 		return err
 	}
-	entry, err := domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency)
-	if err != nil {
-		return err
+	entry := domain.JournalEntry{Currency: j.Currency, Lines: []domain.GLLine{}}
+	if j.Type != domain.JournalTransfer {
+		// A transfer moves value between dimension sets of the same inventory
+		// account: both legs cancel and there is no GL entry.
+		if entry, err = domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency); err != nil {
+			return err
+		}
 	}
 	if !entry.Balanced() {
 		return errors.New("inventory: journal entry does not balance")
@@ -205,6 +235,9 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			d := doc
 			if plan[i].Paired {
 				d.sourceType = sourceOwnershipChange
+				if j.Type == domain.JournalTransfer {
+					d.sourceType = sourceTransferIn
+				}
 			}
 			if _, err := writeTransaction(ctx, tx, tenantID, d, plan[i].Line.ID, r, plan[i]); err != nil {
 				return err
@@ -231,6 +264,34 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	}
 	if j.Type == domain.JournalOwnershipChange {
 		return enqueue(ctx, tx, "journal", j.ID, invevents.OwnershipChanged, tenantID, ownershipChanged(j, plan))
+	}
+	return nil
+}
+
+// valueTransfer values the legs of a TRANSFER journal before the posting loop:
+// it locks every row in key order, values each issue at its source row's
+// running average (lines of one source row in line order), and gives the
+// paired receipt the same value with the opposite sign, so the inventory
+// account does not move. CheckTransferLines guarantees that no row is both a
+// source and a destination.
+func valueTransfer(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, plan []domain.PostedLine, rows map[string]*row, order []string) error {
+	for _, k := range order {
+		r := rows[k]
+		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
+			return err
+		}
+		oh := r.oh
+		for _, i := range r.lines {
+			l := plan[i].Line
+			if l.Qty.Sign() >= 0 {
+				continue
+			}
+			v := oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
+			plan[i].Value, plan[i+1].Value = v, v.Neg()
+			if err := oh.Post(plan[i].Status, l.Qty, v, 1); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

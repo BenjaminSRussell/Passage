@@ -56,6 +56,7 @@ const (
 	maxBOMDepth       = 12
 	maxBOMLines       = 5000
 	maxOperations     = 500
+	maxCoProducts     = 50
 	defaultPageSize   = 50
 	maxPageSize       = 200
 	readyTimeout      = 500 * time.Millisecond
@@ -141,10 +142,21 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/wip-balances", a.wipReport)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/variances", a.varianceReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/subcontract-operations", a.subcontractReport)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/operations", a.operationsOverview)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals", a.journalInquiry)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/kpi", a.orderKPIs)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/trigger-points", a.listTriggerPoints)
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
 	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/operations/{operCommand}", a.operationCommand)
+	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/parameters", a.listParameters)
+	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/parameters", a.saveParameters)
+	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/ocm-profiles", a.listOCMProfiles)
+	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/ocm-profiles", a.saveOCMProfile)
+	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/order-changes:detect", a.detectChanges)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes", a.listChanges)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes/{id}", a.getChange)
+	r.Post("/v1/production/order-changes/{id}", a.changeCommand)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -195,6 +207,18 @@ type createRequest struct {
 	MinimumQty *decimal.Decimal `json:"minimumQty,omitempty"`
 	MaximumQty *decimal.Decimal `json:"maximumQty,omitempty"`
 	Multiple   *decimal.Decimal `json:"multiple,omitempty"`
+	// CoProducts are co-products and by-products the order yields besides its
+	// product (FR-21.14); omitempty keeps the request hash of a body without them.
+	CoProducts []coProductRequest `json:"coProducts,omitempty"`
+}
+
+// coProductRequest declares a co-product or by-product: the item and its planned
+// quantity per unit of the product. An empty type is a co-product.
+type coProductRequest struct {
+	LineNo string          `json:"lineNo"`
+	Type   string          `json:"type,omitempty"`
+	ItemID string          `json:"itemId"`
+	QtyPer decimal.Decimal `json:"qtyPer"`
 }
 
 // quantityRules validates the optional item order settings of a create or a
@@ -233,7 +257,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
 	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
-	if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
+	if ids.Valid(req.LegalEntityID) && !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
 	}
 	if len(fields) > 0 {
@@ -264,10 +288,19 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
+	declared := make([]domain.CoProduct, len(req.CoProducts))
+	for i, c := range req.CoProducts {
+		declared[i] = domain.CoProduct{LineNo: c.LineNo, Type: c.Type, ItemID: c.ItemID, QtyPer: c.QtyPer}
+	}
+	coProducts, err := domain.PlanCoProducts(declared, req.Quantity)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
-		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, EstimateOnCreate: a.cfg.EstimateOnCreate,
+		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
 	})
 	if err != nil {
@@ -676,40 +709,43 @@ func validateCreate(req createRequest, fields map[string]string) {
 	case len(req.Operations) > maxOperations:
 		fields["operations"] = fmt.Sprintf("at most %d operations", maxOperations)
 	}
-	for i, op := range req.Operations {
-		at := fmt.Sprintf("operations[%d]", i)
-		if op.OperNumber < 1 {
-			fields[at+".operNumber"] = "must be a positive whole number"
-		}
-		if !ids.Valid(op.ResourceID) {
-			fields[at+".resourceId"] = "must be a UUID"
-		}
-		for name, v := range map[string]decimal.Decimal{"setupTimeH": op.SetupH, "runTimeHPer": op.RunHPer, "scrapPct": op.ScrapPct,
-			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice} {
-			checkQuantity(at+"."+name, v, false, fields)
-		}
-		if !op.ProcessQty.IsZero() {
-			fields[at+".processQty"] = "is computed by the service"
-		}
-		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
-			fields[at+".status"] = "hours, quantities and status are reported by route cards"
-		}
+	validateRouteSnapshot(req.Operations, fields)
+	validateBOMSnapshot(req.BOM, fields)
+	validateCoProducts(req, fields)
+}
+
+// validateCoProducts checks the declared co-products: a rework order yields none,
+// each line has a unique number, a known type, an item and a positive quantity
+// per unit, and no line yields the order's own product.
+func validateCoProducts(req createRequest, fields map[string]string) {
+	if len(req.CoProducts) == 0 {
+		return
 	}
-	count := 0
+	if req.OriginType == domain.OriginRework {
+		fields["coProducts"] = "a rework order yields no co-products"
+		return
+	}
+	if len(req.CoProducts) > maxCoProducts {
+		fields["coProducts"] = fmt.Sprintf("at most %d co-products", maxCoProducts)
+		return
+	}
 	seen := map[string]bool{}
-	for i, c := range req.BOM {
-		at := fmt.Sprintf("bom[%d]", i)
-		switch {
-		case c.LineNo == "" || len(c.LineNo) > maxLineNo:
-			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters", maxLineNo)
-		case seen[c.LineNo]:
-			fields[at+".lineNo"] = "must be unique in the BOM"
+	for i, c := range req.CoProducts {
+		at := fmt.Sprintf("coProducts[%d]", i)
+		if c.LineNo == "" || len(c.LineNo) > maxLineNo || seen[c.LineNo] {
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters, listed once", maxLineNo)
 		}
 		seen[c.LineNo] = true
-	}
-	validateBOM(req.BOM, "bom", 1, &count, fields)
-	if count > maxBOMLines {
-		fields["bom"] = fmt.Sprintf("at most %d lines", maxBOMLines)
+		if c.Type != "" && c.Type != domain.CoProductTypeCo && c.Type != domain.CoProductTypeBy {
+			fields[at+".type"] = "must be co-product or by-product"
+		}
+		switch {
+		case !ids.Valid(c.ItemID):
+			fields[at+".itemId"] = "must be a UUID"
+		case c.ItemID == req.ProductID:
+			fields[at+".itemId"] = "must not be the order's product"
+		}
+		checkQuantity(at+".qtyPer", c.QtyPer, true, fields)
 	}
 }
 
@@ -759,4 +795,48 @@ func problemFrom(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
 	}
 	return err
+}
+
+// validateRouteSnapshot checks the operations of a route snapshot: the shape a
+// create request and an ECO notice (FR-21.16) share.
+func validateRouteSnapshot(ops []domain.Operation, fields map[string]string) {
+	for i, op := range ops {
+		at := fmt.Sprintf("operations[%d]", i)
+		if op.OperNumber < 1 {
+			fields[at+".operNumber"] = "must be a positive whole number"
+		}
+		if !ids.Valid(op.ResourceID) {
+			fields[at+".resourceId"] = "must be a UUID"
+		}
+		for name, v := range map[string]decimal.Decimal{"setupTimeH": op.SetupH, "runTimeHPer": op.RunHPer, "scrapPct": op.ScrapPct,
+			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice} {
+			checkQuantity(at+"."+name, v, false, fields)
+		}
+		if !op.ProcessQty.IsZero() {
+			fields[at+".processQty"] = "is computed by the service"
+		}
+		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
+			fields[at+".status"] = "hours, quantities and status are reported by route cards"
+		}
+	}
+}
+
+// validateBOMSnapshot checks a BOM snapshot's line numbers, depth and quantities.
+func validateBOMSnapshot(bom []domain.BOMComponent, fields map[string]string) {
+	count := 0
+	seen := map[string]bool{}
+	for i, c := range bom {
+		at := fmt.Sprintf("bom[%d]", i)
+		switch {
+		case c.LineNo == "" || len(c.LineNo) > maxLineNo:
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters", maxLineNo)
+		case seen[c.LineNo]:
+			fields[at+".lineNo"] = "must be unique in the BOM"
+		}
+		seen[c.LineNo] = true
+	}
+	validateBOM(bom, "bom", 1, &count, fields)
+	if count > maxBOMLines {
+		fields["bom"] = fmt.Sprintf("at most %d lines", maxBOMLines)
+	}
 }

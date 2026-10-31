@@ -24,6 +24,9 @@ type ReleaseLine struct {
 	// picking workbench filters and groups on (FR-28.13). Both are optional.
 	CarrierCode string
 	Zone        string
+	// TrackingRequired marks a line whose product carries a batch or serial
+	// tracking dimension (BR-28.10): it cannot post without tracking entries.
+	TrackingRequired bool
 }
 
 // ReleaseRule carries the warehouse release parameters.

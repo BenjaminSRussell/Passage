@@ -33,7 +33,25 @@ Pass criteria checked by the test:
 - the short picks and backorders report lists every short pick, all closed,
   and `pick.confirmed` carried each backordered quantity.
 
-Not in this fixture: batch- and serial-tracked items (BR-28.10 tracking is not
-built), the on-hand check against inventory (inventory issue is a handoff to
-wave 16), the "all SHIPPED within 60 minutes" timing on production hardware,
-and carrier calls (carrier-gateway).
+## Simulated warehouse on-hand (batch/serial mix)
+
+`internal/store/siminventory_test.go` (`TestWarehouseSim1k_SimulatedWarehouseOnHand`)
+generates the same shape from seed 2828 and adds the inventory side:
+
+| Parameter | Value |
+|---|---|
+| Tracking | per product from the seed: 7 in 10 untracked, 2 batch, 1 serial (92 / 20 / 8) |
+| Stock | demand plus 0 to 20 units per warehouse and product (15 have no spare unit); batches split 1 to 3 ways, one serial per unit |
+| Picking | oldest batch first, lowest serial first; entries captured after each pick |
+| Cancellations | every seventh shipment cancels its first slip and posts it again (143) |
+| Short picks | every tenth shipment, as above (100) |
+
+Pass criteria: every order ends SHIPPED; the floor ledger (what the pickers took
+and got back) equals an on-hand projection rebuilt only from
+`packingslip.posted` and `packingslip.cancelled` on every warehouse, product,
+batch and serial; no balance goes negative during the replay; and each
+warehouse and product ends at seeded stock minus demand.
+
+Not in this fixture: inventory's own consumer (wave 16), the "all SHIPPED
+within 60 minutes" timing on production hardware, and carrier calls
+(carrier-gateway).

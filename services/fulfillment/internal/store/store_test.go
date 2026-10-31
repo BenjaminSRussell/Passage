@@ -36,7 +36,7 @@ func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
 // ctxFor is a principal of tenant n; scope is its legal-entity scope ("" = all).
 func ctxFor(n int, scope string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope, UserID: "user-test",
-		Duties: map[string]struct{}{}})
+		Duties: testkit.ScopeDuties(scope)})
 }
 
 func idem(name string) store.Idem { return store.Idem{Key: name + "-" + ids.New(), Hash: "h-" + name} }

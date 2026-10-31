@@ -2,10 +2,11 @@
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
-as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
+as-built genealogy; slice 4 adds the bulk status update, and split and merge (slice 11: split of a Started order with the WIP transfer); slice 5 adds
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
-order quantity rules, estimate on create and the operation finish and reopen commands.
+order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds
+order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters.
 
 Slice 1:
 
@@ -48,6 +49,12 @@ Slice 2:
   Cr labor and overhead absorption at the operation's rates, RAF Dr finished goods / Cr WIP at the
   planned unit cost (cumulative rounding, so receipts never drift). Amounts round to the
   currency's minor unit with `platform/go/money`.
+- Co-products and by-products (slice 12, FR-21.14): `coProducts` on order create declares items the
+  order yields besides its product (planned quantity = quantity per unit × order quantity). A report
+  as finished may carry `coProducts` receipt lines (the `:report-finished` command reports them in
+  proportion); planned cost is spread over product and co-products by quantity only, and End measures
+  earned output over the same base so WIP still clears to 0. A line typed `by-product` carries no cost
+  (BR-9.12) and is received at zero. Split and merge refuse such orders.
 - Flushing principles on BOM lines: `start` lines are issued for their remaining quantity by a
   picking list that `:start` posts; `finish` lines are consumed in proportion to each report as
   finished (AC-21.4: the full quantity consumes exactly qty per × quantity × (1 + scrap%));
@@ -206,6 +213,35 @@ Slice 9:
   emits `operation.statuschanged`; a command already in effect changes nothing. Migration
   `0008_operation_log.sql` adds the log with RLS and grants.
 
+Slice 10:
+
+- OCM profiles (FR-21.16, 4.21.13): `PUT /v1/production/ocm-profiles` (If-Match to replace) and `GET`
+  per legal entity × item group × site (either may be `All`), resolved item group × site, item group ×
+  All, All × site, All × All; with none stored the default is manual and no surcharge. Mode
+  `automatic`, `manual` or `none`; surcharge = a fixed amount plus a percentage of a positive delta
+  (BR-21.12). Needs `production.setup.write` / `.read`.
+- Detection: `POST /v1/production/order-changes:detect` takes an ECO notice (`ecoId`, `productId`,
+  optional `siteId`, and the new `bom` and/or `operations`, as on create) and records every open order
+  (Created to Released) of the product that differs from it and whose profile is not `none`, once per
+  (order, ECO), with the delta counts and the change cost; a hand-edited order is flagged
+  `needsReview` (an edit after detection flags its pending changes too). `orderchange.detected` per
+  record. Older pending changes of the order that the ECO covers are dismissed as superseded; one it
+  covers only in part is blocked (409 `PRODUCTION_ORDER_CHANGE_SUPERSEDED`). Needs
+  `production.order.write`.
+- Automatic profile: every status command (except `:cancel`) on an order before Started first
+  applies its pending automatic changes, oldest first, unless the order was edited by hand or the
+  change is blocked; the record notes `applied automatically at :<command>`.
+- Worklist and record: `GET /v1/production/order-changes` (status, site, order, ECO, needsReview,
+  keyset-paged) and `/{id}` (ETag is the record version).
+- `POST …/order-changes/{id}:preview` shows the delta, the planned cost before and after, the
+  surcharge and change cost, and why applying is blocked now; `:apply` (If-Match on the record,
+  Idempotency-Key, `production.order.apply-change`) re-explodes the order through the order-edit
+  rules, re-estimates, stores the before and after snapshot hashes and emits `order.bomedited` and
+  `orderchange.applied`; lines with consumption or journals are never removed or re-pointed (409
+  `PRODUCTION_ORDER_EDIT_TARGET_IN_USE`); `:dismiss` sets it aside with a note.
+- Migration `0009_order_change.sql` adds `production_ocm_profile` and `production_order_change`
+  with RLS, a legal-entity policy and grants (select, insert, update).
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -221,13 +257,14 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned),
                        trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route),
                        subcontract.go (FR-21.10 purchase requests),
-                       operation.go (FR-21.1 order quantity rules, FR-21.6 finish and reopen)
+                       operation.go (FR-21.1 order quantity rules, FR-21.6 finish and reopen),
+                       ocm.go (FR-21.16 profiles, snapshot diff, BR-21.12 change cost)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
                        split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
-                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards),
+                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards), ocm.go (OCM profiles, detection, preview, apply, dismiss),
                        subcontract.go (purchase requests at release, subcontract operations inquiry),
                        operation.go (finish and reopen)
 internal/api/          HTTP handlers, request validation, platform authz duties
@@ -270,7 +307,8 @@ The routes are `/v1/production/...`; the gateway serves them under `/api`.
 go vet ./... && go test ./...
 PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...                     # store and HTTP tests on a database
 PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app:...@.../... (also)    # the RLS test under the app role
-python3 internal/domain/testdata/gen_prod_orders_50.py                     # regenerate the AC2 fixture
+python3 -I internal/domain/testdata/gen_prod_orders_50.py                  # regenerate the AC2 domain fixture
+python3 -I internal/store/testdata/gen_costing_50.py                       # regenerate the AC2 database fixture
 ```
 
 Database tests skip when `PASSAGE_TEST_DATABASE_URL` is unset; the RLS test also needs a
@@ -283,7 +321,7 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, as-built and where-used, trigger points |
+| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, the operations overview and journal inquiry across orders, as-built and where-used, trigger points |
 | View production costs | `production.cost.read` | `GET …/{id}/costs`, `GET /v1/production/wip-balances`, `GET /v1/production/variances` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `PATCH …/{id}/bom` |
 | Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
@@ -342,6 +380,11 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ORDER_EDIT_TARGET_EXISTS` | 409 | The line or operation to add is already on the order |
 | `PRODUCTION_ORDER_EDIT_TARGET_IN_USE` | 409 | The line or operation has consumption, feedback or journals |
 | `PRODUCTION_ORDER_EDIT_TARGET_NOT_FOUND` | 422 | The line or operation to change or remove is not on the order |
+| `PRODUCTION_ORDER_CHANGE_NOT_FOUND` | 404 | No order change with that id in the caller's scope |
+| `PRODUCTION_ORDER_CHANGE_RESOLVED` | 409 | Applying or dismissing a change already applied (or dismissing one applied) |
+| `PRODUCTION_ORDER_CHANGE_NOT_ELIGIBLE` | 409 | Applying a change to an order that is Started or later (FR-21.16) |
+| `PRODUCTION_ORDER_CHANGE_SUPERSEDED` | 409 | A later ECO on the order replaces the same BOM or route; applying would undo it |
+| `PRODUCTION_ORDER_CHANGE_NO_DELTA` | 422 | The order already matches the change's BOM and route; dismiss it |
 | `PRODUCTION_TRIGGER_CONDITION_INVALID` | 422 | The trigger condition is not `<field> <op> <number>` |
 | `PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED` | 422 | `release-next` or `start-workflow` (waves 23 and 4) |
 | `PRODUCTION_TRIGGER_OPERATION_NOT_FOUND` | 422 | The trigger's operation is not on the order's route |
@@ -365,3 +408,49 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 PSG-21 (wave 21), slices PSG-2101 to PSG-2106. Depends on PSG-20 (costing). Later slices: job
 cards, subcontracting, the split of Started orders with the WIP transfer of BR-21.11 and order
 change management. See `NOT-IMPLEMENTED.md`.
+
+Slice 13 (read-only inquiries of 4.21.14, no migration):
+
+- Operations overview: `GET /v1/production/operations` with legal entity, site, resource, order,
+  operation status, order status and delivery-date range: each operation with its process
+  quantity, planned hours (setup + run × process quantity), hours reported by route cards, good and
+  error quantities and status, keyset-paged by order and operation, with totals (counts by status,
+  hours, quantities) over the whole filter (`production.order.read`).
+- Production journal inquiry: `GET /v1/production/journals` with legal entity, order (id or exact number), type
+  (including `split-transfer`), posted state and posting-date range: journal number, type, order,
+  posting date, posted, line count, the value consumed (issue and hours lines) and received
+  (receipt and co-product lines) in the order currency once posted, journal entry id, keyset-paged by id, with
+  the count over the whole filter (`production.order.read`).
+- Order KPIs: `GET /v1/production/kpi` with legal entity, site, product, the UTC date range the orders
+  ended in, an as-of date and `groupBy` site or product: orders ended, on-time % (finished, the last
+  `ReportedAsFinished` entry of the status log or the `Ended` one without it, on or before the
+  delivery date, over the ended orders that have one), mean cycle days (first `Started` entry to
+  the finish), scrap % (error ÷ finished + error) and the open orders (current status) and those
+  overdue as of the date, per group and in total; rates are null with nothing to measure
+  (`production.order.read`). Read-only; no table or event of its own.
+
+Slice 15:
+
+- Subcontract purchase request changes (FR-21.10): purchasing hears about every change to an
+  operation it was asked to buy. `subcontract.pochanged` carries the previous and the current
+  quantity, unit price, amount and due date after a quantity or delivery date PATCH, an order BOM or
+  route edit (also from an engineering change), a split (the original's PO shrinks) or a merge (the
+  survivor's grows); `subcontract.pocancelled` withdraws the
+  request when the order is cancelled or merged away, or an edit removes the operation, turns
+  subcontracting off or changes the vendor resource. A cancel clears `poRequestedAt` and stamps
+  `poCancelledAt` (migration `0012_subcontract_changes.sql`), so a later release or a switch back on
+  requests afresh. The comparison is `domain.PlanSubcontractChanges`, run in the transaction of the
+  change. The subcontract inquiry and the order's route tab show a withdrawn request.
+
+Slice 16:
+
+- Production parameters (PRD 4.21.13): `GET`/`PUT /v1/production/parameters` store, per legal entity ×
+  site (a site id, or `All`; a site's row wins), the RAF tolerance, over-consumption tolerance,
+  auto-start on feedback, estimate on create, split allocation default, trigger points enabled and
+  as-built required (migration `0013_parameters.sql`, `domain.ResolveParameters`). `PUT` replaces
+  under If-Match, needs every setting and enqueues `parameters.saved` in the same transaction. The
+  store resolves the order's legal entity and site inside each transaction: a stored row overrides
+  the service environment (`PRODUCTION_RAF_TOLERANCE_PCT` and the others, which stay the defaults
+  for a site with no row) on creating and posting journals, report as finished, create, split and
+  trigger evaluation. With as-built required, `:end` of an order that reported output without an
+  attached as-built record is refused with 422 `PRODUCTION_AS_BUILT_REQUIRED`.

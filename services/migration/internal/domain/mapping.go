@@ -57,6 +57,7 @@ type FieldRule struct {
 	Scale       *int              `json:"scale,omitempty"`
 	Default     *string           `json:"default,omitempty"`
 	Required    bool              `json:"required,omitempty"`
+	Format      string            `json:"format,omitempty"`
 }
 
 type Mapping struct {
@@ -64,6 +65,7 @@ type Mapping struct {
 	Version        int           `json:"version"`
 	SourceTimezone string        `json:"sourceTimezone,omitempty"`
 	Fields         []FieldRule   `json:"fields"`
+	RejectWhen     []RejectWhen  `json:"rejectWhen,omitempty"`
 	Tests          []MappingTest `json:"tests,omitempty"`
 	loc            *time.Location
 }
@@ -107,6 +109,9 @@ func ParseMapping(data []byte) (Mapping, error) {
 			}
 		}
 	}
+	if e := m.checkRejectWhen(targets); e != nil {
+		return Mapping{}, e
+	}
 	if e := m.checkTests(); e != nil {
 		return Mapping{}, e
 	}
@@ -119,7 +124,15 @@ func (m Mapping) Apply(row map[string]any) (map[string]any, []Reject) {
 }
 
 func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warning, []Reject) {
+	out, warnings, rejects, _ := m.applyTemplated(row, nil)
+	return out, warnings, rejects
+}
+
+// applyTemplated maps one row. A target whose source is absent takes the data template value when the template
+// holds one (before the rule default), and is reported in fromTemplate for the lineage.
+func (m Mapping) applyTemplated(row map[string]any, template map[string]string) (map[string]any, []Warning, []Reject, []string) {
 	out := make(map[string]any, len(m.Fields))
+	var fromTemplate []string
 	var warnings []Warning
 	var rejects []Reject
 	for _, f := range m.Fields {
@@ -131,8 +144,16 @@ func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warnin
 		if present && isNullMarker(f.Fn, text) {
 			present = false
 		}
+		if present && f.Type == TypeDecimal && len(f.Enum) == 0 && isNumber(row[f.Source]) {
+			// A JSON number is already a machine number, not text in the column's locale: 1.234 stays 1.234
+			// under decimal_comma instead of being read as 1234. (A number under YYYYMMDD is still read as a date.)
+			f.Format = ""
+		}
 		if !present {
-			if f.Default != nil {
+			if tv, ok := template[f.Target]; ok {
+				text, present = tv, true
+				fromTemplate = append(fromTemplate, f.Target)
+			} else if f.Default != nil {
 				text, present = *f.Default, true
 			} else if f.Required {
 				rejects = append(rejects, Reject{f.Target, CodeMapRequired, f.origin() + " is required"})
@@ -162,10 +183,13 @@ func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warnin
 		}
 		out[f.Target] = v
 	}
-	if len(rejects) > 0 {
-		return nil, nil, rejects
+	if len(rejects) == 0 {
+		rejects = m.rejectConditions(out)
 	}
-	return out, warnings, nil
+	if len(rejects) > 0 {
+		return nil, nil, rejects, nil
+	}
+	return out, warnings, nil, fromTemplate
 }
 
 func (m Mapping) location() *time.Location {
@@ -178,6 +202,9 @@ func (m Mapping) location() *time.Location {
 func (m Mapping) coerce(f FieldRule, text string, row map[string]any) (any, *Warning, *Reject) {
 	if f.Fn != "" {
 		return m.coerceFn(f, text, row)
+	}
+	if f.Format != "" {
+		return m.coerceFormatted(f, text)
 	}
 	switch f.Type {
 	case TypeString:
@@ -242,6 +269,14 @@ func coerceDecimal(f FieldRule, text string) (any, *Warning, *Reject) {
 		w = &Warning{f.Target, CodePrecisionLoss, fmt.Sprintf("%s rounded to scale %d, delta %s", f.origin(), places, d.Sub(r).Abs())}
 	}
 	return r.StringFixed(places), w, nil
+}
+
+func isNumber(v any) bool {
+	switch v.(type) {
+	case int, int64, float64, json.Number:
+		return true
+	}
+	return false
 }
 
 func sourceText(v any) (text string, present, scalar bool) {

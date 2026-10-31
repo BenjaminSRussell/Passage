@@ -362,7 +362,7 @@ describe("Cycle counting", () => {
   });
 
   it("validates and creates a count plan", async () => {
-    const values = { legalEntityId: ENTITY_ID, name: "Weekly", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false };
+    const values = { legalEntityId: ENTITY_ID, name: "Weekly", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false, freezeStock: false, fourEyes: false, locationFrom: "", locationTo: "", abcClass: "" as const, samplePct: "" };
     expect(validateCountPlan(values)).toEqual({});
     expect(validateCountPlan({ ...values, tolerancePct: "120", toleranceValue: "-1", name: "" })).toEqual({
       name: "Name the plan (up to 120 characters).",
@@ -379,7 +379,7 @@ describe("Cycle counting", () => {
     fireEvent.click(screen.getByLabelText("Blind count"));
     fireEvent.click(screen.getByRole("button", { name: "Create count plan" }));
     expect(await screen.findByRole("heading", { name: "Count plans" })).toBeInTheDocument();
-    expect(bodyOf(sent("POST")[0])).toEqual({ legalEntityId: ENTITY_ID, name: "Weekly W1", warehouse: "W1", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: true });
+    expect(bodyOf(sent("POST")[0])).toEqual({ legalEntityId: ENTITY_ID, name: "Weekly W1", warehouse: "W1", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: true, freezeStock: false, fourEyes: false });
   });
 
   it("lists open sheets and opens one", async () => {

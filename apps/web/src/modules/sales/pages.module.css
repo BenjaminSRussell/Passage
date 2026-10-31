@@ -164,3 +164,10 @@
   flex-wrap: wrap;
   gap: var(--space-1);
 }
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-md-size, 1rem);
+  font-weight: 600;
+}

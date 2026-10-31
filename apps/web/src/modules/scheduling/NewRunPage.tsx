@@ -8,6 +8,7 @@ import styles from "./pages.module.css";
 interface Values {
   scope: "site" | "selection";
   mode: "jobs" | "operations";
+  direction: "forward" | "backward";
   finite: boolean;
   operationIds: string;
   start: string;
@@ -41,12 +42,12 @@ export function validateRun(values: Values): Errors {
   return errors;
 }
 
-const fieldNames: Record<string, keyof Values> = { scope: "scope", mode: "mode", operationIds: "operationIds", start: "start", horizonDays: "horizonDays" };
+const fieldNames: Record<string, keyof Values> = { scope: "scope", mode: "mode", direction: "direction", operationIds: "operationIds", start: "start", horizonDays: "horizonDays" };
 
 /** Start a heuristic run (FR-23.5, FR-23.11). */
 export function NewRunPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<Values>({ scope: "site", mode: "jobs", finite: true, operationIds: "", start: "", horizonDays: "" });
+  const [values, setValues] = useState<Values>({ scope: "site", mode: "jobs", direction: "forward", finite: true, operationIds: "", start: "", horizonDays: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,7 +64,7 @@ export function NewRunPage() {
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
-    const input: NewRun = { scope: values.scope, mode: values.mode, finite: values.finite };
+    const input: NewRun = { scope: values.scope, mode: values.mode, direction: values.direction, finite: values.finite };
     if (values.scope === "selection") input.operationIds = parseIds(values.operationIds);
     const start = fromUtcInput(values.start);
     if (start) input.start = start;
@@ -91,7 +92,7 @@ export function NewRunPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Start a schedule run"
-        description="The heuristic places operations forward from the start time on the candidate that finishes first. Firmed jobs stay where they are."
+        description="Forward places operations from the start time on the candidate that finishes first. Backward starts each order as late as it can and still end by its due date. Firmed jobs stay where they are."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -108,6 +109,18 @@ export function NewRunPage() {
               <Select {...control} value={values.mode} onChange={(event) => update({ mode: event.target.value as Values["mode"] })}>
                 <option value="jobs">Jobs</option>
                 <option value="operations">Operations</option>
+              </Select>
+            )}
+          </FormField>
+          <FormField
+            id="run-direction"
+            label="Direction"
+            hint="Backward needs a due date on the order. When it cannot end on time, or would have to start within an hour of the run start, the order is placed forward and flagged late (SCHED-0003)."
+          >
+            {(control) => (
+              <Select {...control} value={values.direction} onChange={(event) => update({ direction: event.target.value as Values["direction"] })}>
+                <option value="forward">Forward from the start</option>
+                <option value="backward">Backward from the due date</option>
               </Select>
             )}
           </FormField>

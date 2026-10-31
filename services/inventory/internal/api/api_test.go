@@ -24,12 +24,20 @@ import (
 
 // fakeStore records the calls the HTTP layer makes; it never touches Postgres.
 type fakeStore struct {
-	postVersion int
-	onHand      store.OnHandFilter
-	journals    store.JournalFilter
-	keys        map[string]domain.Journal
-	lines       []domain.JournalLine
-	err         error
+	lineFilter      store.TransferLineFilter
+	variance        store.CountVarianceFilter
+	negative        store.NegativeOnHandFilter
+	workspaceEntity string
+	trace           store.TraceFilter
+	combos          store.DimensionCombinationFilter
+	postVersion     int
+	onHand          store.OnHandFilter
+	journals        store.JournalFilter
+	journalType     domain.JournalType
+	keys            map[string]domain.Journal
+	lines           []domain.JournalLine
+	err             error
+	jn              journalNameFake
 
 	reserveIn        store.ReserveInput
 	reserveOut       store.ReserveResult
@@ -51,6 +59,7 @@ type fakeStore struct {
 	sheet            domain.CountSheet
 	countVersion     int
 	counted          decimal.Decimal
+	recountReason    string
 	countCanApprove  bool
 	postedParams     store.PostParams
 	transferVersion  int
@@ -124,7 +133,7 @@ func (f *fakeStore) AddJournalLines(_ context.Context, id string, lines []domain
 
 func (f *fakeStore) GetJournal(_ context.Context, id string) (domain.Journal, error) {
 	posted := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	return domain.Journal{ID: id, Status: domain.JournalPosted, Version: 4, Currency: "USD", PostedAt: &posted,
+	return domain.Journal{ID: id, Type: f.journalType, Status: domain.JournalPosted, Version: 4, Currency: "USD", PostedAt: &posted,
 		Lines: []domain.JournalLine{{ID: ids.New(), LineNo: 1, ProductID: ids.New(), Qty: decimal.NewFromInt(2), EnteredQty: decimal.NewFromInt(2)}},
 		GLEntry: &domain.JournalEntry{Currency: "USD", Lines: []domain.GLLine{
 			{Account: "1300", Debit: decimal.RequireFromString("8.5"), Credit: decimal.Zero},
@@ -150,7 +159,7 @@ func (f *fakeStore) ListOnHand(_ context.Context, flt store.OnHandFilter) (store
 	f.onHand = flt
 	// The group total is positive but an underlying row is negative: the API
 	// must pass the store's flag through rather than recompute it from the total.
-	return store.OnHandResult{Truncated: true, Rows: []store.OnHandRow{{Group: map[string]string{"site": "S1"}, PhysicalInvent: decimal.NewFromInt(3),
+	return store.OnHandResult{Truncated: true, AsOf: flt.AsOf, Rows: []store.OnHandRow{{Group: map[string]string{"site": "S1"}, PhysicalInvent: decimal.NewFromInt(3),
 		AvailPhysical: decimal.NewFromInt(3), AvailOrdered: decimal.NewFromInt(3), PostedValue: decimal.Zero, Blocked: decimal.NewFromInt(2), Currency: "USD", Negative: true}}}, nil
 }
 
@@ -249,6 +258,42 @@ func (f *fakeStore) PostCountSheet(_ context.Context, _ string, version int, can
 		return domain.CountSheet{}, f.err
 	}
 	f.sheet.Status = domain.CountPosted
+	return f.sheet, nil
+}
+
+func (f *fakeStore) SubmitCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountCounted
+	return f.sheet, nil
+}
+
+func (f *fakeStore) ApproveCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountApproved
+	return f.sheet, nil
+}
+
+func (f *fakeStore) CancelCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountCancelled
+	return f.sheet, nil
+}
+
+func (f *fakeStore) RequestRecount(_ context.Context, _, _ string, version int, reason string) (domain.CountSheet, error) {
+	f.countVersion, f.recountReason = version, reason
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountOpen
 	return f.sheet, nil
 }
 
@@ -494,7 +539,7 @@ func TestListJournalsFiltersAndPages(t *testing.T) {
 	if len(out.Items) != 1 || out.Items[0].LineCount != 3 || out.Items[0].Lines != nil || out.NextCursor != "next-page" {
 		t.Fatalf("unexpected body %s", rec.Body.String())
 	}
-	for _, q := range []string{"status=OPEN", "type=TRANSFER", "limit=0", "limit=500"} {
+	for _, q := range []string{"status=OPEN", "type=BOM", "limit=0", "limit=500"} {
 		if rec := do(t, h, http.MethodGet, "/v1/inventory/journals?"+q, "", []string{"inventory.read"}, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, rec.Code)
 		}
@@ -503,7 +548,7 @@ func TestListJournalsFiltersAndPages(t *testing.T) {
 
 func TestOnHandRejectsUnknownGrouping(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	for _, q := range []string{"groupBy=colour", "groupBy=project", "product=not-a-uuid"} {
+	for _, q := range []string{"groupBy=colour", "groupBy=project", "product=not-a-uuid", "asOf=2026-13-01", "asOf=yesterday"} {
 		if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?"+q, "", []string{"inventory.read"}, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, rec.Code)
 		}
@@ -533,6 +578,28 @@ func TestOnHandGroupsByAnyDimensionSubset(t *testing.T) {
 	}
 	if len(out.Items) != 1 || !out.Items[0].Negative || out.Items[0].Currency != "USD" || out.Items[0].Blocked != "2" || !out.Truncated {
 		t.Fatalf("negative flag, currency, blocked quantity or truncation not passed through: %s", rec.Body.String())
+	}
+}
+
+func TestOnHandAsOfIsPassedToTheStoreAndEchoed(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?asOf=2026-09-30", "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK || fs.onHand.AsOf != "2026-09-30" || !strings.Contains(rec.Body.String(), `"asOf":"2026-09-30"`) {
+		t.Fatalf("status %d filter %+v body %s", rec.Code, fs.onHand, rec.Body.String())
+	}
+	live := do(t, h, http.MethodGet, "/v1/inventory/onhand", "", []string{"inventory.read"}, nil)
+	if strings.Contains(live.Body.String(), "asOf") || !strings.Contains(live.Body.String(), `"availPhysical":"3"`) {
+		t.Fatalf("a live inquiry carries availability and no asOf: %s", live.Body.String())
+	}
+	// A replay does not answer availability: the fields are absent, not zero.
+	for _, field := range []string{"availPhysical", "availOrdered", "reservedPhysical"} {
+		if strings.Contains(rec.Body.String(), field) {
+			t.Fatalf("a replay must omit %s: %s", field, rec.Body.String())
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"physicalInvent":"3"`) || !strings.Contains(rec.Body.String(), `"blocked":"2"`) {
+		t.Fatalf("a replay answers physical and blocked stock: %s", rec.Body.String())
 	}
 }
 
@@ -572,8 +639,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 58 {
-		t.Fatalf("router walk yielded %d operations, want 58: %v", len(served), served)
+	if len(served) != 72 {
+		t.Fatalf("router walk yielded %d operations, want 72: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

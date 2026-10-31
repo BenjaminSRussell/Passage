@@ -16,11 +16,32 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if or .Values.serviceIdentity.signingKeySecret .Values.postingProfilesSecret .Values.fieldCrypt.keysSecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       volumes:
         - name: tmp
           emptyDir: { sizeLimit: 64Mi }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.postingProfilesSecret }}
+        - name: posting-profiles
+          secret:
+            secretName: {{ .Values.postingProfilesSecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: payables
           image: {{ include "payables.image" . | quote }}
@@ -36,12 +57,43 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: payables
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.serviceIdentity.publicKeys }}
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
+{{- end }}
+{{- if .Values.postingProfilesSecret }}
+            - { name: PAYABLES_POSTING_PROFILES_FILE, value: /var/run/passage/posting-profiles/profiles.json }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+{{- end }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
             - { name: AP_CONTROL_ACCOUNT, value: {{ .Values.controlAccount | quote }} }
             - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
+            - { name: PARTY_URL, value: {{ .Values.partyUrl | quote }} }
+            - { name: TAX_URL, value: {{ .Values.taxUrl | quote }} }
             - { name: FX_RATE_TYPE, value: {{ .Values.fxRateType | quote }} }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
+{{- if .Values.postingProfilesSecret }}
+            - { name: posting-profiles, mountPath: /var/run/passage/posting-profiles, readOnly: true }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

@@ -56,6 +56,22 @@ channels:
         $ref: "#/components/messages/CampaignKilled"
       campaignRestored:
         $ref: "#/components/messages/CampaignRestored"
+  freeGoodsRule:
+    address: passage.pricing.freegoodsrule
+    description: Free goods rule created or withdrawn (FR-26.22).
+    messages:
+      freeGoodsRuleCreated:
+        $ref: "#/components/messages/FreeGoodsRuleCreated"
+      freeGoodsRuleWithdrawn:
+        $ref: "#/components/messages/FreeGoodsRuleWithdrawn"
+  rebateAgreement:
+    address: passage.pricing.rebateagreement
+    description: Rebate agreement revised or closed early (FR-26.11).
+    messages:
+      rebateAgreementRevised:
+        $ref: "#/components/messages/RebateAgreementRevised"
+      rebateAgreementClosed:
+        $ref: "#/components/messages/RebateAgreementClosed"
   procedure:
     address: passage.pricing.procedure
     description: Pricing procedure version activated (FR-26.1).
@@ -131,6 +147,30 @@ operations:
     summary: A killed campaign was restored; its records rejoin the next resolve within its validity.
     messages:
       - {$ref: "#/channels/campaign/messages/campaignRestored"}
+  publishFreeGoodsRuleCreated:
+    action: send
+    channel: {$ref: "#/channels/freeGoodsRule"}
+    summary: A free goods rule was created live; the sales cache drops its free goods snapshot for the legal entity.
+    messages:
+      - {$ref: "#/channels/freeGoodsRule/messages/freeGoodsRuleCreated"}
+  publishFreeGoodsRuleWithdrawn:
+    action: send
+    channel: {$ref: "#/channels/freeGoodsRule"}
+    summary: A free goods rule was withdrawn; it leaves the next resolve.
+    messages:
+      - {$ref: "#/channels/freeGoodsRule/messages/freeGoodsRuleWithdrawn"}
+  publishRebateAgreementRevised:
+    action: send
+    channel: {$ref: "#/channels/rebateAgreement"}
+    summary: A rebate agreement's name, end date or (before its first accrual) tiers changed; the version moved on.
+    messages:
+      - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementRevised"}
+  publishRebateAgreementClosed:
+    action: send
+    channel: {$ref: "#/channels/rebateAgreement"}
+    summary: A rebate agreement was closed early; invoices dated after valid_to no longer accrue.
+    messages:
+      - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementClosed"}
   publishVendorRebateClaimCreated:
     action: send
     channel: {$ref: "#/channels/vendorRebateClaim"}
@@ -153,6 +193,7 @@ components:
   messages:
     ConditionRecordActivated:
       name: dev.passage.pricing.conditionrecord.activated.v1
+      title: Condition record activated
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -177,6 +218,7 @@ components:
           retroactive: {type: boolean, description: "valid_from is before the activation or posting day (BR-26.7); consumers never re-price posted documents."}
     ConditionRecordWithdrawn:
       name: dev.passage.pricing.conditionrecord.withdrawn.v1
+      title: Condition record withdrawn or expired
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -187,6 +229,7 @@ components:
           reason: {type: string, description: "The withdrawal reason; EXPIRED when the record expiry job (BR-26.9) ended it."}
     JournalPosted:
       name: dev.passage.pricing.journal.posted.v1
+      title: Price journal posted or reversed
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -198,6 +241,7 @@ components:
           reversed_journal_id: {type: string, format: uuid, description: "Set when this journal reverses another."}
     RebateAccrualPosted:
       name: dev.passage.pricing.rebateaccrual.posted.v1
+      title: Rebate accrual posted
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -223,6 +267,7 @@ components:
           retroactive: {type: boolean, description: "True for the per-period delta of a retroactive recompute (BR-26.7, BR-26.14)."}
     CommissionCalculated:
       name: dev.passage.pricing.commission.calculated.v1
+      title: Commission calculated for a rep
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -248,16 +293,19 @@ components:
           credit_account: {type: string, description: "Commission payable (2170)."}
     FundClosed:
       name: dev.passage.pricing.fund.closed.v1
+      title: Trade fund closed
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/FundStatus"
     FundReopened:
       name: dev.passage.pricing.fund.reopened.v1
+      title: Trade fund reopened
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/FundStatus"
     FundUsageRecorded:
       name: dev.passage.pricing.fundusage.recorded.v1
+      title: Trade fund usage recorded
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -278,16 +326,43 @@ components:
           budget: {type: string, description: "Budget per period at the time of attribution."}
     CampaignKilled:
       name: dev.passage.pricing.campaign.killed.v1
+      title: Campaign killed
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CampaignStatus"
     CampaignRestored:
       name: dev.passage.pricing.campaign.restored.v1
+      title: Campaign restored
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CampaignStatus"
+    FreeGoodsRuleCreated:
+      name: dev.passage.pricing.freegoodsrule.created.v1
+      title: Free goods rule created
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/FreeGoodsRuleEvent"
+    FreeGoodsRuleWithdrawn:
+      name: dev.passage.pricing.freegoodsrule.withdrawn.v1
+      title: Free goods rule withdrawn
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/FreeGoodsRuleEvent"
+    RebateAgreementRevised:
+      name: dev.passage.pricing.rebateagreement.revised.v1
+      title: Rebate agreement revised
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RebateAgreementEvent"
+    RebateAgreementClosed:
+      name: dev.passage.pricing.rebateagreement.closed.v1
+      title: Rebate agreement closed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RebateAgreementEvent"
     ProcedureActivated:
       name: dev.passage.pricing.procedure.activated.v1
+      title: Pricing procedure version activated
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -303,11 +378,13 @@ components:
           superseded_id: {type: string, format: uuid, description: "The version this activation superseded; absent for the first."}
     VendorRebateClaimCreated:
       name: dev.passage.pricing.vendorrebateclaim.created.v1
+      title: Vendor rebate claim created
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/VendorRebateClaim"
     VendorRebateClaimApproved:
       name: dev.passage.pricing.vendorrebateclaim.approved.v1
+      title: Vendor rebate claim approved
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/VendorRebateClaim"
@@ -333,6 +410,43 @@ components:
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         settlement_mode: {type: string, enum: [CREDIT_NOTE, PAYMENT_DEDUCTION, VENDOR_INVOICE]}
         status: {type: string, enum: [OPEN, APPROVED]}
+        version: {type: integer, minimum: 1}
+    FreeGoodsRuleEvent:
+      type: object
+      description: >
+        A free goods rule (FR-26.22) after create or withdraw. Sales (w27) proposes supplementary
+        free goods lines from the live rules (FR-27.14) and drops its snapshot on either event.
+      required: [rule_id, legal_entity_id, customer_kind, customer_key, product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, withdrawn, version]
+      properties:
+        rule_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        customer_kind: {type: string, enum: [customer, customer_group, all]}
+        customer_key: {type: string}
+        product_id: {type: string}
+        unit: {type: string}
+        kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE]}
+        calc_rule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS]}
+        every_quantity: {type: string}
+        free_quantity: {type: string}
+        min_quantity: {type: string}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
+        withdrawn: {type: boolean}
+        version: {type: integer, minimum: 1}
+    RebateAgreementEvent:
+      type: object
+      description: >
+        A rebate agreement after a revise (name, end date, tiers before the first accrual) or an early
+        close (FR-26.11). After a close, valid_to is the close date and no invoice dated later accrues.
+        Ids only.
+      required: [agreement_id, legal_entity_id, party_role, status, valid_from, valid_to, version]
+      properties:
+        agreement_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        party_role: {type: string, enum: [CUSTOMER, VENDOR]}
+        status: {type: string, enum: [ACTIVE, CLOSED]}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
         version: {type: integer, minimum: 1}
     CampaignStatus:
       type: object

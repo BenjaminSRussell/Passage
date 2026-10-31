@@ -23,7 +23,15 @@ type CoverageGroupSpec struct {
 	AutoFirm              bool
 	GenerateActions       bool
 	GenerateFutures       bool
+	// SafetyStockPolicy is SafetyToday or SafetyFirstIssue (BR-22.5).
+	SafetyStockPolicy string
 }
+
+// Safety-stock policies of a coverage group (FR-22.2, BR-22.5).
+const (
+	SafetyToday      = "today"
+	SafetyFirstIssue = "first-issue"
+)
 
 const (
 	coverageFieldMaxDays  = 3650
@@ -42,7 +50,7 @@ var (
 func DefaultCoverageGroup(code, coverageCode string) CoverageGroupSpec {
 	return CoverageGroupSpec{
 		Code: code, CoverageCode: coverageCode, CoverageTimeFenceDays: 100, NegativeDays: 1,
-		GenerateActions: true, GenerateFutures: true,
+		GenerateActions: true, GenerateFutures: true, SafetyStockPolicy: SafetyToday,
 	}
 }
 
@@ -74,6 +82,9 @@ func (g CoverageGroupSpec) Validate() map[string]string {
 		if v < 0 || v > coverageFieldMaxDays {
 			errs[name] = "must be 0 to 3650"
 		}
+	}
+	if g.SafetyStockPolicy != SafetyToday && g.SafetyStockPolicy != SafetyFirstIssue {
+		errs["safetyStockPolicy"] = "must be today or first-issue"
 	}
 	if g.AutoFirm && g.FirmingFenceDays == 0 {
 		errs["autoFirm"] = "needs a firming fence of at least 1 day"

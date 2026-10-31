@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage Lean Manufacturing
-  version: 0.4.0
+  version: 0.5.0
   description: >
     Lean manufacturing (wave 24, PSG-24 slices 1 to 5): production flows with their
     activities, kanban rules, kanban cards with one job per flow activity, the
@@ -92,7 +92,7 @@ paths:
                 activeTo: { type: string, format: date }
       responses:
         '200':
-          description: 'The active flow with version + 1. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.lean.flow.activated.v1.'
+          description: 'The active flow with version + 1; the flow version it replaces, if any, is expired the day before and dev.passage.lean.flow.expired.v1 is written. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.lean.flow.activated.v1.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Flow' } } }
         '400': { $ref: '#/components/responses/Problem' }
         '404':
@@ -102,7 +102,46 @@ paths:
           description: LEAN-0104 when the version is stale; LEAN-0106 when the flow is not a draft.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: LEAN-0004 when a process activity has no output location; idempotency_key_reuse.
+          description: LEAN-0004 when a process activity has no output location; LEAN-0116 when this is a new flow version that starts on or before the version it replaces; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}:new-version:
+    post:
+      operationId: newFlowVersion
+      summary: Create a draft copy of an active flow as its next version, with optional changes (FR-24.8)
+      x-passage-duty: lean.flow.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The version of the active flow the caller read (optimistic concurrency). }
+                taktTimeS: { type: integer, minimum: 1, description: New takt time in seconds; the active flow's takt time is kept when omitted (or null). }
+                activities:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { $ref: '#/components/schemas/ActivityRequest' }
+                  description: The full activity list of the new version; the active flow's activities are copied when omitted.
+      responses:
+        '201':
+          description: 'The new draft with flowVersion + 1 and previousFlowId set. A replay returns 200 with Idempotent-Replayed: true. Activate it to expire the version it replaces.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Flow' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0104 when the version is stale; LEAN-0114 when the flow is not active; LEAN-0115 when it already has a newer version.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/lean/flows/{id}/costing-periods:
@@ -732,7 +771,7 @@ components:
         activities: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ActivityRequest' } }
     Flow:
       type: object
-      required: [id, valueStreamId, siteId, name, status, version, activityCount, createdAt, updatedAt]
+      required: [id, valueStreamId, siteId, name, status, version, flowVersion, activityCount, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         valueStreamId: { type: string, format: uuid }
@@ -743,6 +782,8 @@ components:
         activeFrom: { type: [string, 'null'], format: date }
         activeTo: { type: [string, 'null'], format: date }
         version: { type: integer }
+        flowVersion: { type: integer, minimum: 1, description: 'Number of this version of the flow (1, 2, ...); `version` is the optimistic-concurrency counter.' }
+        previousFlowId: { type: [string, 'null'], format: uuid, description: The flow version this one replaces. }
         activityCount: { type: integer }
         activities: { type: array, items: { $ref: '#/components/schemas/Activity' }, description: Present on create, get and activate, omitted in lists. }
         createdAt: { type: string, format: date-time }

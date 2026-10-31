@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -334,7 +335,7 @@ func TestListReceiptsKeysetFiltersAndLegalEntityScope(t *testing.T) {
 	st := setup(t).st
 	nine := principal(1)
 	eight := tenant.Principal{TenantID: nine.TenantID, LegalEntityID: testkit.TenantID(8)}
-	all := tenant.Principal{TenantID: nine.TenantID}
+	all := tenant.Principal{TenantID: nine.TenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
 	registered(t, st, nine, "PS-1", "S1", "S2", "S3")
 	for _, slip := range []string{"PS-2", "PS-3"} {
 		if _, err := st.CreateArrival(ctxOf(nine), arrival(nine, slip)); err != nil {
@@ -435,5 +436,114 @@ func TestDirectReceiptRequiresPrincipal(t *testing.T) {
 	st := setup(t).st
 	if _, err := st.DirectReceipt(context.Background(), arrival(principal(1), "PS-1"), registerWith("S1")); err == nil {
 		t.Fatal("want error without a principal")
+	}
+}
+
+func TestArrivalPersistsPOLineNo(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	in := arrival(p, "PS-PO-LINE")
+	in.Lines[0].POLineNo = 3
+	created, err := st.CreateArrival(ctxOf(p), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetReceipt(ctxOf(p), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lines[0].POLineNo != 3 {
+		t.Fatalf("po line number %d, want 3", got.Lines[0].POLineNo)
+	}
+	plain, err := st.CreateArrival(ctxOf(p), arrival(p, "PS-NO-PO-LINE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Lines[0].POLineNo != 0 {
+		t.Fatalf("a line keyed without a PO line number reads back %d", plain.Lines[0].POLineNo)
+	}
+}
+
+func TestRegisterSeesWhatOtherReceiptsTookFromThePOLine(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	seen := func(slip string, qty int64) decimal.Decimal {
+		t.Helper()
+		in := arrival(p, slip)
+		in.Lines[0].POLineNo, in.Lines[0].SerialTracked = 2, false
+		r, err := st.CreateArrival(ctxOf(p), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var other decimal.Decimal
+		_, err = st.Register(ctxOf(p), r.ID, func(cur store.Receipt, _ map[domain.SerialKey]struct{}) ([]store.Line, error) {
+			other = cur.Lines[0].OtherReceived
+			l := cur.Lines[0]
+			l.Qty, l.LocationID = decimal.NewFromInt(qty), "00000000-0000-0000-0000-0000000000f1"
+			return []store.Line{l}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return other
+	}
+	if got := seen("PS-OTHER-1", 3); !got.IsZero() {
+		t.Fatalf("first receipt saw %s", got)
+	}
+	if got := seen("PS-OTHER-2", 2); !got.Equal(decimal.NewFromInt(3)) {
+		t.Fatalf("second receipt saw %s, want 3", got)
+	}
+	got, err := st.ReceivedOnPurchaseOrder(ctxOf(p), poID)
+	if err != nil || !got[2].Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("received on the order %v err %v", got, err)
+	}
+}
+
+func TestErsPriceConfirmationKeepsHistoryAndIsScopedToTheEntity(t *testing.T) {
+	e := setup(t)
+	st := e.st
+	p := principal(1)
+	r := registered(t, st, p, "PS-CONFIRM", "S1", "S2", "S3")
+	var olds []string
+	confirm := func(price, by string) error {
+		return st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString(price), by, func(old decimal.NullDecimal) (events.Event, error) {
+			olds = append(olds, old.Decimal.String()+fmt.Sprint(old.Valid))
+			return events.New(events.Type("receiving", "erspriceconfirmation", "confirmed", 1), "/passage/receiving/receiving", r.ID, p.TenantID, map[string]string{"receiptId": r.ID})
+		})
+	}
+
+	if err := confirm("2.6", "buyer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := confirm("2.7", "buyer2"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.ErsPriceConfirmations(ctxOf(p), r.ID)
+	if err != nil || len(got) != 1 || !got[1].Price.Equal(decimal.RequireFromString("2.7")) || got[1].By != "buyer2" {
+		t.Fatalf("confirmations %v err %v", got, err)
+	}
+	if olds[0] != "0false" || olds[1] != "2.6true" {
+		t.Fatalf("old prices seen by the event builder %v", olds)
+	}
+	if n := e.count(p, "receiving_ers_price_confirmation_history"); n != 2 {
+		t.Fatalf("history rows %d, want 2", n)
+	}
+	if n := e.count(p, "outbox"); n != 2 {
+		t.Fatalf("outbox rows %d, want 2", n)
+	}
+	nop := func(decimal.NullDecimal) (events.Event, error) { return events.Event{}, nil }
+	for name, err := range map[string]error{
+		"unknown line":  st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 9, decimal.NewFromInt(1), "buyer", nop),
+		"other entity":  st.ConfirmErsPrice(ctxOf(p), "99999999-9999-4999-8999-999999999990", r.ID, 1, decimal.NewFromInt(1), "buyer", nop),
+		"unknown order": st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, "99999999-9999-4999-8999-999999999991", 1, decimal.NewFromInt(1), "buyer", nop),
+		"other tenant":  st.ConfirmErsPrice(ctxOf(principal(2)), principal(2).LegalEntityID, r.ID, 1, decimal.NewFromInt(1), "buyer", nop),
+	} {
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("%s: err %v, want ErrNotFound", name, err)
+		}
+	}
+	if other, _ := st.ErsPriceConfirmations(ctxOf(principal(2)), r.ID); len(other) != 0 {
+		t.Fatalf("another tenant sees %v", other)
 	}
 }

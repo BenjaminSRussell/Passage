@@ -19,7 +19,7 @@ const maxParallelLedgers = 20
 func (a *API) registerLedgerSets(r chi.Router) {
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledger-sets", a.createLedgerSet)
 	r.With(authz.RequireDuty(dutyRead)).Get("/ledger-sets/{setId}", a.getLedgerSet)
-	r.With(authz.RequireDuty(dutyPost)).Post("/ledger-sets/{setId}/journal-entries", a.postSetEntry)
+	r.With(authz.RequireAnyDuty(dutyPost, dutySetPost)).Post("/ledger-sets/{setId}/journal-entries", a.postSetEntry)
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledgers/{id}/account-mappings", a.createAccountMapping)
 }
 

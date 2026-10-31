@@ -783,8 +783,8 @@ AX 2012 authorizes through `SecurityRole` → `SecurityDuty` → `SecurityPrivil
   - Notes: deprovision sets `status=deprovisioned`, revokes sessions within 60 s, never deletes the row (audit needs it).
 - **FR-2.3 Tenant and legal entity model** — Must. The system shall model `Tenant` → `LegalEntity` → `Site` (shell only; detailed in wave 6) and stamp `tenant_id` on every table in every domain database.
   - Notes: `legal_entity_id` is stamped on per-company tables (AX `SaveDataPerCompany=Yes` equivalent, declared in metadata in wave 3); a user's current legal entity is a session attribute, not a token claim, so switching does not require re-login.
-- **FR-2.4 Row-level security** — Must. Every table shall have `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` with policy `tenant_id = current_setting('app.tenant_id')::uuid`; services connect as role `passage_app` with `NOBYPASSRLS` and set the variable with `SET LOCAL` inside every transaction.
-  - Notes: a missing `app.tenant_id` yields zero rows, not an error; migrations run as `passage_migrate`, which is also NOBYPASSRLS; a CI check fails if any table lacks the policy.
+- **FR-2.4 Row-level security** — Must. Every table shall have `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` with policy `tenant_id = current_setting('passage.tenant_id')::uuid`; services connect as role `passage_app` with `NOBYPASSRLS` and set the variable with `SET LOCAL` inside every transaction.
+  - Notes: a missing `passage.tenant_id` yields zero rows, not an error; migrations run as `passage_owner`, which is also NOBYPASSRLS; a CI check fails if any table lacks the policy.
 - **FR-2.5 Role/duty/privilege model** — Must. The system shall store Role → Duty → Privilege → Permission where Permission = (entity, action, field_mask?, condition?), and compile the closure into one Rego bundle per tenant.
   - Notes: actions are read, create, update, correct, delete, post, approve, export; `correct` retains AX semantics (edit date-effective rows); 20 seeded duties ship (Maintain users, Maintain security roles, Maintain vendors, View vendors, Maintain entity metadata, Apply extensions, Maintain workflows, Approve workflow, Maintain batch jobs, View batch history, Maintain number sequences, View audit log, Import data, Export data, Maintain platform releases, View platform releases, Maintain tenants, Maintain legal entities, Maintain saved views, Maintain hello ledger).
 - **FR-2.6 Policy compilation** — Must. The system shall compile a bundle within 5 s of any role/duty/privilege/assignment change and distribute it to OPA sidecars via bundle polling (interval 10 s) with the version in `pv`.
@@ -14389,21 +14389,23 @@ Interaction rules: results grid is keyboard-first (Tab/Enter down a sample colum
 
 | Lot size | Code | Sample n | AQL 1.0 Ac/Re | AQL 2.5 Ac/Re | AQL 4.0 Ac/Re |
 |---|---|---|---|---|---|
-| 2–8 | A | 2 | use E (13): 0/1 | use D (8): 0/1 | use C (5): 0/1 |
-| 9–15 | B | 3 | use E: 0/1 | use D: 0/1 | use C: 0/1 |
-| 16–25 | C | 5 | use E: 0/1 | use D: 0/1 | 0/1 |
-| 26–50 | D | 8 | use E: 0/1 | 0/1 | use E (13): 1/2 |
+| 2–8 | A | 2 | use E (13): 0/1 | use C (5): 0/1 | use B (3): 0/1 |
+| 9–15 | B | 3 | use E: 0/1 | use C: 0/1 | 0/1 |
+| 16–25 | C | 5 | use E: 0/1 | 0/1 | use B (3): 0/1 |
+| 26–50 | D | 8 | use E: 0/1 | use C (5): 0/1 | use E (13): 1/2 |
 | 51–90 | E | 13 | 0/1 | use F (20): 1/2 | 1/2 |
-| 91–150 | F | 20 | use G (32): 1/2 | 1/2 | 2/3 |
-| 151–280 | G | 32 | 1/2 | 2/3 | 3/4 |
-| 281–500 | H | 50 | 2/3 | 3/4 | 5/6 |
-| 501–1,200 | J | 80 | 3/4 | 5/6 | 7/8 |
-| 1,201–3,200 | K | 125 | 5/6 | 7/8 | 10/11 |
-| 3,201–10,000 | L | 200 | 7/8 | 10/11 | 14/15 |
-| 10,001–35,000 | M | 315 | 10/11 | 14/15 | 21/22 |
-| 35,001–150,000 | N | 500 | 14/15 | 21/22 | 21/22 |
-| 150,001–500,000 | P | 800 | 21/22 | 21/22 | 21/22 |
-| 500,001+ | Q | 1,250 | 21/22 | 21/22 | 21/22 |
+| 91–150 | F | 20 | use E (13): 0/1 | 1/2 | 2/3 |
+| 151–280 | G | 32 | use H (50): 1/2 | 2/3 | 3/4 |
+| 281–500 | H | 50 | 1/2 | 3/4 | 5/6 |
+| 501–1,200 | J | 80 | 2/3 | 5/6 | 7/8 |
+| 1,201–3,200 | K | 125 | 3/4 | 7/8 | 10/11 |
+| 3,201–10,000 | L | 200 | 5/6 | 10/11 | 14/15 |
+| 10,001–35,000 | M | 315 | 7/8 | 14/15 | 21/22 |
+| 35,001–150,000 | N | 500 | 10/11 | 21/22 | use M (315): 21/22 |
+| 150,001–500,000 | P | 800 | 14/15 | use N (500): 21/22 | use M (315): 21/22 |
+| 500,001+ | Q | 1,250 | 21/22 | use N (500): 21/22 | use M (315): 21/22 |
+
+(Corrected in the Wave 33 proof against the Z1.4 / MIL-STD-105D Table II-A master table: the earlier excerpt shifted the AQL 1.0 column from letter F down by one column and missed the arrows at the top of the 2.5 and 4.0 columns and at the bottom of both.)
 
 Arrow cells ("use X") follow the Z1.4 rule: when the table points to another sample size, use that sample size and its Ac/Re; if it exceeds lot size, inspect 100%. The full Table I (code letters for levels S-1…S-4, I–III) and Tables II-A/B/C (normal/tightened/reduced) are stored as versioned reference data `z14_table` and tested cell by cell.
 - **BR-33.2 Switching rules.** Normal → tightened when 2 of 5 consecutive lots are rejected; tightened → normal after 5 consecutive accepted; normal → reduced after 10 consecutive accepted (and switching enabled); reduced → normal on a rejection. Severity is tracked per (item, vendor, test group).
@@ -14427,7 +14429,7 @@ Arrow cells ("use X") follow the Z1.4 rule: when the table points to another sam
 ### 6.33.8 Acceptance criteria
 
 - **AC-33.1** (FR-33.3, BR-33.3) Given the trigger fixture of 60 receipts and 40 RAFs with overlapping associations, when posted, then exactly the expected 73 quality orders exist with the expected test groups.
-- **AC-33.2** (FR-33.2, BR-33.1) Given lot sizes {5, 50, 51, 500, 501, 3200, 10001, 600000} at AQL 2.5 normal level II, when sized, then sample sizes are {5, 8, 20, 50, 80, 125, 315, 1250} (lot 51 → code E, whose AQL 2.5 cell points down to F, n = 20) and Ac/Re are {0/1, 0/1, 1/2, 3/4, 5/6, 7/8, 14/15, 21/22}, matching the Z1.4 reference cells.
+- **AC-33.2** (FR-33.2, BR-33.1) Given lot sizes {5, 50, 51, 500, 501, 3200, 10001, 600000} at AQL 2.5 normal level II, when sized, then sample sizes are {5, 5, 20, 50, 80, 125, 315, 500} (lot 50 → code D, whose AQL 2.5 cell points up to C, n = 5; lot 51 → code E, whose AQL 2.5 cell points down to F, n = 20; lot 600,000 → code Q, whose cell points up to N, n = 500) and Ac/Re are {0/1, 0/1, 1/2, 3/4, 5/6, 7/8, 14/15, 21/22}, matching the Z1.4 reference cells.
 - **AC-33.3** (FR-33.5) Given 10,000 random attempts to pick, ship, consume or transfer quants with open quality orders, when executed, then every attempt fails with `QUALITY_HOLD` and no inventory transaction is written.
 - **AC-33.4** (FR-33.6, BR-33.7) Given a lot of 100 with results, when the decision is accept 90 / reject 10, then 90 are available, 10 sit in quarantine as REJECTED, and an NCR exists for 10.
 - **AC-33.5** (FR-33.8, BR-33.9) Given an NCR with a started 8D workflow, when D7 closes and 90 days elapse (Temporal time-skipping test), then an effectiveness-check task is created and the workflow completes on its approval.
@@ -22668,7 +22670,7 @@ The metadata generator emits one OpenAPI 3.1 document per context (`openapi/<con
 
 A tenant is one customer organization: one Keycloak realm, one `tenant_id`, one row-level security scope across all 12 databases, one Kafka ACL principal set, one Vault namespace, one cost budget. Legal entities are scopes inside the tenant; users are assigned roles per legal entity (or `*`). Data residency is per tenant (wave 48): a tenant is pinned to a region's cluster set and its Iceberg warehouse. Cross-tenant access does not exist in the application; only the analytics and platform-operations principals can read across tenants and only through audited service accounts.
 
-The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_ids = '<uuid>,<uuid>'; SET LOCAL passage.actor = '<sub>'` inside the transaction. The application role has no `BYPASSRLS`.
+The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_scopes = '<uuid>,<uuid>'` inside the transaction. The application role has no `BYPASSRLS`.
 
 ### E.2 RLS policy template
 
@@ -22686,11 +22688,11 @@ CREATE POLICY tenant_isolation ON ledger.journal_entry
 CREATE POLICY legal_entity_scope ON ledger.journal_entry
   AS RESTRICTIVE FOR ALL TO passage_app
   USING (
-    current_setting('passage.legal_entity_ids', true) = '*'
-    OR legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_ids', true), ',')::uuid[])
+    current_setting('passage.legal_entity_scopes', true) = '*'
+    OR legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ',')::uuid[])
   )
   WITH CHECK (
-    legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_ids', true), ',')::uuid[])
+    legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ',')::uuid[])
   );
 
 -- Batch and CDC roles: separate role with the same policies; Debezium reads the WAL and is outside RLS by design,

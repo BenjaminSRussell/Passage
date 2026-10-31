@@ -47,6 +47,8 @@ func storedCoverageDTO(c store.RunCoverage) coverageDTO {
 		Code:              c.CoverageCode,
 		PeriodDays:        c.PeriodDays,
 		MarginDays:        c.MarginDays,
+		IssueMarginDays:   c.IssueMarginDays,
+		ReorderMarginDays: c.ReorderMarginDays,
 		PositiveDays:      c.PositiveDays,
 		NegativeDays:      c.NegativeDays,
 		ReorderMin:        c.MinQty,
@@ -57,6 +59,7 @@ func storedCoverageDTO(c store.RunCoverage) coverageDTO {
 		CoverageFenceDays: c.CoverageFenceDays,
 		FirmingFenceDays:  c.FirmingFenceDays,
 		AutoFirm:          c.AutoFirm,
+		SafetyStockPolicy: c.SafetyStockPolicy,
 	}
 }
 

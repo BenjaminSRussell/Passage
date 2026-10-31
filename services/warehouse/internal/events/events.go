@@ -15,11 +15,12 @@ const Source = "warehouse"
 var (
 	WorkCreated       = events.Type(Context, "work", "created", 1)
 	WorkCompleted     = events.Type(Context, "work", "completed", 1)
+	WorkReleased      = events.Type(Context, "work", "released", 1)
 	ReceiptRegistered = events.Type(Context, "receipt", "registered", 1)
 )
 
 // All lists every published type; asyncapi.yaml must name each one.
-func All() []string { return []string{WorkCreated, WorkCompleted, ReceiptRegistered} }
+func All() []string { return []string{WorkCreated, WorkCompleted, WorkReleased, ReceiptRegistered} }
 
 // Line is one line of a work event.
 type Line struct {
@@ -56,6 +57,16 @@ type WorkCompletedData struct {
 	User        string `json:"user"`
 	DurationS   int64  `json:"duration_s"`
 	Lines       []Line `json:"lines"`
+}
+
+// WorkReleasedData is the payload of dev.passage.wms.work.released.v1, emitted
+// when a WAITING work becomes OPEN because the work it depended on ended:
+// AfterStatus is that work's terminal status (COMPLETED or CANCELLED).
+type WorkReleasedData struct {
+	WorkID      string `json:"work_id"`
+	WarehouseID string `json:"warehouse_id"`
+	AfterWorkID string `json:"after_work_id"`
+	AfterStatus string `json:"after_status"`
 }
 
 // ItemQty is a quantity of one item.

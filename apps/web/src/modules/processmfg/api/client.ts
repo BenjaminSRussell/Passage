@@ -59,6 +59,27 @@ export interface ScalePreview {
 
 export interface OrderLine extends FormulaLine {
   formulaQty: string;
+  /** Quantity reported as finished of a co- or by-product line, once the order is reported. */
+  rafQty?: string;
+}
+
+export type ShareRole = "main" | "co-product" | "by-product-burden";
+
+export interface AllocationShare {
+  role: ShareRole;
+  lineNumber: number;
+  itemId: string;
+  rafQty: string;
+  amount: string;
+  percent: string;
+}
+
+/** The cost split an ended order carries; the amounts add up to batchCost exactly. */
+export interface OrderAllocation {
+  method: AllocationMethod;
+  currency: string;
+  batchCost: string;
+  shares: AllocationShare[];
 }
 
 export interface BatchOrder {
@@ -78,7 +99,13 @@ export interface BatchOrder {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  releasedAt?: string;
+  startedAt?: string;
+  reportedAt?: string;
+  endedAt?: string;
+  actualQty?: string;
   lines?: OrderLine[];
+  allocation?: OrderAllocation;
 }
 
 export interface PotencyRequest {
@@ -245,6 +272,37 @@ export function createBatchOrder(input: { formulaId: string; batchSize: string }
 /** Changes the batch size of a planned or released order; version is the one the page read. */
 export function rescaleBatchOrder(id: string, input: { batchSize: string; version: number }, key: string = newKey()): Promise<BatchOrder> {
   return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:rescale`, input, key);
+}
+
+/** Release (planned) or start (released) an order; version is the one the page read. */
+export function advanceBatchOrder(id: string, command: "release" | "start", version: number, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:${command}`, { version }, key);
+}
+
+export interface ReportInput {
+  version: number;
+  mainQty: string;
+  outputs: { lineNumber: number; qty: string }[];
+}
+
+/** Records the quantities reported as finished and moves a started order to reported. */
+export function reportBatchOrder(id: string, input: ReportInput, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:report-finished`, input, key);
+}
+
+export interface EndInput {
+  version: number;
+  method: AllocationMethod;
+  currency: string;
+  batchCost: string;
+  main: { standardCost?: string; percent?: string };
+  coProducts: { lineNumber: number; standardCost?: string; percent?: string }[];
+  byProducts: { lineNumber: number; costType: ByProductCostType; rate: string }[];
+}
+
+/** Ends a reported order and allocates its cost (BR-24.3). */
+export function endBatchOrder(id: string, input: EndInput, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:end`, input, key);
 }
 
 export function consumePotency(req: PotencyRequest): Promise<PotencyResult> {
@@ -447,4 +505,109 @@ export function proposePicking(req: PickingRequest): Promise<PickingResult> {
 
 export function previewRework(req: ReworkRequest): Promise<ReworkResult> {
   return post<ReworkResult>("/rework-orders:preview", req);
+}
+
+// Batch quality record (slice 11): attribute definitions, batches, recorded
+// values with their limit check, and the disposition with its history.
+
+export const ATTRIBUTE_ROLES = ["generic", "potency"] as const;
+export type AttributeRole = (typeof ATTRIBUTE_ROLES)[number];
+
+export interface StoredAttributeDefinition extends AttributeDefinition {
+  id: string;
+  itemId: string;
+  role: AttributeRole;
+  options: string[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface NewAttributeDefinition extends AttributeDefinition {
+  itemId: string;
+  /** Defaults to generic; potency only on a numeric attribute, one per item. */
+  role?: AttributeRole;
+}
+
+export interface RecordedValue extends AttributeValue {
+  name: string;
+  kind: AttributeKind;
+  pass: boolean;
+  detail?: string;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+export interface DispositionChange {
+  from: Disposition;
+  to: Disposition;
+  reason: string;
+  /** The user who changed the disposition also recorded attribute values on the batch (PRD 4.24.17). */
+  segregationConflict: boolean;
+  changedBy: string;
+  changedAt: string;
+}
+
+export interface Batch {
+  id: string;
+  legalEntityId: string;
+  itemId: string;
+  batchNumber: string;
+  batchOrderId?: string;
+  disposition: Disposition;
+  expiryDate?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  attributes?: RecordedValue[];
+  attributeHistory?: RecordedValue[];
+  dispositions?: DispositionChange[];
+}
+
+export interface NewBatch {
+  itemId: string;
+  batchNumber: string;
+  batchOrderId?: string;
+  disposition?: Disposition;
+}
+
+export interface RecordResult {
+  batch: Batch;
+  checks: { name: string; pass: boolean; detail?: string }[];
+}
+
+export function listAttributeDefinitions(itemId: string, signal?: AbortSignal): Promise<StoredAttributeDefinition[]> {
+  return items<StoredAttributeDefinition>(`/batch-attribute-definitions${query({ itemId, limit: 200 })}`, signal);
+}
+
+export function defineAttribute(input: NewAttributeDefinition, key: string = newKey()): Promise<StoredAttributeDefinition> {
+  return post<StoredAttributeDefinition>("/batch-attribute-definitions", input, key);
+}
+
+export function listBatches(filter: { disposition?: Disposition | ""; itemId?: string } = {}, signal?: AbortSignal): Promise<Batch[]> {
+  return items<Batch>(`/batches${query({ ...filter, limit: 200 })}`, signal);
+}
+
+export function getBatch(id: string, signal?: AbortSignal): Promise<Batch> {
+  return send<Batch>(`/batches/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function registerBatch(input: NewBatch, key: string = newKey()): Promise<Batch> {
+  return post<Batch>("/batches", input, key);
+}
+
+export function recordBatchAttributes(id: string, input: { version: number; values: Record<string, AttributeValue> }, key: string = newKey()): Promise<RecordResult> {
+  return send<RecordResult>(`/batches/${encodeURIComponent(id)}/attributes`, {
+    method: "PUT",
+    headers: { "Idempotency-Key": key },
+    body: JSON.stringify(input),
+  });
+}
+
+export function changeBatchDisposition(
+  id: string,
+  input: { version: number; disposition: Disposition; reason: string },
+  key: string = newKey(),
+): Promise<Batch> {
+  return post<Batch>(`/batches/${encodeURIComponent(id)}:disposition`, input, key);
 }

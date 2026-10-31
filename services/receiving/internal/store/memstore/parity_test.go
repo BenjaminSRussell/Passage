@@ -37,6 +37,8 @@ type backend struct {
 	expireKey func(tenant.Principal, string)
 }
 
+var pendingJournal = []byte(`{"legalEntityId":"` + testkit.TenantID(9) + `"}`)
+
 func principal(n int) tenant.Principal {
 	return tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: testkit.TenantID(9)}
 }
@@ -144,7 +146,7 @@ func claim(t *testing.T, b backend, p tenant.Principal, key string) {
 }
 
 func reservation(base string, hash string, subjects ...string) store.PendingPosting {
-	return store.PendingPosting{BaseKey: base, Subjects: subjects, Hash: hash, Journal: []byte(`{}`)}
+	return store.PendingPosting{BaseKey: base, Subjects: subjects, Hash: hash, Journal: pendingJournal}
 }
 
 func wantCode(t *testing.T, err error, code string) {
@@ -608,7 +610,7 @@ var cases = []struct {
 		p := principal(1)
 		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
 		reserve := func(key, hash string) error {
-			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: []byte(`{"k":1}`)})
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: pendingJournal})
 			return err
 		}
 		if err := reserve("k1", "h1"); err != nil {
@@ -640,10 +642,29 @@ var cases = []struct {
 			t.Fatalf("grir unit price %s, want the receipt line price 2.5", page.Items[0].UnitPrice)
 		}
 	}},
+	{"a posting is invisible to a caller scoped to another legal entity", func(t *testing.T, b backend) {
+		p := principal(1)
+		other := tenant.Principal{TenantID: p.TenantID, LegalEntityID: testkit.TenantID(8)}
+		if _, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h", Journal: pendingJournal}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.ClaimPending(ctxOf(other), "k", 0, time.Minute); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("claim from another entity: err=%v, want ErrPendingNotFound", err)
+		}
+		if _, err := b.st.GetPending(ctxOf(other), "k"); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("get from another entity: err=%v, want ErrPendingNotFound", err)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(other), "subject-a"); err != nil {
+			t.Fatalf("another entity must not see the open posting: %v", err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(other), store.PendingPosting{BaseKey: "k2", Subjects: []string{"subject-b"}, Hash: "h", Journal: pendingJournal}); err == nil {
+			t.Fatal("a posting for an entity outside the caller's scope must be refused")
+		}
+	}},
 	{"a released key can be reserved again with a new body, and a posted key keeps its body", func(t *testing.T, b backend) {
 		p := principal(1)
 		reserve := func(key, hash string) error {
-			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: []byte(`{}`)})
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: pendingJournal})
 			return err
 		}
 		if err := reserve("k", "h1"); err != nil {
@@ -667,7 +688,7 @@ var cases = []struct {
 		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); err != nil {
 			t.Fatal(err)
 		}
-		if key, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h2", Journal: []byte(`{}`)}); err != nil || key != "k:r1" {
+		if key, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h2", Journal: pendingJournal}); err != nil || key != "k:r1" {
 			t.Fatalf("key=%q err=%v, want the next generation k:r1 after a reversal", key, err)
 		}
 		if err := b.st.ReleasePosting(ctxOf(p), "k:r1"); err != nil {
@@ -682,14 +703,14 @@ var cases = []struct {
 	}},
 	{"a posting over several subjects blocks each of them and completes them all together", func(t *testing.T, b backend) {
 		p := principal(1)
-		invoice := store.PendingPosting{BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: []byte(`{}`)}
+		invoice := store.PendingPosting{BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: pendingJournal}
 		if _, err := b.st.ReservePosting(ctxOf(p), invoice); err != nil {
 			t.Fatal(err)
 		}
 		for _, subject := range []string{"receipt-1", "receipt-2", "invoice-1"} {
 			wantPending(t, b.st.EnsureNoPending(ctxOf(p), subject), "inv")
 		}
-		other := store.PendingPosting{BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: []byte(`{}`)}
+		other := store.PendingPosting{BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: pendingJournal}
 		_, err := b.st.ReservePosting(ctxOf(p), other)
 		wantPending(t, err, "inv")
 		rows, err := b.st.ListPending(ctxOf(p))

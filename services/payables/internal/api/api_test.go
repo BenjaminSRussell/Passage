@@ -131,6 +131,9 @@ func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
 			t.Errorf("%s content type %q", name, ct)
 		}
 	}
+	if ct := forbidden.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("403 content type %q", ct)
+	}
 	decode := func(name string, rec *httptest.ResponseRecorder) map[string]any {
 		var body map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

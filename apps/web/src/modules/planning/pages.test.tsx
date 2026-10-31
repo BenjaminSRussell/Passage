@@ -243,6 +243,16 @@ describe("Plan runs page", () => {
     expect(within(table).getAllByText("0f3a9c1d2e4b5a69")).toHaveLength(2);
   });
 
+  it("shows per version how many approved orders the run firmed (FR-22.11)", async () => {
+    stubApi(["/versions", () => json({ items: [{ ...version, approvedFirmed: 7 }, { ...version, id: "v2", number: 2, status: "complete" }] })]);
+    renderAt("/planning/runs");
+    const table = await findTable({ name: "Plan runs" });
+    expect(await within(table).findByRole("columnheader", { name: "Approved firmed" })).toBeInTheDocument();
+    const [, newest, older] = within(table).getAllByRole("row");
+    expect(within(newest).getByText("7")).toBeInTheDocument();
+    expect(within(older).getAllByText("0").length).toBeGreaterThan(0);
+  });
+
   it("explains an empty history", async () => {
     stubApi(["/versions", () => json({ items: [] })]);
     renderAt("/planning/runs");
@@ -280,6 +290,47 @@ describe("Run plan page", () => {
     const body = JSON.parse(init?.body as string);
     expect(body).toMatchObject({ asOf: "2026-11-02", siteId: site });
     expect(body.items[0].demand[0].ref).toBe("SO-1");
+  });
+
+  it("reports the approved orders the run firmed (FR-22.11)", async () => {
+    stubApi([":run", () => json({ ...version, approvedFirmed: 2 }, 201)]);
+    renderAt("/planning/runs/new?plan=MAIN");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
+    fireEvent.change(screen.getByLabelText("Plan date"), { target: { value: "2026-11-02" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    const status = await findStatus();
+    await waitFor(() => expect(status).toHaveTextContent("2 approved orders of the previous version were firmed."));
+  });
+
+  it("names one firmed approved order in the singular and none when the run firmed nothing", async () => {
+    let firmed = 1;
+    stubApi([":run", () => json({ ...version, approvedFirmed: firmed }, 201)]);
+    renderAt("/planning/runs/new?plan=MAIN");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
+    fireEvent.change(screen.getByLabelText("Plan date"), { target: { value: "2026-11-02" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    const status = await findStatus();
+    await waitFor(() => expect(status).toHaveTextContent("1 approved order of the previous version was firmed."));
+    firmed = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await waitFor(() => expect(status).not.toHaveTextContent("approved order"));
+    expect(status).toHaveTextContent("6 planned orders");
+  });
+
+  it("sends carryForward only when firmed orders are counted as supply", async () => {
+    const fetchMock = stubApi([":run", () => json(version, 201)]);
+    renderAt("/planning/runs/new?plan=MAIN");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await findStatus();
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).not.toHaveProperty("carryForward");
+
+    fireEvent.click(screen.getByLabelText("Count firmed orders as supply"));
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({ carryForward: true });
+    const key = (i: number) => (fetchMock.mock.calls[i][1]?.headers as Record<string, string>)["Idempotency-Key"];
+    expect(key(1)).not.toBe(key(0));
   });
 
   it("reuses the Idempotency-Key when the same request is retried", async () => {

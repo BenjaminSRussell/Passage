@@ -167,3 +167,11 @@ func TestCreatePayment_RejectsBadPayerIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeAllows_RefusesACallerWithNoLegalEntityScope(t *testing.T) {
+	rec := do(router(&fakeStore{}), http.MethodPost, "/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`"}`, "ARAgingRun",
+		map[string]string{"X-Passage-Legal-Entity": ""})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("no scope: %d %s", rec.Code, rec.Body.String())
+	}
+}

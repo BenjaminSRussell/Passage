@@ -283,6 +283,8 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0025 | 404 | Cell not found in the run; balance key position past the cell's keys, or a key of a computed cell (drill level 2) |
 | REPORT-0028 | 422 | Journal line refused by the read model (date, period, amounts beyond six places, currency type, unsafe source link) |
 | REPORT-0029 | 422 | Audit entry refused by the trail (unknown or reporting-only kind on ingest, missing actor, object or source event id, bad ledger or period) |
+| REPORT-0031 | 404 | Ledger has no reporting data visible to the caller |
+| REPORT-0032 | 422 | Ledger spans several legal entities, or legalEntityId differs from the ledger's owner |
 | REPORT-0030 | 422 | Audit trail export matches more than 50,000 entries; narrow the filter |
 | REPORT-0099 | 500 | Drill invariant failed: balance keys do not sum to the cell (never served) |
 | conflict_version | 412 | Draft or schedule revision in `If-Match` is stale (409 when two creates race) |
@@ -302,3 +304,20 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 
 Go modules only: the platform module and what it already pulls in (chi,
 pgx/v5, shopspring/decimal, google/uuid) plus `pgregory.net/rapid` for tests.
+
+## Legal-entity scope (#241)
+
+`statement_run`, `reporting_balance`, `reporting_hwm`, `reporting_journal_line` and
+`audit_trail_entry` carry a nullable `legal_entity_id` (migration 0008) with a
+RESTRICTIVE legal-entity policy; `statement_cell` follows its run. A row with no
+entity is visible only to all-entity callers. A ledger's owner is read from its
+`reporting_hwm` and `reporting_balance` rows under the caller's scope: runs,
+journal lines and ledger audit entries take that entity, never the caller's.
+`legalEntityId` on `POST /v1/reporting/runs` is only an assertion (422
+REPORT-0032 when it differs). A ledger with no visible rows is 404 REPORT-0031
+(a hidden ledger looks the same as an empty one); a ledger whose rows span
+several entities is 422 REPORT-0032. The ledger consumer must write the
+ledger's `reporting_hwm` row before its journal lines. Audit entries without a
+ledger (definitions, hierarchies, schedules) stay tenant-level. Report
+definitions, hierarchies and schedules are tenant-level configuration and are
+not entity-scoped.

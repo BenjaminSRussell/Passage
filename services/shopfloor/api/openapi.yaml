@@ -12,7 +12,9 @@ info:
     threshold (BR-25.6), the OEE rollup that stores buckets, kiosk badge login
     and the "Who is clocked in" inquiry. Slice 7: the job dispatch projection
     and list, job detail, and operator feedback with quality checks (FR-25.3 to
-    FR-25.5). Commands that change state
+    FR-25.5). Slice 11: time profiles, pay agreements and the worker links the pay
+    calculation reads (FR-25.7); a replace takes `If-Match` with the version read.
+    Commands that change state
     (except the registration batch, idempotent per item id, process message
     creation, idempotent per source and sourceMessageId, job plans keyed by job id,
     job feedback idempotent per feedbackId, and the scheduler jobs
@@ -194,7 +196,11 @@ paths:
         auto-stopped bundle's time is split by the good quantity on its starts,
         or equally (BR-25.1). Starts sharing the incoming `bundleId` stay open.
         A start older than an open unit (a late offline replay) is itself
-        closed at that unit's start. A unit open for more than 24 hours is
+        closed at that unit's start, or at the worker's next job-start after it
+        if earlier, unless its own `job-stop` is stored or in the same batch.
+        When that stop arrives in a later batch, the server's stop is corrected
+        to zero length (`registration.corrected`, correctedBy
+        `system:offline-replay`). A unit open for more than 24 hours is
         stopped at 24 hours with flag `auto-stop-capped`. A `job-start` for a
         job the server already finished is stored with flag
         `job-finished-conflict` and warning SF-0004, and the job stays finished
@@ -289,6 +295,243 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PayApproveResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registrations/{id}:correct:
+    post:
+      operationId: correctRegistration
+      summary: Correct the times of a registration with a reason
+      x-passage-duty: shopfloor.time.correct
+      description: |
+        A supervisor changes `startedAt` and/or `stoppedAt` of one registration (FR-25.8).
+        The before and after, the reason and the user are kept in the correction audit
+        trail and `dev.passage.shopfloor.registration.corrected.v1` is published in the
+        same transaction. A clock-in or clock-out takes no `stoppedAt`; a closed
+        registration lasts at most 24 hours; a bundled job registration, and a job-start
+        that a job-stop already closed (correct the job-stop), cannot be corrected
+        (SF-0127); an invalid or unchanged correction is SF-0128, except that sending
+        the stored `startedAt` of an auto clock-out nobody has reviewed yet confirms it
+        (BR-25.3), which clears the day's `missing-clock-out` flag on recalculation. A day
+        calculated before the correction cannot be approved until it is recalculated
+        (SF-0104). You cannot correct your own registrations (SF-0106). Corrections to
+        approved days are paid through `pay:revise`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CorrectRegistration"
+      responses:
+        "200":
+          description: The correction as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Correction"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registration-corrections:
+    get:
+      operationId: listRegistrationCorrections
+      summary: Registration corrections made in a date range
+      x-passage-duty: shopfloor.view
+      description: Lists corrections by the day they were made (local days in `timeZone`, UTC by default), newest first.
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Omit to list every worker.
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/TimeZone"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Corrections, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Correction"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registrations:auto-clock-out:
+    post:
+      operationId: autoClockOut
+      summary: Auto clock-out sweep - close clock-ins left open too long
+      x-passage-duty: shopfloor.time.autoclockout
+      description: |
+        The hourly auto clock-out job (D2h, BR-25.3). The platform scheduler calls it for
+        each tenant with a service identity holding the duty; a supervisor may run it by
+        hand. For every worker whose latest clock punch is a clock-in older than
+        `afterHours`, it writes a clock-out at the clock-in plus `afterHours` (so the
+        segment is exactly that long, however late the sweep ran), flagged
+        `auto-clock-out`, and publishes `registration.posted` in the same transaction.
+        Workers are locked with `skip locked`, so concurrent sweeps close each shift
+        once, and a clock-out that arrives meanwhile wins. At most `limit` shifts are
+        closed per call, oldest first. Calling it again is safe, so it takes no
+        Idempotency-Key. Until a supervisor confirms the clock-out (a
+        `correctRegistration` that keeps its time) or corrects it, the calculated day
+        counts the hours but carries the flag `missing-clock-out`, so it cannot be
+        approved (BR-25.3, SF-0006). The flagged clock-outs are listed by
+        `listAutoClockOuts`. A day calculated before the sweep is stale for approval
+        until it is calculated again (SF-0104).
+      parameters:
+        - name: afterHours
+          in: query
+          description: Hours a clock-in may stay open before it is closed (4 to 24).
+          schema:
+            type: integer
+            minimum: 4
+            maximum: 24
+            default: 16
+        - name: limit
+          in: query
+          description: Most shifts closed by this call.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: The threshold used and the clock-ins this sweep closed (empty when none was stale).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [afterHours, items]
+                properties:
+                  afterHours:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AutoClosed"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/auto-clock-outs:
+    get:
+      operationId: listAutoClockOuts
+      summary: Clock-outs written by the auto clock-out sweep, for review
+      x-passage-duty: shopfloor.view
+      description: |
+        Lists the flagged clock-outs the sweep wrote between `from` and `to` (local days
+        in `timeZone`, by the time the server wrote them), newest first, with the worker,
+        the clock-in they close and whether a supervisor has reviewed (confirmed or
+        corrected) them.
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Omit to list every worker.
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/TimeZone"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Auto clock-outs, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AutoClockOutReview"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay:revise:
+    post:
+      operationId: revisePay
+      summary: Recalculate a range and revise approved days with reversal lines
+      x-passage-duty: shopfloor.pay.revise
+      description: |
+        Recalculates the range from the stored registrations (BR-25.8, AC-25.8). Days
+        that are not approved are replaced as `pay:calculate` does. An approved day keeps
+        every line: lines that differ from the recalculation are cancelled by reversal
+        lines (negative hours and amount) and the new lines are added, all with the
+        day's next revision number, and `dev.passage.shopfloor.payday.revised.v1` is
+        published. Reversal and new lines join the next payroll export. A range where
+        nothing differs fails with SF-0129; an approved day that would carry open flags
+        fails with SF-0006; revising your own pay fails with SF-0106.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisePay"
+      responses:
+        "200":
+          description: The days of the range and the lines each revision reversed and added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayRevision"
         "400":
           $ref: "#/components/responses/Problem"
         "401":
@@ -1260,8 +1503,355 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
+  /v1/shopfloor/time-profiles:
+    post:
+      operationId: createTimeProfile
+      summary: Create a time profile with its day rules
+      description: |
+        Day rules per day type (weekday, saturday, sunday): shift window, unpaid breaks, rounding
+        and clock tolerances (FR-25.7, BR-25.2). A day type the profile does not define uses the
+        defaults (10 minutes before, 5 after, 1 minute rounding, no breaks). Publishes
+        `dev.passage.shopfloor.timeprofile.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewTimeProfile"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listTimeProfiles
+      summary: List time profiles by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Time profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/time-profiles/{id}:
+    get:
+      operationId: getTimeProfile
+      summary: Get one time profile
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The timeprofile with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateTimeProfile
+      summary: Replace the editable fields of a time profile
+      description: |
+        Replaces the name, status and days (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        Pay lines already calculated are not touched.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTimeProfile"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay-agreements:
+    post:
+      operationId: createPayAgreement
+      summary: Create a pay agreement with overtime thresholds and multipliers
+      description: |
+        Daily and weekly overtime thresholds, the overtime and Sunday multipliers and the first
+        day of the pay week (FR-25.7, BR-25.8). Workers without an agreement use 8 h daily, 40 h
+        weekly, 1.5x overtime, 2.0x Sunday and a Monday week. Publishes
+        `dev.passage.shopfloor.payagreement.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewPayAgreement"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listPayAgreements
+      summary: List pay agreements by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Pay agreements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay-agreements/{id}:
+    get:
+      operationId: getPayAgreement
+      summary: Get one pay agreement
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The payagreement with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updatePayAgreement
+      summary: Replace the editable fields of a pay agreement
+      description: |
+        Replaces the name, status and rules (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        Pay lines already calculated are not touched; recalculating a day uses the new rules.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePayAgreement"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:assign-setup:
+    post:
+      operationId: assignWorkerSetup
+      summary: Link a worker to a time profile and a pay agreement
+      description: |
+        Sets or clears (null) the worker's time profile and pay agreement, which the pay
+        calculation reads (FR-25.7). `If-Match` carries the worker version you read (SF-0143, 412).
+        A newly chosen profile or agreement must exist (SF-0140, SF-0141) and be active (SF-0144);
+        the one the worker already has may stay linked after it was deactivated.
+        Publishes `dev.passage.shopfloor.worker.assigned.v1`. Days already calculated keep their
+        pay lines until a supervisor recalculates them.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignWorkerSetup"
+      responses:
+        "200":
+          description: The worker with its new links (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The version you read, as an entity tag such as "3". A different current version is SF-0143 (412).
+      schema:
+        type: string
+        pattern: '^"[0-9]+"$'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1334,7 +1924,7 @@ components:
           pattern: "^[A-Z]{3}$"
     Worker:
       type: object
-      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt]
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId]
       properties:
         id:
           type: string
@@ -1359,6 +1949,264 @@ components:
         createdAt:
           type: string
           format: date-time
+        profileId:
+          type: [string, "null"]
+          format: uuid
+          description: Time profile the worker's days are calculated with; null means the defaults.
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
+          description: Pay agreement the worker's overtime follows; null means the defaults.
+    BreakWindow:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local time HH:MM.
+        to:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local time HH:MM, after from.
+    ProfileDay:
+      type: object
+      required: [dayType, shiftStart, shiftEnd, breaks, roundingMinutes, toleranceBeforeMin, toleranceAfterMin, flexAllowed]
+      properties:
+        dayType:
+          type: string
+          enum: [weekday, saturday, sunday]
+        shiftStart:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local HH:MM. Both ends or neither; a clock-in within the tolerance before it snaps to it (BR-25.2).
+        shiftEnd:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local HH:MM after shiftStart; a clock-out within the tolerance after it snaps to it.
+        breaks:
+          type: array
+          maxItems: 6
+          description: Unpaid breaks that must not overlap; the overlap with a segment comes off its hours.
+          items:
+            $ref: "#/components/schemas/BreakWindow"
+        roundingMinutes:
+          type: integer
+          minimum: 1
+          maximum: 15
+        toleranceBeforeMin:
+          type: integer
+          minimum: 0
+          maximum: 60
+        toleranceAfterMin:
+          type: integer
+          minimum: 0
+          maximum: 60
+        flexAllowed:
+          type: boolean
+          description: Stored for the flex balance, which is not calculated yet.
+    NewTimeProfile:
+      type: object
+      required: [code, name, days]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        days:
+          type: array
+          maxItems: 3
+          description: At most one entry per day type.
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+    UpdateTimeProfile:
+      type: object
+      required: [name, days]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        days:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+    TimeProfile:
+      type: object
+      required: [id, code, name, active, version, days, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NewPayAgreement:
+      type: object
+      required: [code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        dailyThreshold:
+          type: string
+          description: Hours per day before overtime, 0 to 24 with up to 2 decimals.
+        weeklyThreshold:
+          type: string
+          description: Base hours per pay week before overtime, 0 to 168 with up to 2 decimals.
+        overtimeMultiplier:
+          type: string
+          description: 1 to 5 with up to 4 decimals.
+        sundayMultiplier:
+          type: string
+          description: 1 to 5 with up to 4 decimals.
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: First day of the pay week, 0 (Sunday) to 6 (Saturday).
+        shiftPremiums:
+          type: array
+          maxItems: 6
+          description: Premium windows (pay type shift-premium); none when empty or omitted.
+          items:
+            $ref: "#/components/schemas/ShiftPremium"
+    UpdatePayAgreement:
+      type: object
+      required: [name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+        shiftPremiums:
+          type: array
+          maxItems: 6
+          description: Premium windows (pay type shift-premium). The update replaces the agreement, so an empty or omitted list removes every window.
+          items:
+            $ref: "#/components/schemas/ShiftPremium"
+    PayAgreement:
+      type: object
+      required: [id, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, shiftPremiums, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+        shiftPremiums:
+          type: array
+          maxItems: 6
+          description: Premium windows (pay type shift-premium); none when empty or omitted.
+          items:
+            $ref: "#/components/schemas/ShiftPremium"
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ShiftPremium:
+      type: object
+      description: >-
+        A premium window of the day. Hours worked between from and to (local HH:MM; a window
+        whose to is not after from crosses midnight) earn the premium rate on top of the pay
+        type of the hour, as a shift-premium pay line whose multiplier is the premium. Unpaid
+        breaks come off the hours. Windows of one agreement must not overlap.
+      required: [name, from, to, premium]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        from:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        to:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        premium:
+          type: string
+          description: Decimal string above 0 and up to 2 with up to 4 decimals; 0.15 pays 15% of the worker's rate extra.
+    AssignWorkerSetup:
+      type: object
+      required: [profileId, payAgreementId]
+      properties:
+        profileId:
+          type: [string, "null"]
+          format: uuid
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
     StoredRegistration:
       type: object
       required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds, flags]
@@ -1407,11 +2255,11 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
-          description: Review flags (BR-25.7, FR-25.3).
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
+          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote.
     WorkerDay:
       type: object
-      required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, payLines]
+      required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, revision, revisedBy, revisedAt, payLines]
       properties:
         workerId:
           type: string
@@ -1439,6 +2287,14 @@ components:
         approvedBy:
           type: [string, "null"]
         approvedAt:
+          type: [string, "null"]
+          format: date-time
+        revision:
+          type: integer
+          description: Number of supervisor revisions of an approved day (AC-25.8); payLines then include reversal lines.
+        revisedBy:
+          type: [string, "null"]
+        revisedAt:
           type: [string, "null"]
           format: date-time
         payLines:
@@ -1596,6 +2452,177 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+        revision:
+          type: integer
+          description: Worker-day revision that added the line; 0 for the original calculation.
+        reversal:
+          type: boolean
+          description: True for a line with negative hours and amount that cancels an earlier line (AC-25.8).
+    CorrectRegistration:
+      type: object
+      required: [reason]
+      description: At least one of startedAt and stoppedAt is required.
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+          description: Closes an open registration or moves its stop; not allowed on clock-in and clock-out.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AutoClosed:
+      type: object
+      required: [registrationId, workerId, clockInId, clockedInAt, clockedOutAt]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+          description: The clock-out the sweep wrote.
+        workerId:
+          type: string
+          format: uuid
+        clockInId:
+          type: string
+          format: uuid
+          description: The open clock-in it closes.
+        clockedInAt:
+          type: string
+          format: date-time
+        clockedOutAt:
+          type: string
+          format: date-time
+          description: Clock-in plus the threshold.
+    AutoClockOutReview:
+      type: object
+      required: [registrationId, workerId, workerName, clockedInAt, clockedOutAt, closedAt, reviewed]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        workerName:
+          type: string
+        clockedInAt:
+          type: [string, "null"]
+          format: date-time
+          description: The clock-in the clock-out closes; null when none precedes it.
+        clockedOutAt:
+          type: string
+          format: date-time
+          description: The clock-out time as it stands now, after any correction.
+        closedAt:
+          type: string
+          format: date-time
+          description: When the server wrote the clock-out.
+        reviewed:
+          type: boolean
+          description: |
+            A supervisor has confirmed or corrected the clock-out. Until then its day
+            carries `missing-clock-out` and cannot be approved (BR-25.3).
+    Correction:
+      type: object
+      required: [id, registrationId, workerId, reason, oldStartedAt, oldStoppedAt, oldHours, newStartedAt, newStoppedAt, newHours, correctedBy, correctedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        oldStartedAt:
+          type: string
+          format: date-time
+        oldStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        oldHours:
+          type: [string, "null"]
+        newStartedAt:
+          type: string
+          format: date-time
+        newStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        newHours:
+          type: [string, "null"]
+        correctedBy:
+          type: string
+        correctedAt:
+          type: string
+          format: date-time
+    RevisePay:
+      type: object
+      required: [workerId, from, to, reason]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive, at most 28 days after from.
+        timeZone:
+          type: string
+          default: UTC
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    PayRevision:
+      type: object
+      required: [workerId, from, to, reason, days]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        reason:
+          type: string
+        days:
+          type: array
+          items:
+            type: object
+            required: [workDate, status, revision, changed, reversedLines, addedLines]
+            properties:
+              workDate:
+                type: string
+                format: date
+              status:
+                type: string
+                enum: [calculated, approved]
+              revision:
+                type: integer
+                description: The day's revision after the call (0 for a day never revised).
+              changed:
+                type: boolean
+              reversedLines:
+                type: array
+                description: Lines with negative hours and amount that cancel approved lines.
+                items:
+                  $ref: "#/components/schemas/PayLine"
+              addedLines:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PayLine"
     PayApproveResponse:
       type: object
       required: [workerId, from, to, days]

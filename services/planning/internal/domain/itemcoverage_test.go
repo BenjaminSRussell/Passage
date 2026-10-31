@@ -93,6 +93,16 @@ func TestItemCoverageSpec_Validate(t *testing.T) {
 			c.SafetyMarginReceiptDays = 366
 			return c
 		}(), []string{"safetyMarginReceiptDays"}},
+		{"issue margin over a year", func() ItemCoverageSpec {
+			c := validItemCoverage()
+			c.SafetyMarginIssueDays = 366
+			return c
+		}(), []string{"safetyMarginIssueDays"}},
+		{"negative reorder margin", func() ItemCoverageSpec {
+			c := validItemCoverage()
+			c.SafetyMarginReorderDays = -1
+			return c
+		}(), []string{"safetyMarginReorderDays"}},
 		{"bad buffer profile id", func() ItemCoverageSpec {
 			c := validItemCoverage()
 			c.BufferProfileID = "BP-1"

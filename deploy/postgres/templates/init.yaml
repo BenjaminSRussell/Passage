@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-postgres-init
+  labels:
+    app.kubernetes.io/name: postgres
+data:
+  10-roles.sh: |
+    secrets=/run/secrets/outbox-postgres
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -v app_password="$(cat $secrets/APP_PASSWORD)" -v cdc_password="$(cat $secrets/CDC_PASSWORD)" <<'SQL'
+    CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';
+    CREATE ROLE debezium_cdc LOGIN NOSUPERUSER REPLICATION BYPASSRLS PASSWORD :'cdc_password';
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL

@@ -76,7 +76,6 @@ describe("client-side checks", () => {
     invoiceDate: "2026-10-26",
     postingDate: "2026-10-26",
     ledgerId: UUID_A,
-    fiscalPeriodId: UUID_B,
     lines: [{ receiptId: RECEIPT, receiptLineNo: "1", qty: "6", unitPrice: "2.5", standardCost: true }],
   };
 
@@ -178,7 +177,6 @@ describe("post vendor invoice", () => {
     fill("Invoice date", "2026-10-26");
     fill("Posting date", "2026-10-26");
     fill("Ledger ID", UUID_A);
-    fill("Fiscal period ID", UUID_B);
     fill("Line 1 receipt ID", RECEIPT);
     fill("Line 1 quantity", "6");
     fill("Line 1 unit price", "2.5");

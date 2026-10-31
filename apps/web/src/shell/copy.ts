@@ -51,6 +51,11 @@ export const copy = {
     description: "Check the address, or search for the page you need.",
     pageTitle: "Page not found",
   },
+  notAvailable: {
+    title: "This page isn't available to you",
+    description: "Your account doesn't have the duty this page needs. Ask an administrator if you should have access.",
+    pageTitle: "Page not available",
+  },
   errorBoundary: {
     title: "This page couldn't load",
     body: "Something went wrong while showing this page. Your other workspaces still work.",

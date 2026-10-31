@@ -40,3 +40,22 @@ func TestCDCPublicationCoversOutbox(t *testing.T) {
 		t.Fatal("publication must list tables explicitly, not FOR ALL TABLES")
 	}
 }
+
+func TestCDCRoleCanReadOutboxButNotWriteIt(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `do $$ begin create role debezium_cdc nologin; exception when duplicate_object or unique_violation then null; end $$`); err != nil {
+		t.Skipf("cannot create the debezium_cdc role: %v", err)
+	}
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var read, write bool
+	err := pool.QueryRow(ctx, `select has_table_privilege('debezium_cdc', 'outbox', 'SELECT'), has_table_privilege('debezium_cdc', 'outbox', 'INSERT')`).Scan(&read, &write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read || write {
+		t.Fatalf("debezium_cdc select=%v insert=%v, want select only", read, write)
+	}
+}

@@ -5,13 +5,14 @@ import {
   createOrder,
   describeProblem,
   newIdempotencyKey,
+  type CoProductType,
   type CreateOrderInput,
   type Flushing,
   type Problem,
   type ProductionOrder,
   type ReworkRefType,
 } from "./api/client";
-import { flushingLabel, reworkRefLabel } from "./labels";
+import { coProductTypeLabel, flushingLabel, reworkRefLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,6 +28,14 @@ export interface LineValues {
   unitCost: string;
   /** Empty means manual (FR-21.5). */
   flushing?: Flushing | "";
+}
+
+export interface CoProductValues {
+  lineNo: string;
+  /** A co-product shares the cost by quantity; a by-product carries none. */
+  type: CoProductType;
+  itemId: string;
+  qtyPer: string;
 }
 
 export interface OperationValues {
@@ -52,6 +61,8 @@ export interface OrderValues {
   multiple: string;
   lines: LineValues[];
   operations: OperationValues[];
+  /** Co-products and by-products the order yields besides its product (FR-21.14). */
+  coProducts: CoProductValues[];
   /** A rework order (FR-21.20): no BOM explosion by default, cost settles as rework. */
   rework: boolean;
   /** What the rework order reports against; empty for none. */
@@ -63,6 +74,7 @@ export interface OrderValues {
 export type OrderErrors = Record<string, string>;
 
 const emptyLine = (n: number): LineValues => ({ lineNo: String(n * 10), itemId: "", qtyPer: "", scrapPct: "", unitCost: "" });
+const emptyCoProduct = (n: number): CoProductValues => ({ lineNo: `C${n}`, type: "co-product", itemId: "", qtyPer: "" });
 const emptyOperation = (n: number): OperationValues => ({
   operNumber: String(n * 10),
   resourceId: "",
@@ -85,6 +97,7 @@ export const initialValues = (): OrderValues => ({
   multiple: "",
   lines: [emptyLine(1)],
   operations: [emptyOperation(1)],
+  coProducts: [],
   rework: false,
   referenceType: "",
   referenceId: "",
@@ -151,6 +164,26 @@ export function validateOrder(values: OrderValues): OrderErrors {
   ) {
     errors.referenceId = "Enter the batch or serial number (up to 100 characters, no surrounding spaces).";
   }
+  if (values.rework && values.coProducts.length > 0) {
+    errors.coProducts = "A rework order yields no co-products.";
+  }
+  const seenCo = new Set<string>();
+  values.coProducts.forEach((co, i) => {
+    if (co.lineNo.trim() === "" || co.lineNo.length > 20) {
+      errors[`coProducts.${i}.lineNo`] = "Enter a line number.";
+    } else if (seenCo.has(co.lineNo.trim())) {
+      errors[`coProducts.${i}.lineNo`] = "Line numbers must be unique.";
+    }
+    seenCo.add(co.lineNo.trim());
+    if (!uuidPattern.test(co.itemId.trim())) {
+      errors[`coProducts.${i}.itemId`] = "Enter the item id (a UUID).";
+    } else if (co.itemId.trim() === values.productId.trim()) {
+      errors[`coProducts.${i}.itemId`] = "A co-product cannot be the order's own product.";
+    }
+    if (!positive(co.qtyPer)) {
+      errors[`coProducts.${i}.qtyPer`] = "Enter a positive quantity.";
+    }
+  });
   let previous = 0;
   values.operations.forEach((op, i) => {
     const n = Number.parseInt(op.operNumber, 10);
@@ -213,6 +246,9 @@ export function toInput(values: OrderValues): CreateOrderInput {
       laborRate: optional(op.laborRate),
       overheadRate: optional(op.overheadRate),
     })),
+    ...(values.coProducts.length > 0
+      ? { coProducts: values.coProducts.map((co) => ({ lineNo: co.lineNo.trim(), type: co.type, itemId: co.itemId.trim(), qtyPer: co.qtyPer })) }
+      : {}),
   };
 }
 
@@ -224,7 +260,7 @@ export function formKey(serverField: string): string {
   if (serverField.startsWith("reworkReference")) {
     return "referenceType";
   }
-  return serverField.replace(/^bom\[(\d+)\]/, "lines.$1").replace(/^operations\[(\d+)\]/, "operations.$1");
+  return serverField.replace(/^bom\[(\d+)\]/, "lines.$1").replace(/^operations\[(\d+)\]/, "operations.$1").replace(/^coProducts\[(\d+)\]/, "coProducts.$1");
 }
 
 export interface CreateProductionOrderPageProps {
@@ -249,6 +285,8 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
   };
   const setLine = (i: number, patch: Partial<LineValues>) =>
     set({ lines: values.lines.map((line, j) => (j === i ? { ...line, ...patch } : line)) });
+  const setCoProduct = (i: number, patch: Partial<CoProductValues>) =>
+    set({ coProducts: values.coProducts.map((co, j) => (j === i ? { ...co, ...patch } : co)) });
   const setOperation = (i: number, patch: Partial<OperationValues>) =>
     set({ operations: values.operations.map((op, j) => (j === i ? { ...op, ...patch } : op)) });
 
@@ -409,6 +447,44 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
             ))}
           </div>
         </Card>
+
+        {values.rework ? null : (
+          <Card
+            title="Co-products and by-products"
+            actions={
+              <Button size="sm" onClick={() => set({ coProducts: [...values.coProducts, emptyCoProduct(values.coProducts.length + 1)] })}>
+                Add co-product
+              </Button>
+            }
+          >
+            <div className={styles.rows}>
+              {values.coProducts.length === 0 ? (
+                <p className={styles.hint}>
+                  None. Add an item the order yields besides its product. The planned cost is spread over the product and its co-products by quantity; a by-product carries no cost.
+                </p>
+              ) : null}
+              {values.coProducts.map((co, i) => (
+                <fieldset key={i} className={styles.row}>
+                  <legend className={styles.legend}>Co-product {i + 1}</legend>
+                  {text(`po-coProducts-${i}-lineNo`, "Line", co.lineNo, (v) => setCoProduct(i, { lineNo: v }))}
+                  <FormField id={`po-coProducts-${i}-type`} label="Type" error={errors[`coProducts.${i}.type`]}>
+                    {(control) => (
+                      <Select {...control} value={co.type} onChange={(event) => setCoProduct(i, { type: event.target.value as CoProductType })}>
+                        <option value="co-product">{coProductTypeLabel["co-product"]}</option>
+                        <option value="by-product">{coProductTypeLabel["by-product"]}</option>
+                      </Select>
+                    )}
+                  </FormField>
+                  {text(`po-coProducts-${i}-itemId`, "Item", co.itemId, (v) => setCoProduct(i, { itemId: v }))}
+                  {text(`po-coProducts-${i}-qtyPer`, "Quantity per unit", co.qtyPer, (v) => setCoProduct(i, { qtyPer: v }), { inputMode: "decimal" })}
+                  <Button variant="ghost" size="sm" onClick={() => set({ coProducts: values.coProducts.filter((_, j) => j !== i) })}>
+                    Remove co-product {i + 1}
+                  </Button>
+                </fieldset>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <Card
           title="Route"

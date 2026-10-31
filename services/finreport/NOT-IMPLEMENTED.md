@@ -77,7 +77,7 @@ platform change outside the wave's owned paths).
 
 | AC | Status | Reason |
 | --- | --- | --- |
-| AC1 statements tie to the trial balance to the cent (demo dataset); cash flow reconciles to the change in cash | Partial. `TestStatements_TieOutToTrialBalance` (domain) ties BS-STD (check row 0.00), PL-STD and TB-STD on a balanced ledger; `TestInstallStandard` (store) runs the installed TB-STD with total 0.00 and the installed CF-STD with the check row 0.00; `TestCashFlow_PropertyReconcilesEveryBalancedLedger` reconciles CF-STD over random balanced ledgers with closing entries. The demo dataset run is **later slice of PSG-15**. | Needs the `demo-fy2026-closed` fixture from waves 11-14. |
+| AC1 statements tie to the trial balance to the cent (demo dataset); cash flow reconciles to the change in cash | Partial. `TestStatements_TieOutToTrialBalance` (domain) ties BS-STD (check row 0.00), PL-STD and TB-STD on a balanced ledger; `TestInstallStandard` (store) runs the installed TB-STD with total 0.00 and the installed CF-STD with the check row 0.00; `TestCashFlow_PropertyReconcilesEveryBalancedLedger` reconciles CF-STD over random balanced ledgers with closing entries. `TestDemoDataset_StatementsTieToTrialBalanceAndCashFlowReconciles` runs TB, BS, PL and CF-STD over a deterministic 12-period closed year (cent amounts, closing entries) and ties each to the journals in every period. Running against the waves 11-14 `demo-fy2026-closed` export is **later slice of PSG-15** (fixture does not exist yet). | In-repo fixture stands in until waves 11-14 produce the export. |
 | AC2 designer round-trips a 200-row definition through JSON export/import | Done. `internal/domain/designer_roundtrip_test.go` covers 200 x 12 `Marshal`, `Parse` and identical cell values; `TestExportImportRoundTripAndReproducibleHash` (store) exports, imports under a new code, publishes and runs both with identical cells. | n/a |
 | AC3 drill sum property over random cells | Done. Level 1: rapid over random balances. Level 2 (slice 5): `TestDrill_LinesSumToEveryCell` (domain, 100 random ledgers of lines with closing entries and postings after the HWM, four statement kinds, every balance-backed cell) and `TestDrillLines_PropertyPagesSumToCell` (Postgres, 100 random ledgers, every cell walked page by page at a random page size; the final cumulative sum equals the cell, each line listed once per key, none after the HWM). Together over 1,000 random cells. | n/a |
 | AC4 phase exit sign-off by finance stakeholders | **handoff** to the finance stakeholders and the wave 15 issue | Process, not code. |
@@ -128,3 +128,14 @@ platform change outside the wave's owned paths).
 - The duty `reporting.statement.schedule` ("Schedule financial statements",
   PRD §2.15.17) is new in slice 3; the role catalog that grants it to the
   financial reporting analyst is a **handoff** to wave 2.
+
+## Legal-entity scope follow-ups (#241)
+
+- **later slice**: the ledger consumer that fills `reporting_balance` and
+  `reporting_hwm` must write `legal_entity_id` from the ledger's legal entity;
+  rows written without it are visible only to all-entity callers.
+- **later slice**: the consumer must write a ledger's `reporting_hwm` row (with
+  its entity) before the journal lines; lines for a ledger without visible
+  reporting rows are refused with 404 REPORT-0031.
+- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
+  data migration owned by the tenant administrator.

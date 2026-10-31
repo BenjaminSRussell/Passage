@@ -1442,19 +1442,19 @@ components:
       properties:
         bookCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
-        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        method: { type: string, enum: [StraightLine, DecliningBalance, MACRS] }
         factor: { type: string, description: "Declining-balance multiplier 1 to 3, 2 = 200%" }
         switchToStraightLine: { type: boolean }
         serviceLifePeriods:
           type: integer
           minimum: 1
           maximum: 1200
-          description: Months for StraightLine (1 to 1200); years for DecliningBalance (1 to 100)
+          description: Months for StraightLine (1 to 1200); years for DecliningBalance (1 to 100); the recovery period for MACRS (3, 5, 7, 10, 15 or 20 years, IRS Pub. 946 Tables A-1 to A-5, salvage 0, factor ignored)
         salvageValue: { type: string }
         convention:
           type: string
           enum: [None, FullMonth, MidMonth15, HalfYear, MidQuarter]
-          description: None, FullMonth and MidMonth15 apply to StraightLine; None, HalfYear and MidQuarter to DecliningBalance (MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of the first year by in-service quarter, IRS Pub. 946)
+          description: None, FullMonth and MidMonth15 apply to StraightLine; None, HalfYear and MidQuarter to DecliningBalance (MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of the first year by in-service quarter, IRS Pub. 946); HalfYear (Table A-1) and MidQuarter (Tables A-2 to A-5 by in-service quarter) to MACRS
         inServiceDate: { type: string, format: date }
         cost: { type: string }
     Book:
@@ -1465,7 +1465,7 @@ components:
         legalEntityId: { type: string, format: uuid }
         bookCode: { type: string }
         currency: { type: string }
-        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        method: { type: string, enum: [StraightLine, DecliningBalance, MACRS] }
         factor: { type: string }
         switchToStraightLine: { type: boolean }
         serviceLifePeriods: { type: integer }
@@ -1987,7 +1987,7 @@ components:
               assetId: { type: string, format: uuid }
               assetNumber: { type: string }
               bookId: { type: string, format: uuid }
-              method: { type: string, enum: [StraightLine, DecliningBalance] }
+              method: { type: string, enum: [StraightLine, DecliningBalance, MACRS] }
               convention: { type: string }
               inServiceDate: { type: string, format: date }
               quarter: { type: integer, minimum: 1, maximum: 4 }
@@ -2064,10 +2064,10 @@ components:
         classCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
         bookCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$", description: "The tax book the group depreciates" }
         taxYear: { type: integer, minimum: 1900, maximum: 2200 }
-        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        method: { type: string, enum: [StraightLine, DecliningBalance, MACRS] }
         factor: { type: string, description: "Declining-balance factor, 1 to 3" }
         switchToStraightLine: { type: boolean }
-        serviceLifePeriods: { type: integer, minimum: 1, maximum: 1200, description: "Months for StraightLine, years for DecliningBalance" }
+        serviceLifePeriods: { type: integer, minimum: 1, maximum: 1200, description: "Months for StraightLine, years for DecliningBalance and MACRS" }
         convention: { type: string, enum: [None, FullMonth, MidMonth15, HalfYear, MidQuarter] }
         memberAssetIds:
           type: array
@@ -2088,7 +2088,7 @@ components:
         bookCode: { type: string }
         taxYear: { type: integer }
         currency: { type: string }
-        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        method: { type: string, enum: [StraightLine, DecliningBalance, MACRS] }
         factor: { type: string }
         switchToStraightLine: { type: boolean }
         serviceLifePeriods: { type: integer }

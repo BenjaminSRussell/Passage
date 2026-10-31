@@ -14,6 +14,9 @@ const (
 	CodeSplitQuantity = "PRODUCTION_SPLIT_QUANTITY"
 	// CodeMergeRefused is PROD-0016 and the other merge preconditions.
 	CodeMergeRefused = "PRODUCTION_MERGE_REFUSED"
+	// CodeSplitRefused is a split of a Started order that BR-21.11 cannot move
+	// the posted figures of: reported output, draft journals, or a transfer.
+	CodeSplitRefused = "PRODUCTION_SPLIT_REFUSED"
 )
 
 // OriginSplit is the origin type of an order a split created (PRD 4.21.4).
@@ -29,12 +32,21 @@ const (
 // maxOrderQty keeps a quantity inside numeric(18,6).
 var maxOrderQty = decimal.New(1, 12)
 
-// CheckSplittable reports whether an order in status s may be split or merged:
-// Created to Released, before anything is consumed or reported. Splitting a
-// Started order with the WIP transfer of BR-21.11 is not built yet.
-func CheckSplittable(s Status) error {
+// CheckMergeable reports whether an order in status s may be merged: Created
+// to Released, before anything is consumed or reported.
+func CheckMergeable(s Status) error {
 	if rank(s) < 0 || rank(s) > rank(Released) {
-		return &Error{Code: CodeIllegalTransition, Detail: fmt.Sprintf("a %s order cannot be split or merged; only Created to Released orders can", s)}
+		return &Error{Code: CodeIllegalTransition, Detail: fmt.Sprintf("a %s order cannot be merged; only Created to Released orders can", s)}
+	}
+	return nil
+}
+
+// CheckSplittable reports whether an order in status s may be split: Created
+// to Started (FR-21.15). A Started order moves its posted consumption, hours
+// and WIP to the new order (BR-21.11); a later status has reported output.
+func CheckSplittable(s Status) error {
+	if rank(s) < 0 || rank(s) > rank(Started) {
+		return &Error{Code: CodeIllegalTransition, Detail: fmt.Sprintf("a %s order cannot be split; only Created to Started orders can", s)}
 	}
 	return nil
 }
@@ -142,7 +154,7 @@ func MergeOrders(orders []MergeInput) (MergedOrder, error) {
 			return MergedOrder{}, refuseMerge(fmt.Sprintf("order %s is listed twice", o.ID))
 		}
 		seen[o.ID] = true
-		if err := CheckSplittable(o.Status); err != nil {
+		if err := CheckMergeable(o.Status); err != nil {
 			return MergedOrder{}, refuseMerge(fmt.Sprintf("order %s is %s; only Created to Released orders can be merged", o.ID, o.Status))
 		}
 		if o.LegalEntityID != first.LegalEntityID || o.ProductID != first.ProductID || o.SiteID != first.SiteID ||

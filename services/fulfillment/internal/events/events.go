@@ -15,16 +15,21 @@ var (
 	PackingSlipPosted    = events.Type(Context, "packingslip", "posted", 1)
 	PackingSlipCancelled = events.Type(Context, "packingslip", "cancelled", 1)
 	ShipmentCancelled    = events.Type(Context, "shipment", "cancelled", 1)
+	ShipmentClosed       = events.Type(Context, "shipment", "closed", 1)
+	ContainerUnpacked    = events.Type(Context, "container", "unpacked", 1)
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
+	WaveAssigned         = events.Type(Context, "wave", "assigned", 1)
+	WaveClosed           = events.Type(Context, "wave", "closed", 1)
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
+	PickTracked          = events.Type(Context, "pick", "tracked", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, WaveCreated, ASNIssued, TrackingUpdated,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked,
 	}
 }
 
@@ -39,6 +44,37 @@ type ShipmentCancelledData struct {
 	Lines          []LineRef `json:"lines"`
 }
 
+// ContainerUnpackedData is published when a CLOSED container is taken apart
+// before it ships: its SSCC stays issued (never reused) and Lines are the
+// quantities that return to the unpacked pool of the shipment.
+type ContainerUnpackedData struct {
+	ShipmentID     string    `json:"shipment_id"`
+	ShipmentNumber string    `json:"shipment_number"`
+	ContainerID    string    `json:"container_id"`
+	SSCC           string    `json:"sscc"`
+	Lines          []LineRef `json:"lines"`
+}
+
+// ClosedLine is one line of a closed remainder: Qty is the planned quantity
+// given up (it will not ship), PickedUnpacked the part of it that was picked but
+// never packed and goes back to stock (inventory releases it).
+type ClosedLine struct {
+	OrderLineID    string `json:"order_line_id"`
+	Qty            string `json:"qty"`
+	PickedUnpacked string `json:"picked_unpacked"`
+}
+
+// ShipmentClosedData is published when the open remainder of a partially
+// shipped shipment is closed (FR-28.8, CANCEL_REMAINDER). Sales may cancel or
+// re-order the remainder; inventory releases the reservation of Qty.
+type ShipmentClosedData struct {
+	ShipmentID     string       `json:"shipment_id"`
+	ShipmentNumber string       `json:"shipment_number"`
+	OrderID        string       `json:"order_id"`
+	WarehouseID    string       `json:"warehouse"`
+	Lines          []ClosedLine `json:"lines"`
+}
+
 // WaveCreatedData is published for each wave the picking workbench creates
 // (FR-28.13); its shipments move to PICKING in the same transaction.
 type WaveCreatedData struct {
@@ -51,6 +87,31 @@ type WaveCreatedData struct {
 	ShipmentIDs   []string `json:"shipment_ids"`
 	LineCount     int      `json:"line_count"`
 	OrderCount    int      `json:"order_count"`
+}
+
+// WaveAssignedData is published when a wave is given to a picker or handed to
+// another one (FR-28.13). PreviousPicker is empty for the first assignment.
+type WaveAssignedData struct {
+	WaveID         string `json:"wave_id"`
+	WaveNumber     string `json:"wave_number"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	WarehouseID    string `json:"warehouse"`
+	Picker         string `json:"picker"`
+	PreviousPicker string `json:"previous_picker,omitempty"`
+}
+
+// WaveClosedData is published when every line of a wave is picked or on a
+// cancelled shipment and the wave is closed. ShortLines counts the lines picked
+// below plan (their remainder is a backorder).
+type WaveClosedData struct {
+	WaveID        string   `json:"wave_id"`
+	WaveNumber    string   `json:"wave_number"`
+	LegalEntityID string   `json:"legal_entity_id"`
+	WarehouseID   string   `json:"warehouse"`
+	Picker        string   `json:"picker,omitempty"`
+	ShipmentIDs   []string `json:"shipment_ids"`
+	LineCount     int      `json:"line_count"`
+	ShortLines    int      `json:"short_lines"`
 }
 
 // ASNLine is one shipment line quantity inside an ASN container.
@@ -109,11 +170,16 @@ type PickLine struct {
 	OrderLineID string `json:"order_line_id"`
 	Qty         string `json:"qty"`
 	Backordered string `json:"backordered"`
+	// ShortReason is the short pick reason code, when one was given.
+	ShortReason string `json:"short_reason,omitempty"`
 }
 
 type PickConfirmedData struct {
-	ShipmentID string     `json:"shipment_id"`
-	Lines      []PickLine `json:"lines"`
+	ShipmentID string `json:"shipment_id"`
+	// WaveID is the wave whose confirmation picked the lines; absent for a
+	// single-shipment pick.
+	WaveID string     `json:"wave_id,omitempty"`
+	Lines  []PickLine `json:"lines"`
 }
 
 type JournalEntry struct {
@@ -128,6 +194,35 @@ type SlipLine struct {
 	Qty            string `json:"qty"`
 	CostAmount     string `json:"cost_amount"`
 	CostSnapshotID string `json:"cost_snapshot_id"`
+	// ProductID and Tracking tell inventory which batches and serials to issue
+	// (BR-28.10). Tracking is empty for an untracked line and for reversals.
+	ProductID string          `json:"product_id,omitempty"`
+	Tracking  []TrackingEntry `json:"tracking,omitempty"`
+}
+
+// TrackingEntry is one batch or serial taken from one location.
+type TrackingEntry struct {
+	BatchNo      string `json:"batch_no,omitempty"`
+	SerialNo     string `json:"serial_no,omitempty"`
+	LocationCode string `json:"location_code,omitempty"`
+	Qty          string `json:"qty"`
+}
+
+// TrackedLine is the tracking captured for one shipment line.
+type TrackedLine struct {
+	OrderLineID string          `json:"order_line_id"`
+	ProductID   string          `json:"product_id"`
+	Entries     []TrackingEntry `json:"entries"`
+}
+
+// PickTrackedData is published when the batch, serial and location entries of
+// a shipment line are captured or replaced at pick (BR-28.10). Entries is the
+// full set of the line's entries not yet shipped.
+type PickTrackedData struct {
+	ShipmentID     string      `json:"shipment_id"`
+	ShipmentNumber string      `json:"shipment_number"`
+	WarehouseID    string      `json:"warehouse"`
+	Line           TrackedLine `json:"line"`
 }
 
 // PackagingFee is one statistical packaging fee line of a slip (BR-28.12). It

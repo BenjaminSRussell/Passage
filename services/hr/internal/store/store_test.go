@@ -3,19 +3,36 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/migrations"
 )
+
+func testSealer(t *testing.T) *domain.Sealer {
+	t.Helper()
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := domain.NewSealer(keys, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealer
+}
 
 // newStore runs against a fresh schema from testkit and skips without
 // PASSAGE_TEST_DATABASE_URL.
@@ -26,10 +43,7 @@ func newStore(t *testing.T) (*Postgres, context.Context) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := testSealer(t)
 	return New(pool, sealer, 10), ctx
 }
 
@@ -241,4 +255,143 @@ func TestPrimaryEmploymentOverlapIsRejectedButConcurrentIsAllowed(t *testing.T) 
 
 	mustEmployment(t, s, ctx, w.ID, le1, "CONCURRENT", day(time.January, 1))
 	mustEmployment(t, s, ctx, w.ID, le2, "PRIMARY", day(time.January, 1))
+}
+
+func TestReadPIIOpensLegacySealedValues(t *testing.T) {
+	s, ctx := newStore(t)
+	legacyKey := bytes.Repeat([]byte{9}, 32)
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sealer, err = domain.NewSealer(keys, legacyKey); err != nil {
+		t.Fatal(err)
+	}
+	w := mustWorker(t, s, ctx, "legacy")
+	block, _ := aes.NewCipher(legacyKey)
+	aead, _ := cipher.NewGCM(block)
+	nonce := bytes.Repeat([]byte{3}, aead.NonceSize())
+	legacy := aead.Seal(nonce, nonce, []byte("987-65-4321"), nil)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $1 where worker_id = $2`, legacy, w.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.ReadPII(ctx, w.ID, true, "legacy migration check", "req-legacy")
+	if err != nil || view.NationalID != "987-65-4321" {
+		t.Fatalf("legacy read = %+v, %v", view, err)
+	}
+	if legacyOpens, failed := s.PIIOpenCounts(); legacyOpens != 1 || failed != 0 {
+		t.Fatalf("PIIOpenCounts = %d, %d; want 1 legacy open", legacyOpens, failed)
+	}
+}
+
+func legacySealed(t *testing.T, key []byte, plain string) []byte {
+	t.Helper()
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := bytes.Repeat([]byte{3}, aead.NonceSize())
+	return aead.Seal(nonce, nonce, []byte(plain), nil)
+}
+
+func sealedKeyIDs(t *testing.T, s *Postgres, ctx context.Context, workerID string) (nid, bank string) {
+	t.Helper()
+	var n, b []byte
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select national_id_sealed, bank_account_sealed from worker_pii where worker_id = $1`, workerID).Scan(&n, &b)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nid, _ = fieldcrypt.KeyID(n)
+	bank, _ = fieldcrypt.KeyID(b)
+	return nid, bank
+}
+
+// TestResealPIIMovesLegacyAndOlderKeysToTheCurrentKey covers #335: after the
+// run every value names the current key and opens without HR_PII_KEY, each
+// rewritten worker has a p3_change audit row, and a second run rewrites nothing.
+func TestResealPIIMovesLegacyAndOlderKeysToTheCurrentKey(t *testing.T) {
+	s, ctx := newStore(t)
+	previous := resealBatchSize
+	resealBatchSize = 1
+	t.Cleanup(func() { resealBatchSize = previous })
+	legacyKey := bytes.Repeat([]byte{9}, 32)
+	legacyWorker, _, err := s.CreateWorker(ctx, WorkerInput{
+		Worker:     Worker{PersonnelNumber: "WRK-RESEAL-1", WorkerType: "EMPLOYEE", PartyPersonID: ids.New(), LegalName: "Legacy"},
+		NationalID: "111-11-1111", BankAccount: "DE89370400440532013000",
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $1, bank_account_sealed = $2 where worker_id = $3`,
+			legacySealed(t, legacyKey, "111-11-1111"), legacySealed(t, legacyKey, "DE89370400440532013000"), legacyWorker.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	olderKey := mustWorker(t, s, ctx, "RESEAL-2")
+
+	rotated, err := fieldcrypt.NewKeys("k2", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32), "k2": bytes.Repeat([]byte{8}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sealer, err = domain.NewSealer(rotated, legacyKey); err != nil {
+		t.Fatal(err)
+	}
+	current := mustWorker(t, s, ctx, "RESEAL-3")
+
+	n, err := s.ResealPII(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("ResealPII = %d, %v; want 2 rewritten", n, err)
+	}
+	for _, id := range []string{legacyWorker.ID, olderKey.ID, current.ID} {
+		if nid, _ := sealedKeyIDs(t, s, ctx, id); nid != "k2" {
+			t.Errorf("worker %s national id under %q, want k2", id, nid)
+		}
+	}
+	if _, bank := sealedKeyIDs(t, s, ctx, legacyWorker.ID); bank != "k2" {
+		t.Errorf("legacy bank account under %q, want k2", bank)
+	}
+
+	if s.sealer, err = domain.NewSealer(rotated, nil); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.ReadPII(ctx, legacyWorker.ID, true, "re-seal verification", "req-reseal")
+	if err != nil || view.NationalID != "111-11-1111" || view.BankAccount == nil || *view.BankAccount != "DE89370400440532013000" {
+		t.Fatalf("read without HR_PII_KEY = %+v, %v", view, err)
+	}
+	var audited int
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) from audit_event where action = 'p3_change' and reason like 're-sealed%'
+			and entity_id in ($1, $2)`, legacyWorker.ID, olderKey.ID).Scan(&audited)
+	}); err != nil || audited != 2 {
+		t.Fatalf("re-seal audit rows = %d, %v; want 2", audited, err)
+	}
+	if again, err := s.ResealPII(ctx); err != nil || again != 0 {
+		t.Fatalf("second ResealPII = %d, %v; want 0", again, err)
+	}
+}
+
+func TestResealPIIStopsOnAValueThatOpensUnderNeitherKey(t *testing.T) {
+	s, ctx := newStore(t)
+	w := mustWorker(t, s, ctx, "RESEAL-ORPHAN")
+	other, err := fieldcrypt.NewKeys("k9", map[string][]byte{"k9": bytes.Repeat([]byte{5}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sealer, err = domain.NewSealer(other, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResealPII(ctx); !errors.Is(err, fieldcrypt.ErrOpen) || !strings.Contains(err.Error(), w.ID) {
+		t.Fatalf("ResealPII = %v; want ErrOpen naming worker %s", err, w.ID)
+	}
 }

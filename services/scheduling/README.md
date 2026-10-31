@@ -34,8 +34,9 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   network governing the step from the order's previous operation (FR-23.13).
   Status `open`, `scheduled` or `unplaced`.
 - **ScheduleRun** (`schedule_run`): scope `site`, `selection` or `move`, mode,
-  direction (`forward`), `finite`, algorithm (`heuristic`), metrics, messages
-  (unplaced operations) and warnings (SCHED-0010, SCHED-0012, SCHED-0014).
+  direction (`forward` or `backward`), `finite`, algorithm (`heuristic`),
+  metrics, messages (unplaced operations) and warnings (SCHED-0003,
+  SCHED-0010, SCHED-0012, SCHED-0014).
 - **ScheduledJob** (`scheduled_job`): one row per contiguous segment of an
   operation on a resource, with `run_id`, `firmed`, `finite`, `late_minutes`
   and, on the first segment, `changeover_minutes` with the `changeover_cost`
@@ -77,7 +78,24 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
 - **OrderPeg** (`scheduling_order_peg`): the dependent order consumes the
   parent order's output (FR-23.8). Both orders need operations in scheduling,
   a pair is pegged once, and a peg that would close a loop is refused. Pegs
-  are entered through the API until wave 22 pegging publishes them.
+  are entered through the API until wave 22 pegging publishes them. Schedule
+  runs honour pegs: parents are placed first, a dependent's first operation
+  starts no earlier than its parents' last end (in this run, or the stored
+  jobs of a parent outside the selection), and a dependent behind an unplaced
+  parent (in the run, or outside it with an unplaced operation) is unplaced.
+  Forward and backward runs both apply it.
+
+Secondary resources (slice 12, BR-23.4): an operation's `secondaryResourceIds`
+(at most 5, distinct, none a candidate) are booked for the same segments as the
+primary in `scheduled_job_secondary`, which carries its own exclusion
+constraint. A slot whose secondary is booked or closed is skipped; moves and the
+jobs they push need their secondaries free (SCHED-0005). Secondary bookings
+count in the capacity load and in downtime `affectedJobs`, and a bar is flagged
+`outsideCapacity` when a secondary is closed for it. Adjacent open intervals on
+a secondary (back-to-back shifts, midnight on a 24-hour calendar) count as one.
+An operation whose secondaries are never free in the horizon is unplaced with a
+SCHED-0005 reason. A primary job and a secondary booking on the same resource
+are kept apart by the scheduler, not by a database constraint.
 
 Rules the heuristic applies: orders sorted by (earliest due date, priority,
 order id), operations in number order; each operation starts after its
@@ -161,6 +179,21 @@ Slice 8:
   consecutive proposals. Nothing is stored: the planner enters each order's
   quantity and creates the campaign with `POST /campaigns`.
 
+Slice 10:
+
+- **Backward runs** (`direction: backward` on `POST /runs`, FR-23.2): each
+  order with a due date (the earliest due date of its operations) starts its
+  first remaining operation as late as it can while its last operation still
+  ends by that date. The latest start is found by a binary search over the
+  first operation's earliest start, placing with the forward engine and
+  releasing each probe, so calendars, bookings, blocks, changeovers and
+  networks apply as they do forward. BR-23.2: when the latest start is less
+  than one hour after the run start, or the order cannot end by its due date
+  even started at once, the order is placed forward from the run start; when
+  it then ends after the due date its jobs carry `late_minutes` and the run
+  reports SCHED-0003 on the order's last operation. Orders without a due date
+  are placed forward.
+
 ## API
 
 All routes need the tenant headers set by the gateway; duties in brackets.
@@ -174,13 +207,17 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/operations?orderId&status&limit` | `scheduling.read` |
 | POST | `/v1/scheduling/runs` (Idempotency-Key) | `scheduling.run` |
 | GET | `/v1/scheduling/runs`, `/v1/scheduling/runs/{id}` | `scheduling.read` |
-| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars) | `scheduling.read` |
+| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` per bar) | `scheduling.read` |
 | POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?from&weeks&resourceIds` | `scheduling.read` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |
+| PATCH | `/v1/scheduling/resources/{id}` (Idempotency-Key, If-Match) | `scheduling.capacity.write` |
+| POST | `/v1/scheduling/resources/{id}/capacity-overrides` (Idempotency-Key) | `scheduling.capacity.write` |
+| GET | `/v1/scheduling/resources/{id}/capacity-overrides?from&to` | `scheduling.read` |
+| DELETE | `/v1/scheduling/resources/{id}/capacity-overrides/{overrideId}` | `scheduling.capacity.write` |
 | POST | `/v1/scheduling/networks`, `/setup-matrices`, `/cleanout-rules` (Idempotency-Key) | `scheduling.setup.write` |
 | GET | `/v1/scheduling/networks[/{id}]`, `/setup-matrices[/{id}]?resourceId`, `/cleanout-rules` | `scheduling.read` |
 | POST | `/v1/scheduling/capacity-blocks` (Idempotency-Key) | `scheduling.capacity.write` |
@@ -221,6 +258,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0001` | 409 / 422 | Overlaps a booked job on a finite resource (a move conflict, or a concurrent booking caught by the exclusion constraint) |
 | `SCHED-0002` | 422 | Move start is outside open capacity, would split a changeover across closed time (BR-23.3), or no capacity is left in the horizon |
 | `SCHED-0004` | 422 | Target resource is not a candidate of the operation |
+| `SCHED-0005` | 422 / run message | A move needs a secondary resource that is booked or closed for the job's segments (BR-23.4); in a run the primary slot is skipped instead, and an operation with no free slot in the horizon is unplaced with this code |
 | `SCHED-0007` | move run message / `truncated` | Propagation stopped at 500 orders or 5 pegging levels; run the site schedule |
 | `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor or a firmed job of a pegged order |
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
@@ -251,6 +289,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0120` | 422 | An order to peg has no operations in scheduling |
 | `SCHED-0121` | 422 | The peg would make the parent order depend on its own dependent |
 | `SCHED-0122` | 404 | Order peg not found |
+| `SCHED-0130` | 404 | Capacity override not found |
 | `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 

@@ -91,6 +91,7 @@ type CostAllocation struct {
 // receipt line, which costing consumes) are filled when the voyage is posted.
 type Voyage struct {
 	ID              string              `json:"id"`
+	LegalEntityID   string              `json:"legalEntityId,omitempty"`
 	Reference       string              `json:"reference"`
 	Currency        string              `json:"currency"`
 	Status          string              `json:"status"`

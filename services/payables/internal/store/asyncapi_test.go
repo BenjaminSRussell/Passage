@@ -12,7 +12,7 @@ func TestAsyncAPINamesEveryEventType(t *testing.T) {
 		t.Fatal(err)
 	}
 	known := map[string]bool{}
-	for _, eventType := range []string{OpenItemCreatedType, OpenItemSettledType} {
+	for _, eventType := range []string{OpenItemCreatedType, OpenItemSettledType, OpenItemGroupedType, OpenItemHeldType, OpenItemReleasedType, VendorBlockedType, VendorUnblockedType, ProposalCreatedType, ProposalApprovedType, ProposalCancelledType} {
 		known[eventType] = true
 		if !strings.Contains(string(spec), "name: "+eventType+"\n") {
 			t.Errorf("asyncapi.yaml does not name %s", eventType)

@@ -33,7 +33,7 @@ func (failingExtractor) Extract(context.Context, string) ([]domain.Record, error
 
 const (
 	runsPath = "/v1/integration/migration-runs"
-	duties   = "migration.run"
+	duties   = "migration.run,tenant.administer"
 	mapping  = `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true},{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}]}`
 	body     = `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":` + mapping + `}`
 )
@@ -126,6 +126,14 @@ func TestCreateRun_LegalEntityScopedCallerForbidden(t *testing.T) {
 	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
 	rec := do(r, http.MethodPost, runsPath, body, duties, true, "X-Passage-Legal-Entity", testkit.TenantID(7))
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateRun_WithoutTenantAdministerForbidden(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
+	rec := do(r, http.MethodPost, runsPath, body, "migration.run", true)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || !strings.Contains(rec.Body.String(), "tenant.administer") {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
@@ -407,5 +415,170 @@ func TestCreateRun_ClientDisconnectStillRecordsRunAndLogsLifecycle(t *testing.T)
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("logs missing %q:\n%s", want, logs.String())
 		}
+	}
+}
+
+const (
+	specsPath = "/v1/integration/mapping-specs"
+	writeDuty = "migration.spec.write,tenant.administer"
+	// specMapping is the shared mapping plus the one test case a published spec must carry.
+	specMapping = `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true},{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}],"tests":[{"name":"retail","input":{"Name":"Acme","Group":"10"},"expect":{"name":"Acme","segment":"retail"}}]}`
+)
+
+type specBody struct {
+	ID       string `json:"id"`
+	Entity   string `json:"entity"`
+	Version  int    `json:"version"`
+	Checksum string `json:"checksum"`
+	Fields   int    `json:"fieldCount"`
+	Mapping  map[string]any
+}
+
+func publish(t *testing.T, r http.Handler, m string, headers ...string) (*httptest.ResponseRecorder, specBody) {
+	t.Helper()
+	rec := do(r, http.MethodPost, specsPath, `{"mapping":`+m+`}`, writeDuty, true, headers...)
+	var out specBody
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec, out
+}
+
+func TestPublishSpec_VersionsChecksumAndDuty(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{records()}, domain.NewMemLoader())
+	rec, first := publish(t, r, specMapping)
+	if rec.Code != http.StatusCreated || first.Version != 1 || first.Entity != "customer" || first.Fields != 2 || len(first.Checksum) != 64 || rec.Header().Get("Location") != specsPath+"/"+first.ID {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	reordered := `{"tests":[{"input":{"Group":"10","Name":"Acme"},"name":"retail","expect":{"segment":"retail","name":"Acme"}}],
+		"fields":[{"source":"Name","target":"name","type":"string","required":true},{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}],"version":1,"entity":"customer"}`
+	rec, again := publish(t, r, reordered)
+	if rec.Code != http.StatusOK || again.ID != first.ID || again.Checksum != first.Checksum {
+		t.Fatalf("key order must not change the checksum: %d %s", rec.Code, rec.Body)
+	}
+	changed := strings.ReplaceAll(specMapping, `"retail"`, `"wholesale"`)
+	if rec, _ := publish(t, r, changed); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), store.CodeSpecVersionUsed) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if rec, _ := publish(t, r, strings.Replace(changed, `"version":1`, `"version":2`, 1)); rec.Code != http.StatusCreated {
+		t.Fatalf("a higher version must publish: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodPost, specsPath, `{"mapping":`+specMapping+`}`, duties, true); rec.Code != http.StatusForbidden {
+		t.Fatalf("run duty must not publish: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodPost, specsPath, `{"mapping":`+specMapping+`}`, "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no principal: %d", rec.Code)
+	}
+}
+
+func TestPublishSpec_Rejections(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
+	failing := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true}],"tests":[{"name":"uppercase","input":{"Name":"a"},"expect":{"name":"A"}}]}`
+	unknownOp := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"like","value":"x","code":"CUST-X"}],"tests":[{"name":"ok","input":{"Name":"a"},"expect":{"name":"a"}}]}`
+	rejectedByCondition := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"match","value":"^TMP","code":"CUST-TEMP"}],"tests":[{"name":"temp loads","input":{"Name":"TMP-1"},"expect":{"name":"TMP-1"}}]}`
+	for name, tc := range map[string]struct {
+		payload string
+		status  int
+		want    string
+	}{
+		"missing":               {`{}`, http.StatusBadRequest, `"mapping"`},
+		"malformed":             {`{`, http.StatusBadRequest, "COM-0001"},
+		"invalid":               {`{"mapping":{"entity":"x","version":0,"fields":[]}}`, http.StatusUnprocessableEntity, domain.CodeMapInvalid},
+		"failing test":          {`{"mapping":` + failing + `}`, http.StatusUnprocessableEntity, domain.CodeMapTestFail},
+		"no tests":              {`{"mapping":` + mapping + `}`, http.StatusUnprocessableEntity, "at least one test case"},
+		"unknown rejectWhen op": {`{"mapping":` + unknownOp + `}`, http.StatusUnprocessableEntity, domain.CodeMapUnknownFn},
+		"rejectWhen fails test": {`{"mapping":` + rejectedByCondition + `}`, http.StatusUnprocessableEntity, "temp loads"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := do(r, http.MethodPost, specsPath, tc.payload, writeDuty, true)
+			if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("got %d %s", rec.Code, rec.Body)
+			}
+		})
+	}
+	s := store.NewMem()
+	s.SaveErr = errors.New("disk full")
+	r2 := router(s, rowsExtractor{}, domain.NewMemLoader())
+	if rec, _ := publish(t, r2, specMapping); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("store error: %d", rec.Code)
+	}
+}
+
+func TestSpecs_ListGetAndRunFromSpec(t *testing.T) {
+	loader := domain.NewMemLoader()
+	r := router(store.NewMem(), rowsExtractor{records()}, loader)
+	_, spec := publish(t, r, specMapping)
+
+	list := do(r, http.MethodGet, specsPath+"?entity=customer&limit=5", "", duties, true)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), spec.ID) || strings.Contains(list.Body.String(), `"mapping"`) {
+		t.Fatalf("list must hold the spec without its body: %d %s", list.Code, list.Body)
+	}
+	if empty := do(r, http.MethodGet, specsPath+"?entity=vendor", "", duties, true); !strings.Contains(empty.Body.String(), `"items":[]`) {
+		t.Fatalf("empty list must be an array: %s", empty.Body)
+	}
+	if bad := do(r, http.MethodGet, specsPath+"?limit=0", "", duties, true); bad.Code != http.StatusBadRequest {
+		t.Fatalf("limit 0: %d", bad.Code)
+	}
+	if get := do(r, http.MethodGet, specsPath+"/"+spec.ID, "", duties, true); get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"mapping"`) {
+		t.Fatalf("get: %d %s", get.Code, get.Body)
+	}
+	if miss := do(r, http.MethodGet, specsPath+"/"+testkit.TenantID(5), "", duties, true); miss.Code != http.StatusNotFound {
+		t.Fatalf("missing spec: %d", miss.Code)
+	}
+
+	rec := do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mappingSpecId":"`+spec.ID+`"}`, duties, true)
+	got := decode(t, rec)
+	if rec.Code != http.StatusAccepted || got.Run.Counts["created"] != 2 || !strings.Contains(rec.Body.String(), `"mappingSpecId":"`+spec.ID+`"`) {
+		t.Fatalf("run from spec: %d %s", rec.Code, rec.Body)
+	}
+	rerun := do(r, http.MethodPost, runsPath+"/"+got.Run.ID+":rerun", "", duties, true)
+	if rerun.Code != http.StatusAccepted || !strings.Contains(rerun.Body.String(), spec.ID) {
+		t.Fatalf("rerun must keep the spec link: %d %s", rerun.Code, rerun.Body)
+	}
+	for name, payload := range map[string]string{
+		"both":     `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":` + mapping + `,"mappingSpecId":"` + spec.ID + `"}`,
+		"not uuid": `{"sourceSystem":"ax2012","mode":"rehearsal","mappingSpecId":"x"}`,
+	} {
+		if rec := do(r, http.MethodPost, runsPath, payload, duties, true); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	unknown := do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mappingSpecId":"`+testkit.TenantID(5)+`"}`, duties, true)
+	if unknown.Code != http.StatusUnprocessableEntity || !strings.Contains(unknown.Body.String(), api.CodeSpecUnknown) || !strings.Contains(unknown.Body.String(), `"mappingSpecId"`) {
+		t.Fatalf("unknown spec: %d %s", unknown.Code, unknown.Body)
+	}
+
+	// One Idempotency-Key cannot replay a run for a different mapping spec version.
+	_, v2 := publish(t, r, strings.Replace(specMapping, `"version":1`, `"version":2`, 1))
+	keyed := func(id string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mappingSpecId":"`+id+`"}`, duties, true, "Idempotency-Key", "spec-run-1")
+	}
+	if rec := keyed(spec.ID); rec.Code != http.StatusAccepted {
+		t.Fatalf("keyed run: %d %s", rec.Code, rec.Body)
+	}
+	if rec := keyed(v2.ID); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "idempotency_key_reuse") {
+		t.Fatalf("key reused with another spec must be rejected: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestListRuns_FiltersAndValidation(t *testing.T) {
+	r := router(store.NewMem(), rowsExtractor{records()}, domain.NewMemLoader())
+	if rec := do(r, http.MethodGet, runsPath, "", duties, true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("empty: %d %s", rec.Code, rec.Body)
+	}
+	created := decode(t, do(r, http.MethodPost, runsPath, body, duties, true))
+	rec := do(r, http.MethodGet, runsPath+"?status=partial&entity=customer", "", duties, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), created.Run.ID) {
+		t.Fatalf("filtered: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodGet, runsPath+"?status=failed", "", duties, true); strings.Contains(rec.Body.String(), created.Run.ID) {
+		t.Fatalf("status filter leaked: %s", rec.Body)
+	}
+	if rec := do(r, http.MethodGet, runsPath+"?status=bogus", "", duties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad status: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, runsPath+"?limit=abc", "", duties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad limit: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, runsPath, "", "org.read", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("duty: %d", rec.Code)
 	}
 }

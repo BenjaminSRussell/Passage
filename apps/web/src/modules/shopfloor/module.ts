@@ -1,8 +1,11 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { AndonPage } from "./AndonPage";
+import { AutoClockOutsPage } from "./AutoClockOutsPage";
 import { BundleDetailPage } from "./BundleDetailPage";
 import { ClockedInPage } from "./ClockedInPage";
+import { CorrectionsPage } from "./CorrectionsPage";
+import { CorrectRegistrationPage } from "./CorrectRegistrationPage";
 import { DowntimesPage } from "./DowntimesPage";
 import { JobDetailPage } from "./JobDetailPage";
 import { JobsPage } from "./JobsPage";
@@ -11,12 +14,17 @@ import { MachinesPage } from "./MachinesPage";
 import { NewMachinePage } from "./NewMachinePage";
 import { NewProcessMessagePage } from "./NewProcessMessagePage";
 import { NewWorkerPage } from "./NewWorkerPage";
+import { NewPayAgreementPage } from "./NewPayAgreementPage";
+import { NewTimeProfilePage } from "./NewTimeProfilePage";
 import { OeePage } from "./OeePage";
+import { PayAgreementsPage } from "./PayAgreementsPage";
 import { PayExportDetailPage } from "./PayExportDetailPage";
 import { PayExportsPage } from "./PayExportsPage";
 import { ProcessMessageDetailPage } from "./ProcessMessageDetailPage";
 import { ProcessMessagesPage } from "./ProcessMessagesPage";
+import { RevisePayPage } from "./RevisePayPage";
 import { TimeApprovalPage } from "./TimeApprovalPage";
+import { TimeProfilesPage } from "./TimeProfilesPage";
 import { WorkerDetailPage } from "./WorkerDetailPage";
 import { WorkersPage } from "./WorkersPage";
 
@@ -24,12 +32,20 @@ const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
   description:
-    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; workers, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
+    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles and pay agreements, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
     { path: "/shopfloor/workers/:id", element: createElement(WorkerDetailPage), handle: { title: "Worker" } },
-    { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle" } },
+    { path: "/shopfloor/workers/:id/revise", element: createElement(RevisePayPage), handle: { title: "Revise pay", duty: "shopfloor.pay.revise" } },
+    { path: "/shopfloor/registrations/:id/correct", element: createElement(CorrectRegistrationPage), handle: { title: "Correct registration", duty: "shopfloor.time.correct" } },
+    { path: "/shopfloor/corrections", element: createElement(CorrectionsPage), handle: { title: "Time corrections", duty: "shopfloor.view" } },
+    { path: "/shopfloor/auto-clock-outs", element: createElement(AutoClockOutsPage), handle: { title: "Auto clock-outs", duty: "shopfloor.view" } },
+    { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle", duty: "shopfloor.view" } },
+    { path: "/shopfloor/time-profiles", element: createElement(TimeProfilesPage), handle: { title: "Time profiles", duty: "shopfloor.view" } },
+    { path: "/shopfloor/time-profiles/new", element: createElement(NewTimeProfilePage), handle: { title: "New time profile", duty: "shopfloor.setup.maintain" } },
+    { path: "/shopfloor/pay-agreements", element: createElement(PayAgreementsPage), handle: { title: "Pay agreements", duty: "shopfloor.view" } },
+    { path: "/shopfloor/pay-agreements/new", element: createElement(NewPayAgreementPage), handle: { title: "New pay agreement", duty: "shopfloor.setup.maintain" } },
     { path: "/shopfloor/kiosk", element: createElement(KioskPage), handle: { title: "Kiosk" } },
     { path: "/shopfloor/jobs", element: createElement(JobsPage), handle: { title: "Dispatch list" } },
     { path: "/shopfloor/jobs/:id", element: createElement(JobDetailPage), handle: { title: "Job" } },
@@ -50,8 +66,12 @@ const shopfloor: PassageModule = {
     { label: "Kiosk", to: "/shopfloor/kiosk", duty: "shopfloor.kiosk.login" },
     { label: "Dispatch list", to: "/shopfloor/jobs", duty: "shopfloor.time.register" },
     { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
+    { label: "Time profiles", to: "/shopfloor/time-profiles", duty: "shopfloor.view" },
+    { label: "Pay agreements", to: "/shopfloor/pay-agreements", duty: "shopfloor.view" },
     { label: "Who is clocked in", to: "/shopfloor/clocked-in", duty: "shopfloor.view" },
     { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },
+    { label: "Time corrections", to: "/shopfloor/corrections", duty: "shopfloor.view" },
+    { label: "Auto clock-outs", to: "/shopfloor/auto-clock-outs", duty: "shopfloor.view" },
     { label: "Payroll export", to: "/shopfloor/pay-exports", duty: "shopfloor.pay.export" },
     { label: "Machines", to: "/shopfloor/machines", duty: "shopfloor.view" },
     { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },

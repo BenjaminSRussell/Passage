@@ -31,33 +31,34 @@ const (
 // fakeStore records the calls the handlers make and returns canned results.
 // The store's own behaviour is covered by the database tests in internal/store.
 type fakeStore struct {
-	err        error
-	replay     bool
-	cards      []store.Kanban
-	flow       *store.Flow
-	gotFlow    store.Flow
-	gotRule    store.Rule
-	gotGen     store.Generate
-	gotIdem    store.Idem
-	gotFrom    time.Time
-	gotTo      *time.Time
-	gotVersion int
-	gotState   domain.State
-	gotBoard   store.BoardFilter
-	gotStatus  string
-	gotFlowID  string
-	gotLimit   int
-	jobs       []store.Job
-	gotJobID   string
-	gotDone    domain.Completion
-	gotOpen    store.OpenPeriod
-	gotSettle  store.SettlePeriod
-	activity   store.RuleActivity
-	work       store.PeriodWork
-	gotRange   [2]time.Time
-	gotPeriod  string
-	periods    []store.Period
-	rule       *store.Rule
+	err           error
+	replay        bool
+	cards         []store.Kanban
+	flow          *store.Flow
+	gotFlow       store.Flow
+	gotRule       store.Rule
+	gotGen        store.Generate
+	gotIdem       store.Idem
+	gotFrom       time.Time
+	gotTo         *time.Time
+	gotVersion    int
+	gotState      domain.State
+	gotBoard      store.BoardFilter
+	gotStatus     string
+	gotFlowID     string
+	gotLimit      int
+	jobs          []store.Job
+	gotJobID      string
+	gotDone       domain.Completion
+	gotOpen       store.OpenPeriod
+	gotSettle     store.SettlePeriod
+	activity      store.RuleActivity
+	work          store.PeriodWork
+	gotRange      [2]time.Time
+	gotPeriod     string
+	periods       []store.Period
+	rule          *store.Rule
+	gotNewVersion store.NewVersion
 }
 
 func (f *fakeStore) CreateFlow(_ context.Context, in store.Flow, idem store.Idem) (store.Flow, bool, error) {
@@ -81,6 +82,11 @@ func (f *fakeStore) GetFlow(context.Context, string) (store.Flow, error) {
 func (f *fakeStore) ActivateFlow(_ context.Context, _ string, version int, from time.Time, to *time.Time, idem store.Idem) (store.Flow, bool, error) {
 	f.gotVersion, f.gotFrom, f.gotTo, f.gotIdem = version, from, to, idem
 	return store.Flow{ID: flowID, Status: "active", Version: version + 1}, !f.replay, f.err
+}
+
+func (f *fakeStore) NewFlowVersion(_ context.Context, _ string, version int, in store.NewVersion, idem store.Idem) (store.Flow, bool, error) {
+	f.gotVersion, f.gotNewVersion, f.gotIdem = version, in, idem
+	return store.Flow{ID: flowID, Status: "draft", Version: 1, FlowVersion: 2}, !f.replay, f.err
 }
 
 func (f *fakeStore) CreateRule(_ context.Context, in store.Rule, idem store.Idem) (store.Rule, bool, error) {
@@ -434,5 +440,34 @@ func TestReady_ReportsDatabase(t *testing.T) {
 	}
 	if rec := (call{method: "GET", path: "/readyz", noTenant: true}).do(newRouter(&fakeStore{err: errors.New("down")})); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("down: %d", rec.Code)
+	}
+}
+
+func TestNewFlowVersion_ValidatesAndPassesChanges(t *testing.T) {
+	fs := &fakeStore{}
+	path := "/v1/lean/flows/" + flowID + ":new-version"
+	rec := call{method: "POST", path: path, body: `{"version":2}`, duties: DutyFlowWrite, headers: key("v-1")}.do(newRouter(fs))
+	if rec.Code != http.StatusCreated || fs.gotVersion != 2 || fs.gotNewVersion.SetTakt || fs.gotNewVersion.Activities != nil {
+		t.Fatalf("copy %d %+v: %s", rec.Code, fs.gotNewVersion, rec.Body)
+	}
+	body := `{"version":2,"taktTimeS":90,"activities":[{"sequence":1,"name":"Mix","kind":"process","cycleTimeS":40,"outputLocationId":"` + itemID + `"}]}`
+	rec = call{method: "POST", path: path, body: body, duties: DutyFlowWrite, headers: key("v-2")}.do(newRouter(fs))
+	if rec.Code != http.StatusCreated || !fs.gotNewVersion.SetTakt || *fs.gotNewVersion.TaktTimeS != 90 || len(fs.gotNewVersion.Activities) != 1 {
+		t.Fatalf("changes %d %+v: %s", rec.Code, fs.gotNewVersion, rec.Body)
+	}
+	for name, bad := range map[string]string{"version": `{"version":0}`, "taktTimeS": `{"version":1,"taktTimeS":0}`,
+		"activities[0].kind": `{"version":1,"activities":[{"sequence":1,"name":"A","kind":"x"}]}`} {
+		rec = call{method: "POST", path: path, body: bad, duties: DutyFlowWrite, headers: key("v-3")}.do(newRouter(fs))
+		if rec.Code != http.StatusBadRequest || problemOf(t, rec).Errors[name] == "" {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	rec = call{method: "POST", path: path, body: `{"version":2}`, duties: DutyRead, headers: key("v-4")}.do(newRouter(fs))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("read duty created a version: %d", rec.Code)
+	}
+	rec = call{method: "POST", path: path, body: `{"version":2}`, duties: DutyFlowWrite}.do(newRouter(fs))
+	if rec.Code < 400 {
+		t.Fatalf("missing Idempotency-Key accepted: %d", rec.Code)
 	}
 }

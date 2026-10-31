@@ -133,22 +133,101 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(vp.check(script, routes()), ["PATHS.stale is declared but no request uses it"])
 
 
+GATEWAY = """apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ledger
+spec:
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/ledger
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/ledger
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ledger
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: planning
+spec:
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/api/v1/planning/"
+"""
+
+
+class TestGateway(unittest.TestCase):
+    def _prefixes(self, text: str = GATEWAY) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "httproutes.yaml").write_text(text, encoding="utf-8")
+            (Path(tmp) / "notes.txt").write_text("type: PathPrefix\nvalue: /api/v1/data\n", encoding="utf-8")
+            return vp.gateway_prefixes(Path(tmp))
+
+    def test_reads_public_prefixes_only(self) -> None:
+        # The internal /v1/ledger match and non-YAML files are ignored; quotes and a trailing slash are dropped.
+        self.assertEqual(self._prefixes(), ["/api/v1/ledger", "/api/v1/planning"])
+
+    def test_unrouted_paths_call_fails_and_unverified_calls_are_skipped(self) -> None:
+        failures = vp.check_gateway(SCRIPT, self._prefixes())
+        self.assertEqual(len(failures), 1)
+        self.assertIn("GET /api/v1/data/{param} (PATHS.data) has no gateway route", failures[0])
+
+    def test_prefix_matches_whole_segments(self) -> None:
+        script = SCRIPT.replace("'/api/v1/ledger/journal-entries'", "'/api/v1/ledgerx/journal-entries'")
+        failures = vp.check_gateway(script, ["/api/v1/ledger", "/api/v1/planning", "/api/v1/data"])
+        self.assertEqual(len(failures), 2)  # the direct call and the variable call
+        self.assertTrue(all("PATHS.journalEntries" in f for f in failures))
+
+    def test_exact_prefix_is_routed(self) -> None:
+        script = "const PATHS = {\n  a: '/api/v1/ledger',\n};\nhttp.get(`${BASE}${PATHS.a}`);"
+        self.assertEqual(vp.check_gateway(script, ["/api/v1/ledger"]), [])
+
+    def test_this_branch_gateway_layout_is_readable(self) -> None:
+        prefixes = vp.gateway_prefixes(vp.ROOT / "deploy" / "gateway")
+        self.assertIn("/api/v1/org", prefixes)
+        self.assertTrue(all(p.startswith("/api/v1/") for p in prefixes))
+
+
 class TestMain(unittest.TestCase):
-    def _run(self, script: str, spec: str = SPEC) -> int:
+    def _run(self, script: str, spec: str = SPEC, gateway: str | None = None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             api = Path(tmp) / "services" / "svc" / "api"
             api.mkdir(parents=True)
             (api / "openapi.yaml").write_text(spec, encoding="utf-8")
             js = Path(tmp) / "scenarios.js"
             js.write_text(script, encoding="utf-8")
+            argv = ["--scenarios", str(js), "--services", str(Path(tmp) / "services")]
+            if gateway is not None:
+                gw = Path(tmp) / "gateway"
+                gw.mkdir()
+                (gw / "httproutes.yaml").write_text(gateway, encoding="utf-8")
+                argv += ["--gateway", str(gw)]
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                return vp.main(["--scenarios", str(js), "--services", str(Path(tmp) / "services")])
+                return vp.main(argv)
 
     def test_exit_codes(self) -> None:
         self.assertEqual(self._run(SCRIPT), 0)
         self.assertEqual(self._run(SCRIPT, SPEC.replace("journal-entries", "journals")), 1)
         self.assertEqual(self._run("no objects here"), 2)
         self.assertEqual(self._run(SCRIPT, "openapi: 3.1.0\n"), 2)
+
+    def test_gateway_exit_codes(self) -> None:
+        routed = GATEWAY.replace("value: /api/v1/ledger", "value: /api/v1/ledger\n        - path:\n"
+                                 "            type: PathPrefix\n            value: /api/v1/data")
+        self.assertEqual(self._run(SCRIPT, gateway=routed), 0)
+        self.assertEqual(self._run(SCRIPT, gateway=GATEWAY), 1)  # /api/v1/data is not forwarded
+        self.assertEqual(self._run(SCRIPT, gateway="kind: HTTPRoute\n"), 2)  # no public prefix at all
 
 
 class TestCampaignOnThisBranch(unittest.TestCase):

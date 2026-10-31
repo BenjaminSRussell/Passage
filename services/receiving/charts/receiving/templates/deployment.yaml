@@ -16,8 +16,26 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
+      {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
+      volumes:
+{{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
+      {{- end }}
       containers:
         - name: receiving
           image: {{ include "receiving.image" . | quote }}
@@ -33,6 +51,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: AUDIT_SAMPLE_SEED
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auditSeedSecret }}
+                  key: AUDIT_SAMPLE_SEED
+            - name: PASSAGE_SERVICE_NAME
+              value: receiving
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+{{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
             - name: LEDGER_URL
@@ -41,6 +78,10 @@ spec:
               value: {{ .Values.serviceUrls.close | default (printf "http://close.%s.svc:8080" .Release.Namespace) | quote }}
             - name: PURCHASING_URL
               value: {{ .Values.serviceUrls.purchasing | default (printf "http://purchasing-purchasing.%s.svc" .Release.Namespace) | quote }}
+            - name: INVENTORY_URL
+              value: {{ .Values.serviceUrls.inventory | default (printf "http://inventory.%s.svc:8080" .Release.Namespace) | quote }}
+            - name: PARTY_URL
+              value: {{ .Values.serviceUrls.party | default (printf "http://party.%s.svc:8080" .Release.Namespace) | quote }}
             - name: POSTING_LEDGER_ID
               value: {{ .Values.postingProfile.ledgerId | quote }}
             - name: POSTING_ACCOUNT_INVENTORY
@@ -51,6 +92,15 @@ spec:
               value: {{ .Values.postingProfile.ppvAccount | quote }}
             - name: POSTING_ACCOUNT_VENDOR_CONTROL
               value: {{ .Values.postingProfile.vendorControlAccount | quote }}
+          {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
+          volumeMounts:
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

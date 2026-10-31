@@ -38,6 +38,8 @@ type splitRequest struct {
 	SplitQty   *decimal.Decimal `json:"splitQty"`
 	MinimumQty *decimal.Decimal `json:"minimumQty"`
 	Multiple   *decimal.Decimal `json:"multiple"`
+	// Allocation is proportional (default) or keep-on-original; it matters for a Started order (BR-21.11).
+	Allocation string `json:"allocation"`
 }
 
 // mergeRequest is the body of POST /v1/production/orders:merge. The first order survives.
@@ -140,6 +142,11 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 		checkQuantity("multiple", *req.Multiple, false, fields)
 		in.Multiple = *req.Multiple
 	}
+	// An empty allocation is resolved by the store from the site's split allocation default.
+	in.Allocation = domain.Allocation(req.Allocation)
+	if in.Allocation != "" && !in.Allocation.Valid() {
+		fields["allocation"] = "must be proportional or keep-on-original"
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -147,7 +154,8 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 	in.RequestHash = hashOf(struct {
 		Command                    domain.Command
 		SplitQty, MinQty, Multiple string
-	}{domain.CmdSplit, in.SplitQty.String(), in.MinQty.String(), in.Multiple.String()})
+		Allocation                 domain.Allocation
+	}{domain.CmdSplit, in.SplitQty.String(), in.MinQty.String(), in.Multiple.String(), in.Allocation})
 	res, err := a.store.SplitOrder(r.Context(), in)
 	if err != nil {
 		a.refuse(w, r, err)

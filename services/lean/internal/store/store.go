@@ -37,6 +37,9 @@ const (
 	CodeFlowNotDraft        = "LEAN-0106"
 	CodeRuleNotGenerable    = "LEAN-0107"
 	CodeJobNotFound         = "LEAN-0108"
+	CodeFlowNotActive       = "LEAN-0114"
+	CodeFlowHasNewVersion   = "LEAN-0115"
+	CodeFlowStartsTooEarly  = "LEAN-0116"
 	CodeIdempotencyReuse    = "idempotency_key_reuse"
 	CodeIdempotencyInFlight = "idempotency_key_in_flight"
 
@@ -70,19 +73,24 @@ type Activity struct {
 
 // Flow is a ProductionFlow (FR-24.8). List results carry ActivityCount only.
 type Flow struct {
-	ID            string     `json:"id"`
-	ValueStreamID string     `json:"valueStreamId"`
-	SiteID        string     `json:"siteId"`
-	Name          string     `json:"name"`
-	TaktTimeS     *int       `json:"taktTimeS"`
-	Status        string     `json:"status"`
-	ActiveFrom    *string    `json:"activeFrom"`
-	ActiveTo      *string    `json:"activeTo"`
-	Version       int        `json:"version"`
-	ActivityCount int        `json:"activityCount"`
-	Activities    []Activity `json:"activities,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID            string  `json:"id"`
+	ValueStreamID string  `json:"valueStreamId"`
+	SiteID        string  `json:"siteId"`
+	Name          string  `json:"name"`
+	TaktTimeS     *int    `json:"taktTimeS"`
+	Status        string  `json:"status"`
+	ActiveFrom    *string `json:"activeFrom"`
+	ActiveTo      *string `json:"activeTo"`
+	Version       int     `json:"version"`
+	// FlowVersion numbers the versions of one flow (1, 2, ...); Version is the
+	// optimistic-concurrency counter. PreviousFlowID names the version this one
+	// replaces.
+	FlowVersion    int        `json:"flowVersion"`
+	PreviousFlowID *string    `json:"previousFlowId"`
+	ActivityCount  int        `json:"activityCount"`
+	Activities     []Activity `json:"activities,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // Rule is a KanbanRule (FR-24.9). ActiveKanbans counts the cards that are not
@@ -159,6 +167,7 @@ type Store interface {
 	ListFlows(ctx context.Context, status string, limit int) ([]Flow, error)
 	GetFlow(ctx context.Context, id string) (Flow, error)
 	ActivateFlow(ctx context.Context, id string, version int, from time.Time, to *time.Time, idem Idem) (Flow, bool, error)
+	NewFlowVersion(ctx context.Context, id string, version int, in NewVersion, idem Idem) (Flow, bool, error)
 	CreateRule(ctx context.Context, in Rule, idem Idem) (Rule, bool, error)
 	ListRules(ctx context.Context, flowID string, limit int) ([]Rule, error)
 	GetRule(ctx context.Context, id string) (Rule, error)
@@ -322,31 +331,8 @@ func (s *Postgres) CreateFlow(ctx context.Context, in Flow, idem Idem) (Flow, bo
 			}
 			return err
 		}
-		p := principal(ctx)
-		in.ID, in.Status, in.Version, in.ActivityCount = ids.New(), "draft", 1, len(in.Activities)
-		in.ActiveFrom, in.ActiveTo = nil, nil
-		if err := tx.QueryRow(ctx, `insert into production_flow (tenant_id, id, value_stream_id, site_id, name, takt_time_s, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, nullif($7, ''), nullif($8, '')) returning created_at, updated_at`,
-			p.TenantID, in.ID, in.ValueStreamID, in.SiteID, in.Name, in.TaktTimeS, idem.Key, idem.Fingerprint).Scan(&in.CreatedAt, &in.UpdatedAt); err != nil {
-			return mapDuplicate(err, "the value stream already has a flow named "+in.Name)
-		}
-		bySeq := make(map[int]string, len(in.Activities))
-		for i := range in.Activities {
-			in.Activities[i].ID = ids.New()
-			bySeq[in.Activities[i].Sequence] = in.Activities[i].ID
-		}
-		for _, a := range in.Activities {
-			preds := make([]string, len(a.Predecessors))
-			for j, seq := range a.Predecessors {
-				preds[j] = bySeq[seq]
-			}
-			if _, err := tx.Exec(ctx, `insert into flow_activity (tenant_id, id, flow_id, sequence, name, kind, cycle_time_s, work_cell_resource_id,
-					input_location_id, output_location_id, predecessor_ids, picking_required)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-				p.TenantID, a.ID, in.ID, a.Sequence, a.Name, a.Kind, a.CycleTimeS, a.WorkCellResourceID, a.InputLocationID, a.OutputLocationID,
-				preds, a.PickingRequired); err != nil {
-				return mapDuplicate(err, "activity sequence numbers and names must be unique within a flow")
-			}
+		if err := insertFlow(ctx, tx, &in, idem, 1, nil); err != nil {
+			return err
 		}
 		out, created = in, true
 		return nil
@@ -354,13 +340,111 @@ func (s *Postgres) CreateFlow(ctx context.Context, in Flow, idem Idem) (Flow, bo
 	return out, created, err
 }
 
-const flowCols = `id, value_stream_id, site_id, name, takt_time_s, status, active_from, active_to, version, created_at, updated_at,
+// insertFlow stores a draft flow row and its activities (predecessors are
+// sequence numbers in in.Activities) as flow version flowVersion.
+func insertFlow(ctx context.Context, tx pgx.Tx, in *Flow, idem Idem, flowVersion int, previous *string) error {
+	p := principal(ctx)
+	in.ID, in.Status, in.Version, in.ActivityCount = ids.New(), "draft", 1, len(in.Activities)
+	in.FlowVersion, in.PreviousFlowID = flowVersion, previous
+	in.ActiveFrom, in.ActiveTo = nil, nil
+	if err := tx.QueryRow(ctx, `insert into production_flow (tenant_id, id, value_stream_id, site_id, name, takt_time_s, flow_version, previous_flow_id,
+			idempotency_key, idempotency_fingerprint)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9, ''), nullif($10, '')) returning created_at, updated_at`,
+		p.TenantID, in.ID, in.ValueStreamID, in.SiteID, in.Name, in.TaktTimeS, flowVersion, previous, idem.Key, idem.Fingerprint).Scan(&in.CreatedAt, &in.UpdatedAt); err != nil {
+		var pg *pgconn.PgError
+		if previous != nil && errors.As(err, &pg) && pg.Code == uniqueViolation &&
+			(pg.ConstraintName == "production_flow_previous_ux" || pg.ConstraintName == "production_flow_name_version_key") {
+			// Names are copied from version to version, so either clash means
+			// another call created the successor first.
+			return httpx.NewProblem(http.StatusConflict, CodeFlowHasNewVersion, fmt.Sprintf("production flow %s already has a newer version", in.Name))
+		}
+		return mapDuplicate(err, "the value stream already has a flow named "+in.Name)
+	}
+	bySeq := make(map[int]string, len(in.Activities))
+	for i := range in.Activities {
+		in.Activities[i].ID = ids.New()
+		bySeq[in.Activities[i].Sequence] = in.Activities[i].ID
+	}
+	for _, a := range in.Activities {
+		preds := make([]string, len(a.Predecessors))
+		for j, seq := range a.Predecessors {
+			preds[j] = bySeq[seq]
+		}
+		if _, err := tx.Exec(ctx, `insert into flow_activity (tenant_id, id, flow_id, sequence, name, kind, cycle_time_s, work_cell_resource_id,
+				input_location_id, output_location_id, predecessor_ids, picking_required)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			p.TenantID, a.ID, in.ID, a.Sequence, a.Name, a.Kind, a.CycleTimeS, a.WorkCellResourceID, a.InputLocationID, a.OutputLocationID,
+			preds, a.PickingRequired); err != nil {
+			return mapDuplicate(err, "activity sequence numbers and names must be unique within a flow")
+		}
+	}
+	return nil
+}
+
+// NewVersion is what a new flow version changes: a takt time (when SetTakt)
+// and the full activity list (when Activities is not nil); the rest is copied
+// from the active flow it replaces.
+type NewVersion struct {
+	SetTakt    bool
+	TaktTimeS  *int
+	Activities []Activity
+}
+
+// NewFlowVersion creates a draft copy of an active flow as its next flow
+// version, with the changes in `in` applied (FR-24.8: flows are versioned, not
+// edited). Only an active flow can be revised and only one draft successor may
+// exist. Activating the draft expires the flow it replaces.
+func (s *Postgres) NewFlowVersion(ctx context.Context, id string, version int, in NewVersion, idem Idem) (Flow, bool, error) {
+	var out Flow
+	created := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if rid, err := rowReplay(ctx, tx, "production_flow", idem); err != nil || rid != "" {
+			if err == nil {
+				out, err = getFlow(ctx, tx, rid, "")
+			}
+			return err
+		}
+		src, err := getFlow(ctx, tx, id, " for update")
+		if err != nil {
+			return err
+		}
+		if src.Version != version {
+			return staleVersion("production flow "+src.Name, src.Version, version)
+		}
+		if src.Status != "active" {
+			return httpx.NewProblem(http.StatusConflict, CodeFlowNotActive, fmt.Sprintf("production flow %s is %s; only an active flow can get a new version", src.Name, src.Status))
+		}
+		var successor string
+		err = tx.QueryRow(ctx, `select id from production_flow where previous_flow_id = $1`, id).Scan(&successor)
+		if err == nil {
+			return httpx.NewProblem(http.StatusConflict, CodeFlowHasNewVersion, fmt.Sprintf("production flow %s already has a newer version %s", src.Name, successor))
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		next := Flow{ValueStreamID: src.ValueStreamID, SiteID: src.SiteID, Name: src.Name, TaktTimeS: src.TaktTimeS, Activities: src.Activities}
+		if in.SetTakt {
+			next.TaktTimeS = in.TaktTimeS
+		}
+		if in.Activities != nil {
+			next.Activities = in.Activities
+		}
+		if err := insertFlow(ctx, tx, &next, idem, src.FlowVersion+1, &src.ID); err != nil {
+			return err
+		}
+		out, created = next, true
+		return nil
+	})
+	return out, created, err
+}
+
+const flowCols = `id, value_stream_id, site_id, name, takt_time_s, status, active_from, active_to, version, created_at, updated_at, flow_version, previous_flow_id,
 	(select count(*) from flow_activity a where a.flow_id = production_flow.id)`
 
 func scanFlow(row pgx.Row) (Flow, error) {
 	var f Flow
 	var from, to *time.Time
-	err := row.Scan(&f.ID, &f.ValueStreamID, &f.SiteID, &f.Name, &f.TaktTimeS, &f.Status, &from, &to, &f.Version, &f.CreatedAt, &f.UpdatedAt, &f.ActivityCount)
+	err := row.Scan(&f.ID, &f.ValueStreamID, &f.SiteID, &f.Name, &f.TaktTimeS, &f.Status, &from, &to, &f.Version, &f.CreatedAt, &f.UpdatedAt, &f.FlowVersion, &f.PreviousFlowID, &f.ActivityCount)
 	f.ActiveFrom, f.ActiveTo = dateString(from), dateString(to)
 	return f, err
 }
@@ -462,6 +546,11 @@ func (s *Postgres) ActivateFlow(ctx context.Context, id string, version int, fro
 		if err := domain.ValidateFlow(toDomainActivities(f.Activities)); err != nil {
 			return err
 		}
+		if f.PreviousFlowID != nil {
+			if err := expirePrevious(ctx, tx, f, from); err != nil {
+				return err
+			}
+		}
 		var activeFrom time.Time
 		var activeTo *time.Time
 		if err := tx.QueryRow(ctx, `update production_flow set status = 'active', active_from = $2, active_to = $3, version = version + 1, updated_at = now()
@@ -470,13 +559,42 @@ func (s *Postgres) ActivateFlow(ctx context.Context, id string, version int, fro
 		}
 		f.Status, f.ActiveFrom, f.ActiveTo = "active", dateString(&activeFrom), dateString(activeTo)
 		if err := enqueue(ctx, tx, "flow", f.ID, leanevents.FlowActivated, leanevents.FlowActivatedData{
-			FlowID: f.ID, ValueStreamID: f.ValueStreamID, SiteID: f.SiteID, Name: f.Name, ActiveFrom: *f.ActiveFrom, Activities: len(f.Activities)}); err != nil {
+			FlowID: f.ID, ValueStreamID: f.ValueStreamID, SiteID: f.SiteID, Name: f.Name, ActiveFrom: *f.ActiveFrom, Activities: len(f.Activities),
+			FlowVersion: f.FlowVersion, PreviousFlowID: f.PreviousFlowID}); err != nil {
 			return err
 		}
 		out, changed = f, true
 		return remember(ctx, tx, idem, http.StatusOK, f)
 	})
 	return out, changed, err
+}
+
+// expirePrevious ends the flow version that the activating version replaces:
+// it expires the day before the new one starts and an event says so. The new
+// version must start after the old one did.
+func expirePrevious(ctx context.Context, tx pgx.Tx, next Flow, from time.Time) error {
+	prev, err := getFlow(ctx, tx, *next.PreviousFlowID, " for update")
+	if err != nil {
+		return err
+	}
+	if prev.Status != "active" {
+		return nil
+	}
+	if prev.ActiveFrom != nil {
+		if start, err := time.Parse(DateLayout, *prev.ActiveFrom); err == nil && !from.After(start) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeFlowStartsTooEarly,
+				fmt.Sprintf("version %d of %s must start after version %d started on %s", next.FlowVersion, next.Name, prev.FlowVersion, *prev.ActiveFrom))
+		}
+	}
+	// An end date the old version already had that falls earlier is kept; the
+	// event reports the end date stored.
+	var end time.Time
+	if err := tx.QueryRow(ctx, `update production_flow set status = 'expired', active_to = case when active_to is null or active_to > $2 then $2 else active_to end,
+		version = version + 1, updated_at = now() where id = $1 returning active_to`, prev.ID, from.AddDate(0, 0, -1)).Scan(&end); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, "flow", prev.ID, leanevents.FlowExpired, leanevents.FlowExpiredData{
+		FlowID: prev.ID, Name: prev.Name, FlowVersion: prev.FlowVersion, ActiveTo: end.Format(DateLayout), SupersededBy: next.ID})
 }
 
 // CreateRule validates (FR-24.9) and stores a kanban rule.

@@ -46,6 +46,10 @@ const summary: WaveSummary = {
   lineCount: 20,
   orderCount: 8,
   createdAt: "2026-10-27T08:00:00Z",
+  version: 1,
+  picker: null,
+  assignedAt: null,
+  closedAt: null,
 };
 
 const wave: Wave = { ...summary, shipments: plans[0].shipments.map((s) => ({ ...s, status: "PICKING" })) };
@@ -242,6 +246,104 @@ describe("shipment detail, slice 3", () => {
     expect(header(call, "If-Match")).toBe('"3"');
     expect(idempotencyKey(call)).toBeTruthy();
     expect(await screen.findByText("Cancelled")).toBeInTheDocument();
+  });
+
+  it("closes the remainder of a partially shipped shipment after confirmation (FR-28.8)", async () => {
+    let current = shipment("PARTIALLY_SHIPPED", { qtyPicked: "90", qtyPacked: "90", qtyShipped: "90", pickConfirmed: true }, 6);
+    serveShipment(() => current);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(":close-remainder")) {
+        current = shipment("SHIPPED", { qtyPlanned: "90", qtyPicked: "90", qtyPacked: "90", qtyShipped: "90", qtyClosed: "10", pickConfirmed: true }, 7);
+        return json(200, current);
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Close remainder" }));
+    expect(posts(":close-remainder")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Yes, close it" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Close remainder" })).toBeNull());
+    const call = posts(":close-remainder")[0];
+    expect(header(call, "If-Match")).toBe('"6"');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect((await screen.findAllByText("Shipped")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Partially shipped")).toBeNull();
+    const lines = await findTable({ name: "Shipment lines" });
+    expect(within(lines).getByText("10")).toBeInTheDocument();
+  });
+
+  it("shows the service refusal when the remainder cannot close", async () => {
+    serveShipment(() => shipment("PARTIALLY_SHIPPED", { qtyPicked: "90", qtyPacked: "90", qtyShipped: "90", pickConfirmed: true }, 6));
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(":close-remainder")) {
+        return json(409, { type: "about:blank", title: "Conflict", status: 409, code: "FUL-0021", detail: "FUL-0021: packed quantity is waiting to ship, post it first" });
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Close remainder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, close it" }));
+    expect(await screen.findByText("Could not close the remainder")).toBeInTheDocument();
+  });
+
+  it("offers no close for a shipment that shipped nothing or has packed stock waiting", async () => {
+    serveShipment(() => shipment("PICKED", { qtyPicked: "100", pickConfirmed: true }));
+    renderAt(`/fulfillment/shipments/${SH}`);
+    await findTable({ name: "Shipment lines" });
+    expect(screen.queryByRole("button", { name: "Close remainder" })).toBeNull();
+  });
+
+  it("unpacks a closed container after confirmation, then the shipment can be cancelled", async () => {
+    const container: Shipment["containers"][number] = { id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] };
+    let current = shipment("PACKED", { qtyPicked: "100", qtyPacked: "100", pickConfirmed: true });
+    current.containers = [container];
+    serveShipment(() => current);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/containers/${CONTAINER}:unpack`)) {
+        current = shipment("PICKED", { qtyPicked: "100", qtyPacked: "0", pickConfirmed: true }, 4);
+        return json(200, current);
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    expect(screen.queryByRole("button", { name: "Cancel shipment" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Unpack 106141411234567897" }));
+    expect(posts(":unpack")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm unpack 106141411234567897" }));
+    expect(await screen.findByRole("button", { name: "Cancel shipment" })).toBeInTheDocument();
+    const call = posts(":unpack")[0];
+    expect(header(call, "If-Match")).toBe('"3"');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Unpack 106141411234567897" })).toBeNull();
+  });
+
+  it("shows the service refusal when a container cannot be unpacked", async () => {
+    const packed = shipment("PACKED", { qtyPicked: "100", qtyPacked: "100", pickConfirmed: true });
+    packed.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] }];
+    serveShipment(() => packed);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(":unpack")) {
+        return json(409, { type: "about:blank", title: "Conflict", status: 409, code: "FUL-0021", detail: "FUL-0021: only a CLOSED container can be unpacked" });
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Unpack 106141411234567897" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm unpack 106141411234567897" }));
+    expect(await screen.findByText("Could not unpack the container")).toBeInTheDocument();
+  });
+
+  it("offers no unpack for a shipped container", async () => {
+    const done = shipment("PARTIALLY_SHIPPED", { qtyPicked: "50", qtyPacked: "50", qtyShipped: "50", pickConfirmed: true });
+    done.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "SHIPPED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: ID, lines: [{ shipmentLineId: LINE, qty: "50" }] }];
+    serveShipment(() => done);
+    renderAt(`/fulfillment/shipments/${SH}`);
+    await findTable({ name: "Containers" });
+    expect(screen.queryByRole("button", { name: /^Unpack/ })).toBeNull();
   });
 
   it("offers no cancel once a container is packed", async () => {

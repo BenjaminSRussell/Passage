@@ -20,6 +20,9 @@ tags:
   - name: journal
   - name: balances
   - name: structures
+  - name: recurring
+  - name: clearing
+  - name: derivation
   - name: ops
 components:
   parameters:
@@ -200,6 +203,7 @@ components:
         sourceLineRef: { type: string }
         reversalOfLineId: { type: string, format: uuid }
         negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
+        derivedByStepIds: { type: array, items: { type: string, format: uuid }, description: Derivation steps that filled dimensions on the line (FR-11.22) }
     LedgerLine:
       type: object
       description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
@@ -378,6 +382,17 @@ components:
               account: { type: string }
               displayName: { type: string }
               dimensionCombinationId: { type: string }
+              dimensions:
+                type: object
+                additionalProperties: { type: string }
+                description: The line's dimension values after derivation (FR-11.22)
+              derivedByStepIds:
+                type: array
+                items: { type: string, format: uuid }
+                description: Derivation steps that changed a value on this line
+              derivation:
+                type: array
+                items: { $ref: "#/components/schemas/DerivationTrace" }
         currency: { type: string }
         debit: { type: string }
         credit: { type: string }
@@ -581,6 +596,92 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         text: { type: string }
         sourceLineRef: { type: string }
+    RecurringLine:
+      type: object
+      required: [lineNumber, account, debitCredit, amountKind, amount, currency]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        account: { type: string }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amountKind: { type: string, enum: [fixed, percent] }
+        amount: { type: string, description: "A decimal string at the currency's minor-unit scale for fixed lines; a percentage of the base amount (0 to 1000) for percent lines" }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        text: { type: string }
+    RecurringLineBody:
+      type: object
+      required: [account, debitCredit, amountKind, amount]
+      properties:
+        account: { type: string }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amountKind: { type: string, enum: [fixed, percent] }
+        amount:
+          type: object
+          required: [currency, value]
+          properties:
+            currency: { type: string, pattern: '^[A-Z]{3}$' }
+            value: { type: string, description: Decimal string; a percentage when amountKind is percent }
+        text: { type: string, maxLength: 255 }
+    RecurringJournalBody:
+      type: object
+      required: [ledgerId, journalName, name, frequency, dayOfMonth, startDate, lines]
+      properties:
+        ledgerId: { type: string, format: uuid, description: Cannot change after creation }
+        journalName: { type: string, description: Active journal name that the generated batches use }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: string, maxLength: 255, description: Description of every generated batch }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        dayOfMonth: { type: integer, minimum: 0, maximum: 31, description: 0 is the last day of the month; a day beyond the month's length is clipped to its last day }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date, description: No run is scheduled after this date }
+        baseAmount: { type: string, description: Base for percent lines; a generation can override it }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RecurringLineBody" }
+    RecurringJournal:
+      type: object
+      required: [id, ledgerId, legalEntityId, journalName, name, description, frequency, dayOfMonth, startDate, status, version,
+        lineCount, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalName: { type: string }
+        name: { type: string }
+        description: { type: string }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        dayOfMonth: { type: integer }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        baseAmount: { type: string }
+        status: { type: string, enum: [active, paused] }
+        nextRunDate: { type: string, format: date, description: Absent when the schedule is past its end date }
+        lastRunDate: { type: string, format: date }
+        version: { type: integer, minimum: 1, description: Optimistic concurrency token, also sent as the ETag }
+        lineCount: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          description: Present on single reads, absent in lists
+          items: { $ref: "#/components/schemas/RecurringLine" }
+    RecurringRun:
+      type: object
+      required: [id, recurringId, scheduledDate, batchId, generatedBy, generatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        recurringId: { type: string, format: uuid }
+        scheduledDate: { type: string, format: date, description: The run date, also the posting date of the batch }
+        batchId: { type: string, format: uuid, description: The draft journal batch that the run created }
+        generatedBy: { type: string }
+        generatedAt: { type: string, format: date-time }
     JournalBatch:
       type: object
       required: [id, ledgerId, legalEntityId, journalName, description, postingDate, currency, status, version,
@@ -614,6 +715,290 @@ components:
           type: array
           description: Present on single-batch reads, absent in lists
           items: { $ref: "#/components/schemas/BatchLine" }
+    OpenItemAccountBody:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean, description: Whether every line posted on the account in this ledger creates an open item }
+    OpenItemAccount:
+      type: object
+      required: [ledgerId, account, name, enabled, openItems, changedBy, changedAt]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        openItems: { type: integer, description: Items still open or reset_open on the account }
+        changedBy: { type: string }
+        changedAt: { type: string, format: date-time }
+    ToleranceGroupBody:
+      type: object
+      required: [name, debitLimit, creditLimit, differenceAccount]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        debitLimit: { type: string, description: "Largest debit residual (debits exceed credits) that may be written off, decimal string with at most 6 decimals (BR-11.12 abs_debit)" }
+        creditLimit: { type: string, description: "Largest credit residual (credits exceed debits) that may be written off, decimal string with at most 6 decimals (BR-11.12 abs_credit)" }
+        percentLimit: { type: string, description: "Optional share (0 to 100) of the selection's absolute total (debit plus credit) the residual may not exceed; 0 or absent means no percentage limit" }
+        differenceAccount: { type: string, description: Postable account in the ledger's chart that receives the write-off }
+        active: { type: boolean, default: true }
+    ToleranceGroup:
+      type: object
+      required: [ledgerId, code, name, debitLimit, creditLimit, percentLimit, differenceAccount, active, version, createdAt, updatedAt]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+        name: { type: string }
+        debitLimit: { type: string }
+        creditLimit: { type: string }
+        percentLimit: { type: string }
+        differenceAccount: { type: string }
+        active: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OpenItem:
+      type: object
+      required: [id, ledgerId, account, accountName, dimensions, sourceType, amount, debitCredit, currency, postingDate, status]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        accountName: { type: string }
+        dimensions: { type: object, additionalProperties: { type: string } }
+        sourceType: { type: string, enum: [gl_line, residual] }
+        amount: { type: string, description: Absolute amount in the ledger currency at its minor-unit scale }
+        debitCredit: { type: string, enum: [D, C] }
+        currency: { type: string }
+        assignment: { type: string, maxLength: 50, description: Matching key; starts as the first 50 characters of the line's sourceLineRef }
+        postingDate: { type: string, format: date }
+        status: { type: string, enum: [open, cleared, reset_open, voided] }
+        clearingDocumentId: { type: string, format: uuid }
+        residualOfItemId: { type: string, format: uuid }
+        entryId: { type: string, format: uuid, description: Journal entry of the source line; absent on residual items }
+        voucher: { type: string }
+        lineNumber: { type: integer }
+    OpenItemPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/OpenItem" } }
+        nextCursor: { type: string, description: Pass as cursor for the next page; absent on the last page }
+    ClearingRequest:
+      type: object
+      required: [ledgerId, itemIds, clearingDate]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        itemIds: { type: array, minItems: 2, maxItems: 10000, uniqueItems: true, items: { type: string, format: uuid }, description: Open items of one open-item managed account }
+        clearingDate: { type: string, format: date, description: Posting date of a difference entry; not before the latest posting date of the items }
+        toleranceGroup: { type: string, description: Tolerance group whose limit may write off the residual }
+        residualItem: { type: boolean, default: false, description: When the residual is above tolerance, carry it as a new open item instead of refusing }
+    ClearingPreview:
+      type: object
+      required: [ledgerId, account, currency, itemCount, debit, credit, net, outcome, differenceAmount, residualAmount]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        currency: { type: string }
+        itemCount: { type: integer }
+        debit: { type: string }
+        credit: { type: string }
+        net: { type: string, description: Debit minus credit of the selection }
+        toleranceGroup: { type: string }
+        outcome: { type: string, enum: [balanced, difference, residual, unbalanced], description: "balanced: net is zero; difference: written off to the difference account; residual: carried as a new item; unbalanced: a clearing would be refused" }
+        differenceAmount: { type: string }
+        residualAmount: { type: string }
+    ClearingDocument:
+      type: object
+      required: [id, ledgerId, account, clearingDate, mode, itemIds, differenceAmount, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        clearingDate: { type: string, format: date }
+        mode: { type: string, enum: [manual, auto], description: auto for documents made by an automatic clearing run }
+        itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected }
+        toleranceGroup: { type: string }
+        differenceAmount: { type: string, description: Residual written off, debit minus credit; 0 when none }
+        differenceEntryId: { type: string, format: uuid }
+        residualItemId: { type: string, format: uuid }
+        status: { type: string, enum: [cleared, reset] }
+        resetReasonCode: { type: string }
+        resetComment: { type: string }
+        resetBy: { type: string }
+        resetAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        items: { type: array, items: { $ref: "#/components/schemas/OpenItem" }, description: Set on single reads }
+    ResetClearingRequest:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: "Active shared reason code that applies to ledger (FR-11.15); also the reason of the reversal of the difference entry when the clearing posted one" }
+        comment: { type: string, maxLength: 255 }
+    AutoClearingRuleBody:
+      type: object
+      required: [name, accountFrom, accountTo, criteria]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        accountFrom: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: First account number of the range, compared as text }
+        accountTo: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: Last account number of the range, compared as text; not before accountFrom }
+        criteria:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items: { type: string, description: "assignment, source_line_ref, document_id (the documentId of the posting request), amount_txn (absolute amount in the ledger currency), posting_date (month) or dim.{ATTRIBUTE}" }
+          description: Ordered fields that group the open items of one account; an item with no value for a field is never grouped
+        allowTolerance: { type: boolean, default: false, description: A group within the tolerance group also clears, the residual going to its difference account }
+        toleranceGroup: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: Required with allowTolerance and refused without }
+        sequence: { type: integer, minimum: 1, maximum: 9999, default: 100, description: Rules run in ascending sequence, then name }
+        active: { type: boolean, default: true }
+    AutoClearingRule:
+      type: object
+      required: [id, ledgerId, name, accountFrom, accountTo, criteria, allowTolerance, sequence, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        name: { type: string }
+        accountFrom: { type: string }
+        accountTo: { type: string }
+        criteria: { type: array, items: { type: string } }
+        allowTolerance: { type: boolean }
+        toleranceGroup: { type: string }
+        sequence: { type: integer }
+        active: { type: boolean }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AutoClearingRunRequest:
+      type: object
+      required: [ledgerId, mode]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid, description: Run only this active rule; every active rule of the ledger when absent }
+        mode: { type: string, enum: [simulate, clear], description: simulate returns the proposed groups and writes nothing }
+        clearingDate: { type: string, format: date, description: Defaults to today; a group whose latest item posted later clears on that date }
+    AutoClearingGroup:
+      type: object
+      required: [no, ruleId, account, itemCount, net, status]
+      properties:
+        no: { type: integer, description: Position in the run log }
+        ruleId: { type: string, format: uuid }
+        account: { type: string }
+        itemCount: { type: integer }
+        net: { type: string, description: Debit minus credit of the group }
+        status: { type: string, enum: [proposed, cleared, skipped] }
+        reasonCode: { type: string, description: Why a group was skipped, for example LEDGER_CLEARING_UNBALANCED }
+        reason: { type: string }
+        clearingDocumentId: { type: string, format: uuid, description: The document a cleared group made }
+        itemIds: { type: array, items: { type: string, format: uuid }, description: Members of a proposed or skipped group in a simulation }
+    AutoClearingRun:
+      type: object
+      required: [ledgerId, mode, clearingDate, groupsFound, groupsCleared, groupsSkipped, itemsCleared, unmatchedItems, truncated]
+      properties:
+        id: { type: string, format: uuid, description: Absent on a simulation }
+        ledgerId: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid }
+        mode: { type: string, enum: [simulate, clear] }
+        clearingDate: { type: string, format: date }
+        groupsFound: { type: integer, description: Groups of two or more items }
+        groupsCleared: { type: integer, description: Groups cleared, or proposed in a simulation }
+        groupsSkipped: { type: integer }
+        itemsCleared: { type: integer }
+        unmatchedItems: { type: integer, description: Items that no group of two or more took }
+        truncated: { type: boolean, description: A rule had more than 100,000 open items; the rest wait for the next run }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        groups: { type: array, items: { $ref: "#/components/schemas/AutoClearingGroup" }, description: The first 1,000 groups }
+    DerivationStepCondition:
+      type: object
+      required: [field, op]
+      properties:
+        field: { type: string, description: "ACCOUNT, ACCOUNT_TYPE or a dimension attribute of the ledger; never the step's own target" }
+        op: { type: string, enum: [eq, ne, in, blank, notblank] }
+        values: { type: array, maxItems: 20, items: { type: string }, description: "One value for eq and ne, 1 to 20 for in, none for blank and notblank" }
+    DerivationStep:
+      type: object
+      required: [sequence, kind, target]
+      properties:
+        id: { type: string, format: uuid, description: "Assigned by the service; replacing a draft keeps the ids of its own steps, any other id is replaced so step ids stay unique across versions" }
+        sequence: { type: integer, minimum: 1, description: Steps run in ascending sequence; must be strictly increasing }
+        kind: { type: string, enum: [table_lookup, move, clear, constant], description: "expression (CEL) is not built" }
+        condition: { $ref: "#/components/schemas/DerivationStepCondition" }
+        sourceFields: { type: array, items: { type: string }, description: "table_lookup: equals the table's source fields; move: one field; clear and constant: none" }
+        target: { type: string, description: Dimension attribute of the ledger that the step writes }
+        lookupTableId: { type: string, format: uuid, description: Required for table_lookup }
+        value: { type: string, description: Required for constant }
+        overwrite: { type: boolean, default: false, description: "With overwrite a step may replace a value set by an earlier step; no step ever changes a value the posting request carries; clear needs overwrite" }
+    DerivationStrategyBody:
+      type: object
+      required: [name, steps]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/DerivationStep" }
+    DerivationStrategy:
+      type: object
+      required: [id, ledgerId, version, lockVersion, name, status, steps]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1, description: Strategy version number, dense per ledger }
+        lockVersion: { type: integer, description: Optimistic-concurrency counter, also the ETag }
+        name: { type: string }
+        status: { type: string, enum: [draft, active, retired] }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/DerivationStep" }
+        activatedBy: { type: string }
+        activatedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DerivationTrace:
+      type: object
+      required: [stepId, sequence, kind, target, before, after]
+      properties:
+        stepId: { type: string, format: uuid }
+        sequence: { type: integer }
+        kind: { type: string, enum: [table_lookup, move, clear, constant] }
+        target: { type: string }
+        before: { type: string }
+        after: { type: string }
+        matchedRow: { type: array, items: { type: string }, description: The lookup row source tuple that matched, for table_lookup }
+    LookupRow:
+      type: object
+      required: [source, target, validFrom]
+      properties:
+        source: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: "Exact values or * per source field; a blank source value matches only *" }
+        target: { type: string, maxLength: 20 }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date, description: Inclusive; absent means open-ended }
+    LookupTableBody:
+      type: object
+      required: [name, sourceFields, target]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        sourceFields: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: ACCOUNT, ACCOUNT_TYPE or dimension attributes of the ledger }
+        target: { type: string, description: Dimension attribute of the ledger that rows fill; not a source field }
+        rows: { type: array, maxItems: 5000, items: { $ref: "#/components/schemas/LookupRow" }, description: Replaces all rows of the table }
+    LookupTable:
+      type: object
+      required: [id, ledgerId, name, sourceFields, target, rowCount, version]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        name: { type: string }
+        sourceFields: { type: array, items: { type: string } }
+        target: { type: string }
+        rowCount: { type: integer }
+        version: { type: integer, description: Counts replacements; also the ETag }
+        rows: { type: array, items: { $ref: "#/components/schemas/LookupRow" }, description: Present on GET of one table only }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -636,7 +1021,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     Problem409:
-      description: Idempotency conflict (LEDGER_IDEMPOTENCY_CONFLICT) or in-progress duplicate (LEDGER_IDEMPOTENCY_IN_PROGRESS, with Retry-After)
+      description: Idempotency conflict (LEDGER_IDEMPOTENCY_CONFLICT), in-progress duplicate (LEDGER_IDEMPOTENCY_IN_PROGRESS, with Retry-After) or, on a reversal, an entry whose open items are cleared (LEDGER_OPEN_ITEM_ALREADY_CLEARED)
       headers:
         Retry-After:
           description: Seconds to wait; set to 1 on LEDGER_IDEMPOTENCY_IN_PROGRESS only
@@ -654,8 +1039,23 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    DerivationProblem409:
+      description: LEDGER_LOOKUP_TABLE_NAME_DUPLICATE, LEDGER_LOOKUP_TABLE_IN_USE (a strategy step uses the table, so its definition cannot change) or LEDGER_DERIVATION_STRATEGY_NOT_DRAFT (only a draft is replaced or activated)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     Problem412:
       description: LEDGER_VERSION_CONFLICT, the If-Match version is stale; reload and retry
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RecurringProblem409:
+      description: LEDGER_RECURRING_PAUSED (the template is paused and the date has no run yet)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RecurringProblem422:
+      description: LEDGER_RECURRING_DATE_INVALID (outside the start and end dates, or not a date of the schedule), LEDGER_RECURRING_BASE_REQUIRED (percent lines without a base amount), LEDGER_RECURRING_LEDGER_FIXED, LEDGER_JOURNAL_NAME_INVALID or LEDGER_LINE_LIMIT; nothing changed
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -664,15 +1064,61 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
+    ClearingProblem409:
+      description: LEDGER_OPEN_ITEM_ALREADY_CLEARED, LEDGER_CLEARING_ALREADY_RESET, LEDGER_CLEARING_RESIDUAL_USED, LEDGER_OI_OPEN_ITEMS_EXIST or LEDGER_IDEMPOTENCY_CONFLICT; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ClearingProblem422:
+      description: LEDGER_CLEARING_UNBALANCED, LEDGER_CLEARING_ACCOUNT_MIXED, LEDGER_CLEARING_DATE_INVALID, LEDGER_CLEARING_RESIDUAL_DEPTH, LEDGER_CLEARING_DIFFERENCE_ACCOUNT, LEDGER_OPEN_ITEM_ACCOUNT_REQUIRED, LEDGER_TOLERANCE_GROUP_INACTIVE, LEDGER_REASON_REQUIRED or LEDGER_REASON_INVALID_MODULE on a reset, LEDGER_OI_ACCOUNT_INVALID, LEDGER_OI_ACTIVATION_BALANCE or a posting or reversal rule violation of the difference entry; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
+    AutoRuleProblem409:
+      description: LEDGER_AUTO_CLEARING_RULE_ID_CONFLICT, the id is used by another rule (a concurrent create, or a rule outside the caller's legal entities); nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AutoRuleProblem422:
+      description: LEDGER_TOLERANCE_GROUP_NOT_FOUND or LEDGER_TOLERANCE_GROUP_INACTIVE, the named tolerance group is not an active group of the ledger; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
+    AutoRunProblem409:
+      description: LEDGER_IDEMPOTENCY_CONFLICT, the Idempotency-Key was used with another body; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AutoRunProblem422:
+      description: LEDGER_AUTO_CLEARING_RULE_INACTIVE, the ruleId names an inactive rule; nothing changed. Groups that cannot clear do not fail the run, they are logged as skipped.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
+    RecurringETag:
+      description: The recurring journal version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
     BatchETag:
       description: The batch version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"3"' }
+    AutoRuleETag:
+      description: The automatic clearing rule version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
+    ToleranceETag:
+      description: The tolerance group version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
+    LookupETag:
+      description: The lookup table version as an entity tag, for If-Match on the next replacement
+      schema: { type: string, example: '"2"' }
+    StrategyETag:
+      description: The derivation strategy lockVersion as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
 paths:
   /v1/ledger/journal-names:
     get:
       tags: [journal]
       operationId: listJournalNames
+      summary: List journal names
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -692,6 +1138,7 @@ paths:
     get:
       tags: [journal]
       operationId: getJournalName
+      summary: Get a journal name
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/JournalNameCode"
@@ -737,6 +1184,7 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalBatches
+      summary: List manual journal batches
       x-passage-duty: ledger.journal.read
       parameters:
         - { name: ledger, in: query, schema: { type: string, format: uuid } }
@@ -788,6 +1236,7 @@ paths:
     get:
       tags: [journal]
       operationId: getJournalBatch
+      summary: Get a manual journal batch with its lines
       x-passage-duty: ledger.journal.read
       parameters:
         - name: id
@@ -1002,6 +1451,7 @@ paths:
     get:
       tags: [structures]
       operationId: listAccountStructures
+      summary: List the account structures of a ledger
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1031,6 +1481,7 @@ paths:
     get:
       tags: [structures]
       operationId: getAccountStructure
+      summary: Get an account structure
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1087,6 +1538,7 @@ paths:
     get:
       tags: [structures]
       operationId: listDimensionValues
+      summary: List the dimension values of a ledger
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1147,6 +1599,7 @@ paths:
     post:
       tags: [ledgers]
       operationId: createLedger
+      summary: Create a ledger
       x-passage-duty: ledger.ledger.write
       requestBody:
         required: true
@@ -1184,6 +1637,7 @@ paths:
     get:
       tags: [ledgers]
       operationId: getLedger
+      summary: Get a ledger
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/LedgerId"
@@ -1200,6 +1654,7 @@ paths:
     get:
       tags: [charts]
       operationId: listAccounts
+      summary: List the accounts of a chart
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/ChartCode"
@@ -1349,6 +1804,7 @@ paths:
     get:
       tags: [journal]
       operationId: getLedgerSet
+      summary: Get a ledger set with its members
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/LedgerSetId"
@@ -1440,6 +1896,7 @@ paths:
     get:
       tags: [journal]
       operationId: getEntry
+      summary: Get a posted journal entry with its lines
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/EntryId"
@@ -1463,7 +1920,9 @@ paths:
         reversal can itself be reversed to re-instate the original. The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
         Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
-        (FB50L, 403 AUTH-0003).
+        (FB50L, 403 AUTH-0003). An entry with an open item in an active clearing document (including a
+        clearing's own difference entry) is refused with 409 LEDGER_OPEN_ITEM_ALREADY_CLEARED until that
+        clearing is reset.
         A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
         be active and apply to the ledger module, and a comment is required when the code says so. A
         code with alternativePostingDateAllowed = false refuses any date other than the original. A code
@@ -1544,6 +2003,7 @@ paths:
         - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
         - { name: voucher, in: query, required: false, schema: { type: string, maxLength: 30 } }
         - { name: source_system, in: query, required: false, schema: { type: string, maxLength: 64 } }
+        - { name: documentId, in: query, required: false, description: Only the lines of the entry posted for this source document, schema: { type: string, format: uuid } }
         - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, pattern: '^[0-9]{1,18}\.[0-9]{1,5}$' } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
       responses:
@@ -1648,6 +2108,7 @@ paths:
     get:
       tags: [reasons]
       operationId: getReasonCode
+      summary: Get a reason code
       x-passage-duty: ledger.journal.read
       parameters:
         - name: code
@@ -1733,6 +2194,7 @@ paths:
     get:
       tags: [templates]
       operationId: getDescriptionTemplate
+      summary: Get a default description template
       x-passage-duty: ledger.journal.read
       parameters:
         - name: id
@@ -1785,6 +2247,228 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "409": { $ref: "#/components/responses/Problem409" }
+  /v1/ledger/recurring-journals:
+    get:
+      tags: [recurring]
+      operationId: listRecurringJournals
+      summary: List recurring journals
+      x-passage-duty: ledger.journal.read
+      description: Recurring journal templates (FR-11.10) in the caller's legal-entity scope, by next run date then name.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [active, paused] }
+      responses:
+        "200":
+          description: Recurring journals without their lines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /v1/ledger/recurring-journals/{id}:
+    get:
+      tags: [recurring]
+      operationId: getRecurringJournal
+      summary: Get a recurring journal with its lines
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [recurring]
+      operationId: putRecurringJournal
+      summary: Create or replace a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: |
+        Creates (201) or replaces (200) a recurring journal (FR-11.10): a journal template with a calendar
+        schedule. Lines are fixed amounts or percentages of the base amount. Naturally idempotent. A
+        replace sends If-Match when the caller read the template first (412 LEDGER_VERSION_CONFLICT when
+        stale), replaces every line, and recomputes the next run date from the last run. The ledger cannot
+        change (422 LEDGER_RECURRING_LEDGER_FIXED). Generated batches use the journal name's approval
+        rules; a template never posts by itself.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecurringJournalBody" }
+      responses:
+        "200":
+          description: Recurring journal replaced
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "201":
+          description: Recurring journal created
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409":
+          description: LEDGER_RECURRING_ID_CONFLICT (a concurrent create took the id, or the id belongs to a template outside the caller's legal entities)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/RecurringProblem422" }
+  /v1/ledger/recurring-journals/{id}/pause:
+    post:
+      tags: [recurring]
+      operationId: pauseRecurringJournal
+      summary: Pause a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: A paused template generates nothing until it is resumed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Paused recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /v1/ledger/recurring-journals/{id}/resume:
+    post:
+      tags: [recurring]
+      operationId: resumeRecurringJournal
+      summary: Resume a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: Resumes a paused template. Runs missed while paused are skipped; the next run date moves to the first scheduled date on or after today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Active recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /v1/ledger/recurring-journals/{id}/generate:
+    post:
+      tags: [recurring]
+      operationId: generateRecurringJournal
+      summary: Generate the draft batch of a scheduled date
+      x-passage-duty: ledger.journal.write
+      description: |
+        Creates one draft journal batch for the scheduled date, with the date as posting date, and
+        records the run, in one transaction. The date is required (send the template's nextRunDate for
+        the next run) and must be one of the schedule's dates between the start and end dates, so a
+        period has at most one run and a retried call never generates the following period. Percent
+        lines are base amount times percentage, rounded half up to the currency's minor units. A date
+        that already has a run returns that run with 200 and creates nothing, so a scheduler that fires
+        twice is safe. A run at or after the next run date advances the schedule to the next date after
+        it; an earlier (catch-up) date leaves it. The batch then follows the normal lifecycle (submit,
+        approve, post). Emits dev.passage.ledger.recurring.generated.v1.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduledDate]
+              properties:
+                scheduledDate: { type: string, format: date, description: A date of the schedule, such as the template's nextRunDate }
+                baseAmount: { type: string, description: Overrides the template's base amount for this run }
+      responses:
+        "200":
+          description: The date already had a run; nothing was created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringRun" }
+        "201":
+          description: Draft batch created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/RecurringProblem409" }
+        "422": { $ref: "#/components/responses/RecurringProblem422" }
+  /v1/ledger/recurring-journals/{id}/runs:
+    get:
+      tags: [recurring]
+      operationId: listRecurringJournalRuns
+      summary: List the generated batches of a recurring journal
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Runs, newest scheduled date first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecurringRun" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
   /readyz:
     get:
       tags: [ops]
@@ -1811,3 +2495,750 @@ paths:
                 type: object
                 properties:
                   status: { type: string, enum: [unavailable] }
+  /v1/ledger/ledgers/{ledger}/open-item-accounts:
+    get:
+      tags: [clearing]
+      operationId: listOpenItemAccounts
+      summary: List open-item account settings of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Every account that was switched on or off for open-item management in the ledger, with the count of its items still open.
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The settings by account number
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/OpenItemAccount" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}:
+    put:
+      tags: [clearing]
+      operationId: putOpenItemAccount
+      summary: Switch open-item management of an account on or off
+      x-passage-duty: ledger.account.write
+      description: |
+        When on, every non-zero line posted on the account in this ledger creates an open item
+        (FR-11.19). Only postable balance-sheet accounts that are not customer or vendor
+        reconciliation accounts qualify (LEDGER_OI_ACCOUNT_INVALID, 422). Switching on an account
+        that has a non-zero balance in the ledger is refused with LEDGER_OI_ACTIVATION_BALANCE (422)
+        because that needs an activation run, which is not built yet. Switching off needs zero open
+        items (LEDGER_OI_OPEN_ITEMS_EXIST, 409). Setting the current value again is a no-op.
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: account
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenItemAccountBody" }
+      responses:
+        "200":
+          description: The account already had a setting; it now holds the requested value
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemAccount" }
+        "201":
+          description: First setting of the account in this ledger
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemAccount" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/tolerance-groups:
+    get:
+      tags: [clearing]
+      operationId: listToleranceGroups
+      summary: List tolerance groups of a ledger
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The tolerance groups by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ToleranceGroup" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/tolerance-groups/{code}:
+    get:
+      tags: [clearing]
+      operationId: getToleranceGroup
+      summary: Get a tolerance group
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+      responses:
+        "200":
+          description: The tolerance group; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [clearing]
+      operationId: putToleranceGroup
+      summary: Create or replace a tolerance group
+      x-passage-duty: ledger.clearing.rules
+      description: |
+        A tolerance group is the largest residual a manual clearing may write off to its difference
+        account (OBA0 semantics, BR-11.12): a debit residual up to the debit limit, a credit residual
+        up to the credit limit and, when a percentage limit is set, up to that share of the selection's
+        absolute total (debit plus credit). Groups are deactivated, never deleted. A
+        replace is checked against If-Match when sent (412 LEDGER_VERSION_CONFLICT).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+        - name: If-Match
+          in: header
+          required: false
+          description: The tolerance group version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToleranceGroupBody" }
+      responses:
+        "200":
+          description: Group replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "201":
+          description: Group created
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/open-items:
+    get:
+      tags: [clearing]
+      operationId: listOpenItems
+      summary: List open items of a ledger
+      x-passage-duty: ledger.journal.read
+      description: |
+        Open items of open-item managed accounts, oldest first, one keyset page at a time. Status
+        open also returns reset_open items, which can be cleared again. Dimension filters are exact
+        matches written dim.{ATTRIBUTE}.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: account, in: query, required: false, schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [open, cleared, reset_open, voided] } }
+        - { name: assignment, in: query, required: false, schema: { type: string, maxLength: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200":
+          description: One page of open items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemPage" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/clearings:simulate:
+    post:
+      tags: [clearing]
+      operationId: simulateClearing
+      summary: Preview the residual and outcome of a clearing
+      x-passage-duty: ledger.clearing.write
+      description: Stateless. Applies the same checks as POST /clearings and reports the residual and what would happen to it, without writing anything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearingRequest" }
+      responses:
+        "200":
+          description: The preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingPreview" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/clearings:
+    get:
+      tags: [clearing]
+      operationId: listClearings
+      summary: List clearing documents of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Newest first, at most 200.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [cleared, reset] } }
+      responses:
+        "200":
+          description: The clearing documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ClearingDocument" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    post:
+      tags: [clearing]
+      operationId: createClearing
+      summary: Clear open items
+      x-passage-duty: ledger.clearing.write
+      description: |
+        Manual clearing (F-03 semantics) of 2 to 10,000 open items of one open-item managed account,
+        in one transaction. A zero net clears them. A residual within the named tolerance group (its
+        debit limit for a debit residual, its credit limit for a credit residual, and its percentage of
+        the selection's absolute total when set) is posted to its difference account and cleared with
+        them; the difference account may not itself be open-item managed
+        (LEDGER_CLEARING_DIFFERENCE_ACCOUNT). A residual above tolerance becomes a
+        new open item when residualItem is true and is otherwise refused (LEDGER_CLEARING_UNBALANCED,
+        422). An item already in a clearing is LEDGER_OPEN_ITEM_ALREADY_CLEARED (409). The clearing
+        date may not precede the latest posting date of the items. A repeated Idempotency-Key returns
+        the same document with 200. Emits dev.passage.ledger.openitem.cleared.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearingRequest" }
+      responses:
+        "200":
+          description: The Idempotency-Key was used before with the same request; the stored document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "201":
+          description: Items cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/clearings/{id}:
+    get:
+      tags: [clearing]
+      operationId: getClearing
+      summary: Get a clearing document with its items
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The clearing document and the items it holds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/clearings/{id}/reset:
+    post:
+      tags: [clearing]
+      operationId: resetClearing
+      summary: Reset a clearing document
+      x-passage-duty: ledger.clearing.reset
+      description: |
+        Resets the clearing as a whole (BR-11.13) with a required reason code: an active shared reason
+        code that applies to ledger (LEDGER_REASON_REQUIRED, 422, when unknown, inactive or missing a
+        required comment). Its items are reset_open and clearable again, the difference entry is
+        reversed with the reason code and its two items are voided, and a residual
+        item is voided, which needs it to be still open (LEDGER_CLEARING_RESIDUAL_USED, 409).
+        Resetting a reset document is LEDGER_CLEARING_ALREADY_RESET (409) unless the Idempotency-Key
+        is the one that reset it, which returns the document. Emits dev.passage.ledger.openitem.cleared.v1
+        with status reset.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetClearingRequest" }
+      responses:
+        "200":
+          description: The reset document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/auto-clearing-rules:
+    get:
+      tags: [clearing]
+      operationId: listAutoClearingRules
+      summary: List automatic clearing rules of a ledger
+      x-passage-duty: ledger.journal.read
+      description: In run order (sequence, then name).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AutoClearingRule" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/auto-clearing-rules/{id}:
+    get:
+      tags: [clearing]
+      operationId: getAutoClearingRule
+      summary: Get an automatic clearing rule
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The rule; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [clearing]
+      operationId: putAutoClearingRule
+      summary: Create or replace an automatic clearing rule
+      x-passage-duty: ledger.clearing.rules
+      description: |
+        A rule (OB74 semantics, FR-11.20) names an account range and up to five ordered criteria that
+        group the open items of each account. The id is chosen by the caller. A group that nets to zero
+        clears as one document; with allowTolerance the named active tolerance group also lets a
+        group with a small net clear. Rules are deactivated, never deleted. A replace is checked
+        against If-Match when sent (412 LEDGER_VERSION_CONFLICT).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: false
+          description: The rule version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoClearingRuleBody" }
+      responses:
+        "200":
+          description: Rule replaced
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "201":
+          description: Rule created
+          headers:
+            ETag: { $ref: "#/components/headers/AutoRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRule" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AutoRuleProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/AutoRuleProblem422" }
+  /v1/ledger/auto-clearing:run:
+    post:
+      tags: [clearing]
+      operationId: runAutoClearing
+      summary: Run automatic clearing
+      x-passage-duty: ledger.clearing.run
+      description: |
+        Groups the open items of every active rule (or one rule) and clears each group that nets to
+        zero, or within the rule's tolerance, as its own clearing document (mode auto, idempotency key
+        auto:{rule}:{group hash}, suffixed when the same group was cleared and reset before). It never makes a residual item. A group that cannot clear, for
+        example because another clearing took an item meanwhile, is logged as skipped with the reason
+        and the run continues. simulate writes nothing and returns the proposed and skipped groups
+        (200). clear stores the run and its group log under the Idempotency-Key (201; a repeat with the
+        same body returns the stored run with 200, another body is LEDGER_IDEMPOTENCY_CONFLICT, 409).
+        Each cleared group emits dev.passage.ledger.openitem.cleared.v1.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required for mode clear; trimmed, 1 to 128 characters
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoClearingRunRequest" }
+      responses:
+        "200":
+          description: A simulation, or the stored run of a repeated Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "201":
+          description: The run was stored; groups are cleared or skipped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AutoRunProblem409" }
+        "422": { $ref: "#/components/responses/AutoRunProblem422" }
+  /v1/ledger/auto-clearing-runs:
+    get:
+      tags: [clearing]
+      operationId: listAutoClearingRuns
+      summary: List stored automatic clearing runs
+      x-passage-duty: ledger.journal.read
+      description: Newest first, at most 100, without the group log.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AutoClearingRun" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/auto-clearing-runs/{id}:
+    get:
+      tags: [clearing]
+      operationId: getAutoClearingRun
+      summary: Get an automatic clearing run with its group log
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The run and its first 1,000 groups
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoClearingRun" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/lookup-tables:
+    get:
+      tags: [derivation]
+      operationId: listLookupTables
+      summary: List the lookup tables of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Lookup tables by name, without rows. Fetch one table to read its rows.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The lookup tables of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LookupTable" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/lookup-tables/{id}:
+    get:
+      tags: [derivation]
+      operationId: getLookupTable
+      summary: Get a lookup table with its rows
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The lookup table and its rows; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [derivation]
+      operationId: putLookupTable
+      summary: Create or replace a lookup table and its rows
+      x-passage-duty: ledger.rules.write
+      description: |
+        A lookup table maps a source tuple to one target dimension value (FR-11.22). Rows match on
+        the full tuple with * wildcards; the row with the fewest wildcards wins, then the latest
+        validFrom, and only rows valid on the posting date apply (BR-11.14). The call replaces all
+        rows (at most 5,000; CSV import is not built). A replace is checked against If-Match when
+        sent (412 LEDGER_VERSION_CONFLICT). The definition cannot change while a strategy step
+        uses the table. Announces dev.passage.ledger.rules.changed.v1.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The table version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LookupTableBody" }
+      responses:
+        "200":
+          description: Table replaced
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "201":
+          description: Table created
+          headers:
+            ETag: { $ref: "#/components/headers/LookupETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LookupTable" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies:
+    get:
+      tags: [derivation]
+      operationId: listDerivationStrategies
+      summary: List the derivation strategy versions of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Versions newest first, each with its steps and status (draft, active, retired).
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The strategy versions of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DerivationStrategy" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies/{version}:
+    get:
+      tags: [derivation]
+      operationId: getDerivationStrategy
+      summary: Get one derivation strategy version
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The strategy version; its lockVersion is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [derivation]
+      operationId: putDerivationStrategy
+      summary: Create the next draft version or replace a draft
+      x-passage-duty: ledger.rules.write
+      description: |
+        A new version number must be the highest existing one plus one. Only a draft is replaced
+        (409 LEDGER_DERIVATION_STRATEGY_NOT_DRAFT); a replace is checked against If-Match when sent.
+        Steps run in sequence before account structure validation (FR-11.22, BR-11.14). Precedence:
+        a value the posting request carries is never changed; a step with overwrite replaces a value
+        set by an earlier step; a step without overwrite only fills a blank.
+        Shape problems (unknown field, a step reading its own target, clear without overwrite,
+        more than 50 steps) are 422 LEDGER_DERIVATION_INVALID.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The lockVersion last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DerivationStrategyBody" }
+      responses:
+        "200":
+          description: Draft replaced
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "201":
+          description: Draft created
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/derivation-strategies/{version}/activate:
+    post:
+      tags: [derivation]
+      operationId: activateDerivationStrategy
+      summary: Activate a draft derivation strategy
+      x-passage-duty: ledger.rules.write
+      description: |
+        Validates the draft against the ledger's dimension attributes and lookup tables (422
+        LEDGER_DERIVATION_INVALID), retires the active version and activates this one in one
+        transaction, and announces dev.passage.ledger.rules.changed.v1. Activating the active
+        version again changes nothing. Postings from then on run the steps and record the
+        step ids on each line they changed.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The lockVersion last read, as an entity tag ("3"); when sent and stale, 412
+          schema: { type: string }
+      responses:
+        "200":
+          description: The active strategy version
+          headers:
+            ETag: { $ref: "#/components/headers/StrategyETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DerivationStrategy" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }

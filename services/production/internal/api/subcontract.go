@@ -31,6 +31,7 @@ type subcontractRowView struct {
 	Amount        string            `json:"amount"`
 	OperStatus    domain.OperStatus `json:"operStatus"`
 	PORequestedAt *time.Time        `json:"poRequestedAt"`
+	POCancelledAt *time.Time        `json:"poCancelledAt"`
 }
 
 type subcontractTotalView struct {
@@ -107,7 +108,7 @@ func (a *API) subcontractReport(w http.ResponseWriter, r *http.Request) {
 		v.Items = append(v.Items, subcontractRowView{OrderID: x.OrderID, OrderNumber: x.OrderNumber, OrderStatus: x.OrderStatus,
 			LegalEntityID: x.LegalEntityID, SiteID: x.SiteID, Currency: x.Currency, DueDate: x.DueDate, OperNumber: x.OperNumber,
 			ResourceID: x.ResourceID, Qty: x.Qty.String(), QtyGood: x.QtyGood.String(), UnitPrice: x.UnitPrice.String(),
-			Amount: fixed(x.Amount, x.Currency), OperStatus: x.OperStatus, PORequestedAt: x.PORequestedAt})
+			Amount: fixed(x.Amount, x.Currency), OperStatus: x.OperStatus, PORequestedAt: x.PORequestedAt, POCancelledAt: x.POCancelledAt})
 	}
 	for _, t := range rep.Totals {
 		v.Totals = append(v.Totals, subcontractTotalView{Currency: t.Currency, Operations: t.Operations, Amount: fixed(t.Amount, t.Currency)})

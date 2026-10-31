@@ -53,6 +53,27 @@ func parseDecimal(f map[string]string, key, s string) decimal.Decimal {
 	return d
 }
 
+// parseBuckets validates the requirement buckets of a release, recording field
+// errors keyed by buckets[i].date and buckets[i].cumRequired.
+func parseBuckets(f map[string]string, in []releaseBucketRequest) []domain.ReleaseBucket {
+	if len(in) == 0 || len(in) > maxPeriods {
+		f["buckets"] = fmt.Sprintf("must have 1 to %d buckets", maxPeriods)
+	}
+	buckets := make([]domain.ReleaseBucket, 0, len(in))
+	for i, b := range in {
+		if _, err := time.Parse(dayLayout, b.Date); err != nil {
+			f[fmt.Sprintf("buckets[%d].date", i)] = "must be a date such as 2027-04-15"
+		}
+		key := fmt.Sprintf("buckets[%d].cumRequired", i)
+		cum := parseDecimal(f, key, b.CumRequired)
+		if err := domain.ValidateCumulative(cum); err != nil && f[key] == "" {
+			f[key] = err.Error()
+		}
+		buckets = append(buckets, domain.ReleaseBucket{Date: b.Date, CumRequired: cum})
+	}
+	return buckets
+}
+
 // checkRelease reconciles a scheduling-agreement release and returns the open
 // schedule lines it would create. It is stateless: nothing is stored.
 func (a *API) checkRelease(w http.ResponseWriter, r *http.Request) {
@@ -71,17 +92,7 @@ func (a *API) checkRelease(w http.ResponseWriter, r *http.Request) {
 	if req.Tolerance != nil {
 		tolerance = parseDecimal(f, "tolerance", *req.Tolerance)
 	}
-	if len(req.Buckets) == 0 || len(req.Buckets) > maxPeriods {
-		f["buckets"] = fmt.Sprintf("must have 1 to %d buckets", maxPeriods)
-	}
-	buckets := make([]domain.ReleaseBucket, 0, len(req.Buckets))
-	for i, b := range req.Buckets {
-		if _, err := time.Parse(dayLayout, b.Date); err != nil {
-			f[fmt.Sprintf("buckets[%d].date", i)] = "must be a date such as 2027-04-15"
-		}
-		cum := parseDecimal(f, fmt.Sprintf("buckets[%d].cumRequired", i), b.CumRequired)
-		buckets = append(buckets, domain.ReleaseBucket{Date: b.Date, CumRequired: cum})
-	}
+	buckets := parseBuckets(f, req.Buckets)
 	if len(f) > 0 {
 		validationFailed(w, r, f)
 		return

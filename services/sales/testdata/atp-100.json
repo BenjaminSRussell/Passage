@@ -329,1746 +329,86 @@
  },
  {
   "id": "atp-010",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "74",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-12",
+  "quantity": "123",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "44",
-    "demand": "17"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "12",
+    "supply": "32",
     "demand": "4"
    },
    {
-    "date": "2027-03-05",
-    "supply": "16",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "21",
-    "demand": "16"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "11",
-    "demand": "15"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "74",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-011",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "68",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "49",
-    "demand": "26"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "3",
-    "demand": "42"
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "20"
    },
    {
     "date": "2027-03-07",
-    "supply": "22",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "39",
-    "demand": "60"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "30",
-    "demand": "16"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "39",
-    "demand": "41"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "68",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-012",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "2",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "58",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "49",
-    "demand": "43"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "5",
+    "supply": "105",
     "demand": "10"
    },
    {
-    "date": "2027-03-10",
-    "supply": "45",
-    "demand": "9"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "34",
-    "demand": "3"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-03",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-03",
-     "quantity": "2",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-013",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "46",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "56",
-    "demand": "36"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "26",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "28",
-    "demand": "55"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "46",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-014",
-  "note": "generated",
-  "requested": "2027-03-02",
-  "quantity": "27",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "11",
-    "demand": "30"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "56",
-    "demand": "33"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "33",
-    "demand": "15"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-05",
-   "backorder": "5",
-   "schedule": [
-    {
-     "date": "2027-03-04",
-     "quantity": "4",
-     "period": 1
-    },
-    {
-     "date": "2027-03-05",
-     "quantity": "18",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-015",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "39",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "5",
-    "demand": "21"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "48",
-    "demand": "3"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "21",
-    "demand": "40"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "44",
-    "demand": "44"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "39",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-016",
-  "note": "generated",
-  "requested": "2027-03-11",
-  "quantity": "16",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "7",
-    "demand": "37"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "58",
-    "demand": "18"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "56",
-    "demand": "49"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "35",
-    "demand": "34"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-11",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-11",
-     "quantity": "16",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-017",
-  "note": "generated",
-  "requested": "2027-03-01",
-  "quantity": "5",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "51",
-    "demand": "12"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "44",
-    "demand": "39"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-01",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-01",
-     "quantity": "5",
-     "period": 0
-    }
-   ]
-  }
- },
- {
-  "id": "atp-018",
-  "note": "generated",
-  "requested": "2027-03-12",
-  "quantity": "43",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "29",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "11",
-    "demand": "57"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "47",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "12",
-    "demand": "14"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "43",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-019",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "30",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "2",
-    "demand": "11"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "54",
-    "demand": "5"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-03",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-03",
-     "quantity": "30",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-020",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "28",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "52",
-    "demand": "30"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "14",
-    "demand": "38"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "54",
-    "demand": "17"
-   },
-   {
     "date": "2027-03-09",
-    "supply": "19",
-    "demand": "34"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-08",
-   "backorder": "8",
-   "schedule": [
-    {
-     "date": "2027-03-08",
-     "quantity": "20",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-021",
-  "note": "generated",
-  "requested": "2027-03-02",
-  "quantity": "61",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "42",
-    "demand": "13"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "52",
-    "demand": "51"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "57",
-    "demand": "14"
+    "supply": "0",
+    "demand": "78"
    },
    {
     "date": "2027-03-10",
-    "supply": "36",
-    "demand": "44"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-09",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-02",
-     "quantity": "29",
-     "period": 0
-    },
-    {
-     "date": "2027-03-05",
-     "quantity": "1",
-     "period": 1
-    },
-    {
-     "date": "2027-03-09",
-     "quantity": "31",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-022",
-  "note": "generated",
-  "requested": "2027-03-12",
-  "quantity": "3",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "5",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "20",
-    "demand": "19"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "8",
-    "demand": "6"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "56",
-    "demand": "5"
+    "supply": "73",
+    "demand": "54"
    },
    {
     "date": "2027-03-11",
-    "supply": "48",
-    "demand": "34"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "58",
-    "demand": "13"
+    "supply": "0",
+    "demand": "3"
    }
   ],
   "expect": {
-   "complete": true,
+   "complete": false,
    "promisedDate": "2027-03-12",
-   "backorder": "0",
+   "backorder": "82",
    "schedule": [
     {
      "date": "2027-03-12",
-     "quantity": "3",
-     "period": 4
-    }
-   ]
-  }
- },
- {
-  "id": "atp-023",
-  "note": "generated",
-  "requested": "2027-03-18",
-  "quantity": "77",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "37",
-    "demand": "38"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "52",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "38",
-    "demand": "3"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "12",
-    "demand": "6"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-18",
-   "backorder": "39",
-   "schedule": [
-    {
-     "date": "2027-03-18",
-     "quantity": "38",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-024",
-  "note": "generated",
-  "requested": "2027-03-11",
-  "quantity": "49",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "21",
-    "demand": "40"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "13",
-    "demand": "25"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "22",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "12",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "12",
-    "demand": "46"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "49",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-025",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "7",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "38",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "48",
-    "demand": "46"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-07",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-07",
-     "quantity": "7",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-026",
-  "note": "generated",
-  "requested": "2027-03-18",
-  "quantity": "49",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "3",
-    "demand": "53"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "31",
-    "demand": "34"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "47",
-    "demand": "8"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "59",
-    "demand": "44"
-   },
-   {
-    "date": "2027-03-19",
-    "supply": "45",
-    "demand": "33"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-19",
-   "backorder": "36",
-   "schedule": [
-    {
-     "date": "2027-03-18",
-     "quantity": "1",
-     "period": 3
-    },
-    {
-     "date": "2027-03-19",
-     "quantity": "12",
-     "period": 4
-    }
-   ]
-  }
- },
- {
-  "id": "atp-027",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "29",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "31",
-    "demand": "22"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "47",
-    "demand": "30"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "51",
-    "demand": "31"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "14",
-    "demand": "33"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "39",
-    "demand": "35"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-21",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-08",
-     "quantity": "27",
-     "period": 2
-    },
-    {
-     "date": "2027-03-21",
-     "quantity": "2",
-     "period": 4
-    }
-   ]
-  }
- },
- {
-  "id": "atp-028",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "63",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "44",
-    "demand": "18"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "10",
-    "demand": "48"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "63",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-029",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "34",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "53",
-    "demand": "11"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "33",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "28",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "2",
-    "demand": "48"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "34",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-030",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "73",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "49",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "35",
-    "demand": "50"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-06",
-   "backorder": "54",
-   "schedule": [
-    {
-     "date": "2027-03-06",
-     "quantity": "19",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-031",
-  "note": "generated",
-  "requested": "2027-03-22",
-  "quantity": "20",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "17",
-    "demand": "34"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "53",
-    "demand": "11"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "3",
-    "demand": "48"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "46",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "57",
-    "demand": "21"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-22",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-22",
-     "quantity": "20",
-     "period": 4
-    }
-   ]
-  }
- },
- {
-  "id": "atp-032",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "1",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "14",
-    "demand": "1"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "16",
-    "demand": "31"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "1",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-033",
-  "note": "generated",
-  "requested": "2027-03-01",
-  "quantity": "23",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "1",
-    "demand": "23"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "43",
-    "demand": "6"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-04",
-   "backorder": "8",
-   "schedule": [
-    {
-     "date": "2027-03-04",
-     "quantity": "15",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-034",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "76",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "1",
-    "demand": "35"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "31",
-    "demand": "53"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "47",
-    "demand": "2"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "76",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-035",
-  "note": "generated",
-  "requested": "2027-03-13",
-  "quantity": "76",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "21",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "17",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "12",
-    "demand": "37"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "16",
-    "demand": "12"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "32",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-19",
-    "supply": "41",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "8",
-    "demand": "4"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "76",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-036",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "19",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "27",
-    "demand": "55"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "57",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "8",
-    "demand": "58"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "27",
-    "demand": "49"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "19",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-037",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "4",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "46",
-    "demand": "59"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "21",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "17",
-    "demand": "21"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "6",
-    "demand": "58"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "31",
-    "demand": "10"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "4",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-038",
-  "note": "generated",
-  "requested": "2027-03-16",
-  "quantity": "71",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "54",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "41",
-    "demand": "11"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "32",
-    "demand": "45"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "58",
-    "demand": "1"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "42",
-    "demand": "51"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "56",
-    "demand": "7"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-16",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-16",
-     "quantity": "71",
+     "quantity": "41",
      "period": 5
     }
    ]
   }
  },
  {
-  "id": "atp-039",
-  "note": "generated",
-  "requested": "2027-03-01",
-  "quantity": "55",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "36",
-    "demand": "24"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "55",
-    "demand": "20"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "15",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "16",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "38",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "54",
-    "demand": "28"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-09",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-09",
-     "quantity": "55",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-040",
-  "note": "generated",
-  "requested": "2027-03-23",
-  "quantity": "63",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "24",
-    "demand": "3"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "46",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "26",
-    "demand": "55"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "2",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "17",
-    "demand": "12"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "52",
-    "demand": "55"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "63",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-041",
-  "note": "generated",
-  "requested": "2027-03-05",
-  "quantity": "31",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "28",
-    "demand": "59"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "12",
-    "demand": "5"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "13",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "58",
-    "demand": "24"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "46",
-    "demand": "53"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "31",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-042",
-  "note": "generated",
-  "requested": "2027-03-13",
-  "quantity": "80",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "33",
-    "demand": "26"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "31",
-    "demand": "24"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "37",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "47",
-    "demand": "33"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "80",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-043",
-  "note": "generated",
-  "requested": "2027-03-05",
-  "quantity": "72",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "53",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "29",
-    "demand": "26"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "72",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-044",
-  "note": "generated",
-  "requested": "2027-03-12",
-  "quantity": "5",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "26",
-    "demand": "9"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "19",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "29",
-    "demand": "40"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "27",
-    "demand": "51"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "45",
-    "demand": "43"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "5",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-045",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "1",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "49",
-    "demand": "44"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "60",
-    "demand": "58"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-06",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-06",
-     "quantity": "1",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-046",
-  "note": "generated",
-  "requested": "2027-03-18",
-  "quantity": "13",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "11",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "37",
-    "demand": "46"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "34",
-    "demand": "53"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "34",
-    "demand": "28"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "27",
-    "demand": "51"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "31",
-    "demand": "43"
-   },
-   {
-    "date": "2027-03-25",
-    "supply": "52",
-    "demand": "38"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "13",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-047",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "49",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "54",
-    "demand": "1"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "13",
-    "demand": "38"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "37",
-    "demand": "53"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-06",
-   "backorder": "37",
-   "schedule": [
-    {
-     "date": "2027-03-06",
-     "quantity": "12",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-048",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "28",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "51",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "36",
-    "demand": "45"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "49",
-    "demand": "18"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "31",
-    "demand": "60"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "47",
-    "demand": "56"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "28",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-049",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "8",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "3",
-    "demand": "14"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "47",
-    "demand": "21"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-04",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-04",
-     "quantity": "8",
-     "period": 1
-    }
-   ]
-  }
- },
- {
-  "id": "atp-050",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "67",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "31",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "49",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "27",
-    "demand": "22"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "67",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-051",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "30",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "35",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "49",
-    "demand": "45"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "18",
-    "demand": "43"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "25",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "40",
-    "demand": "48"
-   },
-   {
-    "date": "2027-03-19",
-    "supply": "18",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "24",
-    "demand": "0"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "30",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-052",
-  "note": "generated",
-  "requested": "2027-03-19",
-  "quantity": "29",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "46",
-    "demand": "6"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "4",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "29",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "4",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "50",
-    "demand": "35"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "29",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-053",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "24",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "49",
-    "demand": "17"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "40",
-    "demand": "39"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "12",
-    "demand": "21"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "33",
-    "demand": "49"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "9",
-    "demand": "4"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-16",
-   "backorder": "11",
-   "schedule": [
-    {
-     "date": "2027-03-04",
-     "quantity": "8",
-     "period": 0
-    },
-    {
-     "date": "2027-03-16",
-     "quantity": "5",
-     "period": 4
-    }
-   ]
-  }
- },
- {
-  "id": "atp-054",
-  "note": "generated",
-  "requested": "2027-03-01",
+  "id": "atp-011",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-15",
   "quantity": "3",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "13",
+    "supply": "12",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "19",
     "demand": "19"
    },
    {
-    "date": "2027-03-05",
-    "supply": "3",
-    "demand": "21"
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "1"
    }
   ],
   "expect": {
@@ -2079,122 +419,346 @@
   }
  },
  {
-  "id": "atp-055",
-  "note": "generated",
-  "requested": "2027-03-14",
-  "quantity": "52",
+  "id": "atp-012",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-10",
+  "quantity": "12",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "14",
-    "demand": "2"
+    "supply": "22",
+    "demand": "10"
    },
    {
     "date": "2027-03-04",
-    "supply": "1",
-    "demand": "60"
+    "supply": "142",
+    "demand": "14"
    },
    {
     "date": "2027-03-05",
-    "supply": "49",
-    "demand": "3"
+    "supply": "73",
+    "demand": "38"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "135",
+    "demand": "32"
    },
    {
     "date": "2027-03-10",
-    "supply": "40",
-    "demand": "18"
+    "supply": "0",
+    "demand": "71"
    },
    {
     "date": "2027-03-13",
     "supply": "24",
-    "demand": "9"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "49",
-    "demand": "23"
+    "demand": "10"
    }
   ],
   "expect": {
    "complete": true,
-   "promisedDate": "2027-03-16",
+   "promisedDate": "2027-03-10",
    "backorder": "0",
    "schedule": [
     {
-     "date": "2027-03-16",
-     "quantity": "52",
-     "period": 5
+     "date": "2027-03-10",
+     "quantity": "12",
+     "period": 4
     }
    ]
   }
  },
  {
-  "id": "atp-056",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "24",
+  "id": "atp-013",
+  "note": "generated: request on, complete only, over-committed at bucket 3, fractional",
+  "requested": "2027-03-01",
+  "quantity": "5.873",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "7",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "58",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "34",
+    "demand": "79"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "118",
+    "demand": "159"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "127",
+    "demand": "29"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "0",
+    "demand": "48"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-13",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-13",
+     "quantity": "5.873",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-014",
+  "note": "generated: request between, partial, quantity = available on bucket 3",
+  "requested": "2027-03-08",
+  "quantity": "112",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "24",
-    "demand": "15"
+    "supply": "13",
+    "demand": "4"
    },
    {
-    "date": "2027-03-04",
-    "supply": "39",
-    "demand": "46"
+    "date": "2027-03-05",
+    "supply": "104",
+    "demand": "68"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "13"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "135",
+    "demand": "55"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-14",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-08",
+     "quantity": "32",
+     "period": 1
+    },
+    {
+     "date": "2027-03-14",
+     "quantity": "80",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-015",
+  "note": "generated: request after, complete only",
+  "requested": "2027-03-21",
+  "quantity": "140",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "5",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "112",
+    "demand": "6"
    },
    {
     "date": "2027-03-07",
-    "supply": "28",
-    "demand": "16"
+    "supply": "0",
+    "demand": "74"
    },
    {
     "date": "2027-03-09",
-    "supply": "3",
-    "demand": "53"
+    "supply": "62",
+    "demand": "76"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "149",
+    "demand": "66"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "56"
+   },
+   {
+    "date": "2027-03-19",
+    "supply": "0",
+    "demand": "3"
    }
   ],
   "expect": {
    "complete": false,
    "promisedDate": null,
-   "backorder": "24",
+   "backorder": "140",
    "schedule": []
   }
  },
  {
-  "id": "atp-057",
-  "note": "generated",
-  "requested": "2027-03-05",
-  "quantity": "9",
+  "id": "atp-016",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-07",
+  "quantity": "32",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "42",
-    "demand": "46"
+    "supply": "20",
+    "demand": "15"
    },
    {
-    "date": "2027-03-03",
-    "supply": "47",
-    "demand": "47"
+    "date": "2027-03-06",
+    "supply": "71",
+    "demand": "43"
    },
    {
-    "date": "2027-03-05",
-    "supply": "60",
-    "demand": "22"
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "8"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "4"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-07",
+   "backorder": "30",
+   "schedule": [
+    {
+     "date": "2027-03-07",
+     "quantity": "2",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-017",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-13",
+  "quantity": "103",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "119",
+    "demand": "48"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "43"
    },
    {
     "date": "2027-03-09",
-    "supply": "50",
-    "demand": "28"
+    "supply": "145",
+    "demand": "79"
    },
    {
     "date": "2027-03-13",
-    "supply": "21",
-    "demand": "58"
+    "supply": "0",
+    "demand": "8"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-13",
+   "backorder": "17",
+   "schedule": [
+    {
+     "date": "2027-03-13",
+     "quantity": "86",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-018",
+  "note": "generated: request between, complete only, over-committed at bucket 1",
+  "requested": "2027-03-02",
+  "quantity": "16",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "30",
+    "demand": "15"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "99",
+    "demand": "118"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "85",
+    "demand": "53"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "33"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "16",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-019",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-05",
+  "quantity": "63",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "38",
+    "demand": "35"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "120",
+    "demand": "22"
    }
   ],
   "expect": {
@@ -2204,1406 +768,454 @@
    "schedule": [
     {
      "date": "2027-03-05",
-     "quantity": "9",
+     "quantity": "63",
      "period": 2
     }
    ]
   }
  },
  {
-  "id": "atp-058",
-  "note": "generated",
-  "requested": "2027-03-17",
-  "quantity": "65",
-  "completeOnly": false,
+  "id": "atp-020",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-03",
+  "quantity": "72",
+  "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "32",
-    "demand": "32"
+    "supply": "3",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "2"
    },
    {
     "date": "2027-03-04",
-    "supply": "15",
-    "demand": "41"
+    "supply": "96",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "15"
    },
    {
     "date": "2027-03-07",
-    "supply": "28",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "42",
-    "demand": "19"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "53",
-    "demand": "15"
+    "supply": "31",
+    "demand": "22"
    }
   ],
   "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-17",
-   "backorder": "17",
+   "complete": true,
+   "promisedDate": "2027-03-07",
+   "backorder": "0",
    "schedule": [
     {
-     "date": "2027-03-17",
-     "quantity": "48",
+     "date": "2027-03-07",
+     "quantity": "72",
      "period": 4
     }
    ]
   }
  },
  {
-  "id": "atp-059",
-  "note": "generated",
-  "requested": "2027-03-05",
-  "quantity": "2",
+  "id": "atp-021",
+  "note": "generated: request on, complete only, over-committed at bucket 2",
+  "requested": "2027-03-01",
+  "quantity": "42",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "14",
-    "demand": "52"
+    "supply": "15",
+    "demand": "6"
    },
    {
     "date": "2027-03-04",
-    "supply": "10",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "36",
-    "demand": "7"
+    "supply": "48",
+    "demand": "21"
    },
    {
     "date": "2027-03-09",
-    "supply": "58",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "39",
-    "demand": "49"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "23",
-    "demand": "31"
-   },
-   {
-    "date": "2027-03-25",
-    "supply": "57",
-    "demand": "55"
+    "supply": "96",
+    "demand": "149"
    }
   ],
   "expect": {
    "complete": false,
    "promisedDate": null,
-   "backorder": "2",
+   "backorder": "42",
    "schedule": []
   }
  },
  {
-  "id": "atp-060",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "80",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "4",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "24",
-    "demand": "46"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "18",
-    "demand": "33"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "19",
-    "demand": "57"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "16",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "20",
-    "demand": "38"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "80",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-061",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "71",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "41",
-    "demand": "50"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "24",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "34",
-    "demand": "2"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "45",
-    "demand": "29"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-09",
-   "backorder": "23",
-   "schedule": [
-    {
-     "date": "2027-03-07",
-     "quantity": "32",
-     "period": 2
-    },
-    {
-     "date": "2027-03-09",
-     "quantity": "16",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-062",
-  "note": "generated",
-  "requested": "2027-03-12",
-  "quantity": "29",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "25",
-    "demand": "1"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "2",
-    "demand": "37"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "9",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "39",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "13",
-    "demand": "20"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "29",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-063",
-  "note": "generated",
-  "requested": "2027-03-25",
+  "id": "atp-022",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-16",
   "quantity": "6",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "21",
-    "demand": "30"
+    "supply": "15",
+    "demand": "10"
    },
    {
     "date": "2027-03-05",
-    "supply": "7",
-    "demand": "30"
+    "supply": "120",
+    "demand": "22"
    },
    {
-    "date": "2027-03-07",
-    "supply": "57",
-    "demand": "57"
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "34"
    },
    {
-    "date": "2027-03-11",
-    "supply": "9",
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "42"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "82",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "140",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-19",
+    "supply": "0",
     "demand": "9"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "18",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "38",
-    "demand": "57"
-   },
-   {
-    "date": "2027-03-25",
-    "supply": "53",
-    "demand": "54"
    }
   ],
   "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "6",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-064",
-  "note": "generated",
-  "requested": "2027-03-21",
-  "quantity": "64",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "59",
-    "demand": "56"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "26",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "27",
-    "demand": "13"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "48",
-    "demand": "35"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "36",
-    "demand": "8"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-21",
-   "backorder": "27",
+   "complete": true,
+   "promisedDate": "2027-03-16",
+   "backorder": "0",
    "schedule": [
     {
-     "date": "2027-03-21",
-     "quantity": "37",
+     "date": "2027-03-16",
+     "quantity": "6",
      "period": 4
     }
    ]
   }
  },
  {
-  "id": "atp-065",
-  "note": "generated",
-  "requested": "2027-03-26",
-  "quantity": "55",
-  "completeOnly": true,
+  "id": "atp-023",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-22",
+  "quantity": "6",
+  "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "44",
-    "demand": "23"
+    "supply": "70",
+    "demand": "1"
    },
    {
     "date": "2027-03-05",
-    "supply": "13",
-    "demand": "19"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "54",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "30",
-    "demand": "60"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "57",
-    "demand": "58"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "4",
-    "demand": "46"
-   },
-   {
-    "date": "2027-03-25",
-    "supply": "24",
-    "demand": "33"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "55",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-066",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "8",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "36",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "54",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "13",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "36",
-    "demand": "40"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "22",
-    "demand": "31"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "16",
-    "demand": "53"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "8",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-067",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "72",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "37",
-    "demand": "21"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "42",
+    "supply": "0",
     "demand": "57"
    },
    {
-    "date": "2027-03-09",
-    "supply": "26",
-    "demand": "7"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "72",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-068",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "18",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "19",
-    "demand": "18"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "26",
-    "demand": "26"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "14",
-    "demand": "3"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "18",
-    "demand": "22"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-09",
-   "backorder": "10",
-   "schedule": [
-    {
-     "date": "2027-03-06",
-     "quantity": "1",
-     "period": 1
-    },
-    {
-     "date": "2027-03-09",
-     "quantity": "7",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-069",
-  "note": "generated",
-  "requested": "2027-03-09",
-  "quantity": "72",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "37",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "30",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "10",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "8",
-    "demand": "54"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "72",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-070",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "55",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "35",
-    "demand": "14"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "52",
+    "date": "2027-03-06",
+    "supply": "0",
     "demand": "2"
    },
    {
-    "date": "2027-03-10",
-    "supply": "15",
-    "demand": "33"
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "2"
    },
    {
-    "date": "2027-03-11",
-    "supply": "49",
-    "demand": "38"
+    "date": "2027-03-13",
+    "supply": "93",
+    "demand": "64"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "74",
+    "demand": "28"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-22",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-22",
+     "quantity": "6",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-024",
+  "note": "generated: request between, complete only",
+  "requested": "2027-03-04",
+  "quantity": "378",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "96",
+    "demand": "59"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "150",
+    "demand": "79"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "135",
+    "demand": "66"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "108",
+    "demand": "53"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "133",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "62"
    },
    {
     "date": "2027-03-17",
-    "supply": "16",
-    "demand": "0"
+    "supply": "88",
+    "demand": "48"
    }
   ],
   "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-11",
-   "backorder": "0",
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "378",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-025",
+  "note": "generated: request before, partial",
+  "requested": "2027-02-27",
+  "quantity": "112",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "46",
+    "demand": "28"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "132",
+    "demand": "52"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "18"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-02",
+   "backorder": "32",
    "schedule": [
     {
-     "date": "2027-03-04",
-     "quantity": "21",
+     "date": "2027-03-01",
+     "quantity": "18",
      "period": 0
     },
     {
-     "date": "2027-03-05",
-     "quantity": "32",
+     "date": "2027-03-02",
+     "quantity": "62",
      "period": 1
-    },
-    {
-     "date": "2027-03-11",
-     "quantity": "2",
-     "period": 3
     }
    ]
   }
  },
  {
-  "id": "atp-071",
-  "note": "generated",
-  "requested": "2027-03-21",
-  "quantity": "1",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "36",
-    "demand": "17"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "16",
-    "demand": "48"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "32",
-    "demand": "14"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "30",
-    "demand": "51"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "9",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "22",
-    "demand": "55"
-   },
-   {
-    "date": "2027-03-19",
-    "supply": "41",
-    "demand": "34"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "1",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-072",
-  "note": "generated",
+  "id": "atp-026",
+  "note": "generated: request on, partial",
   "requested": "2027-03-07",
-  "quantity": "40",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "37",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "48",
-    "demand": "13"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "51",
-    "demand": "47"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "50",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "38",
-    "demand": "16"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "8",
-    "demand": "58"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-07",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-07",
-     "quantity": "40",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-073",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "2",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "56",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "4",
-    "demand": "57"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "2",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-074",
-  "note": "generated",
-  "requested": "2027-03-02",
-  "quantity": "13",
+  "quantity": "20",
   "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "19",
-    "demand": "31"
+    "supply": "70",
+    "demand": "62"
    },
    {
-    "date": "2027-03-05",
-    "supply": "58",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "8",
-    "demand": "49"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "13",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-075",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "66",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "43",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-05",
+    "date": "2027-03-06",
     "supply": "0",
-    "demand": "51"
+    "demand": "4"
    },
    {
     "date": "2027-03-07",
-    "supply": "21",
-    "demand": "54"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "66",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-076",
-  "note": "generated",
-  "requested": "2027-03-02",
-  "quantity": "9",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "2",
-    "demand": "44"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "47",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "52",
-    "demand": "15"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-07",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-05",
-     "quantity": "5",
-     "period": 1
-    },
-    {
-     "date": "2027-03-07",
-     "quantity": "4",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-077",
-  "note": "generated",
-  "requested": "2027-03-01",
-  "quantity": "36",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "2",
+    "supply": "11",
     "demand": "5"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "38",
-    "demand": "43"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "36",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-078",
-  "note": "generated",
-  "requested": "2027-03-10",
-  "quantity": "71",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "41",
-    "demand": "11"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "24",
-    "demand": "55"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "38",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "48",
-    "demand": "54"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "71",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-079",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "54",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "36",
-    "demand": "16"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "28",
-    "demand": "8"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "29",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "13",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "30",
-    "demand": "58"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "54",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-080",
-  "note": "generated",
-  "requested": "2027-03-11",
-  "quantity": "3",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "26",
-    "demand": "22"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "60",
-    "demand": "13"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "19",
-    "demand": "48"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "44",
-    "demand": "30"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "31",
-    "demand": "4"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-11",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-11",
-     "quantity": "3",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-081",
-  "note": "generated",
-  "requested": "2027-03-09",
-  "quantity": "57",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "38",
-    "demand": "50"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "21",
-    "demand": "45"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "45",
-    "demand": "22"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "4",
-    "demand": "54"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "57",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-082",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "80",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "0",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "0",
-    "demand": "51"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "80",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-083",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "68",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "19",
-    "demand": "55"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "3",
-    "demand": "12"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "8",
-    "demand": "35"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "20",
-    "demand": "26"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "16",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-11",
-    "supply": "38",
-    "demand": "4"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "41",
-    "demand": "51"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "68",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-084",
-  "note": "generated",
-  "requested": "2027-03-03",
-  "quantity": "66",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "29",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "29",
-    "demand": "58"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "51",
-    "demand": "12"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "60",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-16",
-    "supply": "14",
-    "demand": "59"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "66",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-085",
-  "note": "generated",
-  "requested": "2027-03-02",
-  "quantity": "58",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "17",
-    "demand": "39"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "47",
-    "demand": "42"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "51",
-    "demand": "53"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "50",
-    "demand": "18"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-13",
-   "backorder": "45",
-   "schedule": [
-    {
-     "date": "2027-03-13",
-     "quantity": "13",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-086",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "65",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "4",
-    "demand": "29"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "48",
-    "demand": "58"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "26",
-    "demand": "10"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "65",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-087",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "79",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "15",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "49",
-    "demand": "0"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "32",
-    "demand": "18"
    }
   ],
   "expect": {
    "complete": false,
    "promisedDate": "2027-03-07",
-   "backorder": "8",
+   "backorder": "10",
    "schedule": [
     {
      "date": "2027-03-07",
-     "quantity": "71",
+     "quantity": "10",
      "period": 2
     }
    ]
   }
  },
  {
-  "id": "atp-088",
-  "note": "generated",
-  "requested": "2027-03-06",
-  "quantity": "45",
-  "completeOnly": true,
+  "id": "atp-027",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-22",
+  "quantity": "24",
+  "completeOnly": false,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "6",
-    "demand": "13"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "40",
-    "demand": "3"
+    "supply": "81",
+    "demand": "68"
    },
    {
     "date": "2027-03-05",
-    "supply": "55",
-    "demand": "34"
+    "supply": "14",
+    "demand": "22"
    },
    {
     "date": "2027-03-10",
-    "supply": "48",
-    "demand": "32"
+    "supply": "0",
+    "demand": "4"
    },
    {
-    "date": "2027-03-11",
-    "supply": "55",
-    "demand": "7"
+    "date": "2027-03-15",
+    "supply": "21",
+    "demand": "18"
    },
    {
-    "date": "2027-03-13",
-    "supply": "51",
-    "demand": "13"
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "1"
    }
   ],
   "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-06",
-   "backorder": "0",
+   "complete": false,
+   "promisedDate": "2027-03-22",
+   "backorder": "23",
    "schedule": [
     {
-     "date": "2027-03-06",
-     "quantity": "45",
-     "period": 2
+     "date": "2027-03-22",
+     "quantity": "1",
+     "period": 5
     }
    ]
   }
  },
  {
-  "id": "atp-089",
-  "note": "generated",
-  "requested": "2027-03-08",
-  "quantity": "48",
+  "id": "atp-028",
+  "note": "generated: request before, complete only",
+  "requested": "2027-02-28",
+  "quantity": "23",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "45",
-    "demand": "11"
+    "supply": "8",
+    "demand": "0"
    },
    {
-    "date": "2027-03-05",
-    "supply": "56",
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "24",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "15"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "23",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-029",
+  "note": "generated: request between, complete only, over-committed at bucket 6",
+  "requested": "2027-03-13",
+  "quantity": "77",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "49",
+    "demand": "13"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "83",
     "demand": "42"
    },
    {
     "date": "2027-03-07",
-    "supply": "28",
+    "supply": "0",
     "demand": "9"
    },
    {
-    "date": "2027-03-10",
-    "supply": "6",
-    "demand": "3"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "3",
+    "date": "2027-03-11",
+    "supply": "0",
     "demand": "15"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-08",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-08",
-     "quantity": "48",
-     "period": 2
-    }
-   ]
-  }
- },
- {
-  "id": "atp-090",
-  "note": "generated",
-  "requested": "2027-03-07",
-  "quantity": "79",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "44",
-    "demand": "11"
    },
    {
-    "date": "2027-03-03",
-    "supply": "29",
-    "demand": "32"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "55",
+    "date": "2027-03-12",
+    "supply": "0",
     "demand": "53"
    },
    {
-    "date": "2027-03-13",
-    "supply": "58",
-    "demand": "20"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-13",
-   "backorder": "9",
-   "schedule": [
-    {
-     "date": "2027-03-07",
-     "quantity": "30",
-     "period": 1
-    },
-    {
-     "date": "2027-03-09",
-     "quantity": "2",
-     "period": 2
-    },
-    {
-     "date": "2027-03-13",
-     "quantity": "38",
-     "period": 3
-    }
-   ]
-  }
- },
- {
-  "id": "atp-091",
-  "note": "generated",
-  "requested": "2027-03-01",
-  "quantity": "77",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "20",
-    "demand": "20"
+    "date": "2027-03-15",
+    "supply": "39",
+    "demand": "29"
    },
    {
-    "date": "2027-03-04",
-    "supply": "12",
-    "demand": "24"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "49",
-    "demand": "50"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "31",
-    "demand": "15"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "20",
-    "demand": "30"
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "34"
    }
   ],
   "expect": {
@@ -3614,268 +1226,46 @@
   }
  },
  {
-  "id": "atp-092",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "19",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "59",
-    "demand": "14"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "5",
-    "demand": "45"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": "2027-03-04",
-   "backorder": "14",
-   "schedule": [
-    {
-     "date": "2027-03-04",
-     "quantity": "5",
-     "period": 0
-    }
-   ]
-  }
- },
- {
-  "id": "atp-093",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "28",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "48",
-    "demand": "37"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "8",
-    "demand": "50"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "28",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-094",
-  "note": "generated",
-  "requested": "2027-03-17",
-  "quantity": "12",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "14",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "54",
-    "demand": "19"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "7",
-    "demand": "17"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "3",
-    "demand": "9"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "36",
-    "demand": "25"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "12",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-095",
-  "note": "generated",
-  "requested": "2027-03-23",
-  "quantity": "69",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "33",
-    "demand": "53"
-   },
-   {
-    "date": "2027-03-03",
-    "supply": "47",
-    "demand": "52"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "36",
-    "demand": "7"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "54",
-    "demand": "39"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "56",
-    "demand": "16"
-   },
-   {
-    "date": "2027-03-21",
-    "supply": "43",
-    "demand": "23"
-   }
-  ],
-  "expect": {
-   "complete": true,
-   "promisedDate": "2027-03-23",
-   "backorder": "0",
-   "schedule": [
-    {
-     "date": "2027-03-23",
-     "quantity": "69",
-     "period": 5
-    }
-   ]
-  }
- },
- {
-  "id": "atp-096",
-  "note": "generated",
-  "requested": "2027-03-15",
-  "quantity": "28",
-  "completeOnly": false,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "2",
-    "demand": "54"
-   },
-   {
-    "date": "2027-03-04",
-    "supply": "23",
-    "demand": "27"
-   },
-   {
-    "date": "2027-03-07",
-    "supply": "15",
-    "demand": "31"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "2",
-    "demand": "6"
-   },
-   {
-    "date": "2027-03-13",
-    "supply": "51",
-    "demand": "18"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "28",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-097",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "50",
-  "completeOnly": true,
-  "periods": [
-   {
-    "date": "2027-03-01",
-    "supply": "27",
-    "demand": "31"
-   },
-   {
-    "date": "2027-03-05",
-    "supply": "29",
-    "demand": "10"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "39",
-    "demand": "24"
-   },
-   {
-    "date": "2027-03-10",
-    "supply": "21",
-    "demand": "14"
-   },
-   {
-    "date": "2027-03-17",
-    "supply": "12",
-    "demand": "60"
-   }
-  ],
-  "expect": {
-   "complete": false,
-   "promisedDate": null,
-   "backorder": "50",
-   "schedule": []
-  }
- },
- {
-  "id": "atp-098",
-  "note": "generated",
-  "requested": "2027-03-15",
+  "id": "atp-030",
+  "note": "generated: request after, complete only",
+  "requested": "2027-03-20",
   "quantity": "38",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
+    "supply": "12",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-06",
     "supply": "46",
-    "demand": "25"
+    "demand": "20"
    },
    {
-    "date": "2027-03-04",
-    "supply": "23",
-    "demand": "26"
-   },
-   {
-    "date": "2027-03-09",
-    "supply": "44",
-    "demand": "40"
+    "date": "2027-03-11",
+    "supply": "57",
+    "demand": "13"
    },
    {
     "date": "2027-03-13",
-    "supply": "56",
-    "demand": "48"
+    "supply": "0",
+    "demand": "2"
    },
    {
-    "date": "2027-03-16",
+    "date": "2027-03-15",
     "supply": "0",
-    "demand": "18"
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "0",
+    "demand": "3"
    },
    {
     "date": "2027-03-19",
-    "supply": "8",
-    "demand": "49"
+    "supply": "23",
+    "demand": "4"
    }
   ],
   "expect": {
@@ -3886,58 +1276,3074 @@
   }
  },
  {
-  "id": "atp-099",
-  "note": "generated",
-  "requested": "2027-03-04",
-  "quantity": "77",
+  "id": "atp-031",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-05",
+  "quantity": "8",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
-    "supply": "26",
-    "demand": "10"
+    "supply": "51",
+    "demand": "51"
    },
    {
-    "date": "2027-03-04",
-    "supply": "40",
-    "demand": "40"
+    "date": "2027-03-05",
+    "supply": "113",
+    "demand": "78"
    },
    {
-    "date": "2027-03-07",
-    "supply": "24",
-    "demand": "54"
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-05",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-05",
+     "quantity": "8",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-032",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-05",
+  "quantity": "115",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "117",
+    "demand": "67"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "123",
+    "demand": "57"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "26"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "65"
    }
   ],
   "expect": {
    "complete": false,
    "promisedDate": null,
-   "backorder": "77",
+   "backorder": "115",
    "schedule": []
   }
  },
  {
-  "id": "atp-100",
-  "note": "generated",
+  "id": "atp-033",
+  "note": "generated: request between, complete only, over-committed at bucket 4",
+  "requested": "2027-03-10",
+  "quantity": "156",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "104",
+    "demand": "67"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "140",
+    "demand": "18"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "40",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "0",
+    "demand": "210"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "120",
+    "demand": "71"
+   },
+   {
+    "date": "2027-03-22",
+    "supply": "135",
+    "demand": "39"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "156",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-034",
+  "note": "generated: request on, partial, over-committed at bucket 5",
   "requested": "2027-03-06",
-  "quantity": "62",
+  "quantity": "107",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "117",
+    "demand": "65"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "52",
+    "demand": "51"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "127",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "21",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "112",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-22",
+    "supply": "0",
+    "demand": "314"
+   },
+   {
+    "date": "2027-03-26",
+    "supply": "0",
+    "demand": "69"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "107",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-035",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-08",
+  "quantity": "141",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "43",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "40",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "150",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "71",
+    "demand": "66"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-08",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-08",
+     "quantity": "141",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-036",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-22",
+  "quantity": "22",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "80",
+    "demand": "61"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "68",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "49"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "25"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "28",
+    "demand": "15"
+   },
+   {
+    "date": "2027-03-22",
+    "supply": "0",
+    "demand": "9"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-22",
+   "backorder": "17",
+   "schedule": [
+    {
+     "date": "2027-03-22",
+     "quantity": "5",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-037",
+  "note": "generated: request on, complete only, fractional",
+  "requested": "2027-03-15",
+  "quantity": "0.56",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "32",
+    "demand": "21"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "135",
+    "demand": "56"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "25",
+    "demand": "71"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "54",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "18"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-15",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-15",
+     "quantity": "0.56",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-038",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-01",
+  "quantity": "65",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "17",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "13"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "126",
+    "demand": "52"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "16"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "27",
+    "demand": "71"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-04",
+   "backorder": "51",
+   "schedule": [
+    {
+     "date": "2027-03-04",
+     "quantity": "14",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-039",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-02",
+  "quantity": "66",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "31",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "24"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "68",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-07",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-07",
+     "quantity": "66",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-040",
+  "note": "generated: request on, complete only, over-committed at bucket 2, quantity = available on bucket 5",
+  "requested": "2027-03-15",
+  "quantity": "36",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "42",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "21"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "70",
+    "demand": "106"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "64",
+    "demand": "16"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "76",
+    "demand": "27"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "39"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-15",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-15",
+     "quantity": "36",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-041",
+  "note": "generated: request between, partial, over-committed at bucket 1",
+  "requested": "2027-03-02",
+  "quantity": "17",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "63",
+    "demand": "50"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "39",
+    "demand": "74"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "2"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "17",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-042",
+  "note": "generated: request on, complete only, over-committed at bucket 3",
+  "requested": "2027-03-10",
+  "quantity": "58",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "101",
+    "demand": "23"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "19",
+    "demand": "49"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "48"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "89",
+    "demand": "62"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "54",
+    "demand": "55"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "58",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-043",
+  "note": "generated: request on, partial, fractional",
+  "requested": "2027-03-03",
+  "quantity": "179.867",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "53",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "62",
+    "demand": "9"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "137",
+    "demand": "43"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "89",
+    "demand": "44"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "47"
+   },
+   {
+    "date": "2027-03-17",
+    "supply": "131",
+    "demand": "77"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-07",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-03",
+     "quantity": "104",
+     "period": 1
+    },
+    {
+     "date": "2027-03-07",
+     "quantity": "75.867",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-044",
+  "note": "generated: request between, complete only, fractional",
+  "requested": "2027-03-05",
+  "quantity": "112.359",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "82",
+    "demand": "26"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "146",
+    "demand": "31"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "43",
+    "demand": "79"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-05",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-05",
+     "quantity": "112.359",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-045",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-06",
+  "quantity": "25",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "119",
+    "demand": "54"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "28",
+    "demand": "67"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "21"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-06",
+   "backorder": "20",
+   "schedule": [
+    {
+     "date": "2027-03-06",
+     "quantity": "5",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-046",
+  "note": "generated: request on, partial, over-committed at bucket 3, fractional",
+  "requested": "2027-03-07",
+  "quantity": "47.056",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "65",
+    "demand": "58"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "137",
+    "demand": "18"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "58"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "32",
+    "demand": "130"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "47.056",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-047",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-12",
+  "quantity": "33",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "49",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "44",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "27"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "11",
+    "demand": "16"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "33",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-048",
+  "note": "generated: request on, complete only, over-committed at bucket 2",
+  "requested": "2027-03-03",
+  "quantity": "33",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "46",
+    "demand": "37"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "98",
+    "demand": "57"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "109",
+    "demand": "161"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "55",
+    "demand": "59"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "33",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-049",
+  "note": "generated: request between, complete only",
+  "requested": "2027-03-21",
+  "quantity": "117",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "102",
+    "demand": "63"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "115",
+    "demand": "30"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "93",
+    "demand": "54"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "109",
+    "demand": "41"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "0",
+    "demand": "61"
+   },
+   {
+    "date": "2027-03-23",
+    "supply": "0",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-21",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-21",
+     "quantity": "117",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-050",
+  "note": "generated: request before, partial, over-committed at bucket 2",
+  "requested": "2027-02-26",
+  "quantity": "33",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "53",
+    "demand": "28"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "130",
+    "demand": "159"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "14",
+    "demand": "39"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "33",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-051",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-08",
+  "quantity": "56",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "38",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "17"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "108",
+    "demand": "33"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-08",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-08",
+     "quantity": "56",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-052",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-01",
+  "quantity": "36",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "56",
+    "demand": "30"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "90",
+    "demand": "55"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "43"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "0",
+    "demand": "5"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "36",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-053",
+  "note": "generated: request after, partial, over-committed at bucket 3",
+  "requested": "2027-03-23",
+  "quantity": "45",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "113",
+    "demand": "37"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "110",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "118",
+    "demand": "284"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "124",
+    "demand": "57"
+   },
+   {
+    "date": "2027-03-21",
+    "supply": "0",
+    "demand": "53"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-23",
+   "backorder": "44",
+   "schedule": [
+    {
+     "date": "2027-03-23",
+     "quantity": "1",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-054",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-15",
+  "quantity": "56",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "82",
+    "demand": "41"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "14"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "47",
+    "demand": "30"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-18",
+   "backorder": "35",
+   "schedule": [
+    {
+     "date": "2027-03-15",
+     "quantity": "4",
+     "period": 5
+    },
+    {
+     "date": "2027-03-18",
+     "quantity": "17",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-055",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-01",
+  "quantity": "32",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "38",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "18"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "13"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "75",
+    "demand": "27"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-14",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-14",
+     "quantity": "32",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-056",
+  "note": "generated: request on, complete only, quantity = available on bucket 1",
+  "requested": "2027-03-01",
+  "quantity": "19",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "46",
+    "demand": "18"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "22",
+    "demand": "31"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "101",
+    "demand": "25"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "66"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "121",
+    "demand": "38"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "129",
+    "demand": "62"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-01",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-01",
+     "quantity": "19",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-057",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-01",
+  "quantity": "69",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "74",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "13",
+    "demand": "70"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "112",
+    "demand": "38"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-06",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-06",
+     "quantity": "69",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-058",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-22",
+  "quantity": "80",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "71",
+    "demand": "41"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "23"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "32",
+    "demand": "33"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "93",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "40"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "7"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-22",
+   "backorder": "42",
+   "schedule": [
+    {
+     "date": "2027-03-22",
+     "quantity": "38",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-059",
+  "note": "generated: request between, partial, over-committed at bucket 1",
+  "requested": "2027-03-11",
+  "quantity": "22",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "95",
+    "demand": "72"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "40",
+    "demand": "90"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "17"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "108",
+    "demand": "52"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-13",
+   "backorder": "10",
+   "schedule": [
+    {
+     "date": "2027-03-13",
+     "quantity": "12",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-060",
+  "note": "generated: request on, partial, quantity = available on bucket 4",
+  "requested": "2027-03-16",
+  "quantity": "11",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "109",
+    "demand": "41"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "84",
+    "demand": "9"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "34"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "74"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "24"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-16",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-16",
+     "quantity": "11",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-061",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-02",
+  "quantity": "27",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "96",
+    "demand": "78"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "28",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-22",
+    "supply": "0",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-02",
+   "backorder": "26",
+   "schedule": [
+    {
+     "date": "2027-03-02",
+     "quantity": "1",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-062",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-03",
+  "quantity": "38",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "17",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "63",
+    "demand": "31"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "0",
+    "demand": "36"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "0"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "38",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-063",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-12",
+  "quantity": "9",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "58",
+    "demand": "14"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "36"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "41",
+    "demand": "10"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-12",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-12",
+     "quantity": "9",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-064",
+  "note": "generated: request between, complete only",
+  "requested": "2027-03-08",
+  "quantity": "31",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "112",
+    "demand": "28"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "12",
+    "demand": "78"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "12"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "31",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-065",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-01",
+  "quantity": "87",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "64",
+    "demand": "64"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "123",
+    "demand": "47"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "0",
+    "demand": "68"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-02",
+   "backorder": "79",
+   "schedule": [
+    {
+     "date": "2027-03-02",
+     "quantity": "8",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-066",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-09",
+  "quantity": "6",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "108",
+    "demand": "76"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "25",
+    "demand": "55"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "2"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "0"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "6",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-067",
+  "note": "generated: request between, complete only, over-committed at bucket 1",
+  "requested": "2027-03-03",
+  "quantity": "18",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "44",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "21"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "102",
+    "demand": "72"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-07",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-07",
+     "quantity": "18",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-068",
+  "note": "generated: request before, complete only",
+  "requested": "2027-02-27",
+  "quantity": "37",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "29",
+    "demand": "27"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "101",
+    "demand": "80"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "6"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "37",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-069",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-16",
+  "quantity": "106",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "38",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "67",
+    "demand": "40"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "132",
+    "demand": "46"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "21",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "76",
+    "demand": "9"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-16",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-16",
+     "quantity": "106",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-070",
+  "note": "generated: request between, partial, quantity = available on bucket 2",
+  "requested": "2027-03-13",
+  "quantity": "15",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "65",
+    "demand": "43"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "16",
+    "demand": "21"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "2"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-13",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-13",
+     "quantity": "15",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-071",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-01",
+  "quantity": "254",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "77",
+    "demand": "16"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "123",
+    "demand": "59"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "127",
+    "demand": "63"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "29"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "85",
+    "demand": "66"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "18",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-21",
+    "supply": "61",
+    "demand": "25"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "254",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-072",
+  "note": "generated: request after, partial, fractional",
+  "requested": "2027-03-22",
+  "quantity": "229.278",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "61",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "126",
+    "demand": "53"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "34",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "145",
+    "demand": "34"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-22",
+   "backorder": "5.278",
+   "schedule": [
+    {
+     "date": "2027-03-22",
+     "quantity": "224",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-073",
+  "note": "generated: request before, partial, fractional",
+  "requested": "2027-02-28",
+  "quantity": "23.608",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "54",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "31"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "14",
+    "demand": "28"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-01",
+   "backorder": "20.608",
+   "schedule": [
+    {
+     "date": "2027-03-01",
+     "quantity": "3",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-074",
+  "note": "generated: request on, complete only, quantity = available on bucket 1",
+  "requested": "2027-03-04",
+  "quantity": "2",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "45",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "32",
+    "demand": "55"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "13"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-04",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-04",
+     "quantity": "2",
+     "period": 1
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-075",
+  "note": "generated: request on, partial, fractional",
+  "requested": "2027-03-11",
+  "quantity": "28.296",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "47",
+    "demand": "33"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "24",
+    "demand": "15"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-11",
+   "backorder": "6.296",
+   "schedule": [
+    {
+     "date": "2027-03-11",
+     "quantity": "22",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-076",
+  "note": "generated: request before, complete only, fractional",
+  "requested": "2027-02-27",
+  "quantity": "23.739",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "9",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "43",
+    "demand": "16"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "29",
+    "demand": "45"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "82",
+    "demand": "44"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "28"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-08",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-08",
+     "quantity": "23.739",
+     "period": 3
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-077",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-25",
+  "quantity": "5",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "51",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "12",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "71",
+    "demand": "32"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "0",
+    "demand": "28"
+   },
+   {
+    "date": "2027-03-19",
+    "supply": "0",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-22",
+    "supply": "0",
+    "demand": "2"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-25",
+   "backorder": "2",
+   "schedule": [
+    {
+     "date": "2027-03-25",
+     "quantity": "3",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-078",
+  "note": "generated: request between, complete only, over-committed at bucket 3",
+  "requested": "2027-03-02",
+  "quantity": "39",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "88",
+    "demand": "9"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "11",
+    "demand": "65"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "53",
+    "demand": "52"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "21",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "67",
+    "demand": "50"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "86",
+    "demand": "41"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-13",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-13",
+     "quantity": "39",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-079",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-18",
+  "quantity": "145",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "23",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "131",
+    "demand": "14"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "32",
+    "demand": "78"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "42"
+   },
+   {
+    "date": "2027-03-17",
+    "supply": "43",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-21",
+    "supply": "0",
+    "demand": "26"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": "2027-03-18",
+   "backorder": "86",
+   "schedule": [
+    {
+     "date": "2027-03-18",
+     "quantity": "59",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-080",
+  "note": "generated: request between, complete only, fractional",
+  "requested": "2027-03-03",
+  "quantity": "1.38",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "18",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "71",
+    "demand": "70"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "3"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-03",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-03",
+     "quantity": "1.38",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-081",
+  "note": "generated: request before, complete only",
+  "requested": "2027-02-28",
+  "quantity": "32",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "30",
+    "demand": "25"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "123",
+    "demand": "43"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-07",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-07",
+     "quantity": "32",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-082",
+  "note": "generated: request between, complete only",
+  "requested": "2027-03-13",
+  "quantity": "84",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "20",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "136",
+    "demand": "31"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "0",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-19",
+    "supply": "77",
+    "demand": "38"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "73"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "84",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-083",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-02",
+  "quantity": "1",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "76",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "72",
+    "demand": "59"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "0",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-02",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-02",
+     "quantity": "1",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-084",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-10",
+  "quantity": "21",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "89",
+    "demand": "45"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "26"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "100",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "24"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "94",
+    "demand": "22"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "91",
+    "demand": "71"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "54",
+    "demand": "64"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-10",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-10",
+     "quantity": "21",
+     "period": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-085",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-02",
+  "quantity": "14",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "68",
+    "demand": "36"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "29"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "80",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-17",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-20",
+    "supply": "0",
+    "demand": "2"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "14",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-086",
+  "note": "generated: request between, complete only",
+  "requested": "2027-03-04",
+  "quantity": "17",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "1",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "133",
+    "demand": "48"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "0",
+    "demand": "42"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-06",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-06",
+     "quantity": "17",
+     "period": 2
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-087",
+  "note": "generated: request on, partial, over-committed at bucket 1",
+  "requested": "2027-03-05",
+  "quantity": "110",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "113",
+    "demand": "19"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "118"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "64",
+    "demand": "71"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "0"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "110",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-088",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-15",
+  "quantity": "156",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "95",
+    "demand": "28"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "10",
+    "demand": "47"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "74",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "20",
+    "demand": "61"
+   },
+   {
+    "date": "2027-03-15",
+    "supply": "0",
+    "demand": "37"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "129",
+    "demand": "36"
+   },
+   {
+    "date": "2027-03-18",
+    "supply": "128",
+    "demand": "4"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-18",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-18",
+     "quantity": "156",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-089",
+  "note": "generated: request before, complete only",
+  "requested": "2027-02-26",
+  "quantity": "81",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "61",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "0",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "46"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "148",
+    "demand": "71"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "81",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-090",
+  "note": "generated: request between, complete only, over-committed at bucket 5",
+  "requested": "2027-03-12",
+  "quantity": "22",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "69",
+    "demand": "53"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "114",
+    "demand": "77"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "18"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "122",
+    "demand": "27"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "96",
+    "demand": "35"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "16",
+    "demand": "208"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "22",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-091",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-08",
+  "quantity": "54",
   "completeOnly": true,
   "periods": [
    {
     "date": "2027-03-01",
     "supply": "34",
-    "demand": "49"
+    "demand": "30"
    },
    {
     "date": "2027-03-04",
-    "supply": "53",
+    "supply": "0",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "45",
+    "demand": "4"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "0",
+    "demand": "36"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "54",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-092",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-01",
+  "quantity": "6",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "40",
+    "demand": "21"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "61",
+    "demand": "43"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "23"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-01",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-01",
+     "quantity": "6",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-093",
+  "note": "generated: request between, partial",
+  "requested": "2027-03-12",
+  "quantity": "10",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "70",
+    "demand": "45"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "88",
+    "demand": "47"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "64",
+    "demand": "9"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "60"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "145",
+    "demand": "14"
+   },
+   {
+    "date": "2027-03-13",
+    "supply": "133",
+    "demand": "17"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-12",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-12",
+     "quantity": "10",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-094",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-09",
+  "quantity": "19",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "108",
+    "demand": "6"
+   },
+   {
+    "date": "2027-03-03",
+    "supply": "38",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "49",
+    "demand": "80"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "79",
+    "demand": "11"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "134",
+    "demand": "47"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-09",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-09",
+     "quantity": "19",
+     "period": 4
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-095",
+  "note": "generated: request between, partial, over-committed at bucket 3",
+  "requested": "2027-03-03",
+  "quantity": "142",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "103",
+    "demand": "36"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "122",
+    "demand": "69"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "76",
+    "demand": "38"
+   },
+   {
+    "date": "2027-03-08",
+    "supply": "17",
+    "demand": "193"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "142",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-096",
+  "note": "generated: request after, partial",
+  "requested": "2027-03-14",
+  "quantity": "31",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "78",
+    "demand": "77"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "42",
+    "demand": "12"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "23"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
     "demand": "8"
    }
   ],
   "expect": {
    "complete": false,
    "promisedDate": null,
-   "backorder": "62",
+   "backorder": "31",
    "schedule": []
+  }
+ },
+ {
+  "id": "atp-097",
+  "note": "generated: request on, complete only",
+  "requested": "2027-03-09",
+  "quantity": "181",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "57",
+    "demand": "7"
+   },
+   {
+    "date": "2027-03-02",
+    "supply": "27",
+    "demand": "63"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "97",
+    "demand": "70"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "0",
+    "demand": "23"
+   },
+   {
+    "date": "2027-03-14",
+    "supply": "85",
+    "demand": "60"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "131",
+    "demand": "1"
+   },
+   {
+    "date": "2027-03-21",
+    "supply": "67",
+    "demand": "1"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-21",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-21",
+     "quantity": "181",
+     "period": 6
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-098",
+  "note": "generated: request before, complete only",
+  "requested": "2027-02-27",
+  "quantity": "81",
+  "completeOnly": true,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "69",
+    "demand": "56"
+   },
+   {
+    "date": "2027-03-04",
+    "supply": "150",
+    "demand": "80"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "79"
+   },
+   {
+    "date": "2027-03-07",
+    "supply": "0",
+    "demand": "0"
+   },
+   {
+    "date": "2027-03-12",
+    "supply": "0",
+    "demand": "4"
+   }
+  ],
+  "expect": {
+   "complete": false,
+   "promisedDate": null,
+   "backorder": "81",
+   "schedule": []
+  }
+ },
+ {
+  "id": "atp-099",
+  "note": "generated: request on, partial, fractional, quantity = available on bucket 1",
+  "requested": "2027-03-01",
+  "quantity": "11",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "62",
+    "demand": "41"
+   },
+   {
+    "date": "2027-03-05",
+    "supply": "0",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-09",
+    "supply": "145",
+    "demand": "45"
+   },
+   {
+    "date": "2027-03-10",
+    "supply": "148",
+    "demand": "73"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-01",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-01",
+     "quantity": "11",
+     "period": 0
+    }
+   ]
+  }
+ },
+ {
+  "id": "atp-100",
+  "note": "generated: request on, partial",
+  "requested": "2027-03-19",
+  "quantity": "33",
+  "completeOnly": false,
+  "periods": [
+   {
+    "date": "2027-03-01",
+    "supply": "33",
+    "demand": "5"
+   },
+   {
+    "date": "2027-03-06",
+    "supply": "0",
+    "demand": "26"
+   },
+   {
+    "date": "2027-03-11",
+    "supply": "96",
+    "demand": "10"
+   },
+   {
+    "date": "2027-03-16",
+    "supply": "47",
+    "demand": "38"
+   },
+   {
+    "date": "2027-03-19",
+    "supply": "52",
+    "demand": "3"
+   },
+   {
+    "date": "2027-03-23",
+    "supply": "124",
+    "demand": "70"
+   }
+  ],
+  "expect": {
+   "complete": true,
+   "promisedDate": "2027-03-19",
+   "backorder": "0",
+   "schedule": [
+    {
+     "date": "2027-03-19",
+     "quantity": "33",
+     "period": 4
+    }
+   ]
   }
  }
 ]

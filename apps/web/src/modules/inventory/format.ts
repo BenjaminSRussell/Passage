@@ -6,12 +6,23 @@ export const dash = "—";
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const DECIMAL = /^-?\d+(\.\d+)?$/;
 
+/**
+ * True for a real calendar date written YYYY-MM-DD (the service refuses 2026-02-30).
+ * Guards date fields in browsers that render them as text.
+ */
+export function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 export const typeLabels: Record<JournalType, string> = {
   MOVEMENT: "Movement",
   ADJUSTMENT: "Adjustment",
   OPENING_BALANCE: "Opening balance",
   COUNT: "Count",
   OWNERSHIP_CHANGE: "Ownership change",
+  TRANSFER: "Transfer",
 };
 
 const statusTones: Record<JournalStatus, BadgeTone> = {

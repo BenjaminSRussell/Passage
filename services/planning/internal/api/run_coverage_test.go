@@ -16,8 +16,12 @@ import (
 
 // RunCoverages returns the stored coverage of the requested items; the fake
 // holds coverage for siteID only.
-func (f *fakeStore) RunCoverages(_ context.Context, site string, itemIDs []string) (map[string]store.RunCoverage, error) {
-	f.runCovSite = site
+func (f *fakeStore) PlanLegalEntity(_ context.Context, _, requested string) (string, error) {
+	return requested, nil
+}
+
+func (f *fakeStore) RunCoverages(_ context.Context, site, planEntity string, itemIDs []string) (map[string]store.RunCoverage, error) {
+	f.runCovSite, f.runCovEntity = site, planEntity
 	out := map[string]store.RunCoverage{}
 	if site != siteID {
 		return out, nil
@@ -89,6 +93,16 @@ func TestRun_StoredCoverageFillsBareItem(t *testing.T) {
 	}
 }
 
+func TestRun_StoredCoverageLookupUsesThePlansEntity(t *testing.T) {
+	entity := "0190f0a0-0000-7000-8000-00000000000a"
+	st := &fakeStore{runCovs: map[string]store.RunCoverage{fgID: requirementCoverage()}}
+	body := strings.Replace(bareBody, `{"asOf"`, `{"legalEntityId":"`+entity+`","asOf"`, 1)
+	runVersion(t, st, body, "k-entity")
+	if st.runCovEntity != entity {
+		t.Fatalf("coverage read for entity %q, want %q", st.runCovEntity, entity)
+	}
+}
+
 // TestRun_StoredMinMaxCoverage: a stored min/max coverage reorders up to the
 // item coverage's maximum (FR-22.2) and its purchase order type applies.
 func TestRun_StoredMinMaxCoverage(t *testing.T) {
@@ -98,10 +112,11 @@ func TestRun_StoredMinMaxCoverage(t *testing.T) {
 	if len(req.Result.Orders) == 0 {
 		t.Fatal("min/max coverage planned nothing")
 	}
-	// On-hand 20 is below the minimum 50 on day 0: reorder up to 500.
+	// On-hand 20 less safety stock 10 (BR-22.1 step 4) is PAB 10 on day 0,
+	// below the minimum 50: reorder up to 500.
 	first := req.Result.Orders[0]
-	if first.OrderType != domain.OrderPurchase || first.DeliveryDate != 0 || !first.Qty.Equal(decimal.NewFromInt(480)) {
-		t.Fatalf("first planned order %+v; want a purchase of 480 on day 0", first)
+	if first.OrderType != domain.OrderPurchase || first.DeliveryDate != 0 || !first.Qty.Equal(decimal.NewFromInt(490)) {
+		t.Fatalf("first planned order %+v; want a purchase of 490 on day 0", first)
 	}
 }
 
@@ -188,5 +203,19 @@ func TestWithStoredCoverage_LeavesUnknownItemsAlone(t *testing.T) {
 	}
 	if items[0].OrderType != "transfer" || *items[0].LeadTimeDays != 2 || items[0].Coverage.Code != "manual" {
 		t.Fatalf("unknown item changed: %+v", items[0])
+	}
+}
+
+// TestRun_StoredMarginsShiftTheOrder (FR-22.5): the stored issue margin moves
+// the demand 3 days earlier and the reorder margin adds 2 days to the lead
+// time, so the order is delivered 3 days earlier and released 5 days earlier.
+func TestRun_StoredMarginsShiftTheOrder(t *testing.T) {
+	_, base := runVersion(t, &fakeStore{runCovs: map[string]store.RunCoverage{fgID: requirementCoverage()}}, bareBody, "k-base")
+	c := requirementCoverage()
+	c.IssueMarginDays, c.ReorderMarginDays = 3, 2
+	_, req := runVersion(t, &fakeStore{runCovs: map[string]store.RunCoverage{fgID: c}}, bareBody, "k-margins")
+	b, o := onlyOrder(t, base), onlyOrder(t, req)
+	if o.DeliveryDate != b.DeliveryDate-3 || o.OrderDate != b.OrderDate-5 {
+		t.Fatalf("with margins %+v; without %+v; want delivery -3 and order -5", o, b)
 	}
 }

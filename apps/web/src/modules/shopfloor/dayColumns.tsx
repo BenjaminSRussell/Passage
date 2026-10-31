@@ -25,5 +25,14 @@ export const dayColumns: DataTableColumn<WorkerDay>[] = [
         </span>
       ),
   },
-  { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
+  {
+    key: "status",
+    header: "Status",
+    render: (row) => (
+      <span className={styles.flags}>
+        <StatusPill status={row.status} />
+        {row.revision ? <Badge tone="info">{`Revised ${row.revision}×`}</Badge> : null}
+      </span>
+    ),
+  },
 ];

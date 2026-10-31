@@ -144,6 +144,8 @@ func (f *fakeStore) GetLease(_ context.Context, id string) (store.Lease, error) 
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
 
+const testLE = "00000000-0000-0000-0000-0000000000a1"
+
 const allDuties = "AssetView,AssetMaintain,AssetDispose,LeaseMaintain"
 
 type req struct {
@@ -156,6 +158,7 @@ func do(h http.Handler, q req) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(q.method, q.path, strings.NewReader(q.body))
 	r.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	r.Header.Set("X-Passage-Duties", q.duties)
+	r.Header.Set("X-Passage-Legal-Entity", testLE)
 	if q.key {
 		r.Header.Set("Idempotency-Key", ids.New())
 	}
@@ -188,7 +191,7 @@ func server(f store.Store) http.Handler {
 
 func createAsset(t *testing.T, h http.Handler) store.Asset {
 	t.Helper()
-	rec := call(h, http.MethodPost, "/v1/assets", `{"legalEntityId":"`+ids.New()+`","assetNumber":"FA-1","name":"Van","classCode":"VEH"}`, allDuties, true)
+	rec := call(h, http.MethodPost, "/v1/assets", `{"legalEntityId":"`+testLE+`","assetNumber":"FA-1","name":"Van","classCode":"VEH"}`, allDuties, true)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create asset status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -219,8 +222,7 @@ const midMonthBook = `{"bookCode":"IFRS","currency":"USD","method":"StraightLine
 
 func TestCreateAsset_DutyKeyTenantAndScope(t *testing.T) {
 	h := server(newFake())
-	le := ids.New()
-	body := `{"legalEntityId":"` + le + `","assetNumber":"FA-000001","name":"Press","classCode":"MACHINE","barcode":" BC-1 "}`
+	body := `{"legalEntityId":"` + testLE + `","assetNumber":"FA-000001","name":"Press","classCode":"MACHINE","barcode":" BC-1 "}`
 	if rec := call(h, http.MethodPost, "/v1/assets", body, "AssetView", true); rec.Code != http.StatusForbidden {
 		t.Errorf("without AssetMaintain status = %d, want 403", rec.Code)
 	}
@@ -234,6 +236,10 @@ func TestCreateAsset_DutyKeyTenantAndScope(t *testing.T) {
 	other := do(h, req{method: http.MethodPost, path: "/v1/assets", body: body, duties: allDuties, key: true, headers: map[string]string{"X-Passage-Legal-Entity": ids.New()}})
 	if other.Code != http.StatusForbidden {
 		t.Errorf("legal entity outside scope status = %d, want 403", other.Code)
+	}
+	unscoped := do(h, req{method: http.MethodPost, path: "/v1/assets", body: body, duties: allDuties, key: true, headers: map[string]string{"X-Passage-Legal-Entity": ""}})
+	if unscoped.Code != http.StatusForbidden {
+		t.Errorf("caller with no legal-entity scope status = %d, want 403", unscoped.Code)
 	}
 	rec := call(h, http.MethodPost, "/v1/assets", body, allDuties, true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
@@ -400,7 +406,7 @@ func TestDispose_PreconditionsAndHappyPath(t *testing.T) {
 func TestLease_WorkedExampleListAndIBRRange(t *testing.T) {
 	// AC-37.6 through the HTTP surface, and AST-0515 for an IBR above 50%.
 	h := server(newFake())
-	body := `{"legalEntityId":"` + ids.New() + `","leaseNumber":"L-1","commencementDate":"2026-01-01","termMonths":60,
+	body := `{"legalEntityId":"` + testLE + `","leaseNumber":"L-1","commencementDate":"2026-01-01","termMonths":60,
 		"paymentsPerYear":1,"paymentAmount":"10000","paymentTiming":"arrears","ibrRate":"0.05","currency":"USD"}`
 	rec := call(h, http.MethodPost, "/v1/leases", body, allDuties, true)
 	if rec.Code != http.StatusCreated {

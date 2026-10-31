@@ -49,7 +49,8 @@ type fakeStore struct {
 	lastFilter   store.CampaignFilter
 
 	// slice 4
-	lastPeg store.Peg
+	lastPeg      store.Peg
+	lastOverride store.CapacityOverride
 
 	// slice 5
 	lastUseID              string
@@ -61,6 +62,10 @@ type fakeStore struct {
 
 	// slice 8
 	lastProposal store.ProposalFilter
+
+	// slice 13
+	lastPatch        store.ResourcePatch
+	lastPatchVersion int
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
@@ -101,7 +106,11 @@ func (f *fakeStore) RunSchedule(_ context.Context, req store.RunRequest, _ store
 	if f.err != nil {
 		return store.Run{}, false, f.err
 	}
-	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Finite: req.Finite, Status: "completed", Messages: []string{}}, true, nil
+	dir := "forward"
+	if req.Backward {
+		dir = "backward"
+	}
+	return store.Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: dir, Finite: req.Finite, Status: "completed", Messages: []string{}}, true, nil
 }
 
 func (f *fakeStore) GetRun(_ context.Context, id string) (store.Run, error) {
@@ -399,5 +408,17 @@ func TestReadEndpoints(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/v1/scheduling/resources", "", "", ""); rec.Code != http.StatusForbidden {
 		t.Fatalf("no duty: status %d", rec.Code)
+	}
+}
+
+func TestCreateRun_ValidatesDirection(t *testing.T) {
+	h := newRouter(&fakeStore{})
+	if rec := do(h, http.MethodPost, "/v1/scheduling/runs", `{"scope":"site","direction":"sideways"}`, allDuties, "dir-bad"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"direction"`) {
+		t.Fatalf("bad direction: status %d body %s", rec.Code, rec.Body)
+	}
+	for _, d := range []string{"forward", "backward"} {
+		if rec := do(h, http.MethodPost, "/v1/scheduling/runs", `{"scope":"site","direction":"`+d+`"}`, allDuties, "dir-"+d); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"direction":"`+d+`"`) {
+			t.Fatalf("%s: status %d body %s", d, rec.Code, rec.Body)
+		}
 	}
 }

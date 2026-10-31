@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -83,17 +84,20 @@ type resourceRequest struct {
 }
 
 type operationRequest struct {
-	OrderID      string            `json:"orderId"`
-	OperNumber   int               `json:"operNumber"`
-	Minutes      int               `json:"minutes"`
-	DueAt        *time.Time        `json:"dueAt"`
-	ReadyAt      *time.Time        `json:"readyAt"`
-	Priority     *int              `json:"priority"`
-	ResourceIDs  []string          `json:"resourceIds"`
-	SetupGroup   *string           `json:"setupGroup"`
-	SetupMinutes *int              `json:"setupMinutes"`
-	Attributes   map[string]string `json:"attributes"`
-	NetworkID    *string           `json:"networkId"`
+	OrderID     string     `json:"orderId"`
+	OperNumber  int        `json:"operNumber"`
+	Minutes     int        `json:"minutes"`
+	DueAt       *time.Time `json:"dueAt"`
+	ReadyAt     *time.Time `json:"readyAt"`
+	Priority    *int       `json:"priority"`
+	ResourceIDs []string   `json:"resourceIds"`
+	// SecondaryResourceIds are booked for the same segments as the primary
+	// (BR-23.4); none of them may be a candidate.
+	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
+	SetupGroup           *string           `json:"setupGroup"`
+	SetupMinutes         *int              `json:"setupMinutes"`
+	Attributes           map[string]string `json:"attributes"`
+	NetworkID            *string           `json:"networkId"`
 }
 
 // Operation attribute limits: block conditions match on these (FR-23.17).
@@ -110,6 +114,7 @@ type runRequest struct {
 	OperationIDs []string   `json:"operationIds"`
 	Start        *time.Time `json:"start"`
 	HorizonDays  *int       `json:"horizonDays"`
+	Direction    string     `json:"direction"`
 }
 
 type moveRequest struct {
@@ -156,6 +161,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources", a.createResource)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources", a.listResources)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}", a.getResource)
+	r.With(authz.RequireDuty(dutyCapacity)).Patch("/v1/scheduling/resources/{id}", a.updateResource)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity", a.resourceCapacity)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/operations", a.createOperation)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/operations", a.listOperations)
@@ -166,6 +172,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:move", a.moveJob)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
+
+	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
+	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity-overrides", a.listCapacityOverrides)
+	r.With(authz.RequireDuty(dutyCapacity)).Delete("/v1/scheduling/resources/{id}/capacity-overrides/{overrideId}", a.deleteCapacityOverride)
 
 	// Slice 4: order pegs that moves propagate along (FR-23.8).
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/order-pegs", a.createPeg)
@@ -320,6 +331,7 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
+	w.Header().Set("ETag", etag(res.Version))
 	httpx.JSON(w, status, res)
 }
 
@@ -355,9 +367,15 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	for i, id := range req.ResourceIDs {
 		req.ResourceIDs[i] = strings.ToLower(id)
 	}
+	for i, id := range req.SecondaryResourceIDs {
+		req.SecondaryResourceIDs[i] = strings.ToLower(id)
+	}
 	fields := map[string]string{}
 	if !ids.Valid(req.OrderID) {
 		fields["orderId"] = "must be a UUID"
+	}
+	if msg := validSecondaries(req.SecondaryResourceIDs, req.ResourceIDs); msg != "" {
+		fields["secondaryResourceIds"] = msg
 	}
 	if req.OperNumber < 1 {
 		fields["operNumber"] = "must be at least 1"
@@ -411,7 +429,7 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
 		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
-		SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
+		SecondaryResourceIDs: req.SecondaryResourceIDs, SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -424,6 +442,27 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
 	httpx.JSON(w, status, op)
+}
+
+// validSecondaries checks the secondary resources of an operation: at most
+// domain.MaxSecondaries distinct UUIDs, none of them a candidate (BR-23.4).
+func validSecondaries(secondary, candidates []string) string {
+	if len(secondary) > domain.MaxSecondaries {
+		return fmt.Sprintf("must list at most %d resources", domain.MaxSecondaries)
+	}
+	seen := map[string]bool{}
+	for _, id := range secondary {
+		switch {
+		case !ids.Valid(id):
+			return "every entry must be a UUID"
+		case seen[id]:
+			return "must not repeat a resource"
+		case slices.Contains(candidates, id):
+			return "a candidate resource cannot also be a secondary resource"
+		}
+		seen[id] = true
+	}
+	return ""
 }
 
 // validAttributes checks the attributes block conditions match on: at most 20
@@ -471,6 +510,9 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if mode != "jobs" && mode != "operations" {
 		fields["mode"] = "must be jobs or operations"
 	}
+	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
+		fields["direction"] = "must be forward or backward"
+	}
 	if req.Scope == "selection" && (len(req.OperationIDs) == 0 || len(req.OperationIDs) > maxSelection) {
 		fields["operationIds"] = fmt.Sprintf("must list 1 to %d operations for selection scope", maxSelection)
 	}
@@ -508,7 +550,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	a.runs.Add(1)
 	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: mode, Finite: finite,
-		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon}, idem)
+		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
 	if err != nil {
 		slog.Error("schedule run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -784,6 +826,7 @@ func (a *API) getResource(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", etag(res.Version))
 	httpx.JSON(w, http.StatusOK, res)
 }
 

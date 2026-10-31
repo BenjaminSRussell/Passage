@@ -26,7 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
-      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18).'
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source.'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -52,6 +52,7 @@ paths:
               schema: {$ref: '#/components/schemas/PlanVersion'}
         '400': {$ref: '#/components/responses/Problem'}
         '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '500': {$ref: '#/components/responses/Problem'}
@@ -103,6 +104,46 @@ paths:
               schema: {$ref: '#/components/schemas/PlanVersion'}
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plans/{planCode}/diff:
+    get:
+      operationId: diffVersions
+      summary: Compare the planned orders of two plan versions
+      description: >-
+        Version-to-version diff (FR-22.14). Planned orders match on item, order
+        type and delivery day; orders equal in quantity, order date and vendor
+        pair first and are unchanged, the remaining ones pair in quantity order
+        and are changed, and the leftovers are added (only in `to`) or removed
+        (only in `from`). Deleted orders are left out. `identical` is true when
+        both plan hashes are equal. The counts and quantity deltas cover every
+        order; `added`, `removed` and `changed` list at most `limit` entries
+        each, and `truncated` says when one was cut.
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - name: from
+          in: query
+          required: true
+          description: Earlier version number.
+          schema: {type: integer, minimum: 1}
+        - name: to
+          in: query
+          required: true
+          description: Later version number.
+          schema: {type: integer, minimum: 1}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Differences between the two versions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VersionDiff'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/planning/planned-orders:
     get:
       operationId: listPlannedOrders
@@ -119,6 +160,10 @@ paths:
         - name: itemId
           in: query
           schema: {type: string, format: uuid}
+        - name: version
+          in: query
+          description: Read this version number instead of the current one, e.g. a simulation version (FR-22.15)
+          schema: {type: integer, minimum: 1}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -253,7 +298,7 @@ paths:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
         '409':
-          description: PLAN-0002 (an order is already firmed) or PLAN-ORDER-NOT-EDITABLE (deleted, or not in the current version)
+          description: PLAN-0002 (an order is already firmed), PLAN-ORDER-NOT-EDITABLE (deleted, or not in the current version) or PLAN-0003 (the order belongs to a simulation, BR-22.14)
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -935,6 +980,175 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios:
+    get:
+      operationId: listScenarios
+      summary: Planning scenarios of the tenant, optionally of one plan (FR-22.15)
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: query
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+          description: Only the scenarios of this plan
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Scenarios ordered by plan and code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createScenario
+      summary: Create a planning scenario (FR-22.15)
+      description: |
+        A scenario is a named set of changes a simulation run applies to its
+        snapshot: a demand factor overall and per item, added sales demand,
+        lead-time overrides. Omitted fields take demand factor 1 and active
+        true. The scenario belongs to the plan and to the plan's legal
+        entity: the plan must have run once and be visible to the caller
+        (404 PLAN-NOT-FOUND otherwise), and callers outside that entity
+        cannot read, change or run the scenario. A code already in use is
+        409 PLAN-SCENARIO-EXISTS; an 11th
+        active scenario of a plan is 409 PLAN-SCENARIO-LIMIT. With an
+        Idempotency-Key, a retry of the same body returns the created
+        scenario with 200 and Idempotent-Replayed: true; another body under
+        the key is 422.
+      x-passage-duty: planning.simulate
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [code, planCode, name]
+                  properties:
+                    code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+                - $ref: '#/components/schemas/ScenarioSettings'
+      responses:
+        '201':
+          description: The created scenario; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '200':
+          description: 'Idempotent replay of an earlier create (Idempotent-Replayed: true)'
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios/{code}:
+    get:
+      operationId: getScenario
+      summary: One planning scenario by code
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+      responses:
+        '200':
+          description: The scenario; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateScenario
+      summary: Replace the settings of a scenario under If-Match; omitted fields take the defaults
+      description: The plan of a scenario cannot change; planCode may be left out or must equal the stored one (422 PLAN-SCENARIO-PLAN). Activating a scenario past the limit of 10 active per plan is 409 PLAN-SCENARIO-LIMIT.
+      x-passage-duty: planning.simulate
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScenarioUpdate'}
+      responses:
+        '200':
+          description: The changed scenario with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios/{code}:run:
+    post:
+      operationId: runScenario
+      summary: Run a scenario as a simulation version of its plan (FR-22.15, BR-22.14)
+      description: |
+        Takes the same snapshot as a plan run (stored item coverage and the
+        forecast model are read the same way), applies the scenario to it and
+        stores the result as a new version of kind simulation. The plan's
+        current version, its messages and its events are untouched: no
+        plan.completed.v1, message.raised.v1 or plannedorder.firmed.v1 is
+        published, only scenario.simulated.v1. Nothing is auto-firmed and
+        firming a planned order of the version is 409 PLAN-0003. Compare it
+        with the operational version through the version diff. The plan must
+        already have an operational run (404 PLAN-NOT-FOUND); an inactive
+        scenario is 409 PLAN-SCENARIO-INACTIVE. The Idempotency-Key
+        fingerprint covers the stored scenario and the request.
+      x-passage-duty: planning.simulate
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunRequest'}
+      responses:
+        '201':
+          description: Simulation version created; it is never current
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '200':
+          description: 'Replay of an earlier simulation with the same Idempotency-Key (Idempotent-Replayed: true)'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
   /v1/planning/item-coverages:
     get:
       operationId: listItemCoverages
@@ -1202,6 +1416,7 @@ paths:
               type: object
               required: [itemId, siteId, profileId, dltDays]
               properties:
+                legalEntityId: {type: string, format: uuid, description: "Owning legal entity of the stored buffer: the caller's single legal entity by default, required (422) for a caller scoped to several or to all; 403 outside the caller's scope. A buffer of the same item, site and warehouse that the caller's scope cannot write is 409 PLAN-BUFFER-ENTITY; an all-entity caller naming an entity claims a legacy buffer that has none."}
                 itemId: {type: string, format: uuid}
                 siteId: {type: string, format: uuid}
                 warehouseId: {type: string, format: uuid, description: Absent for the site scope}
@@ -1320,6 +1535,7 @@ paths:
     put:
       operationId: updateQuotaArrangement
       summary: Replace an arrangement and all its sources under If-Match; the overlap rule applies as on create
+      description: A source naming the same type and reference as a current source keeps its id, so planned orders allocated to it still book on it when firmed; other sources get new ids. Firming an order allocated to one of its sources adds the quantity to the source's allocatedQty and bumps the arrangement's version, so an update sent with an older ETag is a 412.
       x-passage-duty: planning.setup.maintain
       parameters:
         - $ref: '#/components/parameters/EntityId'
@@ -1391,6 +1607,49 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
   schemas:
+    DiffOrder:
+      type: object
+      required: [number, itemId, orderType, qty, orderDate, deliveryDate]
+      properties:
+        number: {type: string}
+        itemId: {type: string, format: uuid}
+        orderType: {type: string, enum: [purchase, production, transfer]}
+        qty: {type: string, description: Decimal string}
+        orderDate: {type: string, format: date}
+        deliveryDate: {type: string, format: date}
+        vendorId: {type: string, format: uuid, description: Absent when the order has no vendor}
+    VersionDiff:
+      type: object
+      required: [from, to, identical, messagesDelta, addedCount, removedCount, changedCount, unchanged, truncated, added, removed, changed, qtyDeltaByOrderType]
+      properties:
+        from: {$ref: '#/components/schemas/PlanVersion'}
+        to: {$ref: '#/components/schemas/PlanVersion'}
+        identical: {type: boolean, description: True when both plan hashes are equal}
+        messagesDelta: {type: integer, description: Messages of `to` minus messages of `from`}
+        addedCount: {type: integer, minimum: 0, description: All added orders, including any beyond the limit}
+        removedCount: {type: integer, minimum: 0, description: All removed orders, including any beyond the limit}
+        changedCount: {type: integer, minimum: 0, description: All changed orders, including any beyond the limit}
+        truncated: {type: boolean, description: True when added, removed or changed lists fewer orders than its count}
+        added:
+          type: array
+          items: {$ref: '#/components/schemas/DiffOrder'}
+        removed:
+          type: array
+          items: {$ref: '#/components/schemas/DiffOrder'}
+        changed:
+          type: array
+          items:
+            type: object
+            required: [from, to, qtyDelta]
+            properties:
+              from: {$ref: '#/components/schemas/DiffOrder'}
+              to: {$ref: '#/components/schemas/DiffOrder'}
+              qtyDelta: {type: string, description: Decimal string, to minus from}
+        unchanged: {type: integer, minimum: 0}
+        qtyDeltaByOrderType:
+          type: object
+          description: Net planned quantity change per order type over every order (to minus from)
+          additionalProperties: {type: string, description: Decimal string}
     CoverageSettings:
       type: object
       required: [coverageCode]
@@ -1407,6 +1666,7 @@ components:
         autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
         generateActions: {type: boolean, default: true}
         generateFutures: {type: boolean, default: true}
+        safetyStockPolicy: {type: string, enum: [today, first-issue], default: today, description: 'BR-22.5. today nets the safety stock as a demand at today; first-issue as a demand on the item first issue date (today when the item has no demand).'}
     CoverageGroup:
       allOf:
         - type: object
@@ -1421,6 +1681,7 @@ components:
       required: [itemId, siteId, coverageGroupId]
       description: Omitted fields (and explicit nulls) take the defaults below.
       properties:
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity on create: the caller's single legal entity by default, required (422) for a caller scoped to several or to all; 403 outside the caller's scope; ignored on update."}
         itemId: {type: string, format: uuid}
         siteId: {type: string, format: uuid}
         warehouseId: {type: [string, 'null'], format: uuid, description: 'Required for warehouse scope, absent otherwise'}
@@ -1428,6 +1689,8 @@ components:
         minQty: {type: string, default: '0', description: 'Decimal string, at most 6 decimals'}
         maxQty: {type: string, default: '0', description: 'Decimal string; 0 means no maximum, otherwise at least minQty'}
         safetyMarginReceiptDays: {type: integer, minimum: 0, maximum: 365, default: 0}
+        safetyMarginIssueDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 'Working days each demand of the item is moved earlier (FR-22.5 issue margin)'}
+        safetyMarginReorderDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 'Working days added to the lead time of the item''s planned orders (FR-22.5 reorder margin)'}
         leadTimeDays: {type: [integer, 'null'], minimum: 0, maximum: 3650, description: Lead time override; null uses the item lead time}
         vendorId: {type: [string, 'null'], format: uuid, description: Default vendor; the subcontractor for subcontractor scope}
         plannedOrderType: {type: string, enum: [purchase, production, transfer], default: purchase, description: Must be transfer (provision) for subcontractor scope}
@@ -1441,7 +1704,7 @@ components:
       type: object
       required: [id, version, itemId, siteId, warehouseId, coverageGroupId, coverageGroupCode, minQty, maxQty, safetyMarginReceiptDays,
         leadTimeDays, vendorId, plannedOrderType, planningStrategy, planningScope, decouplingPoint, bufferProfileId,
-        requiredShelfLifeDays, priorityBased]
+        requiredShelfLifeDays, priorityBased, safetyMarginIssueDays, safetyMarginReorderDays]
       properties:
         id: {type: string, format: uuid}
         version: {type: integer, minimum: 1, description: Same as the ETag}
@@ -1453,6 +1716,8 @@ components:
         minQty: {type: string, description: Decimal string in inventory UoM}
         maxQty: {type: string, description: Decimal string; 0 means no maximum}
         safetyMarginReceiptDays: {type: integer}
+        safetyMarginIssueDays: {type: integer, description: Issue margin in working days}
+        safetyMarginReorderDays: {type: integer, description: Reorder margin in working days}
         leadTimeDays: {type: [integer, 'null']}
         vendorId: {type: [string, 'null'], format: uuid}
         plannedOrderType: {type: string, enum: [purchase, production, transfer]}
@@ -1539,7 +1804,7 @@ components:
         fromWarehouseId: {type: string, format: uuid, description: 'Required for transfer, absent otherwise'}
         quota: {type: string, description: 'Share weight 0 to 99999.9999; 0 is a fallback used only when every other source is blocked'}
         baseQty: {type: string, default: '0'}
-        allocatedQty: {type: string, default: '0', description: Carried over from a legacy system (SAP EQUP)}
+        allocatedQty: {type: string, default: '0', description: Carried over from a legacy system (SAP EQUP); firming adds the quantity of the planned orders allocated to the source}
         maxQtyPerPeriod: {type: [string, 'null'], description: Positive; given together with periodDays}
         periodDays: {type: [integer, 'null'], minimum: 1, maximum: 366}
         priority: {type: integer, minimum: 0, maximum: 999, default: 0, description: 'Breaks rating ties, lower first'}
@@ -1556,6 +1821,7 @@ components:
       type: object
       required: [itemId, siteId, validFrom, validTo, sources]
       properties:
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity on create: the caller's single legal entity by default, required (422) for a caller scoped to several or to all; ignored on update."}
         itemId: {type: string, format: uuid}
         siteId: {type: string, format: uuid}
         validFrom: {type: string, format: date}
@@ -1589,6 +1855,7 @@ components:
       properties:
         asOf: {type: string, format: date, description: Day 0 of the plan}
         siteId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity of the plan when this run creates it: defaults to the caller's single legal entity and is required (422) for a caller scoped to several or to all legal entities; 403 outside the caller's scope. For an existing plan it is an assertion and a different value is 422. A plan code held by a plan outside the caller's scope, including one with no legal entity yet, is 409 PLAN-CODE-TAKEN. When forecastModel is set its legal entity must equal the plan's (422 PLAN-FORECAST-ENTITY)."}
         forecastModel:
           type: string
           pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'
@@ -1606,23 +1873,48 @@ components:
               type: array
               maxItems: 1000
               items: {type: string, format: date}
+        carryForward:
+          type: boolean
+          default: false
+          description: 'When true the plan''s firmed planned orders at the site whose delivery date is on or after asOf are added as scheduled receipts (refType planned-order, ref FP:<planned order id>) of their items, so a firmed order is supply of the run and is not planned a second time (FR-22.1, FR-22.10). The approved planned orders of the current version are carried the same way, since an operational run firms them (FR-22.11). Leave it false when the target orders already arrive in receipts. Orders of simulation versions are never carried.'
+        horizonDays:
+          type: integer
+          minimum: 0
+          maximum: 1095
+          default: 0
+          description: 'Demand dated more than this many days after asOf is ignored (planning horizon, 30 to 1,095). 0 takes the service default PLANNING_HORIZON_DAYS (365 unless configured). Supply is never dropped, and supply dated beyond the horizon raises no cancel or decrease message.'
+        scope:
+          $ref: '#/components/schemas/PlanScope'
         items:
           type: array
           minItems: 1
           maxItems: 100000
           items: {$ref: '#/components/schemas/RunItem'}
+    PlanScope:
+      type: object
+      description: 'Plan scope filter (FR-22.13). The version reports only the items that match every given criterion; the whole snapshot is still exploded and netted, so a component inside the scope is sized by parents outside it. Omitted or empty criteria restrict nothing.'
+      properties:
+        itemIds: {type: array, maxItems: 1000, items: {type: string, format: uuid}, description: Only these items}
+        itemGroups: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 64}, description: 'Only items whose itemGroup is one of these'}
+        planners: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 64}, description: 'Only items whose planner is one of these'}
+        llcMin: {type: integer, minimum: 0, maximum: 99, description: Lowest low-level code reported, 0 is an end item}
+        llcMax: {type: integer, minimum: 0, maximum: 99, description: Highest low-level code reported, at least llcMin}
     RunItem:
       type: object
       required: [itemId]
       properties:
         itemId: {type: string, format: uuid}
+        itemGroup: {type: string, maxLength: 64, description: 'Item group, matched by scope.itemGroups (FR-22.13)'}
+        planner: {type: string, maxLength: 64, description: 'Planner, matched by scope.planners (FR-22.13)'}
         coverage:
           type: object
           description: Omit it, or send it without a code, to use the stored item coverage of the item at the site; a block without a code is replaced whole.
           properties:
             code: {type: string, enum: [requirement, period, minmax, manual], description: Required unless the item has a stored site-scope item coverage}
             periodDays: {type: integer, minimum: 0}
-            marginDays: {type: integer, minimum: 0}
+            marginDays: {type: integer, minimum: 0, maximum: 365, description: Receipt margin in working days (FR-22.5)}
+            issueMarginDays: {type: integer, minimum: 0, maximum: 365, description: Working days each demand of the item is moved earlier (FR-22.5)}
+            reorderMarginDays: {type: integer, minimum: 0, maximum: 365, description: Working days added to the lead time of planned orders (FR-22.5)}
             positiveDays: {type: integer, minimum: 0}
             negativeDays: {type: integer, minimum: 0}
             reorderMin: {type: string, description: Decimal string}
@@ -1633,6 +1925,7 @@ components:
             coverageFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'FR-22.2 coverage time fence: existing supply at or beyond it that demand does not need raises cancel (nothing pegged) or decrease (by the unpegged part), inside the action fence. 0 raises neither.'}
             firmingFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4 firming time fence. With autoFirm, planned orders whose order date falls inside it are firmed by the run (grouping vendor-date, one plannedorder.firmed.v1 each). 0 firms nothing.'}
             autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
+            safetyStockPolicy: {type: string, enum: [today, first-issue], description: 'BR-22.5 safety-stock policy. Left out, the run takes the policy of the stored coverage group, else today.'}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer], description: Required unless the item has a stored site-scope item coverage}
@@ -1663,6 +1956,62 @@ components:
         date: {type: string, format: date}
         qty: {type: string, description: Positive decimal string}
         priority: {type: integer, description: 'Lower nets first; default sales-line 1, forecast 2, others 4'}
+    ScenarioSettings:
+      type: object
+      required: [planCode, name]
+      properties:
+        planCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$', description: The plan the scenario simulates against; at most 10 active scenarios per plan}
+        name: {type: string, minLength: 1, maxLength: 120}
+        demandFactor: {type: string, default: '1', description: 'Multiplies the independent demand (sales lines and forecast) of every item without its own factor; 0 to 100, at most 4 decimals. Safety-stock and transfer-issue demand is not scaled; dependent demand follows from the explosion.'}
+        itemFactors:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, factor]
+            properties:
+              itemId: {type: string, format: uuid}
+              factor: {type: string, description: 'Replaces demandFactor for this item; 0 to 100'}
+        addedDemand:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, date, qty]
+            properties:
+              itemId: {type: string, format: uuid}
+              date: {type: string, format: date, description: A date before the run date is due on the run date}
+              qty: {type: string, description: Decimal greater than 0, at most 6 decimals}
+        leadTimeOverrides:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, leadTimeDays]
+            properties:
+              itemId: {type: string, format: uuid}
+              leadTimeDays: {type: integer, minimum: 0, maximum: 3650}
+        active: {type: boolean, default: true}
+    ScenarioUpdate:
+      type: object
+      description: Same fields as ScenarioSettings; planCode may be left out on update
+      properties:
+        planCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        demandFactor: {type: string, default: '1'}
+        itemFactors: {$ref: '#/components/schemas/ScenarioSettings/properties/itemFactors'}
+        addedDemand: {$ref: '#/components/schemas/ScenarioSettings/properties/addedDemand'}
+        leadTimeOverrides: {$ref: '#/components/schemas/ScenarioSettings/properties/leadTimeOverrides'}
+        active: {type: boolean, default: true}
+    Scenario:
+      allOf:
+        - type: object
+          required: [id, version, code]
+          properties:
+            id: {type: string, format: uuid}
+            version: {type: integer, minimum: 1, description: Same as the ETag}
+            code: {type: string}
+        - $ref: '#/components/schemas/ScenarioSettings'
     PlanVersion:
       type: object
       properties:
@@ -1670,18 +2019,21 @@ components:
         planCode: {type: string}
         number: {type: integer}
         status: {type: string, enum: [running, complete, failed, current]}
+        kind: {type: string, enum: [static, simulation], description: 'A simulation version is written by a scenario run, is never current and cannot be firmed (FR-22.15)'}
+        scenarioCode: {type: string, description: Set on a simulation version}
         asOf: {type: string, format: date}
-        itemsPlanned: {type: integer}
+        itemsPlanned: {type: integer, description: 'Items the version reports: every item of the snapshot, or those inside the run''s scope (FR-22.13)'}
         plannedOrders: {type: integer}
+        approvedFirmed: {type: integer, description: 'Planned orders approved in the previous version that this run firmed (FR-22.11), in one firming batch with one plannedorder.firmed.v1 each'}
         messages: {type: integer}
         durationMs: {type: integer, format: int64}
-        planHash: {type: string, description: 'sha256 hex over orders, pegging and messages'}
+        planHash: {type: string, description: 'sha256 hex over orders, pegging and messages, and the quota source of each allocated order'}
     PlannedOrder:
       type: object
       properties:
         id: {type: string, format: uuid}
         versionId: {type: string, format: uuid}
-        number: {type: string}
+        number: {type: string, description: 'PLN-nnnnnn; the parts of an order a split quota arrangement divided are numbered <number>-<n>'}
         itemId: {type: string, format: uuid}
         orderType: {type: string, enum: [purchase, production, transfer]}
         qty: {type: string}
@@ -1692,7 +2044,9 @@ components:
         lotRule: {type: string}
         status: {type: string, enum: [unprocessed, approved, firmed, deleted]}
         version: {type: integer, minimum: 1, description: Same as the ETag}
-        vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders}
+        vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders, or by a plan run from the vendor of the quota source the order was allocated to}
+        quotaArrangementId: {type: string, format: uuid, description: The quota arrangement a plan run applied to the order (FR-22.17); absent when none applied}
+        quotaSourceId: {type: string, format: uuid, description: The quota source the run allocated the order to; firming books its quantity on that source. A vendor change on the order moves it to that vendor's source of the arrangement, or out of the arrangement when the vendor is not one of its sources}
         firmedTargetType: {type: string, enum: [purchase-order, production-order, transfer-order], description: Set once the order is firmed}
         firmedTargetId: {type: string, format: uuid, description: Id of the order it became (FR-22.10); orders of one purchase group share it}
     FirmRequest:
@@ -1780,6 +2134,7 @@ components:
       required: [lines]
       additionalProperties: false
       properties:
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity of a model this write creates; required (422) for a caller scoped to several or to all. For an existing model it is an assertion and a different value is 422."}
         reductionPrinciple: {type: string, enum: [none, percent, transactions, transactions-dynamic]}
         reductionPercent: {type: string, description: '0 to 100 with at most 6 decimals; only with reductionPrinciple percent'}
         lines:

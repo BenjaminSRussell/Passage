@@ -20,9 +20,34 @@ export interface ShipmentLine {
   qtyPicked: string;
   qtyPacked: string;
   qtyShipped: string;
+  /** Planned quantity given up when the remainder was closed (FR-28.8); absent or 0 when none. */
+  qtyClosed?: string;
   pickConfirmed: boolean;
   /** Pick zone given at release; null when none. */
   zone: string | null;
+  /** Reason given for the latest short pick; null or absent when none. */
+  shortPickReason?: ShortPickReason | null;
+  /** The product is batch or serial tracked; the slip posts only with entries for what it ships (BR-28.10). */
+  trackingRequired?: boolean;
+  /** Batch, serial and location entries captured at pick. */
+  tracking?: TrackingEntry[];
+}
+
+export interface TrackingEntry {
+  id: string;
+  batchNo: string | null;
+  serialNo: string | null;
+  locationCode: string | null;
+  qty: string;
+  /** The packing slip the quantity shipped on; null until it ships. */
+  packingSlipId: string | null;
+}
+
+export interface TrackingEntryInput {
+  batchNo?: string;
+  serialNo?: string;
+  locationCode?: string;
+  qty: string;
 }
 
 export interface Container {
@@ -160,7 +185,8 @@ export interface DniReport {
   lines: DniLine[];
 }
 
-export type ContainerStatus = "OPEN" | "CLOSED" | "SHIPPED";
+/** UNPACKED containers were taken apart before shipping; only the SSCC register lists them. */
+export type ContainerStatus = "OPEN" | "CLOSED" | "SHIPPED" | "UNPACKED";
 
 /** One issued SSCC in the register (section 5.28.14, BR-28.5). */
 export interface SsccRow {
@@ -217,12 +243,16 @@ export interface BackorderRow {
   qtyPlanned: string;
   qtyPicked: string;
   qtyShipped: string;
+  /** Planned quantity given up when the remainder was closed (FR-28.8). */
+  qtyClosed: string;
   /** Planned minus picked. */
   qtyRemainder: string;
   /** A remainder is left and the shipment is not cancelled. */
   open: boolean;
   /** The line's first short pick. */
   shortPickedAt: string;
+  /** Reason given for the latest short pick, if any. */
+  reason: ShortPickReason | null;
 }
 
 export interface BackorderPage {
@@ -276,6 +306,8 @@ export interface ReleaseLineInput {
   carrierCode?: string;
   /** The line's pick zone. */
   zone?: string;
+  /** The product is batch or serial tracked (BR-28.10). */
+  trackingRequired?: boolean;
 }
 
 export interface ReleaseInput {
@@ -348,14 +380,44 @@ export interface WaveSummary {
   warehouseId: string;
   groupBy: WaveGroupBy;
   groupKey: string;
-  status: "OPEN";
+  status: "OPEN" | "CLOSED";
   lineCount: number;
   orderCount: number;
   createdAt: string;
+  /** Wave version, sent as If-Match on assign and close. */
+  version: number;
+  picker: string | null;
+  assignedAt: string | null;
+  closedAt: string | null;
+}
+
+/** Reason codes of a short pick. */
+export type ShortPickReason = "OUT_OF_STOCK" | "DAMAGED" | "NOT_FOUND" | "QUALITY_HOLD" | "OTHER";
+
+export interface WaveLine {
+  shipmentLineId: string;
+  shipmentId: string;
+  shipmentNumber: string;
+  productId: string;
+  unit: string;
+  zone: string | null;
+  qtyPlanned: string;
+  qtyPicked: string;
+  pickConfirmed: boolean;
+  shortPickReason: ShortPickReason | null;
 }
 
 export interface Wave extends WaveSummary {
   shipments: WaveShipment[];
+  /** The wave's lines with their pick state (wave detail only). */
+  lines?: WaveLine[];
+}
+
+export interface WavePickResult {
+  waveId: string;
+  linesConfirmed: number;
+  shortLines: number;
+  shipments: { id: string; shipmentNumber: string; status: ShipmentStatus; version: number; linesConfirmed: number }[];
 }
 
 export interface WavesResult<T> {
@@ -472,8 +534,13 @@ export function getShipment(id: string, signal?: AbortSignal): Promise<Shipment>
   return send<Shipment>(shipmentPath(id), {}, signal);
 }
 
-export function confirmPick(id: string, version: number, picks: { shipmentLineId: string; picked: string }[], key: string): Promise<Shipment> {
+export function confirmPick(id: string, version: number, picks: { shipmentLineId: string; picked: string; reason?: ShortPickReason }[], key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:confirm-pick`, { picks }, key, version);
+}
+
+/** Replaces the unshipped batch, serial and location entries of a picked line (BR-28.10). */
+export function captureTracking(shipmentId: string, lineId: string, version: number, entries: TrackingEntryInput[], key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(shipmentId)}/lines/${encodeURIComponent(lineId)}:capture-tracking`, { entries }, key, version);
 }
 
 export function packContainer(
@@ -510,6 +577,16 @@ export function cancelShipment(id: string, version: number, key: string): Promis
   return command<Shipment>(`${shipmentPath(id)}:cancel`, undefined, key, version);
 }
 
+/** Takes a CLOSED container apart before it ships; a PACKED shipment goes back to PICKED. */
+export function unpackContainer(shipmentId: string, containerId: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}:unpack`, undefined, key, version);
+}
+
+/** Closes the open remainder of a partially shipped shipment at what shipped (FR-28.8, CANCEL_REMAINDER). */
+export function closeShipmentRemainder(id: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(id)}:close-remainder`, undefined, key, version);
+}
+
 /** Read-only workbench preview: the waves the create would make now (FR-28.13). */
 export function previewWaves(input: WorkbenchInput): Promise<WavesResult<WavePlan>> {
   return send<WavesResult<WavePlan>>("/waves:preview", { method: "POST", body: JSON.stringify(input) });
@@ -520,12 +597,34 @@ export function createWaves(input: WorkbenchInput, key: string): Promise<WavesRe
   return command<WavesResult<Wave>>("/waves", input, key);
 }
 
-export function listWaves(filter: { warehouseId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<WaveSummary[]> {
-  return items<WaveSummary>(`/waves${query(filter)}`, signal);
+export function listWaves(filter: { warehouseId?: string; status?: "OPEN" | "CLOSED" | ""; picker?: string; unassigned?: boolean; limit?: number } = {}, signal?: AbortSignal): Promise<WaveSummary[]> {
+  return items<WaveSummary>(`/waves${query({ ...filter, unassigned: filter.unassigned ? "true" : undefined })}`, signal);
+}
+
+/** Gives an OPEN wave to a picker, or hands it to another one (FR-28.13). */
+export function assignWave(id: string, version: number, picker: string, key: string): Promise<Wave> {
+  return command<Wave>(`/waves/${encodeURIComponent(id)}:assign`, { picker }, key, version);
+}
+
+/** Closes a wave once every line is picked or on a cancelled shipment (FUL-0055 otherwise). */
+export function closeWave(id: string, version: number, key: string): Promise<Wave> {
+  return command<Wave>(`/waves/${encodeURIComponent(id)}:close`, undefined, key, version);
 }
 
 export function getWave(id: string, signal?: AbortSignal): Promise<Wave> {
   return send<Wave>(`/waves/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/**
+ * Confirms the picks of a whole wave in one command (FR-28.13). With pickRest,
+ * every line not listed and not yet confirmed is picked in full. Reuse one key per submit.
+ */
+export function confirmWavePick(
+  id: string,
+  input: { picks: { shipmentLineId: string; picked: string; reason?: ShortPickReason }[]; pickRest: boolean },
+  key: string,
+): Promise<WavePickResult> {
+  return command<WavePickResult>(`/waves/${encodeURIComponent(id)}:confirm-pick`, input, key);
 }
 
 export function listTracking(id: string, signal?: AbortSignal): Promise<TrackingEvent[]> {

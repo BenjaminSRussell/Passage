@@ -33,6 +33,9 @@ export function PackRunsPage() {
             <Link className={buttonClassName("ghost")} to="/migration-factory/packs">
               Pack catalog
             </Link>
+            <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-gl">
+              Load GL balances
+            </Link>
             <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-project">
               Load project balances
             </Link>

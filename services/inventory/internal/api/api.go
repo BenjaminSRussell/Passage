@@ -29,18 +29,19 @@ import (
 
 // Privilege codes (<entity>.<action>; see README).
 const (
-	dutyRead          = "inventory.read"
-	dutyJournalWrite  = "inventory.journal.write"
-	dutyJournalPost   = "inventory.journal.post"
-	journalsPath      = "/v1/inventory/journals"
-	onHandPath        = "/v1/inventory/onhand"
-	idempotencyHeader = "Idempotency-Key"
-	ifMatchHeader     = "If-Match"
-	validationDetail  = "one or more fields are invalid"
-	codeValidation    = "COM-0001"
-	codePrecondition  = "COM-0428"
-	maxKeyLength      = 255
-	maxJournalPage    = 200
+	dutyRead                = "inventory.read"
+	dutyOwnershipChangeRead = "inventory.ownership-change.read"
+	dutyJournalWrite        = "inventory.journal.write"
+	dutyJournalPost         = "inventory.journal.post"
+	journalsPath            = "/v1/inventory/journals"
+	onHandPath              = "/v1/inventory/onhand"
+	idempotencyHeader       = "Idempotency-Key"
+	ifMatchHeader           = "If-Match"
+	validationDetail        = "one or more fields are invalid"
+	codeValidation          = "COM-0001"
+	codePrecondition        = "COM-0428"
+	maxKeyLength            = 255
+	maxJournalPage          = 200
 )
 
 var (
@@ -66,8 +67,9 @@ func New(s store.Store, post store.PostParams) *API {
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath, a.createJournal)
-	r.With(authz.RequireDuty(dutyRead)).Get(journalsPath, a.listJournals)
-	r.With(authz.RequireDuty(dutyRead)).Get(journalsPath+"/{id}", journalRoute(a.getJournal))
+	journalRead := r.With(authz.RequireAnyDuty(dutyRead, dutyOwnershipChangeRead))
+	journalRead.Get(journalsPath, a.listJournals)
+	journalRead.Get(journalsPath+"/{id}", journalRoute(a.getJournal))
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath+"/{id}/lines:bulk", journalRoute(a.addLines))
 	r.With(authz.RequireDuty(dutyJournalPost)).Post(journalsPath+"/{id}:post", journalRoute(a.postJournal))
 	r.With(authz.RequireDuty(dutyRead)).Get(onHandPath, a.onHand)
@@ -75,8 +77,11 @@ func (a *API) Register(r chi.Router) {
 	a.registerBlocking(r)
 	a.registerCount(r)
 	a.registerTransfers(r)
+	a.registerReports(r)
+	a.registerWorkspace(r)
 	a.registerTags(r)
 	a.registerJournalWorkflow(r)
+	a.registerJournalNames(r)
 	a.registerConsignment(r)
 	a.registerOps(r)
 	a.registerStatusSteps(r)
@@ -92,6 +97,7 @@ type createJournalRequest struct {
 	PostingDate     string `json:"postingDate"`
 	OffsetAccountID string `json:"offsetAccountId"`
 	Currency        string `json:"currency"`
+	JournalNameID   string `json:"journalNameId"`
 }
 
 type lineRequest struct {
@@ -102,6 +108,8 @@ type lineRequest struct {
 	EnteredQty  *string           `json:"enteredQty"`
 	EnteredUnit string            `json:"enteredUnit"`
 	CostPrice   string            `json:"costPrice"`
+	// ToDimensions is the destination of a TRANSFER journal line.
+	ToDimensions map[string]string `json:"toDimensions"`
 }
 
 type addLinesRequest struct {
@@ -119,6 +127,7 @@ type lineResponse struct {
 	EnteredQty     string            `json:"enteredQty"`
 	EnteredUnit    string            `json:"enteredUnit"`
 	CostPrice      string            `json:"costPrice"`
+	ToDimensions   map[string]string `json:"toDimensions,omitempty"`
 }
 
 type glLineResponse struct {
@@ -141,6 +150,7 @@ type journalSummary struct {
 	PostingDate     string     `json:"postingDate"`
 	OffsetAccountID string     `json:"offsetAccountId,omitempty"`
 	Currency        string     `json:"currency"`
+	JournalNameID   string     `json:"journalNameId,omitempty"`
 	Version         int        `json:"version"`
 	LineCount       int        `json:"lineCount"`
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -157,13 +167,16 @@ type journalResponse struct {
 	GLEntry *glEntryResponse `json:"glEntry,omitempty"`
 }
 
+// onHandItem is one on-hand group. The availability and reservation figures
+// are nil in an as-of replay: they are not kept per date, and a zero would read
+// as "nothing available" (OpenAPI marks them absent with asOf).
 type onHandItem struct {
 	Group            map[string]string `json:"group"`
 	PhysicalInvent   string            `json:"physicalInvent"`
-	AvailPhysical    string            `json:"availPhysical"`
-	AvailOrdered     string            `json:"availOrdered"`
+	AvailPhysical    *string           `json:"availPhysical,omitempty"`
+	AvailOrdered     *string           `json:"availOrdered,omitempty"`
 	PostedValue      string            `json:"postedValue"`
-	ReservedPhysical string            `json:"reservedPhysical"`
+	ReservedPhysical *string           `json:"reservedPhysical,omitempty"`
 	Blocked          string            `json:"blocked"`
 	Currency         string            `json:"currency"`
 	Negative         bool              `json:"negative"`
@@ -213,7 +226,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(req.JournalType)) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE or OWNERSHIP_CHANGE"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE or TRANSFER"
 	}
 	date, err := time.Parse("2006-01-02", req.PostingDate)
 	if err != nil {
@@ -224,12 +237,15 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	req.OffsetAccountID = strings.TrimSpace(req.OffsetAccountID)
 	switch {
-	case req.JournalType == string(domain.JournalMovement) && req.OffsetAccountID == "":
-		fields["offsetAccountId"] = "is required for a MOVEMENT journal"
+	case req.JournalType == string(domain.JournalMovement) && req.OffsetAccountID == "" && req.JournalNameID == "":
+		fields["offsetAccountId"] = "is required for a MOVEMENT journal (or a journal name with a default offset account)"
 	case req.JournalType != string(domain.JournalMovement) && req.OffsetAccountID != "":
 		fields["offsetAccountId"] = "only MOVEMENT journals take an offset account; the posting profile supplies the others"
 	case req.OffsetAccountID != "" && !accountCode.MatchString(req.OffsetAccountID):
 		fields["offsetAccountId"] = "must be an account id of 1 to 64 letters, digits, '.', '_' or '-'"
+	}
+	if req.JournalNameID != "" && !ids.Valid(req.JournalNameID) {
+		fields["journalNameId"] = "must be a UUID"
 	}
 	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
 	if key == "" || len(key) > maxKeyLength {
@@ -243,7 +259,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalType(req.JournalType), PostingDate: date,
-		OffsetAccountID: req.OffsetAccountID, Currency: req.Currency}
+		OffsetAccountID: req.OffsetAccountID, Currency: req.Currency, JournalNameID: req.JournalNameID}
 	j, inserted, err := a.store.CreateJournal(r.Context(), in, key)
 	if err != nil {
 		a.failed(w, r, "create journal", err)
@@ -266,7 +282,16 @@ func (a *API) getJournal(w http.ResponseWriter, r *http.Request, id string) {
 		a.failed(w, r, "get journal", err)
 		return
 	}
+	if ownershipChangeOnly(r) && j.Type != domain.JournalOwnershipChange {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeJournalNotFound, "inventory journal not found"))
+		return
+	}
 	writeJournal(w, http.StatusOK, j)
+}
+
+func ownershipChangeOnly(r *http.Request) bool {
+	p, ok := tenant.FromContext(r.Context())
+	return ok && !p.HasDuty(dutyRead)
 }
 
 func (a *API) addLines(w http.ResponseWriter, r *http.Request, id string) {
@@ -303,6 +328,13 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.JournalFilter{Status: domain.JournalStatus(q.Get("status")), Type: domain.JournalType(q.Get("type")), Cursor: q.Get("cursor"), Limit: 50}
+	if ownershipChangeOnly(r) {
+		if f.Type != "" && f.Type != domain.JournalOwnershipChange {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty: "+dutyRead))
+			return
+		}
+		f.Type = domain.JournalOwnershipChange
+	}
 	fields := map[string]string{}
 	if f.Status != "" && !slices.Contains(domain.JournalStatuses, f.Status) {
 		fields["status"] = "unknown journal status"
@@ -369,7 +401,7 @@ func parseLines(in []lineRequest) ([]domain.JournalLine, map[string]string) {
 			fields[prefix+"enteredUnit"] = "is required (1 to 12 characters of A-Z, 0-9, _ or -)"
 		}
 		out = append(out, domain.JournalLine{ClientKey: l.ClientKey, ProductID: l.ProductID, Dims: domain.Dimensions(l.Dimensions), Qty: qty,
-			EnteredQty: entered, EnteredUnit: l.EnteredUnit, CostPrice: cost, LineNo: i + 1})
+			EnteredQty: entered, EnteredUnit: l.EnteredUnit, CostPrice: cost, LineNo: i + 1, ToDims: domain.Dimensions(l.ToDimensions)})
 	}
 	return out, fields
 }
@@ -412,8 +444,13 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.OnHandFilter{ProductID: q.Get("product"), SiteID: q.Get("site"), WarehouseID: q.Get("warehouse"), BatchID: q.Get("batch"),
-		Owner: q.Get("owner"), Segment: q.Get("segment")}
+		Owner: q.Get("owner"), Segment: q.Get("segment"), AsOf: q.Get("asOf")}
 	fields := map[string]string{}
+	if f.AsOf != "" {
+		if _, err := time.Parse(time.DateOnly, f.AsOf); err != nil {
+			fields["asOf"] = "must be a date (YYYY-MM-DD)"
+		}
+	}
 	if f.ProductID != "" && !ids.Valid(f.ProductID) {
 		fields["product"] = "must be a UUID"
 	}
@@ -435,11 +472,19 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 	a.onhand.Add(1)
 	items := make([]onHandItem, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		items = append(items, onHandItem{Group: row.Group, PhysicalInvent: row.PhysicalInvent.String(), AvailPhysical: row.AvailPhysical.String(),
-			AvailOrdered: row.AvailOrdered.String(), PostedValue: row.PostedValue.String(), ReservedPhysical: row.ReservedPhysical.String(),
-			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative})
+		item := onHandItem{Group: row.Group, PhysicalInvent: row.PhysicalInvent.String(), PostedValue: row.PostedValue.String(),
+			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative}
+		if res.AsOf == "" {
+			avail, ordered, reserved := row.AvailPhysical.String(), row.AvailOrdered.String(), row.ReservedPhysical.String()
+			item.AvailPhysical, item.AvailOrdered, item.ReservedPhysical = &avail, &ordered, &reserved
+		}
+		items = append(items, item)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": res.Truncated})
+	body := map[string]any{"items": items, "truncated": res.Truncated}
+	if res.AsOf != "" {
+		body["asOf"] = res.AsOf
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func splitList(raw string) []string {
@@ -454,7 +499,7 @@ func splitList(raw string) []string {
 
 func summaryOf(j domain.Journal) journalSummary {
 	return journalSummary{ID: j.ID, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type), Status: string(j.Status),
-		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, Version: j.Version,
+		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, JournalNameID: j.JournalNameID, Version: j.Version,
 		LineCount: j.LineCount, CreatedAt: j.CreatedAt, PostedAt: j.PostedAt, ReversesJournalID: j.ReversesJournalID, ReversedByJournalID: j.ReversedByJournalID}
 }
 
@@ -462,7 +507,7 @@ func writeJournal(w http.ResponseWriter, status int, j domain.Journal) {
 	resp := journalResponse{journalSummary: summaryOf(j), Lines: []lineResponse{}}
 	for _, l := range j.Lines {
 		resp.Lines = append(resp.Lines, lineResponse{ID: l.ID, LineNo: l.LineNo, ClientKey: l.ClientKey, ReversesLineID: l.ReversesLineID, ProductID: l.ProductID, Dimensions: l.Dims,
-			Qty: l.Qty.String(), EnteredQty: l.EnteredQty.String(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice.String()})
+			Qty: l.Qty.String(), EnteredQty: l.EnteredQty.String(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice.String(), ToDimensions: l.ToDims})
 	}
 	resp.LineCount = len(j.Lines)
 	if j.GLEntry != nil {
@@ -485,6 +530,7 @@ func (a *API) failed(w http.ResponseWriter, r *http.Request, op string, err erro
 // metrics serves the counters on the admin port.
 func (a *API) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	tenant.WriteReplayMetrics(w)
 	fmt.Fprintf(w, "# HELP inventory_journals_posted_total Journals posted.\n# TYPE inventory_journals_posted_total counter\ninventory_journals_posted_total %d\n", a.posted.Load())
 	fmt.Fprintf(w, "# HELP inventory_onhand_queries_total On-hand inquiries answered.\n# TYPE inventory_onhand_queries_total counter\ninventory_onhand_queries_total %d\n", a.onhand.Load())
 	fmt.Fprintf(w, "# HELP inventory_requests_failed_total Requests answered with a failure.\n# TYPE inventory_requests_failed_total counter\ninventory_requests_failed_total %d\n", a.fail.Load())

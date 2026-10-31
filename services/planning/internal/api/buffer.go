@@ -291,6 +291,7 @@ func (a *API) listDdmrpBuffers(w http.ResponseWriter, r *http.Request) {
 // supplies the factors, spike threshold, spike horizon and ADU window; the rest
 // is the state of the item at the site today (until the run supplies it).
 type recalculateBufferRequest struct {
+	LegalEntityID    string           `json:"legalEntityId"`
 	ItemID           string           `json:"itemId"`
 	SiteID           string           `json:"siteId"`
 	WarehouseID      string           `json:"warehouseId"`
@@ -379,7 +380,7 @@ func (a *API) recalculateDdmrpBuffer(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	stored, err := a.store.UpsertDdmrpBuffer(r.Context(), store.DdmrpBuffer{ItemID: req.ItemID, SiteID: req.SiteID,
+	stored, err := a.store.UpsertDdmrpBuffer(r.Context(), store.DdmrpBuffer{LegalEntityID: req.LegalEntityID, ItemID: req.ItemID, SiteID: req.SiteID,
 		WarehouseID: req.WarehouseID, ProfileID: profile.ID, ADU: res.ADU, DLTDays: req.DLTDays, DAF: res.DAF,
 		Status: res.Status})
 	if err != nil {

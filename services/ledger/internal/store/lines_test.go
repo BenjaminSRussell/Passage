@@ -156,3 +156,21 @@ func TestPostgres_ListLines_ReversalAndIsolation(t *testing.T) {
 		t.Fatalf("unknown ledger: %v", err)
 	}
 }
+
+func TestPostgres_ListLines_DocumentIDFindsOnlyThatDocumentsEntry(t *testing.T) {
+	e, _ := setup(t)
+	postLinesFixture(t, e)
+	in := vendorInvoice(e.ledger.ID, "LQ-DOC", "50.00")
+	res, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := e.store.ListLines(e.ctx, LineFilter{LedgerID: e.ledger.ID, DocumentID: in.DocumentID, Limit: 10})
+	if err != nil || len(page.Items) != 2 || page.Items[0].EntryID != res.Entries[0].ID || page.Items[1].EntryID != res.Entries[0].ID {
+		t.Fatalf("by document: %+v, %v", page.Items, err)
+	}
+	page, err = e.store.ListLines(e.ctx, LineFilter{LedgerID: e.ledger.ID, DocumentID: ids.New(), Limit: 10})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("unknown document: %+v, %v", page.Items, err)
+	}
+}

@@ -19,6 +19,15 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        # fieldcrypt key material is mounted as a file (FIELDCRYPT_KEYS_FILE), not passed in the environment.
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.secret.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.secret.fieldcryptKeysKey }}
+                path: keys
       containers:
         - name: hr
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -51,6 +60,18 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secret.name }}
                   key: {{ .Values.secret.piiKeyKey }}
+                  optional: true
+            - name: FIELDCRYPT_KEYS_FILE
+              value: /var/run/passage/field-crypt/keys
+            - name: FIELDCRYPT_CURRENT_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: {{ .Values.secret.fieldcryptCurrentKeyIdKey }}
+          volumeMounts:
+            - name: field-crypt
+              mountPath: /var/run/passage/field-crypt
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /healthz

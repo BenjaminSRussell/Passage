@@ -601,7 +601,7 @@ func toContractOut(c store.Contract) contractOut {
 	products := make([]string, 0, len(c.Obligations))
 	for _, o := range c.Obligations {
 		item := obligationOut{
-			ID: o.ID, LineNo: o.LineNo, ProductID: o.ProductID, SSP: fixed(o.SSP, c.Currency), SSPSource: o.SSPSource,
+			ID: o.ID, LineNo: o.LineNo, ProductID: o.ProductID, SSP: sspText(o.SSP, c.Currency), SSPSource: o.SSPSource,
 			Allocated: fixed(o.Allocated, c.Currency), Method: o.Method, TermStart: fmtDate(o.TermStart),
 			TermEnd: fmtDate(o.TermEnd), SatisfiedOn: fmtDate(o.SatisfiedOn), Schedule: []scheduleOut{},
 		}
@@ -639,11 +639,9 @@ func fmtDate(t *time.Time) *string {
 	return &s
 }
 
-// inScope reports whether the caller may act on legalEntityID: a principal
-// scoped to one legal entity may act only on it; an unscoped one on any.
 func inScope(r *http.Request, legalEntityID string) bool {
 	p, _ := tenant.FromContext(r.Context())
-	return p.LegalEntityID == "" || p.LegalEntityID == legalEntityID
+	return tenant.InLegalEntityScope(p, legalEntityID)
 }
 
 func outOfScope() error {

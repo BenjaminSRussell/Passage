@@ -1,10 +1,23 @@
 package domain
 
+import "time"
+
+type PeriodRegistration struct {
+	LegalEntityID  string
+	LedgerID       string
+	FiscalPeriodID string
+	Start          time.Time
+	End            time.Time
+	Actor          string
+}
+
 const (
 	CodeInvalidTransition   = "CLOSE-0001"
 	CodeBusy                = "CLOSE-0002"
 	CodeBlockedByDependency = "CLOSE-0003"
 	CodeValidation          = "CLOSE-0004"
+	CodeNoPeriod            = "CLOSE-0005"
+	CodeAmbiguousPeriod     = "CLOSE-0006"
 	CodePeriodClosed        = "LEDGER-0013"
 	CodePeriodOnHold        = "LEDGER-0014"
 	CodeNoConvergence       = "ALLOC-0001"

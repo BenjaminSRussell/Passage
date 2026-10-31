@@ -24,6 +24,9 @@ import (
 const (
 	// CodeAlreadyFirmed is PLAN-0002 (BR-22.9): the planned order is already firmed.
 	CodeAlreadyFirmed = "PLAN-0002"
+	// CodeFirmEntity is returned when one firming request names planned orders of
+	// more than one legal entity: a batch belongs to exactly one.
+	CodeFirmEntity = "PLAN-FIRM-ENTITY"
 
 	firmIdempotencyConstraint = "firming_batch_idempotency_key"
 )
@@ -68,8 +71,8 @@ type FirmedGroup struct {
 // firmRow is a planned order locked for firming.
 type firmRow struct {
 	versionID, itemID, orderDate, deliveryDate string
-	status                                     string
-	current                                    bool
+	status, entity                             string
+	current, simulation                        bool
 	cand                                       domain.FirmCandidate
 }
 
@@ -107,7 +110,8 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 			return err
 		}
 		cands := make([]domain.FirmCandidate, 0, len(req.OrderIDs))
-		for _, id := range req.OrderIDs {
+		entity := ""
+		for i, id := range req.OrderIDs {
 			o, ok := rows[id]
 			switch {
 			case !ok:
@@ -116,8 +120,15 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 				return httpx.NewProblem(http.StatusConflict, CodeAlreadyFirmed, "planned order "+id+" is already firmed")
 			case o.status == "deleted":
 				return httpx.NewProblem(http.StatusConflict, CodeOrderNotEditable, "planned order "+id+" is deleted")
+			case o.simulation:
+				return simulationNotFirmable(id)
 			case !o.current:
 				return httpx.NewProblem(http.StatusConflict, CodeOrderNotEditable, "planned order "+id+" belongs to a version that is no longer current")
+			}
+			if i == 0 {
+				entity = o.entity
+			} else if o.entity != entity {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeFirmEntity, "planned orders of more than one legal entity cannot be firmed in one batch")
 			}
 			cands = append(cands, o.cand)
 		}
@@ -140,8 +151,12 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response)
-			values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, batchID, req.IdempotencyKey, req.InputHash, req.Grouping, len(cands), body); err != nil {
+		if _, err := tx.Exec(ctx, `insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`, p.TenantID, batchID, req.IdempotencyKey, req.InputHash, req.Grouping, len(cands), body, entity); err != nil {
+			return err
+		}
+		quotaRefs, err := bookQuota(ctx, tx, p.TenantID, req.OrderIDs)
+		if err != nil {
 			return err
 		}
 		for _, g := range out.Groups {
@@ -156,6 +171,7 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 					PlannedOrderID: id, PlanVersionID: o.versionID, BatchID: batchID, OrderType: g.OrderType,
 					TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, SiteID: o.cand.SiteID,
 					VendorID: optional(o.cand.VendorID), Qty: o.cand.Qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
+					QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 				})
 				if err != nil {
 					return err
@@ -181,7 +197,7 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 func lockForFirming(ctx context.Context, tx pgx.Tx, tenantID string, orderIDs []string) (map[string]firmRow, error) {
 	rows, err := tx.Query(ctx, `select o.id::text, o.plan_version_id::text, o.item_id::text, v.site_id::text, o.order_type,
 		coalesce(o.vendor_id::text, ''), o.qty::text, to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'),
-		(o.delivery_date - date '1970-01-01'), o.status, v.status = 'current'
+		(o.delivery_date - date '1970-01-01'), o.status, v.status = 'current', v.kind = 'simulation', coalesce(v.legal_entity_id::text, '')
 		from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 		where o.tenant_id = $1 and o.id = any($2::uuid[]) order by o.id for update of o`, tenantID, orderIDs)
 	if err != nil {
@@ -193,7 +209,7 @@ func lockForFirming(ctx context.Context, tx pgx.Tx, tenantID string, orderIDs []
 		var r firmRow
 		var id, qty string
 		if err := rows.Scan(&id, &r.versionID, &r.itemID, &r.cand.SiteID, &r.cand.OrderType, &r.cand.VendorID, &qty,
-			&r.orderDate, &r.deliveryDate, &r.cand.DeliveryDay, &r.status, &r.current); err != nil {
+			&r.orderDate, &r.deliveryDate, &r.cand.DeliveryDay, &r.status, &r.current, &r.simulation, &r.entity); err != nil {
 			return nil, err
 		}
 		if r.cand.Qty, err = decimal.NewFromString(qty); err != nil {
@@ -240,14 +256,14 @@ func (a *autoFirm) groupOf(orderID string) (FirmedGroup, bool) {
 // autoFirmBatch groups the run's auto-firmed orders (orderIDs[i] is the id of
 // req.Result.Orders[i]) into target orders as a planner's firming would with
 // the default grouping vendor-date (4.22.13), and returns nil when the run
-// firms nothing. Planned orders of a run carry no vendor yet, so purchases of
-// the site merge per delivery date.
+// firms nothing. A planned order allocated by a quota arrangement carries its
+// source's vendor; purchases without one merge per delivery date.
 func autoFirmBatch(req RunRequest, versionID string, orderIDs []string) (*autoFirm, error) {
 	epoch := int(req.AsOf.Unix() / 86400)
 	var cands []domain.FirmCandidate
 	for i, o := range req.Result.Orders {
 		if o.AutoFirmed {
-			cands = append(cands, domain.FirmCandidate{ID: orderIDs[i], OrderType: o.OrderType, SiteID: req.SiteID,
+			cands = append(cands, domain.FirmCandidate{ID: orderIDs[i], OrderType: o.OrderType, SiteID: req.SiteID, VendorID: o.VendorID,
 				DeliveryDay: epoch + o.DeliveryDate, Qty: o.Qty})
 		}
 	}

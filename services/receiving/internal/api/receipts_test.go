@@ -30,6 +30,9 @@ type headers map[string]string
 
 func doWith(h http.Handler, method, path, body string, hdr headers) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if _, named := hdr[entityHeader]; !named {
+		req.Header.Set(entityHeader, legalEntityID)
+	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}

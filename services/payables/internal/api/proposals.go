@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -38,17 +39,19 @@ const (
 	pathProposals         = "/v1/payables/payment-proposals"
 	maxVendorMethods      = 500
 	maxRunIDLength        = 64
+	maxWithholdingCodeLen = 40
 	defaultPageSize       = 50
 	maxPageSize           = 200
 	codeNotFound          = "COM-0404"
 	codeValidationFailed  = "COM-0001"
-	codeRatesUnconfigured = "COM-0503"
+	codeNotConfigured     = "COM-0503"
 	currencyMessage       = "must be a 3-letter upper-case ISO 4217 code"
 )
 
 var (
 	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 	openItemStatus  = []string{"OPEN", "PARTIALLY_SETTLED", "SETTLED", "REVERSED"}
+	proposalStatus  = []string{domain.ProposalDraft, domain.ProposalApproved, domain.ProposalCancelled, domain.ProposalExecuting, domain.ProposalExecuted, domain.ProposalFailed}
 )
 
 type PayablesStore interface {
@@ -58,12 +61,16 @@ type PayablesStore interface {
 	FindProposal(ctx context.Context, legalEntityID, runDate, runID string) (store.Proposal, error)
 	CreateProposal(ctx context.Context, in store.NewProposal) (store.Proposal, bool, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
-	ApproveProposal(ctx context.Context, id, approver, today string) (store.Proposal, error)
+	ApproveProposal(ctx context.Context, id, approver, today string, banks ...store.GroupBank) (store.Proposal, error)
 	CancelProposal(ctx context.Context, id, user string) (store.Proposal, error)
+	ListProposals(ctx context.Context, f store.ProposalFilter, limit int) ([]store.ProposalSummary, error)
+	SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error)
+	BlockVendor(ctx context.Context, legalEntityID, vendorID, reason string) error
+	UnblockVendor(ctx context.Context, legalEntityID, vendorID string) error
 }
 
 type RateSource interface {
-	Rate(ctx context.Context, from, to string, date time.Time) (decimal.Decimal, error)
+	Rate(ctx context.Context, legalEntityID, from, to string, date time.Time) (decimal.Decimal, error)
 }
 
 type proposalDeps struct {
@@ -75,6 +82,7 @@ type proposalDeps struct {
 	cancelled     atomic.Int64
 	selfApprovals atomic.Int64
 	rateFaults    atomic.Int64
+	holds         holdCounters
 }
 
 func (a *API) WithProposals(s PayablesStore, rates RateSource) *API {
@@ -89,9 +97,11 @@ func (a *API) registerProposals(r chi.Router) {
 	r.With(authz.RequireDuty(dutyOpenItemRead)).Get(pathOpenItems, a.listOpenItems)
 	r.With(authz.RequireDuty(dutyOpenItemRead)).Get(pathOpenItems+"/{id}", a.getOpenItem)
 	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals, a.createProposal)
+	r.With(authz.RequireDuty(dutyProposalRead)).Get(pathProposals, a.listProposals)
 	r.With(authz.RequireDuty(dutyProposalRead)).Get(pathProposals+"/{id}", a.getProposal)
 	r.With(authz.RequireDuty(dutyProposalApprove)).Post(pathProposals+"/{id}:approve", a.approveProposal)
 	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals+"/{id}:cancel", a.cancelProposal)
+	a.registerHolds(r)
 }
 
 func (a *API) problem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -108,7 +118,7 @@ func (a *API) invalid(w http.ResponseWriter, r *http.Request, fields map[string]
 
 func (a *API) resolveEntity(w http.ResponseWriter, r *http.Request, requested string) (string, bool) {
 	p, _ := tenant.FromContext(r.Context())
-	if p.LegalEntityID != "" && requested != "" && requested != p.LegalEntityID {
+	if requested != "" && !tenant.InLegalEntityScope(p, requested) {
 		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's legal-entity scope")
 		return "", false
 	}
@@ -153,8 +163,8 @@ type openItemPage struct {
 	NextCursor string         `json:"nextCursor,omitempty"`
 }
 
-func encodeCursor(o store.OpenItem) string {
-	return hex.EncodeToString([]byte(o.DueDate + "|" + o.ID))
+func encodeCursor(day, id string) string {
+	return hex.EncodeToString([]byte(day + "|" + id))
 }
 
 func decodeCursor(raw string) (due, id string, ok bool) {
@@ -220,9 +230,9 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	page := openItemPage{Items: make([]openItemBody, 0, min(len(items), limit))}
 	if len(items) > limit {
 		items = items[:limit]
-		page.NextCursor = encodeCursor(items[limit-1])
+		page.NextCursor = encodeCursor(items[limit-1].DueDate, items[limit-1].ID)
 	}
-	valued, ok := a.valueItems(w, r, items, valueIn)
+	valued, ok := a.valueItems(w, r, le, items, valueIn)
 	if !ok {
 		return
 	}
@@ -255,7 +265,7 @@ func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "open item get failed", err)
 		return
 	}
-	valued, ok := a.valueItems(w, r, []store.OpenItem{item}, valueIn)
+	valued, ok := a.valueItems(w, r, item.LegalEntityID, []store.OpenItem{item}, valueIn)
 	if !ok {
 		return
 	}
@@ -264,7 +274,7 @@ func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) today() time.Time { return a.now().UTC().Truncate(24 * time.Hour) }
 
-func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.OpenItem, valueIn string) ([]*valuation, bool) {
+func (a *API) valueItems(w http.ResponseWriter, r *http.Request, legalEntityID string, items []store.OpenItem, valueIn string) ([]*valuation, bool) {
 	out := make([]*valuation, len(items))
 	if valueIn == "" || len(items) == 0 {
 		return out, true
@@ -274,7 +284,7 @@ func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.O
 	for i, it := range items {
 		currencies[i] = it.Currency
 	}
-	rates, ok := a.ratesFor(w, r, currencies, valueIn, date)
+	rates, ok := a.ratesFor(w, r, legalEntityID, currencies, valueIn, date)
 	if !ok {
 		return nil, false
 	}
@@ -284,17 +294,17 @@ func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.O
 	return out, true
 }
 
-func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, currencies []string, to string, date time.Time) (map[string]decimal.Decimal, bool) {
+func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, legalEntityID string, currencies []string, to string, date time.Time) (map[string]decimal.Decimal, bool) {
 	rates := map[string]decimal.Decimal{to: decimal.NewFromInt(1)}
 	for _, c := range currencies {
 		if _, done := rates[c]; done {
 			continue
 		}
 		if a.proposals.rates == nil {
-			a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "exchange rate source is not configured")
+			a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "exchange rate source is not configured")
 			return nil, false
 		}
-		rate, err := a.proposals.rates.Rate(r.Context(), c, to, date)
+		rate, err := a.proposals.rates.Rate(r.Context(), legalEntityID, c, to, date)
 		if err != nil {
 			a.rateFailure(w, r, c, to, err)
 			return nil, false
@@ -326,6 +336,7 @@ type proposalRequest struct {
 	DueBy                string            `json:"dueBy"`
 	PaymentMethod        string            `json:"paymentMethod"`
 	VendorPaymentMethods map[string]string `json:"vendorPaymentMethods"`
+	WithholdingCodes     map[string]string `json:"withholdingCodes,omitempty"`
 }
 
 func (p proposalRequest) validate() (runDate time.Time, fields map[string]string) {
@@ -349,6 +360,14 @@ func (p proposalRequest) validate() (runDate time.Time, fields map[string]string
 	for vendor, method := range p.VendorPaymentMethods {
 		if !ids.Valid(vendor) || !domain.ValidPaymentMethod(method) {
 			fields["vendorPaymentMethods"] = "keys must be vendor UUIDs and values payment methods"
+		}
+	}
+	if len(p.WithholdingCodes) > maxVendorMethods {
+		fields["withholdingCodes"] = fmt.Sprintf("at most %d entries", maxVendorMethods)
+	}
+	for vendor, code := range p.WithholdingCodes {
+		if !ids.Valid(vendor) || code == "" || len(code) > maxWithholdingCodeLen {
+			fields["withholdingCodes"] = fmt.Sprintf("keys must be vendor UUIDs and values withholding codes of at most %d characters", maxWithholdingCodeLen)
 		}
 	}
 	return runDate, fields
@@ -421,7 +440,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	for i, c := range candidates {
 		currencies[i] = c.Currency
 	}
-	rates, ok := a.ratesFor(w, r, currencies, req.LegalEntityCurrency, rateDate)
+	rates, ok := a.ratesFor(w, r, le, currencies, req.LegalEntityCurrency, rateDate)
 	if !ok {
 		return
 	}
@@ -435,6 +454,9 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(groups) == 0 {
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeNothingDue, "no open items are due for payment on or before "+req.DueBy)
+		return
+	}
+	if !a.applyWithholding(w, r, le, runDate, req, groups) {
 		return
 	}
 	proposal, created, err := a.proposals.store.CreateProposal(ctx, store.NewProposal{
@@ -466,6 +488,59 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request, existing store.Prop
 	a.proposals.replayed.Add(1)
 	w.Header().Set("Idempotent-Replayed", "true")
 	httpx.JSON(w, http.StatusOK, existing)
+}
+
+type proposalPage struct {
+	Items      []store.ProposalSummary `json:"items"`
+	NextCursor string                  `json:"nextCursor,omitempty"`
+}
+
+func (a *API) listProposals(w http.ResponseWriter, r *http.Request) {
+	if !a.validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	le, ok := a.resolveEntity(w, r, q.Get("legal_entity"))
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	f := store.ProposalFilter{LegalEntityID: le, Status: q.Get("status"), RunFrom: q.Get("run_from"), RunTo: q.Get("run_to")}
+	if f.Status != "" && !slices.Contains(proposalStatus, f.Status) {
+		fields["status"] = "must be one of " + strings.Join(proposalStatus, ", ")
+	}
+	from, to := parseDay(fields, "run_from", f.RunFrom, false), parseDay(fields, "run_to", f.RunTo, false)
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		fields["run_from"] = "must not be after run_to"
+	}
+	limit := defaultPageSize
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxPageSize {
+			fields["limit"] = fmt.Sprintf("must be an integer from 1 to %d", maxPageSize)
+		}
+		limit = n
+	}
+	if raw := q.Get("cursor"); raw != "" {
+		if f.AfterRunDate, f.AfterID, ok = decodeCursor(raw); !ok {
+			fields["cursor"] = "must be the nextCursor of the previous page"
+		}
+	}
+	if len(fields) > 0 {
+		a.invalid(w, r, fields)
+		return
+	}
+	items, err := a.proposals.store.ListProposals(r.Context(), f, limit+1)
+	if err != nil {
+		a.fault(w, r, "payment proposal list failed", err)
+		return
+	}
+	page := proposalPage{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		page.NextCursor = encodeCursor(items[limit-1].RunDate, items[limit-1].ID)
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) getProposal(w http.ResponseWriter, r *http.Request) {
@@ -503,13 +578,40 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
 		return
 	}
-	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly))
+	var binds []store.GroupBank
+	if a.runs != nil && a.runs.ledger != nil {
+		if a.runs.banks == nil {
+			a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "payment runs are enabled but the party service is not configured; an approved proposal could not be paid")
+			return
+		}
+		draft, err := a.proposals.store.GetProposal(r.Context(), id)
+		switch {
+		case errors.Is(err, store.ErrProposalNotFound):
+			a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+			return
+		case err != nil:
+			a.fault(w, r, "payment proposal get failed", err)
+			return
+		case draft.Status != domain.ProposalDraft:
+			a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
+			return
+		}
+		var ok bool
+		if draft.CreatedBy != caller.UserID {
+			if binds, ok = a.bankBindings(w, r, draft); !ok {
+				return
+			}
+		}
+	}
+	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly), binds...)
 	var changed *store.LinesChangedError
 	switch {
 	case errors.As(err, &changed):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, changed.Error())
 	case errors.Is(err, store.ErrProposalNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+	case errors.Is(err, store.ErrPaidChanged):
+		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; create a new proposal")
 	case errors.Is(err, store.ErrNotDraft):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
 	case errors.Is(err, store.ErrRunDateElapsed):
@@ -560,5 +662,7 @@ func (a *API) writeProposalMetrics(w http.ResponseWriter) {
 	}
 	fmt.Fprintf(w, "# HELP payables_payment_proposals_total Payment proposal commands by outcome.\n# TYPE payables_payment_proposals_total counter\npayables_payment_proposals_total{outcome=\"created\"} %d\npayables_payment_proposals_total{outcome=\"replayed\"} %d\npayables_payment_proposals_total{outcome=\"approved\"} %d\npayables_payment_proposals_total{outcome=\"self_approval_refused\"} %d\npayables_payment_proposals_total{outcome=\"cancelled\"} %d\n",
 		a.proposals.created.Load(), a.proposals.replayed.Load(), a.proposals.approved.Load(), a.proposals.selfApprovals.Load(), a.proposals.cancelled.Load())
+	fmt.Fprintf(w, "# HELP payables_payment_holds_total Payment hold and vendor block commands by outcome.\n# TYPE payables_payment_holds_total counter\npayables_payment_holds_total{outcome=\"held\"} %d\npayables_payment_holds_total{outcome=\"released\"} %d\npayables_payment_holds_total{outcome=\"vendor_blocked\"} %d\npayables_payment_holds_total{outcome=\"vendor_unblocked\"} %d\n",
+		a.proposals.holds.held.Load(), a.proposals.holds.released.Load(), a.proposals.holds.blocked.Load(), a.proposals.holds.unblocked.Load())
 	fmt.Fprintf(w, "# HELP payables_fx_rate_faults_total Exchange rate lookups that failed on a server or transport fault.\n# TYPE payables_fx_rate_faults_total counter\npayables_fx_rate_faults_total %d\n", a.proposals.rateFaults.Load())
 }

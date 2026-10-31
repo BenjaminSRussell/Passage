@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Lean events
-  version: 0.4.0
+  version: 0.5.0
   description: >
     CloudEvents 1.0 published through the transactional outbox (Debezium
     outbox router), each in the same transaction as the change it reports.
@@ -18,6 +18,8 @@ channels:
     messages:
       flowActivated:
         $ref: '#/components/messages/FlowActivated'
+      flowExpired:
+        $ref: '#/components/messages/FlowExpired'
   kanban:
     address: passage.lean.kanban
     messages:
@@ -41,6 +43,11 @@ operations:
     channel: { $ref: '#/channels/flow' }
     messages: [{ $ref: '#/channels/flow/messages/flowActivated' }]
     summary: A production flow passed connectivity and went live (production, planning consume it)
+  publishFlowExpired:
+    action: send
+    channel: { $ref: '#/channels/flow' }
+    messages: [{ $ref: '#/channels/flow/messages/flowExpired' }]
+    summary: A production flow version was replaced by a newer version that went active (production, planning stop using it)
   publishKanbanCreated:
     action: send
     channel: { $ref: '#/channels/kanban' }
@@ -79,22 +86,32 @@ components:
   messages:
     FlowActivated:
       name: dev.passage.lean.flow.activated.v1
+      summary: A production flow was activated and its activities are fixed
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/FlowActivatedData' }
+    FlowExpired:
+      name: dev.passage.lean.flow.expired.v1
+      summary: A production flow version expired because a newer version was activated
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/FlowExpiredData' }
     KanbanCreated:
       name: dev.passage.lean.kanban.created.v1
+      summary: A kanban card was generated from a rule or a demand line
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/KanbanCreatedData' }
     KanbanStateChanged:
       name: dev.passage.lean.kanban.statechanged.v1
+      summary: A kanban card moved to another state (completion drives the replenishment transfer or order)
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/KanbanStateChangedData' }
     JobStateChanged:
       name: dev.passage.lean.kanbanjob.statechanged.v1
+      summary: A kanban job moved to another state (service-activity completions drive subcontract POs)
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/JobStateChangedData' }
     FlowPeriodSettled:
       name: dev.passage.lean.flowperiod.settled.v1
+      summary: A flow costing period was settled; the ledger posts the variance from it
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/FlowPeriodSettledData' }
   schemas:
@@ -115,7 +132,7 @@ components:
         journalEntryId: { type: [string, 'null'], format: uuid, description: Null until the ledger integration posts the journal. }
     FlowActivatedData:
       type: object
-      required: [flowId, valueStreamId, siteId, name, activeFrom, activities]
+      required: [flowId, valueStreamId, siteId, name, activeFrom, activities, flowVersion, previousFlowId]
       properties:
         flowId: { type: string, format: uuid }
         valueStreamId: { type: string, format: uuid }
@@ -123,6 +140,17 @@ components:
         name: { type: string }
         activeFrom: { type: string, format: date }
         activities: { type: integer }
+        flowVersion: { type: integer, minimum: 1, description: 1 for a first version. }
+        previousFlowId: { type: [string, 'null'], format: uuid, description: The flow version this one replaces; it is expired in the same transaction. }
+    FlowExpiredData:
+      type: object
+      required: [flowId, name, flowVersion, activeTo, supersededBy]
+      properties:
+        flowId: { type: string, format: uuid }
+        name: { type: string }
+        flowVersion: { type: integer, minimum: 1 }
+        activeTo: { type: string, format: date, description: The day before the new version starts. }
+        supersededBy: { type: string, format: uuid, description: The flow that replaces it. }
     KanbanCreatedData:
       type: object
       required: [kanbanId, ruleId, cardNumber, itemId, ruleType, qty, state]

@@ -34,6 +34,7 @@ func (d *fieldDecimal) UnmarshalJSON(b []byte) error {
 
 type arrivalLine struct {
 	POLineID         string        `json:"poLineId"`
+	POLineNo         *int          `json:"poLineNo"`
 	ProductID        string        `json:"productId"`
 	OrderedRemaining *fieldDecimal `json:"orderedRemaining"`
 	OverDeliveryPct  *fieldDecimal `json:"overDeliveryPct"`
@@ -59,6 +60,7 @@ type arrivalRequest struct {
 type receiptLineBody struct {
 	LineNo           int      `json:"lineNo"`
 	POLineID         string   `json:"poLineId"`
+	POLineNo         *int     `json:"poLineNo,omitempty"`
 	ProductID        string   `json:"productId"`
 	OrderedRemaining string   `json:"orderedRemaining"`
 	OverDeliveryPct  string   `json:"overDeliveryPct"`
@@ -118,8 +120,12 @@ func toReceiptBody(r store.Receipt) receiptBody {
 		if serials == nil {
 			serials = []string{}
 		}
+		var poLineNo *int
+		if l.POLineNo > 0 {
+			poLineNo = &l.POLineNo
+		}
 		out.Lines = append(out.Lines, receiptLineBody{
-			LineNo: l.LineNo, POLineID: l.POLineID, ProductID: l.ProductID, OrderedRemaining: l.OrderedRemaining.String(),
+			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: poLineNo, ProductID: l.ProductID, OrderedRemaining: l.OrderedRemaining.String(),
 			OverDeliveryPct: l.OverDeliveryPct.String(), UnitPrice: l.UnitPrice.String(), Unit: l.Unit, BatchTracked: l.BatchTracked,
 			SerialTracked: l.SerialTracked, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials, LocationID: l.LocationID,
 			InventoryStatus: l.InventoryStatus, Amount: nullableString(l.Amount), AmountAcct: nullableString(l.AmountAcct),
@@ -188,14 +194,33 @@ func buildArrival(req arrivalRequest) (store.Receipt, map[string]string) {
 	}
 	for i, l := range req.Lines {
 		name := func(field string) string { return fmt.Sprintf("lines[%d].%s", i, field) }
-		checkUUID(fields, name("poLineId"), l.POLineID)
+		if l.POLineNo != nil {
+			if l.POLineID != "" {
+				fields[name("poLineId")] = "is derived from poLineNo and must be omitted"
+			}
+		} else {
+			checkUUID(fields, name("poLineId"), l.POLineID)
+		}
 		checkUUID(fields, name("productId"), l.ProductID)
 		checkLength(fields, name("unit"), l.Unit, 1, maxUnit)
 		line := store.Line{
 			LineNo: i + 1, POLineID: l.POLineID, ProductID: l.ProductID, Unit: l.Unit, Currency: req.Currency,
 			BatchTracked: l.BatchTracked, SerialTracked: l.SerialTracked,
 		}
-		if v, ok := decimalField(fields, name("orderedRemaining"), l.OrderedRemaining, true); ok {
+		fromPO := l.POLineNo != nil
+		if fromPO {
+			line.POLineNo = *l.POLineNo
+			if line.POLineNo < 1 {
+				fields[name("poLineNo")] = "must be at least 1"
+			}
+			if l.OrderedRemaining != nil {
+				fields[name("orderedRemaining")] = poOverrideMessage
+			}
+			if l.UnitPrice != nil {
+				fields[name("unitPrice")] = poOverrideMessage
+			}
+		}
+		if v, ok := decimalField(fields, name("orderedRemaining"), l.OrderedRemaining, !fromPO); ok && !fromPO {
 			if v.Sign() <= 0 {
 				fields[name("orderedRemaining")] = "must be greater than zero"
 			}
@@ -207,7 +232,7 @@ func buildArrival(req arrivalRequest) (store.Receipt, map[string]string) {
 			}
 			line.OverDeliveryPct = v
 		}
-		if v, ok := decimalField(fields, name("unitPrice"), l.UnitPrice, true); ok {
+		if v, ok := decimalField(fields, name("unitPrice"), l.UnitPrice, !fromPO); ok && !fromPO {
 			if v.Sign() < 0 {
 				fields[name("unitPrice")] = "must not be negative"
 			}
@@ -239,6 +264,7 @@ func (a *API) arrive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, fields := buildArrival(req)
+	a.requirePOLine(in, fields)
 	if len(fields) > 0 {
 		problem := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
 		problem.Errors = fields
@@ -246,6 +272,10 @@ func (a *API) arrive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := inScope(p, req.LegalEntityID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if _, err := a.bindPurchaseOrder(r.Context(), &in); err != nil {
 		writeError(w, r, err)
 		return
 	}

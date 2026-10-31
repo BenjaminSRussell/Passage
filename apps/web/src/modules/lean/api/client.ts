@@ -46,6 +46,9 @@ export interface Flow {
   activeFrom: string | null;
   activeTo: string | null;
   version: number;
+  /** The number of this version of the flow (1, 2, ...); `version` is the concurrency counter. */
+  flowVersion: number;
+  previousFlowId: string | null;
   activityCount: number;
   activities?: Activity[];
   createdAt: string;
@@ -294,6 +297,15 @@ export function createFlow(input: NewFlow, key: string = newKey()): Promise<Flow
 /** Validates connectivity and activates a draft flow (FR-24.8). */
 export function activateFlow(id: string, input: { version: number; activeFrom?: string }, key: string = newKey()): Promise<Flow> {
   return post<Flow>(`/flows/${encodeURIComponent(id)}:activate`, input, key);
+}
+
+/** Creates a draft copy of an active flow as its next version (FR-24.8); takt time and activities are optional changes. */
+export function newFlowVersion(
+  id: string,
+  input: { version: number; taktTimeS?: number; activities?: ActivityInput[] },
+  key: string = newKey(),
+): Promise<Flow> {
+  return post<Flow>(`/flows/${encodeURIComponent(id)}:new-version`, input, key);
 }
 
 export function listRules(flowId = "", signal?: AbortSignal): Promise<Rule[]> {

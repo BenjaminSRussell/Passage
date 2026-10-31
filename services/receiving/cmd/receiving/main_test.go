@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
@@ -72,6 +75,7 @@ func TestNotImplementedListsEveryDeliverable(t *testing.T) {
 }
 
 func withAccounts(env map[string]string) map[string]string {
+	env["AUDIT_SAMPLE_SEED"] = "0123456789abcdef"
 	env["POSTING_LEDGER_ID"] = "0a1b2c3d-0000-4000-8000-000000000001"
 	env["POSTING_ACCOUNT_INVENTORY"], env["POSTING_ACCOUNT_GRIR"], env["POSTING_ACCOUNT_PPV"], env["POSTING_ACCOUNT_VENDOR_CONTROL"] = "1400", "2100", "5200", "2000"
 	return env
@@ -154,6 +158,72 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	if _, real := ports.PurchaseOrders.(*purchasing.Client); !real {
 		t.Fatalf("purchase orders is %T despite PURCHASING_URL", ports.PurchaseOrders)
 	}
+	if !ports.RequirePOLine || fakes.RequirePOLine {
+		t.Fatalf("poLineNo must be required exactly when PURCHASING_URL is set: real %v fake %v", ports.RequirePOLine, fakes.RequirePOLine)
+	}
+}
+
+func TestBuildPortsIgnoresTheRemovedLegacyPOLineFlag(t *testing.T) {
+	ports, err := buildPorts(func(k string) string {
+		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "PASSAGE_ALLOW_FAKES": "1", "RECEIVING_ALLOW_LEGACY_PO_LINE": "1"}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ports.RequirePOLine {
+		t.Fatal("RECEIVING_ALLOW_LEGACY_PO_LINE=1 must no longer waive poLineNo")
+	}
+}
+
+func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
+	base := map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "POSTING_LEDGER_ID": "0a1b2c3d-0000-4000-8000-000000000001",
+		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4", "AUDIT_SAMPLE_SEED": "0123456789abcdef"}
+	build := func(extra map[string]string) api.Ports {
+		t.Helper()
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		ports, err := buildPorts(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ports
+	}
+
+	real := build(map[string]string{"INVENTORY_URL": "http://i", "PARTY_URL": "http://party"})
+	if _, ok := real.VendorGroups.(*party.Client); !ok {
+		t.Fatalf("vendor groups is %T despite PARTY_URL", real.VendorGroups)
+	}
+	if unset := build(nil); unset.VendorGroups != nil {
+		t.Fatalf("vendor groups is %T with PARTY_URL unset and no fakes", unset.VendorGroups)
+	}
+	if _, ok := real.OwnershipChanges.(*inventory.Client); !ok {
+		t.Fatalf("ownership changes is %T despite INVENTORY_URL", real.OwnershipChanges)
+	}
+	if plans, ok := real.InvoicingPlans.(*purchasing.Client); !ok || plans != real.PurchaseOrders {
+		t.Fatalf("invoicing plans is %T, want the purchasing client that serves purchase orders", real.InvoicingPlans)
+	}
+	if marks, ok := real.PlanRowSettlements.(*purchasing.Client); !ok || marks != real.PurchaseOrders {
+		t.Fatalf("plan row settlements is %T, want the purchasing client", real.PlanRowSettlements)
+	}
+	if unset := build(nil); unset.OwnershipChanges != nil {
+		t.Fatalf("ownership changes is %T with INVENTORY_URL unset and no fakes: the endpoint must answer 503", unset.OwnershipChanges)
+	}
+	fakes := build(map[string]string{"PASSAGE_ALLOW_FAKES": "1"})
+	if _, ok := fakes.OwnershipChanges.(domain.FakeOwnershipChanges); !ok {
+		t.Fatalf("ownership changes is %T with fakes allowed", fakes.OwnershipChanges)
+	}
+	noPurchasing, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
+	if _, ok := noPurchasing.InvoicingPlans.(domain.FakeInvoicingPlans); !ok || err != nil {
+		t.Fatalf("invoicing plans is %T err %v with fakes allowed", noPurchasing.InvoicingPlans, err)
+	}
+	if _, ok := noPurchasing.PlanRowSettlements.(domain.FakePlanRowSettlements); !ok {
+		t.Fatalf("plan row settlements is %T with fakes allowed", noPurchasing.PlanRowSettlements)
+	}
 }
 
 func TestSmallPoolConfigCapsConnectionsForURLAndKeywordDSNs(t *testing.T) {
@@ -173,5 +243,37 @@ func TestSmallPoolConfigCapsConnectionsForURLAndKeywordDSNs(t *testing.T) {
 	}
 	if _, err := smallPoolConfig("://bad"); err == nil {
 		t.Fatal("an unparseable DSN must fail")
+	}
+}
+
+func TestBuildPortsRequiresTheAuditSampleSeed(t *testing.T) {
+	env := func(seed string) func(string) string {
+		return func(k string) string {
+			e := withAccounts(map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p"})
+			e["AUDIT_SAMPLE_SEED"] = seed
+			return e[k]
+		}
+	}
+	if _, err := buildPorts(env("")); err == nil || !strings.Contains(err.Error(), "AUDIT_SAMPLE_SEED is required") {
+		t.Fatalf("empty seed err %v", err)
+	}
+	if _, err := buildPorts(env("short")); err == nil || !strings.Contains(err.Error(), "AUDIT_SAMPLE_SEED") {
+		t.Fatalf("short seed err %v", err)
+	}
+	if ports, err := buildPorts(env("0123456789abcdef")); err != nil || ports.AuditSampler == nil {
+		t.Fatalf("ports %+v err %v", ports, err)
+	}
+	fakes, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
+	if err != nil || fakes.AuditSampler == nil {
+		t.Fatalf("fakes %+v err %v", fakes, err)
+	}
+}
+
+func TestBuildPorts_MalformedServiceSigningKeyStopsStartup(t *testing.T) {
+	_, err := buildPorts(func(k string) string {
+		return map[string]string{"PASSAGE_ALLOW_FAKES": "1", "PASSAGE_SERVICE_SIGNING_KEY": "not-a-seed"}[k]
+	})
+	if err == nil {
+		t.Fatal("a malformed service signing key must fail startup, not silently fall back to forwarding user duties")
 	}
 }

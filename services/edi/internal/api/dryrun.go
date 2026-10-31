@@ -259,6 +259,13 @@ type ublPartyDTO struct {
 	EndpointID     string `json:"endpointId"`
 	CountryCode    string `json:"countryCode"`
 	VATID          string `json:"vatId"`
+	LegalID        string `json:"legalId"`
+	StreetName     string `json:"streetName"`
+	CityName       string `json:"cityName"`
+	PostalZone     string `json:"postalZone"`
+	ContactName    string `json:"contactName"`
+	ContactPhone   string `json:"contactPhone"`
+	ContactEmail   string `json:"contactEmail"`
 }
 
 type ublLineDTO struct {
@@ -294,12 +301,16 @@ type ublRequest struct {
 	AllowanceCharges []ublAllowanceChargeDTO `json:"allowanceCharges"`
 	Prepaid          string                  `json:"prepaid"`
 	ExemptionReasons map[string]string       `json:"exemptionReasons"`
+	DeliveryDate     string                  `json:"deliveryDate"`
+	DeliveryCountry  string                  `json:"deliveryCountry"`
 	Lines            []ublLineDTO            `json:"lines"`
 }
 
 func toUBLParty(p ublPartyDTO) domain.UBLParty {
 	return domain.UBLParty{Name: p.Name, LegalName: p.LegalName, EndpointScheme: p.EndpointScheme,
-		EndpointID: p.EndpointID, CountryCode: p.CountryCode, VATID: p.VATID}
+		EndpointID: p.EndpointID, CountryCode: p.CountryCode, VATID: p.VATID, LegalID: p.LegalID,
+		StreetName: p.StreetName, CityName: p.CityName, PostalZone: p.PostalZone,
+		ContactName: p.ContactName, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail}
 }
 
 // ublBuild builds Peppol BIS Billing 3.0 UBL for an invoice or credit note and
@@ -324,6 +335,7 @@ func (a *API) ublBuild(w http.ResponseWriter, r *http.Request) {
 		PaymentMeansCode: req.PaymentMeansCode, IBAN: req.IBAN,
 		Prepaid:          parseDec(fields, "prepaid", req.Prepaid),
 		ExemptionReasons: req.ExemptionReasons,
+		DeliveryDate:     req.DeliveryDate, DeliveryCountry: req.DeliveryCountry,
 	}
 	for i, ac := range req.AllowanceCharges {
 		key := fmt.Sprintf("allowanceCharges[%d]", i)

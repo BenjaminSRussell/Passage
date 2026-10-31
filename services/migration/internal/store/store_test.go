@@ -21,7 +21,7 @@ import (
 )
 
 func principalContext(n int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func newStore(t *testing.T) *store.Postgres {
@@ -273,6 +273,9 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 	if _, err := app.SaveRun(one, sampleRun(), ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := app.SaveMappingSpec(one, sampleSpec(1, "c1"), ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := app.Xref().Put(one, domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: "C1"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-000000000001"}); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +290,7 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 		return n
 	}
 	scoped := tenant.With(ctx, tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
-	for _, table := range []string{"run", "run_ledger", "xref"} {
+	for _, table := range []string{"run", "run_ledger", "xref", "mapping_spec"} {
 		if own := count(one, table); own == 0 {
 			t.Errorf("%s: tenant 1 must see its rows", table)
 		}
@@ -297,5 +300,193 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 		if narrowed := count(scoped, table); narrowed != 0 {
 			t.Errorf("%s: a legal-entity-scoped session sees %d tenant-wide rows", table, narrowed)
 		}
+	}
+}
+
+func sampleSpec(version int, checksum string) store.MappingSpec {
+	return store.MappingSpec{Entity: "customer", Version: version, Checksum: checksum, FieldCount: 2, TestCount: 1, Spec: json.RawMessage(`{"entity":"customer"}`)}
+}
+
+func TestPostgres_MappingSpecVersionsAreImmutableAndIdempotent(t *testing.T) {
+	s := newStore(t)
+	ctx := principalContext(1)
+	first, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k1")
+	if err != nil || !created || first.ID == "" {
+		t.Fatalf("first save = %+v, %v, %v", first, created, err)
+	}
+	same, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "")
+	if err != nil || created || same.ID != first.ID {
+		t.Fatalf("same checksum must return the stored version: %+v, %v, %v", same, created, err)
+	}
+	replay, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k1")
+	if err != nil || created || replay.ID != first.ID {
+		t.Fatalf("key replay = %+v, %v, %v", replay, created, err)
+	}
+	var problem *httpx.Problem
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(1, "other"), ""); !errors.As(err, &problem) || problem.Code != store.CodeSpecVersionUsed {
+		t.Fatalf("changed checksum must conflict, got %v", err)
+	}
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(2, "c2"), "k1"); !errors.As(err, &problem) || problem.Code != store.CodeSpecKeyReuse {
+		t.Fatalf("key reuse must be rejected, got %v", err)
+	}
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListMappingSpecs(ctx, "customer", 10)
+	if err != nil || len(list) != 2 || list[0].Version != 2 {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	if none, _ := s.ListMappingSpecs(ctx, "vendor", 10); len(none) != 0 {
+		t.Fatalf("entity filter leaked %v", none)
+	}
+	got, err := s.GetMappingSpec(ctx, first.ID)
+	if err != nil || got.Checksum != "c1" || string(got.Spec) != `{"entity": "customer"}` {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if _, err := s.GetMappingSpec(principalContext(2), first.ID); !errors.As(err, &problem) || problem.Code != store.CodeSpecNotFound {
+		t.Fatalf("other tenant must not read the spec, got %v", err)
+	}
+	if _, err := s.GetMappingSpec(ctx, "bad"); err == nil {
+		t.Fatal("malformed id must error")
+	}
+}
+
+func TestPostgres_ListRunsFiltersAndLinksMappingSpec(t *testing.T) {
+	s := newStore(t)
+	ctx := principalContext(1)
+	spec, _, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := sampleRun()
+	a.MappingSpecID = spec.ID
+	savedA, err := s.SaveRun(ctx, a, "")
+	if err != nil || savedA.MappingSpecID != spec.ID {
+		t.Fatalf("spec link = %+v, %v", savedA, err)
+	}
+	b := sampleRun()
+	b.Entity = "vendor"
+	b.Report.Status = domain.StatusSucceeded
+	savedB, _ := s.SaveRun(ctx, b, "")
+	all, err := s.ListRuns(ctx, store.RunFilter{})
+	if err != nil || len(all) != 2 || all[0].ID != savedB.ID {
+		t.Fatalf("newest first, got %+v, %v", all, err)
+	}
+	if v, _ := s.ListRuns(ctx, store.RunFilter{Entity: "vendor"}); len(v) != 1 {
+		t.Fatalf("entity filter = %d", len(v))
+	}
+	if p, _ := s.ListRuns(ctx, store.RunFilter{Status: domain.StatusPartial}); len(p) != 1 || p[0].ID != savedA.ID {
+		t.Fatalf("status filter = %+v", p)
+	}
+	if one, _ := s.ListRuns(ctx, store.RunFilter{Limit: 1}); len(one) != 1 {
+		t.Fatalf("limit = %d", len(one))
+	}
+	if other, _ := s.ListRuns(principalContext(2), store.RunFilter{}); len(other) != 0 {
+		t.Fatalf("tenant 2 sees %d runs", len(other))
+	}
+}
+
+func TestMem_SpecContract(t *testing.T) {
+	m := store.NewMem()
+	ctx := context.Background()
+	first, created, _ := m.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k")
+	again, created2, _ := m.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k")
+	if !created || created2 || again.ID != first.ID {
+		t.Fatal("same spec must replay")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(1, "x"), ""); err == nil {
+		t.Fatal("changed checksum must conflict")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(3, "x"), "k"); err == nil {
+		t.Fatal("key reuse must fail")
+	}
+	if got, err := m.GetMappingSpec(ctx, first.ID); err != nil || got.ID != first.ID {
+		t.Fatal("get")
+	}
+	if _, err := m.GetMappingSpec(ctx, "x"); err == nil {
+		t.Fatal("missing must error")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := m.ListMappingSpecs(ctx, "customer", 0); len(l) != 2 || l[0].Version != 2 {
+		t.Fatalf("list must put the newest version first like Postgres: %+v", l)
+	}
+	if l, _ := m.ListMappingSpecs(ctx, "customer", 1); len(l) != 1 {
+		t.Fatalf("limit = %d", len(l))
+	}
+}
+
+// The browse runs on the app role, so the 0001 grants and the xref RLS policies are what it exercises.
+func TestPostgres_XrefBrowseKeysetFiltersAndSummary(t *testing.T) {
+	s, pool := newAppStore(t)
+	ctx := principalContext(1)
+	x := s.Xref()
+	for i := 0; i < 5; i++ {
+		key := domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: fmt.Sprintf("C%d_%d", i, i)}
+		if err := x.Put(ctx, key, domain.XrefEntry{TargetID: fmt.Sprintf("00000000-0000-7000-8000-%012d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = x.Put(ctx, domain.XrefKey{SourceSystem: "sap_ecc", Entity: "vendor", SourceKey: "V%1"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000aa"})
+	_ = x.Put(principalContext(2), domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: "OTHER"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000bb"})
+
+	first, err := s.ListXref(ctx, store.XrefFilter{Limit: 4})
+	if err != nil || len(first) != 4 || first[0].SourceKey != "C0_0" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	last := first[3]
+	rest, err := s.ListXref(ctx, store.XrefFilter{After: &store.XrefCursor{SourceSystem: last.SourceSystem, Entity: last.Entity, SourceKey: last.SourceKey}, Limit: 10})
+	if err != nil || len(rest) != 2 || rest[0].SourceKey != "C4_4" || rest[1].SourceKey != "V%1" {
+		t.Fatalf("second page = %+v, %v", rest, err)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{KeyPrefix: "V%"}); len(got) != 1 {
+		t.Fatalf("a literal percent in a prefix must not act as a wildcard: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{KeyPrefix: "C_"}); len(got) != 0 {
+		t.Fatalf("a literal underscore must not act as a wildcard: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{TargetID: "00000000-0000-7000-8000-000000000002"}); len(got) != 1 || got[0].SourceKey != "C2_2" {
+		t.Fatalf("reverse lookup = %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{TargetID: "not-a-uuid"}); len(got) != 0 {
+		t.Fatalf("malformed id = %+v", got)
+	}
+	counts, err := s.XrefSummary(ctx)
+	if err != nil || len(counts) != 2 || counts[0].Count != 5 || counts[1].Entity != "vendor" {
+		t.Fatalf("summary = %+v, %v", counts, err)
+	}
+	if got, _ := s.ListXref(principalContext(2), store.XrefFilter{}); len(got) != 1 || got[0].SourceKey != "OTHER" {
+		t.Fatalf("tenant 2 sees %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{SourceSystem: "ax2012", Entity: "customer", SourceKey: "C1_1", KeyPrefix: "C1"}); len(got) != 1 {
+		t.Fatalf("filters combine with and: %+v", got)
+	}
+	if got, _ := s.ListXref(ctx, store.XrefFilter{SourceSystem: "ax2012", Entity: "vendor"}); len(got) != 0 {
+		t.Fatalf("entity filter = %+v", got)
+	}
+
+	// The party merge flow sets merged_into_target_id; a lookup by the survivor finds the merged legacy key too.
+	survivor := "00000000-0000-7000-8000-000000000001"
+	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update migration.xref set merged_into_target_id = $1 where source_key = 'C3_3'`, survivor)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListXref(ctx, store.XrefFilter{TargetID: survivor})
+	if err != nil || len(got) != 2 || got[0].SourceKey != "C1_1" || got[1].SourceKey != "C3_3" || got[1].MergedIntoTargetID != survivor || got[0].MergedIntoTargetID != "" {
+		t.Fatalf("survivor lookup = %+v, %v", got, err)
+	}
+	if got, _ := s.ListXref(principalContext(2), store.XrefFilter{TargetID: survivor}); len(got) != 0 {
+		t.Fatalf("another tenant finds the survivor: %+v", got)
+	}
+
+	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	if got, err := s.ListXref(scoped, store.XrefFilter{}); err != nil || len(got) != 0 {
+		t.Fatalf("a legal-entity-scoped caller sees %+v, %v", got, err)
+	}
+	if got, err := s.XrefSummary(scoped); err != nil || len(got) != 0 {
+		t.Fatalf("a legal-entity-scoped summary = %+v, %v", got, err)
 	}
 }

@@ -145,7 +145,7 @@ Slice 5 (FR-48.6, FR-48.10, FR-48.11, FR-48.24, FR-48.25, FR-48.29):
   link; an ERASURE with holds goes to HELD at DISCOVER and cannot leave it or be approved while a hold
   stands, AC-48.7; a close after the deadline needs a 10-character justification and is marked late;
   REJECT needs a reason), `PseudonymizeSubject` (BR-48.5: the seven PII fields become a deterministic
-  `ERASED-` token per subject and field, everything else is kept and `erased` is set) and `PurgeCheck`
+  `ERASED-` token (HMAC-SHA256 under a per-tenant key, 128 bits) per tenant, subject and field, everything else is kept and `erased` is set) and `PurgeCheck`
   (BR-48.6).
 - `internal/store/privacy.go` and `0005_privacy.sql`: `subject_request` with RLS; intake under
   `Idempotency-Key`, actions under the row lock and `If-Match`, the stored type, state, holds and
@@ -157,7 +157,7 @@ Slice 5 (FR-48.6, FR-48.10, FR-48.11, FR-48.24, FR-48.25, FR-48.29):
   CLOSED one step at a time; Sev-1 pages on-call; breach clocks from `awareAt`; a clock notified by its
   deadline (`notifiedAt` per regime) is met, and closing needs a justification for every clock sent late
   or still unsent past its deadline.
-- `internal/domain/governance.go` (FR-48.24, FR-48.25): `DecideExport` (PRD default actions, overrides,
+- `internal/domain/governance.go` (FR-48.24, FR-48.25): `DecideExport` (PRD default actions, server-side overrides only: the request body cannot carry a policy or read rules,
   DENY, REASON, APPROVAL and the 10,000-row bulk hold, audit always) and `ClassifyRead` (default
   read-logged fields, exact and `*.name` rules, 90..3650 day retention, names only).
 
@@ -182,7 +182,13 @@ check the append-only tables refuse UPDATE and DELETE.
 Fixture `testdata/sod-50.json` (fx-sod-50) plants 50 users across the seed rules.
 `TestDetect_PlantedFixtureNoFalseNegatives` asserts every planted conflict is detected and nothing else
 fires; `TestEvaluate_PlantedFiftyReconcileWithRecomputation` stores them and reconciles the OPEN count and
-the `conflict.detected` events with an independent recomputation (PRD §9.48.9). Rapid property tests
+the `conflict.detected` events with an independent recomputation (PRD §9.48.9). Fixture
+`testdata/sod-50-distinct.json` plants 50 pairwise distinct role combinations (roles holding both duties
+of a rule, several conflicts per user, all 11 seed rules; 81 conflicts) and 12 near misses;
+`testdata/sod_ref.py` (stdlib, `python3 -I`) recomputes its expectations from the seed rules.
+`TestDetect_FiftyDistinctCombinationsAndNearMisses` checks detection and the simulate block, and
+`TestMitigate_FiftyDistinctCombinationsRecordEveryApproval` stores them, refuses self-approval and records
+a second approver's mitigation on all 81. Rapid property tests
 assert a role set holding both duties of any seed rule is never missed, sampling at 100% selects every
 document, the case machine never skips a state and no break-glass session exceeds 240 minutes.
 
@@ -200,6 +206,7 @@ document, the case machine never skips a state and no break-glass session exceed
 | `BREAKGLASS_REVIEW_DAYS` | `3` | tenant policy `breakglass.review_days`, 1..10 business days |
 | `SCREENING_THRESHOLD` | `0.88` | tenant policy `screening.threshold`, 0.70..0.99 |
 | `TRADE_LICENSE_CHECK` | `BLOCK` | legal entity policy `trade.license_check`: `BLOCK`, `WARN` or `OFF` |
+| `FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_KEYS`, `FIELDCRYPT_CURRENT_KEY_ID` | `id=base64(32 bytes)` lines (a mounted secret; Helm `fieldCrypt.keysSecret` and `fieldCrypt.currentKeyId`) and the key id in use. Erasure pseudonyms are an HMAC under a tenant key derived from the current key, so the key must stay outside the database; without it the erasure preview is a 503 `PRV-1211` and nothing changes. Rotating the current key changes the tokens of later erasures, so do not rotate `FIELDCRYPT_CURRENT_KEY_ID` while erasure requests are open |
 | `HTTP_ADDR` / `ADMIN_ADDR` | `:8080` / `:9090` | listeners |
 
 ## Error codes
@@ -253,6 +260,7 @@ document, the case machine never skips a state and no break-glass session exceed
 | `PRV-1208` | 200 (`code` in the purge check body) | record skipped by the retention purge (BR-48.6) |
 | `PRV-1209` | 404 | no subject request with that id |
 | `PRV-1210` | 412 | stale `If-Match` on a subject request action (missing `If-Match` is 428 `SOD-1109`) |
+| `PRV-1211` | 503 | no pseudonymization key configured; the erasure changed nothing |
 | `SOD-1120` | 422 | campaign start or close missing, or window outside 3..60 days |
 | `SOD-1121` | 422 | a manager cannot certify their own roles |
 | `SOD-1122` | 422 | campaign line incomplete, duplicated or with an unknown decision |

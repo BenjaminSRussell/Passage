@@ -200,3 +200,35 @@ func (a *API) getBomVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, bodyFromVersion(v))
 }
+
+func (a *API) listEcos(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	state := r.URL.Query().Get("state")
+	switch domain.EcoState(state) {
+	case "", domain.EcoDraft, domain.EcoSubmitted, domain.EcoApproved, domain.EcoScheduled, domain.EcoReleased, domain.EcoRejected, domain.EcoCancelled:
+	default:
+		invalid(w, r, map[string]string{"state": "must be draft, submitted, approved, scheduled, released, rejected or cancelled"})
+		return
+	}
+	listPage(a, w, r, "list ecos", &a.ecosFailed, func(ctx context.Context, after string, limit int) (store.Page[domain.Eco], error) {
+		return a.store.ListEcos(ctx, state, after, limit)
+	}, bodyFromEco)
+}
+
+func (a *API) getEco(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	record, err := a.store.GetEco(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "get eco", err, &a.ecosFailed)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, bodyFromEco(record.Eco))
+}

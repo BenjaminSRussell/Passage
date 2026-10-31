@@ -321,11 +321,11 @@ func TestRunLog(t *testing.T) {
 	if err := s.RecordAttempt(ctx, run.ID, 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRunSucceeded(ctx, run.ID, 5, 3); err != nil {
+	if err := s.FinishRunSucceeded(ctx, run.ID, 5, 3, valid.AddDate(0, 0, -1)); err != nil {
 		t.Fatal(err)
 	}
 	again, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid.Add(5*time.Hour))
-	if err != nil || !done || again.ID != run.ID || again.Status != store.RunSucceeded || again.PairsImported != 5 || again.PairsUnchanged != 3 || again.Attempts != 2 || again.LastSuccessAt == nil {
+	if err != nil || !done || again.ID != run.ID || again.Status != store.RunSucceeded || again.PairsImported != 5 || again.PairsUnchanged != 3 || again.Attempts != 2 || again.LastSuccessAt == nil || again.ValidFrom == nil || !again.ValidFrom.Equal(valid.AddDate(0, 0, -1)) {
 		t.Fatalf("second start = %+v done=%v err=%v", again, done, err)
 	}
 	if n := count(t, ctx, pool, `select count(*) from provider_import_run`); n != 1 {
@@ -401,7 +401,7 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	if err != nil || done || restarted.ID != run.ID || restarted.Status != store.RunRunning || restarted.Attempts != 0 || restarted.Error != "" || restarted.FinishedAt != nil {
 		t.Fatalf("restart = %+v done=%v err=%v", restarted, done, err)
 	}
-	if err := s.FinishRunSucceeded(ctx, run.ID, 1, 0); err != nil {
+	if err := s.FinishRunSucceeded(ctx, run.ID, 1, 0, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	next, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
@@ -418,7 +418,7 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	if err := s.FinishRunFailed(ctx, missing, 1, errors.New("x"), true); !errors.Is(err, store.ErrRunNotFound) {
 		t.Fatalf("failed unknown run err = %v", err)
 	}
-	if err := s.FinishRunSucceeded(ctx, missing, 1, 0); !errors.Is(err, store.ErrRunNotFound) {
+	if err := s.FinishRunSucceeded(ctx, missing, 1, 0, time.Time{}); !errors.Is(err, store.ErrRunNotFound) {
 		t.Fatalf("succeeded unknown run err = %v", err)
 	}
 	if err := s.RecordAttempt(ctx, missing, 1); !errors.Is(err, store.ErrRunNotFound) {
@@ -432,7 +432,7 @@ func TestFinishRunDegradedMarksRunAndEnqueuesDegradedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRunSucceeded(ctx, ok.ID, 1, 0); err != nil {
+	if err := s.FinishRunSucceeded(ctx, ok.ID, 1, 0, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
@@ -745,7 +745,7 @@ func TestTakenOverRunIgnoresTheOldOwnersFinish(t *testing.T) {
 	if err != nil || done || taken.ID != run.ID {
 		t.Fatalf("takeover: %+v done=%v err=%v", taken, done, err)
 	}
-	if err := b.FinishRunSucceeded(ctx, run.ID, 3, 0); err != nil {
+	if err := b.FinishRunSucceeded(ctx, run.ID, 3, 0, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.FinishRunDegraded(ctx, run.ID, 4, errors.New("late failure"), true); !errors.Is(err, store.ErrLostOwnership) {

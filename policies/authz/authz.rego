@@ -19,12 +19,7 @@ decision := {"allow": false, "duty_missing": missing_duty} if {
 	not allow
 	input.subject.tenant_id != ""
 	input.subject.user_id != ""
-	candidates := {duty |
-		some duty, spec in data.duties
-		some permission in spec.permissions
-		input.action in permission.methods
-		path_matches(permission.resource, input.resource)
-	}
+	candidates := hint_candidates
 	count(candidates) > 0
 	sizes := {duty_permission_count(duty) |
 		some duty in candidates
@@ -38,6 +33,22 @@ decision := {"allow": false, "duty_missing": missing_duty} if {
 }
 
 default decision := {"allow": false}
+
+granting_duties := {duty |
+	some duty, spec in data.duties
+	some permission in spec.permissions
+	input.action in permission.methods
+	path_matches(permission.resource, input.resource)
+}
+
+person_duties := {duty |
+	some duty in granting_duties
+	not data.duties[duty].service_only
+}
+
+hint_candidates := person_duties if count(person_duties) > 0
+
+hint_candidates := granting_duties if count(person_duties) == 0
 
 duty_permission_count(duty) := total if {
 	counts := [count(permission.methods) |

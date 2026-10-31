@@ -34,11 +34,13 @@ const (
 	dutyFirmOrders       = "planning.order.firm"        // Firm planned orders
 	dutyApproveForecast  = "planning.forecast.approve"  // Approve forecast consensus
 	dutyMaintainSetup    = "planning.setup.maintain"    // Maintain planning setup (4.22.17)
+	dutySimulate         = "planning.simulate"          // Run simulations: scenario create, run, compare (4.22.17)
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
 	maxItems       = 100000
 	maxClosedDates = 1000
+	maxMarginDays  = 365
 	maxPegDepth    = 20
 	defaultDepth   = 5
 	readyTimeout   = 2 * time.Second
@@ -62,6 +64,9 @@ type API struct {
 	runsCompleted atomic.Int64
 	runsReplayed  atomic.Int64
 	runsRefused   atomic.Int64
+
+	// horizonDays is the default planning horizon (0: none), see WithHorizon.
+	horizonDays int
 }
 
 // New returns an API over st.
@@ -75,6 +80,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/planning/plans/{planCode}:run", a.runPlan)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions", a.listVersions)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions/{number}", a.getVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/diff", a.diffVersions)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders", a.listPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}", a.getPlannedOrder)
 	r.With(authz.RequireDuty(dutyMaintainOrders)).Patch("/v1/planning/planned-orders/{id}", a.patchPlannedOrder)
@@ -96,6 +102,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/item-coverages", a.createItemCoverage)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/item-coverages/{id}", a.getItemCoverage)
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/item-coverages/{id}", a.updateItemCoverage)
+	a.registerScenarios(r)
 	a.registerBuffers(r)
 	a.registerQuotaArrangements(r)
 	a.registerCalculators(r)
@@ -139,13 +146,25 @@ func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]
 type runRequest struct {
 	AsOf   string `json:"asOf"`
 	SiteID string `json:"siteId"`
+	// LegalEntityID owns the plan when this run creates it; for an existing plan it is an assertion of its owner.
+	LegalEntityID string `json:"legalEntityId,omitempty"`
 	// ForecastModel, when set, adds the model's reduced forecast at the site
 	// as forecast demand of the snapshot's items (FR-22.8).
 	ForecastModel string `json:"forecastModel,omitempty"`
 	// Calendar is the site work calendar of the run (FR-22.5, BR-22.8); without
 	// it lead times and margins count calendar days.
 	Calendar *calendarDTO `json:"calendar,omitempty"`
-	Items    []itemDTO    `json:"items"`
+	// CarryForward adds the plan's firmed planned orders that are not yet
+	// delivered, and the approved orders of the current version that the run
+	// firms (FR-22.11), as scheduled receipts of the run (FR-22.1, FR-22.10),
+	// so a firmed order is supply and is not planned a second time.
+	CarryForward bool `json:"carryForward,omitempty"`
+	// HorizonDays ignores demand dated beyond that many days from asOf (30 to
+	// 1,095); 0 takes the service default (PLANNING_HORIZON_DAYS).
+	HorizonDays int `json:"horizonDays,omitempty"`
+	// Scope restricts the items the version reports (FR-22.13).
+	Scope *scopeDTO `json:"scope,omitempty"`
+	Items []itemDTO `json:"items"`
 }
 
 // calendarDTO names the closed days of the site: whole weekdays (0 Sunday to
@@ -196,7 +215,10 @@ func (c *calendarDTO) toDomain(asOf time.Time) *domain.Calendar {
 }
 
 type itemDTO struct {
-	ItemID      string          `json:"itemId"`
+	ItemID string `json:"itemId"`
+	// ItemGroup and Planner are item master attributes the plan scope filters on (FR-22.13).
+	ItemGroup   string          `json:"itemGroup,omitempty"`
+	Planner     string          `json:"planner,omitempty"`
 	Coverage    coverageDTO     `json:"coverage"`
 	OnHand      decimal.Decimal `json:"onHand"`
 	SafetyStock decimal.Decimal `json:"safetyStock"`
@@ -211,13 +233,17 @@ type itemDTO struct {
 }
 
 type coverageDTO struct {
-	Code         string          `json:"code"`
-	PeriodDays   int             `json:"periodDays"`
-	MarginDays   int             `json:"marginDays"`
-	PositiveDays int             `json:"positiveDays"`
-	NegativeDays int             `json:"negativeDays"`
-	ReorderMin   decimal.Decimal `json:"reorderMin"`
-	ReorderMax   decimal.Decimal `json:"reorderMax"`
+	Code       string `json:"code"`
+	PeriodDays int    `json:"periodDays"`
+	MarginDays int    `json:"marginDays"`
+	// IssueMarginDays moves demand earlier and ReorderMarginDays lengthens the
+	// lead time of planned orders, in working days (FR-22.5).
+	IssueMarginDays   int             `json:"issueMarginDays"`
+	ReorderMarginDays int             `json:"reorderMarginDays"`
+	PositiveDays      int             `json:"positiveDays"`
+	NegativeDays      int             `json:"negativeDays"`
+	ReorderMin        decimal.Decimal `json:"reorderMin"`
+	ReorderMax        decimal.Decimal `json:"reorderMax"`
 	// Time fences in days from asOf (BR-22.4): freezeFenceDays 0 freezes
 	// nothing; actionFenceDays and futuresFenceDays 0 are unlimited.
 	FreezeFenceDays  int `json:"freezeFenceDays"`
@@ -231,6 +257,9 @@ type coverageDTO struct {
 	// (BR-22.4). AutoFirm needs a fence of at least 1 day.
 	FirmingFenceDays int  `json:"firmingFenceDays"`
 	AutoFirm         bool `json:"autoFirm"`
+	// SafetyStockPolicy is today (default) or first-issue (BR-22.5): the day
+	// the item's safety stock is a demand.
+	SafetyStockPolicy string `json:"safetyStockPolicy"`
 }
 
 type lotDTO struct {
@@ -270,6 +299,8 @@ func (req runRequest) validate() map[string]string {
 			fields["calendar"] = msg
 		}
 	}
+	validateHorizon(fields, req.HorizonDays)
+	req.Scope.validate(fields)
 	if len(req.Items) == 0 || len(req.Items) > maxItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
 	}
@@ -278,18 +309,31 @@ func (req runRequest) validate() map[string]string {
 		if !ids.Valid(it.ItemID) {
 			fields[prefix+".itemId"] = "must be a UUID"
 		}
+		if len(it.ItemGroup) > maxAttrLen || len(it.Planner) > maxAttrLen {
+			fields[prefix+".itemGroup"] = "itemGroup and planner must be at most 64 characters"
+		}
 		if it.LeadTimeDays != nil && (*it.LeadTimeDays < 0 || *it.LeadTimeDays > 3650) {
 			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
 		}
 		c := it.Coverage
-		if c.PeriodDays < 0 || c.MarginDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
-			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
+		if c.PeriodDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
+			fields[prefix+".coverage"] = "periodDays, positiveDays and negativeDays must be 0 or more"
+		}
+		// Margins are stepped day by day over the working calendar, so they
+		// are bounded like the item coverage's margins (FR-22.5).
+		for name, days := range map[string]int{"marginDays": c.MarginDays, "issueMarginDays": c.IssueMarginDays, "reorderMarginDays": c.ReorderMarginDays} {
+			if days < 0 || days > maxMarginDays {
+				fields[prefix+".coverage."+name] = "must be 0 to 365"
+			}
 		}
 		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
 			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays, "firmingFenceDays": c.FirmingFenceDays} {
 			if days < 0 || days > 3650 {
 				fields[prefix+".coverage."+name] = "must be 0 to 3650"
 			}
+		}
+		if c.SafetyStockPolicy != "" && c.SafetyStockPolicy != domain.SafetyToday && c.SafetyStockPolicy != domain.SafetyFirstIssue {
+			fields[prefix+".coverage.safetyStockPolicy"] = "must be today or first-issue"
 		}
 		if c.AutoFirm && c.FirmingFenceDays < 1 {
 			fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
@@ -326,11 +370,12 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 	for _, it := range req.Items {
 		item := domain.Item{
 			ID: it.ItemID, Coverage: it.Coverage.Code, PeriodDays: it.Coverage.PeriodDays, MarginDays: it.Coverage.MarginDays,
+			IssueMarginDays: it.Coverage.IssueMarginDays, ReorderMarginDays: it.Coverage.ReorderMarginDays,
 			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
 			CoverageDays: it.Coverage.CoverageFenceDays, FirmingDays: it.Coverage.FirmingFenceDays, AutoFirm: it.Coverage.AutoFirm,
-			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: deref(it.LeadTimeDays),
+			SafetyPolicy: it.Coverage.SafetyStockPolicy, OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: deref(it.LeadTimeDays),
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
 		var err error
@@ -368,6 +413,55 @@ func toRequirements(in []requirementDTO, asOf time.Time) ([]domain.Requirement, 
 	return out, nil
 }
 
+// buildSnapshot turns a validated run request into the engine's items: stored
+// site-scope item coverage fills what the request leaves out (FR-22.2,
+// FR-22.5) and the forecast model's reduced cells are added as demand
+// (FR-22.8). On failure it has written the problem response and returns false.
+// An operational run and a simulation (FR-22.15) take the same snapshot.
+func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest) (time.Time, []domain.Item, bool) {
+	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return time.Time{}, nil, false
+	}
+	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return time.Time{}, nil, false
+	}
+	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return time.Time{}, nil, false
+	}
+	asOf, _ := time.Parse(dateLayout, req.AsOf)
+	items, err := req.toDomain(asOf)
+	if err != nil {
+		validationFailed(w, r, map[string]string{"items": err.Error()})
+		return time.Time{}, nil, false
+	}
+	if req.ForecastModel != "" {
+		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
+		if err != nil {
+			var p *httpx.Problem
+			if errors.As(err, &p) && p.Code == store.CodeForecastNotFound {
+				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
+			}
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, false
+		}
+		addForecastDemand(items, req.ForecastModel, asOf, lines)
+	}
+	if req.CarryForward {
+		firmed, err := a.store.FirmedSupply(r.Context(), code, req.SiteID, asOf)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, false
+		}
+		addFirmedSupply(items, asOf, firmed)
+	}
+	return asOf, items, true
+}
+
 func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -398,43 +492,25 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		PlanCode string     `json:"planCode"`
 		Request  runRequest `json:"request"`
 	}{code, req})
-	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, itemIDsOf(req.Items))
-	if err != nil {
-		httpx.Fail(w, r, err)
+	asOf, items, ok := a.buildSnapshot(w, r, code, req)
+	if !ok {
 		return
-	}
-	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
-	}
-	asOf, _ := time.Parse(dateLayout, req.AsOf)
-	items, err := req.toDomain(asOf)
-	if err != nil {
-		validationFailed(w, r, map[string]string{"items": err.Error()})
-		return
-	}
-	if req.ForecastModel != "" {
-		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
-		if err != nil {
-			var p *httpx.Problem
-			if errors.As(err, &p) && p.Code == store.CodeForecastNotFound {
-				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
-			}
-			httpx.Fail(w, r, err)
-			return
-		}
-		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
 	started := a.now()
-	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
+	result, planned, err := a.plan(req, asOf, items)
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
 		return
 	}
+	result, err = a.applyQuotaToRun(r.Context(), code, req, asOf, result)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
-		PlanCode: code, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: len(items), DurationMs: elapsed,
+		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,
 		InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
 	})
 	if err != nil {
@@ -474,6 +550,24 @@ func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines 
 		day := int(l.PeriodStart.Sub(asOf) / (24 * time.Hour))
 		it.Demand = append(it.Demand, domain.Requirement{Ref: "FC:" + model + ":" + start, RefType: domain.RefForecast,
 			Date: day, Qty: l.ReducedQty, Priority: domain.PriorityForecast})
+	}
+}
+
+// addFirmedSupply appends each firmed planned order that is still to be
+// delivered to the receipts of its item as a planned-order receipt on its
+// delivery day. Orders of items outside the snapshot are not planned.
+func addFirmedSupply(items []domain.Item, asOf time.Time, firmed []store.FirmedSupply) {
+	index := make(map[string]*domain.Item, len(items))
+	for i := range items {
+		index[items[i].ID] = &items[i]
+	}
+	for _, f := range firmed {
+		it := index[f.ItemID]
+		if it == nil {
+			continue
+		}
+		day := int(f.DeliveryDate.Sub(asOf) / (24 * time.Hour))
+		it.Receipts = append(it.Receipts, domain.Requirement{Ref: "FP:" + f.OrderID, RefType: domain.RefPlanned, Date: day, Qty: f.Qty})
 	}
 }
 
@@ -564,6 +658,13 @@ func (a *API) listPlannedOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.ItemID != "" && !ids.Valid(f.ItemID) {
 		fields["itemId"] = "must be a UUID"
+	}
+	if raw := q.Get("version"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			fields["version"] = "must be a positive version number"
+		}
+		f.Version = n
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

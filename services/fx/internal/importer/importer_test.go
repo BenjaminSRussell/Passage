@@ -47,16 +47,18 @@ type finish struct {
 }
 
 type fakeStore struct {
-	last        *time.Time
-	done        bool
-	attempts    int
-	finishes    []finish
-	posted      []store.RateInput
-	attemptErr  error
-	postErr     error
-	lastErr     error
-	degradedErr error
-	status      string
+	last         *time.Time
+	done         bool
+	attempts     int
+	finishes     []finish
+	posted       []store.RateInput
+	attemptErr   error
+	postErr      error
+	lastErr      error
+	degradedErr  error
+	status       string
+	validFrom    time.Time
+	runValidFrom *time.Time
 }
 
 func (s *fakeStore) outcome() string {
@@ -71,7 +73,7 @@ func (s *fakeStore) StartRun(context.Context, string, string, time.Time) (store.
 	if status == "" {
 		status = store.RunSucceeded
 	}
-	return store.Run{ID: "run-1", Status: status, PairsImported: 7, LastSuccessAt: s.last}, s.done, nil
+	return store.Run{ID: "run-1", Status: status, PairsImported: 7, LastSuccessAt: s.last, ValidFrom: s.runValidFrom}, s.done, nil
 }
 
 func (s *fakeStore) RecordAttempt(_ context.Context, _ string, n int) error {
@@ -91,7 +93,8 @@ func (s *fakeStore) PostRates(_ context.Context, in []store.RateInput) ([]store.
 	return out, nil
 }
 
-func (s *fakeStore) FinishRunSucceeded(_ context.Context, id string, imported, unchanged int) error {
+func (s *fakeStore) FinishRunSucceeded(_ context.Context, id string, imported, unchanged int, validFrom time.Time) error {
+	s.validFrom = validFrom
 	s.finishes = append(s.finishes, finish{kind: store.RunSucceeded, runID: id, attempts: imported + unchanged})
 	return nil
 }
@@ -481,6 +484,9 @@ func TestRunBeforeCubePublicationStoresRatesAndStaysRetryable(t *testing.T) {
 	if s.outcome() != "aborted" || !errors.Is(s.finishes[0].cause, ErrCubeNotPublished) {
 		t.Fatalf("finishes=%+v", s.finishes)
 	}
+	if _, agg := i.metrics.snapshot(); agg[seriesKey{"ecb", "CLOSING"}] == nil {
+		t.Fatal("pending run recorded no metrics series")
+	}
 	p.points = points()
 	res, err = i.Run(context.Background(), "CLOSING", day)
 	if err != nil || res.Pending || !res.ValidFrom.Equal(day) || s.outcome() != store.RunSucceeded {
@@ -515,4 +521,23 @@ type lostStore struct{ *fakeStore }
 
 func (s *lostStore) FinishRunFailed(context.Context, string, int, error, bool) error {
 	return store.ErrLostOwnership
+}
+
+func TestRunAlreadyDoneReportsPersistedCubeDate(t *testing.T) {
+	cube := day.AddDate(0, 0, -1)
+	s := &fakeStore{done: true, runValidFrom: &cube}
+	i, _ := harness(&fakeProvider{points: points()}, s)
+	res, err := i.Run(context.Background(), "CLOSING", day)
+	if err != nil || !res.AlreadyDone || !res.ValidFrom.Equal(cube) {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestRunPersistsCubeDateOnSuccess(t *testing.T) {
+	s := &fakeStore{}
+	i, _ := harness(&fakeProvider{points: stalePoints()}, s)
+	i.now = func() time.Time { return day.Add(time.Duration(DefaultConfig.PublishCutoffHourUTC) * time.Hour) }
+	if _, err := i.Run(context.Background(), "CLOSING", day); err != nil || !s.validFrom.Equal(day.AddDate(0, 0, -1)) {
+		t.Fatalf("err=%v validFrom=%v", err, s.validFrom)
+	}
 }

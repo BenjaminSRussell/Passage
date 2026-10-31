@@ -29,3 +29,13 @@ func TestRun_RefusesUnknownFeatureFlagBeforeConnecting(t *testing.T) {
 		t.Fatalf("run = %v; want the unknown flag refused", err)
 	}
 }
+
+func TestRun_RefusesHorizonOutOfRangeBeforeConnecting(t *testing.T) {
+	for _, v := range []string{"29", "1096", "a year"} {
+		env := map[string]string{"DATABASE_URL": "postgres://unused.invalid/db", "PLANNING_HORIZON_DAYS": v}
+		err := run(context.Background(), func(k string) string { return env[k] })
+		if err == nil || !strings.Contains(err.Error(), "PLANNING_HORIZON_DAYS") {
+			t.Fatalf("PLANNING_HORIZON_DAYS=%q: run = %v; want it refused", v, err)
+		}
+	}
+}

@@ -142,9 +142,14 @@ export function AgreementDetailPage() {
         title={`Sales agreement ${agreement.agreementNumber}`}
         meta={<StatusPill status={agreement.status} />}
         actions={
-          <Link className={buttonClassName("ghost")} to="/sales/agreements">
-            Back to agreements
-          </Link>
+          <>
+            <Link className={buttonClassName("ghost")} to={`/sales/agreements/${agreement.id}/schedule-releases`}>
+              Scheduling releases
+            </Link>
+            <Link className={buttonClassName("ghost")} to="/sales/agreements">
+              Back to agreements
+            </Link>
+          </>
         }
       />
       <Card>

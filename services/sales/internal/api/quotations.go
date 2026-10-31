@@ -18,8 +18,9 @@ import (
 const maxLostReason = 200
 
 // createQuotationRequest is the body of POST /v1/sales/quotations (FR-27.1).
-// invoiceAccountId defaults to the customer, validUntil to +30 days and
-// probabilityPct to 50.
+// invoiceAccountId defaults to the customer; validUntil and probabilityPct to
+// the legal entity's quotation_expiry_days (30 unless set) and
+// quotation_probability_default (50 unless set).
 type createQuotationRequest struct {
 	LegalEntityID    string             `json:"legalEntityId"`
 	CustomerID       string             `json:"customerId"`
@@ -66,7 +67,7 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		f["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
 	}
-	validUntil := domain.QuotationValidUntil(today, domain.QuotationExpiryDays)
+	var validUntil time.Time // zero: the legal entity's quotation validity applies
 	if req.ValidUntil != nil {
 		day, err := time.Parse(dayLayout, *req.ValidUntil)
 		switch {
@@ -80,15 +81,14 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 			validUntil = day
 		}
 	}
-	probability := domain.DefaultProbabilityPct
-	if req.ProbabilityPct != nil {
-		probability = *req.ProbabilityPct
-		if err := domain.ValidateProbability(probability); err != nil {
+	probability := req.ProbabilityPct // nil: the legal entity's quotation_probability_default applies
+	if probability != nil {
+		if err := domain.ValidateProbability(*probability); err != nil {
 			f["probabilityPct"] = err.Error()
 		}
 	}
 	in := store.NewQuotation{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice,
-		Currency: req.Currency, ValidUntil: validUntil, ProbabilityPct: probability}
+		Currency: req.Currency, ValidUntil: validUntil, IssuedAt: today, ProbabilityPct: probability}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		if line, ok := buildLine(i, l, f, path); ok {

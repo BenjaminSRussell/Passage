@@ -146,7 +146,7 @@ func TestPostgres_CreateBomVersion_RollsBackWhenCheckFails(t *testing.T) {
 	if _, err := s.CreateBomVersion(ctx, v, store.Idem{Key: "k", Hash: "h"}, func(store.Snapshot) error { return rejected }); !errors.Is(err, rejected) {
 		t.Fatalf("got %v, want the check error", err)
 	}
-	if page, err := s.ListBomVersions(ctx, "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
+	if page, err := s.ListBomVersions(ctx, store.BomVersionFilter{}, "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
 		t.Fatalf("a rejected version must not persist, got %+v, %v", page, err)
 	}
 	created, err := s.CreateBomVersion(ctx, v, store.Idem{Key: "k", Hash: "h"}, noCheck)
@@ -211,7 +211,7 @@ func TestPostgres_RLS_CrossTenantInvisible(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if page, err := s.ListBomVersions(intruder, "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
+	if page, err := s.ListBomVersions(intruder, store.BomVersionFilter{}, "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
 		t.Fatalf("tenant 2 list = %+v, %v; want nothing", page, err)
 	}
 	if catalog, err := s.Catalog(intruder, []string{"BIKE"}, false); err != nil || len(catalog) != 0 {
@@ -353,7 +353,7 @@ func TestPostgres_ListBomVersions_WalksEveryPage(t *testing.T) {
 	}
 	after, pages := "", 0
 	for {
-		page, err := s.ListBomVersions(ctx, after, 1)
+		page, err := s.ListBomVersions(ctx, store.BomVersionFilter{}, after, 1)
 		if err != nil || len(page.Items) != 1 || !created[page.Items[0].ID] {
 			t.Fatalf("page %d = %+v, %v", pages, page, err)
 		}
@@ -366,6 +366,33 @@ func TestPostgres_ListBomVersions_WalksEveryPage(t *testing.T) {
 	}
 	if pages != 3 || len(created) != 0 {
 		t.Fatalf("walked %d pages, %d versions unseen; want 3 and 0", pages, len(created))
+	}
+}
+
+func TestPostgres_ListBomVersions_Filters(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	ended := version("PA", domain.StatusDraft, releaseDay, "WHEEL")
+	ended.SiteID, ended.EffectiveTo = "S1", releaseDay.AddDate(0, 1, 0)
+	for _, v := range []domain.BomVersion{ended, version("PB", domain.StatusActive, releaseDay, "WHEEL")} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for filter, want := range map[store.BomVersionFilter]int{
+		{}:                                   2,
+		{ProductID: "PA"}:                    1,
+		{Status: domain.StatusActive}:        1,
+		{ProductID: "PA", Status: "active"}:  0,
+		{SiteID: "S1"}:                       1,
+		{SiteID: "nowhere"}:                  0,
+		{AsOf: releaseDay.AddDate(0, 0, -1)}: 0,
+		{AsOf: releaseDay}:                   2,
+		{AsOf: releaseDay.AddDate(0, 1, 0)}:  2,
+		{AsOf: releaseDay.AddDate(0, 1, 1)}:  1,
+	} {
+		if page, err := s.ListBomVersions(ctx, filter, "", store.MaxPageSize); err != nil || len(page.Items) != want {
+			t.Fatalf("filter %+v = %d items, %v; want %d", filter, len(page.Items), err, want)
+		}
 	}
 }
 

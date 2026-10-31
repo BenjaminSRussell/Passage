@@ -226,6 +226,93 @@ func TestReopenDueTenants(t *testing.T) {
 	}
 }
 
+func TestDefinerFunctionsIgnoreTempTableShadow(t *testing.T) {
+	admin, app := migrated(t)
+	ctx := context.Background()
+	conn, err := app.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	sentinel, victim := testkit.TenantID(7), testkit.TenantID(1)
+	for _, stmt := range []string{
+		`create temp table reopen_expiry (tenant_id uuid, ledger_id uuid, fiscal_period_id uuid, module text, reopen_expires_at timestamptz)`,
+		`insert into pg_temp.reopen_expiry values ('` + sentinel + `', '` + ledgerID + `', '` + periodID + `', 'gl', now() - interval '1 hour')`,
+	} {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
+			t.Fatalf("seed temp shadow (%s): %v", stmt, err)
+		}
+	}
+	rows, err := conn.Query(ctx, `select * from close_reopen_due_tenants()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var due []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		due = append(due, id)
+	}
+	rows.Close()
+	if len(due) != 0 {
+		t.Fatalf("definer function read the caller's temp table: %v", due)
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`select set_config('passage.tenant_id', '` + victim + `', true)`,
+		`select set_config('passage.legal_entity_scopes', '*', true)`,
+		`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values('` + victim + `','` + entityID + `','` + ledgerID + `','` + periodID + `','gl','open', now() - interval '1 hour','t')`,
+	} {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var shadowRows, realRows int
+	if err := conn.QueryRow(ctx, `select count(*) from pg_temp.reopen_expiry where tenant_id = $1`, victim).Scan(&shadowRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(ctx, `select count(*) from reopen_expiry where tenant_id = $1`, victim).Scan(&realRows); err != nil {
+		t.Fatal(err)
+	}
+	if shadowRows != 0 || realRows != 1 {
+		t.Fatalf("trigger must write the real table: shadow=%d real=%d", shadowRows, realRows)
+	}
+}
+
+func TestDefinerFunctionsPinSearchPath(t *testing.T) {
+	admin, _ := migrated(t)
+	rows, err := admin.Query(context.Background(), `select proname, proconfig[1] from pg_proc
+		where proname in ('close_reopen_due_tenants', 'period_status_track_reopen_expiry') and prosecdef
+		  and pronamespace = current_schema()::regnamespace`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var name, cfg string
+		if err := rows.Scan(&name, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(cfg, "search_path=pg_catalog, ") || !strings.HasSuffix(cfg, ", pg_temp") {
+			t.Fatalf("%s search_path = %q, want pg_catalog first and pg_temp last", name, cfg)
+		}
+		n++
+	}
+	if n != 2 {
+		t.Fatalf("found %d definer functions, want 2", n)
+	}
+}
+
 func idempotentStore(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool, *store.Postgres) {
 	admin, app := migrated(t)
 	return admin, app, store.New(app)

@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/production/internal/store"
 )
@@ -48,6 +49,13 @@ type journalRequest struct {
 	ErrorQuantity *decimal.Decimal   `json:"errorQuantity"`
 	Issues        []issueRequest     `json:"issues"`
 	Hours         []hoursRequest     `json:"hours"`
+	// CoProducts are the co-product receipts of a report as finished (FR-21.14).
+	CoProducts []coProductReportRequest `json:"coProducts,omitempty"`
+}
+
+type coProductReportRequest struct {
+	LineNo   string          `json:"lineNo"`
+	Quantity decimal.Decimal `json:"quantity"`
 }
 
 func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +132,22 @@ func validateJournal(req journalRequest, in *store.NewJournal, fields map[string
 	}
 	if len(req.Issues)+len(req.Hours) > maxJournalLines {
 		fields["lines"] = fmt.Sprintf("at most %d lines", maxJournalLines)
+	}
+	switch {
+	case len(req.CoProducts) > 0 && req.Type != domain.JournalReportFinished:
+		fields["coProducts"] = "only a report-as-finished journal receipts co-products"
+	case len(req.CoProducts) > maxCoProducts:
+		fields["coProducts"] = fmt.Sprintf("at most %d co-product lines", maxCoProducts)
+	}
+	seenCo := map[string]bool{}
+	for i, c := range req.CoProducts {
+		at := fmt.Sprintf("coProducts[%d]", i)
+		if c.LineNo == "" || len(c.LineNo) > maxLineNo || seenCo[c.LineNo] {
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters, listed once", maxLineNo)
+		}
+		seenCo[c.LineNo] = true
+		checkQuantity(at+".quantity", c.Quantity, true, fields)
+		in.CoProducts = append(in.CoProducts, store.CoProductInput{LineNo: c.LineNo, Qty: c.Quantity})
 	}
 	if len(req.Issues) > 0 && req.Type == domain.JournalRouteCard {
 		fields["issues"] = "a route card reports hours, not issues"
@@ -338,7 +362,7 @@ func (a *API) saveProfile(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
-	} else if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
+	} else if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
 	}
 	if len(req.ItemGroup) > maxItemGroup {

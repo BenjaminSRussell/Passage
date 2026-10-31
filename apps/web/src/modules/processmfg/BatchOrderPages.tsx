@@ -31,6 +31,7 @@ import {
   type Problem,
 } from "./api/client";
 import { formatDateTime, LINE_TYPE_LABELS, QUANTITY, shortId } from "./format";
+import { AllocationCard, OrderLifecycle } from "./OrderLifecycle";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -220,6 +221,7 @@ const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "type", header: "Type", render: (l) => LINE_TYPE_LABELS[l.type] ?? l.type },
   { key: "formulaQty", header: "Formula qty", align: "end" },
   { key: "qty", header: "Order qty", align: "end" },
+  { key: "rafQty", header: "Reported qty", align: "end", render: (l) => l.rafQty ?? "—" },
   { key: "scalable", header: "Scaling", render: (l) => (l.percentControlled ? `${l.percent}% of batch` : l.scalable ? "Scalable" : "Fixed") },
 ];
 
@@ -288,7 +290,21 @@ export function BatchOrderDetailPage() {
         <StatTile label="Batch size" value={`${order.batchSize} ${order.unit}`} />
         <StatTile label="Formula size" value={`${order.formulaSize} ${order.unit}`} />
         <StatTile label="Scale factor" value={order.scaleFactor} />
+        {order.actualQty ? <StatTile label="Finished quantity" value={`${order.actualQty} ${order.unit}`} /> : null}
       </StatGroup>
+      <OrderLifecycle
+        order={order}
+        reload={() => {
+          setCurrent(null);
+          state.reload();
+        }}
+        onChanged={(updated) => {
+          setCurrent(updated);
+          setNotice(null);
+          setFailure(null);
+        }}
+      />
+      <AllocationCard order={order} />
       <Card title="Lines">
         <DataTable
           label="Batch order lines"

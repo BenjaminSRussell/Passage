@@ -113,7 +113,8 @@ type FreeGoodsRule struct {
 	Every  decimal.Decimal
 	Free   decimal.Decimal
 	MinQty decimal.Decimal
-	// Calc is PROPORTIONAL (fractional, 6 dp) or WHOLE_UNITS (floor of whole multiples).
+	// Calc is PROPORTIONAL (fractional, 6 dp), UNIT_REFERENCE (the proportional quantity
+	// rounded down to whole units) or WHOLE_UNITS (floor of whole multiples of Every).
 	Calc string
 }
 
@@ -130,9 +131,12 @@ func FreeGoods(ordered decimal.Decimal, r FreeGoodsRule) FreeGoodsResult {
 		return FreeGoodsResult{Priced: ordered}
 	}
 	var free decimal.Decimal
-	if r.Calc == "PROPORTIONAL" {
+	switch r.Calc {
+	case CalcProportional:
 		free = ordered.Mul(r.Free).Div(r.Every).Truncate(6)
-	} else {
+	case CalcUnitReference:
+		free = ordered.Mul(r.Free).Div(r.Every).Floor()
+	default:
 		free = ordered.Div(r.Every).Floor().Mul(r.Free)
 	}
 	if r.Kind == FreeGoodsInclusive {

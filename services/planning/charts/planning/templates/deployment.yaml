@@ -37,6 +37,8 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: PLANNING_MAX_VERSIONS
               value: {{ .Values.maxVersions | quote }}
+            - name: PLANNING_HORIZON_DAYS
+              value: {{ .Values.horizonDays | quote }}
             - name: PLANNING_FEATURE_FLAGS
               value: {{ .Values.featureFlags | quote }}
           ports:

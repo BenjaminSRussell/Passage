@@ -19,10 +19,12 @@ var (
 	ChangeRejected  = events.Type(Context, "change", "rejected", 1)
 
 	ProtectedFieldsUpdated = events.Type(Context, "protectedfields", "updated", 1)
+
+	VendorBankRevealed = events.Type(Context, "vendorbank", "revealed", 1)
 )
 
 func All() []string {
-	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated}
+	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, VendorBankRevealed}
 }
 
 type CustomerUpdatedData struct {
@@ -50,6 +52,15 @@ type ProtectedFieldsUpdatedData struct {
 	After         []string  `json:"after"`
 	ActorUserID   string    `json:"actor_user_id"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type VendorBankRevealedData struct {
+	VendorID      string    `json:"vendor_id"`
+	LegalEntityID string    `json:"legal_entity_id"`
+	ActorUserID   string    `json:"actor_user_id"`
+	ActorService  string    `json:"actor_service,omitempty"`
+	AccountCount  int       `json:"account_count"`
+	RevealedAt    time.Time `json:"revealed_at"`
 }
 
 type PartyCreatedData struct {

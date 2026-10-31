@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 )
 
@@ -270,5 +271,41 @@ func TestPostgres_DescriptionTemplateLegalEntityScope(t *testing.T) {
 	}
 	if got, err := wide.store.GetDescriptionTemplate(wide.ctx, otherTpl.ID); err != nil || got.Template != "O" {
 		t.Fatalf("other entity's template changed: %+v %v", got, err)
+	}
+}
+
+// A caller with no legal-entity claim writes tenant templates only with the
+// tenant.administer duty, and is refused for any legal entity's template, as the
+// database scope would also hide it. A scoped caller holding tenant.administer is
+// still refused a tenant template.
+func TestPostgres_DescriptionTemplateTenantWritesNeedTenantAdmin(t *testing.T) {
+	e, _ := setup(t)
+	le := e.ledger.LegalEntityID
+	tenantTpl := DescriptionTemplate{Scope: ScopeTenant, SourceType: "vendor_invoice", Language: "en", Template: "T"}
+	callers := []struct {
+		name      string
+		principal tenant.Principal
+		wantOK    bool
+	}{
+		{"no claim without tenant.administer", tenant.Principal{TenantID: e.tenant, UserID: "test-user"}, false},
+		{"scoped with tenant.administer", tenant.Principal{TenantID: e.tenant, LegalEntityID: le, UserID: "test-user", Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}, false},
+		{"no claim with tenant.administer", tenant.Principal{TenantID: e.tenant, UserID: "test-user", Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}, true},
+	}
+	for _, c := range callers {
+		_, _, err := e.store.PutDescriptionTemplate(tenant.With(e.ctx, c.principal), ids.New(), tenantTpl)
+		status, code := problemStatus(err)
+		if c.wantOK && err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !c.wantOK && (status != http.StatusForbidden || code != "AUTH-0003") {
+			t.Fatalf("%s: want 403 AUTH-0003, got %v", c.name, err)
+		}
+		tenantTpl.SourceType += "x"
+	}
+	noAdmin := tenant.With(e.ctx, callers[0].principal)
+	_, _, err := e.store.PutDescriptionTemplate(noAdmin, ids.New(), DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
+		SourceType: "vendor_invoice", Language: "en", Template: "X"})
+	if status, code := problemStatus(err); status != http.StatusForbidden || code != "AUTH-0003" {
+		t.Fatalf("legal-entity template without scope: want 403 AUTH-0003, got %v", err)
 	}
 }

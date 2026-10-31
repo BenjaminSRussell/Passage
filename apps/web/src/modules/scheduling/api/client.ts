@@ -41,6 +41,8 @@ export interface Operation {
   readyAt?: string;
   priority: number;
   resourceIds: string[];
+  /** Resources booked for the same segments as the primary (BR-23.4). */
+  secondaryResourceIds: string[];
   /** Setup group that drives changeovers against the resource's setup matrix (FR-23.15). */
   setupGroup: string | null;
   /** Route setup time, used when the matrix has no entry for a pair (SCHED-0012). */
@@ -61,6 +63,8 @@ export interface NewOperation {
   readyAt?: string;
   priority?: number;
   resourceIds: string[];
+  /** At most 5, none of them a candidate (BR-23.4). */
+  secondaryResourceIds?: string[];
   setupGroup?: string;
   setupMinutes?: number;
   attributes?: Record<string, string>;
@@ -69,6 +73,7 @@ export interface NewOperation {
 
 /** Codes a run reports on placed operations (PRD 4.23.18). */
 export const RUN_WARNING_LABELS: Record<string, string> = {
+  "SCHED-0003": "Order late after backward fallback",
   "SCHED-0010": "Network wait over the maximum",
   "SCHED-0012": "No setup matrix entry",
   "SCHED-0014": "No matching capacity block",
@@ -103,6 +108,7 @@ export interface NewRun {
   scope: "site" | "selection";
   mode: "jobs" | "operations";
   finite: boolean;
+  direction?: "forward" | "backward";
   operationIds?: string[];
   start?: string;
   horizonDays?: number;
@@ -131,6 +137,13 @@ export interface GanttBar {
   changeoverCurrency: string | null;
   /** Cleaning standard operation set the matrix entry requires; null when none. */
   cleaningSetId: string | null;
+  /** Resources booked with the job's primary resource for the same segments (BR-23.4). */
+  secondaryResourceIds: string[];
+  /**
+   * Part of the segment lies outside the resource's open capacity as it is
+   * now, e.g. inside a downtime added after it was booked (SCHED-0002, AC-23.7).
+   */
+  outsideCapacity: boolean;
 }
 
 export interface MoveRequest {
@@ -297,6 +310,25 @@ export function getResourceCapacity(id: string, from: string, to: string, signal
 /** Creates a resource; reuse one key per form so a retried submit cannot create two. */
 export function createResource(input: NewResource, key: string = newKey()): Promise<Resource> {
   return post<Resource>("/resources", input, key);
+}
+
+export interface ResourcePatch {
+  name?: string;
+  timeZone?: string;
+  shifts?: Shift[];
+}
+
+export interface ResourceUpdate extends Resource {
+  affectedJobs: AffectedJob[];
+}
+
+/** Changes a resource under the version the planner saw (If-Match); the answer lists the jobs the new calendar no longer covers. */
+export function updateResource(id: string, version: number, patch: ResourcePatch, key: string = newKey()): Promise<ResourceUpdate> {
+  return send<ResourceUpdate>(`/resources/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
 }
 
 export function listOperations(filter: { status?: OperationStatus | ""; orderId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<Operation[]> {
@@ -757,6 +789,61 @@ export function createPeg(input: NewOrderPeg, key: string = newKey()): Promise<O
 /** Removes a peg; the service answers 204 with no body. */
 export async function deletePeg(id: string): Promise<void> {
   const res = await fetch(`${base}/order-pegs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+}
+
+// Slice 9: capacity overrides, downtimes and extra shifts (FR-23.1, AC-23.7)
+
+export type OverrideKind = "downtime" | "extra";
+
+export interface CapacityOverride {
+  id: string;
+  resourceId: string;
+  kind: OverrideKind;
+  start: string;
+  end: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface NewCapacityOverride {
+  kind: OverrideKind;
+  start: string;
+  end: string;
+  reason?: string;
+}
+
+/** A booked job a downtime overlaps. */
+export interface AffectedJob {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  start: string;
+  end: string;
+  firmed: boolean;
+}
+
+export interface CapacityOverrideResult extends CapacityOverride {
+  affectedJobs: AffectedJob[];
+}
+
+export function listCapacityOverrides(resourceId: string, signal?: AbortSignal): Promise<CapacityOverride[]> {
+  return items<CapacityOverride>(`/resources/${encodeURIComponent(resourceId)}/capacity-overrides`, signal);
+}
+
+export function createCapacityOverride(resourceId: string, input: NewCapacityOverride, key: string = newKey()): Promise<CapacityOverrideResult> {
+  return post<CapacityOverrideResult>(`/resources/${encodeURIComponent(resourceId)}/capacity-overrides`, input, key);
+}
+
+/** Removes an override; the service answers 204 with no body. */
+export async function deleteCapacityOverride(resourceId: string, id: string): Promise<void> {
+  const res = await fetch(`${base}/resources/${encodeURIComponent(resourceId)}/capacity-overrides/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",

@@ -5,6 +5,8 @@ import styles from "./pages.module.css";
 const AREAS = [
   { to: "/processmfg/formulas", title: "Formulas", text: "Recipes with scalable and percent-controlled lines, co- and by-products (FR-24.1)." },
   { to: "/processmfg/batch-orders", title: "Batch orders", text: "Orders scaled from a formula snapshot; rescale until the order starts (FR-24.2)." },
+  { to: "/processmfg/batches", title: "Batches", text: "Quality record of each batch: recorded attributes, expiry, and disposition with its history (FR-24.5)." },
+  { to: "/processmfg/attribute-definitions", title: "Attribute definitions", text: "The attributes an item's batches carry, with limits and options (FR-24.5)." },
   { to: "/processmfg/potency", title: "Potency consumption", text: "Active-ingredient quantity for a batch's potency and the filler that keeps the batch size (BR-24.2)." },
   { to: "/processmfg/allocation", title: "Co-product allocation", text: "How a batch's cost splits over main, co- and by-products (BR-24.3)." },
   { to: "/processmfg/derivation", title: "Batch derivation", text: "A product batch attribute from the ingredient batches it consumed (FR-24.15)." },

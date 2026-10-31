@@ -862,6 +862,10 @@ func newRouter(f *fakeStore) (*chi.Mux, *api.API) {
 }
 
 func do(r http.Handler, method, path, body, duties string, withTenant bool, headers ...string) *httptest.ResponseRecorder {
+	return doWithoutTenantAdmin(r, method, path, body, duties+",tenant.administer", withTenant, headers...)
+}
+
+func doWithoutTenantAdmin(r http.Handler, method, path, body, duties string, withTenant bool, headers ...string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if withTenant {
 		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
@@ -1739,5 +1743,45 @@ func TestNilTenantIsUnauthorized(t *testing.T) {
 	rec := do(r, http.MethodPost, legalEntities, validBody, allDuties, true, "X-Passage-Tenant", ids.Nil)
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "AUTH-0001") {
 		t.Fatalf("nil tenant = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestScopedCallerCannotChangeReferenceStatus(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	rec := do(r, http.MethodPatch, "/v1/org/currencies/USD", `{"status":"inactive"}`, referenceDuties, true, "X-Passage-Legal-Entity", testkit.TenantID(2))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s; want 403 AUTH-0003", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTenantLevelWritesNeedTheTenantAdminDuty(t *testing.T) {
+	routes := []struct {
+		name, method, path, duties string
+	}{
+		{"create legal entity", http.MethodPost, legalEntities, allDuties},
+		{"patch reference status", http.MethodPatch, "/v1/org/currencies/USD", referenceDuties},
+		{"put rounding rule", http.MethodPut, chfCash, referenceDuties},
+		{"delete rounding rule", http.MethodDelete, chfCash, referenceDuties},
+		{"create unit", http.MethodPost, "/v1/org/uom/units", referenceDuties},
+		{"create fiscal calendar", http.MethodPost, fiscalPath, fiscalDuties},
+		{"create hierarchy type", http.MethodPost, "/v1/org/hierarchy-types", hierarchyDuties},
+		{"create team", http.MethodPost, "/v1/org/teams", teamDuties},
+	}
+	for _, tt := range routes {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			rec := doWithoutTenantAdmin(r, tt.method, tt.path, `{}`, tt.duties, true)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || !strings.Contains(rec.Body.String(), "tenant.administer") {
+				t.Fatalf("no claim and %s without tenant.administer: %d %s", tt.duties, rec.Code, rec.Body)
+			}
+			rec = doWithoutTenantAdmin(r, tt.method, tt.path, `{}`, tt.duties+",tenant.administer", true, "X-Passage-Legal-Entity", entityA)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || !strings.Contains(rec.Body.String(), "legal-entity-scoped") {
+				t.Fatalf("scoped caller with tenant.administer: %d %s", rec.Code, rec.Body)
+			}
+			rec = do(r, tt.method, tt.path, `{}`, tt.duties, true)
+			if rec.Code == http.StatusForbidden {
+				t.Fatalf("tenant admin was refused: %s", rec.Body)
+			}
+		})
 	}
 }

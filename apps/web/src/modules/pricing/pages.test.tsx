@@ -378,6 +378,7 @@ describe("Trade agreement detail", () => {
 });
 
 const resolved: ResolveResponse = {
+  freeGoods: [],
   currency: "USD",
   lines: [
     {

@@ -408,17 +408,5 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getResource(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
-		return
-	}
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	record, err := a.store.GetResource(r.Context(), id)
-	if err != nil {
-		a.fail(w, r, "get resource", err, &a.resourceFailed)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, bodyFromResource(record))
+	getByID(a, w, r, "get resource", a.store.GetResource, bodyFromResource)
 }

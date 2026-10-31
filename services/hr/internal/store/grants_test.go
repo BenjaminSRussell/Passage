@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -21,14 +22,11 @@ import (
 func appStore(t *testing.T) (*Postgres, context.Context) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "user-test", Duties: map[string]struct{}{}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "user-test", Duties: testkit.ScopeDuties("")})
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := testSealer(t)
 	return New(app, sealer, 10), ctx
 }
 
@@ -77,6 +75,34 @@ func TestGrants_LockedPathsWorkAsAppRole(t *testing.T) {
 	}
 	if _, _, err := s.EndBenefitEnrollment(ctx, enr.ID, day(time.December, 31), "TERMINATION"); err != nil {
 		t.Fatalf("end enrollment as app role: %v", err)
+	}
+}
+
+// TestGrants_ResealWorksAsAppRoleOnSealedColumnsOnly: 0007 grants UPDATE on the
+// two sealed columns, so hr reseal-pii runs as passage_app while the row's keys
+// stay fixed and worker_pii still cannot be deleted.
+func TestGrants_ResealWorksAsAppRoleOnSealedColumnsOnly(t *testing.T) {
+	s, ctx := appStore(t)
+	mustWorker(t, s, ctx, "GrantsReseal")
+	rotated, err := fieldcrypt.NewKeys("k2", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32), "k2": bytes.Repeat([]byte{8}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sealer, err = domain.NewSealer(rotated, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ResealPII(ctx); err != nil || n != 1 {
+		t.Fatalf("reseal as app role = %d, %v", n, err)
+	}
+	for _, stmt := range []string{`update worker_pii set worker_id = worker_id`, `update worker_pii set key_version = 2`, `delete from worker_pii`} {
+		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, stmt)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Errorf("%q = %v; want insufficient_privilege 42501", stmt, err)
+		}
 	}
 }
 

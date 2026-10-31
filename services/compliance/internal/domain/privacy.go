@@ -1,13 +1,14 @@
 package domain
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 )
 
 // Subject-request, erasure and retention codes (FR-48.10, FR-48.11, BR-48.5, BR-48.6).
@@ -20,6 +21,9 @@ const (
 	CodePrivacyDeadline   = "PRV-1206" // deadline override is longer than the regulation allows
 	CodePrivacyReason     = "PRV-1207" // rejection needs a reason
 	CodePrivacyPurge      = "PRV-1208" // retention purge skipped (BR-48.6)
+	CodePrivacyKey        = "PRV-1211" // no pseudonymization key configured: erasure fails closed
+
+	pseudonymBytes = 16
 
 	privacyJustifyMin     = 10
 	identityAttributesMin = 2
@@ -284,6 +288,8 @@ func PrivacyHolds(in []string) []string {
 // caller has checked that the request is an ERASURE past discovery; HoldIDs are
 // the holds recorded on the request.
 type PseudonymizeInput struct {
+	Keys       *fieldcrypt.Keys  `json:"-"`
+	TenantID   string            `json:"-"`
 	SubjectRef string            `json:"subjectRef"`
 	HoldIDs    []string          `json:"holdIds,omitempty"`
 	Record     map[string]string `json:"record"`
@@ -304,6 +310,9 @@ func PseudonymizeSubject(in PseudonymizeInput) (PseudonymizeResult, error) {
 	if strings.TrimSpace(in.SubjectRef) == "" {
 		return PseudonymizeResult{}, &Error{Code: CodePrivacyInput, Detail: "subjectRef is required"}
 	}
+	if in.Keys == nil || in.TenantID == "" {
+		return PseudonymizeResult{}, &Error{Code: CodePrivacyKey, Detail: "no pseudonymization key is configured; no field was changed"}
+	}
 	out := make(map[string]string, len(in.Record)+1)
 	for k, v := range in.Record {
 		out[k] = v
@@ -311,7 +320,11 @@ func PseudonymizeSubject(in PseudonymizeInput) (PseudonymizeResult, error) {
 	changed := []string{}
 	for _, f := range ErasedFields {
 		if v, ok := in.Record[f]; ok && v != "" {
-			out[f] = privacyPseudonym(in.SubjectRef, f)
+			token, err := privacyPseudonym(in.Keys, in.TenantID, in.SubjectRef, f)
+			if err != nil {
+				return PseudonymizeResult{}, &Error{Code: CodePrivacyKey, Detail: "pseudonymization key could not be applied; no field was changed"}
+			}
+			out[f] = token
 			changed = append(changed, f)
 		}
 	}
@@ -319,10 +332,14 @@ func PseudonymizeSubject(in PseudonymizeInput) (PseudonymizeResult, error) {
 	return PseudonymizeResult{Record: out, Pseudonymized: changed}, nil
 }
 
-// privacyPseudonym is deterministic per subject and field, so joins on the token still work.
-func privacyPseudonym(subject, field string) string {
-	sum := sha256.Sum256([]byte(subject + "|" + field))
-	return "ERASED-" + hex.EncodeToString(sum[:8])
+// privacyPseudonym is an HMAC under the tenant's key: deterministic per tenant, subject and field so joins
+// on the token still work, and not recomputable from a guessed subject reference without the key.
+func privacyPseudonym(keys *fieldcrypt.Keys, tenantID, subject, field string) (string, error) {
+	sum, err := keys.MAC(tenantID, []byte(subject+"\x00"+field))
+	if err != nil {
+		return "", err
+	}
+	return "ERASED-" + hex.EncodeToString(sum[:pseudonymBytes]), nil
 }
 
 // PurgeCandidate is a record considered by the monthly retention purge.

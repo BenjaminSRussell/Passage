@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -48,7 +49,7 @@ type fakeLedger struct {
 	ownErr  error
 }
 
-func (f *fakeLedger) LegalEntity(context.Context, string) (string, error) {
+func (f *fakeLedger) LegalEntity(context.Context, string, string) (string, error) {
 	if f.ownErr != nil {
 		return "", f.ownErr
 	}
@@ -58,7 +59,7 @@ func (f *fakeLedger) LegalEntity(context.Context, string) (string, error) {
 	return f.owner, nil
 }
 
-func (f *fakeLedger) AccountBalance(_ context.Context, _, account, period string) (ledger.Balance, error) {
+func (f *fakeLedger) AccountBalance(_ context.Context, _, _, account, period string) (ledger.Balance, error) {
 	f.account, f.period = account, period
 	return f.bal, f.err
 }
@@ -81,9 +82,17 @@ func agingRouter(store *fakeAgingStore, l api.LedgerBalances, account string) *c
 }
 
 func get(r http.Handler, path, duties, legalEntity string) *httptest.ResponseRecorder {
+	if legalEntity == "" {
+		duties += "," + tenant.DutyAllScope
+	}
+	return getScoped(r, path, duties, legalEntity)
+}
+
+func getScoped(r http.Handler, path, duties, legalEntity string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Duties", duties)
+	req.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
 	if legalEntity != "" {
 		req.Header.Set("X-Passage-Legal-Entity", legalEntity)
 	}
@@ -130,6 +139,13 @@ func TestAging_ReportRejections(t *testing.T) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body, tc.want, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestAging_CallerWithoutEntityScopeCannotNameAnEntity(t *testing.T) {
+	rec := getScoped(agingRouter(&fakeAgingStore{rows: agingRows()}, nil, ""), agingURL, "aging.read", "")
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -236,5 +252,84 @@ func TestAging_MetricsCountOutcomes(t *testing.T) {
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), `payables_aging_reconciliations_total{outcome="reconciled"} 1`) {
 		t.Fatalf("metrics = %s", rec.Body)
+	}
+}
+
+func groupedRows() []domain.AgingRow {
+	due := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
+	return []domain.AgingRow{
+		{VendorID: "v1", VendorGroupID: "g-b", Currency: "USD", DueDate: due, OpenAmount: dec("600.00")},
+		{VendorID: "v2", VendorGroupID: "g-a", Currency: "USD", DueDate: due, OpenAmount: dec("250.25")},
+		{VendorID: "v3", VendorGroupID: "g-a", Currency: "USD", DueDate: due.AddDate(0, 0, 40), OpenAmount: dec("149.75")},
+		{VendorID: "v4", Currency: "USD", DueDate: due, OpenAmount: dec("0.50")},
+	}
+}
+
+func TestAging_ReconcileByVendorGroup(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: dec("1000.50")}}
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	order := []string{`"vendorGroupId":"g-a","currency":"USD","subledgerTotal":"400"`, `"vendorGroupId":"g-b","currency":"USD","subledgerTotal":"600"`, `"vendorGroupId":"UNASSIGNED","currency":"USD","subledgerTotal":"0.5"`}
+	last := -1
+	for _, want := range order {
+		i := strings.Index(body, want)
+		if i <= last {
+			t.Fatalf("vendorGroups out of order or missing %s: %s", want, body)
+		}
+		last = i
+	}
+	for _, want := range []string{`"reconciled":true`, `"difference":"0"`, `"comparable":false,"reason":"the ledger exposes one AP control balance`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %s: %s", want, body)
+		}
+	}
+}
+
+func TestAging_ReconcileWithoutGroupByOmitsVendorGroups(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: dec("1000.00")}}
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile, "aging.reconcile", "")
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "vendorGroups") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReportRejectsVendorGroupGrouping(t *testing.T) {
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, nil, ""), agingURL+"&group_by=vendorGroup", "aging.read", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "aging:reconcile") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReconcileByVendorGroupNeedsExplicitEntityScope(t *testing.T) {
+	r := agingRouter(&fakeAgingStore{rows: groupedRows()}, &fakeLedger{}, "")
+	for name, c := range map[string]struct {
+		rec  *httptest.ResponseRecorder
+		want int
+	}{
+		"entity outside scope":    {get(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", entityB), http.StatusForbidden},
+		"unscoped names a entity": {getScoped(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", ""), http.StatusForbidden},
+		"no entity at all":        {get(r, "/v1/payables/aging:reconcile?ledger="+ledgerID+"&group_by=vendorGroup", "aging.reconcile", ""), http.StatusBadRequest},
+	} {
+		if c.rec.Code != c.want {
+			t.Errorf("%s: got %d, want %d: %s", name, c.rec.Code, c.want, c.rec.Body)
+		}
+	}
+}
+
+func TestAging_ReconcileByVendorGroupWithNoItemsReturnsEmptyArray(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD"}}
+	rec := get(agingRouter(&fakeAgingStore{}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"vendorGroups":[]`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReconcileRejectsVendorGrouping(t *testing.T) {
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, &fakeLedger{}, ""), reconcile+"&group_by=vendor", "aging.reconcile", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "group_by=vendor applies to aging only") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }

@@ -13,5 +13,11 @@ numberingUrl: ""
 config:
   PARTY_DEDUP_LIKELY_WEIGHT: "12"
   PARTY_DEDUP_POSSIBLE_WEIGHT: "6"
+  PARTY_VIES_URL: ""
   PARTY_VIES_TIMEOUT_MS: "5000"
 serviceMonitor: { enabled: false }
+
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+  publicKeys: ""

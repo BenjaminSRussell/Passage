@@ -3,6 +3,7 @@ package memstore
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -45,6 +46,17 @@ type tenantData struct {
 	keys     map[string]*claim
 	invoices map[string]struct{}
 	counter  int
+
+	invoiceDocs     map[string]store.Invoice
+	adjustments     map[string]store.InvoiceAdjustment
+	settlements     map[string]store.Settlement
+	ersVendors      map[string]bool
+	auditRates      map[string]domain.AuditPolicy
+	payees          map[string]store.OneTimePayee
+	ersPrices       map[string]store.PriceConfirmation
+	ersPriceHistory []string
+
+	policyHistory []PolicyChange
 }
 
 type pendingRow struct {
@@ -79,7 +91,9 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	defer s.mu.Unlock()
 	t := s.tenants[p.TenantID]
 	if t == nil {
-		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{}}
+		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
+			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -164,7 +178,11 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 	for i, l := range r.Lines {
 		productIDs[i] = l.ProductID
 	}
-	lines, err := fn(cloneReceipt(r), t.recordedFor(productIDs))
+	withOthers := cloneReceipt(r)
+	for i, l := range withOthers.Lines {
+		withOthers.Lines[i].OtherReceived = t.receivedOn(r.ID, r.PurchaseOrderID, l.POLineNo)
+	}
+	lines, err := fn(withOthers, t.recordedFor(productIDs))
 	if err != nil {
 		return store.Receipt{}, err
 	}
@@ -199,6 +217,39 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 		}
 	}
 	return r, nil
+}
+
+func (t *tenantData) receivedOn(excludeID, purchaseOrderID string, poLineNo int) decimal.Decimal {
+	total := decimal.Zero
+	if poLineNo < 1 {
+		return total
+	}
+	for _, other := range t.receipts {
+		if other.ID == excludeID || other.PurchaseOrderID != purchaseOrderID || !slices.Contains([]domain.ReceiptState{domain.Registered, domain.Posted, domain.Corrected}, other.State) {
+			continue
+		}
+		for _, l := range other.Lines {
+			if l.POLineNo == poLineNo {
+				total = total.Add(l.Qty)
+			}
+		}
+	}
+	return total
+}
+
+func (s *Store) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (out map[int]decimal.Decimal, err error) {
+	out = map[int]decimal.Decimal{}
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, r := range t.receipts {
+			for _, l := range r.Lines {
+				if l.POLineNo > 0 && r.PurchaseOrderID == purchaseOrderID {
+					out[l.POLineNo] = t.receivedOn("", purchaseOrderID, l.POLineNo)
+				}
+			}
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (s *Store) Ping(context.Context) error { return nil }
@@ -291,6 +342,9 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 			})
 		}
 		current.State, current.PostingDate, current.PostedAt, current.LedgerEntryID = domain.Posted, &outcome.PostingDate, &now, outcome.LedgerEntryID
+		if p, ok := tenant.FromContext(ctx); ok {
+			current.PostedBy = p.UserID
+		}
 		current.Version++
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)
@@ -440,17 +494,36 @@ func (r *pendingRow) sharedSubject(subjects []string) string {
 	return slices.Min(shared)
 }
 
+func pendingEntity(journal []byte) string {
+	var entry struct {
+		LegalEntityID string `json:"legalEntityId"`
+	}
+	if json.Unmarshal(journal, &entry) != nil {
+		return ""
+	}
+	id, _ := ids.Canonical(entry.LegalEntityID)
+	return id
+}
+
+func visibleTo(p tenant.Principal, entity string) bool {
+	if p.LegalEntityID == "" {
+		return p.HasDuty(tenant.DutyAllScope)
+	}
+	return entity != "" && slices.Contains(tenant.LegalEntityScopeList(p), entity)
+}
+
 func (s *Store) pendingFor(ctx context.Context) (map[string]*pendingRow, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("memstore: no principal in context")
 	}
-	rows := s.pending[principal.TenantID]
-	if rows == nil {
-		rows = map[string]*pendingRow{}
-		s.pending[principal.TenantID] = rows
+	visible := map[string]*pendingRow{}
+	for key, row := range s.pending[principal.TenantID] {
+		if visibleTo(principal, pendingEntity(row.Journal)) {
+			visible[key] = row
+		}
 	}
-	return rows, nil
+	return visible, nil
 }
 
 func (s *Store) markDone(ctx context.Context, subject string, expectOpen bool) error {
@@ -484,6 +557,10 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	if err != nil {
 		return "", err
 	}
+	principal, _ := tenant.FromContext(ctx)
+	if pendingEntity(p.Journal) == "" || !visibleTo(principal, pendingEntity(p.Journal)) {
+		return "", errors.New("memstore: the pending posting needs a legal entity within the caller's scope")
+	}
 	generation := 0
 	for _, row := range rows {
 		if row.BaseKey == p.BaseKey && row.Outcome == store.OutcomeReversed {
@@ -503,7 +580,10 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	if existing != nil && existing.Outcome != store.OutcomeRejected {
 		return key, nil
 	}
-	rows[key] = &pendingRow{PendingRow: store.PendingRow{
+	if s.pending[principal.TenantID] == nil {
+		s.pending[principal.TenantID] = map[string]*pendingRow{}
+	}
+	s.pending[principal.TenantID][key] = &pendingRow{PendingRow: store.PendingRow{
 		Key: key, BaseKey: p.BaseKey, Subjects: slices.Compact(slices.Sorted(slices.Values(p.Subjects))), Hash: p.Hash, Journal: slices.Clone(p.Journal), CreatedAt: time.Now().UTC(),
 	}}
 	return key, nil
@@ -636,7 +716,11 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		if current.State != domain.Posted {
 			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s, not POSTED", id, current.State)}
 		}
-		adj, err := fn(cloneReceipt(current))
+		withOthers := cloneReceipt(current)
+		for i, l := range withOthers.Lines {
+			withOthers.Lines[i].OtherReceived = t.receivedOn(current.ID, current.PurchaseOrderID, l.POLineNo)
+		}
+		adj, err := fn(withOthers)
 		if err != nil {
 			return err
 		}
@@ -720,8 +804,28 @@ func (t *tenantData) releaseSerials(r store.Receipt) {
 
 func invoiceKey(vendorID, number string) string { return vendorID + "|" + strings.ToLower(number) }
 
+func (s *Store) CreateOneTimePayee(ctx context.Context, in store.OneTimePayee) (out store.OneTimePayee, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		in.CreatedAt = time.Now().UTC()
+		t.payees[in.ID] = in
+		out = in
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.InvoiceFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
+		if in.OneTimePayeeID != "" {
+			// Like the Postgres legal-entity RLS policy: a payee outside the caller's scope is not found.
+			payee, ok := t.payees[in.OneTimePayeeID]
+			if principal, _ := tenant.FromContext(ctx); !ok || !tenant.InLegalEntityScope(principal, payee.LegalEntityID) {
+				return store.ErrPayeeNotFound
+			}
+			if payee.LegalEntityID != in.LegalEntityID {
+				return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "the one-time payee belongs to another legal entity"}
+			}
+		}
 		key := invoiceKey(in.VendorID, in.InvoiceNumber)
 		if _, dup := t.invoices[key]; dup {
 			return &domain.Error{Code: domain.CodeDuplicateInvoice, Detail: fmt.Sprintf("invoice %q is already posted for the vendor", in.InvoiceNumber)}
@@ -748,12 +852,19 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 			}
 			items[i] = working[k]
 		}
+		for k := range working {
+			if lineNo, settled := t.planSettledLine(t.productOf(k.ReceiptID, k.LineNo)); settled {
+				return store.PlanSettled(t.receipts[k.ReceiptID].PurchaseOrderID, lineNo)
+			}
+		}
 		outcome, err := fn(items)
 		if err != nil {
 			return err
 		}
-		if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
-			return err
+		if !outcome.Blocked {
+			if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
+				return err
+			}
 		}
 		for k, item := range working {
 			g := &t.grir[indexes[k]]
@@ -770,6 +881,18 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		t.invoices[key] = struct{}{}
 		s.events = append(s.events, outcome.Event)
 		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
+		in.Source = cmp.Or(in.Source, domain.InvoiceSourceManual)
+		in.Status = domain.InvoiceStatusPosted
+		if outcome.Blocked {
+			in.Status = domain.InvoiceStatusAuditBlocked
+		}
+		in.Lines = slices.Clone(in.Lines)
+		for i := range in.Lines {
+			if i < len(outcome.Clearings) {
+				in.Lines[i].GrirCleared = outcome.Clearings[i]
+			}
+		}
+		t.invoiceDocs[in.ID] = in
 		out = in
 		return nil
 	})

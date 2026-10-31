@@ -3,7 +3,7 @@ info:
   title: Passage Fulfillment API
   version: 1.0.0
   description: >
-    Wave 28 slices 1 to 6. Release, pick, pack and packing-slip posting;
+    Wave 28 slices 1 to 11 (the wave picker, assign and close are slice 11). Release, pick, pack and packing-slip posting;
     container types, packing rules and auto-pack; packaging materials, country
     fee rates, the statistical packaging fee and the packaging report;
     returnable transport packaging balances; partial shipments, shipment
@@ -29,7 +29,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Shipment version from the ETag of the last read, e.g. "3".
+      description: Version from the ETag of the last read (shipment, or wave on the wave commands), e.g. "3".
       schema: { type: string }
     ShipmentId:
       name: id
@@ -148,8 +148,24 @@ components:
         qtyPicked: { $ref: "#/components/schemas/Decimal" }
         qtyPacked: { $ref: "#/components/schemas/Decimal" }
         qtyShipped: { $ref: "#/components/schemas/Decimal" }
+        qtyClosed: { $ref: "#/components/schemas/Decimal", description: "Planned quantity given up when the remainder was closed (FR-28.8); the line then plans what shipped." }
         pickConfirmed: { type: boolean }
         zone: { type: [string, "null"], description: "Pick zone, given at release (FR-28.13)." }
+        shortPickReason: { type: [string, "null"], enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER, null], description: "Reason given for the latest short pick, if any." }
+        trackingRequired: { type: boolean, description: "The product carries a batch or serial tracking dimension (BR-28.10); the slip cannot post until the quantity it ships is covered by tracking entries (FUL-0006)." }
+        tracking:
+          type: array
+          description: Batch, serial and location entries captured at pick, oldest first.
+          items: { $ref: "#/components/schemas/TrackingEntry" }
+    TrackingEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        batchNo: { type: [string, "null"] }
+        serialNo: { type: [string, "null"], description: "A serial entry is one unit; the serial is unique per product while its shipment is live." }
+        locationCode: { type: [string, "null"] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        packingSlipId: { type: [string, "null"], format: uuid, description: "The packing slip the quantity shipped on; null until it ships." }
     Container:
       type: object
       properties:
@@ -278,7 +294,7 @@ components:
           items: { $ref: "#/components/schemas/WaveShipment" }
     WaveSummary:
       type: object
-      required: [id, waveNumber, legalEntityId, warehouseId, groupBy, groupKey, status, lineCount, orderCount, createdAt]
+      required: [id, waveNumber, legalEntityId, warehouseId, groupBy, groupKey, status, lineCount, orderCount, createdAt, version]
       properties:
         id: { type: string, format: uuid }
         waveNumber: { type: string, example: "WV-0000001" }
@@ -286,10 +302,14 @@ components:
         warehouseId: { type: string, format: uuid }
         groupBy: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
         groupKey: { type: string }
-        status: { type: string, enum: [OPEN] }
+        status: { type: string, enum: [OPEN, CLOSED] }
         lineCount: { type: integer }
         orderCount: { type: integer }
         createdAt: { type: string, format: date-time }
+        version: { type: integer, description: Wave version for If-Match on assign and close; also the ETag. }
+        picker: { type: [string, "null"], description: The picker the wave is assigned to; null until assigned. }
+        assignedAt: { type: [string, "null"], format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
     Wave:
       allOf:
         - { $ref: "#/components/schemas/WaveSummary" }
@@ -299,6 +319,23 @@ components:
             shipments:
               type: array
               items: { $ref: "#/components/schemas/WaveShipment" }
+            lines:
+              type: array
+              description: The wave's shipment lines with their pick state; returned by the wave detail.
+              items:
+                type: object
+                required: [shipmentLineId, shipmentId, shipmentNumber, productId, unit, qtyPlanned, qtyPicked, pickConfirmed]
+                properties:
+                  shipmentLineId: { type: string, format: uuid }
+                  shipmentId: { type: string, format: uuid }
+                  shipmentNumber: { type: string }
+                  productId: { type: string, format: uuid }
+                  unit: { type: string }
+                  zone: { type: [string, "null"] }
+                  qtyPlanned: { $ref: "#/components/schemas/Decimal" }
+                  qtyPicked: { $ref: "#/components/schemas/Decimal" }
+                  pickConfirmed: { type: boolean }
+                  shortPickReason: { type: [string, "null"], enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER, null] }
     WorkbenchRequest:
       type: object
       required: [warehouseId]
@@ -369,6 +406,7 @@ paths:
                       held: { type: boolean }
                       carrierCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: "The order's carrier; every line of one order names the same one." }
                       zone: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: The line's pick zone. }
+                      trackingRequired: { type: boolean, description: "The product is batch or serial tracked (BR-28.10)." }
       responses:
         "201":
           description: Shipments created (one per order, warehouse and ship date) and lines skipped
@@ -496,6 +534,7 @@ paths:
                     properties:
                       shipmentLineId: { type: string, format: uuid }
                       picked: { $ref: "#/components/schemas/Decimal" }
+                      reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Why the line was picked short; only valid when picked is below plan." }
       responses:
         "200":
           description: Updated shipment
@@ -509,7 +548,7 @@ paths:
         "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: FUL-0021 invalid move, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers:
     post:
@@ -606,7 +645,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED, FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -1007,7 +1046,7 @@ paths:
                         sscc: { type: string, pattern: "^[0-9]{18}$" }
                         containerId: { type: string, format: uuid }
                         containerType: { type: string }
-                        status: { type: string, enum: [OPEN, CLOSED, SHIPPED] }
+                        status: { type: string, enum: [OPEN, CLOSED, SHIPPED, UNPACKED] }
                         shipmentId: { type: string, format: uuid }
                         shipmentNumber: { type: string }
                         orderId: { type: string, format: uuid }
@@ -1024,8 +1063,8 @@ paths:
       summary: Short picks and backorders (FR-28.2, AC-28.4, section 5.28.14)
       description: >-
         Shipment lines a pick confirmed below their planned quantity, newest short pick first. The
-        remainder (qtyPlanned - qtyPicked) is open until a re-pick reaches the planned quantity or the shipment
-        is cancelled. status=open (default) lists open backorders only; status=all also lists closed ones. from
+        remainder (qtyPlanned - qtyPicked) is open until a re-pick reaches the planned quantity, the remainder is
+        closed (qtyClosed, FR-28.8) or the shipment is cancelled. status=open (default) lists open backorders only; status=all also lists closed ones. from
         and to bound the date of the line's first short pick. Page with limit and the nextCursor of the previous
         page.
       x-passage-duty: WarehouseView
@@ -1049,7 +1088,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [shipmentLineId, shipmentId, shipmentNumber, status, warehouseId, orderId, customerId, orderLineId, productId, unit, qtyPlanned, qtyPicked, qtyShipped, qtyRemainder, open, shortPickedAt]
+                      required: [shipmentLineId, shipmentId, shipmentNumber, status, warehouseId, orderId, customerId, orderLineId, productId, unit, qtyPlanned, qtyPicked, qtyShipped, qtyClosed, qtyRemainder, open, shortPickedAt]
                       properties:
                         shipmentLineId: { type: string, format: uuid }
                         shipmentId: { type: string, format: uuid }
@@ -1064,9 +1103,11 @@ paths:
                         qtyPlanned: { $ref: "#/components/schemas/Decimal" }
                         qtyPicked: { $ref: "#/components/schemas/Decimal" }
                         qtyShipped: { $ref: "#/components/schemas/Decimal" }
+                        qtyClosed: { $ref: "#/components/schemas/Decimal", description: "Planned quantity given up when the remainder was closed (FR-28.8); qtyPlanned is then what shipped." }
                         qtyRemainder: { $ref: "#/components/schemas/Decimal" }
                         open: { type: boolean, description: "A remainder is left and the shipment is not cancelled." }
                         shortPickedAt: { type: string, format: date-time, description: "The line's first short pick." }
+                        reason: { type: [string, "null"], enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER, null], description: "Reason given for the latest short pick, if any." }
                   nextCursor: { type: string, format: uuid, description: "Present when another page exists." }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -1188,6 +1229,119 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:close-remainder:
+    post:
+      operationId: closeShipmentRemainder
+      summary: Close the open remainder of a partially shipped shipment (FR-28.8)
+      description: >
+        CANCEL_REMAINDER: allowed while the shipment is PARTIALLY_SHIPPED, or its
+        remainder is being picked (PICKING, PICKED), after at least one slip has
+        shipped and with nothing packed waiting to ship. Every line shrinks to the
+        quantity that shipped (qtyClosed records what was given up), the backorder
+        closes and the shipment becomes SHIPPED. shipment.closed tells inventory
+        which reservation and which picked-but-unpacked stock to release.
+        Batch and serial entries that never shipped are dropped, freeing their serials.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Shipment SHIPPED with its remainder closed; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 no open remainder, nothing shipped yet, or packed quantity waiting to ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}/containers/{cid}:unpack:
+    post:
+      operationId: unpackContainer
+      summary: Take a CLOSED container apart before it ships
+      description: >
+        Allowed while the shipment is PICKING, PICKED or PACKED and the container is
+        CLOSED (not on a posted slip). The container's packed quantities return to the
+        unpacked pool; a PACKED shipment goes back to PICKED so it can be repacked or,
+        once it holds no container, cancelled. The SSCC stays issued and is never
+        reused (BR-28.5). Publishes container.unpacked.
+      x-passage-duty: WarehousePack
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { name: cid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Shipment without the container; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment, FUL-0054 container not on the shipment (or already unpacked)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 shipment status does not allow unpacking, or the container already shipped", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}/lines/{lid}:capture-tracking:
+    post:
+      operationId: captureLineTracking
+      summary: Capture batch, serial and location for a picked shipment line (BR-28.10)
+      description: >
+        Replaces the line's entries that have not shipped yet; an empty list clears
+        them. Each entry names a batch or a serial number (a serial is one unit, and
+        unique per product while its shipment is live, FUL-0036) and optionally the
+        pick location. Entries, shipped and new together, cannot exceed the picked
+        quantity (FUL-0035). Allowed while the shipment is PICKING, PICKED, PACKED
+        or PARTIALLY_SHIPPED. A line released with trackingRequired posts only when
+        its entries cover the quantity the slip ships (FUL-0006). Publishes pick.tracked.
+      x-passage-duty: WarehousePick
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { name: lid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              additionalProperties: false
+              properties:
+                entries:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [qty]
+                    additionalProperties: false
+                    properties:
+                      batchNo: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      serialNo: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      locationCode: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      qty: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "200":
+          description: The shipment with the line's tracking entries; ETag carries the new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment, FUL-0041 line not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0036 serial already assigned to another line of the product", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 shipment status does not allow capture, FUL-0035 entries exceed the picked quantity, FUL-0050 malformed entry, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/waves:preview:
     post:
       operationId: previewWaves
@@ -1226,9 +1380,13 @@ paths:
     get:
       operationId: listWaves
       summary: Pick waves, newest first
+      description: Optionally filtered by warehouse, status, picker, or only the waves nobody is assigned to.
       x-passage-duty: WarehouseView
       parameters:
         - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, CLOSED] } }
+        - { name: picker, in: query, description: Waves assigned to this picker., schema: { type: string, maxLength: 64 } }
+        - { name: unassigned, in: query, description: "true lists only waves with no picker; not combinable with picker.", schema: { type: boolean } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
         "200":
@@ -1289,12 +1447,132 @@ paths:
         - { $ref: "#/components/parameters/WaveId" }
       responses:
         "200":
-          description: Wave
+          description: Wave; the ETag carries the wave version for If-Match on assign and close
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Wave" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0052, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/waves/{id}:confirm-pick:
+    post:
+      operationId: confirmWavePick
+      summary: Confirm the picks of a whole wave in one command (FR-28.13)
+      description: >
+        Confirms the listed picks across the shipments of the wave in one transaction and
+        writes one pick.confirmed per shipment, carrying the wave id. With pickRest, every other
+        line of the wave that is not yet confirmed is picked in full; shipments of the wave that
+        no longer pick (picked, packed, cancelled) are left alone. A listed line must belong to
+        the wave, and a listed line on a shipment that no longer picks fails the whole command.
+      x-passage-duty: WarehousePick
+      parameters:
+        - { $ref: "#/components/parameters/WaveId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                pickRest: { type: boolean, description: "Pick every other unconfirmed line of the wave in full." }
+                picks:
+                  type: array
+                  items:
+                    type: object
+                    required: [shipmentLineId, picked]
+                    properties:
+                      shipmentLineId: { type: string, format: uuid }
+                      picked: { $ref: "#/components/schemas/Decimal" }
+                      reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Why the line was picked short; only valid when picked is below plan." }
+      responses:
+        "200":
+          description: The shipments that took picks, with their new status and version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [waveId, linesConfirmed, shortLines, shipments]
+                properties:
+                  waveId: { type: string, format: uuid }
+                  linesConfirmed: { type: integer }
+                  shortLines: { type: integer, description: "Lines picked below plan." }
+                  shipments:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, shipmentNumber, status, version, linesConfirmed]
+                      properties:
+                        id: { type: string, format: uuid }
+                        shipmentNumber: { type: string }
+                        status: { $ref: "#/components/schemas/ShipmentStatus" }
+                        version: { type: integer }
+                        linesConfirmed: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0052 wave or FUL-0041 line not in the wave", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave CLOSED or shipment status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/waves/{id}:assign:
+    post:
+      operationId: assignWave
+      summary: Give a wave to a picker or hand it to another one (FR-28.13)
+      description: >
+        Sets the picker of an OPEN wave; assigning again reassigns it. Needs the wave version in
+        If-Match. Writes wave.assigned with the previous picker. A CLOSED wave, or the picker the
+        wave already has, is refused.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WaveId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [picker]
+              additionalProperties: false
+              properties:
+                picker: { type: string, minLength: 1, maxLength: 64, description: The picker's user name or badge; no control characters. }
+      responses:
+        "200":
+          description: The wave with its new picker; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wave" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0052 wave not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave is CLOSED, FUL-0050 already assigned to that picker, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/waves/{id}:close:
+    post:
+      operationId: closeWave
+      summary: Close a wave once every line is picked (FR-28.13)
+      description: >
+        Closes an OPEN wave when each of its lines is pick-confirmed or sits on a cancelled
+        shipment; a line still to pick answers FUL-0055. Needs the wave version in If-Match.
+        Writes wave.closed with the number of lines picked short.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WaveId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: The CLOSED wave; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Wave" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0052 wave not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 wave already CLOSED, FUL-0055 a line is still to pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/tracking:
     get:
       operationId: listTracking

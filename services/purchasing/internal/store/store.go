@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -79,6 +80,7 @@ type Store interface {
 	GetInvoicingPlan(ctx context.Context, poID string, lineNo int) (PlanResult, error)
 	ListInvoicingPlans(ctx context.Context, poID string) ([]domain.InvoicingPlan, error)
 	DeleteInvoicingPlan(ctx context.Context, poID string, lineNo, ifMatch int) (int, error)
+	MarkPlanRowInvoiced(ctx context.Context, poID string, lineNo, seq int, ref string, amount decimal.Decimal) (PlanRowSettlement, error)
 	CreateSchedulingAgreement(ctx context.Context, in domain.SchedulingAgreement, idem Idem) (SchedulingAgreementDetail, error)
 	GetSchedulingAgreement(ctx context.Context, id string) (SchedulingAgreementDetail, error)
 	ListSchedulingAgreements(ctx context.Context, f SchedulingAgreementFilter, after string, limit int) (Page[SAMonitorRow], error)
@@ -86,6 +88,9 @@ type Store interface {
 	RunSchedulingRelease(ctx context.Context, id, kind string, runDate domain.Day, reset bool, idem Idem) (domain.SARelease, bool, error)
 	ListSchedulingReleases(ctx context.Context, agreementID string) ([]domain.SARelease, error)
 	GetSchedulingRelease(ctx context.Context, agreementID string, releaseNo int) (domain.SARelease, error)
+	GetPolicy(ctx context.Context, legalEntityID string) (domain.Policy, error)
+	ListPolicies(ctx context.Context) ([]domain.Policy, error)
+	PutPolicy(ctx context.Context, in domain.Policy, ifMatch int) (domain.Policy, error)
 	Ping(ctx context.Context) error
 }
 

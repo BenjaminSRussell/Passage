@@ -326,37 +326,43 @@ func (s *Postgres) CreateBatch(ctx context.Context, in BatchInput) (Batch, error
 	}
 	var out Batch
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
-		if err != nil {
-			return err
-		}
-		name, err := usableJournalName(ctx, tx, p.TenantID, in.JournalName)
-		if err != nil {
-			return err
-		}
-		if err := checkLinesLimit(name, len(in.Lines)); err != nil {
-			return err
-		}
-		var docDate *string
-		if in.DocumentDate != nil {
-			d := in.DocumentDate.Format(time.DateOnly)
-			docDate = &d
-		}
-		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into journal_batch (tenant_id, id, ledger_id, legal_entity_id, journal_name, description,
-				posting_date, document_date, status, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7::text::date, $8::text::date, 'draft', $9)`,
-			p.TenantID, id, ledger.ID, ledger.LegalEntityID, name.Code, in.Description, in.PostingDate.Format(time.DateOnly),
-			docDate, p.UserID); err != nil {
-			return err
-		}
-		if err := insertBatchLines(ctx, tx, p.TenantID, ledger.LegalEntityID, id, in.Lines); err != nil {
-			return err
-		}
-		out, err = getBatchTx(ctx, tx, p.TenantID, id, false)
+		out, err = createBatchTx(ctx, tx, p, in)
 		return err
 	})
 	return out, err
+}
+
+// createBatchTx stores a draft batch inside tx; recurring journal generation
+// shares it so the batch and its run row commit together.
+func createBatchTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in BatchInput) (Batch, error) {
+	ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
+	if err != nil {
+		return Batch{}, err
+	}
+	name, err := usableJournalName(ctx, tx, p.TenantID, in.JournalName)
+	if err != nil {
+		return Batch{}, err
+	}
+	if err := checkLinesLimit(name, len(in.Lines)); err != nil {
+		return Batch{}, err
+	}
+	var docDate *string
+	if in.DocumentDate != nil {
+		d := in.DocumentDate.Format(time.DateOnly)
+		docDate = &d
+	}
+	id := ids.New()
+	if _, err := tx.Exec(ctx, `insert into journal_batch (tenant_id, id, ledger_id, legal_entity_id, journal_name, description,
+			posting_date, document_date, status, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7::text::date, $8::text::date, 'draft', $9)`,
+		p.TenantID, id, ledger.ID, ledger.LegalEntityID, name.Code, in.Description, in.PostingDate.Format(time.DateOnly),
+		docDate, p.UserID); err != nil {
+		return Batch{}, err
+	}
+	if err := insertBatchLines(ctx, tx, p.TenantID, ledger.LegalEntityID, id, in.Lines); err != nil {
+		return Batch{}, err
+	}
+	return getBatchTx(ctx, tx, p.TenantID, id, false)
 }
 
 // GetBatch returns one batch with its lines.
@@ -477,11 +483,17 @@ func (s *Postgres) SubmitBatch(ctx context.Context, id string, version int, toda
 		if err != nil {
 			return err
 		}
-		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
+		// The same stages as posting: derivation (FR-11.22) runs before structure validation,
+		// so a dimension the active strategy fills is not reported missing.
+		lines, _, err := applyDerivation(ctx, tx, p.TenantID, ledger, accounts, in.PostingDate, in.Lines)
 		if err != nil {
 			return err
 		}
-		if res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, in.Lines); !res.Valid() {
+		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), lines)
+		if err != nil {
+			return err
+		}
+		if res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, lines); !res.Valid() {
 			return &domain.RejectedError{Violations: res.Violations}
 		}
 		if _, err := tx.Exec(ctx, `update journal_batch set submitted_by = $3, decided_by = null, last_error = null

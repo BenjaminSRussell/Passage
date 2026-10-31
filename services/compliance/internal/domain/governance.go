@@ -65,7 +65,7 @@ var defaultExportPolicy = map[ExportClassification][]ExportAction{
 	ClassPublic:       {ActionAllow},
 }
 
-// ExportPolicy overrides the action set of the named classifications (role or tenant policy).
+// ExportPolicy overrides the action set of the named classifications. It is set server-side only; the request body never binds it.
 type ExportPolicy map[ExportClassification][]ExportAction
 
 // ExportRequest asks whether a download may proceed.
@@ -74,7 +74,7 @@ type ExportRequest struct {
 	Channel        ExportChannel        `json:"channel"`
 	Rows           int                  `json:"rows"`
 	Reason         string               `json:"reason,omitempty"`
-	Policy         ExportPolicy         `json:"policy,omitempty"`
+	Policy         ExportPolicy         `json:"-"`
 }
 
 // ExportDecision is the outcome of an export check. Every export is audited.

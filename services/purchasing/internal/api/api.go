@@ -52,6 +52,8 @@ const (
 	dutyPurchaseOrderInquire   = "PurchaseOrderInquire"
 	dutyTradeAgreementMaintain = "TradeAgreementMaintain"
 	dutyAgreementMaintain      = "AgreementMaintain"
+	dutyPlanRowSettle          = "procurement.invoicing-plan.settle"
+	dutyPurchaseOrderLookup    = "procurement.purchase-order.lookup"
 )
 
 // maxRequisitionLines is the FR-17.1 cap on lines per requisition.
@@ -105,6 +107,8 @@ type API struct {
 	sealedRFQsOpened   atomic.Int64
 
 	invoicingPlansSaved atomic.Int64
+	planRowsInvoiced    atomic.Int64
+	planRowConflicts    atomic.Int64
 	repricesApplied     atomic.Int64
 
 	schedulingAgreementsCreated atomic.Int64
@@ -141,7 +145,8 @@ func (a *API) Register(r chi.Router) {
 		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
 		inquire := r.With(authz.RequireDuty(dutyPurchaseOrderInquire))
-		inquire.Get("/purchase-orders/{id}", a.getOrder)
+		lookup := r.With(authz.RequireAnyDuty(dutyPurchaseOrderInquire, dutyPurchaseOrderLookup))
+		lookup.Get("/purchase-orders/{id}", a.getOrder)
 		// PO lifecycle (FR-17.7, FR-17.8): PATCH edits or creates a change
 		// version; custom methods (":submit", ":approve", ":reject", ":confirm",
 		// ":cancel") arrive as one path segment and check their own duty in
@@ -155,10 +160,12 @@ func (a *API) Register(r chi.Router) {
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		// Invoicing plans per PO line (FR-17.21); a line amount change
 		// reproportions them inside the PO edit (BR-17.17).
-		inquire.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)
+		lookup.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)
 		inquire.Get("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.getInvoicingPlan)
 		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.putInvoicingPlan)
 		maintain.Delete("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.deleteInvoicingPlan)
+		// Receiving reports a settled plan row (#289); only receiving's service grant holds this duty.
+		r.With(authz.RequireDuty(dutyPlanRowSettle)).Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement", a.settlePlanRow)
 		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Get("/pricing/lookup", a.lookupPrice)
 		ta := r.With(authz.RequireDuty(dutyTradeAgreementMaintain))
 		ta.Post("/trade-agreements", a.createAgreement)
@@ -197,6 +204,12 @@ func (a *API) Register(r chi.Router) {
 		pa.Put("/scheduling-agreements/{id}/schedule", a.replaceSchedule)
 		saRead.Get("/scheduling-agreements/{id}/releases", a.listSchedulingReleases)
 		saRead.Get("/scheduling-agreements/{id}/releases/{releaseNo}", a.getSchedulingRelease)
+		// Purchasing policy per legal entity (FR-17.13).
+		policyRead := r.With(authz.Require(anyDuty{dutyPolicyMaintain, dutyPurchaseOrderInquire},
+			dutyPolicyMaintain+" or "+dutyPurchaseOrderInquire, ""))
+		policyRead.Get("/purchasing-policies", a.listPolicies)
+		policyRead.Get("/purchasing-policies/{legalEntityId}", a.getPolicy)
+		r.With(authz.RequireDuty(dutyPolicyMaintain)).Put("/purchasing-policies/{legalEntityId}", a.putPolicy)
 	})
 }
 
@@ -204,6 +217,7 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		for _, c := range []struct {
 			name, help string
 			value      int64
@@ -224,6 +238,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_rfq_vendors_scored_total", "RFQ vendor scorings recorded.", a.rfqVendorsScored.Load()},
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
+			{"purchasing_invoicing_plan_rows_invoiced_total", "Plan rows flipped to INVOICED for a settlement from receiving; replays are not counted.", a.planRowsInvoiced.Load()},
+			{"purchasing_invoicing_plan_row_settlement_conflicts_total", "Plan row settlements from receiving refused with PRC-IP-004 (a person must resolve them).", a.planRowConflicts.Load()},
 			{"purchasing_purchase_orders_repriced_total", "Subsequent price changes applied to a purchase order.", a.repricesApplied.Load()},
 			{"purchasing_scheduling_agreements_created_total", "Scheduling agreements created; idempotent replays are counted.", a.schedulingAgreementsCreated.Load()},
 			{"purchasing_scheduling_agreement_releases_created_total", "Scheduling agreement releases created (FRC and JIT).", a.saReleasesCreated.Load()},
@@ -278,7 +294,7 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeRFQSealed {
+		if de.Code == domain.CodeRFQSealed || de.Code == domain.CodeFourEyes {
 			status = http.StatusForbidden
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
@@ -353,16 +369,9 @@ func hashBody(operation string, v any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// inScope rejects a write for a legal entity outside the caller's scope
-// (passage.legal_entity_scopes: empty or "*" means every entity).
 func inScope(p tenant.Principal, legalEntityID string) error {
-	if p.LegalEntityID == "" || p.LegalEntityID == "*" {
+	if tenant.InLegalEntityScope(p, legalEntityID) {
 		return nil
-	}
-	for _, scope := range strings.Split(p.LegalEntityID, ",") {
-		if strings.TrimSpace(scope) == legalEntityID {
-			return nil
-		}
 	}
 	return httpx.NewProblem(http.StatusForbidden, codeScope, "legal entity "+legalEntityID+" is outside the caller's scope")
 }

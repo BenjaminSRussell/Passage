@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
@@ -47,9 +46,9 @@ func toPostings(in []postingDTO) ([]domain.RekeyPosting, error) {
 		if err != nil {
 			return nil, err
 		}
-		amt, err := decimal.NewFromString(strings.TrimSpace(p.Amount))
+		amt, err := parseMoney(p.Amount)
 		if err != nil {
-			return nil, fmt.Errorf("%w: posting %d (%s) amount %q is not a decimal", domain.ErrInvalid, i+1, p.DocumentRef, p.Amount)
+			return nil, fmt.Errorf("%w: posting %d (%s) amount %q %s", domain.ErrInvalid, i+1, p.DocumentRef, p.Amount, err)
 		}
 		out = append(out, domain.RekeyPosting{Kind: kind, Entity: strings.TrimSpace(p.Entity), DocumentRef: strings.TrimSpace(p.DocumentRef),
 			PostedAt: p.PostedAt, Account: strings.TrimSpace(p.Account), Dimensions: p.Dimensions, Currency: p.Currency, Amount: amt, Text: p.Text})

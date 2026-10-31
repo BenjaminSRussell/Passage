@@ -1141,3 +1141,33 @@ export async function listSchedulingReleases(id: string, signal?: AbortSignal) {
 export function getSchedulingRelease(id: string, releaseNo: number, signal?: AbortSignal) {
   return send<SchedulingRelease>("GET", `${saPath(id)}/releases/${releaseNo}`, { signal });
 }
+
+/** Purchasing policy of one legal entity (FR-17.13); version 0 means none is saved and the defaults apply. */
+export interface PurchasingPolicy {
+  legalEntityId: string;
+  changeManagementDefault: boolean;
+  poFourEyes: boolean;
+  allowInvoiceBeforeReceipt: boolean;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export type PurchasingPolicyInput = Pick<PurchasingPolicy, "changeManagementDefault" | "poFourEyes" | "allowInvoiceBeforeReceipt">;
+
+export async function listPolicies(signal?: AbortSignal) {
+  const { body } = await send<{ items: PurchasingPolicy[] }>("GET", "/purchasing-policies", { signal });
+  return body.items;
+}
+
+export function getPolicy(legalEntityId: string, signal?: AbortSignal) {
+  return send<PurchasingPolicy>("GET", `/purchasing-policies/${encodeURIComponent(legalEntityId)}`, { signal });
+}
+
+/** Saves the policy; version is the one read (0 creates it). PUT is idempotent, so no key is sent. */
+export function savePolicy(legalEntityId: string, input: PurchasingPolicyInput, version: number) {
+  return send<PurchasingPolicy>("PUT", `/purchasing-policies/${encodeURIComponent(legalEntityId)}`, {
+    body: input,
+    headers: { "If-Match": `"${version}"` },
+  });
+}

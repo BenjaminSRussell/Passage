@@ -2,6 +2,7 @@ package numbering_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,9 +14,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 )
 
+const entityID = "00000000-0000-0000-0000-0000000000e1"
+
 func principalContext() context.Context {
 	return tenant.With(context.Background(), tenant.Principal{
-		TenantID: "00000000-0000-0000-0000-000000000001", UserID: "user-1",
+		TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: entityID, UserID: "user-1",
 		Duties: map[string]struct{}{"party.write": {}, "party.read": {}},
 	})
 }
@@ -44,7 +47,7 @@ func TestNext_PostsWithPrincipalHeadersAndReturnsFormatted(t *testing.T) {
 	}
 	for header, want := range map[string]string{
 		"Idempotency-Key": "key-1", "X-Passage-Tenant": "00000000-0000-0000-0000-000000000001",
-		"X-Passage-User": "user-1", "X-Passage-Duties": "party.read,party.write",
+		"X-Passage-Legal-Entity": entityID, "X-Passage-User": "user-1", "X-Passage-Duties": "party.read,party.write",
 	} {
 		if got.Header.Get(header) != want {
 			t.Errorf("%s = %q, want %q", header, got.Header.Get(header), want)
@@ -84,4 +87,44 @@ func TestNext_TransportErrorIsUnavailable(t *testing.T) {
 func TestUnavailable_AlwaysFails(t *testing.T) {
 	_, err := numbering.Unavailable{}.Next(principalContext(), "PARTY", "k")
 	wantUnavailable(t, err)
+}
+
+func TestNext_RequiresASingleLegalEntity(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls++ }))
+	defer srv.Close()
+	for name, entity := range map[string]string{"none": "", "list": entityID + ",00000000-0000-0000-0000-0000000000e2"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: entity})
+			_, err := numbering.New(srv.URL).Next(ctx, "PARTY", "k")
+			var p *httpx.Problem
+			if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != numbering.CodeEntityRequired {
+				t.Fatalf("got %v, want 422 %s", err, numbering.CodeEntityRequired)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("numbering called %d times without a legal entity", calls)
+	}
+}
+
+func TestNext_SignedSendsPartyServiceTokenWithoutUserDuties(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("party", priv)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"formatted":"PTY-000007"}`))
+	}))
+	defer srv.Close()
+	if _, err := numbering.New(srv.URL).WithSigner(signer).Next(principalContext(), "PARTY", "key-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get(tenant.HeaderDuties) != "" || got.Get("Idempotency-Key") != "key-1" {
+		t.Fatalf("headers %v", got)
+	}
+	claims, err := tenant.NewServiceVerifier("numbering", map[string]ed25519.PublicKey{"party": pub}).Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.sequence.allocate") || claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("party.write") {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
 }

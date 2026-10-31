@@ -94,6 +94,8 @@ func TestSequences(t *testing.T) {
 		{"create without duty", http.MethodPost, createPath, validBody, "numbering.read", ok, true, http.StatusForbidden, "AUTH-0003"},
 		{"create store error", http.MethodPost, createPath, validBody, allDuties, &fakeStore{err: errors.New("pg secret")}, true, http.StatusInternalServerError, "COM-0500"},
 		{"allocate ok", http.MethodPost, nextPath, "", allDuties, ok, true, http.StatusOK, `"formatted":"INV-000001"`},
+		{"allocate with the narrow service duty", http.MethodPost, nextPath, "", "numbering.sequence.allocate", ok, true, http.StatusOK, `"formatted":"INV-000001"`},
+		{"create with the narrow service duty", http.MethodPost, createPath, validBody, "numbering.sequence.allocate", ok, true, http.StatusForbidden, "AUTH-0003"},
 		{"allocate without duty", http.MethodPost, nextPath, "", "numbering.read", ok, true, http.StatusForbidden, "AUTH-0003"},
 	}
 	for _, tc := range tests {

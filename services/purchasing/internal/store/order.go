@@ -16,27 +16,33 @@ import (
 // PurchaseOrder is a PO in its pre-confirmation state (FR-17.7). Totals are
 // persisted with the lines; a deferred constraint trigger enforces the header identity.
 type PurchaseOrder struct {
-	ID               string                `json:"id"`
-	Number           string                `json:"number"`
-	LegalEntityID    string                `json:"legalEntityId"`
-	VendorID         string                `json:"vendorId"`
-	SiteID           string                `json:"siteId,omitempty"`
-	WarehouseID      string                `json:"warehouseId,omitempty"`
-	Currency         string                `json:"currency"`
-	ApprovalStatus   string                `json:"approvalStatus"`
-	DocumentStatus   string                `json:"documentStatus"`
-	VersionNo        int                   `json:"versionNo"`
-	ChangeManagement bool                  `json:"changeManagement"`
-	Subtotal         decimal.Decimal       `json:"subtotal"`
-	DiscountTotal    decimal.Decimal       `json:"discountTotal"`
-	ChargesTotal     decimal.Decimal       `json:"chargesTotal"`
-	TaxTotal         decimal.Decimal       `json:"taxTotal"`
-	Total            decimal.Decimal       `json:"total"`
-	RowVersion       int                   `json:"rowVersion"`
-	Lines            []PurchaseOrderLine   `json:"lines"`
-	Charges          []PurchaseOrderCharge `json:"charges"`
-	CreatedAt        time.Time             `json:"createdAt"`
-	UpdatedAt        time.Time             `json:"updatedAt"`
+	ID               string          `json:"id"`
+	Number           string          `json:"number"`
+	LegalEntityID    string          `json:"legalEntityId"`
+	VendorID         string          `json:"vendorId"`
+	SiteID           string          `json:"siteId,omitempty"`
+	WarehouseID      string          `json:"warehouseId,omitempty"`
+	Currency         string          `json:"currency"`
+	ApprovalStatus   string          `json:"approvalStatus"`
+	DocumentStatus   string          `json:"documentStatus"`
+	VersionNo        int             `json:"versionNo"`
+	ChangeManagement bool            `json:"changeManagement"`
+	Subtotal         decimal.Decimal `json:"subtotal"`
+	DiscountTotal    decimal.Decimal `json:"discountTotal"`
+	ChargesTotal     decimal.Decimal `json:"chargesTotal"`
+	TaxTotal         decimal.Decimal `json:"taxTotal"`
+	Total            decimal.Decimal `json:"total"`
+	RowVersion       int             `json:"rowVersion"`
+	// CreatedBy, SubmittedBy and ChangedBy (the last user who edited or
+	// repriced the content) are the users the four-eyes policy keeps from
+	// approving or confirming the PO; empty for POs from before they were recorded.
+	CreatedBy   string                `json:"createdBy,omitempty"`
+	SubmittedBy string                `json:"submittedBy,omitempty"`
+	ChangedBy   string                `json:"changedBy,omitempty"`
+	Lines       []PurchaseOrderLine   `json:"lines"`
+	Charges     []PurchaseOrderCharge `json:"charges"`
+	CreatedAt   time.Time             `json:"createdAt"`
+	UpdatedAt   time.Time             `json:"updatedAt"`
 	// Warnings are computed on create (PRC-AGR-004) and not stored.
 	Warnings []Warning `json:"warnings,omitempty"`
 }
@@ -119,11 +125,11 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 	in.Number = fmt.Sprintf("PO-%08d", seq)
 	in.ApprovalStatus, in.DocumentStatus, in.VersionNo = "DRAFT", "NONE", 0
 	if _, err := tx.Exec(ctx, `insert into purchase_order (tenant_id, id, legal_entity_id, number, vendor_id, site_id, warehouse_id,
-		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		p.TenantID, in.ID, in.LegalEntityID, in.Number, in.VendorID, nullable(in.SiteID), nullable(in.WarehouseID), in.Currency,
 		in.ApprovalStatus, in.DocumentStatus, in.VersionNo, in.ChangeManagement, in.Subtotal, in.DiscountTotal, in.ChargesTotal,
-		in.TaxTotal, in.Total); err != nil {
+		in.TaxTotal, in.Total, userOrNil(p.UserID)); err != nil {
 		return PurchaseOrder{}, err
 	}
 	for _, l := range in.Lines {
@@ -167,10 +173,11 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	var o PurchaseOrder
 	err := tx.QueryRow(ctx, `select id, legal_entity_id, number, vendor_id, coalesce(site_id::text, ''), coalesce(warehouse_id::text, ''),
 		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total,
-		row_version, created_at, updated_at from purchase_order where tenant_id = $1 and id = $2`, p.TenantID, id).
+		row_version, created_at, updated_at, coalesce(created_by::text, ''), coalesce(submitted_by::text, ''),
+		coalesce(changed_by::text, '') from purchase_order where tenant_id = $1 and id = $2`, p.TenantID, id).
 		Scan(&o.ID, &o.LegalEntityID, &o.Number, &o.VendorID, &o.SiteID, &o.WarehouseID, &o.Currency, &o.ApprovalStatus,
 			&o.DocumentStatus, &o.VersionNo, &o.ChangeManagement, &o.Subtotal, &o.DiscountTotal, &o.ChargesTotal, &o.TaxTotal,
-			&o.Total, &o.RowVersion, &o.CreatedAt, &o.UpdatedAt)
+			&o.Total, &o.RowVersion, &o.CreatedAt, &o.UpdatedAt, &o.CreatedBy, &o.SubmittedBy, &o.ChangedBy)
 	if err != nil {
 		return PurchaseOrder{}, notFound(err, CodePurchaseOrderNotFound, "purchase order not found")
 	}

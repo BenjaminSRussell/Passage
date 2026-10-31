@@ -27,11 +27,18 @@ describe("production module", () => {
     expect(production.routes.map((r) => r.path)).toEqual([
       "/production",
       "/production/new",
+      "/production/parameters",
       "/production/posting-profiles",
       "/production/as-built",
       "/production/wip-balances",
       "/production/variances",
       "/production/subcontract-operations",
+      "/production/operations",
+      "/production/journals",
+      "/production/kpi",
+      "/production/order-changes",
+      "/production/order-changes/:changeId",
+      "/production/ocm-profiles",
       "/production/:id",
     ]);
     expect(production.nav).toEqual([
@@ -41,6 +48,12 @@ describe("production module", () => {
       { label: "WIP balance", to: "/production/wip-balances", duty: "production.cost.read" },
       { label: "Production variances", to: "/production/variances", duty: "production.cost.read" },
       { label: "Subcontract operations", to: "/production/subcontract-operations", duty: "production.order.read" },
+      { label: "Operations overview", to: "/production/operations", duty: "production.order.read" },
+      { label: "Production journals", to: "/production/journals", duty: "production.order.read" },
+      { label: "Production KPIs", to: "/production/kpi", duty: "production.order.read" },
+      { label: "Order changes", to: "/production/order-changes", duty: "production.order.read" },
+      { label: "Order change profiles", to: "/production/ocm-profiles", duty: "production.setup.read" },
+      { label: "Production parameters", to: "/production/parameters", duty: "production.setup.read" },
       { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },
     ]);
     expect(loadModules().some((m) => m.id === "production")).toBe(true);

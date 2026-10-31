@@ -32,6 +32,7 @@ const tiered: RebateAgreement = {
   accrualAccount: "2150",
   expenseAccount: "4150",
   status: "ACTIVE",
+  version: 1,
 };
 
 function accrual(patch: Partial<RebateAccrual>): RebateAccrual {
@@ -266,5 +267,70 @@ describe("rebate form rules", () => {
     expect(sumDecimals(["30", "120", "-105.1"])).toBe("44.9");
     expect(sumDecimals(["-1.5", "1"])).toBe("-0.5");
     expect(sumDecimals([])).toBe("0");
+  });
+});
+
+describe("Rebate agreement lifecycle", () => {
+  it("revises the end date with the version and idempotency key, then shows the new validity", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/rebates/agreements/${A1}:revise`)) return json(200, { ...tiered, name: "Acme renamed", validTo: "2027-06-30", version: 2 });
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, { ...tiered, version: 1 });
+      if (url.pathname.endsWith("/rebates/accruals")) return json(200, { items: [] });
+      return undefined;
+    };
+    const { container } = renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fill("Name", "Acme renamed");
+    fill("Valid to", "2027-06-30");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("heading", { name: "Acme renamed" })).toBeInTheDocument();
+    expect(screen.getByText("The agreement is updated.")).toBeInTheDocument();
+    const post = server.calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ version: 1, name: "Acme renamed", validTo: "2027-06-30" });
+    expect(idempotencyKey(post!)).toBeTruthy();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("checks the form before calling the service and shows a refusal", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST") return json(422, { code: "PRC-0048", detail: "validTo is before the invoice of 2027-02-10" });
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, { ...tiered, version: 1 });
+      if (url.pathname.endsWith("/rebates/accruals")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Change the name or the end date.")).toBeInTheDocument();
+    fill("Close date", "2030-01-01");
+    fireEvent.click(screen.getByRole("button", { name: "Close agreement" }));
+    expect(await screen.findByText(`Choose a day from ${tiered.validFrom} to ${tiered.validTo}.`)).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fill("Close date", tiered.validFrom);
+    fireEvent.click(screen.getByRole("button", { name: "Close agreement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Keep it open" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Close agreement" }));
+    fireEvent.click(await screen.findByRole("button", { name: `Close on ${tiered.validFrom}` }));
+    expect(await screen.findByText("That date is before an invoice this agreement already accrued")).toBeInTheDocument();
+    expect(await findAlert()).toHaveTextContent("PRC-0048");
+  });
+
+  it("closes the agreement and shows the closed state", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/rebates/agreements/${A1}:close`)) return json(200, { ...tiered, status: "CLOSED", validTo: "2027-05-31", version: 2 });
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, { ...tiered, version: 1 });
+      if (url.pathname.endsWith("/rebates/accruals")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fill("Close date", "2027-05-31");
+    fireEvent.click(screen.getByRole("button", { name: "Close agreement" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Invoices dated after 2027-05-31 will no longer accrue");
+    fireEvent.click(screen.getByRole("button", { name: "Close on 2027-05-31" }));
+    expect(await screen.findByText(/This agreement is closed\. Invoices dated after 2027-05-31/)).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ version: 1, closeDate: "2027-05-31" });
   });
 });

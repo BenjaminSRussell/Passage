@@ -28,6 +28,10 @@ const (
 // fakeStore records the inputs the handlers pass down and answers with the
 // configured result or error.
 type fakeStore struct {
+	rec      recurringFake
+	oi       openItemFake
+	auto     autoFake
+	deriv    derivationFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error
@@ -562,13 +566,17 @@ func TestListAccounts_PagesWithCursor(t *testing.T) {
 func TestCreateLedger_ScopeAndValidation(t *testing.T) {
 	h := server(&fakeStore{})
 	body := `{"legalEntityId":"` + testDoc + `","code":"GL","name":"General ledger","chartCode":"STD","currency":"USD","dimensionAttributes":["DEPT","CC"]}`
-	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, nil)
+	inScope := map[string]string{"X-Passage-Legal-Entity": testDoc}
+	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, inScope)
 	if rec.Code != http.StatusCreated || decode(t, rec)["futurePostingDays"] != float64(366) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, map[string]string{"X-Passage-Legal-Entity": testLedger})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a caller scoped to another legal entity must get 403, got %d", rec.Code)
+	}
+	if rec = call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("a caller with no legal-entity scope must get 403, got %d", rec.Code)
 	}
 	dup := strings.Replace(body, `["DEPT","CC"]`, `["DEPT","DEPT"]`, 1)
 	if rec = call(h, http.MethodPost, "/v1/ledger/ledgers", dup, dutyLedgerWrite, nil); rec.Code != http.StatusBadRequest {

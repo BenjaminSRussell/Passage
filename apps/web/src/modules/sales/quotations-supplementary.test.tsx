@@ -306,19 +306,20 @@ const creditHold = {
   appliedBy: "sales-rep",
   // Long past, so the hold shows as waiting beyond the SLA.
   appliedAt: "2020-03-01T09:00:00Z",
+  slaDueAt: "2020-03-03T09:00:00Z",
   failedRule: { id: "CR-1", result: "FAIL", value: "11500", threshold: "11000" },
   creditLimit: "10000",
   limitCurrency: "USD",
 };
 
 describe("holdAge and overSla", () => {
-  it("reads the wait in days, hours or minutes and flags holds past two days", () => {
+  it("reads the wait in days, hours or minutes and flags holds past their SLA due time", () => {
     const now = new Date("2027-03-04T13:30:00Z");
     expect(holdAge("2027-03-01T09:00:00Z", now)).toBe("3 d 4 h");
     expect(holdAge("2027-03-04T08:30:00Z", now)).toBe("5 h");
     expect(holdAge("2027-03-04T13:18:00Z", now)).toBe("12 min");
-    expect(overSla("2027-03-02T13:00:00Z", now)).toBe(true);
-    expect(overSla("2027-03-02T14:00:00Z", now)).toBe(false);
+    expect(overSla("2027-03-04T13:00:00Z", now)).toBe(true);
+    expect(overSla("2027-03-04T14:00:00Z", now)).toBe(false);
   });
 });
 

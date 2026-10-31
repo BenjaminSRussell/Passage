@@ -70,24 +70,27 @@ type Resource struct {
 // NetworkID names the resource network governing the step from the order's
 // previous operation into this one (FR-23.13).
 type Operation struct {
-	ID           string            `json:"id"`
-	OrderID      string            `json:"orderId"`
-	OperNumber   int               `json:"operNumber"`
-	Minutes      int               `json:"minutes"`
-	DueAt        *time.Time        `json:"dueAt,omitempty"`
-	ReadyAt      *time.Time        `json:"readyAt,omitempty"`
-	Priority     int               `json:"priority"`
-	ResourceIDs  []string          `json:"resourceIds"`
-	SetupGroup   *string           `json:"setupGroup"`
-	SetupMinutes int               `json:"setupMinutes"`
-	Attributes   map[string]string `json:"attributes"`
-	NetworkID    *string           `json:"networkId"`
-	Status       string            `json:"status"`
-	CreatedAt    time.Time         `json:"createdAt"`
+	ID          string     `json:"id"`
+	OrderID     string     `json:"orderId"`
+	OperNumber  int        `json:"operNumber"`
+	Minutes     int        `json:"minutes"`
+	DueAt       *time.Time `json:"dueAt,omitempty"`
+	ReadyAt     *time.Time `json:"readyAt,omitempty"`
+	Priority    int        `json:"priority"`
+	ResourceIDs []string   `json:"resourceIds"`
+	// SecondaryResourceIDs are booked with the primary for the whole job
+	// (BR-23.4).
+	SecondaryResourceIDs []string          `json:"secondaryResourceIds"`
+	SetupGroup           *string           `json:"setupGroup"`
+	SetupMinutes         int               `json:"setupMinutes"`
+	Attributes           map[string]string `json:"attributes"`
+	NetworkID            *string           `json:"networkId"`
+	Status               string            `json:"status"`
+	CreatedAt            time.Time         `json:"createdAt"`
 }
 
 // RunWarning is a finding about a placed operation that did not stop the run
-// (SCHED-0010, SCHED-0012, SCHED-0014).
+// (SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014).
 type RunWarning struct {
 	Code        string `json:"code"`
 	OperationID string `json:"operationId"`
@@ -132,6 +135,13 @@ type Bar struct {
 	ChangeoverCost     *decimal.Decimal `json:"changeoverCost"`
 	ChangeoverCurrency *string          `json:"changeoverCurrency"`
 	CleaningSetID      *string          `json:"cleaningSetId"`
+	// OutsideCapacity is true when part of the segment lies outside the
+	// resource's open capacity as it is now, for example inside a downtime
+	// added after the job was booked (SCHED-0002, AC-23.7).
+	OutsideCapacity bool `json:"outsideCapacity"`
+	// SecondaryResourceIDs are the resources booked with the job's primary for
+	// the same segments (BR-23.4).
+	SecondaryResourceIDs []string `json:"secondaryResourceIds"`
 }
 
 type RunRequest struct {
@@ -141,6 +151,8 @@ type RunRequest struct {
 	OperationIDs []string
 	Start        time.Time
 	HorizonDays  int
+	// Backward schedules each order from its due date (FR-23.2, BR-23.2).
+	Backward bool
 }
 
 type MoveRequest struct {
@@ -233,6 +245,8 @@ type Store interface {
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	SetupStore
 	PegStore
+	OverrideStore
+	ResourceUpdateStore
 	CampaignStore
 	Ping(ctx context.Context) error
 }
@@ -332,6 +346,9 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[]) and not firmed`, opIDs); err != nil {
 			return err
 		}
+		if err := dropOrphanSecondaries(ctx, tx, opIDs); err != nil {
+			return err
+		}
 		kept, err := placementsOfOrders(ctx, tx, orderIDs)
 		if err != nil {
 			return err
@@ -354,9 +371,18 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		if err != nil {
 			return err
 		}
+		pegs, parentEnds, unplacedParents, err := pegsForRun(ctx, tx, orderIDs)
+		if err != nil {
+			return err
+		}
 		res := domain.Schedule(domain.Problem{Resources: resources, Operations: todo, Booked: booked, Fixed: fixed,
-			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite})
-		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: "forward", Finite: req.Finite, Algorithm: "heuristic",
+			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite, Backward: req.Backward,
+			Pegs: pegs, ParentEnds: parentEnds, UnplacedParents: unplacedParents})
+		direction := "forward"
+		if req.Backward {
+			direction = "backward"
+		}
+		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: direction, Finite: req.Finite, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(todo), MakespanMinutes: domain.Makespan(res.Placements),
 			TotalLatenessMinutes: domain.TotalLateness(res.Placements), Messages: unplacedMessages(res.Unplaced),
 			Warnings: runWarnings(res.Warnings)}
@@ -527,6 +553,9 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[])`, changed); err != nil {
 			return err
 		}
+		if err := dropOrphanSecondaries(ctx, tx, changed); err != nil {
+			return err
+		}
 		if err := writePlacements(ctx, tx, run.ID, plan.Changes, finite); err != nil {
 			return err
 		}
@@ -611,6 +640,9 @@ func (s *Postgres) CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.Wee
 			return err
 		}
 		rows, err := tx.Query(ctx, `select resource_id::text, job_id::text, start_at, end_at from scheduled_job
+			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))
+			union all
+			select resource_id::text, job_id::text, start_at, end_at from scheduled_job_secondary
 			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))`, from, to, len(rids) == 0, rids)
 		if err != nil {
 			return err
@@ -647,7 +679,8 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 	bars := []Bar{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.segment_no, j.start_at, j.end_at,
-				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id
+				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id,
+				o.secondary_resource_ids::text[]
 			from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
 			where j.end_at > $1 and j.start_at < $2 and ($3::boolean or j.resource_id = any($4::uuid[]))
 			order by j.start_at, j.resource_id, j.segment_no limit $5`,
@@ -655,12 +688,12 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var b Bar
 			var cost *string
 			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
-				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID); err != nil {
+				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID, &b.SecondaryResourceIDs); err != nil {
+				rows.Close()
 				return err
 			}
 			if cost != nil {
@@ -669,7 +702,14 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 			}
 			bars = append(bars, b)
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(bars) == 0 || len(bars) > MaxBars {
+			return nil
+		}
+		return flagOutsideCapacity(ctx, tx, bars)
 	})
 	if err != nil {
 		return nil, err
@@ -678,6 +718,44 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeWindowTooLarge, "the window holds more than 5000 bars; narrow the window or the resources")
 	}
 	return bars, nil
+}
+
+// flagOutsideCapacity marks the bars that are no longer inside their
+// resource's open capacity, or that of a secondary resource booked with them,
+// calendar and overrides applied (AC-23.7).
+func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
+	resources, _, err := loadResources(ctx, tx)
+	if err != nil {
+		return err
+	}
+	lo, hi := bars[0].Start, bars[0].End
+	for _, b := range bars {
+		if b.Start.Before(lo) {
+			lo = b.Start
+		}
+		if b.End.After(hi) {
+			hi = b.End
+		}
+	}
+	// A day either side so the local days straddling the window are whole.
+	from := lo.Add(-24 * time.Hour)
+	days := int(hi.Sub(from)/(24*time.Hour)) + 2
+	open := make(map[string][]domain.Interval, len(resources))
+	for _, r := range resources {
+		open[r.ID] = r.Open(from, days)
+	}
+	for i := range bars {
+		b := &bars[i]
+		b.OutsideCapacity = domain.OutsideOpen(open[b.ResourceID], b.Start, b.End)
+		// A secondary resource is booked for the same segment, so a downtime
+		// on it (or a calendar that no longer covers it) flags the bar too.
+		for _, sid := range b.SecondaryResourceIDs {
+			if iv, ok := open[sid]; ok && domain.OutsideOpen(iv, b.Start, b.End) {
+				b.OutsideCapacity = true
+			}
+		}
+	}
+	return nil
 }
 
 // writePlacements inserts one scheduled_job row per segment, pipelined in a
@@ -706,7 +784,25 @@ func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.P
 				runID, finite[pl.ResourceID], pl.LateMinutes, changeover, cost, currency, cleaning)
 		}
 	}
+	for _, pl := range ps {
+		for _, sid := range pl.Secondaries {
+			for i, seg := range pl.Segments {
+				batch.Queue(`insert into scheduled_job_secondary (tenant_id, id, job_id, resource_id, segment_no, start_at, end_at, run_id, finite)
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+					tenantID, ids.New(), pl.OperationID, sid, i+1, seg.Start, seg.End, runID, finite[sid])
+			}
+		}
+	}
 	return tx.SendBatch(ctx, batch).Close()
+}
+
+// dropOrphanSecondaries deletes the secondary bookings of operations that no
+// longer hold a primary placement: called after their scheduled_job rows are
+// deleted, so the secondaries of firmed jobs, which stay, are kept.
+func dropOrphanSecondaries(ctx context.Context, tx pgx.Tx, opIDs []string) error {
+	_, err := tx.Exec(ctx, `delete from scheduled_job_secondary s where s.job_id = any($1::uuid[])
+		and not exists (select 1 from scheduled_job j where j.tenant_id = s.tenant_id and j.job_id = s.job_id)`, opIDs)
+	return err
 }
 
 func setStatus(ctx context.Context, tx pgx.Tx, opIDs []string, status string) error {
@@ -740,7 +836,7 @@ func enqueuePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain
 		evt, err := newEvent(ctx, schedevents.JobScheduled, pl.OperationID, schedevents.JobScheduledData{JobID: pl.OperationID,
 			OrderID: pl.OrderID, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
 			ChangeoverMinutes: pl.ChangeoverMinutes, ChangeoverCost: costOf(pl), ChangeoverCurrency: currencyOf(pl),
-			CleaningSetID: pl.CleaningSetID, RunID: runID, Firmed: firmed})
+			CleaningSetID: pl.CleaningSetID, SecondaryResourceIDs: pl.Secondaries, RunID: runID, Firmed: firmed})
 		if err != nil {
 			return err
 		}

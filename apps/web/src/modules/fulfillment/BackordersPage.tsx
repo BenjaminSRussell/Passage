@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderRow } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
-import { formatDateTime, shortId, UUID } from "./format";
+import { dash, formatDateTime, shortId, SHORT_PICK_REASONS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -23,11 +23,13 @@ const columns: DataTableColumn<BackorderRow>[] = [
   { key: "qtyPlanned", header: "Planned", align: "end", render: (row) => `${row.qtyPlanned} ${row.unit}` },
   { key: "qtyPicked", header: "Picked", align: "end", render: (row) => `${row.qtyPicked} ${row.unit}` },
   { key: "qtyRemainder", header: "Backorder", align: "end", render: (row) => `${row.qtyRemainder} ${row.unit}` },
+  { key: "qtyClosed", header: "Qty closed", align: "end", render: (row) => `${row.qtyClosed} ${row.unit}` },
   {
     key: "open",
     header: "Backorder state",
     render: (row) => (row.open ? <Badge tone="warning">Open</Badge> : <Badge tone="neutral">Closed</Badge>),
   },
+  { key: "reason", header: "Reason", render: (row) => (row.reason ? (SHORT_PICK_REASONS[row.reason] ?? row.reason) : dash) },
   { key: "shortPickedAt", header: "Short-picked", render: (row) => formatDateTime(row.shortPickedAt) },
 ];
 
@@ -53,7 +55,8 @@ function validate(values: Filter): Record<string, string> {
 /**
  * Short picks and backorders (FR-28.2, section 5.28.14): shipment lines picked
  * below plan, newest short pick first. The remainder stays a backorder until
- * it is re-picked on the shipment detail or the shipment is cancelled.
+ * it is re-picked on the shipment detail, its remainder is closed there, or the
+ * shipment is cancelled.
  */
 export function BackordersPage() {
   const [values, setValues] = useState<Filter>(blank);

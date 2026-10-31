@@ -15,9 +15,11 @@ type Buffer struct {
 	capacity int
 	items    []entry
 	evicted  int
+	next     uint64
 }
 
 type entry struct {
+	id      uint64
 	at      time.Time
 	payload []byte
 }
@@ -42,8 +44,41 @@ func (b *Buffer) Push(now time.Time, payload []byte) (evicted bool) {
 		b.evicted++
 		evicted = true
 	}
-	b.items = append(b.items, entry{at: now, payload: payload})
+	b.next++
+	b.items = append(b.items, entry{id: b.next, at: now, payload: payload})
 	return evicted
+}
+
+// Peek returns up to n of the oldest payloads still within maxAge without
+// removing them, and the position to pass to Ack once the broker acknowledged
+// them (0 when nothing is buffered). A publisher that loses its broker before
+// the acknowledgement keeps the payloads and sends them again, so a broker
+// restart costs duplicates (dropped downstream by seq) and never loses events,
+// which Drain cannot promise.
+func (b *Buffer) Peek(now time.Time, n int) (payloads [][]byte, through uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.expire(now)
+	n = min(n, len(b.items))
+	payloads = make([][]byte, 0, n)
+	for _, e := range b.items[:n] {
+		payloads = append(payloads, e.payload)
+		through = e.id
+	}
+	return payloads, through
+}
+
+// Ack removes the payloads up to and including position through, as returned
+// by Peek. Payloads evicted or expired since the Peek are already gone, and
+// payloads pushed since stay.
+func (b *Buffer) Ack(through uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cut := 0
+	for cut < len(b.items) && b.items[cut].id <= through {
+		cut++
+	}
+	b.items = b.items[cut:]
 }
 
 // Drain removes and returns up to n of the oldest payloads that are still within maxAge.

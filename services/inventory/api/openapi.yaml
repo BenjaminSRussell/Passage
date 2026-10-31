@@ -27,7 +27,9 @@ paths:
         post to the posting-profile account and must leave it empty. A repeated Idempotency-Key
         with the same body returns the original journal (200, Idempotent-Replayed: true); with a
         different body it is idempotency_key_reuse (422). A legal entity outside the caller's
-        scope is AUTH-0003 (403).
+        scope is AUTH-0003 (403). With journalNameId the name must exist in the caller's scope
+        (404 INV-JNLN-NOT-FOUND) and be active, of the journal's legal entity and type (422
+        INV-JNL-007); a MOVEMENT journal without offsetAccountId takes the name's default.
       x-passage-duty: inventory.journal.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -55,6 +57,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listInventoryJournals
@@ -143,6 +146,9 @@ paths:
         projection, stores a balanced GL entry and enqueues the outbox events in the same
         transaction. Rejections roll everything back. Posting a POSTED journal returns it
         unchanged.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        A journal whose journal name requires approval posts only from APPROVED; a post from DRAFT
+        is refused (422 INV-JNL-008).
       x-passage-duty: inventory.journal.post
       parameters:
         - $ref: '#/components/parameters/JournalId'
@@ -170,9 +176,16 @@ paths:
       description: |
         Aggregates the on-hand projection with the FR-16.3 formulas. Every group is also split by
         currency so posted values never mix currencies. At most 10,000 groups are returned;
-        truncated is true when more matched.
+        truncated is true when more matched. With asOf the ledger is replayed up to that date
+        (inclusive): each transaction counts at the status it held on the date (from its status
+        changes; a journal-posted transaction at its status from its physical date), giving
+        physical quantity, posted value, blocked quantity and the negative flag. Value counts only
+        transactions at a financial status with a financial date on or before asOf. Availability,
+        ordered and reserved quantities are not kept per date: availPhysical, availOrdered and
+        reservedPhysical are omitted in a replay.
       x-passage-duty: inventory.read
       parameters:
+        - { name: asOf, in: query, description: 'Replay date (YYYY-MM-DD, inclusive); omit for the current projection', schema: { type: string, format: date } }
         - { name: product, in: query, schema: { type: string, format: uuid } }
         - { name: site, in: query, schema: { type: string } }
         - { name: warehouse, in: query, schema: { type: string } }
@@ -196,6 +209,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/OnHandItem' }
                   truncated: { type: boolean }
+                  asOf: { type: string, format: date, description: Replay date, present only when asOf was requested }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -211,7 +225,7 @@ paths:
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
-        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
+        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - $ref: '#/components/parameters/Limit'
@@ -357,6 +371,7 @@ paths:
         issue and a PURCHASED receipt valued at the source's running average (no GL effect: both
         legs are on the inventory account). Physical stock is unchanged and availability drops
         (BR-16.10). The quantity must be available physical stock at the source (INV-BLK-003).
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.blocking.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -384,6 +399,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listInventoryBlockings
@@ -416,6 +432,7 @@ paths:
         RELEASE moves the quantity back to unrestricted stock. A QUARANTINE blocking must name its
         disposition (INV-BLK-001); a BLOCKED one without a disposition is released. SCRAP and RETURN
         are not supported yet (INV-BLK-005). Requires If-Match. A released blocking is returned unchanged.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.blocking.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -440,8 +457,120 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journal-names:
+    post:
+      operationId: createInventoryJournalName
+      summary: Create a journal name (PRD 3.16.13)
+      description: |
+        A journal name is the setup a keyed journal is created under. It fixes the journal type and
+        legal entity, may require the approval workflow before posting (BR-16.11; a post from DRAFT
+        is then refused with INV-JNL-008) and, for MOVEMENT, may carry a default offset account. The
+        code is upper-cased and unique per legal entity (409 INV-JNLN-001). The code, legal entity
+        and journal type cannot change afterwards.
+      x-passage-duty: inventory.journal-name.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalNameRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryJournalNames
+      summary: List journal names by legal entity and code (at most 200)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: journalType, in: query, schema: { $ref: '#/components/schemas/JournalType' } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+      responses:
+        '200':
+          description: Journal names
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journal-names/{id}:
+    get:
+      operationId: getInventoryJournalName
+      summary: Read one journal name
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The journal name
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateInventoryJournalName
+      summary: Change a journal name's description, approval rule, offset account or active flag
+      description: |
+        Requires If-Match. An inactive name refuses new journals (INV-JNL-007); journals already
+        created under it keep it. A DRAFT journal under a name that now requires approval must be
+        approved before it posts.
+      x-passage-duty: inventory.journal-name.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalNamePatch' }
+      responses:
+        '200':
+          description: The journal name after the change
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalName' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
   /v1/inventory/count-plans:
     post:
@@ -528,7 +657,7 @@ paths:
       x-passage-duty: inventory.read
       parameters:
         - { name: planId, in: query, schema: { type: string, format: uuid } }
-        - { name: status, in: query, schema: { type: string, enum: [OPEN, POSTED] } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED] } }
       responses:
         '200':
           description: Count sheets (no lines)
@@ -548,7 +677,7 @@ paths:
     get:
       operationId: getInventoryCountSheet
       summary: Read a count sheet with its lines
-      description: While a blind sheet is OPEN, expectedQty is null for callers without inventory.count.approve.
+      description: Until a blind sheet is POSTED or CANCELLED, expectedQty is null for callers without inventory.count.approve.
       x-passage-duty: inventory.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -608,7 +737,11 @@ paths:
         inventory.count.approve; otherwise 403 INV-CNT-001 and nothing is written. Uncounted lines are
         skipped; a sheet with no counted line is INV-CNT-005. The COUNT journal posts like an
         ADJUSTMENT (inventory against the adjustment account) with the negative policy applied.
-        Requires If-Match. Posting a POSTED sheet returns it unchanged.
+        Requires If-Match. Posting a POSTED sheet returns it unchanged. A sheet with an outstanding
+        recount is refused (409 INV-CNT-006); a plan with fourEyes needs the sheet APPROVED first
+        (409 INV-CNT-008); an APPROVED sheet posts its above-tolerance variances without the
+        posting caller holding inventory.count.approve.
+        Its COUNT journal is exempt from the sheet's own freeze but not from another unfinished freezeStock sheet on the same rows (409 INV-CNT-002). Emits countsheet.changed (POSTED).
       x-passage-duty: inventory.count.post
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -616,6 +749,128 @@ paths:
       responses:
         '200':
           description: Sheet posted (or already posted)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:submit:
+    post:
+      operationId: submitInventoryCountSheet
+      summary: Submit an OPEN count sheet for review (FR-16.9)
+      description: |
+        Closes counting: the sheet becomes COUNTED and takes no further entries. Needs at least one
+        counted line (INV-CNT-005) and no outstanding recount (INV-CNT-006). Requires If-Match.
+        Emits countsheet.changed (SUBMITTED).
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:approve:
+    post:
+      operationId: approveInventoryCountSheet
+      summary: Approve a COUNTED count sheet (FR-16.9)
+      description: |
+        A supervisor accepts the counted quantities, including variances above tolerance, which then
+        post without a further approval. On a four-eyes plan the approver must not be one of the
+        counters (403 INV-CNT-007). Requires If-Match. Emits countsheet.changed (APPROVED).
+      x-passage-duty: inventory.count.approve
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:cancel:
+    post:
+      operationId: cancelInventoryCountSheet
+      summary: Cancel an unposted count sheet and lift its freeze
+      description: |
+        A sheet that is OPEN, COUNTED or APPROVED becomes CANCELLED; a POSTED sheet cannot be
+        cancelled. Requires If-Match. Emits countsheet.changed (CANCELLED).
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}/lines/{lineId}:recount:
+    post:
+      operationId: requestInventoryCountRecount
+      summary: Ask for one counted line to be counted again
+      description: |
+        A supervisor flags a counted line with a reason. The sheet returns to OPEN, any approval is
+        cleared, and the line must be entered again before the sheet can be submitted or posted
+        (INV-CNT-006). Requires If-Match. Emits countsheet.changed (RECOUNT_REQUESTED).
+      x-passage-duty: inventory.count.approve
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: lineId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
           headers:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
@@ -722,6 +977,7 @@ paths:
         (default today) becomes the order's ship date and the transactions' date. Emits
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
         mismatch); an order not CREATED is INV-TRF-006.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -746,6 +1002,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -761,6 +1018,7 @@ paths:
         INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
         Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -782,6 +1040,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -828,6 +1087,202 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/InTransitItem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-order-lines:
+    get:
+      operationId: listTransferOrderLines
+      summary: Transfer order line inquiry with late-shipment and late-receipt overview (FR-16.15)
+      description: |
+        Lines of every transfer order in the caller's legal entities, oldest planned or actual ship date
+        first, at most 1,000 (truncated is true when more matched). from and to bound the ship date
+        (inclusive). A line is late once its due date is before asOf: a line of an order still CREATED is
+        due on its planned ship date (LATE_SHIPMENT); a line of a SHIPPED or PARTIALLY_RECEIVED order with
+        quantity still in transit and not closed short is due lateReceiptDays after its ship date
+        (LATE_RECEIPT). daysLate counts the days past the due date and is 0 for a line on time. With
+        late=true only late lines are returned.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity owning the order }
+        - { name: status, in: query, schema: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }, description: Order status }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+        - { name: fromWarehouseId, in: query, schema: { type: string }, description: Shipping warehouse }
+        - { name: toWarehouseId, in: query, schema: { type: string }, description: Receiving warehouse }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Earliest planned or actual ship date }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Latest planned or actual ship date; not before from }
+        - { name: late, in: query, schema: { type: boolean }, description: Return only late lines }
+        - { name: lateReceiptDays, in: query, schema: { type: integer, minimum: 0, maximum: 3650, default: 7 }, description: Days a shipment may stay in transit before its receipt is late }
+        - { name: asOf, in: query, schema: { type: string, format: date }, description: Date lateness is measured at (default today, UTC) }
+      responses:
+        '200':
+          description: Transfer order lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TransferLineInquiryItem' }
+                  truncated: { type: boolean, description: More than 1,000 lines matched; narrow the filters to see the rest }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/count-variance:
+    get:
+      operationId: getCountVarianceReport
+      summary: Count variance report by plan, sheet, warehouse, date and counter (3.16.14)
+      description: |
+        Counted lines of cycle count sheets that are not CANCELLED, newest count first, at most 1,000
+        (truncated is true when more matched). varianceQty is the posted variance once the sheet is POSTED
+        (measured against the book at posting, BR-16.8) and counted minus expected before that.
+        varianceValue is varianceQty times unitCost: for a posted sheet the cost of the COUNT journal line
+        (valueBasis JOURNAL), otherwise the running average of the on-hand row today rounded to 6 decimals
+        as posting rounds it (valueBasis ESTIMATE). totalsByCounter sums gain, loss and net value
+        per counter and currency over the returned lines. from and to bound the day the line was counted (UTC).
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity owning the sheet }
+        - { name: planId, in: query, schema: { type: string, format: uuid }, description: Count plan }
+        - { name: sheetId, in: query, schema: { type: string, format: uuid }, description: Count sheet }
+        - { name: warehouseId, in: query, schema: { type: string }, description: Warehouse of the plan or of the counted stock }
+        - { name: counter, in: query, schema: { type: string }, description: User who entered the count }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Earliest count day }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Latest count day; not before from }
+      responses:
+        '200':
+          description: Variance lines with totals per counter
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, totalsByCounter, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountVarianceLine' }
+                  totalsByCounter:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountVarianceTotals' }
+                  truncated: { type: boolean, description: More than 1,000 lines matched; narrow the filters to see the rest }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/negative-onhand:
+    get:
+      operationId: listNegativeOnHand
+      summary: Negative on-hand list with shortfall and first negative date (3.16.14)
+      description: |
+        Projection rows whose physical stock (posted + received + registered - deducted - picked) is below
+        zero, largest shortfall first, at most 1,000. firstNegativeDate is the first physical date of the
+        current negative run: the day after whose movements (netted per day) the physical quantity went
+        below zero and has stayed below zero since. It is absent when the transactions do not show it.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+        - { name: siteId, in: query, schema: { type: string }, description: Site dimension }
+        - { name: warehouseId, in: query, schema: { type: string }, description: Warehouse dimension }
+      responses:
+        '200':
+          description: Rows with negative physical stock
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/NegativeOnHandLine' }
+                  truncated: { type: boolean, description: More than 1,000 rows matched }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/workspace/summary:
+    get:
+      operationId: getInventoryWorkspaceSummary
+      summary: Counts behind the inventory management workspace tiles
+      description: |
+        Open work counted for the caller's legal entities (or one legal entity): draft journals and journals
+        awaiting approval (SUBMITTED), stock rows with negative physical quantity, count sheets still open
+        (OPEN, COUNTED or APPROVED) and those counted but not yet approved or posted, legal-entity /
+        account / currency pairs whose latest reconciliation run shows a difference with the time of the last run,
+        active reservations, and
+        the number of transfer orders in every status (statuses without orders carry 0). Counts are read under
+        row-level security, so a legal entity the caller may not see contributes nothing.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Count one legal entity only }
+      responses:
+        '200':
+          description: Workspace counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceSummary' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/tracking-trace:
+    get:
+      operationId: traceTrackingDimension
+      summary: Batch and serial trace through time (3.16.14)
+      description: |
+        Every inventory transaction that carries the batch or serial, oldest physical date first, at most
+        1,000, with its origin document. One of batchId and serialId is required (INV-TRC-001 with field
+        errors otherwise). direction FORWARD lists the issues (where the stock went), BACKWARD the receipts
+        (where it came from), BOTH (the default) every movement. With BOTH each movement that changes
+        physical stock carries running, the traced physical balance of its legal entity and product after it.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: batchId, in: query, schema: { type: string }, description: Batch to trace }
+        - { name: serialId, in: query, schema: { type: string }, description: Serial number to trace }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Restrict to one product }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: direction, in: query, schema: { type: string, enum: [BOTH, FORWARD, BACKWARD], default: BOTH }, description: Which movements to list (case-insensitive) }
+      responses:
+        '200':
+          description: Traced movements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, direction, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TraceLine' }
+                  direction: { type: string, enum: [BOTH, FORWARD, BACKWARD] }
+                  truncated: { type: boolean, description: More than 1,000 movements matched }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/dimension-combinations:
+    get:
+      operationId: listDimensionCombinations
+      summary: Dimension combinations a product has used, with first and last use (3.16.14)
+      description: |
+        One row per product and dimension set that has inventory transactions, ordered by product and first
+        use, at most 1,000. activeDimensions names the dimensions the set carries.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+      responses:
+        '200':
+          description: Dimension combinations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/DimensionCombination' }
+                  truncated: { type: boolean, description: More than 1,000 combinations matched }
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/abc-runs:
@@ -1204,6 +1659,7 @@ paths:
         written. 200 with valid=true when the post would succeed now; otherwise the problem the post
         would return (for example INV-NEG-001, INV-OWN-002, INV-SER-001). Any other status is
         INV-JNL-004 (409). The result holds for the stock at the time of the call.
+        A row held by an unfinished sheet of a freezeStock count plan answers 409 INV-CNT-002.
       x-passage-duty: inventory.journal.write
       parameters:
         - $ref: '#/components/parameters/JournalId'
@@ -1553,6 +2009,7 @@ paths:
         negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
+        Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -1588,6 +2045,7 @@ paths:
         negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
+        Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -1706,6 +2164,7 @@ paths:
         (splitting, BR-16.2, is not built). The projection, the audit row and the events are
         written in one database transaction. No GL entry is produced here: the calling document
         posts its own ledger entry. Internal path: not exposed by the web BFF.
+        A move that changes the physical quantity of a row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transaction.apply
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1795,14 +2254,57 @@ components:
         vendor-owned stock at value 0 and a PURCHASED receipt at the same dimensions without owner
         at quantity x price, Dr inventory / Cr consignment accrual, and emits
         dev.passage.inventory.ownership.changed.v1. More than the available vendor-owned quantity
-        is INV-OWN-002; it cannot be reversed.
-      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE]
+        is INV-OWN-002; it cannot be reversed. A TRANSFER journal moves stock between two
+        dimension sets of the legal entity (location to location, warehouse to warehouse, segment
+        to segment): each line names the source (dimensions), the destination (toDimensions) and a
+        positive quantity. It posts a SOLD issue at the source at its running average and a
+        PURCHASED receipt of the same value at the destination, so the inventory account does not
+        move and the GL entry is empty. The destination must differ from the source and carry a
+        site, batch, serial and the product dimensions (config, size, color, style) cannot change, blocked or quarantined status is moved by a
+        blocking (INV-JNL-006), a row cannot be both source and destination in one journal, and a
+        transfer cannot be reversed (post one back). It takes no offset account.
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE, TRANSFER]
     JournalStatus:
       type: string
       enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    JournalNameRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, code, journalType]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,19}$', description: Upper-cased on save }
+        description: { type: string, maxLength: 200 }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        requiresApproval: { type: boolean, default: false }
+        offsetAccountId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$', description: Default offset account; MOVEMENT names only }
+    JournalNamePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        description: { type: string, maxLength: 200 }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: string, description: 'Empty string clears the default' }
+        active: { type: boolean }
+    JournalName:
+      type: object
+      required: [id, legalEntityId, code, description, journalType, requiresApproval, active, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: string }
+        active: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     CreateJournalRequest:
       type: object
       additionalProperties: false
@@ -1816,6 +2318,13 @@ components:
           pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
           description: Ledger account id. Required for MOVEMENT, rejected for the other types.
         currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency of the legal entity }
+        journalNameId:
+          type: string
+          format: uuid
+          description: |
+            Journal name to create the journal under (PRD 3.16.13). It must be active, of the same legal entity
+            and journal type (INV-JNL-007). A MOVEMENT journal then defaults its offset account to the name's. If the
+            name requires approval, the journal posts only once APPROVED (INV-JNL-008).
     AddLinesRequest:
       type: object
       additionalProperties: false
@@ -1843,7 +2352,8 @@ components:
         clientKey: { type: string, maxLength: 255, description: Per-line idempotency key }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
-        qty: { $ref: '#/components/schemas/Decimal', description: 'Signed quantity in the inventory unit (receipt > 0, issue < 0)' }
+        toDimensions: { $ref: '#/components/schemas/Dimensions', description: 'Destination dimension set of a TRANSFER journal line; refused on any other journal type' }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Signed quantity in the inventory unit (receipt > 0, issue < 0); the positive quantity moved on a TRANSFER line' }
         enteredQty: { $ref: '#/components/schemas/Decimal', description: 'Quantity as keyed; defaults to qty and must have its sign' }
         enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
         costPrice: { $ref: '#/components/schemas/Decimal', description: 'Non-negative cost per inventory unit, up to 6 decimals; receipts are valued at it, issues at the running average (it is the fallback when none exists)' }
@@ -1857,6 +2367,7 @@ components:
         reversesLineId: { type: string, format: uuid, description: On a reversal journal, the line this one negates }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
+        toDimensions: { $ref: '#/components/schemas/Dimensions', description: Destination dimension set of a TRANSFER journal line }
         qty: { $ref: '#/components/schemas/Decimal' }
         enteredQty: { $ref: '#/components/schemas/Decimal' }
         enteredUnit: { type: string }
@@ -1887,6 +2398,7 @@ components:
         postingDate: { type: string, format: date }
         offsetAccountId: { type: string }
         currency: { type: string }
+        journalNameId: { type: string, format: uuid }
         version: { type: integer }
         lineCount: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -1905,14 +2417,14 @@ components:
             glEntry: { $ref: '#/components/schemas/GLEntry' }
     OnHandItem:
       type: object
-      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, blocked, currency, negative]
+      required: [group, physicalInvent, postedValue, blocked, currency, negative]
       properties:
         group: { type: object, additionalProperties: { type: string } }
         physicalInvent: { $ref: '#/components/schemas/Decimal' }
-        availPhysical: { $ref: '#/components/schemas/Decimal' }
-        availOrdered: { $ref: '#/components/schemas/Decimal' }
+        availPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
+        availOrdered: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         postedValue: { $ref: '#/components/schemas/Decimal' }
-        reservedPhysical: { $ref: '#/components/schemas/Decimal' }
+        reservedPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
         currency: { type: string }
         negative: { type: boolean, description: True when any row in the group has negative physical stock }
@@ -1926,9 +2438,9 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         originId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
         sourceId: { type: string, format: uuid }
-        journalId: { type: string, format: uuid, description: Set for journal lines and the receipt leg of an ownership change }
+        journalId: { type: string, format: uuid, description: 'Set for journal lines, the receipt leg of an ownership change and the destination leg (TRANSFER_IN) of a transfer journal line' }
         reference: { type: string, description: 'Source document of other origins (blocking, transfer or replenishment order id, or the reference given to transactions:apply)' }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
@@ -2093,6 +2605,12 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean, default: false }
+        freezeStock: { type: boolean, default: false, description: 'While a sheet of the plan is OPEN, COUNTED or APPROVED, refuse movements of its rows (409 INV-CNT-002): journal postings (including other COUNT journals), transfer ship / receive, blocking and release, and status steps that change physical stock. Reservations are not refused.' }
+        fourEyes: { type: boolean, default: false, description: 'The sheet needs :submit and a separate :approve by someone who did not count before it posts (INV-CNT-007)' }
+        locationFrom: { type: string, maxLength: 60, description: 'Inclusive lower bound of the location dimension, compared byte-wise (C collation)' }
+        locationTo: { type: string, maxLength: 60, description: Inclusive upper bound of the location dimension }
+        abcClass: { type: string, enum: [A, B, C], description: 'Select only rows whose product x site has this class in the latest ABC run of the legal entity' }
+        samplePct: { $ref: '#/components/schemas/Decimal', description: 'Count only this percent (0 to 100, rounded up) of the selected rows; the rows are chosen by a hash seeded with the sheet id, so each sheet draws a different, reproducible sample. 0 counts all' }
     CountPlan:
       type: object
       required: [id, legalEntityId, name, currency, unit, tolerancePct, toleranceValue, blind, createdAt]
@@ -2106,19 +2624,29 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean }
+        freezeStock: { type: boolean }
+        fourEyes: { type: boolean }
+        locationFrom: { type: string }
+        locationTo: { type: string }
+        abcClass: { type: string, enum: [A, B, C] }
+        samplePct: { type: string, description: Sample percent; absent when every selected row is counted }
         createdAt: { type: string, format: date-time }
     CountSheetSummary:
       type: object
-      required: [id, legalEntityId, planId, planName, number, status, blind, version, lineCount, countedCount, createdAt]
+      required: [id, legalEntityId, planId, planName, number, status, blind, fourEyes, freezeStock, recountLines, version, lineCount, countedCount, createdAt]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         planId: { type: string, format: uuid }
         planName: { type: string }
         number: { type: string, description: 'CNT- number (the wave 5 sequence replaces it)' }
-        status: { type: string, enum: [OPEN, POSTED] }
+        status: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED] }
         blind: { type: boolean }
-        approvedBy: { type: string, description: User who approved a variance above tolerance }
+        approvedBy: { type: string, description: User who approved the sheet, or a variance above tolerance at posting }
+        submittedBy: { type: string, description: User who submitted the sheet for review }
+        fourEyes: { type: boolean }
+        freezeStock: { type: boolean }
+        recountLines: { type: integer, description: Lines with an outstanding recount request }
         journalId: { type: string, format: uuid, description: COUNT journal of a posted sheet with variances }
         version: { type: integer }
         lineCount: { type: integer }
@@ -2135,17 +2663,20 @@ components:
               type: array
               items:
                 type: object
-                required: [id, lineNo, productId, dimensions, expectedQty, countedQty, postedVariance]
+                required: [id, lineNo, productId, dimensions, expectedQty, countedQty, postedVariance, recountRequested, recountRounds]
                 properties:
                   id: { type: string, format: uuid }
                   lineNo: { type: integer }
                   productId: { type: string, format: uuid }
                   dimensions: { $ref: '#/components/schemas/Dimensions' }
-                  expectedQty: { type: [string, 'null'], description: Book quantity at generation; null while a blind sheet is open (unless approver) }
+                  expectedQty: { type: [string, 'null'], description: 'Book quantity at generation; null until a blind sheet is POSTED or CANCELLED (unless approver)' }
                   countedQty: { type: [string, 'null'] }
                   countedBy: { type: string }
                   countedAt: { type: string, format: date-time }
                   postedVariance: { type: [string, 'null'], description: Counted minus book at posting }
+                  recountRequested: { type: boolean, description: A supervisor asked for this line to be counted again; enter it again to clear }
+                  recountReason: { type: string }
+                  recountRounds: { type: integer }
     TransferStatus:
       type: string
       enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
@@ -2247,6 +2778,124 @@ components:
         daysInTransit: { type: integer }
         inTransitQty: { $ref: '#/components/schemas/Decimal' }
         closedShort: { type: boolean, description: The line was closed short; the quantity is left in transit for investigation }
+    TransferLineInquiryItem:
+      type: object
+      required: [orderId, legalEntityId, number, orderStatus, fromWarehouseId, toWarehouseId, shipDate, lineId, lineNo, productId, dimensions, unit, qty, shippedQty, receivedQty, remainingQty, inTransit, daysInTransit, closed, daysLate]
+      properties:
+        orderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string }
+        orderStatus: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }
+        fromWarehouseId: { type: string }
+        toWarehouseId: { type: string }
+        shipDate: { type: string, format: date, description: Planned until the order ships, then the actual ship date }
+        lineId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        shippedQty: { $ref: '#/components/schemas/Decimal' }
+        receivedQty: { $ref: '#/components/schemas/Decimal' }
+        remainingQty: { $ref: '#/components/schemas/Decimal' }
+        inTransit: { $ref: '#/components/schemas/Decimal' }
+        daysInTransit: { type: integer, description: Days since the ship date while quantity is in transit, otherwise 0 }
+        closed: { type: boolean, description: The line was closed short }
+        late: { type: string, enum: [LATE_SHIPMENT, LATE_RECEIPT], description: Absent when the line is on time }
+        daysLate: { type: integer, description: Days past the due date for a late line, otherwise 0 }
+    CountVarianceLine:
+      type: object
+      required: [sheetId, sheetNumber, sheetStatus, planId, planName, legalEntityId, lineId, lineNo, productId, dimensions, unit, currency, expectedQty, countedQty, varianceQty, unitCost, varianceValue, valueBasis, countedAt]
+      properties:
+        sheetId: { type: string, format: uuid }
+        sheetNumber: { type: string }
+        sheetStatus: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED] }
+        planId: { type: string, format: uuid }
+        planName: { type: string }
+        warehouseId: { type: string, description: Warehouse of the plan, when it has one }
+        legalEntityId: { type: string, format: uuid }
+        lineId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
+        currency: { type: string }
+        expectedQty: { $ref: '#/components/schemas/Decimal' }
+        countedQty: { $ref: '#/components/schemas/Decimal' }
+        varianceQty: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        varianceValue: { $ref: '#/components/schemas/Decimal' }
+        valueBasis: { type: string, enum: [JOURNAL, ESTIMATE], description: JOURNAL for a POSTED sheet (the cost of its COUNT journal line; a zero variance values at zero); ESTIMATE the running average today }
+        countedBy: { type: string }
+        countedAt: { type: string, format: date-time }
+    CountVarianceTotals:
+      type: object
+      required: [counter, currency, lines, absVarianceQty, gainValue, lossValue, netValue]
+      properties:
+        counter: { type: string, description: Empty for lines with no recorded counter }
+        currency: { type: string }
+        lines: { type: integer }
+        absVarianceQty: { $ref: '#/components/schemas/Decimal' }
+        gainValue: { $ref: '#/components/schemas/Decimal' }
+        lossValue: { $ref: '#/components/schemas/Decimal', description: Value of negative variances as a positive number }
+        netValue: { $ref: '#/components/schemas/Decimal' }
+    WorkspaceSummary:
+      type: object
+      required: [journals, negativeOnHandRows, openCountSheets, countSheetsCounted, reconciliationDifferences, lastReconciliationAt, activeReservations, transferOrdersByStatus]
+      properties:
+        journals:
+          type: object
+          required: [draft, awaitingApproval]
+          properties:
+            draft: { type: integer, description: Journals in DRAFT }
+            awaitingApproval: { type: integer, description: Journals in SUBMITTED, waiting for an approver }
+        negativeOnHandRows: { type: integer, description: Stock rows whose physical quantity is below zero }
+        openCountSheets: { type: integer, description: Count sheets in OPEN, COUNTED or APPROVED }
+        countSheetsCounted: { type: integer, description: Count sheets in COUNTED }
+        reconciliationDifferences: { type: integer, description: Legal entity / account / currency pairs whose latest reconciliation run is DIFFERENCE }
+        lastReconciliationAt: { type: [string, 'null'], format: date-time, description: When the latest reconciliation run in scope was computed; null when none has run }
+        activeReservations: { type: integer, description: Reservations in ACTIVE }
+        transferOrdersByStatus:
+          type: object
+          description: Transfer order count per status
+          required: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
+          additionalProperties: { type: integer }
+          properties:
+            CREATED: { type: integer }
+            SHIPPED: { type: integer }
+            PARTIALLY_RECEIVED: { type: integer }
+            RECEIVED: { type: integer }
+            CANCELLED: { type: integer }
+    NegativeOnHandLine:
+      type: object
+      required: [legalEntityId, productId, dimensions, physicalInvent, shortfallQty, postedValue]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        physicalInvent: { $ref: '#/components/schemas/Decimal' }
+        shortfallQty: { $ref: '#/components/schemas/Decimal' }
+        postedValue: { $ref: '#/components/schemas/Decimal' }
+        currency: { type: string }
+        firstNegativeDate: { type: string, format: date }
+    TraceLine:
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          properties:
+            running: { $ref: '#/components/schemas/Decimal', description: Traced physical balance of the legal entity and product after this movement; BOTH direction and physical movements only }
+    DimensionCombination:
+      type: object
+      required: [legalEntityId, productId, dimensionSetHash, dimensions, activeDimensions, firstUse, lastUse, transactionCount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSetHash: { type: string, description: Hex of the dimension-set hash }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        activeDimensions: { type: array, items: { type: string } }
+        firstUse: { type: string, format: date }
+        lastUse: { type: string, format: date }
+        transactionCount: { type: integer }
     AbcRunRequest:
       type: object
       additionalProperties: false

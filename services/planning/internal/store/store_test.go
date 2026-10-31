@@ -253,7 +253,7 @@ func TestRunPlan_RefusesConcurrentRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true)`, testkit.TenantID(1)); err != nil {
+	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, testkit.TenantID(1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, `select id from plan where code = 'MAIN' for update`); err != nil {

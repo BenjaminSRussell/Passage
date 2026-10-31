@@ -256,6 +256,41 @@ func TestPipeline_DuplicateSourceKeyRejected(t *testing.T) {
 	}
 }
 
+// Regression: the first occurrence of a repeated key used to load and later ones were rejected, so when the
+// occurrences differed the target depended on extract order and re-running the same rows in another order
+// (an ODBC extract without ORDER BY) updated the target.
+func TestPipeline_ConflictingDuplicateKeyRejectsEveryOccurrenceSoOrderCannotChangeTheLoad(t *testing.T) {
+	rows := axDataset(2, 0, 0, 0).Customers
+	changed := domain.Record{Key: rows[0].Key, Fields: map[string]any{}}
+	for k, v := range rows[0].Fields {
+		changed.Fields[k] = v
+	}
+	changed.Fields["Name"] = "Customer 0 renamed"
+	ext := &sliceExtractor{rows: []domain.Record{rows[0], rows[1], changed}}
+	p, _, loader := newPipeline(nil)
+	p.Extractor = ext
+	first, err := p.Run(context.Background(), spec(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Created != 1 || len(loader.Rows) != 1 || len(first.Rejects) != 2 || first.Status != domain.StatusPartial {
+		t.Fatalf("created=%d loaded=%d rejects=%+v status=%s", first.Created, len(loader.Rows), first.Rejects, first.Status)
+	}
+	for _, r := range first.Rejects {
+		if r.SourceKey != "C000000" || r.Rejects[0].Code != domain.CodeDuplicate {
+			t.Fatalf("reject %+v, want both C000000 occurrences as %s", r, domain.CodeDuplicate)
+		}
+	}
+	ext.rows = []domain.Record{changed, rows[1], rows[0]}
+	second, err := p.Run(context.Background(), spec(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Updated != 0 || second.Unchanged != 1 || len(second.Rejects) != 2 {
+		t.Fatalf("reordered re-run created=%d updated=%d unchanged=%d rejects=%d", second.Created, second.Updated, second.Unchanged, len(second.Rejects))
+	}
+}
+
 func TestPipeline_SourceRowsMissingSinceLastRunAreReportedNotDeleted(t *testing.T) {
 	rows := axDataset(3, 0, 0, 0).Customers
 	p, _, loader := newPipeline(rows)
@@ -362,5 +397,19 @@ func TestPipeline_LoaderFailureIsLoggedWithCause(t *testing.T) {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("logs missing %q:\n%s", want, logs.String())
 		}
+	}
+}
+
+func TestPipeline_RejectWhenQueuesRowWithReasonCodeAndLoadsTheRest(t *testing.T) {
+	m := parseMapping(t, `{"entity":"customer","version":1,"fields":[{"source":"id","target":"id","type":"string"}],
+	"rejectWhen":[{"field":"id","op":"match","value":"^TMP","code":"CUST-TEMP"}]}`)
+	rows := []domain.Record{{Key: "C1", Fields: map[string]any{"id": "C1"}}, {Key: "T1", Fields: map[string]any{"id": "TMP-1"}}}
+	p, _, loader := newPipeline(rows)
+	rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: "customer", Mapping: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Created != 1 || len(loader.Rows) != 1 || len(rep.Rejects) != 1 || rep.Rejects[0].SourceKey != "T1" || rep.Rejects[0].Rejects[0].Code != "CUST-TEMP" {
+		t.Fatalf("created=%d rejects=%+v", rep.Created, rep.Rejects)
 	}
 }

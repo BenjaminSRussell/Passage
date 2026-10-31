@@ -14,10 +14,10 @@ a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
-scheduling-agreement release storage, the ATP projection and reservations,
+scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
 change approval and `:cancel-remainder`, the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
-grid, w8 related products as a proposal source, quotation expiry job and PDF, the intake dedup window beyond the
+grid, w8 related products as a proposal source, the hourly scheduler for quotation expiry, the quotation PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
 
 ## Run
@@ -43,7 +43,10 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # run store and RLS tes
 
 - `internal/domain`: table-driven and property tests (`pgregory.net/rapid`) for
   ATP cumulative propagation, the BR-27.1 worked example, the 100 fixtures of
-  `testdata/atp-100.json` (AC-27.1, AC-27.2), the 40 credit fixtures of
+  `testdata/atp-100.json` (AC-27.1, AC-27.2; regenerate with
+  `python3 -I testdata/gen_atp100.py`, the independent reference a test compares
+  the file with), the no-over-promise property over over-committed projections,
+  the 40 credit fixtures of
   `testdata/credit-40.json` (CR-1..CR-6 with tolerance edges), line nets and
   quantity rules; the field-level diff, line-status and re-promise rules of
   change management; the scheduling-release reconciliation (AC-27.13); and the
@@ -52,7 +55,9 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # run store and RLS tes
   only at or above the threshold).
 - `internal/api`: request validation, duty routing per hold type, list filters,
   PATCH/cancel/history contracts, the release check and backorder preview, wire
-  formats, and that every route is in `api/openapi.yaml` and back.
+  formats, and that every route is in `api/openapi.yaml` and back; with the
+  database, the intake load proof (500 orders/min open loop, p99 < 500 ms,
+  exactly once; `-short` skips it, `PASSAGE_SALES_INTAKE_MINUTES` lengthens it).
 - `internal/events`: every event type is in `events/asyncapi.yaml` and back.
 - `internal/store`: create with idempotent replay and key reuse, the CREDIT hold
   and the release that confirms the order (AC-27.3) with the outbox rows each
@@ -88,8 +93,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup |
 | GET | `/v1/sales/orders` | `sales.order.read` | Newest first; `status`, `customerId`, `hold` (orders with an ACTIVE hold of the type), `cursor`, `limit` |
 | GET | `/v1/sales/orders/{id}` | `sales.order.read` | ETag = version |
-| POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold |
-| POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3) |
+| POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold; draws allocation quota per line (`SLS-0013` warning when a line moves to a later period, 422 when none can cover it) |
+| POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3); when allocation quota cannot cover that confirmation the hold is still released and the order stays unconfirmed with an `SLS-0013` warning |
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled` |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
@@ -99,9 +104,24 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET / POST | `/v1/sales/agreements` | `sales.order.read` / `sales.agreement.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`); create with `Idempotency-Key`, numbered `SA-` |
 | GET | `/v1/sales/agreements/{id}` | `sales.order.read` | With remaining quantity and release history |
 | POST | `/v1/sales/agreements/{id}:release-order` | `sales.agreement.maintain` | `Idempotency-Key`; creates a DRAFT order at the agreement price and decrements the commitment atomically; emits `agreement.released` |
+| GET / POST | `/v1/sales/agreements/{id}/schedule-releases` | `sales.order.read` / `sales.agreement.maintain` | Releases newest first; store a FORECAST or JIT release (`Idempotency-Key`, `releaseNo`, `cumReceived`, `buckets`): ACCEPTED replaces the previous release's open lines, a cumulative mismatch beyond the agreement tolerance is stored HELD (`CUM_QTY_MISMATCH`, `SLS-0014`) and changes nothing; refused with `SLS-0029` outside the agreement's validity; emits `schedulerelease.received` |
+| GET | `/v1/sales/agreements/{id}/schedule-releases/{releaseId}` | `sales.order.read` | The release with its schedule lines |
+| POST | `/v1/sales/agreements/{id}/schedule-releases/{releaseId}:resolve` | `sales.agreement.maintain` | `If-Match`; `ACCEPT` (override) or `REJECT` a HELD release with a reason; emits `schedulerelease.resolved` |
+| POST | `/v1/sales/agreements/{id}:record-shipped` | `sales.agreement.maintain` | `If-Match`; sets the cumulative shipped quantity (and optionally a later reset date, which carries the closed period's shipped quantity into the releases' `shippedOffset`) and recalculates the open lines of the release in effect; emits `schedulerelease.recalculated` |
+| POST | `/v1/sales/orders/{id}/lines/{lineNo}:promise` | `sales.order.write` | `If-Match`; places one line of a CONFIRMED order against the supplied ATP buckets (`periods`, `completeOnly`) and stores its schedule lines: CONFIRMED up to the requested date, BACKORDER after it, UNPROMISED for quantity no bucket covers (FR-27.6, AC-27.8). New order version, `order.changed` and `atp.promised` |
+| GET | `/v1/sales/orders/{id}/schedule-lines` | `sales.order.read` | The order's active schedule lines |
+| GET | `/v1/sales/backorders` | `sales.order.read` | Backorder list by promised date, undated last (`legalEntityId`, `productId`, `customerId`, `promisedTo`, `limit`) |
 | POST | `/v1/sales/atp:check` | `sales.order.read` | Stateless BR-27.1 check over supplied buckets |
+| GET / POST | `/v1/sales/backorder-runs` | `sales.order.read` / `sales.backorder.run` | Stored backorder runs (`legalEntityId`, `productId`, `status`, `limit`); plan a run (`Idempotency-Key`, `legalEntityId`, `productId`, `siteId`, `warehouseId`, `strategy`, `supply`, `supplyDate`, optional `loseThreshold`, `defaultPriorityClass`, `priorityClasses`) over the open lines of the CONFIRMED orders and store it as a PREVIEW that changes nothing (FR-27.17, BR-27.11); `SLS-0027` when no line is open or a protected confirmation cannot be kept |
+| GET | `/v1/sales/backorder-runs/{id}` | `sales.order.read` | The run with its lines in processing order (promised quantity before and after, gain date, order version the preview used) |
+| POST | `/v1/sales/backorder-runs/{id}:commit` | `sales.backorder.run` | `If-Match`; applies a PREVIEW in one transaction serialised per product, site and warehouse: rewrites the schedule lines of each changed line, moves confirmed dates, versions each order, emits `order.changed`, `atp.promised` per changed line and `backorderrun.committed`; an order changed since the preview, or another line of the product promised differently since, is `SLS-0042` and nothing is applied; a committed run is `SLS-0041` |
 | POST | `/v1/sales/schedule-releases:check` | `sales.agreement.maintain` | Stateless BR-27.12 reconciliation; a mismatch returns `held: true`, `code: CUM_QTY_MISMATCH` and no schedule lines |
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
+| GET | `/v1/sales/change-requests` | `sales.order.read` | Optional `legalEntityId`, `status`, `orderId`, `limit`; PENDING oldest first (the approval queue), otherwise newest first |
+| GET | `/v1/sales/change-requests/{id}` | `sales.order.read` | The stored change, its field-level diff and the order version it was made against; the ETag is the request version |
+| POST | `/v1/sales/change-requests/{id}:approve` | `sales.order.approve` | `If-Match`; applies the stored change to the order and records the approval in one transaction (`order.changed`, then `orderchange.approved`); the requester cannot approve (`SLS-0045`), a decided request is `SLS-0044`, an order that moved since is `SLS-0046` |
+| POST | `/v1/sales/change-requests/{id}:reject` | `sales.order.approve` | `If-Match`; a `comment` is required; the order stays as it was |
+| GET / PUT | `/v1/sales/customers/{customerId}/change-policy` | `sales.order.read` / `sales.order.approve` | `legalEntityId` required; `approvalRequired` switch, off at version 0; PUT takes `If-Match` (`"0"` to create); `changepolicy.changed` |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
 | GET / PUT | `/v1/sales/credit-profiles/{customerId}` | `sales.order.read` / `sales.credit.maintain` | `legalEntityId` query or the caller's `Passage-Legal-Entity`; PUT takes `If-Match` (`"0"` to create) |
 | GET / POST | `/v1/sales/quotations` | `sales.order.read` / `sales.quotation.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`) without lines; create a DRAFT with `Idempotency-Key`, numbered `SQ-`, validity default +30 days, probability 50 |
@@ -110,11 +130,15 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/quotations/{id}:lose` | `sales.quotation.maintain` | `If-Match`; `{reason}`; DRAFT or SENT to LOST |
 | POST | `/v1/sales/quotations/{id}:convert` | `sales.quotation.maintain` | `If-Match`; optional `{lineNos, listingOverrideReason}` (empty converts every open line); 201 with the CONVERTED quotation and one DRAFT order; emits `quotation.converted` |
 | GET | `/v1/sales/holds` | `sales.credit.release` or `sales.order.hold` | Release queue: ACTIVE holds oldest first (`legalEntityId`, `holdType`, `limit`) with the failed credit rule, the customer's credit limit and the order version for the release call |
+| POST | `/v1/sales/quotations:expire` | `sales.quotation.maintain` | Expiry run (`legalEntityId` optional): DRAFT and SENT quotations past their validity become EXPIRED, oldest first, up to 500 per run (`more` says to call again), each with a version bump and `quotation.expired` in the same transaction; state-based, so a repeat expires nothing twice |
+| GET | `/v1/sales/summary` | `sales.order.read` | Workspace tiles (ACTIVE holds, backorder schedule lines, quotations ending within 7 days, lapsed open quotations), the open pipeline per currency (count, net, probability-weighted net) narrowed by `status`, `minProbabilityPct` and `expiringWithinDays`, and won/lost/expired with the conversion rate over `windowDays` (default 90) |
 | GET / POST | `/v1/sales/supplementary-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, `parentProductId`, `limit`); create a rule (one per parent, customer or all customers, and item) |
 | DELETE | `/v1/sales/supplementary-item-rules/{id}` | `sales.listing.maintain` | Remove a rule |
 | POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
 | GET / POST | `/v1/sales/product-proposal-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) with each rule's accepted and declined counts; create a rule (one per ordered product, customer or all customers, and proposed product) |
 | DELETE | `/v1/sales/product-proposal-rules/{id}` | `sales.listing.maintain` | Remove a rule; recorded responses stay |
+| GET / POST | `/v1/sales/allocation-quotas` | `sales.order.read` / `sales.allocation.maintain` | Quota inquiry per product and period (`legalEntityId`, `productId`, `customerId`, `onDate`, `limit`) with quota, consumed and remaining; set a quota for a product, period and customer or every customer (`Idempotency-Key`; overlapping periods are `SLS-0035`) |
+| GET / PATCH | `/v1/sales/allocation-quotas/{id}` | `sales.order.read` / `sales.allocation.maintain` | One quota with its draw history; change the quantity under `If-Match` (below the consumed quantity is `SLS-0036`) |
 | POST | `/v1/sales/product-proposals:evaluate` | `sales.order.read` | Stateless: the products to propose for the products being committed, excluding those already on the order |
 | POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
@@ -157,6 +181,17 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   validity period (`SLS-0029`), creates the DRAFT order (channel `AGREEMENT`)
   and stores the release in the same transaction. At the commitment the
   agreement is EXHAUSTED. Overdelivery is 0 until the parameter table exists.
+- **FR-27.9 change approval** (slice 13): a customer can be switched to
+  `approvalRequired` (`customer_change_policy`, per legal entity and customer;
+  off when never saved). A PATCH of a CONFIRMED order of such a customer by a
+  caller without `sales.order.approve` is validated, then stored as a PENDING
+  `order_change_request` (the PATCH body, its diff, the order version it was
+  made against) and answered 202 with the order unchanged and `pendingChange`;
+  `orderchange.requested` is written. At most one request per order is PENDING
+  (`SLS-0043`). `:approve` applies it through the same path as a direct PATCH,
+  as the requester's change, and records the decision in one transaction
+  (`order.changed`, then `orderchange.approved`); `:reject` needs a comment. A
+  caller with `sales.order.approve` changes the order directly.
 - **FR-27.9 / BR-27.5** change management: PATCH changes the header date and
   OPEN/RESERVED lines of a DRAFT, OPEN or CONFIRMED order. Each change that
   alters something bumps the version, stores the field-level diff in
@@ -178,8 +213,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   REDISTRIBUTE may move confirmed quantity to higher priority; FILL serves by
   requested date; LOSE may deconfirm only lines at or above `loseThreshold`
   (default 3). A run that cannot keep a protected confirmation is refused.
-- **FR-27.1 / BR-27.5** quotations: DRAFT → SENT → CONVERTED or LOST (EXPIRED
-  and CANCELLED exist as states; nothing sets them yet). A quotation is valid
+- **FR-27.1 / BR-27.5** quotations: DRAFT → SENT → CONVERTED or LOST (`POST /quotations:expire` sets EXPIRED
+  for quotations past validity; CANCELLED exists as a state nothing sets yet). A quotation is valid
   through its `validUntil` day (default +30 days, at most 365); an expired
   quotation can be neither sent nor converted (`SLS-0031`). `:convert` takes
   the quotation's row lock and, in one transaction, creates one DRAFT order
@@ -231,6 +266,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0008` | 422 | Agreement commitment exhausted (`AGREEMENT_EXHAUSTED`) |
 | `SLS-0011` | 422 | Product not listed for the customer (`PRODUCT_NOT_LISTED`) |
 | `SLS-0012` | 201 (warning) | Mandatory supplementary item added at commit (`warnings[]` on the order) |
+| `SLS-0013` | 422 / warning | Allocation for a line is exhausted (FR-27.16, BR-27.15): 422 on a confirm or change when no period from the requested one on has enough left; a warning in `warnings[]` when the line moved to a later period, and when a CREDIT release could not confirm the order (the hold is still released) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
 | `SLS-0015` | 200 (warning) | Backorder run preview would deconfirm lines (`warningCode`) |
 | `SLS-0019` | 422 | Order not confirmable in its current state |
@@ -240,7 +276,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0024` | 422 | Change refused: unknown line, a line that is not OPEN or RESERVED, a supplementary line's own quantity or date, invalid quantity, bad price or date, or reason too long |
 | `SLS-0025` | 422 | Order cannot be cancelled: shipped, closed or cancelled, or a line is picked, delivered or invoiced |
 | `SLS-0026` | 422 | Scheduling release refused: negative quantities, unordered or decreasing buckets |
-| `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation |
+| `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, a WIN, GAIN or LOSE run that cannot keep a protected confirmation, or (stored runs) no open line for the product, site and warehouse or more than 10,000 |
 | `SLS-0028` | 422 | Hold cannot be applied: CREDIT by hand, the order is shipped, closed or cancelled, or an ACTIVE hold of the type exists |
 | `SLS-0029` | 422 | Agreement is not valid on the release date |
 | `SLS-0030` | 422 | Quotation status does not allow the action (send a non-DRAFT, convert a DRAFT or LOST, lose a CONVERTED) |
@@ -248,6 +284,18 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0032` | 422 | Selected quotation lines are not open (already converted, unknown or repeated) or none remain |
 | `SLS-0033` | 409 | A supplementary item rule for the parent, customer (or all customers) and item exists |
 | `SLS-0034` | 409 | A product proposal rule for the ordered product, customer (or all customers) and proposed product exists |
+| `SLS-0035` | 409 | An allocation quota for the product and customer (or all customers) already covers part of the period |
+| `SLS-0036` | 409 | Allocation quota set below the consumed quantity |
+| `SLS-0037` | 422 | The order is not CONFIRMED or is a JOURNAL order (BR-27.7), the line is past RESERVED, or the line is a supplementary line, so it cannot be promised |
+| `SLS-0038` | 409 | A release with this number was already received for the agreement |
+| `SLS-0039` | 422 | The release is not HELD, or a newer release is already in effect |
+| `SLS-0040` | 422 | Cumulative shipped quantity would fall without a later reset date, or the reset date moves back |
+| `SLS-0041` | 409 | The backorder run was already committed |
+| `SLS-0042` | 409 | The run is out of date, so nothing was applied: an order of a changed line moved since the preview (version, status or line state), or another open line of the product, site and warehouse now holds another promised quantity than the preview saw |
+| `SLS-0043` | 409 | The order already has a change waiting for approval |
+| `SLS-0044` | 409 | The change request was already decided |
+| `SLS-0045` | 403 | A change cannot be approved by the user who requested it |
+| `SLS-0046` | 409 | The order changed since the change request was made; reject it and ask for a new change |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -256,6 +304,11 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0105` | 404 | Quotation not found |
 | `SLS-0106` | 404 | Supplementary item rule not found |
 | `SLS-0107` | 404 | Product proposal rule not found (also on `:respond` for a rule outside the legal entity) |
+| `SLS-0108` | 404 | Allocation quota not found |
+| `SLS-0109` | 404 | Order line not found |
+| `SLS-0110` | 404 | Scheduling release not found |
+| `SLS-0111` | 404 | Backorder run not found |
+| `SLS-0112` | 404 | Change request not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

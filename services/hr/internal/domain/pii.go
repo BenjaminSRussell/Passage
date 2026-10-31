@@ -3,12 +3,14 @@ package domain
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 )
 
 // PIIReadDuty is the duty that permits an unmasked read (FR-42.1).
@@ -17,49 +19,109 @@ const PIIReadDuty = "HcmPIIRead"
 // DefaultReasonMinLength is the minimum length of a PII reveal reason (8.42.13).
 const DefaultReasonMinLength = 10
 
-// Sealer encrypts P3 values column by column with AES-256-GCM. The key is
-// 32 bytes; it comes from the environment in this slice and from Vault later.
-// Output layout is nonce || ciphertext.
+// Sealer encrypts P3 values with platform fieldcrypt (tenant and field bound).
+// Values written before fieldcrypt (nonce || ciphertext under the single
+// HR_PII_KEY, no envelope) still open through the legacy key.
 type Sealer struct {
-	aead cipher.AEAD
+	keys         *fieldcrypt.Keys
+	legacy       cipher.AEAD
+	legacyOpens  atomic.Int64
+	openFailures atomic.Int64
 }
 
-// NewSealer builds a sealer from a 32-byte key.
-func NewSealer(key []byte) (*Sealer, error) {
-	if len(key) != 32 {
+// legacyPath is what the legacy key did for one open, logged beside a fieldcrypt failure.
+type legacyPath string
+
+const (
+	legacyUnused        legacyPath = "unused"
+	legacyOpened        legacyPath = "opened"
+	legacyFailed        legacyPath = "failed"
+	legacyNotConfigured legacyPath = "not_configured"
+)
+
+// NewSealer builds a sealer. legacyKey is optional (nil) and, when set, must be 32 bytes.
+func NewSealer(keys *fieldcrypt.Keys, legacyKey []byte) (*Sealer, error) {
+	if keys == nil {
+		return nil, errors.New("fieldcrypt keys are required")
+	}
+	s := &Sealer{keys: keys}
+	if legacyKey == nil {
+		return s, nil
+	}
+	if len(legacyKey) != 32 {
 		return nil, errors.New("PII key must be 32 bytes")
 	}
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher(legacyKey)
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
+	if s.legacy, err = cipher.NewGCM(block); err != nil {
 		return nil, err
 	}
-	return &Sealer{aead: aead}, nil
+	return s, nil
 }
 
-// Seal encrypts plain with a fresh random nonce.
-func (s *Sealer) Seal(plain string) ([]byte, error) {
-	nonce := make([]byte, s.aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
+func (s *Sealer) Seal(tenantID, field, plain string) ([]byte, error) {
+	return s.keys.Seal(tenantID, field, []byte(plain))
+}
+
+// Open tries fieldcrypt, then the legacy key. An open that needed the legacy key
+// and an open that failed both are counted (OpenCounts) and logged with the key id
+// the envelope names and what each path did, never the value, so a bad rotation or
+// a missed re-seal shows up before every read fails.
+func (s *Sealer) Open(tenantID, field string, sealed []byte) (string, error) {
+	plain, path, err := s.open(tenantID, field, sealed)
+	switch {
+	case err != nil:
+		s.openFailures.Add(1)
+		keyID, _ := fieldcrypt.KeyID(sealed)
+		slog.Error("hr pii value did not open", "tenantId", tenantID, "field", field, "envelopeKeyId", keyID,
+			"fieldcrypt", "failed", "legacy", string(path))
+	case path == legacyOpened:
+		s.legacyOpens.Add(1)
+		slog.Warn("hr pii value opened only with the legacy HR_PII_KEY; run hr reseal-pii", "tenantId", tenantID, "field", field)
 	}
-	return s.aead.Seal(nonce, nonce, []byte(plain), nil), nil
+	return plain, err
 }
 
-// Open decrypts a value produced by Seal.
-func (s *Sealer) Open(sealed []byte) (string, error) {
-	n := s.aead.NonceSize()
+func (s *Sealer) open(tenantID, field string, sealed []byte) (string, legacyPath, error) {
+	if plain, err := s.keys.Open(tenantID, field, sealed); err == nil {
+		return string(plain), legacyUnused, nil
+	}
+	if s.legacy == nil {
+		return "", legacyNotConfigured, fieldcrypt.ErrOpen
+	}
+	n := s.legacy.NonceSize()
 	if len(sealed) < n {
-		return "", errors.New("sealed value too short")
+		return "", legacyFailed, fieldcrypt.ErrOpen
 	}
-	plain, err := s.aead.Open(nil, sealed[:n], sealed[n:], nil)
+	plain, err := s.legacy.Open(nil, sealed[:n], sealed[n:], nil)
 	if err != nil {
-		return "", err
+		return "", legacyFailed, fieldcrypt.ErrOpen
 	}
-	return string(plain), nil
+	return string(plain), legacyOpened, nil
+}
+
+// OpenCounts reports opens that needed the legacy key and opens that failed both keys.
+func (s *Sealer) OpenCounts() (legacy, failed int64) {
+	return s.legacyOpens.Load(), s.openFailures.Load()
+}
+
+// Reseal returns sealed re-encrypted under the current fieldcrypt key when it opens
+// only through the legacy key or names an older key id; changed is false when the
+// value is already sealed under the current key. It neither counts nor logs per value.
+func (s *Sealer) Reseal(tenantID, field string, sealed []byte) (out []byte, changed bool, err error) {
+	plain, path, err := s.open(tenantID, field, sealed)
+	if err != nil {
+		return nil, false, err
+	}
+	if keyID, _ := fieldcrypt.KeyID(sealed); path == legacyUnused && keyID == s.keys.CurrentID() {
+		return sealed, false, nil
+	}
+	if out, err = s.Seal(tenantID, field, plain); err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }
 
 // MaskNationalID shows only the last four characters: ***-**-1234 (AC-42.7).

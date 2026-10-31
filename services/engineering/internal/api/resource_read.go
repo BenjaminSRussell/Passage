@@ -71,9 +71,7 @@ func (a *API) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	listPage(a, w, r, "list resource groups", &a.resourceFailed, func(ctx context.Context, after string, limit int) (store.Page[domain.ResourceGroup], error) {
 		return a.store.ListResourceGroups(ctx, v["siteId"], after, limit)
-	}, func(g domain.ResourceGroup) groupBody {
-		return groupBody{ID: g.ID, Code: g.Code, Name: g.Name, SiteID: g.SiteID, CalendarID: g.CalendarID}
-	})
+	}, bodyFromGroup)
 }
 
 func (a *API) listCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -87,5 +85,55 @@ func (a *API) listCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	listPage(a, w, r, "list capabilities", &a.resourceFailed, func(ctx context.Context, after string, limit int) (store.Page[domain.Capability], error) {
 		return a.store.ListCapabilities(ctx, after, limit)
-	}, func(c domain.Capability) capabilityBody { return capabilityBody{ID: c.ID, Code: c.Code, Name: c.Name} })
+	}, bodyFromCapability)
+}
+
+func bodyFromGroup(g domain.ResourceGroup) groupBody {
+	return groupBody{ID: g.ID, Code: g.Code, Name: g.Name, SiteID: g.SiteID, CalendarID: g.CalendarID}
+}
+
+func bodyFromCapability(c domain.Capability) capabilityBody {
+	return capabilityBody{ID: c.ID, Code: c.Code, Name: c.Name}
+}
+
+func getByID[T, B any](a *API, w http.ResponseWriter, r *http.Request, operation string, fetch func(ctx context.Context, id string) (T, error), convert func(T) B) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := fetch(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, operation, err, &a.resourceFailed)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, convert(item))
+}
+
+func (a *API) getResourceGroup(w http.ResponseWriter, r *http.Request) {
+	getByID(a, w, r, "get resource group", a.store.GetResourceGroup, bodyFromGroup)
+}
+
+func (a *API) getCapability(w http.ResponseWriter, r *http.Request) {
+	getByID(a, w, r, "get capability", a.store.GetCapability, bodyFromCapability)
+}
+
+func (a *API) getCalendar(w http.ResponseWriter, r *http.Request) {
+	getByID(a, w, r, "get calendar", a.store.GetCalendar, func(c store.Calendar) calendarView { return bodyFromCalendar(c, nil) })
+}
+
+func (a *API) listCalendars(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	fields, _ := listFilterFields(r)
+	if len(fields) > 0 {
+		unprocessable(w, r, fields)
+		return
+	}
+	listPage(a, w, r, "list calendars", &a.resourceFailed, func(ctx context.Context, after string, limit int) (store.Page[store.Calendar], error) {
+		return a.store.ListCalendars(ctx, after, limit)
+	}, func(c store.Calendar) calendarView { return bodyFromCalendar(c, nil) })
 }

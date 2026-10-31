@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Passage Purchasing API
-  version: 0.8.0
+  version: 0.9.0
   description: |
-    Wave 17 (PSG-17) slices 1 to 8: purchase requisitions with policy-routed approval,
+    Wave 17 (PSG-17) slices 1 to 9: purchase requisitions with policy-routed approval,
     consolidation of approved requisition lines into purchase orders, purchase orders
     with agreement and trade-agreement pricing, the purchase order lifecycle (submit,
     approve, reject, confirm, cancel) with versioned change management, purchase
@@ -11,7 +11,8 @@ info:
     for quotation cycle (create, send, replies, compare, award to purchase orders) with
     sealed bids and weighted scoring, invoicing plans on purchase order lines, and the
     subsequent price change (reprice) of confirmed purchase orders, and scheduling
-    agreements with firm and trade-off zones and FRC/JIT releases with cumulative quantities.
+    agreements with firm and trade-off zones and FRC/JIT releases with cumulative quantities, and
+    the purchasing policy per legal entity (change management default, PO four-eyes, invoice before receipt).
     Mounted at /v1/procurement. The browser reaches the same paths under /api/v1/procurement
     through the web BFF. Errors are RFC 9457 problem details; see README for codes.
 servers:
@@ -28,6 +29,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    LegalEntityId:
+      name: legalEntityId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -67,6 +73,25 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    PurchasingPolicy:
+      type: object
+      required: [legalEntityId, changeManagementDefault, poFourEyes, allowInvoiceBeforeReceipt, version]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        changeManagementDefault: { type: boolean, description: "changeManagement of a new PO that does not say (default true)" }
+        poFourEyes: { type: boolean, description: "a user who created, submitted or last changed a PO cannot approve or confirm it (PRC-POL-002, 403)" }
+        allowInvoiceBeforeReceipt: { type: boolean, description: "a PO line quantity may drop below invoiced, never below received (BR-17.7)" }
+        version: { type: integer, minimum: 0, description: "0 when no policy is saved yet" }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    PurchasingPolicyInput:
+      type: object
+      required: [changeManagementDefault, poFourEyes, allowInvoiceBeforeReceipt]
+      additionalProperties: false
+      properties:
+        changeManagementDefault: { type: boolean }
+        poFourEyes: { type: boolean }
+        allowInvoiceBeforeReceipt: { type: boolean }
     Money:
       type: string
       description: Decimal string, never a float.
@@ -315,6 +340,9 @@ components:
         taxTotal: { $ref: '#/components/schemas/Money' }
         total: { $ref: '#/components/schemas/Money', description: "Equals subtotal − discountTotal + chargesTotal + taxTotal." }
         rowVersion: { type: integer }
+        createdBy: { type: string, format: uuid, description: "user who created the PO; absent on POs from before it was recorded" }
+        submittedBy: { type: string, format: uuid, description: "user who last submitted the PO" }
+        changedBy: { type: string, format: uuid, description: "user who last edited or repriced the PO's content" }
         lines:
           type: array
           items: { $ref: '#/components/schemas/PurchaseOrderLine' }
@@ -1055,6 +1083,7 @@ paths:
   /v1/procurement/requisitions:
     post:
       operationId: createRequisition
+      x-passage-duty: RequisitionCreate
       summary: Create a DRAFT requisition (duty RequisitionCreate)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1076,6 +1105,7 @@ paths:
         '422': { description: Validation, PRC-REQ-002 (more than 500 lines) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listRequisitions
+      x-passage-duty: RequisitionCreate
       summary: List requisitions newest first (duty RequisitionCreate)
       parameters:
         - { name: status, in: query, required: false, schema: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CLOSED, CANCELLED] } }
@@ -1092,6 +1122,7 @@ paths:
   /v1/procurement/requisitions/{id}:
     get:
       operationId: getRequisition
+      x-passage-duty: RequisitionCreate
       summary: Read a requisition (ETag = version; duty RequisitionCreate)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1106,6 +1137,7 @@ paths:
   /v1/procurement/requisitions/{id}:submit:
     post:
       operationId: submitRequisition
+      x-passage-duty: RequisitionCreate
       summary: Submit for approval; routes by amount and category; APPROVED when the chain is empty. A replayed Idempotency-Key returns the requisition as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1125,6 +1157,7 @@ paths:
   /v1/procurement/requisition-lines:
     get:
       operationId: listOpenRequisitionLines
+      x-passage-duty: PurchaseOrderMaintain
       summary: Consolidation queue - OPEN lines of APPROVED requisitions, newest first (FR-17.3; duty PurchaseOrderMaintain)
       parameters:
         - { name: sourcing, in: query, required: false, description: "NEEDS_SOURCING keeps lines with no preferred vendor; HAS_VENDOR those with one.", schema: { type: string, enum: [NEEDS_SOURCING, HAS_VENDOR] } }
@@ -1141,6 +1174,7 @@ paths:
   /v1/procurement/requisitions:consolidate:
     post:
       operationId: consolidateRequisitions
+      x-passage-duty: PurchaseOrderMaintain
       summary: Create DRAFT purchase orders from approved requisition lines, one per legal entity, vendor, currency, site and delivery window (FR-17.3; duty PurchaseOrderMaintain). A replayed Idempotency-Key returns the POs the lines went into.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1162,6 +1196,7 @@ paths:
   /v1/procurement/purchase-orders:reprice:
     post:
       operationId: repricePurchaseOrders
+      x-passage-duty: PurchaseOrderInquire or PurchaseOrderConfirm
       summary: Preview or apply the subsequent price change run over a page of CONFIRMED POs (FR-17.22, AC-17.16)
       description: |
         Visits, in id order, CONFIRMED POs with an open line priced from a trade agreement and not drawn
@@ -1194,6 +1229,7 @@ paths:
   /v1/procurement/purchase-orders:
     post:
       operationId: createPurchaseOrder
+      x-passage-duty: PurchaseOrderMaintain
       summary: Create a DRAFT purchase order, pricing lines from trade agreements when unitPrice is omitted
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1216,6 +1252,7 @@ paths:
         '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseOrders
+      x-passage-duty: PurchaseOrderInquire
       summary: List purchase orders newest first (duty PurchaseOrderInquire)
       parameters:
         - { name: approvalStatus, in: query, required: false, schema: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED, FINALIZED, CANCELLED] } }
@@ -1232,6 +1269,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:
     get:
       operationId: getPurchaseOrder
+      x-passage-duty: PurchaseOrderInquire or procurement.purchase-order.lookup
       summary: Read a purchase order (ETag = row version; duty PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1245,6 +1283,7 @@ paths:
         '404': { description: Not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     patch:
       operationId: editPurchaseOrder
+      x-passage-duty: PurchaseOrderMaintain
       summary: Replace the lines and charges of a PO (FR-17.8, BR-17.8; duty PurchaseOrderMaintain)
       description: |
         The body is the whole order as on create. A line with lineNo changes that existing line; a line
@@ -1284,6 +1323,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:submit:
     post:
       operationId: submitPurchaseOrder
+      x-passage-duty: PurchaseOrderMaintain
       summary: DRAFT or REJECTED to IN_REVIEW (duty PurchaseOrderMaintain). A replayed Idempotency-Key returns the PO as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1305,6 +1345,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:approve:
     post:
       operationId: approvePurchaseOrder
+      x-passage-duty: PurchaseOrderConfirm
       summary: IN_REVIEW to APPROVED (duty PurchaseOrderConfirm; stands in for the wave 4 approval task)
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1319,7 +1360,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing PurchaseOrderConfirm duty, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing PurchaseOrderConfirm duty (AUTH-0003), or the purchasing policy has poFourEyes on and the caller created, submitted or last changed the PO (PRC-POL-002)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Not IN_REVIEW (PRC-PO-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -1327,6 +1368,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:reject:
     post:
       operationId: rejectPurchaseOrder
+      x-passage-duty: PurchaseOrderConfirm
       summary: IN_REVIEW to REJECTED (duty PurchaseOrderConfirm). A rejected PO is edited and submitted again; a rejected change to a confirmed PO can also be edited back to the confirmed content.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1349,6 +1391,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:confirm:
     post:
       operationId: confirmPurchaseOrder
+      x-passage-duty: PurchaseOrderConfirm
       summary: APPROVED to CONFIRMED (duty PurchaseOrderConfirm). Confirms version 1, or the pending change version, and writes po.confirmed (and poversion.created above version 1).
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1363,7 +1406,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: Missing PurchaseOrderConfirm duty, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing PurchaseOrderConfirm duty (AUTH-0003), or the purchasing policy has poFourEyes on and the caller created, submitted or last changed the PO (PRC-POL-002)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Not APPROVED or no pending change (PRC-PO-008), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -1371,6 +1414,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:cancel:
     post:
       operationId: cancelPurchaseOrder
+      x-passage-duty: PurchaseOrderMaintain
       summary: Cancel every open line of a PO with nothing received or invoiced (BR-17.2; duty PurchaseOrderMaintain). Returns agreement releases and requisition lines and writes po.cancelled.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1392,6 +1436,7 @@ paths:
   /v1/procurement/purchase-orders/{id}:reprice:
     post:
       operationId: repricePurchaseOrder
+      x-passage-duty: PurchaseOrderInquire or PurchaseOrderConfirm
       summary: Preview or apply a subsequent price change on one CONFIRMED PO (FR-17.22, BR-17.18, AC-17.16)
       description: |
         Moves open, un-invoiced lines priced from a trade agreement (price_source TRADE_AGREEMENT:<id>) to
@@ -1442,6 +1487,7 @@ paths:
   /v1/procurement/purchase-orders/{id}/versions:
     get:
       operationId: listPurchaseOrderVersions
+      x-passage-duty: PurchaseOrderInquire
       summary: Every stored version of a PO, oldest first, a pending change included (FR-17.8; duty PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1460,6 +1506,7 @@ paths:
   /v1/procurement/purchase-orders/{id}/versions/{n}/diff:
     get:
       operationId: getPurchaseOrderVersionDiff
+      x-passage-duty: PurchaseOrderInquire
       summary: JSON Patch (RFC 6902) from version n-1 to version n (duty PurchaseOrderInquire)
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1487,6 +1534,7 @@ paths:
   /v1/procurement/purchase-orders/{id}/invoicing-plans:
     get:
       operationId: listInvoicingPlans
+      x-passage-duty: PurchaseOrderInquire or procurement.purchase-order.lookup
       summary: Every invoicing plan of a PO in line order (FR-17.21; duty PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1503,6 +1551,7 @@ paths:
   /v1/procurement/purchase-orders/{id}/lines/{lineNo}/invoicing-plan:
     get:
       operationId: getInvoicingPlan
+      x-passage-duty: PurchaseOrderInquire
       summary: The invoicing plan of one PO line (ETag = PO row version; duty PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/LineNo' }]
       responses:
@@ -1517,6 +1566,7 @@ paths:
         '422': { description: Bad id or line number (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     put:
       operationId: putInvoicingPlan
+      x-passage-duty: PurchaseOrderMaintain
       summary: Replace the invoicing plan of one PO line, rows generated from the line amount (FR-17.21, BR-17.17; duty PurchaseOrderMaintain)
       description: >-
         If-Match is the PO row version; the write bumps it and the answer's ETag is the new one. A later PO edit
@@ -1544,6 +1594,7 @@ paths:
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     delete:
       operationId: deleteInvoicingPlan
+      x-passage-duty: PurchaseOrderMaintain
       summary: Remove the invoicing plan of one PO line (duty PurchaseOrderMaintain)
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1558,9 +1609,56 @@ paths:
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: The plan has invoiced rows (PRC-IP-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement:
+    put:
+      operationId: settleInvoicingPlanRow
+      x-passage-duty: procurement.invoicing-plan.settle
+      summary: Receiving reports that it settled a plan row; the row becomes INVOICED (#289; duty procurement.invoicing-plan.settle, held only by receiving's service grant)
+      description: >-
+        Service-only: 403 unless the call carries a verified service token from receiving. Idempotent per row and
+        settlementRef; the same reference and amount again answers 200 with replayed true once the row is INVOICED.
+        The settlement is the truth: if a reprice changed the row's amount in between, the row becomes INVOICED at
+        the settled amount and the difference is shared over the remaining OPEN rows; 409 only when the line cannot
+        absorb it (logged and counted for a person to resolve). An INVOICED row is never re-split by a later
+        line amount change (BR-17.17). The record keeps the settlement reference, amount and actor.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/LineNo' }
+        - { name: seq, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 120 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settlementRef, amount]
+              additionalProperties: false
+              properties:
+                settlementRef: { type: string, maxLength: 255, description: The receiving settlement id }
+                amount: { type: string, description: Decimal string, the amount receiving settled }
+      responses:
+        '200':
+          description: The row is INVOICED
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purchaseOrderId: { type: string, format: uuid }
+                  lineNo: { type: integer }
+                  seq: { type: integer }
+                  status: { type: string, enum: [INVOICED] }
+                  settlementRef: { type: string }
+                  amount: { type: string }
+                  replayed: { type: boolean }
+        '403': { description: Not called by the receiving service (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order (PRC-PO-NOT-FOUND) or plan row (PRC-IP-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The row is settled under another reference or amount, or the line cannot absorb the settled amount (PRC-IP-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/pricing/lookup:
     get:
       operationId: lookupPrice
+      x-passage-duty: PurchaseOrderMaintain
       summary: Resolve the trade agreement price with explain (FR-17.6; duty PurchaseOrderMaintain)
       parameters:
         - { name: vendor, in: query, required: true, schema: { type: string, format: uuid } }
@@ -1582,6 +1680,7 @@ paths:
   /v1/procurement/trade-agreements:
     post:
       operationId: createTradeAgreement
+      x-passage-duty: TradeAgreementMaintain
       summary: Create an ACTIVE PRICE trade agreement row (duty TradeAgreementMaintain)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1600,6 +1699,7 @@ paths:
         '422': { description: Validation or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listTradeAgreements
+      x-passage-duty: TradeAgreementMaintain
       summary: List trade agreement rows newest first (duty TradeAgreementMaintain)
       parameters:
         - { name: accountId, in: query, required: false, schema: { type: string, format: uuid } }
@@ -1617,6 +1717,7 @@ paths:
   /v1/procurement/trade-agreements/{id}:
     get:
       operationId: getTradeAgreement
+      x-passage-duty: TradeAgreementMaintain
       summary: Read a trade agreement row (duty TradeAgreementMaintain)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1629,6 +1730,7 @@ paths:
   /v1/procurement/agreements:
     post:
       operationId: createPurchaseAgreement
+      x-passage-duty: AgreementMaintain
       summary: Create a purchase agreement, EFFECTIVE unless DRAFT is asked for (FR-17.5; duty AgreementMaintain)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1649,6 +1751,7 @@ paths:
         '422': { description: Validation, more than 500 lines (PRC-AGR-002) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseAgreements
+      x-passage-duty: AgreementMaintain
       summary: List purchase agreements newest first with their highest release level (duty AgreementMaintain)
       parameters:
         - { name: status, in: query, required: false, schema: { type: string, enum: [DRAFT, EFFECTIVE, ON_HOLD, CLOSED] } }
@@ -1665,6 +1768,7 @@ paths:
   /v1/procurement/agreements/{id}:
     get:
       operationId: getPurchaseAgreement
+      x-passage-duty: AgreementMaintain
       summary: Read a purchase agreement with its lines and releases (ETag = version; duty AgreementMaintain)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1679,6 +1783,7 @@ paths:
   /v1/procurement/agreements/{id}:activate:
     post:
       operationId: activatePurchaseAgreement
+      x-passage-duty: AgreementMaintain
       summary: Activate a DRAFT or ON_HOLD agreement (duty AgreementMaintain). A replayed Idempotency-Key returns the agreement as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1698,6 +1803,7 @@ paths:
   /v1/procurement/agreements/{id}:hold:
     post:
       operationId: holdPurchaseAgreement
+      x-passage-duty: AgreementMaintain
       summary: Put an EFFECTIVE agreement on hold; releases are refused (PRC-AGR-007) (duty AgreementMaintain). A replayed Idempotency-Key returns the agreement as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1717,6 +1823,7 @@ paths:
   /v1/procurement/agreements/{id}:close:
     post:
       operationId: closePurchaseAgreement
+      x-passage-duty: AgreementMaintain
       summary: Close an EFFECTIVE or ON_HOLD agreement (duty AgreementMaintain). A replayed Idempotency-Key returns the agreement as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1736,6 +1843,7 @@ paths:
   /v1/procurement/scheduling-agreements:
     post:
       operationId: createSchedulingAgreement
+      x-passage-duty: AgreementMaintain
       summary: Create a scheduling agreement with its release schedule (FR-17.15; duty AgreementMaintain)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1756,6 +1864,7 @@ paths:
         '422': { description: Validation (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listSchedulingAgreements
+      x-passage-duty: AgreementMaintain or PurchaseOrderInquire
       summary: Monitor scheduling agreement releases, newest first (FR-17.15, 3.17.14; duty AgreementMaintain or PurchaseOrderInquire)
       parameters:
         - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
@@ -1772,6 +1881,7 @@ paths:
   /v1/procurement/scheduling-agreements/{id}:
     get:
       operationId: getSchedulingAgreement
+      x-passage-duty: AgreementMaintain or PurchaseOrderInquire
       summary: Read a scheduling agreement with its schedule and today's zones (ETag = version; duty AgreementMaintain or PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1786,6 +1896,7 @@ paths:
   /v1/procurement/scheduling-agreements/{id}:release:
     post:
       operationId: releaseSchedulingAgreement
+      x-passage-duty: AgreementMaintain
       summary: >-
         Run a release (SAP ME84): snapshot the schedule as the next FRC or JIT release with cumulative
         quantities and write sarelease.created.v1 (FR-17.15; duty AgreementMaintain). A run with the same
@@ -1815,6 +1926,7 @@ paths:
   /v1/procurement/scheduling-agreements/{id}/schedule:
     put:
       operationId: replaceSchedule
+      x-passage-duty: AgreementMaintain
       summary: >-
         Replace the release schedule (FR-17.15, BR-17.13; duty AgreementMaintain). Zones are judged on today:
         reducing, moving or removing a FIRM line needs a reason code, a TRADEOFF reduction comes back as a warning.
@@ -1842,6 +1954,7 @@ paths:
   /v1/procurement/scheduling-agreements/{id}/releases:
     get:
       operationId: listSchedulingReleases
+      x-passage-duty: AgreementMaintain or PurchaseOrderInquire
       summary: Release headers of an agreement in release order (SAP ME85; duty AgreementMaintain or PurchaseOrderInquire)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1854,6 +1967,7 @@ paths:
   /v1/procurement/scheduling-agreements/{id}/releases/{releaseNo}:
     get:
       operationId: getSchedulingRelease
+      x-passage-duty: AgreementMaintain or PurchaseOrderInquire
       summary: Release documentation for one release number (SAP ME86; duty AgreementMaintain or PurchaseOrderInquire)
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1869,6 +1983,7 @@ paths:
   /v1/procurement/rfqs:
     post:
       operationId: createRFQ
+      x-passage-duty: RFQMaintain
       summary: Create a DRAFT request for quotation with lines and a reply deadline (FR-17.4; duty RFQMaintain)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -1889,6 +2004,7 @@ paths:
         '422': { description: "Validation (COM-0001): deadline not in the future, unknown ranking rule, WEIGHTED_SCORE without criteria, bad criteria, no lines or more than 500, line without product or description; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listRFQs
+      x-passage-duty: RFQMaintain or RFQAward
       summary: List RFQs newest first with line, vendor and reply counts (duty RFQMaintain or RFQAward)
       parameters:
         - { name: status, in: query, required: false, description: 'Comma-separated statuses, e.g. SENT,REPLIES_OPEN', schema: { type: string } }
@@ -1904,6 +2020,7 @@ paths:
   /v1/procurement/rfqs/{id}:
     get:
       operationId: getRFQ
+      x-passage-duty: RFQMaintain or RFQAward
       summary: Read an RFQ with lines, invitations, replies, criteria and scores (ETag = version; duty RFQMaintain or RFQAward)
       description: >-
         A sealed RFQ before its deadline is answered with repliesSealed=true and no replies or scores (BR-17.16);
@@ -1921,6 +2038,7 @@ paths:
   /v1/procurement/rfqs/{id}:send:
     post:
       operationId: sendRFQ
+      x-passage-duty: RFQMaintain
       summary: Invite vendors and move a DRAFT RFQ to SENT; writes rfq.sent.v1 (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1952,6 +2070,7 @@ paths:
   /v1/procurement/rfqs/{id}:close:
     post:
       operationId: closeRFQ
+      x-passage-duty: RFQMaintain
       summary: Stop taking replies, SENT or REPLIES_OPEN to CLOSED (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1973,6 +2092,7 @@ paths:
   /v1/procurement/rfqs/{id}:cancel:
     post:
       operationId: cancelRFQ
+      x-passage-duty: RFQMaintain
       summary: Cancel an RFQ that is not yet awarded (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -1994,6 +2114,7 @@ paths:
   /v1/procurement/rfqs/{id}:award:
     post:
       operationId: awardRFQ
+      x-passage-duty: RFQAward
       summary: Award lines to replies and create one DRAFT purchase order per winning vendor and currency (FR-17.4; duty RFQAward)
       description: >-
         Each awarded line becomes a PO line with the RFQ quantity and unit, the reply price and price unit
@@ -2033,6 +2154,7 @@ paths:
   /v1/procurement/rfqs/{id}/replies:
     post:
       operationId: recordRFQReplies
+      x-passage-duty: RFQMaintain
       summary: Record an invited vendor's prices for lines of a SENT or REPLIES_OPEN RFQ (FR-17.4; duty RFQMaintain)
       description: >-
         A reply received after the deadline is stored with late=true and answered with a PRC-RFQ-003 warning
@@ -2063,6 +2185,7 @@ paths:
   /v1/procurement/rfqs/{id}/compare:
     get:
       operationId: compareRFQ
+      x-passage-duty: RFQMaintain or RFQAward
       summary: Rank the replies per line by the RFQ's rule or ?rule=; late replies are listed as excluded (FR-17.4, BR-17.11, FR-17.19; duty RFQMaintain or RFQAward)
       description: >-
         A sealed RFQ is refused before its deadline (403 PRC-RFQ-004); the first comparison or read after the
@@ -2082,6 +2205,7 @@ paths:
   /v1/procurement/rfqs/{id}/scores/{vendorId}:
     put:
       operationId: scoreRFQVendor
+      x-passage-duty: RFQAward
       summary: Record the buyer's 1–10 scores of an invited vendor on the RFQ's criteria (FR-17.19; duty RFQAward)
       description: >-
         Replaces the vendor's earlier score on each criterion named and bumps the RFQ version. The RFQ must be SENT,
@@ -2107,4 +2231,69 @@ paths:
         '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ cannot be scored in its status (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation, unknown or repeated criterion, RFQ without criteria (COM-0001), or vendor not invited (PRC-RFQ-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchasing-policies:
+    get:
+      operationId: listPurchasingPolicies
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: List the saved purchasing policies of the caller's legal entities (FR-17.13)
+      responses:
+        '200':
+          description: The saved policies; a legal entity with none is not listed and has the defaults
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PurchasingPolicy' } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchasing-policies/{legalEntityId}:
+    get:
+      operationId: getPurchasingPolicy
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: Read the purchasing policy of a legal entity (FR-17.13)
+      description: A legal entity with no saved policy answers the defaults at version 0. The ETag is the version PUT takes as If-Match.
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntityId' }
+      responses:
+        '200':
+          description: The policy
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchasingPolicy' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: legalEntityId is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: putPurchasingPolicy
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Save the purchasing policy of a legal entity (FR-17.13, BR-17.7, PO four-eyes)
+      description: >-
+        Replaces the three settings under If-Match: 0 creates the policy, n replaces version n. PUT is idempotent, so no
+        Idempotency-Key is taken. Writes policy.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntityId' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchasingPolicyInput' }
+      responses:
+        '200':
+          description: The saved policy at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchasingPolicy' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the saved version (PRC-POL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A setting is missing (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

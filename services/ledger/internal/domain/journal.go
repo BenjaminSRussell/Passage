@@ -62,6 +62,8 @@ type Account struct {
 	Postable      bool
 	SuspendedFrom *time.Time
 	ReconType     string
+	// Type is the account type (asset, expense, ...); derivation steps read it as ACCOUNT_TYPE.
+	Type string
 }
 
 // Rules is the ledger configuration that posting rules read.
@@ -97,6 +99,8 @@ type LineInput struct {
 	Currency      string
 	Text          string
 	SourceLineRef string
+	// DerivedBy lists the derivation step ids that filled dimensions (FR-11.22).
+	DerivedBy []string
 }
 
 // ValidLine is a line that passed every line-level rule.
@@ -112,6 +116,8 @@ type ValidLine struct {
 	DisplayName   string
 	// StructureID is the account structure version that validated the line.
 	StructureID string
+	// DerivedBy lists the derivation step ids that filled dimensions (FR-11.22).
+	DerivedBy []string
 	// Negative marks a negative posting (storno, BR-11.16): the projection
 	// reduces the original side instead of adding to the opposite side.
 	Negative bool
@@ -126,6 +132,8 @@ type Result struct {
 	Debit      decimal.Decimal
 	Credit     decimal.Decimal
 	Violations []Violation
+	// Derivation is the derivation trace per line index (FR-11.22); filled by the store.
+	Derivation map[int][]DerivationTrace
 }
 
 // Valid reports whether the entry may be posted.
@@ -265,7 +273,7 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 		id, display := CombinationIDFor(structureID, r.DimensionAttributes, r.ChartCode, acct.Number, dims)
 		res.Lines = append(res.Lines, ValidLine{Index: idx, Account: acct, Dimensions: dims, Side: in.Side,
 			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, CombinationID: id, DisplayName: display,
-			StructureID: structureID})
+			StructureID: structureID, DerivedBy: in.DerivedBy})
 	}
 	if !res.Debit.Equal(res.Credit) {
 		res.Violations = append(res.Violations, Violation{Code: "LEDGER_UNBALANCED", Field: "lines",

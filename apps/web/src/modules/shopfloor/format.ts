@@ -107,6 +107,7 @@ export const REGISTRATION_FLAG_LABELS: Record<string, string> = {
   "job-finished-conflict": "Started after finish",
   "auto-stopped": "Auto-stopped",
   "auto-stop-capped": "Capped at 24 h",
+  "auto-clock-out": "Closed automatically",
 };
 
 export const FLAG_LABELS: Record<string, string> = {
@@ -148,3 +149,6 @@ export function elapsed(start: string, now: number = Date.now()): string {
   const hours = Math.floor(minutes / 60);
   return hours > 0 ? `${hours} h ${String(minutes % 60).padStart(2, "0")} min` : `${minutes} min`;
 }
+
+/** Day names indexed like the service's weekStart: 0 is Sunday. */
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;

@@ -305,6 +305,79 @@ describe("Stock in transit", () => {
   });
 });
 
+describe("Transfer order lines", () => {
+  const item = (overrides: Record<string, unknown> = {}) => ({
+    orderId: ORDER_ID, legalEntityId: ENTITY_ID, number: "TO-1", orderStatus: "CREATED", fromWarehouseId: "W1", toWarehouseId: "W2", shipDate: "2026-09-01",
+    lineId: LINE_ID, lineNo: 1, productId: PRODUCT_ID, dimensions: { site: "S1", warehouse: "W1" }, unit: "EA", qty: "10", shippedQty: "0",
+    receivedQty: "0", remainingQty: "10", inTransit: "0", daysInTransit: 0, closed: false, daysLate: 0, ...overrides,
+  });
+
+  it("flags late shipments, late receipts and short-closed lines with remaining and days in transit", async () => {
+    handler = () =>
+      json(200, {
+        items: [
+          item({ late: "LATE_SHIPMENT", daysLate: 9 }),
+          item({ number: "TO-2", lineId: "l2", orderStatus: "SHIPPED", shippedQty: "10", inTransit: "10", daysInTransit: 12, late: "LATE_RECEIPT", daysLate: 5 }),
+          item({ number: "TO-3", lineId: "l3", orderStatus: "RECEIVED", shippedQty: "10", receivedQty: "8", remainingQty: "0", inTransit: "2", daysInTransit: 30, closed: true }),
+        ],
+        truncated: false,
+      });
+    const { container } = renderAt("/inventory/transfer-lines");
+    const table = await findTable({ name: "Transfer order lines" });
+    await waitFor(() => expect(table).toHaveTextContent("Late shipment, 9 days overdue"));
+    expect(table).toHaveTextContent("Late receipt, 5 days overdue");
+    expect(table).toHaveTextContent("Closed short, investigate");
+    const receiptRow = within(table).getByRole("link", { name: "TO-2" }).closest("tr")!;
+    expect(receiptRow).toHaveTextContent("12");
+    expect(screen.getByText("1 late shipment and 1 late receipt in this list.")).toBeInTheDocument();
+    expect(screen.queryByText("Showing the first 1,000 lines")).not.toBeInTheDocument();
+    expect(within(table).getByRole("link", { name: "TO-1" })).toHaveAttribute("href", `/inventory/transfer-orders/${ORDER_ID}`);
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("sends every filter on apply and blocks invalid ones", async () => {
+    handler = () => json(200, { items: [], truncated: false });
+    renderAt("/inventory/transfer-lines");
+    await screen.findByText("No transfer order lines");
+    expect(calls[0].url.search).toBe("");
+
+    fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: "nope" } });
+    fireEvent.change(screen.getByLabelText(/^Ship date from/), { target: { value: "2026-09-10" } });
+    fireEvent.change(screen.getByLabelText(/^Ship date to/), { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("The end date is before the start date.")).toBeInTheDocument();
+    expect(calls).toHaveLength(1);
+
+    fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: PRODUCT_ID } });
+    fireEvent.change(screen.getByLabelText(/^Ship date to/), { target: { value: "2026-09-30" } });
+    fireEvent.change(screen.getByLabelText(/^Order status/), { target: { value: "SHIPPED" } });
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "late" } });
+    fireEvent.change(screen.getByLabelText(/^Shipping warehouse/), { target: { value: "W1" } });
+    fireEvent.change(screen.getByLabelText(/^Receiving warehouse/), { target: { value: "W2" } });
+    fireEvent.change(screen.getByLabelText(/^Legal entity/), { target: { value: ENTITY_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    const params = calls[1].url.searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      legalEntityId: ENTITY_ID, status: "SHIPPED", productId: PRODUCT_ID, fromWarehouseId: "W1", toWarehouseId: "W2", from: "2026-09-10", to: "2026-09-30", late: "true",
+    });
+    expect(await screen.findByText("No late transfer lines")).toBeInTheDocument();
+  });
+
+  it("says when the service capped the list", async () => {
+    handler = () => json(200, { items: [item()], truncated: true });
+    renderAt("/inventory/transfer-lines");
+    expect(await screen.findByText("Showing the first 1,000 lines")).toBeInTheDocument();
+  });
+
+  it("shows a failure with a retry", async () => {
+    handler = () => json(500, { title: "Server error", status: 500, code: "internal" });
+    renderAt("/inventory/transfer-lines");
+    expect(await findAlert()).toHaveTextContent("Could not load transfer order lines");
+  });
+});
+
 describe("ABC classification", () => {
   it("lists runs with class counts", async () => {
     handler = () => json(200, { items: [run()] });

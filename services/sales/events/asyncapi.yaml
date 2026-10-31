@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: >-
     CloudEvents 1.0 events published by the sales service through the outbox
-    (wave 27, slices 1 to 4). Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
+    (wave 27, slices 1 to 7). Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
     Topic passage.sales.<entity> is relayed by Debezium's outbox router.
 defaultContentType: application/cloudevents+json
 servers:
@@ -47,18 +47,153 @@ channels:
     messages:
       agreementReleased:
         $ref: "#/components/messages/AgreementReleased"
+  scheduleReleaseReceived:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseReceived:
+        $ref: "#/components/messages/ScheduleReleaseReceived"
+  scheduleReleaseResolved:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseResolved:
+        $ref: "#/components/messages/ScheduleReleaseResolved"
+  scheduleReleaseRecalculated:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseRecalculated:
+        $ref: "#/components/messages/ScheduleReleaseRecalculated"
+  backorderRunCommitted:
+    address: passage.sales.backorderrun
+    messages:
+      backorderRunCommitted:
+        $ref: "#/components/messages/BackorderRunCommitted"
+  parametersChanged:
+    address: passage.sales.parameters
+    messages:
+      parametersChanged:
+        $ref: "#/components/messages/ParametersChanged"
+  orderChangeRequested:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeRequested:
+        $ref: "#/components/messages/OrderChangeRequested"
+  orderChangeApproved:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeApproved:
+        $ref: "#/components/messages/OrderChangeApproved"
+  orderChangeRejected:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeRejected:
+        $ref: "#/components/messages/OrderChangeRejected"
+  changePolicyChanged:
+    address: passage.sales.changepolicy
+    messages:
+      changePolicyChanged:
+        $ref: "#/components/messages/ChangePolicyChanged"
   quotationConverted:
     address: passage.sales.quotation
     messages:
       quotationConverted:
         $ref: "#/components/messages/QuotationConverted"
+  quotationExpired:
+    address: passage.sales.quotation
+    messages:
+      quotationExpired:
+        $ref: "#/components/messages/QuotationExpired"
+  allocationQuotaCreated:
+    address: passage.sales.allocationquota
+    messages:
+      allocationQuotaCreated:
+        $ref: "#/components/messages/AllocationQuotaCreated"
+  allocationQuotaChanged:
+    address: passage.sales.allocationquota
+    messages:
+      allocationQuotaChanged:
+        $ref: "#/components/messages/AllocationQuotaChanged"
+  allocationConsumed:
+    address: passage.sales.allocation
+    messages:
+      allocationConsumed:
+        $ref: "#/components/messages/AllocationConsumed"
+  allocationReturned:
+    address: passage.sales.allocation
+    messages:
+      allocationReturned:
+        $ref: "#/components/messages/AllocationReturned"
+  atpPromised:
+    address: passage.sales.atp
+    messages:
+      atpPromised:
+        $ref: "#/components/messages/ATPPromised"
 operations:
+  publishParametersChanged:
+    action: send
+    channel: {$ref: "#/channels/parametersChanged"}
+    summary: The sales parameters of a legal entity were created or replaced (PRD 5.27.13). Consumers - audit, analytics.
+    messages:
+      - {$ref: "#/channels/parametersChanged/messages/parametersChanged"}
+  publishOrderChangeRequested:
+    action: send
+    channel: {$ref: "#/channels/orderChangeRequested"}
+    summary: A change of a confirmed order was stored for approval because its customer needs change approval (FR-27.9). Consumers - sales managers' work queue, audit.
+    messages:
+      - {$ref: "#/channels/orderChangeRequested/messages/orderChangeRequested"}
+  publishOrderChangeApproved:
+    action: send
+    channel: {$ref: "#/channels/orderChangeApproved"}
+    summary: A stored change was approved and applied to the order in the same transaction (FR-27.9). order.changed for the applied version is written just before it in the same transaction.
+    messages:
+      - {$ref: "#/channels/orderChangeApproved/messages/orderChangeApproved"}
+  publishOrderChangeRejected:
+    action: send
+    channel: {$ref: "#/channels/orderChangeRejected"}
+    summary: A stored change was rejected with a comment and the order stays as it was (FR-27.9).
+    messages:
+      - {$ref: "#/channels/orderChangeRejected/messages/orderChangeRejected"}
+  publishChangePolicyChanged:
+    action: send
+    channel: {$ref: "#/channels/changePolicyChanged"}
+    summary: The change approval switch of a customer was created or replaced (PRD 5.27.13 change_approval_required).
+    messages:
+      - {$ref: "#/channels/changePolicyChanged/messages/changePolicyChanged"}
   publishQuotationConverted:
     action: send
     channel: {$ref: "#/channels/quotationConverted"}
     summary: Selected lines of a quotation became the lines of one DRAFT sales order (FR-27.1); consumed by analytics and CRM.
     messages:
       - {$ref: "#/channels/quotationConverted/messages/quotationConverted"}
+  publishQuotationExpired:
+    action: send
+    channel: {$ref: "#/channels/quotationExpired"}
+    summary: A DRAFT or SENT quotation past its validity was moved to EXPIRED by the expiry run (FR-27.1). Consumers - analytics and CRM.
+    messages:
+      - {$ref: "#/channels/quotationExpired/messages/quotationExpired"}
+  publishScheduleReleaseReceived:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseReceived"}
+    summary: A forecast or JIT release was stored against a sales agreement, ACCEPTED (its open lines replaced the previous release's) or HELD for a cumulative mismatch (FR-27.20, BR-27.12). Consumers - planning, fulfillment.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseReceived/messages/scheduleReleaseReceived"}
+  publishScheduleReleaseResolved:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseResolved"}
+    summary: A HELD scheduling release was accepted by override or rejected. Consumers - planning, fulfillment, audit.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseResolved/messages/scheduleReleaseResolved"}
+  publishScheduleReleaseRecalculated:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseRecalculated"}
+    summary: The open lines of the release in effect were recalculated after the cumulative shipped quantity changed. Consumers - planning, fulfillment.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseRecalculated/messages/scheduleReleaseRecalculated"}
+  publishBackorderRunCommitted:
+    action: send
+    channel: {$ref: "#/channels/backorderRunCommitted"}
+    summary: A backorder processing run was committed and the schedule lines of its changed lines were rewritten in one transaction (FR-27.17, BR-27.11). atp.promised is written per changed line. Consumers - planning, fulfillment, analytics.
+    messages:
+      - {$ref: "#/channels/backorderRunCommitted/messages/backorderRunCommitted"}
   publishAgreementReleased:
     action: send
     channel: {$ref: "#/channels/agreementReleased"}
@@ -105,17 +240,63 @@ operations:
       collections.
     messages:
       - {$ref: "#/channels/creditCheckEvaluated/messages/creditCheckEvaluated"}
+  publishAllocationQuotaCreated:
+    action: send
+    channel: {$ref: "#/channels/allocationQuotaCreated"}
+    summary: An allocation quota was set for a product, customer scope and period (FR-27.16). Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationQuotaCreated/messages/allocationQuotaCreated"}
+  publishAllocationQuotaChanged:
+    action: send
+    channel: {$ref: "#/channels/allocationQuotaChanged"}
+    summary: An allocation quota quantity changed; never below the consumed quantity (BR-27.15). Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationQuotaChanged/messages/allocationQuotaChanged"}
+  publishAllocationConsumed:
+    action: send
+    channel: {$ref: "#/channels/allocationConsumed"}
+    summary: >-
+      An order line drew quota at confirmation (a confirm, a CREDIT release that confirms, or a change of a confirmed line), in that
+      transaction (BR-27.15). Keyed by the quota id, so one quota's draws and returns arrive in order. Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationConsumed/messages/allocationConsumed"}
+  publishAllocationReturned:
+    action: send
+    channel: {$ref: "#/channels/allocationReturned"}
+    summary: >-
+      An order line gave quota back to the period it drew from because its order or line was cancelled or changed (BR-27.15).
+      Keyed by the quota id. Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationReturned/messages/allocationReturned"}
+  publishATPPromised:
+    action: send
+    channel: {$ref: "#/channels/atpPromised"}
+    summary: >-
+      An order line was promised against cumulative ATP and split into schedule lines, in the transaction that stored them (FR-27.6).
+      Keyed by the order id. Consumers - fulfillment, planning, portal.
+    messages:
+      - {$ref: "#/channels/atpPromised/messages/atpPromised"}
 components:
   messages:
     QuotationConverted:
       name: dev.passage.sales.quotation.converted.v1
+      title: Quotation converted to a sales order
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/QuotationConvertedData"
+    QuotationExpired:
+      name: dev.passage.sales.quotation.expired.v1
+      title: Quotation expired
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/QuotationExpiredData"
     OrderConfirmed:
       name: dev.passage.sales.order.confirmed.v1
+      title: Sales order confirmed
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -123,6 +304,7 @@ components:
         $ref: "#/components/schemas/OrderConfirmedData"
     OrderHoldApplied:
       name: dev.passage.sales.orderhold.applied.v1
+      title: Order hold applied
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -130,6 +312,7 @@ components:
         $ref: "#/components/schemas/OrderHoldData"
     OrderHoldReleased:
       name: dev.passage.sales.orderhold.released.v1
+      title: Order hold released
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -137,6 +320,7 @@ components:
         $ref: "#/components/schemas/OrderHoldData"
     CreditCheckEvaluated:
       name: dev.passage.sales.creditcheck.evaluated.v1
+      title: Credit check evaluated
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -144,13 +328,47 @@ components:
         $ref: "#/components/schemas/CreditCheckData"
     AgreementReleased:
       name: dev.passage.sales.agreement.released.v1
+      title: Sales agreement released into an order
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AgreementReleasedData"
+    ScheduleReleaseReceived:
+      name: dev.passage.sales.schedulerelease.received.v1
+      title: Scheduling release received
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
+    ScheduleReleaseResolved:
+      name: dev.passage.sales.schedulerelease.resolved.v1
+      title: Scheduling release resolved
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
+    ScheduleReleaseRecalculated:
+      name: dev.passage.sales.schedulerelease.recalculated.v1
+      title: Scheduling release recalculated
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
+    BackorderRunCommitted:
+      name: dev.passage.sales.backorderrun.committed.v1
+      title: Backorder run committed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/BackorderRunCommittedData"
     OrderChanged:
       name: dev.passage.sales.order.changed.v1
+      title: Sales order changed
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -158,12 +376,201 @@ components:
         $ref: "#/components/schemas/OrderChangedData"
     OrderCancelled:
       name: dev.passage.sales.order.cancelled.v1
+      title: Sales order cancelled
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderCancelledData"
+    AllocationQuotaCreated:
+      name: dev.passage.sales.allocationquota.created.v1
+      title: Allocation quota created
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationQuotaData"
+    OrderChangeRequested:
+      name: dev.passage.sales.orderchange.requested.v1
+      title: Order change requested
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeRequestedData"
+    OrderChangeApproved:
+      name: dev.passage.sales.orderchange.approved.v1
+      title: Order change approved
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeDecidedData"
+    OrderChangeRejected:
+      name: dev.passage.sales.orderchange.rejected.v1
+      title: Order change rejected
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeDecidedData"
+    ChangePolicyChanged:
+      name: dev.passage.sales.changepolicy.changed.v1
+      title: Customer change policy changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ChangePolicyChangedData"
+    ParametersChanged:
+      name: dev.passage.sales.parameters.changed.v1
+      title: Sales parameters changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ParametersChangedData"
+    AllocationQuotaChanged:
+      name: dev.passage.sales.allocationquota.changed.v1
+      title: Allocation quota changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationQuotaData"
+    AllocationConsumed:
+      name: dev.passage.sales.allocation.consumed.v1
+      title: Allocation quota consumed by an order line
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationData"
+    AllocationReturned:
+      name: dev.passage.sales.allocation.returned.v1
+      title: Allocation quota returned by an order line
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationData"
+    ATPPromised:
+      name: dev.passage.sales.atp.promised.v1
+      title: Order line promised against ATP
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ATPPromisedData"
   schemas:
+    ATPPromisedData:
+      type: object
+      required: [order_id, line_id, line_no, product_id, site_id, warehouse_id, quantity, requested_ship_date, source, complete, backorder_qty, schedule, actor, version]
+      properties:
+        order_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        line_no: {type: integer}
+        product_id: {type: string, format: uuid}
+        site_id: {type: string}
+        warehouse_id: {type: string}
+        quantity: {type: string, description: line quantity (decimal string)}
+        requested_ship_date: {type: string, format: date, description: the line's requested ship date}
+        source: {type: string, enum: [ATP, ALLOCATION, BACKORDER_RUN], description: ALLOCATION when the quota period the line drew from held the promise back (BR-27.15); BACKORDER_RUN when a committed backorder run changed the line (FR-27.17)}
+        complete: {type: boolean, description: true when the whole quantity was placed on dated schedule lines}
+        promised_date: {type: string, format: date, description: the line's new confirmed ship date - the date of the first dated schedule line; absent when nothing could be promised}
+        backorder_qty: {type: string, description: quantity promised after the requested date or not at all (decimal string)}
+        schedule:
+          type: array
+          items:
+            type: object
+            required: [quantity, status]
+            properties:
+              date: {type: string, format: date, description: absent on an UNPROMISED slice}
+              bucket_date: {type: string, format: date, description: date of the ATP bucket the slice drew on (with product, site and warehouse the atp_bucket key); absent on an UNPROMISED slice}
+              quantity: {type: string}
+              status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
+        actor: {type: string}
+        version: {type: integer, description: order version after the promise}
+    OrderChangeRequestedData:
+      type: object
+      required: [request_id, legal_entity_id, order_id, customer_id, base_version, reason, actor, diff]
+      properties:
+        request_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        base_version: {type: integer, description: order version the change was made against}
+        reason: {type: string}
+        actor: {type: string, description: who asked for the change}
+        diff:
+          type: array
+          items:
+            type: object
+            required: [line_no, field, old, new]
+            properties:
+              line_no: {type: integer, description: 0 for a header field}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+    OrderChangeDecidedData:
+      type: object
+      required: [request_id, legal_entity_id, order_id, requested_by, actor, comment]
+      properties:
+        request_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        requested_by: {type: string}
+        actor: {type: string, description: who decided}
+        comment: {type: string}
+        applied_version: {type: integer, description: order version the approval produced; absent on a rejection}
+    ChangePolicyChangedData:
+      type: object
+      required: [legal_entity_id, customer_id, approval_required, actor, version]
+      properties:
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        approval_required: {type: boolean}
+        actor: {type: string}
+        version: {type: integer, description: version after the change}
+    ParametersChangedData:
+      type: object
+      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, actor, version]
+      properties:
+        legal_entity_id: {type: string, format: uuid}
+        quotation_expiry_days: {type: integer, minimum: 1, maximum: 365}
+        quotation_probability_default: {type: integer, minimum: 0, maximum: 100}
+        credit_release_validity_days: {type: integer, minimum: 1, maximum: 30}
+        credit_hold_sla_business_days: {type: integer, minimum: 1, maximum: 10}
+        default_order_type: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION]}
+        actor: {type: string}
+        version: {type: integer, description: version after the change}
+    AllocationQuotaData:
+      type: object
+      required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]
+      properties:
+        quota_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid, description: absent when the quota applies to every customer of the legal entity}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        quota_qty: {type: string, description: quota quantity as a decimal string}
+        previous_qty: {type: string, description: quota quantity before a change; absent on created}
+        consumed_qty: {type: string}
+        actor: {type: string}
+        version: {type: integer, description: quota version after the change}
+    AllocationData:
+      type: object
+      required: [quota_id, order_id, line_id, product_id, quantity, consumed_qty, remaining_qty]
+      properties:
+        quota_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        quantity: {type: string, description: quantity drawn or returned}
+        consumed_qty: {type: string, description: quota consumed after the change}
+        remaining_qty: {type: string}
+        confirmed_ship_date: {type: string, format: date, description: on consumed, the date the line is confirmed for}
+        source: {type: string, enum: [ALLOCATION], description: on consumed, present when the line moved to a later period because the requested one was exhausted}
     CloudEventHeaders:
       type: object
       required: [specversion, id, source, type, tenantid, sequence, dataschema]
@@ -268,6 +675,64 @@ components:
         status: {type: string, enum: [ACTIVE, EXHAUSTED]}
         version: {type: integer, description: the agreement version after the release}
         actor: {type: string}
+    BackorderRunCommittedData:
+      type: object
+      required: [run_id, legal_entity_id, product_id, site_id, warehouse_id, strategy, supply, allocated, deconfirmed_count, lines, actor, version]
+      properties:
+        run_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        warehouse_id: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {type: string, description: supply the run distributed (decimal string)}
+        allocated: {type: string, description: quantity carrying a promised date across the run's lines after the run}
+        deconfirmed_count: {type: integer, description: lines whose dated quantity fell}
+        lines:
+          type: array
+          description: only the lines whose dated quantity changed
+          items:
+            type: object
+            required: [order_id, line_id, line_no, before_qty, after_qty, deconfirmed]
+            properties:
+              order_id: {type: string, format: uuid}
+              line_id: {type: string, format: uuid}
+              line_no: {type: integer}
+              before_qty: {type: string}
+              after_qty: {type: string}
+              deconfirmed: {type: boolean}
+        actor: {type: string}
+        version: {type: integer, description: the run version after the commit}
+    ScheduleReleaseData:
+      type: object
+      required: [release_id, release_no, release_type, legal_entity_id, agreement_id, agreement_number, customer_id, product_id, status, cum_received, cum_shipped, difference, open_qty, lines, actor]
+      properties:
+        release_id: {type: string, format: uuid}
+        release_no: {type: string, description: the customer's release number}
+        release_type: {type: string, enum: [FORECAST, JIT]}
+        legal_entity_id: {type: string, format: uuid}
+        agreement_id: {type: string, format: uuid}
+        agreement_number: {type: string, example: SA-0000001}
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        status: {type: string, enum: [ACCEPTED, HELD, REJECTED], description: HELD means CUM_QTY_MISMATCH and no schedule line changed}
+        cum_received: {type: string, description: the customer's cumulative received quantity (decimal string)}
+        cum_shipped: {type: string, description: shipped quantity the release is reconciled against on its own cumulative basis (shipped since the reset plus the offset of closed periods)}
+        difference: {type: string, description: cum_received less cum_shipped}
+        open_qty: {type: string, description: cumulative required less shipped, at least 0}
+        lines:
+          type: array
+          description: the open schedule lines now owned by the release; empty when HELD or REJECTED
+          items:
+            type: object
+            required: [date, quantity]
+            properties:
+              date: {type: string, format: date}
+              quantity: {type: string}
+        superseded_release_id: {type: string, format: uuid, description: the release whose open lines were replaced}
+        decision: {type: string, enum: [ACCEPT, REJECT], description: resolved only}
+        reason: {type: string, description: resolved only}
+        actor: {type: string}
     QuotationConvertedData:
       type: object
       required: [quotation_id, quotation_number, customer_id, order_id, order_number, lines, actor, version]
@@ -282,6 +747,21 @@ components:
           items: {type: integer, minimum: 1, description: quotation line numbers; the order renumbers them from 1 in this order}
         actor: {type: string}
         version: {type: integer, description: quotation version produced by the conversion}
+    QuotationExpiredData:
+      type: object
+      required: [quotation_id, quotation_number, legal_entity_id, customer_id, valid_until, previous_status, probability_pct, net_total, currency, actor, version]
+      properties:
+        quotation_id: {type: string, format: uuid}
+        quotation_number: {type: string, description: SQ- number}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        valid_until: {type: string, format: date, description: the last day the quotation was valid}
+        previous_status: {type: string, enum: [DRAFT, SENT]}
+        probability_pct: {type: integer, minimum: 0, maximum: 100}
+        net_total: {type: string, description: decimal string in currency}
+        currency: {type: string, description: ISO 4217 alpha-3}
+        actor: {type: string}
+        version: {type: integer, description: quotation version produced by the expiry}
     CreditCheckData:
       type: object
       required: [customer_id, order_id, rules, outcome]

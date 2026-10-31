@@ -122,10 +122,13 @@ type Order struct {
 	ListingOverrides  []ListingOverride `json:"listingOverrides"`
 	// Warnings is set only on the result of a create (including a replay),
 	// a quotation conversion or an agreement release.
-	Warnings    []Notice  `json:"warnings,omitempty"`
-	RequestHash string    `json:"-"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Warnings []Notice `json:"warnings,omitempty"`
+	// PendingChange is set only on the result of a PATCH that was stored as a
+	// change request awaiting approval instead of being applied.
+	PendingChange *OrderChangeRequest `json:"pendingChange,omitempty"`
+	RequestHash   string              `json:"-"`
+	CreatedAt     time.Time           `json:"createdAt"`
+	UpdatedAt     time.Time           `json:"updatedAt"`
 }
 
 // NewOrder is an intake request after validation.
@@ -231,12 +234,19 @@ type Store interface {
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]Agreement, error)
 	GetAgreement(ctx context.Context, id string) (Agreement, error)
 	ReleaseAgreement(ctx context.Context, id string, in AgreementRelease, now time.Time) (ReleaseResult, bool, error)
+	CreateScheduleRelease(ctx context.Context, in NewScheduleRelease, now time.Time) (ScheduleRelease, bool, error)
+	ListScheduleReleases(ctx context.Context, agreementID string, limit int) ([]ScheduleRelease, error)
+	GetScheduleRelease(ctx context.Context, agreementID, id string) (ScheduleRelease, error)
+	ResolveScheduleRelease(ctx context.Context, agreementID, id string, version int, decision, reason, actor string, now time.Time) (ScheduleRelease, error)
+	RecordShipped(ctx context.Context, agreementID string, version int, cumShipped decimal.Decimal, resetDate *string, actor string, now time.Time) (Agreement, error)
 	CreateQuotation(ctx context.Context, in NewQuotation) (Quotation, bool, error)
 	ListQuotations(ctx context.Context, f QuotationFilter) ([]Quotation, error)
 	GetQuotation(ctx context.Context, id string) (Quotation, error)
 	SendQuotation(ctx context.Context, id string, version int, now time.Time) (Quotation, error)
 	LoseQuotation(ctx context.Context, id string, version int, reason string) (Quotation, error)
 	ConvertQuotation(ctx context.Context, id string, in ConvertRequest, now time.Time) (QuotationConversion, error)
+	ExpireQuotations(ctx context.Context, legalEntityID string, today time.Time, actor string) (ExpireResult, error)
+	Summary(ctx context.Context, f SummaryFilter) (Summary, error)
 	ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueueItem, error)
 	CreateSupplementaryRule(ctx context.Context, in domain.SupplementaryRule, actor string) (domain.SupplementaryRule, error)
 	ListSupplementaryRules(ctx context.Context, f SupplementaryRuleFilter) ([]domain.SupplementaryRule, error)
@@ -245,6 +255,25 @@ type Store interface {
 	ListProposalRules(ctx context.Context, f ProposalRuleFilter) ([]domain.ProposalRule, error)
 	DeleteProposalRule(ctx context.Context, id string) error
 	RecordProposalResponse(ctx context.Context, in NewProposalResponse) (ProposalResponse, bool, error)
+	CreateAllocationQuota(ctx context.Context, in NewAllocationQuota) (AllocationQuota, bool, error)
+	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
+	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)
+	ChangeAllocationQuota(ctx context.Context, id string, version int, qty decimal.Decimal, actor string, now time.Time) (AllocationQuota, error)
+	PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error)
+	ListScheduleLines(ctx context.Context, orderID string) ([]ScheduleLine, error)
+	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderItem, error)
+	CreateBackorderRun(ctx context.Context, in NewBackorderRun, now time.Time) (BackorderRun, bool, error)
+	ListBackorderRuns(ctx context.Context, f BackorderRunFilter) ([]BackorderRun, error)
+	GetBackorderRun(ctx context.Context, id string) (BackorderRun, error)
+	CommitBackorderRun(ctx context.Context, id string, version int, actor string, now time.Time) (BackorderRun, error)
+	GetChangePolicy(ctx context.Context, legalEntityID, customerID string) (ChangePolicy, error)
+	PutChangePolicy(ctx context.Context, in ChangePolicy, version int, actor string) (ChangePolicy, error)
+	ListChangeRequests(ctx context.Context, f ChangeRequestFilter) ([]OrderChangeRequest, error)
+	GetChangeRequest(ctx context.Context, id string) (OrderChangeRequest, error)
+	ApproveChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (ChangeDecision, error)
+	RejectChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
+	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
+	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error
 }
 
@@ -289,6 +318,13 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			out = existing
 			out.Warnings = supplementaryWarnings(out)
 			return nil
+		}
+		if in.OrderType == "" {
+			params, err := loadParameters(ctx, tx, p.TenantID, in.LegalEntityID)
+			if err != nil {
+				return err
+			}
+			in.OrderType = params.DefaultOrderType
 		}
 		out, err = createOrderTx(ctx, tx, p.TenantID, in)
 		created = err == nil
@@ -605,20 +641,29 @@ func applyCreditHoldTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 }
 
 // confirmOrderTx confirms every line at its requested ship date (delivery date
-// control NONE until the ATP projection exists), moves the order to CONFIRMED
+// control NONE until the ATP projection exists) unless allocation quota moves
+// it to a later period (FR-27.16), moves the order to CONFIRMED
 // and writes order.confirmed in the same transaction.
 func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (Order, error) {
 	if _, err := tx.Exec(ctx, `update sales_order_line set confirmed_ship_date = requested_ship_date
 		where tenant_id = $1 and order_id = $2 and line_status <> 'CANCELLED'`, tenantID, o.ID); err != nil {
 		return Order{}, err
 	}
+	alloc, err := allocateOrderTx(ctx, tx, tenantID, o, nil)
+	if err != nil {
+		return Order{}, err
+	}
 	if err := setOrderState(ctx, tx, tenantID, o.ID, domain.OrderConfirmed); err != nil {
+		return Order{}, err
+	}
+	if err := syncScheduleTx(ctx, tx, tenantID, o.ID); err != nil {
 		return Order{}, err
 	}
 	confirmed, err := loadOrder(ctx, tx, tenantID, o.ID, false)
 	if err != nil {
 		return Order{}, err
 	}
+	confirmed.Warnings = alloc.Notices
 	lines := make([]salesevents.ConfirmedLine, 0, len(confirmed.Lines))
 	for _, l := range confirmed.Lines {
 		if l.ConfirmedShipDate == nil {
@@ -632,8 +677,8 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 	return confirmed, err
 }
 
-// ReleaseHold releases an active hold. A CREDIT release is valid for
-// CreditReleaseDays. The user who applied a hold may not release it (SoD).
+// ReleaseHold releases an active hold. A CREDIT release is valid for the
+// legal entity's credit_release_validity_days. The user who applied a hold may not release it (SoD).
 // Releasing the CREDIT hold that a confirm placed confirms the order in the
 // same transaction when no other hold blocks confirmation (AC-27.3).
 func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error) {
@@ -662,7 +707,11 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 		if hold.AppliedBy == actor {
 			return problem(http.StatusForbidden, "AUTH-0003", "the user who applied a hold may not release it")
 		}
-		until := domain.ReleaseValidUntil(now)
+		params, err := loadParameters(ctx, tx, p.TenantID, o.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		until := domain.ReleaseValidUntil(now, params.CreditReleaseValidityDays)
 		if _, err := tx.Exec(ctx, `update order_hold set status = 'RELEASED', released_by = $3, released_at = $4, released_until = $5
 			where tenant_id = $1 and id = $2`, p.TenantID, holdID, actor, now, until); err != nil {
 			return err
@@ -682,9 +731,32 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 			out = ConfirmResult{Order: released}
 			return nil
 		}
-		confirmed, err := confirmOrderTx(ctx, tx, p.TenantID, released)
+		// The credit decision stands even when allocation quota cannot cover the
+		// order: the confirmation runs under a savepoint, and an SLS-0013 refusal
+		// rolls back only the confirmation, so the hold is released and the order
+		// stays unconfirmed with the refusal as a warning (FR-27.16).
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		confirmed, err := confirmOrderTx(ctx, sp, p.TenantID, released)
+		var refused *httpx.Problem
+		if errors.As(err, &refused) && refused.Code == CodeAllocationExhausted {
+			if err := sp.Rollback(ctx); err != nil {
+				return err
+			}
+			released.Warnings = []Notice{{Code: CodeAllocationExhausted, Message: refused.Detail}}
+			out = ConfirmResult{Order: released}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return err
+		}
 		out = ConfirmResult{Order: confirmed, Confirmed: true}
-		return err
+		return nil
 	})
 	return out, err
 }

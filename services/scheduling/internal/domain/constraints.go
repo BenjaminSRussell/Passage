@@ -231,6 +231,12 @@ func (e *engine) book(op Operation, pl Placement) {
 		e.busy[pl.ResourceID] = insertBusy(e.busy[pl.ResourceID], busyOf(op, pl)...)
 	}
 	e.booked[pl.ResourceID] += spanMinutes(pl.Segments)
+	for _, b := range secondaryBusy(pl) {
+		if e.holds(b.ResourceID) {
+			e.busy[b.ResourceID] = insertBusy(e.busy[b.ResourceID], b)
+		}
+		e.booked[b.ResourceID] += minutesBetween(b.Start, b.End)
+	}
 }
 
 func (e *engine) unbook(pl Placement) {
@@ -238,6 +244,12 @@ func (e *engine) unbook(pl Placement) {
 		e.busy[pl.ResourceID] = removeJob(e.busy[pl.ResourceID], pl.OperationID)
 	}
 	e.booked[pl.ResourceID] -= spanMinutes(pl.Segments)
+	for _, b := range secondaryBusy(pl) {
+		if e.holds(b.ResourceID) {
+			e.busy[b.ResourceID] = removeJob(e.busy[b.ResourceID], pl.OperationID)
+		}
+		e.booked[b.ResourceID] -= minutesBetween(b.Start, b.End)
+	}
 }
 
 // stop says why an attempt to place an order's operations ended early. A
@@ -255,9 +267,11 @@ type stop struct {
 // placeChain places the operations of one order. While a network's maximum
 // wait cannot be met, the predecessor is delayed and the chain tried again,
 // up to the delay limit from the predecessor's first start; past it the whole
-// order is unplaced as NETWORK_INFEASIBLE (SCHED-0009).
-func (e *engine) placeChain(chain []Operation, fixed []Placement, start time.Time, res *Result) {
+// order is unplaced as NETWORK_INFEASIBLE (SCHED-0009). A non-zero seed is the
+// earliest start of the first operation (backward scheduling, BR-23.2).
+func (e *engine) placeChain(chain []Operation, fixed []Placement, start, seed time.Time, res *Result) {
 	notBefore := make([]time.Time, len(chain))
+	notBefore[0] = seed
 	first := make([]time.Time, len(chain))
 	for {
 		pls, ws, st := e.attempt(chain, fixed, start, notBefore)
@@ -371,6 +385,7 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 	found, overFound, sawEdge := false, false, false
 	var overEdge NetworkEdge
 	shortest := time.Duration(-1)
+	var secondary *Conflict
 	for _, rid := range op.Candidates {
 		c, ok := e.caps[rid]
 		if !ok {
@@ -385,8 +400,11 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 			sawEdge = true
 			r = latest(r, prev.End.Add(minutes(edge.TransferMinutes)))
 		}
-		s, conf := placeOn(c, op, e.busyOn(rid), r, sequenced(c, op, e.infinite))
+		s, conf := placeOnSec(c, op, e.busyOn(rid), r, sequenced(c, op, e.infinite), secondaryChecker(e.caps, e.busy, op, e.infinite))
 		if conf != nil {
+			if conf.Code == CodeSecondaryBusy {
+				secondary = conf
+			}
 			continue
 		}
 		cand := newPlacement(op, rid, s.segs).withSlot(s)
@@ -423,6 +441,8 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 			// prev is the operation before this one in the chain: a fixed
 			// predecessor is frozen and took the case above.
 			return Placement{}, nil, &stop{network: true, retry: true, until: prev.Start.Add(step)}
+		case secondary != nil:
+			return Placement{}, nil, &stop{reason: fmt.Sprintf("%s: no slot in the horizon has every secondary resource free; last: %s", CodeSecondaryBusy, secondary.Detail)}
 		default:
 			return Placement{}, nil, &stop{reason: "no candidate resource has open capacity in the horizon"}
 		}

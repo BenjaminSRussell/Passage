@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
+	invevents "github.com/BenjaminSRussell/passage/services/inventory/internal/events"
 )
 
 // CountSheetFilter selects count sheet headers. Empty fields do not filter.
@@ -39,11 +40,13 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `insert into count_plan (tenant_id, legal_entity_id, id, name, warehouse, currency, unit, tolerance_pct,
-			tolerance_value, blind, idempotency_key) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			tolerance_value, blind, freeze_stock, four_eyes, location_from, location_to, abc_class, sample_pct, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 			on conflict (tenant_id, idempotency_key) do update set name = count_plan.name
 			returning id::text, (xmax = 0)`,
 			tp.TenantID, in.LegalEntityID, ids.New(), strings.TrimSpace(in.Name), optionalText(in.Warehouse), in.Currency, in.Unit,
-			in.TolerancePct.String(), in.ToleranceValue.String(), in.Blind, key).Scan(&id, &inserted); err != nil {
+			in.TolerancePct.String(), in.ToleranceValue.String(), in.Blind, in.FreezeStock, in.FourEyes, optionalText(in.LocationFrom),
+			optionalText(in.LocationTo), optionalText(in.ABCClass), optionalDecimal(in.SamplePct), key).Scan(&id, &inserted); err != nil {
 			return scopeProblem(err)
 		}
 		var err error
@@ -55,7 +58,8 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	}
 	if !inserted && (out.LegalEntityID != in.LegalEntityID || out.Name != strings.TrimSpace(in.Name) || out.Warehouse != in.Warehouse ||
 		out.Currency != in.Currency || out.Unit != in.Unit || !out.TolerancePct.Equal(in.TolerancePct) ||
-		!out.ToleranceValue.Equal(in.ToleranceValue) || out.Blind != in.Blind) {
+		!out.ToleranceValue.Equal(in.ToleranceValue) || out.Blind != in.Blind || out.FreezeStock != in.FreezeStock || out.FourEyes != in.FourEyes ||
+		out.LocationFrom != in.LocationFrom || out.LocationTo != in.LocationTo || out.ABCClass != in.ABCClass || !out.SamplePct.Equal(in.SamplePct)) {
 		return domain.CountPlan{}, false, problem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return out, inserted, nil
@@ -138,24 +142,41 @@ func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and o.legal_entity_id = $2 and ($3 = '' or d.dims->>'warehouse' = $3)
 		  and o.posted_qty + o.received + o.registered - o.deducted - o.picked <> 0 and d.dims->>'owner' is null
-		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse)
+		  and ($4 = '' or d.dims->>'location' collate "C" >= $4 collate "C")
+		  and ($5 = '' or d.dims->>'location' collate "C" <= $5 collate "C")
+		  and ($6 = '' or exists (select 1 from abc_classification c where c.tenant_id = o.tenant_id and c.product_id = o.product_id
+		       and c.site = coalesce(d.dims->>'site', '') and c.class = $6
+		       and c.run_id = (select r.id from abc_run r where r.tenant_id = o.tenant_id and r.legal_entity_id = o.legal_entity_id
+		                       order by r.created_at desc, r.id desc limit 1)))
+		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse, plan.LocationFrom, plan.LocationTo, plan.ABCClass)
 	if err != nil {
 		return err
 	}
-	var lineIDs, products, expected []string
-	var hashes [][]byte
+	type candidate struct {
+		product, qty string
+		hash         []byte
+	}
+	var cands []candidate
+	var keys []string
 	for rows.Next() {
-		var product, qty string
-		var hash []byte
-		if err := rows.Scan(&product, &hash, &qty); err != nil {
+		var c candidate
+		if err := rows.Scan(&c.product, &c.hash, &c.qty); err != nil {
 			rows.Close()
 			return err
 		}
-		lineIDs, products, hashes, expected = append(lineIDs, ids.New()), append(products, product), append(hashes, hash), append(expected, qty)
+		cands, keys = append(cands, c), append(keys, rowKey(c.product, c.hash))
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	keep := domain.SampleKeys(sheetID, keys, plan.SamplePct)
+	var lineIDs, products, expected []string
+	var hashes [][]byte
+	for _, c := range cands {
+		if keep[rowKey(c.product, c.hash)] {
+			lineIDs, products, hashes, expected = append(lineIDs, ids.New()), append(products, c.product), append(hashes, c.hash), append(expected, c.qty)
+		}
 	}
 	if len(lineIDs) == 0 {
 		return nil
@@ -225,7 +246,7 @@ func (s *Postgres) EnterCount(ctx context.Context, sheetID, lineID string, versi
 		if sheet.Version != version {
 			return problem(http.StatusPreconditionFailed, CodeConflictVersion, "count sheet changed since it was read; reread and retry")
 		}
-		tag, err := tx.Exec(ctx, `update count_sheet_line set counted_qty = $4, counted_by = $5, counted_at = now()
+		tag, err := tx.Exec(ctx, `update count_sheet_line set counted_qty = $4, counted_by = $5, counted_at = now(), recount_requested = false
 			where tenant_id = $1 and sheet_id = $2 and id = $3`, tp.TenantID, sheetID, lineID, counted.String(), optionalText(tp.UserID))
 		if err != nil {
 			return err
@@ -266,6 +287,15 @@ func (s *Postgres) PostCountSheet(ctx context.Context, sheetID string, version i
 		if sheet.Version != version {
 			return problem(http.StatusPreconditionFailed, CodeConflictVersion, "count sheet changed since it was read; reread and retry")
 		}
+		if err := domain.RequireStatus(sheet.Status, domain.CountOpen, domain.CountCounted, domain.CountApproved); err != nil {
+			return domainProblem(err)
+		}
+		if n := domain.OutstandingRecounts(sheet.Lines); n > 0 {
+			return problem(http.StatusConflict, domain.CodeCountRecount, fmt.Sprintf("%d line(s) are flagged for recount; enter them again before posting", n))
+		}
+		if sheet.FourEyes && sheet.Status != domain.CountApproved {
+			return problem(http.StatusConflict, domain.CodeCountNotReady, "this plan needs a separate approval; submit the sheet and have another supervisor approve it before posting")
+		}
 		plan, err := loadCountPlan(ctx, tx, sheet.PlanID)
 		if err != nil {
 			return err
@@ -274,7 +304,8 @@ func (s *Postgres) PostCountSheet(ctx context.Context, sheetID string, version i
 		if err != nil {
 			return err
 		}
-		if approval != "" && !canApprove {
+		approved := sheet.Status == domain.CountApproved
+		if approval != "" && !canApprove && !approved {
 			return problem(http.StatusForbidden, domain.CodeCountApproval, approval+"; supervisor approval (inventory.count.approve) is required")
 		}
 		var journalID *string
@@ -291,14 +322,14 @@ func (s *Postgres) PostCountSheet(ctx context.Context, sheetID string, version i
 			}
 		}
 		var approvedBy *string
-		if approval != "" {
+		switch {
+		case approved:
+			approvedBy = optionalText(sheet.ApprovedBy)
+		case approval != "":
 			approvedBy = optionalText(tp.UserID)
 		}
-		if _, err := tx.Exec(ctx, `update count_sheet set status = 'POSTED', journal_id = $3, approved_by = $4, posted_by = $5, posted_at = now(),
-			version = version + 1 where tenant_id = $1 and id = $2`, tp.TenantID, sheetID, journalID, approvedBy, optionalText(tp.UserID)); err != nil {
-			return err
-		}
-		out, err = loadCountSheet(ctx, tx, sheetID, false)
+		out, err = moveSheet(ctx, tx, sheetID, invevents.CountActionPosted, "", "",
+			`status = 'POSTED', journal_id = $3, approved_by = $4, posted_by = $5, posted_at = now()`, journalID, approvedBy, optionalText(tp.UserID))
 		return err
 	})
 	return out, err
@@ -382,19 +413,22 @@ func (s *Postgres) postCountJournal(ctx context.Context, tx pgx.Tx, tenantID str
 	if err != nil {
 		return "", err
 	}
-	return id, s.postLoaded(ctx, tx, tenantID, j, p)
+	return id, s.postLoaded(ctx, tx, tenantID, j, p, sheet.ID)
 }
 
 const countPlanColumns = `id::text, legal_entity_id::text, name, coalesce(warehouse, ''), currency::text, unit, tolerance_pct::text,
-	tolerance_value::text, blind, created_at`
+	tolerance_value::text, blind, freeze_stock, four_eyes, coalesce(location_from, ''), coalesce(location_to, ''), coalesce(abc_class, ''),
+	coalesce(sample_pct, 0)::text, created_at`
 
 func scanCountPlan(row pgx.Row) (domain.CountPlan, error) {
 	var p domain.CountPlan
-	var pct, val string
-	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.Warehouse, &p.Currency, &p.Unit, &pct, &val, &p.Blind, &p.CreatedAt); err != nil {
+	var pct, val, sample string
+	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.Warehouse, &p.Currency, &p.Unit, &pct, &val, &p.Blind, &p.FreezeStock, &p.FourEyes,
+		&p.LocationFrom, &p.LocationTo, &p.ABCClass, &sample, &p.CreatedAt); err != nil {
 		return p, err
 	}
 	p.TolerancePct, p.ToleranceValue = decimal.RequireFromString(pct), decimal.RequireFromString(val)
+	p.SamplePct = decimal.RequireFromString(sample)
 	return p, nil
 }
 
@@ -408,14 +442,16 @@ func loadCountPlan(ctx context.Context, tx pgx.Tx, id string) (domain.CountPlan,
 }
 
 const countSheetColumns = `s.id::text, s.legal_entity_id::text, s.plan_id::text, p.name, s.number, s.status, coalesce(s.approved_by, ''),
-	coalesce(s.journal_id::text, ''), p.blind, s.version, s.created_at, s.posted_at,
+	coalesce(s.journal_id::text, ''), coalesce(s.submitted_by, ''), p.four_eyes, p.freeze_stock,
+	(select count(*) from count_sheet_line l where l.tenant_id = s.tenant_id and l.sheet_id = s.id and l.recount_requested),
+	p.blind, s.version, s.created_at, s.posted_at,
 	(select count(*) from count_sheet_line l where l.tenant_id = s.tenant_id and l.sheet_id = s.id),
 	(select count(*) from count_sheet_line l where l.tenant_id = s.tenant_id and l.sheet_id = s.id and l.counted_qty is not null)`
 
 func scanCountSheet(row pgx.Row) (domain.CountSheet, error) {
 	var out domain.CountSheet
 	err := row.Scan(&out.ID, &out.LegalEntityID, &out.PlanID, &out.PlanName, &out.Number, &out.Status, &out.ApprovedBy, &out.JournalID,
-		&out.Blind, &out.Version, &out.CreatedAt, &out.PostedAt, &out.LineCount, &out.CountedCount)
+		&out.SubmittedBy, &out.FourEyes, &out.Freeze, &out.RecountLines, &out.Blind, &out.Version, &out.CreatedAt, &out.PostedAt, &out.LineCount, &out.CountedCount)
 	return out, err
 }
 
@@ -436,7 +472,8 @@ func loadCountSheet(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (
 		return out, err
 	}
 	rows, err := tx.Query(ctx, `select l.id::text, l.line_no, l.product_id::text, d.dims, l.expected_qty::text, l.counted_qty::text,
-		coalesce(l.counted_by, ''), l.counted_at, l.posted_variance::text from count_sheet_line l
+		coalesce(l.counted_by, ''), l.counted_at, l.posted_variance::text, l.recount_requested, coalesce(l.recount_reason, ''), l.recount_rounds
+		from count_sheet_line l
 		join dimension_set d on d.tenant_id = l.tenant_id and d.hash = l.dimension_set_hash
 		where l.tenant_id = $1 and l.sheet_id = $2 order by l.line_no`, tp.TenantID, id)
 	if err != nil {
@@ -448,7 +485,7 @@ func loadCountSheet(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (
 		var dims []byte
 		var expected string
 		var counted, posted *string
-		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &dims, &expected, &counted, &l.CountedBy, &l.CountedAt, &posted); err != nil {
+		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &dims, &expected, &counted, &l.CountedBy, &l.CountedAt, &posted, &l.RecountRequested, &l.RecountReason, &l.RecountRounds); err != nil {
 			return out, err
 		}
 		if err := json.Unmarshal(dims, &l.Dims); err != nil {

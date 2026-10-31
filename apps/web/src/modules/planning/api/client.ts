@@ -24,6 +24,9 @@ export const PlannedOrder = z.object({
   /** The order's ETag: send it back as If-Match on PATCH and DELETE. */
   version: z.number().int().min(1),
   vendorId: z.string().nullish(),
+  /** The quota arrangement and source a plan run allocated the order to (FR-22.17). */
+  quotaArrangementId: z.string().nullish(),
+  quotaSourceId: z.string().nullish(),
   /** Set once the order is firmed: the purchase, production or transfer order it became (FR-22.10). */
   firmedTargetType: TargetType.nullish(),
   firmedTargetId: z.string().nullish(),
@@ -73,9 +76,14 @@ export const PlanVersion = z.object({
   planCode: z.string(),
   number: z.number().int(),
   status: z.enum(["running", "complete", "failed", "current"]),
+  /** A simulation version comes from a scenario run, is never current and cannot be firmed (FR-22.15). */
+  kind: z.enum(["static", "simulation"]).optional(),
+  scenarioCode: z.string().nullish(),
   asOf: z.string(),
   itemsPlanned: z.number().int(),
   plannedOrders: z.number().int(),
+  /** Orders approved in the previous version that this run firmed (FR-22.11). */
+  approvedFirmed: z.number().int().optional(),
   messages: z.number().int(),
   durationMs: z.number(),
   planHash: z.string(),
@@ -99,7 +107,23 @@ export interface RunPlanRequest {
   forecastModel?: string;
   /** Without a calendar the run counts calendar days. */
   calendar?: WorkCalendar;
+  /** Adds the plan's undelivered firmed orders as scheduled receipts (FR-22.1). */
+  carryForward?: boolean;
+  /** Demand dated beyond this many days from asOf is ignored (30 to 1095); omitted takes the service default. */
+  horizonDays?: number;
+  /** Restricts the items the version reports (FR-22.13). */
+  scope?: PlanScope;
   items: unknown[];
+}
+
+/** Plan scope filter (FR-22.13): every given criterion must match; the whole snapshot is still planned. */
+export interface PlanScope {
+  itemIds?: string[];
+  itemGroups?: string[];
+  planners?: string[];
+  /** Low-level code range, inclusive; 0 is an end item. */
+  llcMin?: number;
+  llcMax?: number;
 }
 
 /** One day of the MD04-style net requirements view of an item (FR-22.12). Quantities are decimal strings. */
@@ -196,6 +220,8 @@ export interface OrderQuery {
   planCode: string;
   status?: z.infer<typeof OrderStatus>;
   itemId?: string;
+  /** A version number, e.g. a simulation; without it the current version is read. */
+  version?: number;
   limit?: number;
 }
 
@@ -203,6 +229,7 @@ export async function listPlannedOrders(q: OrderQuery, init?: RequestInit): Prom
   const params = new URLSearchParams({ planCode: q.planCode });
   if (q.status) params.set("status", q.status);
   if (q.itemId) params.set("itemId", q.itemId);
+  if (q.version) params.set("version", String(q.version));
   if (q.limit) params.set("limit", String(q.limit));
   const body = await request(
     `/planned-orders?${params.toString()}`,
@@ -250,6 +277,43 @@ export async function listVersions(planCode: string, limit = 50, init?: RequestI
     init,
   );
   return body.items;
+}
+
+export const DiffOrder = z.object({
+  number: z.string(),
+  itemId: z.string(),
+  orderType: OrderType,
+  qty: z.string(),
+  orderDate: z.string(),
+  deliveryDate: z.string(),
+  vendorId: z.string().nullish(),
+});
+export type DiffOrder = z.infer<typeof DiffOrder>;
+
+/**
+ * Response of GET /plans/{code}/diff: planned-order differences between two versions (FR-22.14).
+ * The counts cover every order; the lists stop at the request's limit (`truncated`).
+ */
+export const VersionDiff = z.object({
+  from: PlanVersion,
+  to: PlanVersion,
+  identical: z.boolean(),
+  messagesDelta: z.number().int(),
+  addedCount: z.number().int(),
+  removedCount: z.number().int(),
+  changedCount: z.number().int(),
+  truncated: z.boolean(),
+  added: z.array(DiffOrder),
+  removed: z.array(DiffOrder),
+  changed: z.array(z.object({ from: DiffOrder, to: DiffOrder, qtyDelta: z.string() })),
+  unchanged: z.number().int(),
+  qtyDeltaByOrderType: z.record(z.string(), z.string()),
+});
+export type VersionDiff = z.infer<typeof VersionDiff>;
+
+/** Compares version `from` with the later version `to` of a plan, listing at most `limit` orders per list. */
+export async function diffVersions(planCode: string, from: number, to: number, limit = 500, init?: RequestInit): Promise<VersionDiff> {
+  return request(`/plans/${encodeURIComponent(planCode)}/diff?from=${from}&to=${to}&limit=${limit}`, VersionDiff, init);
 }
 
 /** Requests a static plan run. The Idempotency-Key makes retries safe (409 when a run is already in progress). */
@@ -412,6 +476,10 @@ export async function forecastConsensus(modelCode: string, step: ConsensusStep, 
 export const CoverageCode = z.enum(["requirement", "period", "minmax", "manual"]);
 export type CoverageCode = z.infer<typeof CoverageCode>;
 
+/** Safety-stock policies of BR-22.5: demand at today, or at the first issue date. */
+export const SafetyStockPolicy = z.enum(["today", "first-issue"]);
+export type SafetyStockPolicy = z.infer<typeof SafetyStockPolicy>;
+
 /** The settings of a coverage group, as a create or update sends them (CoverageSettings in the OpenAPI). */
 export const CoverageSettings = z.object({
   coverageCode: CoverageCode,
@@ -427,6 +495,7 @@ export const CoverageSettings = z.object({
   autoFirm: z.boolean(),
   generateActions: z.boolean(),
   generateFutures: z.boolean(),
+  safetyStockPolicy: SafetyStockPolicy,
 });
 export type CoverageSettings = z.infer<typeof CoverageSettings>;
 
@@ -452,6 +521,7 @@ export const COVERAGE_DEFAULTS: CoverageSettings = {
   autoFirm: false,
   generateActions: true,
   generateFutures: true,
+  safetyStockPolicy: "today",
 };
 
 export async function listCoverageGroups(init?: RequestInit): Promise<CoverageGroup[]> {
@@ -506,6 +576,8 @@ export interface ItemCoverageInput {
   minQty: string;
   maxQty: string;
   safetyMarginReceiptDays: number;
+  safetyMarginIssueDays: number;
+  safetyMarginReorderDays: number;
   leadTimeDays: number | null;
   plannedOrderType: z.infer<typeof OrderType>;
   planningStrategy: PlanningStrategy;
@@ -528,6 +600,8 @@ export const ItemCoverage = z.object({
   minQty: z.string(),
   maxQty: z.string(),
   safetyMarginReceiptDays: z.number().int(),
+  safetyMarginIssueDays: z.number().int(),
+  safetyMarginReorderDays: z.number().int(),
   leadTimeDays: z.number().int().nullable(),
   vendorId: z.string().nullable(),
   plannedOrderType: OrderType,
@@ -809,5 +883,70 @@ export async function updateQuotaArrangement(id: string, version: number, input:
     method: "PUT",
     headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
     body: JSON.stringify(input),
+  });
+}
+
+/** Settings of a planning scenario (FR-22.15). Factors and quantities are decimal strings. */
+export const ScenarioSettings = z.object({
+  planCode: z.string(),
+  name: z.string(),
+  /** Multiplies the independent demand of every item without its own factor; 1 leaves demand as it is. */
+  demandFactor: z.string(),
+  itemFactors: z.array(z.object({ itemId: z.string(), factor: z.string() })),
+  addedDemand: z.array(z.object({ itemId: z.string(), date: z.string(), qty: z.string() })),
+  leadTimeOverrides: z.array(z.object({ itemId: z.string(), leadTimeDays: z.number().int() })),
+  active: z.boolean(),
+});
+export type ScenarioSettings = z.infer<typeof ScenarioSettings>;
+
+export const Scenario = ScenarioSettings.extend({
+  id: z.string(),
+  code: z.string(),
+  /** The scenario's ETag: send it back as If-Match on PUT. */
+  version: z.number().int().min(1),
+});
+export type Scenario = z.infer<typeof Scenario>;
+
+/** At most this many scenarios of one plan are active (FR-22.15). */
+export const MAX_ACTIVE_SCENARIOS = 10;
+
+export async function listScenarios(planCode = "", init?: RequestInit): Promise<Scenario[]> {
+  const q = planCode ? `&planCode=${encodeURIComponent(planCode)}` : "";
+  const out = await request(`/scenarios?limit=500${q}`, z.object({ items: z.array(Scenario) }), init);
+  return out.items;
+}
+
+export async function getScenario(code: string, init?: RequestInit): Promise<Scenario> {
+  return request(`/scenarios/${encodeURIComponent(code)}`, Scenario, init);
+}
+
+/** Creates a scenario (Run simulations). 409 `PLAN-SCENARIO-EXISTS` means the code is taken, `PLAN-SCENARIO-LIMIT` that the plan has 10 active ones. */
+export async function createScenario(code: string, settings: ScenarioSettings, idempotencyKey: string): Promise<Scenario> {
+  return request(`/scenarios`, Scenario, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ code, ...settings }),
+  });
+}
+
+/** Replaces the settings of a scenario under If-Match; 412 means someone else changed it. */
+export async function updateScenario(code: string, version: number, settings: ScenarioSettings): Promise<Scenario> {
+  return request(`/scenarios/${encodeURIComponent(code)}`, Scenario, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(settings),
+  });
+}
+
+/**
+ * Runs a scenario on a snapshot and stores a simulation version of its plan.
+ * The operational plan, its messages and events stay as they are; the
+ * Idempotency-Key makes a retry replay the same simulation.
+ */
+export async function runScenario(code: string, idempotencyKey: string, body: RunPlanRequest): Promise<PlanVersion> {
+  return request(`/scenarios/${encodeURIComponent(code)}:run`, PlanVersion, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
   });
 }

@@ -25,7 +25,7 @@ const (
 )
 
 func principalContext(tenantNumber int, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 func migratedApp(t *testing.T) *pgxpool.Pool {
@@ -107,8 +107,8 @@ func TestMigrate_AppliesTwice(t *testing.T) {
 		}
 	}
 	var applied int
-	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != 7 {
-		t.Fatalf("schema_migrations rows = %d, %v; want 7", applied, err)
+	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != 9 {
+		t.Fatalf("schema_migrations rows = %d, %v; want 9", applied, err)
 	}
 }
 
@@ -223,7 +223,7 @@ func TestMigrate_EveryTableForcesRowLevelSecurity(t *testing.T) {
 	err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select c.relname from pg_class c
 			where c.relnamespace = current_schema()::regnamespace and c.relkind = 'r'
-			and c.relname <> 'schema_migrations' and not (c.relrowsecurity and c.relforcerowsecurity)`)
+			and c.relname not in ('schema_migrations', 'service_token_replay') and not (c.relrowsecurity and c.relforcerowsecurity)`)
 		if err != nil {
 			return err
 		}

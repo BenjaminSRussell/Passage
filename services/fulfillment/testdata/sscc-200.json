@@ -1,0 +1,5486 @@
+{
+ "fixture": "sscc-200",
+ "gs1": [
+  {
+   "ais": [
+    "00"
+   ],
+   "form": "hri",
+   "id": "G001",
+   "input": "(00)706141413832203155",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "706141413832203155"
+   }
+  },
+  {
+   "ais": [
+    "00"
+   ],
+   "form": "raw",
+   "id": "G002",
+   "input": "00006141413791212435",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "006141413791212435"
+   }
+  },
+  {
+   "ais": [
+    "01"
+   ],
+   "form": "hri",
+   "id": "G003",
+   "input": "(01)81416818473014",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "81416818473014",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01"
+   ],
+   "form": "raw",
+   "id": "G004",
+   "input": "0166208451248866",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "66208451248866",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G005",
+   "input": "(00)206141413741040983(01)27039488385177",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "27039488385177",
+    "serial": "",
+    "sscc": "206141413741040983"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G006",
+   "input": "006061414186242120280183791744158470",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "83791744158470",
+    "serial": "",
+    "sscc": "606141418624212028"
+   }
+  },
+  {
+   "ais": [
+    "10"
+   ],
+   "form": "hri",
+   "id": "G007",
+   "input": "(10)r46k",
+   "valid": true,
+   "want": {
+    "batch": "r46k",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10"
+   ],
+   "form": "raw",
+   "id": "G008",
+   "input": "10sMqMfo&+5c&EGD0>Z8?",
+   "valid": true,
+   "want": {
+    "batch": "sMqMfo&+5c&EGD0>Z8?",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G009",
+   "input": "(10)eEO0a&XPgM,zhXmllJ(00)306141410123648611",
+   "valid": true,
+   "want": {
+    "batch": "eEO0a&XPgM,zhXmllJ",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "306141410123648611"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G010",
+   "input": "0080614141957023522610Lmb9!\"F*",
+   "valid": true,
+   "want": {
+    "batch": "Lmb9!\"F*",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "806141419570235226"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G011",
+   "input": "(01)82552336619066(10);*",
+   "valid": true,
+   "want": {
+    "batch": ";*",
+    "count": 0,
+    "expiry": "",
+    "gtin": "82552336619066",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G012",
+   "input": "10Z?MZ/(,ye%>r\u001d0112026069222455",
+   "valid": true,
+   "want": {
+    "batch": "Z?MZ/(,ye%>r",
+    "count": 0,
+    "expiry": "",
+    "gtin": "12026069222455",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G013",
+   "input": "(00)006141410470261975(10)aK4fp-Ooy!9Q(01)21022871050857",
+   "valid": true,
+   "want": {
+    "batch": "aK4fp-Ooy!9Q",
+    "count": 0,
+    "expiry": "",
+    "gtin": "21022871050857",
+    "serial": "",
+    "sscc": "006141410470261975"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G014",
+   "input": "003061414180273334280146598888830106105,Z",
+   "valid": true,
+   "want": {
+    "batch": "5,Z",
+    "count": 0,
+    "expiry": "",
+    "gtin": "46598888830106",
+    "serial": "",
+    "sscc": "306141418027333428"
+   }
+  },
+  {
+   "ais": [
+    "17"
+   ],
+   "form": "hri",
+   "id": "G015",
+   "input": "(17)100321",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "100321",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17"
+   ],
+   "form": "raw",
+   "id": "G016",
+   "input": "17620600",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "620600",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G017",
+   "input": "(17)760630(00)206141419096793222",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "760630",
+    "gtin": "",
+    "serial": "",
+    "sscc": "206141419096793222"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G018",
+   "input": "1776103100906141414579691148",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "761031",
+    "gtin": "",
+    "serial": "",
+    "sscc": "906141414579691148"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G019",
+   "input": "(17)230630(01)34545229481171",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "230630",
+    "gtin": "34545229481171",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G020",
+   "input": "176012000190516830249470",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "601200",
+    "gtin": "90516830249470",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G021",
+   "input": "(17)471204(00)406141416006295221(01)02648065313925",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "471204",
+    "gtin": "02648065313925",
+    "serial": "",
+    "sscc": "406141416006295221"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G022",
+   "input": "00306141414151084724016786828591791917460630",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "460630",
+    "gtin": "67868285917919",
+    "serial": "",
+    "sscc": "306141414151084724"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G023",
+   "input": "(10)jA0m(17)070910",
+   "valid": true,
+   "want": {
+    "batch": "jA0m",
+    "count": 0,
+    "expiry": "070910",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G024",
+   "input": "10>)8V6Bon-Uc\u001d17900701",
+   "valid": true,
+   "want": {
+    "batch": ">)8V6Bon-Uc",
+    "count": 0,
+    "expiry": "900701",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G025",
+   "input": "(00)906141414552886295(10)1zX%y/ZE;(17)570908",
+   "valid": true,
+   "want": {
+    "batch": "1zX%y/ZE;",
+    "count": 0,
+    "expiry": "570908",
+    "gtin": "",
+    "serial": "",
+    "sscc": "906141414552886295"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G026",
+   "input": "0010614141966055184810bFULu*6vVo79a9\u001d17080911",
+   "valid": true,
+   "want": {
+    "batch": "bFULu*6vVo79a9",
+    "count": 0,
+    "expiry": "080911",
+    "gtin": "",
+    "serial": "",
+    "sscc": "106141419660551848"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G027",
+   "input": "(17)440900(10)4jpA!ti%(01)42397869477118",
+   "valid": true,
+   "want": {
+    "batch": "4jpA!ti%",
+    "count": 0,
+    "expiry": "440900",
+    "gtin": "42397869477118",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G028",
+   "input": "10LEgLOnh&C%&cn8\u001d179507000105255288073184",
+   "valid": true,
+   "want": {
+    "batch": "LEgLOnh&C%&cn8",
+    "count": 0,
+    "expiry": "950700",
+    "gtin": "05255288073184",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "01",
+    "00",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G029",
+   "input": "(17)681023(01)24326263192536(00)406141413064321244(10)8r>\"!d,2",
+   "valid": true,
+   "want": {
+    "batch": "8r>\"!d,2",
+    "count": 0,
+    "expiry": "681023",
+    "gtin": "24326263192536",
+    "serial": "",
+    "sscc": "406141413064321244"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10",
+    "00",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G030",
+   "input": "017323295582266610;<j%P2_mw%G(Mm7MDJhj\u001d0030614141613470089817200800",
+   "valid": true,
+   "want": {
+    "batch": ";<j%P2_mw%G(Mm7MDJhj",
+    "count": 0,
+    "expiry": "200800",
+    "gtin": "73232955822666",
+    "serial": "",
+    "sscc": "306141416134700898"
+   }
+  },
+  {
+   "ais": [
+    "21"
+   ],
+   "form": "hri",
+   "id": "G031",
+   "input": "(21):TOOKIhvHU6&RO2",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": ":TOOKIhvHU6&RO2",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21"
+   ],
+   "form": "raw",
+   "id": "G032",
+   "input": "21Tk_-Gd'&:>rE6Ct0x<)",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "Tk_-Gd'&:>rE6Ct0x<)",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G033",
+   "input": "(21)GxYU.fO&<jx=U(00)906141415758939488",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "GxYU.fO&<jx=U",
+    "sscc": "906141415758939488"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G034",
+   "input": "0050614141891291548121(N'C=,7/R.b",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "(N'C=,7/R.b",
+    "sscc": "506141418912915481"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G035",
+   "input": "(21)5DbVt.nH9Z(01)30286962620611",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "30286962620611",
+    "serial": "5DbVt.nH9Z",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G036",
+   "input": "21C?g=6\u001d0136160341100083",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "36160341100083",
+    "serial": "C?g=6",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G037",
+   "input": "(00)206141413753808014(21)67fiu7C(01)54833612972547",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "54833612972547",
+    "serial": "67fiu7C",
+    "sscc": "206141413753808014"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G038",
+   "input": "0040614141710502826021A*jZPXN2l>yI\u001d0142813005339855",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "",
+    "gtin": "42813005339855",
+    "serial": "A*jZPXN2l>yI",
+    "sscc": "406141417105028260"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G039",
+   "input": "(21)8s=m5u(10)EAOJb",
+   "valid": true,
+   "want": {
+    "batch": "EAOJb",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "8s=m5u",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G040",
+   "input": "10SIyf2S\u001d21Hs%v:",
+   "valid": true,
+   "want": {
+    "batch": "SIyf2S",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "Hs%v:",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G041",
+   "input": "(00)306141418114065607(21)11Yt2&Sxy+IHyCBkK(10)4q!=s&urSEY",
+   "valid": true,
+   "want": {
+    "batch": "4q!=s&urSEY",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "11Yt2&Sxy+IHyCBkK",
+    "sscc": "306141418114065607"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G042",
+   "input": "10l5+(P\u001d21CG3!dP'oW(zfWo\"\u001d00806141419190072980",
+   "valid": true,
+   "want": {
+    "batch": "l5+(P",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "CG3!dP'oW(zfWo\"",
+    "sscc": "806141419190072980"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G043",
+   "input": "(21)bqa4:9wI,iIJTI(10)N+bv.'1cv(01)19409971527093",
+   "valid": true,
+   "want": {
+    "batch": "N+bv.'1cv",
+    "count": 0,
+    "expiry": "",
+    "gtin": "19409971527093",
+    "serial": "bqa4:9wI,iIJTI",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "01",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G044",
+   "input": "21VfG40M4Q_mXv/K\u001d019942095515231110vwyO\"'_\"O0B81F",
+   "valid": true,
+   "want": {
+    "batch": "vwyO\"'_\"O0B81F",
+    "count": 0,
+    "expiry": "",
+    "gtin": "99420955152311",
+    "serial": "VfG40M4Q_mXv/K",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G045",
+   "input": "(00)206141415637679628(21)OKlpNKzb*T4Fd(10)n-=7p*%xuj\"_?(01)37499250544336",
+   "valid": true,
+   "want": {
+    "batch": "n-=7p*%xuj\"_?",
+    "count": 0,
+    "expiry": "",
+    "gtin": "37499250544336",
+    "serial": "OKlpNKzb*T4Fd",
+    "sscc": "206141415637679628"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "01",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G046",
+   "input": "10=:?rkm'8vsI2\u001d21O40ozR?T3.5\u001d012334217853617400506141411892000635",
+   "valid": true,
+   "want": {
+    "batch": "=:?rkm'8vsI2",
+    "count": 0,
+    "expiry": "",
+    "gtin": "23342178536174",
+    "serial": "O40ozR?T3.5",
+    "sscc": "506141411892000635"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G047",
+   "input": "(21),y!_LU(17)171201",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "171201",
+    "gtin": "",
+    "serial": ",y!_LU",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G048",
+   "input": "17310124211C%G'RYviEpa(oj\"",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "310124",
+    "gtin": "",
+    "serial": "1C%G'RYviEpa(oj\"",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "00",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G049",
+   "input": "(21)l92xX(00)306141419734381818(17)081100",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "081100",
+    "gtin": "",
+    "serial": "l92xX",
+    "sscc": "306141419734381818"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G050",
+   "input": "213i%K\u001d1704050300106141412886679488",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "040503",
+    "gtin": "",
+    "serial": "3i%K",
+    "sscc": "106141412886679488"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G051",
+   "input": "(21)Njq(17)870331(01)45648921013728",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "870331",
+    "gtin": "45648921013728",
+    "serial": "Njq",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G052",
+   "input": "211_wZLH/?8Hybs5P*0Viz\u001d178208210145686355851264",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "820821",
+    "gtin": "45686355851264",
+    "serial": "1_wZLH/?8Hybs5P*0Viz",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "21",
+    "01",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G053",
+   "input": "(17)740400(21)b8(01)37898362865856(00)806141416714165524",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "740400",
+    "gtin": "37898362865856",
+    "serial": "b8",
+    "sscc": "806141416714165524"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00",
+    "01",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G054",
+   "input": "17651031006061414198480460240130603853464008214L6/MK=a",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 0,
+    "expiry": "651031",
+    "gtin": "30603853464008",
+    "serial": "4L6/MK=a",
+    "sscc": "606141419848046024"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G055",
+   "input": "(10)Evv4,=41qMuxPS:%(21)s7s=d*0SE--wlX'Fz(17)230200",
+   "valid": true,
+   "want": {
+    "batch": "Evv4,=41qMuxPS:%",
+    "count": 0,
+    "expiry": "230200",
+    "gtin": "",
+    "serial": "s7s=d*0SE--wlX'Fz",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G056",
+   "input": "21Jw56GZ\u001d1788022910kK4j_,.n*n_8",
+   "valid": true,
+   "want": {
+    "batch": "kK4j_,.n*n_8",
+    "count": 0,
+    "expiry": "880229",
+    "gtin": "",
+    "serial": "Jw56GZ",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "17",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G057",
+   "input": "(00)006141419562524844(21)=xjm+6JyWf'pdU*(17)480500(10)/LlPjM&%SDDW.",
+   "valid": true,
+   "want": {
+    "batch": "/LlPjM&%SDDW.",
+    "count": 0,
+    "expiry": "480500",
+    "gtin": "",
+    "serial": "=xjm+6JyWf'pdU*",
+    "sscc": "006141419562524844"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "10",
+    "00",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G058",
+   "input": "17230430107b(kxZ!FSAh<.Y6v_X\u001d0030614141063170996521bf*",
+   "valid": true,
+   "want": {
+    "batch": "7b(kxZ!FSAh<.Y6v_X",
+    "count": 0,
+    "expiry": "230430",
+    "gtin": "",
+    "serial": "bf*",
+    "sscc": "306141410631709965"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01",
+    "21",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G059",
+   "input": "(10)gOHDC&pdzm3Q7xk_UQ;(01)13167530083102(21)yHr=*U(17)071019",
+   "valid": true,
+   "want": {
+    "batch": "gOHDC&pdzm3Q7xk_UQ;",
+    "count": 0,
+    "expiry": "071019",
+    "gtin": "13167530083102",
+    "serial": "yHr=*U",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17",
+    "21",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G060",
+   "input": "10kk,kd\u001d1784010021;?MA&zGCZ6uJHMveH\u001d0156372187171569",
+   "valid": true,
+   "want": {
+    "batch": "kk,kd",
+    "count": 0,
+    "expiry": "840100",
+    "gtin": "56372187171569",
+    "serial": ";?MA&zGCZ6uJHMveH",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "21",
+    "17",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G061",
+   "input": "(00)706141415509241187(10)AbzS(21)H(17)180510(01)07086476685548",
+   "valid": true,
+   "want": {
+    "batch": "AbzS",
+    "count": 0,
+    "expiry": "180510",
+    "gtin": "07086476685548",
+    "serial": "H",
+    "sscc": "706141415509241187"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "21",
+    "01",
+    "00",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G062",
+   "input": "1788020021ywZ:1t8quUDz\u001d01882076147412910050614141846050481610ErbUJSD)",
+   "valid": true,
+   "want": {
+    "batch": "ErbUJSD)",
+    "count": 0,
+    "expiry": "880200",
+    "gtin": "88207614741291",
+    "serial": "ywZ:1t8quUDz",
+    "sscc": "506141418460504816"
+   }
+  },
+  {
+   "ais": [
+    "30"
+   ],
+   "form": "hri",
+   "id": "G063",
+   "input": "(30)62215",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 62215,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30"
+   ],
+   "form": "raw",
+   "id": "G064",
+   "input": "3024",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 24,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G065",
+   "input": "(00)006141413249458880(30)4986",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4986,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "006141413249458880"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G066",
+   "input": "00406141410247608307305034043",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5034043,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "406141410247608307"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G067",
+   "input": "(30)661735(01)34435565992502",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 661735,
+    "expiry": "",
+    "gtin": "34435565992502",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G068",
+   "input": "0181214988159550309405",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 9405,
+    "expiry": "",
+    "gtin": "81214988159550",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "30",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G069",
+   "input": "(01)50770287063658(30)19(00)706141414535656187",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 19,
+    "expiry": "",
+    "gtin": "50770287063658",
+    "serial": "",
+    "sscc": "706141414535656187"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G070",
+   "input": "000061414183432144550188045477805138302132550",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 2132550,
+    "expiry": "",
+    "gtin": "88045477805138",
+    "serial": "",
+    "sscc": "006141418343214455"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G071",
+   "input": "(30)31134(10)5m0fC3WK-",
+   "valid": true,
+   "want": {
+    "batch": "5m0fC3WK-",
+    "count": 31134,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G072",
+   "input": "10b\u001d30366",
+   "valid": true,
+   "want": {
+    "batch": "b",
+    "count": 366,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "10",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G073",
+   "input": "(30)3(10)\"tcoZmobi10a(00)506141417004324880",
+   "valid": true,
+   "want": {
+    "batch": "\"tcoZmobi10a",
+    "count": 3,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "506141417004324880"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G074",
+   "input": "003061414159440979073055057\u001d10vV;pGU(2o1<_.Cc",
+   "valid": true,
+   "want": {
+    "batch": "vV;pGU(2o1<_.Cc",
+    "count": 55057,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "306141415944097907"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "30",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G075",
+   "input": "(10)!gaR(30)1674(01)48369282156943",
+   "valid": true,
+   "want": {
+    "batch": "!gaR",
+    "count": 1674,
+    "expiry": "",
+    "gtin": "48369282156943",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "10",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G076",
+   "input": "3062841086\u001d10vF/!f0+_M**0Q>w\u001d0171811889015751",
+   "valid": true,
+   "want": {
+    "batch": "vF/!f0+_M**0Q>w",
+    "count": 62841086,
+    "expiry": "",
+    "gtin": "71811889015751",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "01",
+    "10",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G077",
+   "input": "(30)53(01)76996800637757(10)tnnqiWq1Rf(00)006141418628568396",
+   "valid": true,
+   "want": {
+    "batch": "tnnqiWq1Rf",
+    "count": 53,
+    "expiry": "",
+    "gtin": "76996800637757",
+    "serial": "",
+    "sscc": "006141418628568396"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "01",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G078",
+   "input": "0030614141262103781210cs8:B5P\u001d0193072837424816309673645",
+   "valid": true,
+   "want": {
+    "batch": "cs8:B5P",
+    "count": 9673645,
+    "expiry": "",
+    "gtin": "93072837424816",
+    "serial": "",
+    "sscc": "306141412621037812"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G079",
+   "input": "(30)41(17)700831",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 41,
+    "expiry": "700831",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G080",
+   "input": "1700053130414",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 414,
+    "expiry": "000531",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G081",
+   "input": "(00)306141415161801653(30)44097577(17)320700",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 44097577,
+    "expiry": "320700",
+    "gtin": "",
+    "serial": "",
+    "sscc": "306141415161801653"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "00",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G082",
+   "input": "304\u001d0030614141743146528217270225",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4,
+    "expiry": "270225",
+    "gtin": "",
+    "serial": "",
+    "sscc": "306141417431465282"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "30",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G083",
+   "input": "(01)01593555532847(30)7764(17)440331",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 7764,
+    "expiry": "440331",
+    "gtin": "01593555532847",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "30",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G084",
+   "input": "019466537197262330674648\u001d17161231",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 674648,
+    "expiry": "161231",
+    "gtin": "94665371972623",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "17",
+    "00",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G085",
+   "input": "(01)58994183408968(17)700500(00)906141411254752545(30)862597",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 862597,
+    "expiry": "700500",
+    "gtin": "58994183408968",
+    "serial": "",
+    "sscc": "906141411254752545"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "30",
+    "01",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G086",
+   "input": "170809303017064088\u001d012523115537879200106141417009918246",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 17064088,
+    "expiry": "080930",
+    "gtin": "25231155378792",
+    "serial": "",
+    "sscc": "106141417009918246"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "10",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G087",
+   "input": "(30)134040(10)3l/fDYDG>\"_b7FpnYwh(17)661100",
+   "valid": true,
+   "want": {
+    "batch": "3l/fDYDG>\"_b7FpnYwh",
+    "count": 134040,
+    "expiry": "661100",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "30",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G088",
+   "input": "171307193067\u001d10E7.d2R,6_FRWz",
+   "valid": true,
+   "want": {
+    "batch": "E7.d2R,6_FRWz",
+    "count": 67,
+    "expiry": "130719",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "00",
+    "10",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G089",
+   "input": "(30)3577(00)706141418582406863(10)k=fiDUpEw;VKt+BR-(17)750900",
+   "valid": true,
+   "want": {
+    "batch": "k=fiDUpEw;VKt+BR-",
+    "count": 3577,
+    "expiry": "750900",
+    "gtin": "",
+    "serial": "",
+    "sscc": "706141418582406863"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "17",
+    "10",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G090",
+   "input": "008061414159041519271719103110*/c\u001d30417572",
+   "valid": true,
+   "want": {
+    "batch": "*/c",
+    "count": 417572,
+    "expiry": "191031",
+    "gtin": "",
+    "serial": "",
+    "sscc": "806141415904151927"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "17",
+    "10",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G091",
+   "input": "(01)66734512153362(17)990831(10)V8_+2s4sC95ox1(30)4173453",
+   "valid": true,
+   "want": {
+    "batch": "V8_+2s4sC95ox1",
+    "count": 4173453,
+    "expiry": "990831",
+    "gtin": "66734512153362",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10",
+    "17",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G092",
+   "input": "014056376591674310z-3-.Dtrv(=6+oZ>O'\u001d17021130302682",
+   "valid": true,
+   "want": {
+    "batch": "z-3-.Dtrv(=6+oZ>O'",
+    "count": 2682,
+    "expiry": "021130",
+    "gtin": "40563765916743",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "17",
+    "10",
+    "00",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G093",
+   "input": "(01)70346881724444(17)641200(10)Y6Jin1;bA(00)206141412523076097(30)9",
+   "valid": true,
+   "want": {
+    "batch": "Y6Jin1;bA",
+    "count": 9,
+    "expiry": "641200",
+    "gtin": "70346881724444",
+    "serial": "",
+    "sscc": "206141412523076097"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "10",
+    "01",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G094",
+   "input": "00806141412235130003306551393\u001d103ZyN\"Rl!Es\u001d015032453106409217830228",
+   "valid": true,
+   "want": {
+    "batch": "3ZyN\"Rl!Es",
+    "count": 6551393,
+    "expiry": "830228",
+    "gtin": "50324531064092",
+    "serial": "",
+    "sscc": "806141412235130003"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G095",
+   "input": "(21)'m!EsbTz?U(30)3885119",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 3885119,
+    "expiry": "",
+    "gtin": "",
+    "serial": "'m!EsbTz?U",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G096",
+   "input": "3032767128\u001d21_LCY",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 32767128,
+    "expiry": "",
+    "gtin": "",
+    "serial": "_LCY",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "30",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G097",
+   "input": "(21)RYR>ppjwQr(30)17522(00)406141410076860990",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 17522,
+    "expiry": "",
+    "gtin": "",
+    "serial": "RYR>ppjwQr",
+    "sscc": "406141410076860990"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G098",
+   "input": "0000614141752776084930861\u001d210;lFoxs(1_lsqb",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 861,
+    "expiry": "",
+    "gtin": "",
+    "serial": "0;lFoxs(1_lsqb",
+    "sscc": "006141417527760849"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "01",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G099",
+   "input": "(21)g4sjs2:K_fLtDo'lvm(01)32206465679174(30)5",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5,
+    "expiry": "",
+    "gtin": "32206465679174",
+    "serial": "g4sjs2:K_fLtDo'lvm",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "21",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G100",
+   "input": "019155885036609521jwXWOnK663G*-WG*jt52\u001d302",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 2,
+    "expiry": "",
+    "gtin": "91558850366095",
+    "serial": "jwXWOnK663G*-WG*jt52",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "21",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G101",
+   "input": "(00)106141413791098487(30)87493(21)BHd+Qw48R(01)13959050741996",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 87493,
+    "expiry": "",
+    "gtin": "13959050741996",
+    "serial": "BHd+Qw48R",
+    "sscc": "106141413791098487"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "01",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G102",
+   "input": "0090614141087094811021-\"qiftPSPB)X6\u001d01394150234837613090566518",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 90566518,
+    "expiry": "",
+    "gtin": "39415023483761",
+    "serial": "-\"qiftPSPB)X6",
+    "sscc": "906141410870948110"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "21",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G103",
+   "input": "(30)93930(21)onk;s;bcP*.L(10)Ci4",
+   "valid": true,
+   "want": {
+    "batch": "Ci4",
+    "count": 93930,
+    "expiry": "",
+    "gtin": "",
+    "serial": "onk;s;bcP*.L",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "30",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G104",
+   "input": "101M\u001d3018\u001d21Da,",
+   "valid": true,
+   "want": {
+    "batch": "1M",
+    "count": 18,
+    "expiry": "",
+    "gtin": "",
+    "serial": "Da,",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "30",
+    "21",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G105",
+   "input": "(10)1tn/l>LAS1Ln.CCqI(30)12042866(21)6V-aBgjsy+EWUix8S_4*(00)706141412067337543",
+   "valid": true,
+   "want": {
+    "batch": "1tn/l>LAS1Ln.CCqI",
+    "count": 12042866,
+    "expiry": "",
+    "gtin": "",
+    "serial": "6V-aBgjsy+EWUix8S_4*",
+    "sscc": "706141412067337543"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "30",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G106",
+   "input": "0050614141612048069221zI!\u001d3070485\u001d10sQ_",
+   "valid": true,
+   "want": {
+    "batch": "sQ_",
+    "count": 70485,
+    "expiry": "",
+    "gtin": "",
+    "serial": "zI!",
+    "sscc": "506141416120480692"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "21",
+    "10",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G107",
+   "input": "(01)84680970239116(21);Kg+q(10)'3L2D(30)67011",
+   "valid": true,
+   "want": {
+    "batch": "'3L2D",
+    "count": 67011,
+    "expiry": "",
+    "gtin": "84680970239116",
+    "serial": ";Kg+q",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "30",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G108",
+   "input": "10\"4W'q;?XQ*8qZ+'\u001d21HBJNX&x\u001d3066715\u001d0113479603440096",
+   "valid": true,
+   "want": {
+    "batch": "\"4W'q;?XQ*8qZ+'",
+    "count": 66715,
+    "expiry": "",
+    "gtin": "13479603440096",
+    "serial": "HBJNX&x",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01",
+    "00",
+    "30",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G109",
+   "input": "(10)D?\"Uq22*Vjr>%O(01)31625834417635(00)206141415243857946(30)313264(21)ij:>13*P",
+   "valid": true,
+   "want": {
+    "batch": "D?\"Uq22*Vjr>%O",
+    "count": 313264,
+    "expiry": "",
+    "gtin": "31625834417635",
+    "serial": "ij:>13*P",
+    "sscc": "206141415243857946"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "30",
+    "21",
+    "10",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G110",
+   "input": "00806141417431170297301\u001d21iq+H<66rPO*cg8yb\u001d10D10dHsUu_nucpYqJE\u001d0194997361098908",
+   "valid": true,
+   "want": {
+    "batch": "D10dHsUu_nucpYqJE",
+    "count": 1,
+    "expiry": "",
+    "gtin": "94997361098908",
+    "serial": "iq+H<66rPO*cg8yb",
+    "sscc": "806141417431170297"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "30",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G111",
+   "input": "(21)E8aU:a1bs-A_2E%<U(30)48403466(17)460915",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 48403466,
+    "expiry": "460915",
+    "gtin": "",
+    "serial": "E8aU:a1bs-A_2E%<U",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "21",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G112",
+   "input": "1753073121&'b-KwHhN5zw)_&\u001d3048",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 48,
+    "expiry": "530731",
+    "gtin": "",
+    "serial": "&'b-KwHhN5zw)_&",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "17",
+    "21",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G113",
+   "input": "(00)006141417279905376(17)910100(21)qQut<OHS2OKV(30)1877526",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 1877526,
+    "expiry": "910100",
+    "gtin": "",
+    "serial": "qQut<OHS2OKV",
+    "sscc": "006141417279905376"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "00",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G114",
+   "input": "219Y(eHqF4p)y7spgnmVX\u001d17120712006061414129625037943012",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 12,
+    "expiry": "120712",
+    "gtin": "",
+    "serial": "9Y(eHqF4p)y7spgnmVX",
+    "sscc": "606141412962503794"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "30",
+    "01",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G115",
+   "input": "(17)120430(30)5(01)44009193130192(21)Cf/hCsQl+",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5,
+    "expiry": "120430",
+    "gtin": "44009193130192",
+    "serial": "Cf/hCsQl+",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "21",
+    "17",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G116",
+   "input": "010185803930961321&xrPjJk59SB;B5Ad_s\u001d17140815305964",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5964,
+    "expiry": "140815",
+    "gtin": "01858039309613",
+    "serial": "&xrPjJk59SB;B5Ad_s",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "00",
+    "01",
+    "17",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G117",
+   "input": "(30)3402(00)306141414899495851(01)41557449734869(17)470731(21)J!u",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 3402,
+    "expiry": "470731",
+    "gtin": "41557449734869",
+    "serial": "J!u",
+    "sscc": "306141414899495851"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "30",
+    "01",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G118",
+   "input": "00006141416635827338216r\u001d304724550\u001d014947738938500117461231",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4724550,
+    "expiry": "461231",
+    "gtin": "49477389385001",
+    "serial": "6r",
+    "sscc": "006141416635827338"
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "17",
+    "10",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G119",
+   "input": "(30)4099250(17)000221(10)l-Mq4;vPg6t?M*D+z(21)fD9U;JqGJ",
+   "valid": true,
+   "want": {
+    "batch": "l-Mq4;vPg6t?M*D+z",
+    "count": 4099250,
+    "expiry": "000221",
+    "gtin": "",
+    "serial": "fD9U;JqGJ",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17",
+    "30",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G120",
+   "input": "10B7k28:B%zd*o\u001d173611033097\u001d21Lwoh&-sG_VW4cG(3J7:?",
+   "valid": true,
+   "want": {
+    "batch": "B7k28:B%zd*o",
+    "count": 97,
+    "expiry": "361103",
+    "gtin": "",
+    "serial": "Lwoh&-sG_VW4cG(3J7:?",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "00",
+    "30",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G121",
+   "input": "(21)D(17)680430(00)306141415292802215(30)22684795(10)eXc+iQhvLub",
+   "valid": true,
+   "want": {
+    "batch": "eXc+iQhvLub",
+    "count": 22684795,
+    "expiry": "680430",
+    "gtin": "",
+    "serial": "D",
+    "sscc": "306141415292802215"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "10",
+    "00",
+    "21",
+    "30"
+   ],
+   "form": "raw",
+   "id": "G122",
+   "input": "1715060010jgI\"ZFPzGvRI,_TyCiC\u001d0090614141258870454521_Lv(S<S-%wNi1C7\u001d305616",
+   "valid": true,
+   "want": {
+    "batch": "jgI\"ZFPzGvRI,_TyCiC",
+    "count": 5616,
+    "expiry": "150600",
+    "gtin": "",
+    "serial": "_Lv(S<S-%wNi1C7",
+    "sscc": "906141412588704545"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01",
+    "17",
+    "21",
+    "30"
+   ],
+   "form": "hri",
+   "id": "G123",
+   "input": "(10)abx:iWiIyIZJ-(01)51054077860016(17)390331(21)Kx_rtAdae&O>M(30)8",
+   "valid": true,
+   "want": {
+    "batch": "abx:iWiIyIZJ-",
+    "count": 8,
+    "expiry": "390331",
+    "gtin": "51054077860016",
+    "serial": "Kx_rtAdae&O>M",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "30",
+    "01",
+    "21",
+    "17",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G124",
+   "input": "30326\u001d0177077235791470210JlC</BOx45KvFA:f)x\u001d17330916103,2dxESYIG5em",
+   "valid": true,
+   "want": {
+    "batch": "3,2dxESYIG5em",
+    "count": 326,
+    "expiry": "330916",
+    "gtin": "77077235791470",
+    "serial": "0JlC</BOx45KvFA:f)x",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10",
+    "00",
+    "21",
+    "30",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G125",
+   "input": "(01)85173518792857(10)wyZ1?=M%YJQPr&(00)606141414385998294(21)HF3TjBML8ZKyqeTi(30)44149(17)840731",
+   "valid": true,
+   "want": {
+    "batch": "wyZ1?=M%YJQPr&",
+    "count": 44149,
+    "expiry": "840731",
+    "gtin": "85173518792857",
+    "serial": "HF3TjBML8ZKyqeTi",
+    "sscc": "606141414385998294"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01",
+    "17",
+    "21",
+    "30",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G126",
+   "input": "00106141417252911919016578995902455417371200219xpqP\u001d309114170\u001d10\"sj=kus<(DT6H",
+   "valid": true,
+   "want": {
+    "batch": "\"sj=kus<(DT6H",
+    "count": 9114170,
+    "expiry": "371200",
+    "gtin": "65789959024554",
+    "serial": "9xpqP",
+    "sscc": "106141417252911919"
+   }
+  },
+  {
+   "ais": [
+    "37"
+   ],
+   "form": "hri",
+   "id": "G127",
+   "input": "(37)4295673",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4295673,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37"
+   ],
+   "form": "raw",
+   "id": "G128",
+   "input": "374",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G129",
+   "input": "(37)491(00)006141414931581510",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 491,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "006141414931581510"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G130",
+   "input": "007061414102202406003746",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 46,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "706141410220240600"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G131",
+   "input": "(37)8687057(01)49358628878259",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 8687057,
+    "expiry": "",
+    "gtin": "49358628878259",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G132",
+   "input": "3730136398\u001d0177882741795009",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 30136398,
+    "expiry": "",
+    "gtin": "77882741795009",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "37",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G133",
+   "input": "(01)49608957808480(37)55037(00)706141416408671662",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 55037,
+    "expiry": "",
+    "gtin": "49608957808480",
+    "serial": "",
+    "sscc": "706141416408671662"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "00",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G134",
+   "input": "0196620038788779004061414189496744223748516622",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 48516622,
+    "expiry": "",
+    "gtin": "96620038788779",
+    "serial": "",
+    "sscc": "406141418949674422"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G135",
+   "input": "(10)ApN<EFW6w(37)7794",
+   "valid": true,
+   "want": {
+    "batch": "ApN<EFW6w",
+    "count": 7794,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G136",
+   "input": "37562\u001d10P0.Al5SV",
+   "valid": true,
+   "want": {
+    "batch": "P0.Al5SV",
+    "count": 562,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "00",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G137",
+   "input": "(37)764804(00)606141418638800921(10)j",
+   "valid": true,
+   "want": {
+    "batch": "j",
+    "count": 764804,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "606141418638800921"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "00",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G138",
+   "input": "3733\u001d0020614141331150242210EJAIu1.')QD<WD-(:?V",
+   "valid": true,
+   "want": {
+    "batch": "EJAIu1.')QD<WD-(:?V",
+    "count": 33,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": "206141413311502422"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "37",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G139",
+   "input": "(10)-Xc8%M8/VyvzzM1Dqq(37)19569(01)85326472493852",
+   "valid": true,
+   "want": {
+    "batch": "-Xc8%M8/VyvzzM1Dqq",
+    "count": 19569,
+    "expiry": "",
+    "gtin": "85326472493852",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "01",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G140",
+   "input": "37630\u001d010643408949796510.4CT)L4cb",
+   "valid": true,
+   "want": {
+    "batch": ".4CT)L4cb",
+    "count": 630,
+    "expiry": "",
+    "gtin": "06434089497965",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10",
+    "00",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G141",
+   "input": "(01)16524674695467(10)r%uI=U+/<BL4(00)806141419715119404(37)31496",
+   "valid": true,
+   "want": {
+    "batch": "r%uI=U+/<BL4",
+    "count": 31496,
+    "expiry": "",
+    "gtin": "16524674695467",
+    "serial": "",
+    "sscc": "806141419715119404"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "00",
+    "37",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G142",
+   "input": "10fRkp?nF?4&iPz-F\u001d007061414133748435813777805\u001d0102031728694910",
+   "valid": true,
+   "want": {
+    "batch": "fRkp?nF?4&iPz-F",
+    "count": 77805,
+    "expiry": "",
+    "gtin": "02031728694910",
+    "serial": "",
+    "sscc": "706141413374843581"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G143",
+   "input": "(17)480531(37)451114",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 451114,
+    "expiry": "480531",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G144",
+   "input": "3726255\u001d17240905",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 26255,
+    "expiry": "240905",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "37",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G145",
+   "input": "(00)806141418909564273(37)16895(17)330308",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 16895,
+    "expiry": "330308",
+    "gtin": "",
+    "serial": "",
+    "sscc": "806141418909564273"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G146",
+   "input": "1743103100106141419269489665378066",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 8066,
+    "expiry": "431031",
+    "gtin": "",
+    "serial": "",
+    "sscc": "106141419269489665"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "37",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G147",
+   "input": "(01)14622566680941(37)43(17)720100",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 43,
+    "expiry": "720100",
+    "gtin": "14622566680941",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "37",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G148",
+   "input": "179711153748387805\u001d0158602031607004",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 48387805,
+    "expiry": "971115",
+    "gtin": "58602031607004",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "37",
+    "01",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G149",
+   "input": "(00)706141412874383061(37)79189197(01)72833392859713(17)300700",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 79189197,
+    "expiry": "300700",
+    "gtin": "72833392859713",
+    "serial": "",
+    "sscc": "706141412874383061"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "37",
+    "00",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G150",
+   "input": "0190576132823297378\u001d0030614141378114973517660505",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 8,
+    "expiry": "660505",
+    "gtin": "90576132823297",
+    "serial": "",
+    "sscc": "306141413781149735"
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "37",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G151",
+   "input": "(10)G9&!+sEi*cz>7A4P.:D(37)1637830(17)510731",
+   "valid": true,
+   "want": {
+    "batch": "G9&!+sEi*cz>7A4P.:D",
+    "count": 1637830,
+    "expiry": "510731",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "17",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G152",
+   "input": "37613\u001d1799030010_aPSj)%nN;",
+   "valid": true,
+   "want": {
+    "batch": "_aPSj)%nN;",
+    "count": 613,
+    "expiry": "990300",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00",
+    "10",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G153",
+   "input": "(17)200918(00)706141415431088805(10)K&d&q,Zx(37)297835",
+   "valid": true,
+   "want": {
+    "batch": "K&d&q,Zx",
+    "count": 297835,
+    "expiry": "200918",
+    "gtin": "",
+    "serial": "",
+    "sscc": "706141415431088805"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "10",
+    "00",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G154",
+   "input": "371\u001d10I%y'mcH**3f\u001d0040614141113318212317880831",
+   "valid": true,
+   "want": {
+    "batch": "I%y'mcH**3f",
+    "count": 1,
+    "expiry": "880831",
+    "gtin": "",
+    "serial": "",
+    "sscc": "406141411133182123"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "37",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G155",
+   "input": "(17)091031(37)633(10)g:e(01)00306878180487",
+   "valid": true,
+   "want": {
+    "batch": "g:e",
+    "count": 633,
+    "expiry": "091031",
+    "gtin": "00306878180487",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17",
+    "37",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G156",
+   "input": "10l2+8cT2&aa6\u001d177410173746\u001d0175450549761186",
+   "valid": true,
+   "want": {
+    "batch": "l2+8cT2&aa6",
+    "count": 46,
+    "expiry": "741017",
+    "gtin": "75450549761186",
+    "serial": "",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "17",
+    "01",
+    "37",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G157",
+   "input": "(10)ABe215ydnNpN;=7Eb<(17)180811(01)27255874473048(37)4(00)906141414082589475",
+   "valid": true,
+   "want": {
+    "batch": "ABe215ydnNpN;=7Eb<",
+    "count": 4,
+    "expiry": "180811",
+    "gtin": "27255874473048",
+    "serial": "",
+    "sscc": "906141414082589475"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "10",
+    "17",
+    "37",
+    "00"
+   ],
+   "form": "raw",
+   "id": "G158",
+   "input": "012276782902273710Z\u001d17650930374062408\u001d00506141411677071928",
+   "valid": true,
+   "want": {
+    "batch": "Z",
+    "count": 4062408,
+    "expiry": "650930",
+    "gtin": "22767829022737",
+    "serial": "",
+    "sscc": "506141411677071928"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G159",
+   "input": "(21)M*(37)74687",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 74687,
+    "expiry": "",
+    "gtin": "",
+    "serial": "M*",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G160",
+   "input": "37471\u001d21cw",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 471,
+    "expiry": "",
+    "gtin": "",
+    "serial": "cw",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G161",
+   "input": "(00)506141414214041125(21)N_a84AuP4MvQQ%R/0<(37)5222",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5222,
+    "expiry": "",
+    "gtin": "",
+    "serial": "N_a84AuP4MvQQ%R/0<",
+    "sscc": "506141414214041125"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "00",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G162",
+   "input": "21pU.a:P1'hTAiy1uJK='\u001d00206141417372435323376421",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 6421,
+    "expiry": "",
+    "gtin": "",
+    "serial": "pU.a:P1'hTAiy1uJK='",
+    "sscc": "206141417372435323"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "37",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G163",
+   "input": "(01)89585325890330(37)3520(21)1G*bsyPAzR*X!C3leQ/b",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 3520,
+    "expiry": "",
+    "gtin": "89585325890330",
+    "serial": "1G*bsyPAzR*X!C3leQ/b",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "37",
+    "01"
+   ],
+   "form": "raw",
+   "id": "G164",
+   "input": "21x4whAMw\u001d372\u001d0136524077076652",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 2,
+    "expiry": "",
+    "gtin": "36524077076652",
+    "serial": "x4whAMw",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "01",
+    "21",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G165",
+   "input": "(37)9(01)82913084626575(21)6UTgbZt-W33-q:MRwJ'(00)906141415915620525",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 9,
+    "expiry": "",
+    "gtin": "82913084626575",
+    "serial": "6UTgbZt-W33-q:MRwJ'",
+    "sscc": "906141415915620525"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "01",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G166",
+   "input": "0000614141786809579221KR\u001d0191356838813537371",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 1,
+    "expiry": "",
+    "gtin": "91356838813537",
+    "serial": "KR",
+    "sscc": "006141417868095792"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "10",
+    "21"
+   ],
+   "form": "hri",
+   "id": "G167",
+   "input": "(37)323644(10)vr*i0H(21)wp%x0okuTVs/OZZ",
+   "valid": true,
+   "want": {
+    "batch": "vr*i0H",
+    "count": 323644,
+    "expiry": "",
+    "gtin": "",
+    "serial": "wp%x0okuTVs/OZZ",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G168",
+   "input": "1048L.\u001d21wDp5V/+C:l,UuBS6Y\u001d3755650297",
+   "valid": true,
+   "want": {
+    "batch": "48L.",
+    "count": 55650297,
+    "expiry": "",
+    "gtin": "",
+    "serial": "wDp5V/+C:l,UuBS6Y",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "00",
+    "37",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G169",
+   "input": "(21)4s<pSST1BJ;T3e/r_pJ(00)606141411222638689(37)9(10)O",
+   "valid": true,
+   "want": {
+    "batch": "O",
+    "count": 9,
+    "expiry": "",
+    "gtin": "",
+    "serial": "4s<pSST1BJ;T3e/r_pJ",
+    "sscc": "606141411222638689"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "21",
+    "37",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G170",
+   "input": "0030614141717558568021HYAKw>+87\".\u001d37946135\u001d109+MN%On3vjepb",
+   "valid": true,
+   "want": {
+    "batch": "9+MN%On3vjepb",
+    "count": 946135,
+    "expiry": "",
+    "gtin": "",
+    "serial": "HYAKw>+87\".",
+    "sscc": "306141417175585680"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "21",
+    "37",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G171",
+   "input": "(01)41781235038811(21)NfvslaC8,CEh*.(37)4123(10)OeiLzT?1Wj??iA/6R",
+   "valid": true,
+   "want": {
+    "batch": "OeiLzT?1Wj??iA/6R",
+    "count": 4123,
+    "expiry": "",
+    "gtin": "41781235038811",
+    "serial": "NfvslaC8,CEh*.",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01",
+    "21",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G172",
+   "input": "10HX0DtU&z5Nf\u001d014651481021857621T%HRcg'<LmOIFDfq/Y<&\u001d379970738",
+   "valid": true,
+   "want": {
+    "batch": "HX0DtU&z5Nf",
+    "count": 9970738,
+    "expiry": "",
+    "gtin": "46514810218576",
+    "serial": "T%HRcg'<LmOIFDfq/Y<&",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "01",
+    "10",
+    "21",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G173",
+   "input": "(00)006141413206913315(01)93093811449366(10)g72&P'(21)'03Z%skM3+d(37)859166",
+   "valid": true,
+   "want": {
+    "batch": "g72&P'",
+    "count": 859166,
+    "expiry": "",
+    "gtin": "93093811449366",
+    "serial": "'03Z%skM3+d",
+    "sscc": "006141413206913315"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "37",
+    "01",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G174",
+   "input": "00306141410189382757107)F?n+!/vlI:c\"\u001d3779\u001d019227549756684621IW(2a*;be2G%:_W",
+   "valid": true,
+   "want": {
+    "batch": "7)F?n+!/vlI:c\"",
+    "count": 79,
+    "expiry": "",
+    "gtin": "92275497566846",
+    "serial": "IW(2a*;be2G%:_W",
+    "sscc": "306141410189382757"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "37",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G175",
+   "input": "(21)Q:gAxQ2f5=a*Doa:5(37)4(17)200930",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4,
+    "expiry": "200930",
+    "gtin": "",
+    "serial": "Q:gAxQ2f5=a*Doa:5",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G176",
+   "input": "21ZZUZQ/.I;\u001d1704063037830",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 830,
+    "expiry": "040630",
+    "gtin": "",
+    "serial": "ZZUZQ/.I;",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "21",
+    "37",
+    "00"
+   ],
+   "form": "hri",
+   "id": "G177",
+   "input": "(17)681130(21)Wa\"TZ:z(37)5(00)106141419966835451",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 5,
+    "expiry": "681130",
+    "gtin": "",
+    "serial": "Wa\"TZ:z",
+    "sscc": "106141419966835451"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "00",
+    "21",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G178",
+   "input": "37579\u001d0000614141168189982721:bBf2xVZg_&dqTKD\u001d17721100",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 579,
+    "expiry": "721100",
+    "gtin": "",
+    "serial": ":bBf2xVZg_&dqTKD",
+    "sscc": "006141411681899827"
+   }
+  },
+  {
+   "ais": [
+    "01",
+    "17",
+    "21",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G179",
+   "input": "(01)67473976646070(17)020400(21)<uyg?l;%3v:uwxg7(37)4",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4,
+    "expiry": "020400",
+    "gtin": "67473976646070",
+    "serial": "<uyg?l;%3v:uwxg7",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "37",
+    "01",
+    "17"
+   ],
+   "form": "raw",
+   "id": "G180",
+   "input": "21i>p3I\u001d3782804\u001d010602940421979917290331",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 82804,
+    "expiry": "290331",
+    "gtin": "06029404219799",
+    "serial": "i>p3I",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "00",
+    "37",
+    "21",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G181",
+   "input": "(17)870731(00)306141416805238965(37)93(21)!!11Wbj;%h9g(01)93551096892951",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 93,
+    "expiry": "870731",
+    "gtin": "93551096892951",
+    "serial": "!!11Wbj;%h9g",
+    "sscc": "306141416805238965"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "01",
+    "00",
+    "17",
+    "21"
+   ],
+   "form": "raw",
+   "id": "G182",
+   "input": "374883\u001d0104019029223389004061414112769523791740063021D(tZh",
+   "valid": true,
+   "want": {
+    "batch": "",
+    "count": 4883,
+    "expiry": "400630",
+    "gtin": "04019029223389",
+    "serial": "D(tZh",
+    "sscc": "406141411276952379"
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "21",
+    "10",
+    "17"
+   ],
+   "form": "hri",
+   "id": "G183",
+   "input": "(37)550154(21)o3800O<H(10)*39:!C1,>;(17)540300",
+   "valid": true,
+   "want": {
+    "batch": "*39:!C1,>;",
+    "count": 550154,
+    "expiry": "540300",
+    "gtin": "",
+    "serial": "o3800O<H",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "21",
+    "17",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G184",
+   "input": "10TSKHl\u001d21JUj),8Z;k\u001d17321200372122",
+   "valid": true,
+   "want": {
+    "batch": "TSKHl",
+    "count": 2122,
+    "expiry": "321200",
+    "gtin": "",
+    "serial": "JUj),8Z;k",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "00",
+    "17",
+    "10",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G185",
+   "input": "(21)QpF?s(00)306141413028909542(17)350531(10)i+(37)56039243",
+   "valid": true,
+   "want": {
+    "batch": "i+",
+    "count": 56039243,
+    "expiry": "350531",
+    "gtin": "",
+    "serial": "QpF?s",
+    "sscc": "306141413028909542"
+   }
+  },
+  {
+   "ais": [
+    "00",
+    "10",
+    "21",
+    "17",
+    "37"
+   ],
+   "form": "raw",
+   "id": "G186",
+   "input": "0020614141998654242810i.au8e\u001d21Odn<ibVmj=d\u001d172710003724435395",
+   "valid": true,
+   "want": {
+    "batch": "i.au8e",
+    "count": 24435395,
+    "expiry": "271000",
+    "gtin": "",
+    "serial": "Odn<ibVmj=d",
+    "sscc": "206141419986542428"
+   }
+  },
+  {
+   "ais": [
+    "17",
+    "37",
+    "21",
+    "10",
+    "01"
+   ],
+   "form": "hri",
+   "id": "G187",
+   "input": "(17)190629(37)99(21)HJ5&s.uCo+YXUU2M+2hZ(10)V>tR<QZimytLqYx\"Sz36(01)81048319568601",
+   "valid": true,
+   "want": {
+    "batch": "V>tR<QZimytLqYx\"Sz36",
+    "count": 99,
+    "expiry": "190629",
+    "gtin": "81048319568601",
+    "serial": "HJ5&s.uCo+YXUU2M+2hZ",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "37",
+    "17",
+    "21",
+    "01",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G188",
+   "input": "377998\u001d1706101321NNk\u001d010543370233983610eRFsGZ8*g",
+   "valid": true,
+   "want": {
+    "batch": "eRFsGZ8*g",
+    "count": 7998,
+    "expiry": "061013",
+    "gtin": "05433702339836",
+    "serial": "NNk",
+    "sscc": ""
+   }
+  },
+  {
+   "ais": [
+    "10",
+    "01",
+    "00",
+    "17",
+    "21",
+    "37"
+   ],
+   "form": "hri",
+   "id": "G189",
+   "input": "(10):e/V4HAu&Cy5zULZX:I1(01)67009865045312(00)306141418416388695(17)570400(21)-IoC!(37)4472",
+   "valid": true,
+   "want": {
+    "batch": ":e/V4HAu&Cy5zULZX:I1",
+    "count": 4472,
+    "expiry": "570400",
+    "gtin": "67009865045312",
+    "serial": "-IoC!",
+    "sscc": "306141418416388695"
+   }
+  },
+  {
+   "ais": [
+    "21",
+    "17",
+    "01",
+    "37",
+    "00",
+    "10"
+   ],
+   "form": "raw",
+   "id": "G190",
+   "input": "21X*\"'>&e'<q\u001d17320500015947282158884937436\u001d0000614141578718125110f",
+   "valid": true,
+   "want": {
+    "batch": "f",
+    "count": 436,
+    "expiry": "320500",
+    "gtin": "59472821588849",
+    "serial": "X*\"'>&e'<q",
+    "sscc": "006141415787181251"
+   }
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G191",
+   "input": "(17)261305",
+   "rule": "AI 17 month 13 (GS1 GenSpecs 7.12: MM 01-12)",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G192",
+   "input": "(17)260015",
+   "rule": "AI 17 month 00",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G193",
+   "input": "(17)260132",
+   "rule": "AI 17 day 32",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G194",
+   "input": "(17)260431",
+   "rule": "AI 17 31 April",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G195",
+   "input": "(17)280230",
+   "rule": "AI 17 30 February",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G196",
+   "input": "(17)270229",
+   "rule": "AI 17 29 February in a non-leap year",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G197",
+   "input": "(17)26013A",
+   "rule": "AI 17 not numeric",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "raw",
+   "id": "G198",
+   "input": "17261305",
+   "rule": "AI 17 raw month 13",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G199",
+   "input": "(10)LOT 7",
+   "rule": "AI 10 space is outside character set 82",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G200",
+   "input": "(10)LOT#7",
+   "rule": "AI 10 '#' is outside character set 82",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G201",
+   "input": "(21)SN@1",
+   "rule": "AI 21 '@' is outside character set 82",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G202",
+   "input": "(21)SN\u00e91",
+   "rule": "AI 21 non-ASCII",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "raw",
+   "id": "G203",
+   "input": "10LOT~7",
+   "rule": "AI 10 raw with '~'",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G204",
+   "input": "(10)A1(10)B2",
+   "rule": "AI 10 twice with different values (GenSpecs 4.14)",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G205",
+   "input": "(01)00614141000012(01)10614141000019",
+   "rule": "AI 01 twice with different values",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G206",
+   "input": "(01)00614141000013",
+   "rule": "GTIN check digit wrong",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G207",
+   "input": "(00)006141410123456780",
+   "rule": "SSCC check digit wrong",
+   "valid": false
+  },
+  {
+   "error": "value",
+   "form": "hri",
+   "id": "G208",
+   "input": "(37)5X",
+   "rule": "AI 37 not numeric",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "hri",
+   "id": "G209",
+   "input": "(01)0061414100001",
+   "rule": "AI 01 too short",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "hri",
+   "id": "G210",
+   "input": "(00)0061414101234567890",
+   "rule": "AI 00 too long",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "hri",
+   "id": "G211",
+   "input": "(10)ABCDEFGHIJKLMNOPQRSTU",
+   "rule": "AI 10 longer than 20",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "hri",
+   "id": "G212",
+   "input": "(30)123456789",
+   "rule": "AI 30 longer than 8",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "hri",
+   "id": "G213",
+   "input": "(10)(37)5",
+   "rule": "empty variable-length value",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "raw",
+   "id": "G214",
+   "input": "0100614141",
+   "rule": "raw fixed-length value truncated",
+   "valid": false
+  },
+  {
+   "error": "parse",
+   "form": "raw",
+   "id": "G215",
+   "input": "375\u001d1",
+   "rule": "raw identifier truncated",
+   "valid": false
+  },
+  {
+   "error": "unknown",
+   "form": "hri",
+   "id": "G216",
+   "input": "(99)123",
+   "rule": "unknown AI 99",
+   "valid": false
+  },
+  {
+   "error": "unknown",
+   "form": "raw",
+   "id": "G217",
+   "input": "0200614141000012",
+   "rule": "raw unknown AI 02",
+   "valid": false
+  },
+  {
+   "ais": [
+    "10",
+    "10"
+   ],
+   "form": "hri",
+   "id": "G218",
+   "input": "(10)LOT7(10)LOT7",
+   "valid": true,
+   "want": {
+    "batch": "LOT7",
+    "count": 0,
+    "expiry": "",
+    "gtin": "",
+    "serial": "",
+    "sscc": ""
+   }
+  }
+ ],
+ "source": "testdata/gen_sscc200.py (python3 -I), independent of the Go engine",
+ "sscc": [
+  {
+   "extension": 1,
+   "id": "S001",
+   "input": "106141411234567897",
+   "kind": "gs1-example",
+   "prefix": "0614141",
+   "serial": 123456789,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S002",
+   "input": "006141410123456789",
+   "kind": "ac-28.3-repo-example",
+   "prefix": "0614141",
+   "serial": 12345678,
+   "valid": true
+  },
+  {
+   "error": "format",
+   "id": "S003",
+   "input": "0061414101234567891",
+   "kind": "ac-28.3-prd-string",
+   "valid": false
+  },
+  {
+   "extension": 0,
+   "id": "S004",
+   "input": "030294000000000004",
+   "kind": "valid-prefix-6",
+   "prefix": "302940",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S005",
+   "input": "720747799999999990",
+   "kind": "valid-prefix-6",
+   "prefix": "207477",
+   "serial": 9999999999,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S006",
+   "input": "331465162853627495",
+   "kind": "valid-prefix-6",
+   "prefix": "314651",
+   "serial": 6285362749,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S007",
+   "input": "374122721117000006",
+   "kind": "valid-prefix-6",
+   "prefix": "741227",
+   "serial": 2111700000,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S008",
+   "input": "367193876690509504",
+   "kind": "valid-prefix-6",
+   "prefix": "671938",
+   "serial": 7669050950,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S009",
+   "input": "128309533661275757",
+   "kind": "valid-prefix-6",
+   "prefix": "283095",
+   "serial": 3366127575,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S010",
+   "input": "779443194384369856",
+   "kind": "valid-prefix-6",
+   "prefix": "794431",
+   "serial": 9438436985,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S011",
+   "input": "548514800082980734",
+   "kind": "valid-prefix-6",
+   "prefix": "485148",
+   "serial": 8298073,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S012",
+   "input": "834107548008315663",
+   "kind": "valid-prefix-6",
+   "prefix": "341075",
+   "serial": 4800831566,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S013",
+   "input": "504541387230426899",
+   "kind": "valid-prefix-6",
+   "prefix": "045413",
+   "serial": 8723042689,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S014",
+   "input": "863773094468423860",
+   "kind": "valid-prefix-6",
+   "prefix": "637730",
+   "serial": 9446842386,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S015",
+   "input": "714600098805285418",
+   "kind": "valid-prefix-6",
+   "prefix": "146000",
+   "serial": 9880528541,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S016",
+   "input": "042270708022617363",
+   "kind": "valid-prefix-6",
+   "prefix": "422707",
+   "serial": 802261736,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S017",
+   "input": "643798922278264946",
+   "kind": "valid-prefix-6",
+   "prefix": "437989",
+   "serial": 2227826494,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S018",
+   "input": "201770100000000000",
+   "kind": "valid-prefix-7",
+   "prefix": "0177010",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S019",
+   "input": "138167019999999992",
+   "kind": "valid-prefix-7",
+   "prefix": "3816701",
+   "serial": 999999999,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S020",
+   "input": "383261737909308311",
+   "kind": "valid-prefix-7",
+   "prefix": "8326173",
+   "serial": 790930831,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S021",
+   "input": "562680007981865560",
+   "kind": "valid-prefix-7",
+   "prefix": "6268000",
+   "serial": 798186556,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S022",
+   "input": "870037267664502810",
+   "kind": "valid-prefix-7",
+   "prefix": "7003726",
+   "serial": 766450281,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S023",
+   "input": "022660295207677430",
+   "kind": "valid-prefix-7",
+   "prefix": "2266029",
+   "serial": 520767743,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S024",
+   "input": "571272610591900339",
+   "kind": "valid-prefix-7",
+   "prefix": "7127261",
+   "serial": 59190033,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S025",
+   "input": "862968205763583398",
+   "kind": "valid-prefix-7",
+   "prefix": "6296820",
+   "serial": 576358339,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S026",
+   "input": "672556895031765461",
+   "kind": "valid-prefix-7",
+   "prefix": "7255689",
+   "serial": 503176546,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S027",
+   "input": "377685254507363030",
+   "kind": "valid-prefix-7",
+   "prefix": "7768525",
+   "serial": 450736303,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S028",
+   "input": "532696296070568909",
+   "kind": "valid-prefix-7",
+   "prefix": "3269629",
+   "serial": 607056890,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S029",
+   "input": "992110497772392688",
+   "kind": "valid-prefix-7",
+   "prefix": "9211049",
+   "serial": 777239268,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S030",
+   "input": "485152488695765744",
+   "kind": "valid-prefix-7",
+   "prefix": "8515248",
+   "serial": 869576574,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S031",
+   "input": "874639506976896553",
+   "kind": "valid-prefix-7",
+   "prefix": "7463950",
+   "serial": 697689655,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S032",
+   "input": "375025898000000001",
+   "kind": "valid-prefix-8",
+   "prefix": "75025898",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S033",
+   "input": "598418357999999998",
+   "kind": "valid-prefix-8",
+   "prefix": "98418357",
+   "serial": 99999999,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S034",
+   "input": "955967285280148584",
+   "kind": "valid-prefix-8",
+   "prefix": "55967285",
+   "serial": 28014858,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S035",
+   "input": "618119422186870378",
+   "kind": "valid-prefix-8",
+   "prefix": "18119422",
+   "serial": 18687037,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S036",
+   "input": "392704072011850924",
+   "kind": "valid-prefix-8",
+   "prefix": "92704072",
+   "serial": 1185092,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S037",
+   "input": "132526270974207885",
+   "kind": "valid-prefix-8",
+   "prefix": "32526270",
+   "serial": 97420788,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S038",
+   "input": "155327871157005184",
+   "kind": "valid-prefix-8",
+   "prefix": "55327871",
+   "serial": 15700518,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S039",
+   "input": "122736995350452579",
+   "kind": "valid-prefix-8",
+   "prefix": "22736995",
+   "serial": 35045257,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S040",
+   "input": "243237828686393598",
+   "kind": "valid-prefix-8",
+   "prefix": "43237828",
+   "serial": 68639359,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S041",
+   "input": "816755215281312067",
+   "kind": "valid-prefix-8",
+   "prefix": "16755215",
+   "serial": 28131206,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S042",
+   "input": "523737234165597629",
+   "kind": "valid-prefix-8",
+   "prefix": "23737234",
+   "serial": 16559762,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S043",
+   "input": "682186233694878762",
+   "kind": "valid-prefix-8",
+   "prefix": "82186233",
+   "serial": 69487876,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S044",
+   "input": "323961079633626361",
+   "kind": "valid-prefix-8",
+   "prefix": "23961079",
+   "serial": 63362636,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S045",
+   "input": "305907909390136699",
+   "kind": "valid-prefix-8",
+   "prefix": "05907909",
+   "serial": 39013669,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S046",
+   "input": "365128303600000001",
+   "kind": "valid-prefix-9",
+   "prefix": "651283036",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S047",
+   "input": "213919780999999990",
+   "kind": "valid-prefix-9",
+   "prefix": "139197809",
+   "serial": 9999999,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S048",
+   "input": "408324666689090704",
+   "kind": "valid-prefix-9",
+   "prefix": "083246666",
+   "serial": 8909070,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S049",
+   "input": "753544077668982003",
+   "kind": "valid-prefix-9",
+   "prefix": "535440776",
+   "serial": 6898200,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S050",
+   "input": "327554396933938973",
+   "kind": "valid-prefix-9",
+   "prefix": "275543969",
+   "serial": 3393897,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S051",
+   "input": "458121770832071325",
+   "kind": "valid-prefix-9",
+   "prefix": "581217708",
+   "serial": 3207132,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S052",
+   "input": "162177116357587302",
+   "kind": "valid-prefix-9",
+   "prefix": "621771163",
+   "serial": 5758730,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S053",
+   "input": "501918011490326589",
+   "kind": "valid-prefix-9",
+   "prefix": "019180114",
+   "serial": 9032658,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S054",
+   "input": "524296396794061201",
+   "kind": "valid-prefix-9",
+   "prefix": "242963967",
+   "serial": 9406120,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S055",
+   "input": "371524616366925060",
+   "kind": "valid-prefix-9",
+   "prefix": "715246163",
+   "serial": 6692506,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S056",
+   "input": "795954272019104308",
+   "kind": "valid-prefix-9",
+   "prefix": "959542720",
+   "serial": 1910430,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S057",
+   "input": "725156514645608694",
+   "kind": "valid-prefix-9",
+   "prefix": "251565146",
+   "serial": 4560869,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S058",
+   "input": "573567786709620211",
+   "kind": "valid-prefix-9",
+   "prefix": "735677867",
+   "serial": 962021,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S059",
+   "input": "416049847415961087",
+   "kind": "valid-prefix-9",
+   "prefix": "160498474",
+   "serial": 1596108,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S060",
+   "input": "094488806840000001",
+   "kind": "valid-prefix-10",
+   "prefix": "9448880684",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S061",
+   "input": "059344425179999990",
+   "kind": "valid-prefix-10",
+   "prefix": "5934442517",
+   "serial": 999999,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S062",
+   "input": "748026873488104091",
+   "kind": "valid-prefix-10",
+   "prefix": "4802687348",
+   "serial": 810409,
+   "valid": true
+  },
+  {
+   "extension": 0,
+   "id": "S063",
+   "input": "083562246624175061",
+   "kind": "valid-prefix-10",
+   "prefix": "8356224662",
+   "serial": 417506,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S064",
+   "input": "337678154212574513",
+   "kind": "valid-prefix-10",
+   "prefix": "3767815421",
+   "serial": 257451,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S065",
+   "input": "519117894771233769",
+   "kind": "valid-prefix-10",
+   "prefix": "1911789477",
+   "serial": 123376,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S066",
+   "input": "226238731082629173",
+   "kind": "valid-prefix-10",
+   "prefix": "2623873108",
+   "serial": 262917,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S067",
+   "input": "655692027560107151",
+   "kind": "valid-prefix-10",
+   "prefix": "5569202756",
+   "serial": 10715,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S068",
+   "input": "886459525564841460",
+   "kind": "valid-prefix-10",
+   "prefix": "8645952556",
+   "serial": 484146,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S069",
+   "input": "972505153956346965",
+   "kind": "valid-prefix-10",
+   "prefix": "7250515395",
+   "serial": 634696,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S070",
+   "input": "220864028453829988",
+   "kind": "valid-prefix-10",
+   "prefix": "2086402845",
+   "serial": 382998,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S071",
+   "input": "414930036548030466",
+   "kind": "valid-prefix-10",
+   "prefix": "1493003654",
+   "serial": 803046,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S072",
+   "input": "730321919385596359",
+   "kind": "valid-prefix-10",
+   "prefix": "3032191938",
+   "serial": 559635,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S073",
+   "input": "991569916428184750",
+   "kind": "valid-prefix-10",
+   "prefix": "9156991642",
+   "serial": 818475,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S074",
+   "input": "559936168315000005",
+   "kind": "valid-prefix-11",
+   "prefix": "59936168315",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S075",
+   "input": "476359187300999992",
+   "kind": "valid-prefix-11",
+   "prefix": "76359187300",
+   "serial": 99999,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S076",
+   "input": "848403968255099952",
+   "kind": "valid-prefix-11",
+   "prefix": "48403968255",
+   "serial": 9995,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S077",
+   "input": "800733444776254521",
+   "kind": "valid-prefix-11",
+   "prefix": "00733444776",
+   "serial": 25452,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S078",
+   "input": "842230768184727285",
+   "kind": "valid-prefix-11",
+   "prefix": "42230768184",
+   "serial": 72728,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S079",
+   "input": "981615366023453789",
+   "kind": "valid-prefix-11",
+   "prefix": "81615366023",
+   "serial": 45378,
+   "valid": true
+  },
+  {
+   "extension": 8,
+   "id": "S080",
+   "input": "877677974536857930",
+   "kind": "valid-prefix-11",
+   "prefix": "77677974536",
+   "serial": 85793,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S081",
+   "input": "120926339173988605",
+   "kind": "valid-prefix-11",
+   "prefix": "20926339173",
+   "serial": 98860,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S082",
+   "input": "317460281579236893",
+   "kind": "valid-prefix-11",
+   "prefix": "17460281579",
+   "serial": 23689,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S083",
+   "input": "366585656934649049",
+   "kind": "valid-prefix-11",
+   "prefix": "66585656934",
+   "serial": 64904,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S084",
+   "input": "200946729072074272",
+   "kind": "valid-prefix-11",
+   "prefix": "00946729072",
+   "serial": 7427,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S085",
+   "input": "161999420435275317",
+   "kind": "valid-prefix-11",
+   "prefix": "61999420435",
+   "serial": 27531,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S086",
+   "input": "648415689550291056",
+   "kind": "valid-prefix-11",
+   "prefix": "48415689550",
+   "serial": 29105,
+   "valid": true
+  },
+  {
+   "extension": 7,
+   "id": "S087",
+   "input": "749293608671879343",
+   "kind": "valid-prefix-11",
+   "prefix": "49293608671",
+   "serial": 87934,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S088",
+   "input": "198047942920900006",
+   "kind": "valid-prefix-12",
+   "prefix": "980479429209",
+   "serial": 0,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S089",
+   "input": "364859799068399997",
+   "kind": "valid-prefix-12",
+   "prefix": "648597990683",
+   "serial": 9999,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S090",
+   "input": "510805191312487632",
+   "kind": "valid-prefix-12",
+   "prefix": "108051913124",
+   "serial": 8763,
+   "valid": true
+  },
+  {
+   "extension": 3,
+   "id": "S091",
+   "input": "312425880144893602",
+   "kind": "valid-prefix-12",
+   "prefix": "124258801448",
+   "serial": 9360,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S092",
+   "input": "441074932286675244",
+   "kind": "valid-prefix-12",
+   "prefix": "410749322866",
+   "serial": 7524,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S093",
+   "input": "103404626214178825",
+   "kind": "valid-prefix-12",
+   "prefix": "034046262141",
+   "serial": 7882,
+   "valid": true
+  },
+  {
+   "extension": 9,
+   "id": "S094",
+   "input": "962368832659369977",
+   "kind": "valid-prefix-12",
+   "prefix": "623688326593",
+   "serial": 6997,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S095",
+   "input": "590065090117801310",
+   "kind": "valid-prefix-12",
+   "prefix": "900650901178",
+   "serial": 131,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S096",
+   "input": "639560237304405234",
+   "kind": "valid-prefix-12",
+   "prefix": "395602373044",
+   "serial": 523,
+   "valid": true
+  },
+  {
+   "extension": 2,
+   "id": "S097",
+   "input": "220145548069992743",
+   "kind": "valid-prefix-12",
+   "prefix": "201455480699",
+   "serial": 9274,
+   "valid": true
+  },
+  {
+   "extension": 1,
+   "id": "S098",
+   "input": "199176097468715235",
+   "kind": "valid-prefix-12",
+   "prefix": "991760974687",
+   "serial": 1523,
+   "valid": true
+  },
+  {
+   "extension": 5,
+   "id": "S099",
+   "input": "562560412954030345",
+   "kind": "valid-prefix-12",
+   "prefix": "625604129540",
+   "serial": 3034,
+   "valid": true
+  },
+  {
+   "extension": 4,
+   "id": "S100",
+   "input": "453724624955828839",
+   "kind": "valid-prefix-12",
+   "prefix": "537246249558",
+   "serial": 2883,
+   "valid": true
+  },
+  {
+   "extension": 6,
+   "id": "S101",
+   "input": "689849716198761095",
+   "kind": "valid-prefix-12",
+   "prefix": "898497161987",
+   "serial": 6109,
+   "valid": true
+  },
+  {
+   "error": "check",
+   "id": "S102",
+   "input": "138167019999999996",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S103",
+   "input": "199176097768715235",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S104",
+   "input": "200996729072074272",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S105",
+   "input": "220145548069992443",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S106",
+   "input": "042270708022617863",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S107",
+   "input": "367193886690509504",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S108",
+   "input": "542560412954030345",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S109",
+   "input": "454121770832071325",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S110",
+   "input": "138167019099999992",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S111",
+   "input": "327554396933930973",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S112",
+   "input": "163404626214178825",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S113",
+   "input": "562680207981865560",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S114",
+   "input": "800733494776254521",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S115",
+   "input": "749213608671879343",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S116",
+   "input": "161999420235275317",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S117",
+   "input": "725156514045608694",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S118",
+   "input": "414930036545030466",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S119",
+   "input": "071524616366925060",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S120",
+   "input": "370122721117000006",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S121",
+   "input": "504547387230426899",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S122",
+   "input": "715600098805285418",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S123",
+   "input": "532696298070568909",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S124",
+   "input": "200966729072074272",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S125",
+   "input": "870037267664592810",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S126",
+   "input": "718026873488104091",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S127",
+   "input": "962366832659369977",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S128",
+   "input": "643798922228264946",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S129",
+   "input": "485152480695765744",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S130",
+   "input": "886459525564841400",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S131",
+   "input": "877677974536857910",
+   "kind": "substitution",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S132",
+   "input": "672556859031765461",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S133",
+   "input": "327553496933938973",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S134",
+   "input": "337671854212574513",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S135",
+   "input": "161999240435275317",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S136",
+   "input": "059344421579999990",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S137",
+   "input": "331465162835627495",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S138",
+   "input": "981615366023457389",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S139",
+   "input": "981651366023453789",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S140",
+   "input": "684415689550291056",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S141",
+   "input": "371422721117000006",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S142",
+   "input": "863773904468423860",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S143",
+   "input": "476395187300999992",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S144",
+   "input": "504543187230426899",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S145",
+   "input": "870037266764502810",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "id": "S146",
+   "input": "383216737909308311",
+   "kind": "adjacent-transposition",
+   "valid": true
+  },
+  {
+   "error": "check",
+   "id": "S147",
+   "input": "414390036548030466",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S148",
+   "input": "573544077668982003",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S149",
+   "input": "648415689550921056",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "id": "S150",
+   "input": "366585656934694049",
+   "kind": "adjacent-transposition",
+   "valid": true
+  },
+  {
+   "error": "check",
+   "id": "S151",
+   "input": "132522670974207885",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S152",
+   "input": "532696296070586909",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S153",
+   "input": "598418357999999989",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "id": "S154",
+   "input": "648415689505291056",
+   "kind": "adjacent-transposition",
+   "valid": true
+  },
+  {
+   "error": "check",
+   "id": "S155",
+   "input": "317460281759236893",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S156",
+   "input": "842237068184727285",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S157",
+   "input": "795954272019104380",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S158",
+   "input": "559963168315000005",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S159",
+   "input": "312425880414893602",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S160",
+   "input": "212736995350452579",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S161",
+   "input": "383261737903908311",
+   "kind": "adjacent-transposition",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S162",
+   "input": "87767797453685793",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S163",
+   "input": "84840396825509995",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S164",
+   "input": "72074779999999999",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S165",
+   "input": "37502589800000000",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S166",
+   "input": "19917609746871523",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S167",
+   "input": "16199942043527531",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S168",
+   "input": "57356778670962021",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S169",
+   "input": "88645952556484146",
+   "kind": "truncated-17",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S170",
+   "input": "0302940000000000044",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S171",
+   "input": "7535440776689820031",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S172",
+   "input": "7794431943843698560",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S173",
+   "input": "8167552152813120678",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S174",
+   "input": "8422307681847272857",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S175",
+   "input": "3174602815792368936",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S176",
+   "input": "6484156895502910562",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S177",
+   "input": "2262387310826291736",
+   "kind": "extended-19",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S178",
+   "input": "3376781542A2574513",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S179",
+   "input": "7251 6514645608694",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S180",
+   "input": "31746028157-236893",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S181",
+   "input": "103404626O14178825",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S182",
+   "input": "x41074932286675244",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S183",
+   "input": "15532787115\u0660005184",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S184",
+   "input": "1283095.3661275757",
+   "kind": "foreign-character",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S185",
+   "input": "",
+   "kind": "empty",
+   "valid": false
+  },
+  {
+   "id": "S186",
+   "input": "000000000000000000",
+   "kind": "all-zeros",
+   "valid": true
+  },
+  {
+   "error": "check",
+   "id": "S187",
+   "input": "000000000000000001",
+   "kind": "all-zeros-bad-check",
+   "valid": false
+  },
+  {
+   "error": "format",
+   "id": "S188",
+   "input": "(00)059344425179999990",
+   "kind": "hri-with-ai",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S189",
+   "input": "682186233694878763",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S190",
+   "input": "590065090117801311",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S191",
+   "input": "795954272019104309",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S192",
+   "input": "510805191312487633",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S193",
+   "input": "213919780999999991",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S194",
+   "input": "862968205763583399",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S195",
+   "input": "331465162853627496",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S196",
+   "input": "323961079633626362",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S197",
+   "input": "374122721117000007",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S198",
+   "input": "981615366023453780",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S199",
+   "input": "748026873488104092",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  },
+  {
+   "error": "check",
+   "id": "S200",
+   "input": "730321919385596350",
+   "kind": "check-digit-off-by-one",
+   "valid": false
+  }
+ ]
+}

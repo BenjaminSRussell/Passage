@@ -41,6 +41,13 @@ type OnHandFilter struct {
 	// dimensions (FR-16.17, FR-16.20).
 	Owner   string
 	Segment string
+	// AsOf (YYYY-MM-DD, empty for now) replays the ledger up to that date:
+	// physical quantity, posted value, the blocked quantity and the negative
+	// flag are answered. Availability and reservations are not replayed (a
+	// reservation record moves reserved stock without a transaction), so
+	// AvailPhysical, AvailOrdered and ReservedPhysical are left zero and the
+	// API omits them.
+	AsOf    string
 	GroupBy []string
 	Limit   int
 }
@@ -50,7 +57,50 @@ type OnHandFilter struct {
 type OnHandResult struct {
 	Rows      []OnHandRow
 	Truncated bool
+	// AsOf echoes the filter date when the rows are a date replay.
+	AsOf string
 }
+
+// asOfSource replays inventory_transaction up to the date $8 into the column
+// layout of on_hand. Each transaction counts at the status it held on the date:
+// a transaction registered or moved through transactions:apply has status
+// change rows, and its status on the date is the target of the last change
+// dated on or before it (none: registered later, so it is left out); a
+// transaction without history (journals, blockings, transfers, consignment)
+// counts at its current status from its physical date. A transaction whose
+// first recorded change is a move (not CREATE) existed before it, at that
+// move's from-status. Physical quantity follows FR-16.3: financial statuses
+// count their signed quantity, received and registered add, deducted and
+// picked subtract; expected statuses (ordered, arrived, on order, reserved)
+// add nothing to it. Posted value counts transactions at a financial status
+// whose financial date (physical date when none) is on or before the date.
+// Rows are summed per projection row, in the row's currency, so the negative
+// flag and the currency split are the live projection's.
+const asOfSource = `(select t.tenant_id, t.legal_entity_id, t.product_id, t.dimension_set_hash, oh.currency,
+  sum(case when s.status in ('SOLD', 'PURCHASED') then t.qty
+           when s.status in ('RECEIVED', 'REGISTERED') then abs(t.qty)
+           when s.status in ('DEDUCTED', 'PICKED') then -abs(t.qty)
+           else 0 end) as posted_qty,
+  sum(case when s.status in ('SOLD', 'PURCHASED') and coalesce(t.financial_date, t.physical_date) <= $8::date
+           then coalesce(t.cost_amount_posted, 0) else 0 end) as posted_value,
+  0::numeric as received, 0::numeric as registered, 0::numeric as arrived, 0::numeric as ordered, 0::numeric as deducted,
+  0::numeric as picked, 0::numeric as reserved_physical, 0::numeric as reserved_ordered, 0::numeric as on_order
+  from inventory_transaction t
+  join on_hand oh on oh.tenant_id = t.tenant_id and oh.legal_entity_id = t.legal_entity_id
+    and oh.product_id = t.product_id and oh.dimension_set_hash = t.dimension_set_hash
+  left join lateral (select c.to_status from inventory_transaction_status_change c
+    where c.tenant_id = t.tenant_id and c.transaction_id = t.id and c.status_date <= $8::date
+    order by c.status_date desc, c.occurred_at desc, c.id desc limit 1) last_change on true
+  left join lateral (select c.command, c.from_status from inventory_transaction_status_change c
+    where c.tenant_id = t.tenant_id and c.transaction_id = t.id
+    order by c.status_date, c.occurred_at, c.id limit 1) first_change on true
+  cross join lateral (select case
+    when last_change.to_status is not null then last_change.to_status
+    when t.physical_date > $8::date then null
+    when first_change.command is null then coalesce(t.issue_status, t.receipt_status)
+    else first_change.from_status end as status) s
+  where t.tenant_id = $1 and s.status is not null
+  group by t.tenant_id, t.legal_entity_id, t.product_id, t.dimension_set_hash, oh.currency)`
 
 // OnHandRow is one aggregated line of the on-hand inquiry.
 type OnHandRow struct {
@@ -114,17 +164,25 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		"coalesce(sum("+phys+") filter (where "+restricted+"), 0)::text",
 		"bool_or(("+phys+") < 0)",
 	)
-	q := fmt.Sprintf(`select %s from on_hand o
+	source, asOf := "on_hand", f.AsOf
+	if asOf != "" {
+		source = asOfSource
+	}
+	q := fmt.Sprintf(`select %s from %s o
 		join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and ($2 = '' or o.product_id::text = $2) and ($3 = '' or d.dims->>'site' = $3)
 		and ($4 = '' or d.dims->>'warehouse' = $4) and ($5 = '' or d.dims->>'batch' = $5)
 		and ($6 = '' or d.dims->>'owner' = $6) and ($7 = '' or d.dims->>'segment' = $7)
-		group by %s order by %s limit %d`, strings.Join(selects, ", "), strings.Join(positions, ", "), strings.Join(positions, ", "), limit+1)
+		group by %s order by %s limit %d`, strings.Join(selects, ", "), source, strings.Join(positions, ", "), strings.Join(positions, ", "), limit+1)
 
 	p, _ := tenant.FromContext(ctx)
 	out := []OnHandRow{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, q, p.TenantID, f.ProductID, f.SiteID, f.WarehouseID, f.BatchID, f.Owner, f.Segment)
+		args := []any{p.TenantID, f.ProductID, f.SiteID, f.WarehouseID, f.BatchID, f.Owner, f.Segment}
+		if asOf != "" {
+			args = append(args, asOf)
+		}
+		rows, err := tx.Query(ctx, q, args...)
 		if err != nil {
 			return err
 		}
@@ -145,6 +203,9 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 				AvailPhysical: decimal.RequireFromString(avail), AvailOrdered: decimal.RequireFromString(ordered),
 				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), Blocked: decimal.RequireFromString(blocked),
 				Currency: currency, Negative: negative}
+			if asOf != "" {
+				r.AvailPhysical, r.AvailOrdered, r.ReservedPhysical = decimal.Zero, decimal.Zero, decimal.Zero
+			}
 			for i, name := range groups {
 				r.Group[name] = g[i]
 			}
@@ -155,7 +216,7 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 	if err != nil {
 		return OnHandResult{}, err
 	}
-	res := OnHandResult{Rows: out}
+	res := OnHandResult{Rows: out, AsOf: asOf}
 	if len(out) > limit {
 		res.Rows, res.Truncated = out[:limit], true
 	}

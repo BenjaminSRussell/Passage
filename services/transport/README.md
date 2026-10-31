@@ -67,7 +67,7 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 |---|---|---|---|
 | POST | /v1/transport/loads/{id}:tender | TMS_TENDER | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
 | GET | /v1/transport/tenders | TMS_TENDER | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
-| POST | /v1/transport/tenders:expire | TMS_TENDER | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call) |
+| POST | /v1/transport/tenders:expire | TMS_TENDER | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
 | GET | /v1/transport/tenders/{id} | TMS_TENDER | One tender with its attempts |
 | POST | /v1/transport/tenders/{id}:respond | TMS_CARRIER_RESPOND | `{carrierId, accept}`; late is TMS-0105, wrong carrier TMS-0113; the same response again returns the tender unchanged |
 | POST | /v1/transport/tracking-events | TMS_TRACK_INGEST | EDI 214 codes X3, AF, X1, D1; source + ref is the idempotency key (201 stored, 200 replay with `Idempotent-Replayed: true`) |
@@ -198,7 +198,8 @@ go test ./internal/store/
   lane and zone lookup with `*` wildcards and the most specific row winning; break bands in
   kg, pallets, containers, per shipment, km or miles (DISTANCE basis); the next-break
   deficit rule on WEIGHT_BREAK cards; dimensional weight (divisor per card, default 5000
-  cm³/kg); minimum charge; flat or percent accessorials; fuel surcharge percent of base;
+  cm³/kg); chargeable weight and miles are rounded to 0.01 before the band lookup, as the
+  trace shows them; minimum charge; flat or percent accessorials; fuel surcharge percent of base;
   each charge rounded to cents half-up; total = Σ charges; explain trace with the
   chargeable weight, base, weight-break, minimum, accessorial and fuel steps.
 - BR-34.10: a service with no card valid on the ship date yields one `NO_VALID_RATE_CARD`
@@ -209,7 +210,8 @@ go test ./internal/store/
   invoice numbers per carrier are TMS-0108; a bill takes one invoice (TMS-0111) from its
   own carrier in its own currency (TMS-0112). Tolerance per charge: the smaller of $5.00
   and 2 % of the expected amount, so a charge must pass both limits (this is what makes
-  AC-34.4's $5.50 on $412.50 a variance).
+  AC-34.4's $5.50 on $412.50 a variance). The 2 % is exact, not rounded to cents: on
+  $123.45 it is $2.469, so $2.47 over is a variance.
 - BR-34.6 landed-cost allocation by weight, volume, value, quantity or equal split per
   voyage cost line, shares rounded to cents with the residual on the highest-value line
   (ties: lowest line number); the receipt-line totals equal the voyage cost total to the
@@ -333,3 +335,34 @@ Each is written to the outbox in the transaction that makes the change.
 
 No new third-party dependencies beyond the platform module and what it pulls in
 (chi, pgx/v5, shopspring/decimal, pgregory.net/rapid for tests).
+
+## Legal-entity scope (#241)
+
+`load`, `freight_bill`, `carrier_invoice`, `gate_visit` and `goods_in_transit_order`
+carry a nullable `legal_entity_id` (migration 0006) with a RESTRICTIVE legal-entity
+policy; `load_shipment`, `dg_check`, `screening_hold`, `freight_bill_decision`,
+`gate_event` and `goods_in_transit_line` follow their parent, and `tender` and
+`tracking_event` follow their load (migration 0007). A new load, goods-in-transit
+order, or invoice or visit without a parent takes `legalEntityId` from the request
+(default: the caller's single entity); a caller scoped to several entities or to all
+of them must send it (422). A freight bill, gate visit with a load, and matched
+invoice inherit the entity of the load or bill they reference, and `legalEntityId`
+is then an assertion (422 on mismatch). Tendering, tracking and billing against a
+load the caller cannot see is 404, never a pass through the child gates. A row with
+no entity is visible only to all-entity callers.
+
+### Voyages, folios and route plans (#292)
+
+| Table | Decision | Owner of a new row |
+|---|---|---|
+| `voyage` | entity-specific root (migration 0008) | `legalEntityId` on the request, default the caller's single entity (422 for several or all; 403 outside the scope) |
+| voyage cost lines, folios, legs, containers, receipt lines | JSON documents inside the `voyage` row, so they follow it; there are no tables to scope | the voyage's |
+| `goods_in_transit_order` on a voyage | already scoped (0006); now takes the voyage's entity, and `legalEntityId` is an assertion (422 on mismatch) | the voyage's |
+| `route_plan` | entity-specific root (migration 0008) | `legalEntityId` on the optimize request, same rules as a voyage |
+| `rate_card` | stays tenant-level: negotiated carrier rates are shared by every entity of the tenant when rating | n/a |
+
+A voyage or goods-in-transit order on a voyage the caller cannot see is 404. The
+route-plan request hash (which excludes `legalEntityId`) is the idempotency key within
+one legal entity: two entities that send the same request each get their own plan.
+A voyage `Idempotency-Key` held by another entity's voyage is 422
+`idempotency_key_reuse`, not a replay.

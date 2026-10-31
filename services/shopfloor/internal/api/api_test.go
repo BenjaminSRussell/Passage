@@ -41,6 +41,16 @@ type fakeStore struct {
 	days       []store.WorkerDay
 	dayFilter  store.DayFilter
 	bundleRead string
+	corrected  []domain.CorrectionRequest
+	correctErr error
+	revised    *store.PayCalculation
+	revisedWhy string
+	// paySetup is what LoadPaySetup returns; the setup calls record their input.
+	paySetup      domain.PaySetup
+	profileIn     *store.TimeProfileInput
+	agreementIn   *store.PayAgreementInput
+	updateVersion int
+	assigned      *assignRequest
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
@@ -103,6 +113,28 @@ func (f *fakeStore) ApprovePay(_ context.Context, workerID, from, to, _ string, 
 	f.approved = append(f.approved, workerID)
 	return store.ApproveResult{WorkerID: workerID, From: from, To: to,
 		Days: []store.ApprovedDay{{WorkDate: "2026-10-20", Status: "approved", NewlyApproved: true, PayLines: []store.PayLine{}}}}, nil
+}
+
+func (f *fakeStore) CorrectRegistration(_ context.Context, id string, req domain.CorrectionRequest, by string, _ store.Idem) (store.Correction, error) {
+	if f.correctErr != nil {
+		return store.Correction{}, f.correctErr
+	}
+	f.corrected = append(f.corrected, req)
+	start := time.Date(2026, 10, 20, 7, 0, 0, 0, time.UTC)
+	if req.StartedAt != nil {
+		start = *req.StartedAt
+	}
+	return store.Correction{ID: regID, RegistrationID: id, WorkerID: workerID, Reason: req.Reason, NewStartedAt: start, CorrectedBy: by}, nil
+}
+
+func (f *fakeStore) ListCorrections(context.Context, string, time.Time, time.Time, int) ([]store.Correction, error) {
+	return []store.Correction{}, nil
+}
+
+func (f *fakeStore) RevisePay(_ context.Context, calc store.PayCalculation, reason, _ string, _ store.Idem) (store.RevisionResult, error) {
+	f.revised, f.revisedWhy = &calc, reason
+	return store.RevisionResult{WorkerID: calc.WorkerID, From: calc.FromDate, To: calc.ToDate, Reason: reason,
+		Days: []store.RevisedDay{{WorkDate: calc.FromDate, Status: "approved", Revision: 1, Changed: true, ReversedLines: []store.PayLine{}, AddedLines: []store.PayLine{}}}}, nil
 }
 
 func (f *fakeStore) ListWorkerDays(_ context.Context, filter store.DayFilter) ([]store.WorkerDay, error) {

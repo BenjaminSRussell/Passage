@@ -25,7 +25,6 @@ export interface InvoiceDraft {
   postingDate: string;
   currency: string;
   ledgerId: string;
-  fiscalPeriodId: string;
   lines: InvoiceLineDraft[];
 }
 
@@ -41,14 +40,13 @@ export const emptyInvoice: InvoiceDraft = {
   postingDate: "",
   currency: "USD",
   ledgerId: "",
-  fiscalPeriodId: "",
   lines: [emptyInvoiceLine],
 };
 
 /** Client checks that mirror POST /invoices:post; the service has the last word. */
 export function validateInvoice(v: InvoiceDraft): Errors {
   const errors: Errors = {};
-  for (const key of ["vendorId", "legalEntityId", "ledgerId", "fiscalPeriodId"] as const) {
+  for (const key of ["vendorId", "legalEntityId", "ledgerId"] as const) {
     if (!UUID.test(v[key])) errors[key] = "Enter a UUID.";
   }
   if (v.invoiceNumber.trim() === "" || v.invoiceNumber.trim().length > 64) errors.invoiceNumber = "Enter an invoice number of up to 64 characters.";
@@ -76,7 +74,6 @@ export function toInvoiceInput(v: InvoiceDraft): InvoiceInput {
     postingDate: v.postingDate,
     currency: v.currency,
     ledgerId: v.ledgerId,
-    fiscalPeriodId: v.fiscalPeriodId,
     lines: v.lines.map((l) => ({ receiptId: l.receiptId, receiptLineNo: Number(l.receiptLineNo), qty: l.qty.trim(), unitPrice: l.unitPrice.trim(), standardCost: l.standardCost })),
   };
 }
@@ -165,10 +162,9 @@ export function PostInvoicePage() {
           {text("legalEntityId", "Legal entity ID", { mono: true })}
           {text("invoiceNumber", "Invoice number", { hint: "Unique per vendor, ignoring case." })}
           {text("invoiceDate", "Invoice date", { type: "date" })}
-          {text("postingDate", "Posting date", { type: "date", hint: "Must fall in an open AP period." })}
+          {text("postingDate", "Posting date", { type: "date", hint: "Sets the fiscal period; it must be an open AP period." })}
           {text("currency", "Currency", { hint: "Must match the receipt currency." })}
           {text("ledgerId", "Ledger ID", { mono: true })}
-          {text("fiscalPeriodId", "Fiscal period ID", { mono: true })}
           {errors.lines ? (
             <div className={styles.formActions}>
               <Alert tone="danger" live="alert">

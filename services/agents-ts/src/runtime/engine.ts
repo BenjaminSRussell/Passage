@@ -1,4 +1,8 @@
-import { buildActionRecord, type ActionRecord, type Decision } from "../domain/audit.js";
+import {
+  buildActionRecord,
+  type ActionRecord,
+  type Decision,
+} from "../domain/audit.js";
 import { selfApprovalBlocked, canCallTool } from "../domain/authz.js";
 import {
   addUsage,
@@ -10,7 +14,11 @@ import {
   type TokenBudget,
 } from "../domain/budget.js";
 import type { Money } from "../domain/money.js";
-import { decideDisposition, validatePolicy, type ModePolicy } from "../domain/policy.js";
+import {
+  decideDisposition,
+  validatePolicy,
+  type ModePolicy,
+} from "../domain/policy.js";
 import type { AgentVersion } from "../domain/registry.js";
 import { assertNoPii, Pseudonymizer } from "../domain/redaction.js";
 import { isTerminal, transition, type RunStatus } from "../domain/run.js";
@@ -38,7 +46,11 @@ export interface ModelResponse {
 
 /** Provider layer (FR-47.13). Only pseudonymized text reaches this port. */
 export interface ModelProvider {
-  complete(req: { system: string; user: string; allowedTools: readonly string[] }): Promise<ModelResponse>;
+  complete(req: {
+    system: string;
+    user: string;
+    allowedTools: readonly string[];
+  }): Promise<ModelResponse>;
 }
 
 export interface ToolDescriptor {
@@ -146,19 +158,36 @@ export interface RunResult {
  * This slice runs one model turn that yields one proposal; the multi-step loop
  * of read-tool calls before the proposal is a later slice (NOT-IMPLEMENTED.md).
  */
-export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResult> {
+const UNAUDITABLE_INPUT = '{"withheld":"AGT-0210"}';
+
+export async function runAgent(
+  deps: RunDeps,
+  req: RunRequest,
+): Promise<RunResult> {
   if (deps.killSwitch.isHalted(req.tenantId)) {
-    throw new AgentError("AGT-0201", "agent runs are halted by the kill switch");
+    throw new AgentError(
+      "AGT-0201",
+      "agent runs are halted by the kill switch",
+    );
   }
   assertCanStartRun(req.budget);
   if (!req.evalPassed) {
-    throw new AgentError("AGT-0204", `agent ${req.agent.agentId} v${req.agent.version} has no passing evaluation`);
+    throw new AgentError(
+      "AGT-0204",
+      `agent ${req.agent.agentId} v${req.agent.version} has no passing evaluation`,
+    );
   }
-  if (req.policy.mode === "OFF") throw new Error(`agent ${req.agent.agentId} is OFF for this legal entity`);
+  if (req.policy.mode === "OFF")
+    throw new Error(`agent ${req.agent.agentId} is OFF for this legal entity`);
   const policyErrors = validatePolicy(req.policy);
-  if (policyErrors.length > 0) throw new Error(`invalid agent policy: ${policyErrors.join("; ")}`);
+  if (policyErrors.length > 0)
+    throw new Error(`invalid agent policy: ${policyErrors.join("; ")}`);
 
-  const pseudo = new Pseudonymizer(req.tenantId, deps.pseudonymTtlMs, deps.nowMs);
+  const pseudo = new Pseudonymizer(
+    req.tenantId,
+    deps.pseudonymTtlMs,
+    deps.nowMs,
+  );
   const actions: ActionRecord[] = [];
   let status: RunStatus = "PLANNING";
   let code: string | undefined;
@@ -200,12 +229,13 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     decision: Decision,
     approverUserId: string | null,
     committedEntityRef: string | null = null,
+    why?: string,
   ): void => {
-    seq += 1;
+    // seq advances only when the row is built, so a refused row leaves no gap.
     actions.push(
       buildActionRecord({
         runId: req.runId,
-        seq,
+        seq: seq + 1,
         toolName: tool,
         inputRedacted,
         outputRedacted: pseudo.redact(JSON.stringify(output) ?? "null"),
@@ -213,15 +243,52 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
         decision,
         decidedAt: deps.now(),
         committedEntityRef,
+        ...(why !== undefined ? { reason: why } : {}),
       }),
     );
+    seq += 1;
+  };
+  // AC-47.3: once the model has proposed an action, every way out of the run
+  // leaves exactly one action row for it. `pending` holds what that row must
+  // say if the run ends before an explicit record (kill switch, a port that
+  // throws): DENIED with no approver until a decision exists, then the
+  // decision and its approver, so a human approval is never lost.
+  let pending:
+    | {
+        tool: string;
+        inputRedacted: string;
+        decision: Decision;
+        approver: string | null;
+      }
+    | undefined;
+  // Set once the tool call has committed, so a row written after that names the commit.
+  let committed: { ref: string | null } | undefined;
+  const closePending = (output: unknown, why: string): void => {
+    if (pending === undefined || actions.length > 0) return;
+    try {
+      record(
+        pending.tool,
+        pending.inputRedacted,
+        output,
+        pending.decision,
+        pending.approver,
+        committed?.ref ?? null,
+        why,
+      );
+    } catch (err) {
+      if (!(err instanceof AgentError && err.code === "AGT-0210")) throw err;
+    }
+  };
+  const killed = (why: string): RunResult => {
+    closePending({ killed: why }, "KILLED");
+    return finish("KILLED", undefined, why);
   };
 
   try {
     const prompt = pseudo.redact(req.prompt);
     assertNoPii(prompt);
     // AC-47.6: once halted, no provider call is made at all, not only no tool call.
-    if (halted()) return finish("KILLED", undefined, "kill switch activated");
+    if (halted()) return killed("kill switch activated");
     const response = await deps.provider.complete({
       system: req.agent.systemPrompt,
       user: prompt,
@@ -236,31 +303,57 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     tokensIn += usage.tokensIn;
     tokensOut += usage.tokensOut;
     // Tokens spent count against the budget even when the run then breaks its cap.
-    budget = addUsage(budget, { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated });
+    budget = addUsage(budget, {
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      estimated,
+    });
     assertRunWithinCap(tokensIn + tokensOut, req.runTokenCap);
     displayText = pseudo.restore(response.text);
     moveTo("ACTING");
 
     const p = response.proposal;
     if (!p) return finish("FAILED", undefined, "model returned no proposal");
-    if (halted()) return finish("KILLED", undefined, "kill switch activated");
-
     const inputRedacted = pseudo.redact(JSON.stringify(p.args));
+    pending = {
+      tool: p.tool,
+      inputRedacted,
+      decision: "DENIED",
+      approver: null,
+    };
+    if (halted()) return killed("kill switch activated");
+
     const desc = deps.tools.describe(p.tool);
     if (!req.agent.allowedTools.includes(p.tool) || !desc) {
       record(p.tool, inputRedacted, { error: "not_allowed" }, "DENIED", null);
-      return finish("FAILED", undefined, `tool ${p.tool} is not on the allow-list of ${req.agent.agentId}`);
+      return finish(
+        "FAILED",
+        undefined,
+        `tool ${p.tool} is not on the allow-list of ${req.agent.agentId}`,
+      );
     }
     if (!canCallTool(req.userDuties, desc.requiredDuty)) {
       record(p.tool, inputRedacted, { error: "AGT-0203" }, "DENIED", null);
-      return finish("FAILED", "AGT-0203", `you do not hold duty ${desc.requiredDuty} required by ${p.tool}`);
+      return finish(
+        "FAILED",
+        "AGT-0203",
+        `you do not hold duty ${desc.requiredDuty} required by ${p.tool}`,
+      );
     }
     if (desc.approvalMode === "none") {
-      return finish("FAILED", undefined, `tool ${p.tool} is read-only and cannot be proposed`);
+      record(p.tool, inputRedacted, { error: "read_only" }, "DENIED", null);
+      return finish(
+        "FAILED",
+        undefined,
+        `tool ${p.tool} is read-only and cannot be proposed`,
+      );
     }
 
     // Restore real values only now, for the approval view and the commit call.
-    const args = JSON.parse(pseudo.restore(JSON.stringify(p.args))) as Record<string, unknown>;
+    const args = JSON.parse(pseudo.restore(JSON.stringify(p.args))) as Record<
+      string,
+      unknown
+    >;
     const risk = deps.risk.assess(p.tool, args);
     const amount = risk.amount ?? p.amount;
     // approve_before_commit always goes to a human: v1 has no autonomous posting
@@ -278,7 +371,7 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     let decision: Decision = "AUTO";
     let approver: string | null = null;
     if (disposition === "PROPOSE") {
-      if (halted()) return finish("KILLED", undefined, "kill switch activated");
+      if (halted()) return killed("kill switch activated");
       moveTo("AWAITING_APPROVAL");
       const d = await deps.approvals.request({
         runId: req.runId,
@@ -291,29 +384,101 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
       });
       approver = d.approverUserId;
       if (d.decision === "REJECTED") {
-        record(p.tool, inputRedacted, { rejected: d.reason ?? "REJECTED" }, "REJECTED", approver);
-        return finish("REJECTED", d.reason === "EXPIRED" ? "AGT-0208" : undefined, d.reason ?? "approver rejected");
+        record(
+          p.tool,
+          inputRedacted,
+          { rejected: d.reason ?? "REJECTED" },
+          "REJECTED",
+          approver,
+        );
+        return finish(
+          "REJECTED",
+          d.reason === "EXPIRED" ? "AGT-0208" : undefined,
+          d.reason ?? "approver rejected",
+        );
       }
-      if (selfApprovalBlocked({ approverUserId: approver, invokerUserId: req.invokerUserId, amount, selfApprovalLimit: req.selfApprovalLimit })) {
-        record(p.tool, inputRedacted, { rejected: "AGT-0209" }, "REJECTED", approver);
-        return finish("REJECTED", "AGT-0209", "you cannot approve an action from a run you started above the self-approval limit");
+      if (
+        selfApprovalBlocked({
+          approverUserId: approver,
+          invokerUserId: req.invokerUserId,
+          amount,
+          selfApprovalLimit: req.selfApprovalLimit,
+        })
+      ) {
+        record(
+          p.tool,
+          inputRedacted,
+          { rejected: "AGT-0209" },
+          "REJECTED",
+          approver,
+        );
+        return finish(
+          "REJECTED",
+          "AGT-0209",
+          "you cannot approve an action from a run you started above the self-approval limit",
+        );
       }
       decision = "APPROVED";
     }
+    pending = { ...pending, decision, approver };
 
-    if (halted()) return finish("KILLED", undefined, "kill switch activated before commit");
+    if (halted()) return killed("kill switch activated before commit");
+    try {
+      assertNoPii(inputRedacted);
+    } catch (err) {
+      if (!(err instanceof AgentError && err.code === "AGT-0210")) throw err;
+      record(
+        p.tool,
+        UNAUDITABLE_INPUT,
+        { error: "AGT-0210" },
+        "DENIED",
+        approver,
+      );
+      return finish("FAILED", "AGT-0210", err.message);
+    }
     const out = await deps.tools.call(p.tool, args);
     if (!out.ok) {
       record(p.tool, inputRedacted, { error: out.code }, decision, approver);
       return finish("FAILED", out.code, out.message);
     }
-    record(p.tool, inputRedacted, out.output, decision, approver, out.ref ?? null);
+    committed = { ref: out.ref ?? null };
+    record(
+      p.tool,
+      inputRedacted,
+      out.output,
+      decision,
+      approver,
+      committed.ref,
+    );
     return finish("COMMITTED");
   } catch (err) {
     // Once the run has started it always ends in a terminal status: a provider,
     // inbox or tool port that throws fails the run instead of leaving it open.
     if (isTerminal(current())) throw err;
-    if (err instanceof AgentError) return finish("FAILED", err.code, err.message);
-    return finish("FAILED", undefined, err instanceof Error ? err.message : String(err));
+    // The tool call committed but its row was not written: the run is COMMITTED,
+    // and the fallback row carries the reference instead of the full output.
+    if (committed !== undefined) {
+      closePending(
+        { committed: committed.ref },
+        "committed; tool output not recorded",
+      );
+      return finish(
+        "COMMITTED",
+        undefined,
+        "committed; tool output not recorded",
+      );
+    }
+    // A fixed output: the error message is not scanned for PII and stays off the row.
+    closePending(
+      { error: "port_error" },
+      "run failed before the action was recorded",
+    );
+    if (err instanceof AgentError)
+      return finish("FAILED", err.code, err.message);
+    return finish(
+      "FAILED",
+      undefined,
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }

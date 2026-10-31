@@ -19,6 +19,9 @@ const (
 	CampaignRestored = "dev.passage.pricing.campaign.restored.v1"
 	// Pricing procedures (FR-26.1): a version became ACTIVE.
 	ProcedureActivated = "dev.passage.pricing.procedure.activated.v1"
+	// Rebate agreements (FR-26.11): revised, and closed early.
+	RebateAgreementRevised = "dev.passage.pricing.rebateagreement.revised.v1"
+	RebateAgreementClosed  = "dev.passage.pricing.rebateagreement.closed.v1"
 	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
 	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
 	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
@@ -169,4 +172,42 @@ type ConditionRecordWithdrawnData struct {
 	ID      string `json:"id"`
 	Version int    `json:"version"`
 	Reason  string `json:"reason"`
+}
+
+// Free goods rules (FR-26.22): a rule was created, or withdrawn. The sales cache drops its
+// free goods snapshot for the legal entity on either event.
+const (
+	FreeGoodsRuleCreated   = "dev.passage.pricing.freegoodsrule.created.v1"
+	FreeGoodsRuleWithdrawn = "dev.passage.pricing.freegoodsrule.withdrawn.v1"
+)
+
+// FreeGoodsRuleData is the payload of freegoodsrule.created and .withdrawn.
+type FreeGoodsRuleData struct {
+	RuleID        string `json:"rule_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	CustomerKind  string `json:"customer_kind"`
+	CustomerKey   string `json:"customer_key"`
+	ProductID     string `json:"product_id"`
+	Unit          string `json:"unit"`
+	Kind          string `json:"kind"`
+	CalcRule      string `json:"calc_rule"`
+	EveryQuantity string `json:"every_quantity"`
+	FreeQuantity  string `json:"free_quantity"`
+	MinQuantity   string `json:"min_quantity"`
+	ValidFrom     string `json:"valid_from"`
+	ValidTo       string `json:"valid_to"`
+	Withdrawn     bool   `json:"withdrawn"`
+	Version       int    `json:"version"`
+}
+
+// RebateAgreementData is the payload of rebateagreement.revised and .closed. Ids only. After
+// a close, ValidTo is the close date and no invoice dated later accrues (BR-26.8).
+type RebateAgreementData struct {
+	AgreementID   string `json:"agreement_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	PartyRole     string `json:"party_role"`
+	Status        string `json:"status"`
+	ValidFrom     string `json:"valid_from"`
+	ValidTo       string `json:"valid_to"`
+	Version       int    `json:"version"`
 }

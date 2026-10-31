@@ -2,9 +2,7 @@ package domain
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -32,6 +30,13 @@ type VendorInvoice struct {
 	Lines          []PostLine
 }
 
+type HeldLine struct {
+	Qty          decimal.Decimal
+	UnitPrice    decimal.Decimal
+	StandardCost bool
+	Clearing     decimal.Decimal
+}
+
 func clearingFor(item GrirItem, qty decimal.Decimal, exhausts bool, clearedInInvoice decimal.Decimal) money.Amount {
 	if exhausts {
 		return money.Amount{Value: item.OpenAmount().Sub(clearedInInvoice), Currency: item.ReceivedAmount.Currency}
@@ -39,21 +44,17 @@ func clearingFor(item GrirItem, qty decimal.Decimal, exhausts bool, clearedInInv
 	return roundedMoney(item.ReceivedAmount.Value.Mul(qty).Div(item.ReceivedQty), item.ReceivedAmount.Currency)
 }
 
-func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
-	if in.PostingDate.IsZero() || len(in.Lines) == 0 {
-		return JournalEntry{}, fail(CodeInvalidReceipt, "invoice %s needs a posting date and at least one line", in.ID)
+func checkInvoiceHeader(in VendorInvoice, lines int) error {
+	if in.PostingDate.IsZero() || lines == 0 {
+		return fail(CodeInvalidReceipt, "invoice %s needs a posting date and at least one line", in.ID)
 	}
 	if in.LedgerID == "" || in.FiscalPeriodID == "" {
-		return JournalEntry{}, fail(CodeInvalidReceipt, "invoice %s needs a ledger and a fiscal period", in.ID)
+		return fail(CodeInvalidReceipt, "invoice %s needs a ledger and a fiscal period", in.ID)
 	}
-	status, err := periods.AP(ctx, PeriodQuery{LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID, PostingDate: in.PostingDate})
-	if err != nil {
-		slog.ErrorContext(ctx, "period control unavailable", "err", err, "invoiceId", in.ID)
-		return JournalEntry{}, fmt.Errorf("check AP period for invoice %s: %w", in.ID, err)
-	}
-	if status != PeriodOpen {
-		return JournalEntry{}, fail(CodePeriodClosed, "AP period for %s is %s", in.PostingDate.Format(time.DateOnly), status)
-	}
+	return nil
+}
+
+func buildInvoiceEntry(in VendorInvoice, lines []HeldLine, profile PostingProfile) JournalEntry {
 	entry := JournalEntry{
 		IdempotencyKey: fmt.Sprintf(invoiceKeyFormat, in.ID),
 		LegalEntityID:  in.LegalEntityID,
@@ -63,10 +64,28 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		Source:         DocumentSource{Context: "receiving", DocumentType: "vendorinvoice", DocumentID: in.ID, Purpose: "invoice"},
 		RateType:       "spot",
 	}
+	payable := money.Amount{Value: decimal.Zero, Currency: in.Currency}
+	for _, l := range lines {
+		amount := roundedMoney(l.Qty.Mul(l.UnitPrice), in.Currency)
+		payable.Value = payable.Value.Add(amount.Value)
+		entry.Lines = append(entry.Lines, JournalLine{Account: profile.GRIR, Amount: money.Amount{Value: l.Clearing, Currency: in.Currency}})
+		if diff := amount.Value.Sub(l.Clearing); !diff.IsZero() {
+			account := profile.Inventory
+			if l.StandardCost {
+				account = profile.PPV
+			}
+			entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: diff, Currency: in.Currency}})
+		}
+		entry.GrirCleared = append(entry.GrirCleared, l.Clearing)
+	}
+	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
+	return entry
+}
+
+func assessInvoice(in VendorInvoice, profile PostingProfile) (JournalEntry, error) {
 	claimed := map[*GrirItem]decimal.Decimal{}
 	cleared := map[*GrirItem]decimal.Decimal{}
-	clearings := make([]money.Amount, len(in.Lines))
-	payable := money.Amount{Value: decimal.Zero, Currency: in.Currency}
+	held := make([]HeldLine, len(in.Lines))
 	for i, l := range in.Lines {
 		if l.Qty.Sign() <= 0 {
 			return JournalEntry{}, fail(CodeInvalidReceipt, "invoice line %d quantity must be positive", i+1)
@@ -79,38 +98,64 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 			return JournalEntry{}, fail(CodeOverInvoice, "invoice line %d exceeds received uninvoiced quantity", i+1)
 		}
 		exhausts := claimed[l.Item].Equal(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty))
-		clearings[i] = clearingFor(*l.Item, l.Qty, exhausts, cleared[l.Item])
-		cleared[l.Item] = cleared[l.Item].Add(clearings[i].Value)
-		amount := roundedMoney(l.Qty.Mul(l.UnitPrice), in.Currency)
-		payable.Value = payable.Value.Add(amount.Value)
-		entry.Lines = append(entry.Lines, JournalLine{Account: profile.GRIR, Amount: clearings[i]})
-		if diff := amount.Value.Sub(clearings[i].Value); !diff.IsZero() {
-			account := profile.Inventory
-			if l.StandardCost {
-				account = profile.PPV
-			}
-			entry.Lines = append(entry.Lines, JournalLine{Account: account, Amount: money.Amount{Value: diff, Currency: in.Currency}})
-		}
+		clearing := clearingFor(*l.Item, l.Qty, exhausts, cleared[l.Item])
+		cleared[l.Item] = cleared[l.Item].Add(clearing.Value)
+		held[i] = HeldLine{Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost, Clearing: clearing.Value}
 	}
-	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
-	entryID, err := ledger.Post(ctx, entry)
-	if err != nil {
-		if errors.Is(err, ErrPeriodClosed) {
-			return JournalEntry{}, fail(CodePeriodClosed, "ledger rejected invoice %s: period closed", in.ID)
-		}
-		if errors.Is(err, ErrLedgerConflict) {
-			return JournalEntry{}, fail(CodePostingPending, "ledger holds a different posting under the key for invoice %s", in.ID)
-		}
-		slog.ErrorContext(ctx, "invoice ledger post failed", "err", err, "invoiceId", in.ID)
-		return JournalEntry{}, fmt.Errorf("post invoice %s: %w", in.ID, err)
-	}
-	entry.LedgerEntryID = entryID
-	for _, c := range clearings {
-		entry.GrirCleared = append(entry.GrirCleared, c.Value)
-	}
+	return buildInvoiceEntry(in, held, profile), nil
+}
+
+func applyInvoice(in VendorInvoice, entry JournalEntry) {
 	for i, l := range in.Lines {
 		l.Item.InvoicedQty = l.Item.InvoicedQty.Add(l.Qty)
-		l.Item.ClearedAmount.Value = l.Item.ClearedAmount.Value.Add(clearings[i].Value)
+		l.Item.ClearedAmount.Value = l.Item.ClearedAmount.Value.Add(entry.GrirCleared[i])
+	}
+}
+
+func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
+	if err := checkInvoiceHeader(in, len(in.Lines)); err != nil {
+		return JournalEntry{}, err
+	}
+	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
+		return JournalEntry{}, err
+	}
+	entry, err := assessInvoice(in, profile)
+	if err != nil {
+		return JournalEntry{}, err
+	}
+	if entry.LedgerEntryID, err = postEntry(ctx, ledger, entry, in.ID); err != nil {
+		return JournalEntry{}, err
+	}
+	applyInvoice(in, entry)
+	return entry, nil
+}
+
+func HoldInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, profile PostingProfile) (JournalEntry, error) {
+	if err := checkInvoiceHeader(in, len(in.Lines)); err != nil {
+		return JournalEntry{}, err
+	}
+	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
+		return JournalEntry{}, err
+	}
+	entry, err := assessInvoice(in, profile)
+	if err != nil {
+		return JournalEntry{}, err
+	}
+	applyInvoice(in, entry)
+	return entry, nil
+}
+
+func PostHeldInvoice(ctx context.Context, in VendorInvoice, lines []HeldLine, periods PeriodControl, ledger LedgerPoster, profile PostingProfile) (JournalEntry, error) {
+	if err := checkInvoiceHeader(in, len(lines)); err != nil {
+		return JournalEntry{}, err
+	}
+	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
+		return JournalEntry{}, err
+	}
+	entry := buildInvoiceEntry(in, lines, profile)
+	var err error
+	if entry.LedgerEntryID, err = postEntry(ctx, ledger, entry, in.ID); err != nil {
+		return JournalEntry{}, err
 	}
 	return entry, nil
 }

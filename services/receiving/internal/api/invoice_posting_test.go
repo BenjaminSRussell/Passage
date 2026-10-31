@@ -100,7 +100,7 @@ func closeService(t *testing.T, status int, body string) *periods.Client {
 }
 
 func tenantCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001"})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: testEntityID})
 }
 
 func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {
@@ -142,14 +142,14 @@ func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {
 		price := receipt.Lines[i].UnitPrice.Value
 		if rng.Intn(2) == 0 && item.ReceivedQty.Cmp(decimal.NewFromInt(2)) > 0 {
 			first := item.ReceivedQty.Div(decimal.NewFromInt(3)).Floor()
-			in := domain.VendorInvoice{ID: fmt.Sprintf("part-%d", i), LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: first, UnitPrice: price}}}
+			in := domain.VendorInvoice{ID: fmt.Sprintf("part-%d", i), LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: first, UnitPrice: price}}}
 			if _, err := a.PostInvoice(ctx, in, profile); err != nil {
 				t.Fatal(err)
 			}
 			completePostings(t, st)
 		}
 		rest := item.ReceivedQty.Sub(item.InvoicedQty)
-		in := domain.VendorInvoice{ID: fmt.Sprintf("final-%d", i), LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: rest, UnitPrice: price}}}
+		in := domain.VendorInvoice{ID: fmt.Sprintf("final-%d", i), LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: rest, UnitPrice: price}}}
 		if _, err := a.PostInvoice(ctx, in, profile); err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestPostInvoice_ClosedPeriodRejectedByRealPeriodsAdapter(t *testing.T) {
 			t.Cleanup(ledgerSrv.Close)
 			a := api.New(memstore.New(), api.Ports{Periods: closeService(t, tc.status, tc.body), Ledger: ledger.New(ledgerSrv.URL, nil)})
 			item := domain.GrirItem{ReceivedQty: decimal.NewFromInt(10), ReceivedAmount: money.Amount{Value: decimal.NewFromInt(50), Currency: "USD"}}
-			in := domain.VendorInvoice{ID: "i-1", LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(10), UnitPrice: decimal.NewFromInt(5)}}}
+			in := domain.VendorInvoice{ID: "i-1", LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(10), UnitPrice: decimal.NewFromInt(5)}}}
 
 			_, err := a.PostInvoice(tenantCtx(), in, profile)
 
@@ -202,7 +202,7 @@ func TestPostInvoice_LedgerPeriodClosedMapsToProblemCode(t *testing.T) {
 	t.Cleanup(ledgerSrv.Close)
 	a := api.New(memstore.New(), api.Ports{Periods: closeService(t, http.StatusOK, `{"allowed":true,"module":"ap","status":"open"}`), Ledger: ledger.New(ledgerSrv.URL, nil)})
 	item := domain.GrirItem{ReceivedQty: decimal.NewFromInt(1), ReceivedAmount: money.Amount{Value: decimal.NewFromInt(5), Currency: "USD"}}
-	in := domain.VendorInvoice{ID: "i-2", LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(5)}}}
+	in := domain.VendorInvoice{ID: "i-2", LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(5)}}}
 
 	_, err := a.PostInvoice(tenantCtx(), in, profile)
 
@@ -237,3 +237,5 @@ func TestNew_PanicsWithoutPorts(t *testing.T) {
 	}()
 	api.New(memstore.New(), api.Ports{})
 }
+
+const testEntityID = "00000000-0000-0000-0000-0000000000e1"

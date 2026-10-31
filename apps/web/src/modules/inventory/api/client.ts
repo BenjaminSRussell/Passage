@@ -3,14 +3,15 @@
 
 export const base = "/api/v1/inventory";
 
-export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT", "OWNERSHIP_CHANGE"] as const;
+export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT", "OWNERSHIP_CHANGE", "TRANSFER"] as const;
 export type JournalType = (typeof JOURNAL_TYPES)[number];
 
 /**
  * Types a user creates directly; COUNT journals come from posted count sheets.
- * OWNERSHIP_CHANGE also needs inventory.consignment.write (FR-16.17).
+ * OWNERSHIP_CHANGE also needs inventory.consignment.write (FR-16.17). TRANSFER
+ * moves stock between two dimension sets of the legal entity.
  */
-export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "OWNERSHIP_CHANGE"] as const;
+export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "OWNERSHIP_CHANGE", "TRANSFER"] as const;
 export type KeyedJournalType = (typeof KEYED_JOURNAL_TYPES)[number];
 
 export const JOURNAL_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "POSTING", "POSTED", "REJECTED", "CANCELLED"] as const;
@@ -35,6 +36,8 @@ export interface JournalSummary {
   postingDate: string;
   offsetAccountId?: string;
   currency: string;
+  /** Journal name the journal was created under (PRD 3.16.13). */
+  journalNameId?: string;
   version: number;
   lineCount: number;
   createdAt: string;
@@ -53,6 +56,8 @@ export interface JournalLine {
   reversesLineId?: string;
   productId: string;
   dimensions: Partial<Record<string, string>>;
+  /** Destination dimension set of a TRANSFER journal line. */
+  toDimensions?: Partial<Record<string, string>>;
   qty: string;
   enteredQty: string;
   enteredUnit: string;
@@ -81,11 +86,14 @@ export interface CreateJournalInput {
   postingDate: string;
   currency: string;
   offsetAccountId?: string;
+  journalNameId?: string;
 }
 
 export interface LineInput {
   productId: string;
   dimensions: Partial<Record<LineDimension, string>>;
+  /** Destination of a TRANSFER line. */
+  toDimensions?: Partial<Record<LineDimension, string>>;
   qty: string;
   enteredUnit: string;
   costPrice?: string;
@@ -94,10 +102,13 @@ export interface LineInput {
 export interface OnHandRow {
   group: Partial<Record<string, string>>;
   physicalInvent: string;
-  availPhysical: string;
-  availOrdered: string;
+  /** Absent in an as-of replay: availability is not kept per date. */
+  availPhysical?: string;
+  /** Absent in an as-of replay. */
+  availOrdered?: string;
   postedValue: string;
-  reservedPhysical: string;
+  /** Absent in an as-of replay. */
+  reservedPhysical?: string;
   /** Physical quantity held as BLOCKED or QUARANTINE; not in the available columns. */
   blocked: string;
   currency: string;
@@ -107,10 +118,14 @@ export interface OnHandRow {
 export interface OnHandResult {
   items: OnHandRow[];
   truncated: boolean;
+  /** Replay date (YYYY-MM-DD) when the rows are the stock on that date; absent for the live projection. */
+  asOf?: string;
 }
 
 export interface OnHandQuery {
   groupBy: readonly OnHandGroup[];
+  /** Replay the ledger up to this date (YYYY-MM-DD). */
+  asOf?: string;
   product?: string;
   site?: string;
   warehouse?: string;
@@ -181,7 +196,7 @@ function newKey(): string {
 export function onHandUrl(q: OnHandQuery): string {
   const params = new URLSearchParams();
   if (q.groupBy.length > 0) params.set("groupBy", q.groupBy.join(","));
-  for (const key of ["product", "site", "warehouse", "batch", "owner", "segment"] as const) {
+  for (const key of ["asOf", "product", "site", "warehouse", "batch", "owner", "segment"] as const) {
     const value = q[key]?.trim();
     if (value) params.set(key, value);
   }
@@ -194,7 +209,7 @@ export async function fetchOnHand(q: OnHandQuery, signal?: AbortSignal): Promise
   if (!Array.isArray(body.items)) {
     throw new InventoryApiError(0, "COM-0001", "The on-hand response has no items");
   }
-  return { items: body.items, truncated: body.truncated === true };
+  return { items: body.items, truncated: body.truncated === true, ...(body.asOf ? { asOf: body.asOf } : {}) };
 }
 
 export interface JournalQuery {
@@ -223,6 +238,7 @@ export async function getJournal(id: string, signal?: AbortSignal): Promise<Jour
 export async function createJournal(input: CreateJournalInput, key: string = newKey()): Promise<Journal> {
   const body: CreateJournalInput = { ...input };
   if (!body.offsetAccountId) delete body.offsetAccountId;
+  if (!body.journalNameId) delete body.journalNameId;
   return (await send<Journal>("/journals", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
 }
 
@@ -235,6 +251,13 @@ export async function addLines(journalId: string, lines: LineInput[]): Promise<J
     }
     const out: Record<string, unknown> = { clientKey: newKey(), productId: line.productId, dimensions, qty: line.qty, enteredUnit: line.enteredUnit };
     if (line.costPrice && line.costPrice.trim() !== "") out.costPrice = line.costPrice.trim();
+    if (line.toDimensions) {
+      const to: Record<string, string> = {};
+      for (const [name, value] of Object.entries(line.toDimensions)) {
+        if (value && value.trim() !== "") to[name] = value.trim();
+      }
+      out.toDimensions = to;
+    }
     return out;
   });
   return (
@@ -303,6 +326,7 @@ export const SOURCE_TYPES = [
   "TRANSFER_LINE",
   "CONSIGNMENT_LINE",
   "OWNERSHIP_CHANGE",
+  "TRANSFER_IN",
   "PURCH_LINE",
   "RECEIPT_LINE",
   "SALES_LINE",
@@ -586,7 +610,8 @@ export async function releaseBlocking(id: string, version: number): Promise<Bloc
 
 // ---- Cycle counting (FR-16.9) ----
 
-export type CountSheetStatus = "OPEN" | "POSTED";
+export type CountSheetStatus = "OPEN" | "COUNTED" | "APPROVED" | "POSTED" | "CANCELLED";
+export type CountAbcClass = "A" | "B" | "C";
 
 export interface CountPlan {
   id: string;
@@ -598,6 +623,12 @@ export interface CountPlan {
   tolerancePct: string;
   toleranceValue: string;
   blind: boolean;
+  freezeStock: boolean;
+  fourEyes: boolean;
+  locationFrom?: string;
+  locationTo?: string;
+  abcClass?: CountAbcClass;
+  samplePct?: string;
   createdAt: string;
 }
 
@@ -610,6 +641,12 @@ export interface CountPlanInput {
   tolerancePct?: string;
   toleranceValue?: string;
   blind: boolean;
+  freezeStock?: boolean;
+  fourEyes?: boolean;
+  locationFrom?: string;
+  locationTo?: string;
+  abcClass?: CountAbcClass | "";
+  samplePct?: string;
 }
 
 export interface CountSheetSummary {
@@ -621,6 +658,11 @@ export interface CountSheetSummary {
   status: CountSheetStatus;
   blind: boolean;
   approvedBy?: string;
+  submittedBy?: string;
+  fourEyes: boolean;
+  freezeStock: boolean;
+  /** Lines a supervisor asked to be counted again and that are not yet re-entered. */
+  recountLines: number;
   journalId?: string;
   version: number;
   lineCount: number;
@@ -640,6 +682,9 @@ export interface CountLine {
   countedBy?: string;
   countedAt?: string;
   postedVariance: string | null;
+  recountRequested: boolean;
+  recountReason?: string;
+  recountRounds: number;
 }
 
 export interface CountSheet extends CountSheetSummary {
@@ -648,7 +693,7 @@ export interface CountSheet extends CountSheetSummary {
 
 export async function createCountPlan(input: CountPlanInput, key: string = newKey()): Promise<CountPlan> {
   const body: Record<string, unknown> = { ...input };
-  for (const name of ["warehouse", "tolerancePct", "toleranceValue"] as const) {
+  for (const name of ["warehouse", "tolerancePct", "toleranceValue", "locationFrom", "locationTo", "abcClass", "samplePct"] as const) {
     if (!input[name] || input[name]?.trim() === "") delete body[name];
   }
   return (await send<CountPlan>("/count-plans", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
@@ -685,6 +730,28 @@ export async function enterCount(sheetId: string, lineId: string, version: numbe
 
 export async function postCountSheet(sheetId: string, version: number): Promise<CountSheet> {
   return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+async function sheetAction(sheetId: string, action: string, version: number): Promise<CountSheet> {
+  return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:${action}`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/** Closes counting: the sheet becomes COUNTED. */
+export const submitCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "submit", version);
+/** A supervisor's approval of a COUNTED sheet (a four-eyes plan needs it before posting). */
+export const approveCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "approve", version);
+/** Abandons an unposted sheet and lifts its stock freeze. */
+export const cancelCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "cancel", version);
+
+/** Flags a counted line for recount; the sheet returns to OPEN. */
+export async function requestCountRecount(sheetId: string, lineId: string, version: number, reason: string): Promise<CountSheet> {
+  return (
+    await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}/lines/${encodeURIComponent(lineId)}:recount`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ reason }),
+    })
+  ).body;
 }
 
 // ---- Tag counting (FR-16.18) ----
@@ -901,6 +968,207 @@ export async function listInTransit(signal?: AbortSignal): Promise<InTransitItem
   return body.items ?? [];
 }
 
+export type TransferLateness = "LATE_SHIPMENT" | "LATE_RECEIPT";
+
+/** One transfer order line with its order header; `late` is absent when the line is on time. */
+export interface TransferLineItem {
+  orderId: string;
+  legalEntityId: string;
+  number: string;
+  orderStatus: TransferStatus;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  /** Planned until the order ships, then the actual ship date. */
+  shipDate: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  qty: string;
+  shippedQty: string;
+  receivedQty: string;
+  remainingQty: string;
+  inTransit: string;
+  daysInTransit: number;
+  closed: boolean;
+  late?: TransferLateness;
+  /** Days past the due date (planned ship date, or ship date plus the receipt allowance); 0 when on time. */
+  daysLate: number;
+}
+
+export interface TransferLineQuery {
+  legalEntityId?: string;
+  status?: TransferStatus | "";
+  productId?: string;
+  fromWarehouseId?: string;
+  toWarehouseId?: string;
+  /** Ship date range, inclusive (YYYY-MM-DD). */
+  from?: string;
+  to?: string;
+  lateOnly?: boolean;
+}
+
+export interface TransferLinePage {
+  items: TransferLineItem[];
+  /** More than the service's 1,000-line cap matched. */
+  truncated: boolean;
+}
+
+/** Transfer order line inquiry across all orders, oldest ship date first (FR-16.15). */
+export async function listTransferLines(query: TransferLineQuery = {}, signal?: AbortSignal): Promise<TransferLinePage> {
+  const params = new URLSearchParams();
+  for (const key of ["legalEntityId", "status", "productId", "fromWarehouseId", "toWarehouseId", "from", "to"] as const) {
+    const value = query[key]?.trim();
+    if (value) params.set(key, value);
+  }
+  if (query.lateOnly) params.set("late", "true");
+  const qs = params.toString();
+  const { body } = await send<{ items?: TransferLineItem[]; truncated?: boolean }>(`/transfer-order-lines${qs ? `?${qs}` : ""}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
+// ---- Inquiries and reports (PRD 3.16.14) ----
+
+function reportQuery(params: Record<string, string | undefined>): string {
+  const out = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    const v = value?.trim();
+    if (v) out.set(key, v);
+  }
+  const qs = out.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export type ValueBasis = "JOURNAL" | "ESTIMATE";
+
+export interface CountVarianceLine {
+  sheetId: string;
+  sheetNumber: string;
+  sheetStatus: string;
+  planId: string;
+  planName: string;
+  warehouseId?: string;
+  legalEntityId: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  currency: string;
+  expectedQty: string;
+  countedQty: string;
+  varianceQty: string;
+  unitCost: string;
+  varianceValue: string;
+  /** JOURNAL is the cost of the posted COUNT journal line; ESTIMATE is today's running average. */
+  valueBasis: ValueBasis;
+  countedBy?: string;
+  countedAt: string;
+}
+
+export interface CountVarianceTotals {
+  counter: string;
+  currency: string;
+  lines: number;
+  absVarianceQty: string;
+  gainValue: string;
+  lossValue: string;
+  netValue: string;
+}
+
+export interface CountVarianceQuery {
+  legalEntityId?: string;
+  planId?: string;
+  sheetId?: string;
+  warehouseId?: string;
+  counter?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface CountVarianceReport {
+  items: CountVarianceLine[];
+  totalsByCounter: CountVarianceTotals[];
+  truncated: boolean;
+}
+
+/** Count variance report: counted lines with variance quantity and value, and totals per counter. */
+export async function getCountVariance(query: CountVarianceQuery = {}, signal?: AbortSignal): Promise<CountVarianceReport> {
+  const { body } = await send<Partial<CountVarianceReport>>(`/reports/count-variance${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], totalsByCounter: body.totalsByCounter ?? [], truncated: body.truncated ?? false };
+}
+
+export interface NegativeOnHandLine {
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  physicalInvent: string;
+  shortfallQty: string;
+  postedValue: string;
+  currency?: string;
+  firstNegativeDate?: string;
+}
+
+export interface NegativeOnHandQuery {
+  legalEntityId?: string;
+  productId?: string;
+  siteId?: string;
+  warehouseId?: string;
+}
+
+export interface ReportPage<T> {
+  items: T[];
+  truncated: boolean;
+}
+
+export async function listNegativeOnHand(query: NegativeOnHandQuery = {}, signal?: AbortSignal): Promise<ReportPage<NegativeOnHandLine>> {
+  const { body } = await send<{ items?: NegativeOnHandLine[]; truncated?: boolean }>(`/reports/negative-onhand${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
+export const TRACE_DIRECTIONS = ["BOTH", "FORWARD", "BACKWARD"] as const;
+export type TraceDirection = (typeof TRACE_DIRECTIONS)[number];
+
+export interface TraceLine extends Transaction {
+  /** Traced physical balance of the product after this movement (BOTH direction, physical movements only). */
+  running?: string;
+}
+
+export interface TraceQuery {
+  batchId?: string;
+  serialId?: string;
+  productId?: string;
+  legalEntityId?: string;
+  direction?: TraceDirection;
+}
+
+export interface TraceResult extends ReportPage<TraceLine> {
+  direction: TraceDirection;
+}
+
+/** Batch or serial trace: the transactions that carry the batch or serial, oldest first. */
+export async function traceTracking(query: TraceQuery, signal?: AbortSignal): Promise<TraceResult> {
+  const { body } = await send<{ items?: TraceLine[]; truncated?: boolean; direction?: TraceDirection }>(`/reports/tracking-trace${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false, direction: body.direction ?? query.direction ?? "BOTH" };
+}
+
+export interface DimensionCombination {
+  legalEntityId: string;
+  productId: string;
+  dimensionSetHash: string;
+  dimensions: Partial<Record<string, string>>;
+  activeDimensions: string[];
+  firstUse: string;
+  lastUse: string;
+  transactionCount: number;
+}
+
+export async function listDimensionCombinations(query: { legalEntityId?: string; productId?: string } = {}, signal?: AbortSignal): Promise<ReportPage<DimensionCombination>> {
+  const { body } = await send<{ items?: DimensionCombination[]; truncated?: boolean }>(`/reports/dimension-combinations${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
 // ---- ABC classification (FR-16.19) ----
 
 export const ABC_CLASSES = ["A", "B", "C", "N"] as const;
@@ -1107,4 +1375,97 @@ export async function listReconciliations(
 
 export async function getReconciliation(id: string, signal?: AbortSignal): Promise<Reconciliation> {
   return (await send<Reconciliation>(`/reconciliations/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+// ---- Journal names (PRD 3.16.13) ----
+
+export interface JournalName {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  description: string;
+  journalType: KeyedJournalType;
+  requiresApproval: boolean;
+  offsetAccountId?: string;
+  active: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalNameInput {
+  legalEntityId: string;
+  code: string;
+  description?: string;
+  journalType: KeyedJournalType;
+  requiresApproval: boolean;
+  offsetAccountId?: string;
+}
+
+export interface JournalNamePatch {
+  description?: string;
+  requiresApproval?: boolean;
+  offsetAccountId?: string;
+  active?: boolean;
+}
+
+export interface JournalNameQuery {
+  legalEntityId?: string;
+  journalType?: string;
+  active?: "true" | "false" | "";
+}
+
+export async function listJournalNames(q: JournalNameQuery = {}, signal?: AbortSignal): Promise<JournalName[]> {
+  const { body } = await send<{ items?: JournalName[] }>(`/journal-names${query({ legalEntityId: q.legalEntityId, journalType: q.journalType, active: q.active })}`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Creates a journal name; the key makes a retried click replay the same create. */
+export async function createJournalName(input: JournalNameInput, key: string = newKey()): Promise<JournalName> {
+  const body: JournalNameInput = { ...input };
+  if (!body.description) delete body.description;
+  if (!body.offsetAccountId) delete body.offsetAccountId;
+  return (await send<JournalName>("/journal-names", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+/** Changes a journal name at the version the screen shows (If-Match). */
+export async function updateJournalName(id: string, version: number, patch: JournalNamePatch): Promise<JournalName> {
+  return (
+    await send<JournalName>(`/journal-names/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify(patch),
+    })
+  ).body;
+}
+
+export interface WorkspaceSummary {
+  journals: { draft: number; awaitingApproval: number };
+  negativeOnHandRows: number;
+  openCountSheets: number;
+  countSheetsCounted: number;
+  reconciliationDifferences: number;
+  /** When the latest reconciliation run in scope was computed; undefined when none has run. */
+  lastReconciliationAt?: string;
+  activeReservations: number;
+  transferOrdersByStatus: Partial<Record<TransferStatus, number>>;
+}
+
+/** Counts behind the inventory management workspace tiles, for the caller's legal entities or one of them. */
+export async function getWorkspaceSummary(legalEntityId = "", signal?: AbortSignal): Promise<WorkspaceSummary> {
+  const { body } = await send<Partial<Omit<WorkspaceSummary, "lastReconciliationAt">> & { lastReconciliationAt?: string | null }>(
+    `/workspace/summary${reportQuery({ legalEntityId })}`,
+    {},
+    signal,
+  );
+  return {
+    journals: { draft: body.journals?.draft ?? 0, awaitingApproval: body.journals?.awaitingApproval ?? 0 },
+    negativeOnHandRows: body.negativeOnHandRows ?? 0,
+    openCountSheets: body.openCountSheets ?? 0,
+    countSheetsCounted: body.countSheetsCounted ?? 0,
+    reconciliationDifferences: body.reconciliationDifferences ?? 0,
+    lastReconciliationAt: body.lastReconciliationAt ?? undefined,
+    activeReservations: body.activeReservations ?? 0,
+    transferOrdersByStatus: body.transferOrdersByStatus ?? {},
+  };
 }

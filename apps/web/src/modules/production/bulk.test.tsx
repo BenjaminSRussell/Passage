@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import { bulkStatus, canSplit, mergeOrders, splitOrder, STATUSES } from "./api/client";
+import { bulkStatus, canMerge, canSplit, mergeOrders, splitOrder, STATUSES } from "./api/client";
 import { loggedCommandLabel } from "./labels";
 import production from "./module";
 import { validateSplit } from "./SplitPanel";
@@ -251,7 +251,33 @@ describe("Split on the order detail (FR-21.15)", () => {
     expect(message.closest('[role="alert"]')).toHaveTextContent("The split was refused");
   });
 
-  it("is not offered once the order has started, and links a split or merged order to its origin", async () => {
+  it("splits a Started order with the allocation of its posted consumption and WIP (BR-21.11)", async () => {
+    const created = order({ id: uuid(8), orderNumber: "PO-000008", quantity: "40", status: "Started", originType: "Split", splitFromOrderId: orderId });
+    const fetchMock = detailFetch(order({ status: "Started", version: 5, quantity: "100" }), () => json({ original: order({ status: "Started", version: 6, quantity: "60" }), new: created }, 201));
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Split order" });
+    expect(within(form).getByLabelText("Posted consumption and WIP")).toHaveValue("proportional");
+    await userEvent.type(within(form).getByLabelText("Split quantity"), "40");
+    await userEvent.click(within(form).getByRole("button", { name: "Split off" }));
+    expect(await screen.findByText("Split off PO-000008 for 40.")).toBeInTheDocument();
+    const [[, init]] = posts(fetchMock);
+    expect(JSON.parse(String(init?.body))).toEqual({ splitQty: "40", allocation: "proportional" });
+  });
+
+  it("sends keep-on-original when the user keeps the posted figures on the order", async () => {
+    const fetchMock = detailFetch(order({ status: "Started", version: 5, quantity: "100" }), () => problem(409, "PRODUCTION_SPLIT_REFUSED", "the order has 1 draft journals; post or delete them before splitting"));
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Split order" });
+    await userEvent.selectOptions(within(form).getByLabelText("Posted consumption and WIP"), "keep-on-original");
+    expect(screen.getByText(/stay on this order; the new order starts with nothing posted/)).toBeInTheDocument();
+    await userEvent.type(within(form).getByLabelText("Split quantity"), "10");
+    await userEvent.click(within(form).getByRole("button", { name: "Split off" }));
+    expect(await screen.findByText(/post or delete them before splitting \(PRODUCTION_SPLIT_REFUSED\)/)).toBeInTheDocument();
+    const [[, init]] = posts(fetchMock);
+    expect(JSON.parse(String(init?.body))).toEqual({ splitQty: "10", allocation: "keep-on-original" });
+  });
+
+  it("is not offered once the order has ended, and links a split or merged order to its origin", async () => {
     detailFetch(order({ status: "Cancelled", splitFromOrderId: uuid(4), mergedIntoOrderId: uuid(5) }));
     const { location } = renderAt(`/production/${orderId}`);
     await screen.findByRole("heading", { name: /Production order PO-000001/ });
@@ -275,8 +301,9 @@ describe("split, merge and bulk client", () => {
     });
   });
 
-  it("offers split and merge only before Started", () => {
-    expect(STATUSES.filter(canSplit)).toEqual(["Created", "Estimated", "Scheduled", "Released"]);
+  it("offers merge before Started and split up to Started", () => {
+    expect(STATUSES.filter(canMerge)).toEqual(["Created", "Estimated", "Scheduled", "Released"]);
+    expect(STATUSES.filter(canSplit)).toEqual(["Created", "Estimated", "Scheduled", "Released", "Started"]);
     expect(loggedCommandLabel.merge).toBe("Merge");
   });
 

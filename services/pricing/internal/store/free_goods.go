@@ -1,0 +1,231 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
+	pevents "github.com/BenjaminSRussell/passage/services/pricing/internal/events"
+)
+
+const freeGoodsColumns = `id::text, legal_entity_id::text, customer_kind, customer_key, product_id, unit, kind, calc_rule,
+	every_quantity::text, free_quantity::text, min_quantity::text, valid_from, valid_to, withdrawn, version`
+
+func scanFreeGoods(row pgx.Row) (domain.FreeGoodsDef, error) {
+	var r domain.FreeGoodsDef
+	var ck, every, free, min string
+	if err := row.Scan(&r.ID, &r.LegalEntityID, &ck, &r.CustomerKey, &r.ProductID, &r.Unit, &r.Kind, &r.Calc,
+		&every, &free, &min, &r.ValidFrom, &r.ValidTo, &r.Withdrawn, &r.Version); err != nil {
+		return domain.FreeGoodsDef{}, err
+	}
+	r.CustomerKind = domain.CustomerKind(ck)
+	r.Every = decimal.RequireFromString(every)
+	r.Free = decimal.RequireFromString(free)
+	r.MinQty = decimal.RequireFromString(min)
+	return r, nil
+}
+
+func freeGoodsNotFound(id string) error {
+	return httpx.NewProblem(http.StatusNotFound, domain.CodeFreeGoodsRuleNotFound, "no free goods rule "+id)
+}
+
+func sameFreeGoods(a, b domain.FreeGoodsDef) bool {
+	return a.LegalEntityID == b.LegalEntityID && a.CustomerKind == b.CustomerKind && a.CustomerKey == b.CustomerKey &&
+		a.ProductID == b.ProductID && a.Unit == b.Unit && a.Kind == b.Kind && a.Calc == b.Calc && a.Every.Equal(b.Every) &&
+		a.Free.Equal(b.Free) && a.MinQty.Equal(b.MinQty) && dayStr(a.ValidFrom) == dayStr(b.ValidFrom) && dayStr(a.ValidTo) == dayStr(b.ValidTo)
+}
+
+func freeGoodsEventData(r domain.FreeGoodsDef) pevents.FreeGoodsRuleData {
+	return pevents.FreeGoodsRuleData{RuleID: r.ID, LegalEntityID: r.LegalEntityID, CustomerKind: string(r.CustomerKind),
+		CustomerKey: r.CustomerKey, ProductID: r.ProductID, Unit: r.Unit, Kind: r.Kind, CalcRule: r.Calc,
+		EveryQuantity: r.Every.String(), FreeQuantity: r.Free.String(), MinQuantity: r.MinQty.String(),
+		ValidFrom: dayStr(r.ValidFrom), ValidTo: dayStr(r.ValidTo), Withdrawn: r.Withdrawn, Version: r.Version}
+}
+
+// CreateFreeGoodsRule stores a live rule at version 1. Under a transaction-scoped advisory
+// lock on the rule key it refuses a live rule with the same customer, product and unit whose
+// validity overlaps (409 PRC-0002), and announces the rule through the outbox in the same
+// transaction. A repeated Idempotency-Key returns the original rule, or idempotency_key_reuse
+// when the body differs.
+func (s *Postgres) CreateFreeGoodsRule(ctx context.Context, in domain.FreeGoodsDef, idempotencyKey string) (domain.FreeGoodsDef, error) {
+	p, _ := tenant.FromContext(ctx)
+	var key *string
+	if idempotencyKey != "" {
+		key = &idempotencyKey
+	}
+	var out domain.FreeGoodsDef
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		// The lock comes first so a retry of the same request waits for the original and
+		// replays it instead of tripping the overlap guard.
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"|fg|"+domain.FreeGoodsKey(in)); err != nil {
+			return err
+		}
+		if key != nil {
+			replay, err := scanFreeGoods(tx.QueryRow(ctx, `select `+freeGoodsColumns+` from free_goods_rule where idempotency_key = $1`, idempotencyKey))
+			if err == nil {
+				if !sameFreeGoods(replay, in) {
+					return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyUse, "Idempotency-Key was already used with a different request body")
+				}
+				out = replay
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
+			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_id = $4 and unit = $5 and not withdrawn`,
+			in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, in.ProductID, in.Unit)
+		if err != nil {
+			return err
+		}
+		var live []domain.FreeGoodsDef
+		for rows.Next() {
+			r, err := scanFreeGoods(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			live = append(live, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if c, clash := domain.FreeGoodsOverlap(in, live); clash {
+			return httpx.NewProblem(http.StatusConflict, domain.CodeOverlap, fmt.Sprintf("overlapping free goods rule %s for the same customer, product and unit", c.ID))
+		}
+		created, err := scanFreeGoods(tx.QueryRow(ctx, `insert into free_goods_rule (tenant_id, id, legal_entity_id, customer_kind, customer_key,
+			product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13, $14, $15)
+			returning `+freeGoodsColumns,
+			p.TenantID, ids.New(), in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, in.ProductID, in.Unit, in.Kind, in.Calc,
+			in.Every.String(), in.Free.String(), in.MinQty.String(), dayStr(in.ValidFrom), dayStr(in.ValidTo), key))
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "free_goods_rule_tenant_id_idempotency_key_key" {
+			// A concurrent request with the same key and another rule key won the insert.
+			return httpx.NewProblem(http.StatusConflict, CodeIdempotencyUse, "a request with this Idempotency-Key is in flight; retry it")
+		}
+		if err != nil {
+			return err
+		}
+		out = created
+		return enqueueEvent(ctx, tx, "freegoodsrule", out.ID, pevents.FreeGoodsRuleCreated, freeGoodsEventData(out))
+	})
+	return out, err
+}
+
+// GetFreeGoodsRule reads one rule. PRC-0047 when it does not exist or lies outside the
+// caller's legal entities.
+func (s *Postgres) GetFreeGoodsRule(ctx context.Context, id string) (domain.FreeGoodsDef, error) {
+	var out domain.FreeGoodsDef
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = scanFreeGoods(tx.QueryRow(ctx, `select `+freeGoodsColumns+` from free_goods_rule where id = $1`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return freeGoodsNotFound(id)
+		}
+		return err
+	})
+	return out, err
+}
+
+// ListFreeGoodsRules returns the rules of one legal entity (all the caller may see when
+// empty), optionally for one product, latest start first. Withdrawn rules are included.
+func (s *Postgres) ListFreeGoodsRules(ctx context.Context, legalEntityID, productID string, limit int) ([]domain.FreeGoodsDef, error) {
+	if limit <= 0 || limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+	out := []domain.FreeGoodsDef{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
+			where ($1::text = '' or legal_entity_id::text = $1) and ($2::text = '' or product_id = $2)
+			order by valid_from desc, product_id, id limit $3`, legalEntityID, productID, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			r, err := scanFreeGoods(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ActiveFreeGoodsRules returns the live rules of one legal entity for the named products
+// that cover asOf, for the resolve proposal. Withdrawn rules and rules outside their
+// validity are not returned.
+func (s *Postgres) ActiveFreeGoodsRules(ctx context.Context, legalEntityID string, productIDs []string, asOf time.Time) ([]domain.FreeGoodsDef, error) {
+	out := []domain.FreeGoodsDef{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
+			where legal_entity_id = $1::uuid and product_id = any($2::text[]) and not withdrawn
+			and valid_from <= $3::date and valid_to >= $3::date`, legalEntityID, productIDs, dayStr(asOf))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			r, err := scanFreeGoods(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// WithdrawFreeGoodsRule takes a rule out of resolve at the expected version (412
+// conflict_version otherwise; 409 PRC-0031 when already withdrawn) and announces it through
+// the outbox in the same transaction. A repeated Idempotency-Key replays the first response.
+func (s *Postgres) WithdrawFreeGoodsRule(ctx context.Context, id string, version int, idempotencyKey string) (domain.FreeGoodsDef, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.FreeGoodsDef
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := scanFreeGoods(tx.QueryRow(ctx, `select `+freeGoodsColumns+` from free_goods_rule where id = $1 for update`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return freeGoodsNotFound(id)
+		}
+		if err != nil {
+			return err
+		}
+		hash := commandHash("freegoods-withdraw", id, strconv.Itoa(version))
+		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
+			return err
+		}
+		if cur.Version != version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "free goods rule version does not match")
+		}
+		if cur.Withdrawn {
+			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "free goods rule is already withdrawn")
+		}
+		out, err = scanFreeGoods(tx.QueryRow(ctx, `update free_goods_rule set withdrawn = true, version = version + 1
+			where id = $1 returning `+freeGoodsColumns, id))
+		if err != nil {
+			return err
+		}
+		if err := enqueueEvent(ctx, tx, "freegoodsrule", out.ID, pevents.FreeGoodsRuleWithdrawn, freeGoodsEventData(out)); err != nil {
+			return err
+		}
+		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
+	})
+	return out, err
+}

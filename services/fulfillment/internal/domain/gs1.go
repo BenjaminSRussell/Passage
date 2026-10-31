@@ -58,7 +58,14 @@ func ParseGS1(raw string) (Scan, error) {
 		return Scan{}, err
 	}
 	var s Scan
+	seen := map[string]string{}
 	for _, p := range pairs {
+		// An identifier may repeat only with the same value (GS1 General
+		// Specifications 4.14).
+		if prev, ok := seen[p.ai]; ok && prev != p.value {
+			return Scan{}, fmt.Errorf("%w: AI %s appears twice with different values", ErrGS1Value, p.ai)
+		}
+		seen[p.ai] = p.value
 		switch p.ai {
 		case "00":
 			if err := ValidSSCC(p.value); err != nil {
@@ -71,13 +78,19 @@ func ParseGS1(raw string) (Scan, error) {
 			}
 			s.GTIN = p.value
 		case "10":
+			if !inCSet82(p.value) {
+				return Scan{}, fmt.Errorf("%w: batch", ErrGS1Value)
+			}
 			s.Batch = p.value
 		case "17":
-			if !allDigits(p.value) {
+			if !validYYMMDD(p.value) {
 				return Scan{}, fmt.Errorf("%w: expiry", ErrGS1Value)
 			}
 			s.Expiry = p.value
 		case "21":
+			if !inCSet82(p.value) {
+				return Scan{}, fmt.Errorf("%w: serial", ErrGS1Value)
+			}
 			s.Serial = p.value
 		case "30", "37":
 			if !allDigits(p.value) {
@@ -91,6 +104,46 @@ func ParseGS1(raw string) (Scan, error) {
 		}
 	}
 	return s, nil
+}
+
+// cset82 is the GS1 AI encodable character set 82, the only characters allowed
+// in the batch (10) and serial (21) values.
+const cset82 = "!\"%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
+
+func inCSet82(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if strings.IndexByte(cset82, v[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// validYYMMDD checks a GS1 date: month 01 to 12, day 01 to the month's last day,
+// or 00 for "end of month". The century is not encoded; within the GS1 sliding
+// window (current year -49 to +50) a year is a leap year exactly when YY is
+// divisible by 4.
+func validYYMMDD(v string) bool {
+	if len(v) != 6 || !allDigits(v) {
+		return false
+	}
+	yy := int(v[0]-'0')*10 + int(v[1]-'0')
+	mm := int(v[2]-'0')*10 + int(v[3]-'0')
+	dd := int(v[4]-'0')*10 + int(v[5]-'0')
+	if mm < 1 || mm > 12 {
+		return false
+	}
+	last := 31
+	switch mm {
+	case 2:
+		last = 28
+		if yy%4 == 0 {
+			last = 29
+		}
+	case 4, 6, 9, 11:
+		last = 30
+	}
+	return dd <= last
 }
 
 // RequireGTIN returns the GTIN or ErrGS1Missing when the scan carries none.

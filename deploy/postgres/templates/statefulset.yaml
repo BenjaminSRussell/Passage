@@ -1,0 +1,68 @@
+{{- $secret := include "outbox-postgres.secretName" . }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.image | quote }}
+          args:
+            - -c
+            - wal_level=logical
+            - -c
+            - max_wal_senders=10
+            - -c
+            - max_replication_slots=10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - { name: POSTGRES_USER, value: passage }
+            - { name: POSTGRES_DB, value: {{ required "database is required" .Values.database | quote }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - { name: POSTGRES_PASSWORD_FILE, value: /run/secrets/outbox-postgres/POSTGRES_PASSWORD }
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, passage, -d, {{ .Values.database | quote }}]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            - { name: credentials, mountPath: /run/secrets/outbox-postgres, readOnly: true }
+      volumes:
+        - name: credentials
+          secret: { secretName: {{ $secret }}, defaultMode: 0440 }
+        - name: init
+          configMap: { name: {{ .Release.Name }}-postgres-init, defaultMode: 365 }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

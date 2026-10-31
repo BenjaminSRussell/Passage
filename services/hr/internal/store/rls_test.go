@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"testing"
@@ -30,14 +29,11 @@ func TestRowLevelSecurity(t *testing.T) {
 	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := testSealer(t)
 	s := New(app, sealer, 10)
 	le, otherLE := ids.New(), ids.New()
 	scoped := func(tenantID, entity string) context.Context {
-		return tenant.With(bg, tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "user-test", Duties: map[string]struct{}{}})
+		return tenant.With(bg, tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "user-test", Duties: testkit.ScopeDuties(entity)})
 	}
 	one := scoped(testkit.TenantID(1), "")
 	w := mustWorker(t, s, one, "Rls")

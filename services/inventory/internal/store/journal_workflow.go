@@ -37,7 +37,7 @@ func (s *Postgres) ValidateJournal(ctx context.Context, id string, p PostParams)
 		default:
 			return problem(http.StatusConflict, CodeJournalState, "a "+string(j.Status)+" journal cannot be validated")
 		}
-		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p); err != nil {
+		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p, ""); err != nil {
 			return err
 		}
 		return errDryRun

@@ -1,0 +1,12 @@
+{
+  "note": "minted by services/workflow-ts/src/serviceToken.ts; the Go verifier must accept it and the TypeScript test must reproduce it byte for byte",
+  "seedBase64": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+  "publicKeyBase64": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+  "keyId": "k1",
+  "iat": 1793275200,
+  "jti": "00112233445566778899aabbccddeeff",
+  "tenantId": "0190a5f2-7b1c-7d3e-8a4f-1234567890ab",
+  "legalEntityId": "0190a5f2-7b1c-7d3e-8a4f-1234567890ac",
+  "actor": "erin",
+  "token": "eyJpc3MiOiJ3b3JrZmxvdy10cyIsImtpZCI6ImsxIiwiYXVkIjoicGF5YWJsZXMiLCJ0aWQiOiIwMTkwYTVmMi03YjFjLTdkM2UtOGE0Zi0xMjM0NTY3ODkwYWIiLCJsZSI6IjAxOTBhNWYyLTdiMWMtN2QzZS04YTRmLTEyMzQ1Njc4OTBhYyIsImFjdCI6ImVyaW4iLCJkdXRpZXMiOlsicGF5bWVudC1ydW4uZXhlY3V0ZSJdLCJpYXQiOjE3OTMyNzUyMDAsImV4cCI6MTc5MzI3NTI2MCwianRpIjoiMDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmYifQ.A2lZGYsDjowoSxkmGv9cUk9scRStoOYzSoUlAg6_bH_K82PfsbSTsVvbf-A3vUbAKFb_-_dVNjiYYyEGep-jAQ"
+}

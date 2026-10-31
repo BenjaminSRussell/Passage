@@ -147,7 +147,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation(map[string]string{idempotencyHeader: fmt.Sprintf("header is required, at most %d characters", maxIdempotencyKey)}))
 		return
 	}
-	if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbiddenScope, "the project's legal entity is outside the caller's scope"))
 		return
 	}

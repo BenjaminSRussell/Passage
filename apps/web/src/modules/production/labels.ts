@@ -1,10 +1,14 @@
 import type { BadgeTone } from "../../shell/ui";
 import type {
   BulkCommand,
+  ChangeStatus,
+  CoProductType,
+  OCMMode,
+  SplitAllocation,
   CostGroup,
   EditOp,
   Flushing,
-  JournalType,
+  ListedJournalType,
   LoggedCommand,
   OperStatus,
   ProductionCommand,
@@ -19,6 +23,11 @@ import type {
   TriggerOperator,
   VarianceType,
 } from "./api/client";
+
+export const coProductTypeLabel: Record<CoProductType, string> = {
+  "co-product": "Co-product",
+  "by-product": "By-product",
+};
 
 export const commandLabel: Record<ProductionCommand, string> = {
   estimate: "Estimate",
@@ -90,10 +99,11 @@ export const costGroupLabel: Record<CostGroup, string> = {
   subcontract: "Subcontract",
 };
 
-export const journalTypeLabel: Record<JournalType, string> = {
+export const journalTypeLabel: Record<ListedJournalType, string> = {
   "picking-list": "Picking list",
   "route-card": "Route card",
   "report-as-finished": "Report as finished",
+  "split-transfer": "Split transfer",
 };
 
 export const proposalLabel: Record<Proposal, string> = {
@@ -227,3 +237,40 @@ export function describeCondition(condition: string): string {
   }
   return `${fieldLabel} ${opLabel} ${value}`;
 }
+
+export const changeStatusLabel: Record<ChangeStatus, string> = { pending: "Pending", applied: "Applied", dismissed: "Dismissed" };
+
+export const changeStatusTone: Record<ChangeStatus, BadgeTone> = { pending: "warning", applied: "success", dismissed: "neutral" };
+
+export const ocmModeLabel: Record<OCMMode, string> = {
+  automatic: "Automatic (applied at the next status command)",
+  manual: "Manual (the planner confirms)",
+  none: "None (ignore new versions)",
+};
+
+/** A one-line summary of what an ECO changes on an order, for the worklist. */
+export function describeDelta(d: {
+  linesAdded: number;
+  linesRemoved: number;
+  linesChanged: number;
+  operationsAdded: number;
+  operationsRemoved: number;
+  operationsChanged: number;
+}): string {
+  const parts: string[] = [];
+  const add = (n: number, what: string) => n > 0 && parts.push(`${n} ${what}`);
+  add(d.linesAdded, "lines added");
+  add(d.linesRemoved, "lines removed");
+  add(d.linesChanged, "lines changed");
+  add(d.operationsAdded, "operations added");
+  add(d.operationsRemoved, "operations removed");
+  add(d.operationsChanged, "operations changed");
+  return parts.length > 0 ? parts.join(", ") : "No difference";
+}
+
+export const splitAllocationLabel: Record<SplitAllocation, string> = {
+  proportional: "Proportional (consumption, hours and WIP move with the quantity)",
+  "keep-on-original": "Keep on the original order",
+};
+
+export const yesNo = (value: boolean) => (value ? "Yes" : "No");

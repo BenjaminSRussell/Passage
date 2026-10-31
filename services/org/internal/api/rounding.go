@@ -3,7 +3,6 @@ package api
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -183,7 +182,7 @@ func (a *API) roundCurrency(w http.ResponseWriter, r *http.Request) {
 			badQuery(w, r, "legalEntityId", "must be a UUID")
 			return
 		}
-		if p.LegalEntityID != "" && !strings.EqualFold(asked, p.LegalEntityID) {
+		if !tenant.InLegalEntityScope(p, asked) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot round for another legal entity"))
 			return
 		}

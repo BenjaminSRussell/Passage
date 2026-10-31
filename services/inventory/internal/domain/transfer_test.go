@@ -190,3 +190,56 @@ func TestInTransitDays(t *testing.T) {
 		t.Fatalf("future ship date days %d, want 0", got)
 	}
 }
+
+func TestTransferLineLateness(t *testing.T) {
+	day := func(n int) time.Time { return time.Date(2026, 9, n, 0, 0, 0, 0, time.UTC) }
+	open := TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("4")}
+	closed := open
+	closed.Closed = true
+	received := TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("10")}
+	cases := []struct {
+		name, status string
+		line         TransferLine
+		ship, asOf   time.Time
+		want         string
+		days         int
+	}{
+		{"created past planned date", TransferCreated, TransferLine{Qty: d("10")}, day(1), day(4), LateShipment, 3},
+		{"created on planned date", TransferCreated, TransferLine{Qty: d("10")}, day(2), day(2), "", 0},
+		{"created with a future planned date", TransferCreated, TransferLine{Qty: d("10")}, day(9), day(2), "", 0},
+		{"shipped exactly at the allowance is due today", TransferShipped, open, day(1), day(8), "", 0},
+		{"shipped one day beyond the allowance", TransferShipped, open, day(1), day(9), LateReceipt, 1},
+		{"partially received and old", TransferPartial, open, day(1), day(20), LateReceipt, 12},
+		{"closed short is for investigation, not late", TransferPartial, closed, day(1), day(20), "", 0},
+		{"nothing left in transit", TransferShipped, received, day(1), day(20), "", 0},
+		{"received order", TransferReceived, open, day(1), day(20), "", 0},
+		{"cancelled order", TransferCancelled, TransferLine{Qty: d("10")}, day(1), day(20), "", 0},
+	}
+	for _, c := range cases {
+		if got, days := TransferLineLateness(c.status, c.line, c.ship, c.asOf, DefaultLateReceiptDays); got != c.want || days != c.days {
+			t.Errorf("%s: got %q %d days, want %q %d", c.name, got, days, c.want, c.days)
+		}
+	}
+	if got, days := TransferLineLateness(TransferShipped, open, day(1), day(2), 0); got != LateReceipt || days != 1 {
+		t.Errorf("zero allowance: got %q %d, want a late receipt one day overdue", got, days)
+	}
+}
+
+func TestTransferLineRemaining(t *testing.T) {
+	cases := []struct {
+		name, status string
+		line         TransferLine
+		want         string
+	}{
+		{"not shipped", TransferCreated, TransferLine{Qty: d("10")}, "10"},
+		{"partly received", TransferPartial, TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("4")}, "6"},
+		{"closed short", TransferReceived, TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("9"), Closed: true}, "0"},
+		{"over-received", TransferReceived, TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("11")}, "0"},
+		{"cancelled", TransferCancelled, TransferLine{Qty: d("10")}, "0"},
+	}
+	for _, c := range cases {
+		if got := TransferLineRemaining(c.status, c.line); !got.Equal(d(c.want)) {
+			t.Errorf("%s: remaining %s, want %s", c.name, got, c.want)
+		}
+	}
+}

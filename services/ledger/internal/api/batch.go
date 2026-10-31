@@ -50,7 +50,7 @@ func (a *API) registerBatches(r chi.Router) {
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post("/journal-batches/{id}/submit", a.submitBatch)
 	r.With(authz.RequireDuty(dutyJournalApprove)).Post("/journal-batches/{id}/approve", a.approveBatch)
 	r.With(authz.RequireDuty(dutyJournalApprove)).Post("/journal-batches/{id}/reject", a.rejectBatch)
-	r.With(authz.RequireDuty(dutyPost)).Post("/journal-batches/{id}/post", a.postBatch)
+	r.With(authz.RequireAnyDuty(dutyPost, dutyBatchPost)).Post("/journal-batches/{id}/post", a.postBatch)
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post("/journal-batches/{id}/cancel", a.cancelBatch)
 }
 

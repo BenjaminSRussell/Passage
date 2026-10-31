@@ -36,11 +36,36 @@ channels:
     messages:
       shipmentCancelled:
         $ref: "#/components/messages/ShipmentCancelled"
+  shipmentClosed:
+    address: passage.fulfillment.shipment
+    messages:
+      shipmentClosed:
+        $ref: "#/components/messages/ShipmentClosed"
+  pickTracked:
+    address: passage.fulfillment.pick
+    messages:
+      pickTracked:
+        $ref: "#/components/messages/PickTracked"
+  containerUnpacked:
+    address: passage.fulfillment.container
+    messages:
+      containerUnpacked:
+        $ref: "#/components/messages/ContainerUnpacked"
   waveCreated:
     address: passage.fulfillment.wave
     messages:
       waveCreated:
         $ref: "#/components/messages/WaveCreated"
+  waveAssigned:
+    address: passage.fulfillment.wave
+    messages:
+      waveAssigned:
+        $ref: "#/components/messages/WaveAssigned"
+  waveClosed:
+    address: passage.fulfillment.wave
+    messages:
+      waveClosed:
+        $ref: "#/components/messages/WaveClosed"
   asnIssued:
     address: passage.fulfillment.asn
     messages:
@@ -77,11 +102,36 @@ operations:
     channel: { $ref: "#/channels/shipmentCancelled" }
     messages:
       - $ref: "#/channels/shipmentCancelled/messages/shipmentCancelled"
+  publishShipmentClosed:
+    action: send
+    channel: { $ref: "#/channels/shipmentClosed" }
+    messages:
+      - $ref: "#/channels/shipmentClosed/messages/shipmentClosed"
+  publishPickTracked:
+    action: send
+    channel: { $ref: "#/channels/pickTracked" }
+    messages:
+      - $ref: "#/channels/pickTracked/messages/pickTracked"
+  publishContainerUnpacked:
+    action: send
+    channel: { $ref: "#/channels/containerUnpacked" }
+    messages:
+      - $ref: "#/channels/containerUnpacked/messages/containerUnpacked"
   publishWaveCreated:
     action: send
     channel: { $ref: "#/channels/waveCreated" }
     messages:
       - $ref: "#/channels/waveCreated/messages/waveCreated"
+  publishWaveAssigned:
+    action: send
+    channel: { $ref: "#/channels/waveAssigned" }
+    messages:
+      - $ref: "#/channels/waveAssigned/messages/waveAssigned"
+  publishWaveClosed:
+    action: send
+    channel: { $ref: "#/channels/waveClosed" }
+    messages:
+      - $ref: "#/channels/waveClosed/messages/waveClosed"
   publishASNIssued:
     action: send
     channel: { $ref: "#/channels/asnIssued" }
@@ -96,6 +146,10 @@ components:
   messages:
     ShipmentReleased:
       name: dev.passage.fulfillment.shipment.released.v1
+      title: Shipment released
+      summary: >
+        An order was released to the warehouse as a shipment (FR-28.1). Inventory
+        reserves and picking starts from it.
       contentType: application/json
       payload:
         type: object
@@ -121,6 +175,7 @@ components:
         required: [shipment_id, lines]
         properties:
           shipment_id: { type: string, format: uuid }
+          wave_id: { type: string, format: uuid, description: "The wave whose confirmation picked the lines (FR-28.13); absent for a single-shipment pick." }
           lines:
             type: array
             items:
@@ -129,6 +184,7 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string }
                 backordered: { type: string }
+                short_reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Reason of the short pick, present when one was given." }
     PackingSlipPosted:
       name: dev.passage.fulfillment.packingslip.posted.v1
       summary: >
@@ -214,6 +270,79 @@ components:
               properties:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string, description: The planned quantity that no longer ships. }
+    ShipmentClosed:
+      name: dev.passage.fulfillment.shipment.closed.v1
+      title: Shipment remainder closed
+      summary: >
+        The open remainder of a partially shipped shipment was closed (FR-28.8,
+        CANCEL_REMAINDER). Inventory releases the reservation of the closed
+        quantity and returns picked stock that was never packed; sales may cancel
+        or re-order the remainder.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, order_id, warehouse, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          order_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [order_line_id, qty, picked_unpacked]
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string, description: The planned quantity that will not ship. }
+                picked_unpacked: { type: string, description: The part of qty that was picked but never packed and goes back to stock. }
+    PickTracked:
+      name: dev.passage.fulfillment.pick.tracked.v1
+      title: Pick tracking captured
+      summary: >
+        The batch, serial and location entries of a shipment line were captured or
+        replaced at pick (BR-28.10). Entries is the full set not yet shipped on the line.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, warehouse, line]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          warehouse: { type: string, format: uuid }
+          line:
+            type: object
+            required: [order_line_id, product_id, entries]
+            properties:
+              order_line_id: { type: string, format: uuid }
+              product_id: { type: string, format: uuid }
+              entries:
+                type: array
+                items: { $ref: "#/components/schemas/TrackingEntry" }
+    ContainerUnpacked:
+      name: dev.passage.fulfillment.container.unpacked.v1
+      title: Container unpacked
+      summary: >
+        A CLOSED container was taken apart before it shipped. Its SSCC stays issued
+        and is never reused; the line quantities return to the unpacked pool of the
+        shipment, which goes back to PICKED when it had been PACKED.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, container_id, sscc, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          container_id: { type: string, format: uuid }
+          sscc: { type: string, description: The 18-digit SSCC of the unpacked container. }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [order_line_id, qty]
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string, description: The quantity that was in the container. }
     WaveCreated:
       name: dev.passage.fulfillment.wave.created.v1
       summary: >
@@ -236,6 +365,42 @@ components:
             items: { type: string, format: uuid }
           line_count: { type: integer }
           order_count: { type: integer }
+    WaveAssigned:
+      name: dev.passage.fulfillment.wave.assigned.v1
+      summary: >
+        A supervisor gave a pick wave to a picker or handed it to another one
+        (FR-28.13). previous_picker is absent on the first assignment.
+      contentType: application/json
+      payload:
+        type: object
+        required: [wave_id, wave_number, legal_entity_id, warehouse, picker]
+        properties:
+          wave_id: { type: string, format: uuid }
+          wave_number: { type: string, example: "WV-0000001" }
+          legal_entity_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          picker: { type: string }
+          previous_picker: { type: string }
+    WaveClosed:
+      name: dev.passage.fulfillment.wave.closed.v1
+      summary: >
+        A pick wave was closed: every line is picked, or sits on a cancelled
+        shipment. short_lines counts the lines picked below plan.
+      contentType: application/json
+      payload:
+        type: object
+        required: [wave_id, wave_number, legal_entity_id, warehouse, shipment_ids, line_count, short_lines]
+        properties:
+          wave_id: { type: string, format: uuid }
+          wave_number: { type: string, example: "WV-0000001" }
+          legal_entity_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          picker: { type: string, description: Absent when the wave was never assigned. }
+          shipment_ids:
+            type: array
+            items: { type: string, format: uuid }
+          line_count: { type: integer }
+          short_lines: { type: integer }
     ASNIssued:
       name: dev.passage.fulfillment.asn.issued.v1
       summary: >
@@ -296,6 +461,19 @@ components:
         qty: { type: string }
         cost_amount: { type: string }
         cost_snapshot_id: { type: string }
+        product_id: { type: string, format: uuid, description: Set on a posted slip line. }
+        tracking:
+          type: array
+          description: Batches and serials shipping on this line (BR-28.10); absent for an untracked line and for a reversal.
+          items: { $ref: "#/components/schemas/TrackingEntry" }
+    TrackingEntry:
+      type: object
+      required: [qty]
+      properties:
+        batch_no: { type: string }
+        serial_no: { type: string }
+        location_code: { type: string }
+        qty: { type: string }
     JournalEntry:
       type: object
       description: Signed amount; debits positive, credits negative.

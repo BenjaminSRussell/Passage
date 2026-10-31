@@ -10,7 +10,7 @@ paths:
     post:
       operationId: validateTaxRegistration
       x-passage-duty: party.write
-      description: Format-checks tax numbers. VAT returns validationStatus unverified until VIES integration is implemented.
+      description: Format-checks tax numbers. VAT is checked against VIES when PARTY_VIES_URL is set and returns validationStatus unverified otherwise or when VIES gives no verdict.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -37,7 +37,7 @@ paths:
     post:
       operationId: createParty
       x-passage-duty: party.write
-      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1.
+      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1. The caller must carry exactly one legal entity (X-Passage-Legal-Entity), because the party number is allocated for that entity; a caller with none or several gets 422 PTY-LEGAL-ENTITY-REQUIRED.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -60,7 +60,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { description: 'idempotency_key_reuse: the key was used with a different body.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PTY-PARTY-INVALID; errors names each failing field.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PARTY-INVALID; errors names each failing field. PTY-LEGAL-ENTITY-REQUIRED: the caller has no legal entity or more than one.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
         '503': { description: 'PTY-NUMBERING-UNAVAILABLE: the numbering service failed, timed out or NUMBERING_URL is empty. No party is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/parties/{id}:
@@ -113,6 +113,91 @@ paths:
         '422': { description: 'PTY-PARTY-INVALID (bad field, partyType change) or PTY-STATUS-TRANSITION (status merged, unknown status, or the party is merged).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: 'PTY-VERSION-REQUIRED: no usable If-Match or body version.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties/{id}/vendor:
+    parameters:
+      - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
+    post:
+      operationId: createVendorRole
+      x-passage-duty: party.write
+      description: Adds the vendor role to a party in the caller's single legal entity. 409 PTY-VENDOR-EXISTS when the party already has one there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewVendor' }
+      responses:
+        '201': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties/{id}/vendors:
+    parameters:
+      - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
+    get:
+      operationId: listPartyVendors
+      x-passage-duty: party.read
+      description: The party's vendor roles visible to the caller's legal entities.
+      responses:
+        '200': { description: 'vendors.', content: { application/json: { schema: { type: object, required: [vendors], properties: { vendors: { type: array, items: { $ref: '#/components/schemas/Vendor' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/vendors/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getVendor
+      x-passage-duty: party.read
+      description: The vendor role, including vendorGroupId.
+      responses:
+        '200': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-VENDOR-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/vendors/{id}/bank-accounts:
+    parameters:
+      - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
+    post:
+      operationId: addVendorBankAccount
+      x-passage-duty: party.vendor_bank.write
+      description: Stores a bank account; account and routing numbers are encrypted per tenant and field. Needs X-Passage-User. 503 PTY-BANK-ENCRYPTION-UNAVAILABLE when no field encryption keys are configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewBankAccount' }
+      responses:
+        '201': { description: The account, masked., content: { application/json: { schema: { $ref: '#/components/schemas/BankAccount' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-VENDOR-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: PTY-BANK-INVALID., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listVendorBankAccounts
+      x-passage-duty: party.read
+      description: Bank accounts with accountLast4 only.
+      responses:
+        '200': { description: 'bankAccounts, masked.', content: { application/json: { schema: { type: object, required: [bankAccounts], properties: { bankAccounts: { type: array, items: { $ref: '#/components/schemas/BankAccount' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-VENDOR-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/vendors/{id}/bank-accounts:reveal:
+    parameters:
+      - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
+    get:
+      operationId: revealVendorBankAccounts
+      x-passage-duty: party.vendor_bank.reveal
+      description: Bank accounts with accountNumber and routingNumber decrypted. Each call is logged with the user and vendor id.
+      responses:
+        '200': { description: 'bankAccounts, unmasked.', content: { application/json: { schema: { type: object, required: [bankAccounts], properties: { bankAccounts: { type: array, items: { $ref: '#/components/schemas/BankAccount' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-VENDOR-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/party/customers/{id}/credit-limit:
     parameters:
       - { name: id, in: path, required: true, description: Customer role id., schema: { type: string, format: uuid } }
@@ -271,6 +356,50 @@ paths:
               schema: { type: string }
 components:
   schemas:
+    NewVendor:
+      type: object
+      additionalProperties: false
+      required: [accountNumber, vendorGroupId, currencyCode]
+      properties:
+        accountNumber: { type: string, maxLength: 20 }
+        vendorGroupId: { type: string, format: uuid }
+        paymentTermId: { type: string, format: uuid, nullable: true }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+    Vendor:
+      type: object
+      required: [id, partyId, legalEntityId, accountNumber, vendorGroupId, currencyCode, blocked, version]
+      properties:
+        id: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        accountNumber: { type: string }
+        vendorGroupId: { type: string, format: uuid }
+        paymentTermId: { type: string, format: uuid }
+        currencyCode: { type: string }
+        blocked: { type: string, enum: [none, payment, all] }
+        version: { type: integer }
+    NewBankAccount:
+      type: object
+      additionalProperties: false
+      required: [accountHolder, bankCountry, currencyCode, accountNumber]
+      properties:
+        accountHolder: { type: string, maxLength: 140 }
+        bankCountry: { type: string, minLength: 2, maxLength: 2 }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        accountNumber: { type: string, description: IBAN or account number; spaces and dashes are stripped. }
+        routingNumber: { type: string }
+    BankAccount:
+      type: object
+      required: [id, vendorId, accountHolder, bankCountry, currencyCode, accountLast4]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        accountHolder: { type: string }
+        bankCountry: { type: string }
+        currencyCode: { type: string }
+        accountLast4: { type: string }
+        accountNumber: { type: string, description: Only on the reveal route. }
+        routingNumber: { type: string, description: Only on the reveal route. }
     ValidateTaxRegistration:
       type: object
       additionalProperties: false

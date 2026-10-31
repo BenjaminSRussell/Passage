@@ -38,6 +38,11 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID+"|"+in.VendorID+"|"+strings.ToLower(in.InvoiceNumber)); err != nil {
 			return err
 		}
+		if in.OneTimePayeeID != "" {
+			if err := checkPayeeForInvoice(ctx, tx, tenantID, in); err != nil {
+				return err
+			}
+		}
 		var existing int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receiving_vendor_invoice WHERE tenant_id = $1 AND vendor_id = $2 AND lower(invoice_number) = lower($3)`,
 			tenantID, in.VendorID, in.InvoiceNumber).Scan(&existing); err != nil {
@@ -68,11 +73,24 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		for i, l := range in.Lines {
 			items[i] = byKey[l.ItemKey()]
 		}
+		if err := refuseSettledPlanLines(ctx, tx, tenantID, distinct); err != nil {
+			return err
+		}
 		outcome, err := fn(items)
 		if err != nil {
 			return err
 		}
 		in.LedgerEntryID, in.Total = outcome.LedgerEntryID, outcome.Total
+		in.Source = cmp.Or(in.Source, domain.InvoiceSourceManual)
+		in.Status = domain.InvoiceStatusPosted
+		if outcome.Blocked {
+			in.Status = domain.InvoiceStatusAuditBlocked
+		}
+		for i := range in.Lines {
+			if i < len(outcome.Clearings) {
+				in.Lines[i].GrirCleared = outcome.Clearings[i]
+			}
+		}
 		if err := insertInvoice(ctx, tx, tenantID, &in); err != nil {
 			return err
 		}
@@ -94,8 +112,10 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET invoiced_qty = $4 WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
 			return err
 		}
-		if err := markPostingsDone(ctx, tx, tenantID, in.ID, outcome.LedgerEntryID != ""); err != nil {
-			return err
+		if !outcome.Blocked {
+			if err := markPostingsDone(ctx, tx, tenantID, in.ID, outcome.LedgerEntryID != ""); err != nil {
+				return err
+			}
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, in.ID, outcome.Event)
 	})
@@ -132,15 +152,15 @@ func lockGrirItem(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, k
 
 func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in *Invoice) error {
 	if err := tx.QueryRow(ctx, `INSERT INTO receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date,
-		currency, ledger_id, fiscal_period_id, ledger_entry_id, total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING created_at`,
+		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason, one_time_payee_id, audit_rule_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, NULLIF($18, 0)) RETURNING created_at`,
 		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, in.InvoiceDate, in.PostingDate, in.Currency, in.LedgerID, in.FiscalPeriodID,
-		in.LedgerEntryID, in.Total).Scan(&in.CreatedAt); err != nil {
+		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason, in.OneTimePayeeID, in.AuditRuleVersion).Scan(&in.CreatedAt); err != nil {
 		return err
 	}
 	rows := make([][]any, len(in.Lines))
 	for i, l := range in.Lines {
-		rows[i] = []any{tenantID, in.ID, i + 1, in.LegalEntityID, l.ReceiptID, l.ReceiptLineNo, l.Qty, l.UnitPrice, l.Amount, l.StandardCost}
+		rows[i] = []any{tenantID, in.ID, i + 1, in.LegalEntityID, l.ReceiptID, l.ReceiptLineNo, l.Qty, l.UnitPrice, l.Amount, l.StandardCost, l.GrirCleared}
 	}
-	return execBatch(ctx, tx, `INSERT INTO receiving_vendor_invoice_line (tenant_id, invoice_id, line_no, legal_entity_id, receipt_id, receipt_line_no, qty, unit_price, amount, standard_cost)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, rows)
+	return execBatch(ctx, tx, `INSERT INTO receiving_vendor_invoice_line (tenant_id, invoice_id, line_no, legal_entity_id, receipt_id, receipt_line_no, qty, unit_price, amount, standard_cost, grir_cleared)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, rows)
 }

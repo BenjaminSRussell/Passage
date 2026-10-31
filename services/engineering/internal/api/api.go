@@ -83,10 +83,14 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions", a.createRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos", a.listEcos)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}", a.getEco)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}/impact", a.ecoImpact)
 		r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars", a.createCalendar)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars/{id}:generate", a.generateCalendar)
@@ -98,6 +102,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups", a.listResourceGroups)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities", a.listCapabilities)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities/{id}", a.getCapability)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups/{id}", a.getResourceGroup)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars", a.listCalendars)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars/{id}", a.getCalendar)
 	})
 }
 
@@ -316,7 +324,27 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	listPage(a, w, r, "list bom versions", &a.bomFailed, a.store.ListBomVersions, bodyFromVersion)
+	q := r.URL.Query()
+	f := store.BomVersionFilter{ProductID: q.Get("productId"), SiteID: q.Get("siteId"), Status: q.Get("status")}
+	fields := map[string]string{}
+	for field, value := range map[string]string{"productId": f.ProductID, "siteId": f.SiteID} {
+		if len(value) > maxIDLength {
+			fields[field] = fmt.Sprintf("must be at most %d characters", maxIDLength)
+		}
+	}
+	switch f.Status {
+	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusSuperseded:
+	default:
+		fields["status"] = "must be draft, active, expired or superseded"
+	}
+	f.AsOf = optionalDate("asOf", q.Get("asOf"), fields)
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	listPage(a, w, r, "list bom versions", &a.bomFailed, func(ctx context.Context, after string, limit int) (store.BomVersionPage, error) {
+		return a.store.ListBomVersions(ctx, f, after, limit)
+	}, bodyFromVersion)
 }
 
 func pageParams(r *http.Request) (int, string, error) {
@@ -512,7 +540,7 @@ func (a *API) leadTime(w http.ResponseWriter, r *http.Request) {
 		fields["quantity"] = "quantity and hoursPerDay must be decimals within range"
 	}
 	for _, o := range req.Operations {
-		if !finite(o.SetupH, o.RunH, o.ProcessQty, o.QueueBeforeH, o.QueueAfterH, o.TransitH, o.EfficiencyPct) {
+		if !finite(o.SetupH, o.RunH, o.ProcessQty, o.QueueBeforeH, o.QueueAfterH, o.TransitH, o.EfficiencyPct, o.OverlapQty) {
 			fields["operations"] = "operation times must be decimals within range"
 		}
 	}

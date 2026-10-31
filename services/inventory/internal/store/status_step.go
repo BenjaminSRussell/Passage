@@ -185,6 +185,9 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		if err := checkStepNegative(r, vendorOwned, in.Negative); err != nil {
 			return err
 		}
+		if err := checkStepFreeze(ctx, tx, tp.TenantID, in.LegalEntityID, r); err != nil {
+			return err
+		}
 		if err := saveRow(ctx, tx, tp.TenantID, in.LegalEntityID, r, 1); err != nil {
 			return err
 		}
@@ -284,6 +287,9 @@ func (s *Postgres) ApplyStatusStep(ctx context.Context, in StatusStepInput) (Sta
 			return err
 		}
 		if err := checkStepNegative(r, vendorOwned, in.Negative); err != nil {
+			return err
+		}
+		if err := checkStepFreeze(ctx, tx, tp.TenantID, t.legalEntityID, r); err != nil {
 			return err
 		}
 		if err := saveRow(ctx, tx, tp.TenantID, t.legalEntityID, r, 1); err != nil {
@@ -456,7 +462,7 @@ func loadStepTxn(ctx context.Context, tx pgx.Tx, tenantID, id string) (stepTxn, 
 		from inventory_transaction t
 		join inventory_transaction_origin o on o.tenant_id = t.tenant_id and o.id = t.origin_id
 		join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
-		left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE') and l.tenant_id = o.tenant_id and l.id = o.source_id
+		left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE', 'TRANSFER_IN') and l.tenant_id = o.tenant_id and l.id = o.source_id
 		where t.tenant_id = $1 and t.id = $2 for update of t`, tenantID, id).Scan(
 		&t.legalEntityID, &t.originID, &t.sourceType, &t.journalID, &t.reference, &t.product, &t.hash, &raw, &qty, &entered, &t.unit,
 		&t.currency, &physical, &posted, &issue, &receipt, &t.physicalDate, &t.financialDate, &t.corrects)
@@ -609,4 +615,15 @@ func (s *Postgres) GetTransaction(ctx context.Context, id string) (TransactionRo
 	}
 	slices.Reverse(history)
 	return rows[0], history, nil
+}
+
+// checkStepFreeze applies the count freeze (INV-CNT-002) to a status change
+// that moves the row's physical inventory. Steps that only touch the ordered,
+// arrived or reserved buckets (for example ON_ORDER to ARRIVED) are not
+// movements of counted stock and pass.
+func checkStepFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, r *row) error {
+	if r.before.PhysicalInvent().Equal(r.oh.PhysicalInvent()) {
+		return nil
+	}
+	return checkCountFreeze(ctx, tx, tenantID, legalEntityID, "", []*row{r})
 }

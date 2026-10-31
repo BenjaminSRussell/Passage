@@ -31,9 +31,11 @@ function backorder(line: string, patch: Partial<BackorderRow> = {}): BackorderRo
     qtyPlanned: "100",
     qtyPicked: "90",
     qtyShipped: "90",
+    qtyClosed: "0",
     qtyRemainder: "10",
     open: true,
     shortPickedAt: "2026-10-21T14:05:00Z",
+    reason: null,
     ...patch,
   };
 }
@@ -43,14 +45,14 @@ const last = (path: string) => calls(path)[calls(path).length - 1].url.searchPar
 
 describe("Short picks and backorders", () => {
   it("lists open backorders on open with the remainder and links the shipment", async () => {
-    server.handler = (url) => (url.pathname === BACKORDERS ? json(200, { items: [backorder("0195f0a0-0000-7000-8000-0000000000a1")] }) : undefined);
+    server.handler = (url) => (url.pathname === BACKORDERS ? json(200, { items: [backorder("0195f0a0-0000-7000-8000-0000000000a1", { reason: "DAMAGED" })] }) : undefined);
     const { container } = renderAt("/fulfillment/backorders");
     expect(screen.getByRole("table", { name: "Short picks and backorders" })).toHaveAttribute("aria-busy", "true");
 
     const table = await findTable({ name: "Short picks and backorders" });
     const row = (await within(table).findByText("SH-0000007")).closest("tr") as HTMLElement;
     const cells = Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent);
-    expect(cells).toEqual(["SH-0000007", "Partially shipped", "0195f0a1", "0195f0a0", "100 EA", "90 EA", "10 EA", "Open", "2026-10-21 14:05 UTC"]);
+    expect(cells).toEqual(["SH-0000007", "Partially shipped", "0195f0a1", "0195f0a0", "100 EA", "90 EA", "10 EA", "0 EA", "Open", "Damaged", "2026-10-21 14:05 UTC"]);
     expect(within(row).getByRole("link", { name: "SH-0000007" })).toHaveAttribute("href", `/fulfillment/shipments/${SHIPMENT}`);
     const params = last(BACKORDERS);
     expect(params.get("limit")).toBe(String(BACKORDER_PAGE));
@@ -86,6 +88,18 @@ describe("Short picks and backorders", () => {
     fireEvent.change(screen.getByLabelText("Show"), { target: { value: "open" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
     expect(await screen.findByText("No short picks match the filter")).toBeInTheDocument();
+  });
+
+  it("shows a closed remainder with the quantity given up (FR-28.8)", async () => {
+    const closed = backorder("0195f0a0-0000-7000-8000-0000000000a3", {
+      status: "SHIPPED", qtyPlanned: "90", qtyPicked: "90", qtyClosed: "10", qtyRemainder: "0", open: false,
+    });
+    server.handler = (url) => (url.pathname === BACKORDERS ? json(200, { items: [closed] }) : undefined);
+    renderAt("/fulfillment/backorders");
+    const table = await findTable({ name: "Short picks and backorders" });
+    const row = (await within(table).findByText("SH-0000007")).closest("tr") as HTMLElement;
+    const cells = Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent);
+    expect(cells).toEqual(["SH-0000007", "Shipped", "0195f0a1", "0195f0a0", "90 EA", "90 EA", "0 EA", "10 EA", "Closed", "—", "2026-10-21 14:05 UTC"]);
   });
 
   it("validates the filter before calling the service", async () => {

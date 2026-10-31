@@ -131,12 +131,13 @@ func TestReverseEntry_StoreRejectionIs422(t *testing.T) {
 func TestCreateLedger_ReversalParameterDefaults(t *testing.T) {
 	h := server(&fakeStore{})
 	base := `"legalEntityId":"` + testDoc + `","code":"GL","name":"General ledger","chartCode":"STD","currency":"USD"`
-	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`}`, dutyLedgerWrite, nil)
+	inScope := map[string]string{"X-Passage-Legal-Entity": testDoc}
+	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`}`, dutyLedgerWrite, inScope)
 	body := decode(t, rec)
 	if rec.Code != http.StatusCreated || body["reversalReasonRequired"] != true || body["negativePostingEnabled"] != false {
 		t.Fatalf("defaults: status %d: %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`,"reversalReasonRequired":false,"negativePostingEnabled":true}`, dutyLedgerWrite, nil)
+	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", `{`+base+`,"reversalReasonRequired":false,"negativePostingEnabled":true}`, dutyLedgerWrite, inScope)
 	body = decode(t, rec)
 	if rec.Code != http.StatusCreated || body["reversalReasonRequired"] != false || body["negativePostingEnabled"] != true {
 		t.Fatalf("explicit: status %d: %s", rec.Code, rec.Body.String())

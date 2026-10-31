@@ -302,7 +302,7 @@ func TestSimulateMatchesEnrollment(t *testing.T) {
 func TestEmployeesSeeOnlyTheirOwnBenefits(t *testing.T) {
 	s, admin := newStore(t)
 	me := ids.New()
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: me, Duties: map[string]struct{}{}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: me, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 	plan := mustBenefitPlan(t, s, admin, medicalPlan("MED-OWN"))
 	mine, _, err := s.CreateWorker(admin, WorkerInput{Worker: Worker{PersonnelNumber: "WRK-ME", WorkerType: "EMPLOYEE",
 		PartyPersonID: ids.New(), LegalName: "Me", UserID: &me}, NationalID: "123-45-6789"}, "")

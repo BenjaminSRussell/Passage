@@ -86,20 +86,63 @@ func TestQuery_MirrorsLegalEntityScopeIntoPlan(t *testing.T) {
 	}
 }
 
-func TestQuery_NoHeaderMeansWholeTenant(t *testing.T) {
+func TestQuery_NoEntityFailsClosed(t *testing.T) {
 	h := newTestServer()
 	body := `{"measures":["revenue"],"from":"2026-01-01","to":"2026-01-31"}`
-	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, withLE(""))
+	allScopeNoALL := map[string]string{tenant.HeaderDuties: DutyView + "," + tenant.DutyAllScope}
+	allHeaderNoDuty := map[string]string{tenant.HeaderDuties: DutyView, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	for name, headers := range map[string]map[string]string{"no entity": withLE(""), "duty without the ALL header": allScopeNoALL, "ALL header without the duty": allHeaderNoDuty} {
+		t.Run(name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, headers)
+			var got QueryResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("status %d err %v", rec.Code, err)
+			}
+			if got.Plan.Reason != domain.ReasonNoScope || len(got.Plan.Filters) != 0 {
+				t.Fatalf("plan = %+v, want NO_SCOPE", got.Plan)
+			}
+			if body := rec.Body.String(); !strings.Contains(body, `"filters":[]`) || !strings.Contains(body, `"dimensions":[]`) {
+				t.Fatalf("empty lists must encode as []: %s", body)
+			}
+		})
+	}
+}
+
+func TestQuery_AllScopeCallerGetsUnrestrictedPlan(t *testing.T) {
+	h := newTestServer()
+	body := `{"measures":["revenue"],"dimensions":["account_code"],"from":"2026-01-01","to":"2026-03-31"}`
+	allScope := map[string]string{tenant.HeaderDuties: DutyView + "," + tenant.DutyAllScope, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, allScope)
+	var got QueryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status %d err %v: %s", rec.Code, err, rec.Body.String())
+	}
+	if got.Plan.Reason != "" || got.Plan.Model != "fin_journal_line" || len(got.Plan.Filters) != 0 {
+		t.Fatalf("plan = %+v, want an unfiltered all-entity plan", got.Plan)
+	}
+}
+
+func TestQuery_EntityHeaderPlusALLStillNarrows(t *testing.T) {
+	h := newTestServer()
+	body := `{"measures":["revenue"],"dimensions":["account_code"],"from":"2026-01-01","to":"2026-03-31"}`
+	headers := map[string]string{tenant.HeaderDuties: DutyView + "," + tenant.DutyAllScope, tenant.HeaderLegalEntity: usmf, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, headers)
 	var got QueryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d err %v", rec.Code, err)
 	}
-	if len(got.Plan.Filters) != 0 || got.Plan.Reason != "" {
-		t.Fatalf("unrestricted plan = %+v", got.Plan)
+	if len(got.Plan.Filters) != 1 || got.Plan.Filters[0].Values[0] != usmf {
+		t.Fatalf("filters = %+v, want narrowed to %s", got.Plan.Filters, usmf)
 	}
-	// The OpenAPI Plan requires arrays: an empty filter or dimension list is [], never null.
-	if body := rec.Body.String(); !strings.Contains(body, `"filters":[]`) || !strings.Contains(body, `"dimensions":[]`) {
-		t.Fatalf("empty lists must encode as []: %s", body)
+}
+
+func TestExport_AllScopeIsStillStripped(t *testing.T) {
+	h := newTestServer()
+	body := `{"measures":["revenue"],"from":"2026-01-01","to":"2026-01-31","format":"CSV"}`
+	allScope := map[string]string{tenant.HeaderDuties: DutyView + "," + DutyExport + "," + tenant.DutyAllScope, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll, "Idempotency-Key": "k-293"}
+	rec := do(t, h, http.MethodPost, "/v1/analytics/exports", body, allScope)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), domain.CodeNoScope) {
+		t.Fatalf("status %d: %s, want 403 NO_SCOPE", rec.Code, rec.Body.String())
 	}
 }
 

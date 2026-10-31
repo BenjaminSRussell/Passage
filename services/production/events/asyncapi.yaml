@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.9
+  version: 0.21.15
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -17,6 +17,9 @@ info:
     (FR-21.18) with the requirement lines planning needs. triggerpoint.fired reports each trigger
     point that route-card feedback made due (FR-21.17): what its function did, or why it failed.
     operation.statuschanged reports an operation finished or reopened by its command (FR-21.6).
+    orderchange.detected, .applied and .dismissed report order change management (FR-21.16): an
+    open order whose BOM or route an ECO superseded, and what the planner did with the change.
+    parameters.saved reports the production parameters of a site created or replaced (PRD 4.21.13).
 channels:
   passage.production.order:
     address: passage.production.order
@@ -58,12 +61,32 @@ channels:
     messages:
       porequested:
         $ref: '#/components/messages/subcontractPORequested'
+      pochanged:
+        $ref: '#/components/messages/subcontractPOChanged'
+      pocancelled:
+        $ref: '#/components/messages/subcontractPOCancelled'
   passage.production.operation:
     address: passage.production.operation
     description: Keyed by order id (the outbox aggregate), so an order's operation changes stay ordered.
     messages:
       statuschanged:
         $ref: '#/components/messages/operationStatusChanged'
+  passage.production.orderchange:
+    address: passage.production.orderchange
+    description: Keyed by order id (the outbox aggregate), so an order's changes stay ordered with its other events.
+    messages:
+      detected:
+        $ref: '#/components/messages/orderChangeDetected'
+      applied:
+        $ref: '#/components/messages/orderChangeApplied'
+      dismissed:
+        $ref: '#/components/messages/orderChangeDismissed'
+  passage.production.parameters:
+    address: passage.production.parameters
+    description: Keyed by legal entity id (the outbox aggregate), so the changes of one legal entity's parameters stay ordered.
+    messages:
+      saved:
+        $ref: '#/components/messages/parametersSaved'
 operations:
   onOrderCreated:
     action: send
@@ -105,10 +128,34 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.subcontract' }
     messages: [{ $ref: '#/channels/passage.production.subcontract/messages/porequested' }]
+  onSubcontractPOChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.production.subcontract' }
+    messages: [{ $ref: '#/channels/passage.production.subcontract/messages/pochanged' }]
+  onSubcontractPOCancelled:
+    action: send
+    channel: { $ref: '#/channels/passage.production.subcontract' }
+    messages: [{ $ref: '#/channels/passage.production.subcontract/messages/pocancelled' }]
   onOperationStatusChanged:
     action: send
     channel: { $ref: '#/channels/passage.production.operation' }
     messages: [{ $ref: '#/channels/passage.production.operation/messages/statuschanged' }]
+  onOrderChangeDetected:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/detected' }]
+  onOrderChangeApplied:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/applied' }]
+  onOrderChangeDismissed:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/dismissed' }]
+  onParametersSaved:
+    action: send
+    channel: { $ref: '#/channels/passage.production.parameters' }
+    messages: [{ $ref: '#/channels/passage.production.parameters/messages/saved' }]
 components:
   messages:
     orderCreated:
@@ -215,17 +262,23 @@ components:
         journals posted by :start and :report-finished and the reversal journals of
         :reset-status (reversalOf set, negative quantities). journalEntryId stays null until the
         general ledger books the postings (consumers: inventory, ledger, planning).
+        A split of a Started order (BR-21.11) emits one `split-transfer` journal on each order,
+        linked by counterpartOrderId: negative lines and Cr WIP on the original, positive lines and
+        Dr WIP on the new order. It moves consumption, hours and WIP between the two orders only:
+        no stock moves (inventory must not book its issue lines) and its postings net to zero on
+        the WIP account.
       payload:
         type: object
-        required: [journalId, journalNumber, orderId, type, postingDate, currency, reversalOf, lines, postings, journalEntryId]
+        required: [journalId, journalNumber, orderId, type, postingDate, currency, reversalOf, counterpartOrderId, lines, postings, journalEntryId]
         properties:
           journalId: { type: string, format: uuid }
           journalNumber: { type: string }
           orderId: { type: string, format: uuid }
-          type: { type: string, enum: [picking-list, route-card, report-as-finished] }
+          type: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer] }
           postingDate: { type: string, format: date }
           currency: { type: string }
           reversalOf: { type: [string, 'null'], format: uuid }
+          counterpartOrderId: { type: [string, 'null'], format: uuid, description: 'The other order of a split-transfer journal; null for every other type.' }
           lines: { type: array, items: { $ref: '#/components/schemas/journalLine' } }
           postings: { type: array, items: { $ref: '#/components/schemas/posting' } }
           journalEntryId: { type: [string, 'null'], format: uuid }
@@ -329,6 +382,60 @@ components:
           dueDate: { type: [string, 'null'], format: date, description: The order's delivery date until scheduling (wave 23) dates the operation. }
           actor: { type: string }
       x-passage-type: dev.passage.production.subcontract.porequested.v1
+    subcontractPOChanged:
+      name: pochanged
+      title: Subcontract purchase order changed
+      description: |
+        Emitted in the transaction of a change that moves the process quantity, the vendor unit price or the due
+        date of a subcontract operation purchasing was already asked to buy: a quantity or delivery date PATCH, an
+        order BOM or route edit (also applied from an engineering change), the split of the order (the original
+        keeps a smaller PO) and the merge of orders (the survivor's PO grows). It carries the figures purchasing
+        was last given and the ones now in force. Consumer: purchasing (wave 17), which updates the vendor PO line.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, operNumber, resourceId, previousQty, qty, previousUnitPrice, unitPrice, previousAmount, amount, currency, previousDueDate, dueDate, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          operNumber: { type: integer }
+          resourceId: { type: string, format: uuid, description: The vendor resource of the operation. }
+          previousQty: { type: string, description: The process quantity of the request purchasing last received. }
+          qty: { type: string, description: The process quantity now. }
+          previousUnitPrice: { type: string }
+          unitPrice: { type: string }
+          previousAmount: { type: string, description: 'previousUnitPrice × previousQty at 4 places.' }
+          amount: { type: string, description: 'unitPrice × qty at 4 places: the subcontract row of the estimate.' }
+          currency: { type: string }
+          previousDueDate: { type: [string, 'null'], format: date, description: The due date purchasing last received. }
+          dueDate: { type: [string, 'null'], format: date, description: The order's delivery date now, until scheduling (wave 23) dates the operation. }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.subcontract.pochanged.v1
+    subcontractPOCancelled:
+      name: pocancelled
+      title: Subcontract purchase order request withdrawn
+      description: |
+        Emitted in the transaction that withdraws a request purchasing was given: the order is cancelled (also
+        by bulk status) or merged into another, an edit removed the operation, turned subcontracting off or
+        moved it to another vendor resource. The reason says which. The operation's poRequestedAt is cleared, so
+        a vendor change and a later release request afresh with subcontract.porequested; a reset below Released
+        withdraws nothing. Consumer: purchasing (wave 17), which cancels the vendor PO line.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, operNumber, resourceId, qty, unitPrice, amount, currency, reason, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          operNumber: { type: integer }
+          resourceId: { type: string, format: uuid, description: The vendor resource the request named. }
+          qty: { type: string, description: The process quantity that was requested. }
+          unitPrice: { type: string }
+          amount: { type: string, description: 'unitPrice × qty at 4 places.' }
+          currency: { type: string }
+          reason: { type: string, enum: [order-cancelled, operation-removed, subcontract-off, vendor-changed] }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.subcontract.pocancelled.v1
     operationStatusChanged:
       name: statuschanged
       title: Operation finished or reopened
@@ -350,6 +457,93 @@ components:
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.operation.statuschanged.v1
+    orderChangeDetected:
+      name: detected
+      title: Order change detected
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes:detect` for each open order whose BOM or route snapshot an ECO superseded and whose OCM profile is not none; a repeated ECO emits nothing for orders already recorded (FR-21.16). Consumers: the planner worklist, notifications.'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.detected.v1
+    orderChangeApplied:
+      name: applied
+      title: Order change applied
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes/{id}:apply`, or of the order status command that applies a change detected under an automatic OCM profile (note "applied automatically at :<command>"), after order.bomedited for the same re-explosion and re-estimate (FR-21.16). Consumers: planning, analytics.'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.applied.v1
+    orderChangeDismissed:
+      name: dismissed
+      title: Order change dismissed
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes/{id}:dismiss`, or of `POST /v1/production/order-changes:detect` when a later ECO covers an older pending change of the order (note "superseded by <ecoId>") (FR-21.16).'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.dismissed.v1
+    parametersSaved:
+      name: saved
+      title: Production parameters saved
+      description: 'Emitted in the transaction of `PUT /v1/production/parameters` when the parameters of a site (or All sites) of a legal entity are created or replaced (PRD 4.21.13). The payload is the row after the save. Consumers: audit, analytics.'
+      payload:
+        type: object
+        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, version, actor, occurredAt]
+        properties:
+          legalEntityId: { type: string, format: uuid }
+          siteId: { type: string, description: A site UUID, or All. }
+          rafTolerancePct: { type: string, description: 'Over-delivery allowed on report as finished, 0 to 100.' }
+          overConsumptionPct: { type: string, description: 'Picking beyond the required quantity allowed without the over-consumption duty, 0 to 1000.' }
+          autoStartOnFeedback: { type: boolean }
+          estimateOnCreate: { type: boolean }
+          splitAllocation: { type: string, enum: [proportional, keep-on-original] }
+          triggerPointsEnabled: { type: boolean }
+          asBuiltRequired: { type: boolean }
+          version: { type: integer }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.parameters.saved.v1
   schemas:
     reworkReference:
       type: object
@@ -361,8 +555,9 @@ components:
       type: object
       required: [kind, lineNo, operNumber, itemId, qty, unitCost, amount, hours]
       properties:
-        kind: { type: string, enum: [issue, hours, receipt] }
+        kind: { type: string, enum: [issue, hours, receipt, coproduct] }
         lineNo: { type: [string, 'null'] }
+        coProductLineNo: { type: [string, 'null'], description: 'The order''s co-product line of a coproduct receipt (FR-21.14); absent on other lines.' }
         operNumber: { type: [integer, 'null'] }
         itemId: { type: [string, 'null'], format: uuid }
         qty: { type: string }

@@ -133,7 +133,7 @@ cd services/planning
 go test ./...                # domain + API; store tests skip without a database
 PASSAGE_TEST_DATABASE_URL=postgres://admin@host/db \
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tests as the RLS-bound app role
-DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_HORIZON_DAYS (365, 30 to 1095), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the
@@ -339,6 +339,7 @@ NOT-IMPLEMENTED.md):
 | POST | `/v1/planning/plans/{planCode}:run` | `planning.run` (Idempotency-Key required) |
 | GET | `/v1/planning/plans/{planCode}/versions?limit=` | `planning.read` |
 | GET | `/v1/planning/plans/{planCode}/versions/{number}` | `planning.read` |
+| GET | `/v1/planning/plans/{planCode}/diff?from=&to=&limit=` | `planning.read` |
 | GET | `/v1/planning/planned-orders?planCode=&status=&itemId=&limit=` | `planning.read` |
 | GET | `/v1/planning/planned-orders/{id}` | `planning.read` |
 | PATCH | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
@@ -425,3 +426,52 @@ PSG-9 (BOM and low-level codes), PSG-27 (sales demand, later).
 
 Only the platform kernel and the modules it already pulls in (chi, pgx/v5,
 shopspring/decimal, google/uuid, and `pgregory.net/rapid` for property tests).
+
+## Legal-entity scope (#241)
+
+`plan`, `plan_version`, `forecast_model` and `quota_arrangement` carry a nullable
+`legal_entity_id` (migration 0012) with a RESTRICTIVE legal-entity policy;
+`planned_order`, `pegging`, `action_message`, `net_requirement`, `forecast_line` and
+`quota_source` follow their parent. A row with no entity is visible only to
+all-entity callers. A plan run takes an optional `legalEntityId` that owns the plan
+when the run creates it (default: the caller's single entity; required for a caller
+scoped to several or to all entities; 403 outside the caller's scope). For an existing
+plan it is an assertion (422 when it differs), and a forecast model netted into the
+run must belong to the plan's entity (422 `PLAN-FORECAST-ENTITY`). Forecast-model
+writes and quota-arrangement creates take `legalEntityId` the same way. A plan or
+forecast model code held outside the caller's scope, including by a row with no
+entity yet, is 409 `PLAN-CODE-TAKEN`.
+
+### Firming batches, item coverage and DDMRP buffers (#292)
+
+| Table | Decision | Owner of a new row |
+|---|---|---|
+| `firming_batch` (with its `response` document) | entity-specific root (migration 0013) | the entity of the planned orders' plan version, for a planner's firming and for the run's auto-firm batch; a request mixing entities is 422 `PLAN-FIRM-ENTITY` |
+| `item_coverage` | entity-specific root | `legalEntityId` on the create, default the caller's single entity (422 for several or all; 403 outside the scope); an update keeps the owner |
+| `ddmrp_buffer` | entity-specific root | `legalEntityId` on `:recalculate`, same rules; a buffer of the same item, site and warehouse that the caller's scope cannot write is 409 `PLAN-BUFFER-ENTITY` and is never overwritten |
+| `planning_scenario` | entity-specific root (migration 0014): belongs to one plan (`plan_id`) and carries that plan's legal entity | copied from the plan when the scenario is created; the plan must have run and be visible to the caller (404 `PLAN-NOT-FOUND`), so a scenario is never created, read, changed or run outside the plan's entity; the simulation version it writes carries the same entity |
+| `coverage_group`, `buffer_profile` | stay tenant-level: shared planning setup that coverages and buffers of every entity refer to by id | n/a |
+
+Orders the caller cannot see are 404 `PLAN-ORDER-NOT-FOUND` when firming, so a batch
+never forms from, or replays into, another entity's orders. The item-coverage scope
+key and the firming and profile idempotency keys stay unique per tenant: a clash with
+another entity's row is the same 409 or 422 as a clash inside the entity, without
+revealing the row. The run reads item coverage under the caller's scope, so a coverage
+held by an entity the caller cannot see is as good as absent.
+
+The quota-arrangement overlap rule (409 `PLAN-QUOTA-OVERLAP`) runs per legal entity
+as well as per item and site. That assumes a site belongs to exactly one legal
+entity; the site register lives in the org service, so a site shared between
+entities would let each entity hold an arrangement for it.
+
+### Simulation scenarios (FR-22.15, BR-22.14)
+
+A scenario belongs to a plan that has run at least once and to that plan's legal entity.
+Its demand factor (overall, or per item) scales independent demand only: sales lines and
+forecast; safety-stock and transfer-issue lines keep their quantity and dependent demand
+follows from the explosion. `POST /v1/planning/scenarios/{code}:run` applies a stored
+scenario to the plan-run snapshot and stores a `simulation` version of the scenario's plan. It never becomes current, never
+auto-firms, publishes only `scenario.simulated.v1` (no `plan.completed.v1`, `message.raised.v1`
+or `plannedorder.firmed.v1`), and its planned orders are 409 `PLAN-0003` on firm, change and
+delete. Read its orders with `GET /planned-orders?planCode=&version=N` and compare it with the
+operational version through `GET /plans/{planCode}/diff`. Duty `planning.simulate`.

@@ -383,3 +383,113 @@ func reconcile(t *testing.T, admin *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 }
+
+// The line inquiry spans orders, filters by legal entity, status, warehouse,
+// product and ship date, finds late shipments and late receipts with the same
+// boundary as domain.TransferLineLateness, and never shows another legal
+// entity's or tenant's lines.
+func TestListTransferLinesFiltersAndLateness(t *testing.T) {
+	s, _, _ := setup(t)
+	leA, leB := ids.New(), ids.New()
+	ctx, ctxB := entityCtx(1, leA), entityCtx(1, leB)
+	product, other, productB := ids.New(), ids.New(), ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "100", "2", dims()), line(other, "50", "1", dims()))
+	post(t, ctxB, s, domain.JournalOpeningBalance, line(productB, "10", "1", dims()))
+
+	planned, _, err := s.CreateTransfer(ctx, "to-a", transferOrder(ctx, product, "10", false)) // planned 2026-09-01, never shipped
+	if err != nil {
+		t.Fatal(err)
+	}
+	toShip, _, err := s.CreateTransfer(ctx, "to-b", transferOrder(ctx, other, "20", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shipped, err := s.ShipTransfer(ctx, toShip.ID, toShip.Version, shipDay, domain.NegativePolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateTransfer(ctxB, "to-c", transferOrder(ctxB, productB, "5", false)); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func(c context.Context, f store.TransferLineFilter) []store.TransferLineRow {
+		t.Helper()
+		if f.AsOf.IsZero() {
+			f.AsOf = shipDay.AddDate(0, 0, 10)
+		}
+		if f.LateReceiptDays == 0 {
+			f.LateReceiptDays = 7
+		}
+		rows, truncated, err := s.ListTransferLines(c, f)
+		if err != nil || truncated {
+			t.Fatalf("list %+v: truncated %v, %v", f, truncated, err)
+		}
+		return rows
+	}
+	numbers := func(rows []store.TransferLineRow) []string {
+		out := []string{}
+		for _, r := range rows {
+			out = append(out, r.Number)
+		}
+		return out
+	}
+
+	all := list(ctx, store.TransferLineFilter{})
+	if len(all) != 2 || all[0].Number != planned.Number || all[1].Number != shipped.Number || all[0].LegalEntityID != leA {
+		t.Fatalf("legal entity A sees %v", numbers(all))
+	}
+	if l := all[1].Line; !l.ShippedQty.Equal(dec("20")) || !l.InTransit().Equal(dec("20")) || all[1].Status != domain.TransferShipped ||
+		l.Dims[domain.DimWarehouse] != "W1" || !all[1].ShipDate.Equal(shipDay) {
+		t.Fatalf("shipped line %+v", all[1])
+	}
+	if rows := list(tenantWideCtx(1), store.TransferLineFilter{}); len(rows) != 3 {
+		t.Fatalf("tenant-wide sees %v, want all three orders", numbers(rows))
+	}
+	if rows := list(tenantWideCtx(1), store.TransferLineFilter{LegalEntityID: leB}); len(rows) != 1 || rows[0].LegalEntityID != leB {
+		t.Fatalf("legal entity filter: %v", numbers(rows))
+	}
+
+	asOf := shipDay.AddDate(0, 0, 8) // eight days in transit: one beyond the 7-day allowance
+	late := list(ctx, store.TransferLineFilter{LateOnly: true, AsOf: asOf})
+	if len(late) != 2 {
+		t.Fatalf("late lines %v", numbers(late))
+	}
+	for _, r := range late {
+		want := domain.LateShipment
+		if r.Status == domain.TransferShipped {
+			want = domain.LateReceipt
+		}
+		if got, days := domain.TransferLineLateness(r.Status, r.Line, r.ShipDate, asOf, 7); got != want || days < 1 {
+			t.Errorf("%s: lateness %q %d days, want %q", r.Number, got, days, want)
+		}
+	}
+	if due := list(ctx, store.TransferLineFilter{LateOnly: true, AsOf: shipDay.AddDate(0, 0, 7)}); len(due) != 1 || due[0].Status != domain.TransferCreated {
+		t.Fatalf("a shipment due today is not late yet: %v", numbers(due))
+	}
+	if rows := list(ctx, store.TransferLineFilter{LateOnly: true, AsOf: shipDay.AddDate(0, 0, 8), LateReceiptDays: 30}); len(rows) != 1 {
+		t.Fatalf("a longer allowance keeps the shipment on time: %v", numbers(rows))
+	}
+
+	from, to := shipDay, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if rows := list(ctx, store.TransferLineFilter{From: &from}); len(rows) != 1 || rows[0].OrderID != shipped.ID {
+		t.Fatalf("from filter: %v", numbers(rows))
+	}
+	if rows := list(ctx, store.TransferLineFilter{To: &to}); len(rows) != 1 || rows[0].OrderID != planned.ID {
+		t.Fatalf("to filter: %v", numbers(rows))
+	}
+	if rows := list(ctx, store.TransferLineFilter{Status: domain.TransferShipped}); len(rows) != 1 || rows[0].OrderID != shipped.ID {
+		t.Fatalf("status filter: %v", numbers(rows))
+	}
+	if rows := list(ctx, store.TransferLineFilter{ProductID: product}); len(rows) != 1 || rows[0].OrderID != planned.ID {
+		t.Fatalf("product filter: %v", numbers(rows))
+	}
+	if rows := list(ctx, store.TransferLineFilter{FromWarehouse: "W9"}); len(rows) != 0 {
+		t.Fatalf("from warehouse filter: %v", numbers(rows))
+	}
+	if rows := list(ctx, store.TransferLineFilter{ToWarehouse: "W2"}); len(rows) != 2 {
+		t.Fatalf("to warehouse filter: %v", numbers(rows))
+	}
+	if rows := list(entityCtx(2, ids.New()), store.TransferLineFilter{}); len(rows) != 0 {
+		t.Fatalf("another tenant sees lines: %v", numbers(rows))
+	}
+}

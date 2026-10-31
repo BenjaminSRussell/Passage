@@ -9,6 +9,7 @@ paths:
   /v1/engineering/bom-versions:
     post:
       operationId: createBomVersion
+      summary: Create a BOM version
       x-passage-duty: engineering.bom.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -22,13 +23,18 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listBomVersions
+      summary: List BOM versions
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, superseded] } }
+        - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
       responses:
         '200':
-          description: One page of BOM version headers ordered by id. Pass nextCursor as cursor for the next page.
+          description: One page of BOM version headers ordered by id. Pass nextCursor as cursor for the next page. A bad filter, limit or cursor is 400 COM-0001 with the offending fields in errors.
           content:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BomVersion' } }, nextCursor: { type: string } } }
@@ -36,6 +42,7 @@ paths:
   /v1/engineering/bom-versions/{id}:
     get:
       operationId: getBomVersion
+      summary: Get a BOM version with its lines
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -48,6 +55,7 @@ paths:
   /v1/engineering/route-versions:
     get:
       operationId: listRouteVersions
+      summary: List route versions
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -63,9 +71,34 @@ paths:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/RouteVersionHeader' } }, nextCursor: { type: string } } }
         default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRouteVersion
+      summary: Create a draft route version
+      x-passage-duty: engineering.route.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersionCreate' } } }
+      responses:
+        '201':
+          description: Draft route version with its operations and requirements, or the original version on an Idempotency-Key replay. Omitting versionNo takes the next number for the product, site and route code. Activation is a separate call.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '400':
+          description: COM-0001 with per-field errors, for a malformed or missing field or a value its column cannot hold (integers above 2147483647, hours from 10000000000, process or overlap quantity from 100000000000000 or with more than 6 decimals, efficiency from 1000, a requirement refId over 64 characters).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: ENG-DUPLICATE, the version number is already used for this product, site and route code, or the Idempotency-Key is in flight.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: A route rule failed, such as ENG-ROUTE-CYCLE, ENG-ROUTE-NEXT, ENG-ROUTE-OP-DUP, ENG-ROUTE-OPS-LIMIT, ENG-ROUTE-QTY, ENG-ROUTE-REQ-KIND or ENG-ROUTE-SECONDARY-NOPRIMARY (BR-9.7, a secondary operation with no primary joining the same next operation), or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions:active:
     get:
       operationId: getActiveRouteVersion
+      summary: Get the active route version as of a date
       x-passage-duty: engineering.read
       parameters:
         - { name: productId, in: query, required: true, schema: { type: string, maxLength: 64 } }
@@ -80,6 +113,7 @@ paths:
   /v1/engineering/route-versions/{id}:
     get:
       operationId: getRouteVersion
+      summary: Get a route version with its operations
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -92,6 +126,7 @@ paths:
   /v1/engineering/route-versions/{id}:activate:
     post:
       operationId: activateRouteVersion
+      summary: Activate a route version
       x-passage-duty: engineering.route.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -111,6 +146,7 @@ paths:
   /v1/engineering/boms:explode:
     post:
       operationId: explodeBom
+      summary: Explode a BOM to its components
       x-passage-duty: engineering.read
       requestBody:
         required: true
@@ -123,6 +159,7 @@ paths:
   /v1/engineering/boms:where-used:
     get:
       operationId: whereUsedBom
+      summary: List where a component is used
       x-passage-duty: engineering.read
       parameters:
         - { name: component, in: query, required: true, schema: { type: string } }
@@ -138,6 +175,7 @@ paths:
   /v1/engineering/routes:lead-time:
     post:
       operationId: computeRouteLeadTime
+      summary: Compute routing lead time
       x-passage-duty: engineering.read
       requestBody:
         required: true
@@ -150,6 +188,7 @@ paths:
   /v1/engineering/ecos:
     post:
       operationId: createEco
+      summary: Create an engineering change order
       x-passage-duty: engineering.bom.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -161,9 +200,61 @@ paths:
           description: ECO created in the submitted state, or the original ECO on an Idempotency-Key replay.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEcos
+      summary: List engineering change orders
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [draft, submitted, approved, scheduled, released, rejected, cancelled] } }
+      responses:
+        '200':
+          description: One page of ECOs ordered by id, each with its replacements. Pass nextCursor as cursor for the next page. A bad state, limit or cursor is 400 COM-0001.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Eco' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecos/{id}:
+    get:
+      operationId: getEco
+      summary: Get an engineering change order
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECO with its state, release date, approver and the BOM version replacements.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecos/{id}/impact:
+    get:
+      operationId: getEcoImpact
+      summary: Get the impact report of an engineering change order
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: 'Date the where-used is evaluated. Defaults to the ECO release date when it is in the future, otherwise today.', schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Each replacement with its component line differences, and the distinct products affected as of the date, the replaced products and every product that uses them at any level, with sites and active version ids. Open production and planned order counts are 0 until waves 21 and 22 supply them.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EcoImpact' } } }
+        '400':
+          description: COM-0001, the id is not a UUID or asOf is not a YYYY-MM-DD date.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-BOM-CYCLE or ENG-BOM-TOOLARGE, the stored structure cannot be walked.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/ecos/{id}:release:
     post:
       operationId: releaseEco
+      summary: Approve and release an engineering change order
       x-passage-duty: engineering.eco.approve
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -174,8 +265,24 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/calendars:
+    get:
+      operationId: listCalendars
+      summary: List work calendars
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of work calendars with their templates and generated range. Ordered by code then id. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Calendar' } }, nextCursor: { type: string } } }
+        '422': { $ref: '#/components/responses/InvalidQuery' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCalendar
+      summary: Create a work calendar
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -189,9 +296,24 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/calendars/{id}:
+    get:
+      operationId: getCalendar
+      summary: Get a work calendar
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The work calendar with its weekly template, closed dates, version and generated range. An unknown id is 404 ENG-CAL-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Calendar' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/calendars/{id}:generate:
     post:
       operationId: generateCalendar
+      summary: Generate calendar days for a range
       x-passage-duty: engineering.resource.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -209,6 +331,7 @@ paths:
   /v1/engineering/calendars/{id}/days:
     get:
       operationId: listCalendarDays
+      summary: List generated calendar days
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -226,6 +349,7 @@ paths:
   /v1/engineering/resource-groups:
     get:
       operationId: listResourceGroups
+      summary: List resource groups
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -241,6 +365,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResourceGroup
+      summary: Create a resource group
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -257,6 +382,7 @@ paths:
   /v1/engineering/capabilities:
     get:
       operationId: listCapabilities
+      summary: List capabilities
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -271,6 +397,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCapability
+      summary: Create a capability
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -283,9 +410,38 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
         '409': { $ref: '#/components/responses/Conflict' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/capabilities/{id}:
+    get:
+      operationId: getCapability
+      summary: Get a capability
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The capability. An unknown id is 404 ENG-RES-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/resource-groups/{id}:
+    get:
+      operationId: getResourceGroup
+      summary: Get a resource group
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The resource group with its site and calendar. An unknown id is 404 ENG-RES-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ResourceGroup' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/resources:
     get:
       operationId: listResources
+      summary: List resources
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -304,6 +460,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResource
+      summary: Create a resource
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -321,6 +478,7 @@ paths:
   /v1/engineering/resources/{id}:
     get:
       operationId: getResource
+      summary: Get a resource
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -333,12 +491,14 @@ paths:
   /healthz:
     get:
       operationId: liveness
+      summary: Liveness probe
       x-passage-duty: public
       responses:
         '200': { description: Process is alive. }
   /readyz:
     get:
       operationId: readiness
+      summary: Readiness probe
       x-passage-duty: public
       responses:
         '200': { description: Database reachable. }
@@ -395,6 +555,18 @@ components:
         { id: { type: string, format: uuid }, productId: { type: string }, siteId: { type: string }, routeCode: { type: string }, versionNo: { type: integer },
           effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [draft, active, expired] },
           operationCount: { type: integer } }
+    RouteVersionCreate:
+      type: object
+      additionalProperties: false
+      required: [productId, siteId, routeCode, effectiveFrom, operations]
+      properties:
+        productId: { type: string, maxLength: 64 }
+        siteId: { type: string, maxLength: 64 }
+        routeCode: { type: string, maxLength: 64 }
+        versionNo: { type: integer, minimum: 1, maximum: 2147483647, description: Omit to take the next number for the product, site and route code. }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        operations: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RouteVersionOperation' } }
     RouteVersion:
       allOf:
         - { $ref: '#/components/schemas/RouteVersionHeader' }
@@ -438,6 +610,7 @@ components:
         queueAfter: { type: string }
         transit: { type: string }
         efficiencyPct: { type: string }
+        overlapQty: { type: string, description: 'transfer batch: the next operation may start once this many units are done; 0 or at least the quantity is no overlap' }
     LeadTimeRequest:
       type: object
       additionalProperties: false
@@ -461,6 +634,46 @@ components:
         releaseDate: { type: string, format: date }
         decidedBy: { type: string }
         replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
+    EcoImpact:
+      type: object
+      required: [asOf, replacements, products, siteIds, openProductionOrders, openPlannedOrders]
+      properties:
+        asOf: { type: string, format: date }
+        replacements:
+          type: array
+          items:
+            type: object
+            required: [oldVersionId, newVersionId, productId, changes]
+            properties:
+              oldVersionId: { type: string, format: uuid }
+              newVersionId: { type: string, format: uuid }
+              productId: { type: string }
+              changes:
+                type: array
+                items:
+                  type: object
+                  required: [componentProductId, change]
+                  properties:
+                    componentProductId: { type: string }
+                    change: { type: string, enum: [added, removed, changed] }
+                    oldQuantity: { type: string, description: Decimal, summed over the lines of the old version }
+                    newQuantity: { type: string, description: Decimal, summed over the lines of the new version }
+        products:
+          type: array
+          description: Distinct affected products, replaced products first, then parents by level and product id.
+          items:
+            type: object
+            required: [productId, reason, level, topLevel, siteIds, versionIds]
+            properties:
+              productId: { type: string }
+              reason: { type: string, enum: [replaced, parent] }
+              level: { type: integer, description: 0 for a replaced product, otherwise the shortest distance to it }
+              topLevel: { type: boolean, description: 'True when no active version uses this product as of the date: the distinct top-level products of the where-used (AC-9.6).' }
+              siteIds: { type: array, description: Sites of the affected versions; empty when they all apply to every site., items: { type: string } }
+              versionIds: { type: array, description: 'For a replaced product, the replaced version and the active versions at its site; for a parent, its active versions that use an affected product.', items: { type: string, format: uuid } }
+        siteIds: { type: array, items: { type: string } }
+        openProductionOrders: { type: integer }
+        openPlannedOrders: { type: integer }
     Shift:
       type: object
       additionalProperties: false

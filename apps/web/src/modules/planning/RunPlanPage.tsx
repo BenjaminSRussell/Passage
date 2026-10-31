@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
-import { runPlan, type PlanVersion, type WorkCalendar } from "./api/client";
+import { runPlan, type PlanScope, type PlanVersion, type WorkCalendar } from "./api/client";
 import { describeError, PLAN_CODE, usePlanCode, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 
@@ -40,6 +40,16 @@ interface Draft {
   closedWeekdays?: number[];
   /** Closed dates (holidays) separated by commas, spaces or new lines. */
   closedDates?: string;
+  /** Count the plan's firmed, undelivered orders as supply (FR-22.1). */
+  carryForward?: boolean;
+  /** Planning horizon in days (30 to 1095); empty takes the service default. */
+  horizonDays?: string;
+  /** Plan scope (FR-22.13): item ids separated by commas or spaces, item groups and planners separated by commas, and the low-level code range. */
+  scopeItemIds?: string;
+  scopeGroups?: string;
+  scopePlanners?: string;
+  llcMin?: string;
+  llcMax?: string;
   items: string;
 }
 
@@ -57,12 +67,32 @@ export const WEEKDAYS: [number, string][] = [
 ];
 
 const MAX_CLOSED_DATES = 1000;
+const MIN_HORIZON = 30;
+const MAX_HORIZON = 1095;
+const MAX_SCOPE_VALUES = 1000;
+
+const words = (v: string | undefined) => (v ?? "").split(/[\s,]+/).filter((x) => x !== "");
+/** Comma-separated values, trimmed; item groups and planners may contain spaces. */
+const listed = (v: string | undefined) => (v ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "");
+
+/** Reads a whole-number field; undefined when empty, NaN when it is not a whole number. */
+function wholeNumber(v: string | undefined): number | undefined {
+  const t = (v ?? "").trim();
+  if (t === "") return undefined;
+  return /^\d+$/.test(t) ? Number(t) : Number.NaN;
+}
 
 /**
  * Checks the form; returns field errors, the parsed items array and the work
  * calendar (undefined when no day is closed, so the run counts calendar days).
  */
-export function validateRun(d: Draft): { errors: Errors; items: unknown[]; calendar?: WorkCalendar } {
+export function validateRun(d: Draft): {
+  errors: Errors;
+  items: unknown[];
+  calendar?: WorkCalendar;
+  horizonDays?: number;
+  scope?: PlanScope;
+} {
   const errors: Errors = {};
   if (!PLAN_CODE.test(d.plan.trim())) errors.plan = "Use 2 to 20 capital letters, digits, _ or -.";
   if (!DATE.test(d.asOf)) errors.asOf = "Enter the plan date.";
@@ -86,7 +116,32 @@ export function validateRun(d: Draft): { errors: Errors; items: unknown[]; calen
     closedWeekdays.length > 0 || closedDates.length > 0
       ? { ...(closedWeekdays.length > 0 ? { closedWeekdays } : {}), ...(closedDates.length > 0 ? { closedDates } : {}) }
       : undefined;
-  return { errors, items, calendar };
+  const horizonDays = wholeNumber(d.horizonDays);
+  if (horizonDays !== undefined && !(horizonDays >= MIN_HORIZON && horizonDays <= MAX_HORIZON)) {
+    errors.horizonDays = `Enter ${MIN_HORIZON} to ${MAX_HORIZON} days, or leave empty for the service default.`;
+  }
+  const itemIds = words(d.scopeItemIds);
+  const itemGroups = listed(d.scopeGroups);
+  const planners = listed(d.scopePlanners);
+  if (itemIds.some((x) => !UUID.test(x))) errors.scopeItemIds = "Enter item ids as UUIDs.";
+  else if (itemIds.length > MAX_SCOPE_VALUES) errors.scopeItemIds = `Enter at most ${MAX_SCOPE_VALUES} ids.`;
+  if (itemGroups.length > MAX_SCOPE_VALUES || itemGroups.some((x) => x.length > 64)) errors.scopeGroups = "Enter item groups of at most 64 characters.";
+  if (planners.length > MAX_SCOPE_VALUES || planners.some((x) => x.length > 64)) errors.scopePlanners = "Enter planners of at most 64 characters.";
+  const llcMin = wholeNumber(d.llcMin);
+  const llcMax = wholeNumber(d.llcMax);
+  if (llcMin !== undefined && !(llcMin <= 99)) errors.llcMin = "Enter a low-level code from 0 to 99.";
+  if (llcMax !== undefined && !(llcMax <= 99)) errors.llcMax = "Enter a low-level code from 0 to 99.";
+  if (llcMin !== undefined && llcMax !== undefined && llcMin <= 99 && llcMax <= 99 && llcMin > llcMax) {
+    errors.llcMax = "The highest code must be at least the lowest.";
+  }
+  const scope: PlanScope = {
+    ...(itemIds.length > 0 ? { itemIds } : {}),
+    ...(itemGroups.length > 0 ? { itemGroups } : {}),
+    ...(planners.length > 0 ? { planners } : {}),
+    ...(llcMin !== undefined ? { llcMin } : {}),
+    ...(llcMax !== undefined ? { llcMax } : {}),
+  };
+  return { errors, items, calendar, horizonDays, scope: Object.keys(scope).length > 0 ? scope : undefined };
 }
 
 /**
@@ -103,6 +158,13 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     forecastModel: "",
     closedWeekdays: [],
     closedDates: "",
+    carryForward: false,
+    horizonDays: "",
+    scopeItemIds: "",
+    scopeGroups: "",
+    scopePlanners: "",
+    llcMin: "",
+    llcMax: "",
     items: SAMPLE_ITEMS,
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -123,10 +185,15 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     });
   };
 
+  const toggleCarry = (on: boolean) => {
+    key.current = newKey();
+    setDraft((d) => ({ ...d, carryForward: on }));
+  };
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const { errors: found, items, calendar } = validateRun(draft);
+    const { errors: found, items, calendar, horizonDays, scope } = validateRun(draft);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
@@ -141,6 +208,9 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
           siteId: draft.siteId.trim(),
           ...(forecastModel ? { forecastModel } : {}),
           ...(calendar ? { calendar } : {}),
+          ...(draft.carryForward ? { carryForward: true } : {}),
+          ...(horizonDays !== undefined ? { horizonDays } : {}),
+          ...(scope ? { scope } : {}),
           items,
         }),
       );
@@ -165,6 +235,9 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
         {result ? (
           <>
             {`${result.plannedOrders} planned orders and ${result.messages} messages from ${result.itemsPlanned} items. `}
+            {result.approvedFirmed
+              ? `${result.approvedFirmed} approved ${result.approvedFirmed === 1 ? "order" : "orders"} of the previous version ${result.approvedFirmed === 1 ? "was" : "were"} firmed. `
+              : null}
             <Link to={withPlan("/planning/planned-orders", result.planCode)}>View planned orders</Link>
           </>
         ) : null}
@@ -227,6 +300,59 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
               {(a11y) => <Input {...a11y} value={draft.closedDates ?? ""} onChange={(e) => set("closedDates")(e.target.value)} />}
             </FormField>
           </div>
+          <div className={styles.wide}>
+            <label className={styles.check} htmlFor="run-carry">
+              <Input
+                id="run-carry"
+                type="checkbox"
+                aria-describedby="run-carry-hint"
+                checked={draft.carryForward ?? false}
+                onChange={(e) => toggleCarry(e.target.checked)}
+              />
+              Count firmed orders as supply
+            </label>
+            <p id="run-carry-hint" className={styles.summary}>
+              Adds this plan's firmed orders that are not yet delivered, and the approved orders this run firms, as receipts of their
+              items, so they are not planned again.
+              Leave it off when the target orders already arrive in the receipts below.
+            </p>
+          </div>
+          <FormField
+            id="run-horizon"
+            label="Planning horizon (days)"
+            optional
+            hint="Demand dated later than this many days after the plan date is ignored. Empty uses the service default (365 days unless configured)."
+            error={errors.horizonDays}
+          >
+            {(a11y) => <Input {...a11y} inputMode="numeric" value={draft.horizonDays ?? ""} onChange={(e) => set("horizonDays")(e.target.value)} />}
+          </FormField>
+          <fieldset className={`${styles.fieldset} ${styles.wide}`} aria-describedby="run-scope-hint">
+            <legend className={styles.legend}>Plan scope</legend>
+            <p id="run-scope-hint" className={styles.summary}>
+              The version reports only the items that match every filled field. The whole snapshot is still planned, so a component
+              inside the scope is sized by parents outside it. Item group and planner are read from each item's itemGroup and planner in
+              the JSON below. The version replaces the plan's current one, so the plan then holds orders only for the items inside.
+            </p>
+            <div className={styles.form}>
+              <FormField id="run-scope-groups" label="Item groups" optional hint="Separate with commas." error={errors.scopeGroups}>
+                {(a11y) => <Input {...a11y} value={draft.scopeGroups ?? ""} onChange={(e) => set("scopeGroups")(e.target.value)} />}
+              </FormField>
+              <FormField id="run-scope-planners" label="Planners" optional hint="Separate with commas." error={errors.scopePlanners}>
+                {(a11y) => <Input {...a11y} value={draft.scopePlanners ?? ""} onChange={(e) => set("scopePlanners")(e.target.value)} />}
+              </FormField>
+              <FormField id="run-scope-llc-min" label="Lowest low-level code" optional hint="0 is an end item." error={errors.llcMin}>
+                {(a11y) => <Input {...a11y} inputMode="numeric" value={draft.llcMin ?? ""} onChange={(e) => set("llcMin")(e.target.value)} />}
+              </FormField>
+              <FormField id="run-scope-llc-max" label="Highest low-level code" optional error={errors.llcMax}>
+                {(a11y) => <Input {...a11y} inputMode="numeric" value={draft.llcMax ?? ""} onChange={(e) => set("llcMax")(e.target.value)} />}
+              </FormField>
+              <div className={styles.wide}>
+                <FormField id="run-scope-items" label="Item ids" optional hint="UUIDs separated by commas or spaces." error={errors.scopeItemIds}>
+                  {(a11y) => <Input {...a11y} value={draft.scopeItemIds ?? ""} onChange={(e) => set("scopeItemIds")(e.target.value)} />}
+                </FormField>
+              </div>
+            </div>
+          </fieldset>
           <div className={styles.wide}>
             <FormField
               id="run-items"

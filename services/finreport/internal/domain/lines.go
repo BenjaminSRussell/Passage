@@ -38,6 +38,7 @@ var ErrBadCursor = errors.New("finreport: malformed drill-down cursor")
 // of the source document; TraceID is the posting's trace.
 type JournalLine struct {
 	LedgerID        string
+	LegalEntityID   string
 	PostingSequence int64
 	LineNumber      int
 	PostingDate     string // YYYY-MM-DD

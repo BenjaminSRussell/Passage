@@ -73,6 +73,31 @@ func atpResponse(p domain.Promise, periods []domain.Period) atpCheckResponse {
 	return atpCheckResponse{Promise: promise, Periods: views, Cumulative: domain.Cumulative(periods)}
 }
 
+// parsePeriods validates ATP buckets, adding a message per bad field to fields.
+func parsePeriods(in []atpPeriodRequest, fields map[string]string) []domain.Period {
+	periods := make([]domain.Period, 0, len(in))
+	for i, pr := range in {
+		path := func(name string) string { return "periods[" + strconv.Itoa(i) + "]." + name }
+		date, errDate := time.Parse(dayLayout, pr.Date)
+		supply, errSupply := decimal.NewFromString(pr.Supply)
+		demand, errDemand := decimal.NewFromString(pr.Demand)
+		if errDate != nil {
+			fields[path("date")] = "must be a date such as 2027-03-01"
+		}
+		if errSupply != nil || supply.IsNegative() {
+			fields[path("supply")] = "must be a non-negative decimal"
+		}
+		if errDemand != nil || demand.IsNegative() {
+			fields[path("demand")] = "must be a non-negative decimal"
+		}
+		if i > 0 && errDate == nil && !date.After(periods[i-1].Date) {
+			fields[path("date")] = "must be later than the previous bucket"
+		}
+		periods = append(periods, domain.Period{Date: date, Supply: supply, Demand: demand})
+	}
+	return periods
+}
+
 // atpCheck answers the BR-27.1 question: when can this quantity be promised?
 func (a *API) atpCheck(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -97,26 +122,7 @@ func (a *API) atpCheck(w http.ResponseWriter, r *http.Request) {
 	if n := len(req.Periods); n == 0 || n > maxPeriods {
 		fields["periods"] = "must have 1 to 1000 buckets"
 	}
-	periods := make([]domain.Period, 0, len(req.Periods))
-	for i, pr := range req.Periods {
-		path := func(name string) string { return "periods[" + strconv.Itoa(i) + "]." + name }
-		date, errDate := time.Parse(dayLayout, pr.Date)
-		supply, errSupply := decimal.NewFromString(pr.Supply)
-		demand, errDemand := decimal.NewFromString(pr.Demand)
-		if errDate != nil {
-			fields[path("date")] = "must be a date such as 2027-03-01"
-		}
-		if errSupply != nil || supply.IsNegative() {
-			fields[path("supply")] = "must be a non-negative decimal"
-		}
-		if errDemand != nil || demand.IsNegative() {
-			fields[path("demand")] = "must be a non-negative decimal"
-		}
-		if i > 0 && errDate == nil && !date.After(periods[i-1].Date) {
-			fields[path("date")] = "must be later than the previous bucket"
-		}
-		periods = append(periods, domain.Period{Date: date, Supply: supply, Demand: demand})
-	}
+	periods := parsePeriods(req.Periods, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return

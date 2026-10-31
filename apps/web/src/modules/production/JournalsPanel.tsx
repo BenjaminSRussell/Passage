@@ -18,7 +18,7 @@ import {
   type Proposal,
   type TriggerFiring,
 } from "./api/client";
-import { addDecimals, amount, dash, describeFiring, isZero, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
+import { addDecimals, amount, coProductTypeLabel, dash, describeFiring, isZero, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -29,6 +29,8 @@ export interface JournalsPanelProps {
   order: ProductionOrder;
   /** Called after a post changed the order (consumption, status, costs). */
   onChanged(): void;
+  /** Opens another order: the counterpart of a split-transfer journal. */
+  onOpenOrder?(orderId: string): void;
 }
 
 export interface Draft {
@@ -40,6 +42,8 @@ export interface Draft {
   /** Manual lines: quantity and unit cost by BOM line; hours, good and error quantity by operation. */
   issues: Record<string, { quantity: string; unitCost: string }>;
   hours: Record<string, { hours: string; qtyGood: string; qtyError?: string }>;
+  /** Quantity received per co-product line of a report as finished (FR-21.14); empty skips the line. */
+  coProducts: Record<string, string>;
 }
 
 export const emptyDraft = (type: JournalType | ""): Draft => ({
@@ -50,6 +54,7 @@ export const emptyDraft = (type: JournalType | ""): Draft => ({
   errorQuantity: "",
   issues: {},
   hours: {},
+  coProducts: {},
 });
 
 type Errors = Record<string, string>;
@@ -75,6 +80,16 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
         errors.errorQuantity = "Enter a quantity with up to 6 decimals, or leave it empty.";
       }
       input.errorQuantity = draft.errorQuantity;
+    }
+    const received = Object.entries(draft.coProducts).filter(([, q]) => q !== "");
+    if (received.length > 0) {
+      input.coProducts = [];
+      for (const [lineNo, quantity] of received) {
+        if (!quantityPattern.test(quantity) || !positive(quantity)) {
+          errors[`co.${lineNo}`] = "Enter a positive quantity with up to 6 decimals.";
+        }
+        input.coProducts.push({ lineNo, quantity });
+      }
     }
   }
   if (draft.proposal === "none") {
@@ -130,7 +145,7 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
 const journalValue = (j: Journal) => addDecimals(j.postings.map((p) => p.dr));
 
 const lineColumns: DataTableColumn<JournalLine>[] = [
-  { key: "kind", header: "Line", render: (l) => (l.kind === "issue" ? `Issue ${l.lineNo}` : l.kind === "hours" ? `Operation ${l.operNumber}` : "Finished receipt") },
+  { key: "kind", header: "Line", render: (l) => (l.kind === "issue" ? `Issue ${l.lineNo}` : l.kind === "hours" ? `Operation ${l.operNumber}` : l.kind === "coproduct" ? `Co-product ${l.coProductLineNo}` : "Finished receipt") },
   { key: "itemId", header: "Item", mono: true, render: (l) => l.itemId ?? dash },
   { key: "qty", header: "Quantity or hours", align: "end" },
   { key: "qtyGood", header: "Good", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyGood) },
@@ -164,7 +179,7 @@ const postingColumns: DataTableColumn<Posting>[] = [
 ];
 
 /** Journals of an order (PRD 4.21.6 Journals tab and journal editor): list, create with a proposal or by hand, post, delete drafts. */
-export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
+export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelProps) {
   const types = useMemo(() => journalTypesFor(order.status), [order.status]);
   const [journals, setJournals] = useState<{ rows: Journal[]; loading: boolean; error: Problem | null }>({ rows: [], loading: true, error: null });
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(types[0] ?? ""));
@@ -348,6 +363,20 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
                 </div>
               ) : null}
             </div>
+            {current.type === "split-transfer" && current.counterpartOrderId ? (
+              <div className={styles.toolbar}>
+                <p className={styles.hint}>
+                  {current.counterpartOrderId === order.splitFromOrderId
+                    ? "Moves this order's share of the consumption, hours and WIP posted on the order it was split from."
+                    : "Moves the share of the consumption, hours and WIP posted here to the order split off from this one."}
+                </p>
+                {onOpenOrder ? (
+                  <Button variant="ghost" size="sm" onClick={() => onOpenOrder(current.counterpartOrderId!)}>
+                    Open the other order
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             {confirmDelete ? (
               <Alert
                 tone="warning"
@@ -432,6 +461,33 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
                 </>
               ) : null}
             </div>
+            {draft.type === "report-as-finished" && (order.coProducts ?? []).length > 0 ? (
+              <div className={styles.rows}>
+                {(order.coProducts ?? []).map((co) => (
+                  <fieldset key={co.lineNo} className={styles.row}>
+                    <legend className={styles.legend}>
+                      {coProductTypeLabel[co.type] ?? "Co-product"} {co.lineNo} ({co.qtyReported} of {co.qtyPlanned} received)
+                    </legend>
+                    <FormField
+                      id={`journal-co-${co.lineNo}`}
+                      label="Quantity received"
+                      optional
+                      hint={co.type === "by-product" ? "Received at zero cost; a by-product carries no cost." : "Valued at the planned unit cost by quantity."}
+                      error={errors[`co.${co.lineNo}`]}
+                    >
+                      {(control) => (
+                        <Input
+                          {...control}
+                          inputMode="decimal"
+                          value={draft.coProducts[co.lineNo] ?? ""}
+                          onChange={(e) => setDraft({ ...draft, coProducts: { ...draft.coProducts, [co.lineNo]: e.target.value } })}
+                        />
+                      )}
+                    </FormField>
+                  </fieldset>
+                ))}
+              </div>
+            ) : null}
             {manual && draft.type === "route-card" ? (
               <div className={styles.rows}>
                 {order.operations

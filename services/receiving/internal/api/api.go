@@ -18,6 +18,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -47,23 +48,43 @@ type Ports struct {
 	Profile domain.PostingProfile
 
 	PurchaseOrders domain.PurchaseOrders
+	RequirePOLine  bool
+	InvoicingPlans domain.InvoicingPlans
+
+	PlanRowSettlements domain.PlanRowSettlements
+	OwnershipChanges   domain.OwnershipChanges
+	VendorGroups       domain.VendorGroups
+	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
+
+	// FieldCrypt keys the stored Idempotency-Key request hash (RequestHash); nil keeps plain SHA-256.
+	FieldCrypt *fieldcrypt.Keys
 }
 
 type API struct {
-	store         store.Store
-	ports         Ports
-	resolveMinAge time.Duration
-	resolveLease  time.Duration
-	evaluated     atomic.Int64
-	rejected      atomic.Int64
-	arrived       atomic.Int64
-	registered    atomic.Int64
-	posted        atomic.Int64
-	adjusted      atomic.Int64
-	invoiced      atomic.Int64
+	store           store.Store
+	ports           Ports
+	resolveMinAge   time.Duration
+	resolveLease    time.Duration
+	evaluated       atomic.Int64
+	rejected        atomic.Int64
+	arrived         atomic.Int64
+	registered      atomic.Int64
+	posted          atomic.Int64
+	adjusted        atomic.Int64
+	invoiced        atomic.Int64
+	adjustments     atomic.Int64
+	settlements     atomic.Int64
+	planMarkFailed  atomic.Int64
+	ersSettled      atomic.Int64
+	auditBlocked    atomic.Int64
+	resolveFallback atomic.Int64
+	auditReleased   atomic.Int64
+	auditRejected   atomic.Int64
+	payeesCreated   atomic.Int64
+	groupMissing    atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -82,6 +103,15 @@ func New(s store.Store, ports Ports) *API {
 		lease = 2*ledger.Timeout + httpx.RequestTimeout
 	}
 	return &API{store: s, ports: ports, resolveMinAge: minAge, resolveLease: lease, http: newRequestMetrics()}
+}
+
+func (a *API) resolveFiscalPeriod(ctx context.Context, legalEntityID string, postingDate time.Time, supplied string) (string, error) {
+	id, fellBack, err := domain.ResolveFiscalPeriod(ctx, a.ports.Periods, domain.PeriodQuery{LegalEntityID: legalEntityID, LedgerID: a.ports.Profile.LedgerID, PostingDate: postingDate}, supplied)
+	if fellBack {
+		a.resolveFallback.Add(1)
+		slog.WarnContext(ctx, "close has no dated period; using the caller-supplied fiscal period", "fiscalPeriodId", id, "legalEntityId", legalEntityID, "postingDate", postingDate.Format(dateLayout), "correlationId", middleware.GetReqID(ctx))
+	}
+	return id, err
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
@@ -107,6 +137,16 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Get("/v1/receiving/pending-postings", a.listPending)
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/one-time-payees", a.idempotent(a.createOneTimePayee))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/ers-settlements:run", a.idempotent(a.runErsSettlement))
+	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:release-audit-block", a.idempotent(a.releaseAuditBlock))
+	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:reject-audit-block", a.idempotent(a.rejectAuditBlock))
+	r.With(authz.RequireDuty(dutyErsPriceConfirm)).Put("/v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation", a.confirmErsPrice)
+	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/audit-policy", a.setAuditPolicy)
+	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/ers-vendors/{vendorId}", a.setErsVendor)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -114,6 +154,7 @@ func (a *API) Metrics() http.Handler {
 		name, help string
 		value      *atomic.Int64
 	}{
+		{"receiving_plan_row_marks_failed_total", "Plan row settlements purchasing could not be told about; the next plan run retries them.", &a.planMarkFailed},
 		{"receiving_matches_evaluated_total", "Invoices evaluated by the matching engine.", &a.evaluated},
 		{"receiving_evaluate_rejected_total", "Evaluate requests rejected by validation.", &a.rejected},
 		{"receiving_receipts_arrived_total", "Receipts recorded at arrival.", &a.arrived},
@@ -121,6 +162,15 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_receipts_posted_total", "Receipts posted to the ledger.", &a.posted},
 		{"receiving_receipts_adjusted_total", "Posted receipts corrected or cancelled.", &a.adjusted},
 		{"receiving_invoices_posted_total", "Vendor invoices posted against GR/IR items.", &a.invoiced},
+		{"receiving_invoice_adjustments_posted_total", "Subsequent debits and credits posted against vendor invoices.", &a.adjustments},
+		{"receiving_settlements_posted_total", "Invoicing plan rows and consignment journals settled.", &a.settlements},
+		{"receiving_ers_invoices_posted_total", "Self-billed invoices created by evaluated receipt settlement runs, including those held for audit.", &a.ersSettled},
+		{"receiving_invoices_audit_blocked_total", "Invoices held by the stochastic audit block.", &a.auditBlocked},
+		{"receiving_period_resolve_fallback_total", "Documents posted with the caller-supplied fiscal period because close has no dated period (temporary).", &a.resolveFallback},
+		{"receiving_one_time_payees_created_total", "One-time payees recorded for vendor invoices.", &a.payeesCreated},
+		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
+		{"receiving_vendor_group_lookups_failed_total", "Invoices posted without vendor_group_id because party was unreachable, refused the lookup or does not know the vendor.", &a.groupMissing},
+		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -194,6 +244,7 @@ type lineRequest struct {
 
 type evaluateRequest struct {
 	PurchaseOrderID string         `json:"purchaseOrderId"`
+	LegalEntityID   string         `json:"legalEntityId"`
 	Policy          *policyRequest `json:"policy"`
 	Currency        string         `json:"currency"`
 	HeaderTotal     *wireDecimal   `json:"headerTotal"`
@@ -249,6 +300,11 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 		a.rejectEvaluation(w, r, fields)
 		return
 	}
+	if req.LegalEntityID != "" && !tenant.InLegalEntityScope(p, req.LegalEntityID) {
+		a.rejected.Add(1)
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's access"))
+		return
+	}
 	poFields, err := a.fillFromPurchaseOrder(r.Context(), &req)
 	if err != nil {
 		a.rejected.Add(1)
@@ -294,6 +350,9 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
 		add("purchaseOrderId", "must be a UUID")
 	}
+	if req.LegalEntityID != "" && !ids.Valid(req.LegalEntityID) {
+		add("legalEntityId", "must be a UUID")
+	}
 	lineIndexes := map[int]int{}
 	for i, l := range req.Lines {
 		if l.POLineNo == nil {
@@ -321,26 +380,42 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	return fields
 }
 
+func (a *API) loadPurchaseOrder(ctx context.Context, legalEntityID, id string) (domain.PurchaseOrder, error) {
+	if a.ports.PurchaseOrders == nil {
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
+	}
+	po, err := a.ports.PurchaseOrders.Get(ctx, legalEntityID, id)
+	switch {
+	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
+	case errors.Is(err, domain.ErrPurchaseOrderForbidden):
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "purchase order is outside the caller's access")
+	case err != nil:
+		slog.ErrorContext(ctx, "purchase order lookup failed", "err", err, "purchaseOrderId", id, "correlationId", middleware.GetReqID(ctx))
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
+	}
+	if !po.Usable() {
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or confirmed")
+	}
+	return po, nil
+}
+
 func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
 	fields := map[string]string{}
 	if !slices.ContainsFunc(req.Lines, func(l lineRequest) bool { return l.POLineNo != nil }) {
 		return fields, nil
 	}
-	if a.ports.PurchaseOrders == nil {
-		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
+	po, err := a.loadPurchaseOrder(ctx, req.LegalEntityID, req.PurchaseOrderID)
+	if err != nil {
+		return nil, err
 	}
-	po, err := a.ports.PurchaseOrders.Get(ctx, req.PurchaseOrderID)
-	switch {
-	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
-		return nil, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
-	case errors.Is(err, domain.ErrPurchaseOrderForbidden):
-		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "purchase order is outside the caller's access")
-	case err != nil:
-		slog.ErrorContext(ctx, "purchase order lookup failed", "err", err, "purchaseOrderId", req.PurchaseOrderID, "correlationId", middleware.GetReqID(ctx))
-		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
-	}
-	if !po.Usable() {
-		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or confirmed")
+	if req.LegalEntityID != "" {
+		named, _ := ids.Canonical(req.LegalEntityID)
+		owner, _ := ids.Canonical(po.LegalEntityID)
+		if named != owner {
+			fields["legalEntityId"] = "does not match the purchase order's legal entity"
+			return fields, nil
+		}
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {

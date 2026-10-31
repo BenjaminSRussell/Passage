@@ -4,7 +4,7 @@ Tooling for moving a customer off AX 2012 / D365 F&O or SAP ECC / S/4HANA: trans
 migration packs with control totals, legacy cross-references, parallel-run diffing and the
 cutover runbook generator. Wave reference: PRD section 9.49, ticket PSG-49.
 
-## Slices 1 and 2 (this build)
+## Slices 1 to 5 (this build)
 
 Built and tested:
 
@@ -17,7 +17,9 @@ Built and tested:
   currency).
 - **Validation and quarantine** (`validate.go`): referential (party in master data), domain
   (ISO 4217 currency, control account present), and uniqueness rules, plus the
-  `quarantine_max_pct` gate (0-10, default 1; MIG-1504).
+  `quarantine_max_pct` gate (0-10, default 1; MIG-1504). An amount with more than six decimal
+  places (the stored `numeric(28,6)` scale) rejects the open_items, gl_balances or project_wip
+  request, so a run never reconciles a value Passage stores rounded.
 - **Idempotent loading** (`loader.go`, `internal/store`): records already in `legacy_xref` by natural
   key `(system, company, table, id)` are skipped, so a re-run loads zero records (MIG-1505). Runs of
   one (system, company) serialize on an advisory lock.
@@ -47,14 +49,22 @@ Built and tested:
   loads them with their `legacy_xref` rows (never posting to the GL) and reconciles cost, sales,
   WIP cost and WIP sales per project and category to legacy; a project that differs is
   `OPENING_MISMATCH`.
+- **GL balances** (`gl.go`, `internal/store/gl.go`): the gl_balances pack refuses an extract
+  whose debits differ from its credits in a currency, quarantines balances by uniqueness (legacy
+  id and (account, dimensions, currency)), referential (chart of accounts) and domain (ISO 4217)
+  rules, loads the rest write-once into `gl_opening_balance` with their `legacy_xref` rows (never
+  posting to the GL) and compares the balance per (company, account, dimensions, currency), the
+  count of non-zero combinations and the trial balance per currency. A run that names an
+  open_items run of the same company also compares the open items per control account with the
+  GL balance of that account (BR-49.2, MIG-1506).
 - **Legacy cross-reference lookup**: `GET /api/v1/migration/xref` by legacy id or by Passage record.
 - **Store** (`internal/store`, `migrations/`): Postgres with forced row-level security on every
   table, the outbox written in the same transaction, `Idempotency-Key` replay, and an optimistic
   version check on plan commands.
 - **HTTP API** (`internal/api`): the kernel router, tenant middleware and duty checks. Contract in
   `api/openapi.yaml` (a test checks it against the routes); events in `events/asyncapi.yaml`.
-- **Web module** (`apps/web/src/modules/migration-factory`): the pack catalog, pack runs (list, open_items and
-  project_wip start forms, detail with the control-total board, quarantine release and projects),
+- **Web module** (`apps/web/src/modules/migration-factory`): the pack catalog, pack runs (list, open_items,
+  gl_balances and project_wip start forms, detail with the control-total board, quarantine release and projects),
   project opening balances, parallel runs (list, start, variance review and sign-off), the legacy
   reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist,
   step start with the live timer, step completion, the rollback plan, rollback with the re-keying
@@ -86,6 +96,11 @@ partitioning, idempotent re-runs and the 100-variance classifier. Store and API 
 Postgres use `platform/go/testkit` and skip without `PASSAGE_TEST_DATABASE_URL`; the row-level
 security tests also need `PASSAGE_TEST_APP_DATABASE_URL` (the `passage_app` role), and the API tests
 run as that role when it is set.
+
+The wave proof `TestWave49_SyntheticYearCutoverRehearsal` (database) runs a synthetic AX 2012 and
+SAP ECC year (three entities each) through the generated runbook and the rollback. Its extracts
+and expected values come from `internal/api/testdata/synth/synth_reference.py`, an independent
+standard-library reference; regenerate with `python3 -I internal/api/testdata/synth/synth_reference.py`.
 
 Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc --noEmit`.
 

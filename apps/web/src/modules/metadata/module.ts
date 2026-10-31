@@ -12,7 +12,7 @@ const metadataModule: PassageModule = {
   id: "metadata",
   title: "Metadata",
   description: "Fields and forms your tenant uses for each record type.",
-  routes: [{ path: "/metadata/:entity?", element: createElement(MetadataRoute) }],
+  routes: [{ path: "/metadata/:entity?", element: createElement(MetadataRoute), handle: { duty: "metadata.read" } }],
   nav: [{ label: "Metadata", to: "/metadata/Vendor", duty: "metadata.read" }],
 };
 

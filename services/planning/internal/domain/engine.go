@@ -74,11 +74,15 @@ type BOMLine struct {
 
 // Item is the planning snapshot of one item at one site.
 type Item struct {
-	ID                         string
-	Coverage                   string
-	PeriodDays                 int
-	MarginDays                 int
-	PositiveDays, NegativeDays int
+	ID         string
+	Coverage   string
+	PeriodDays int
+	MarginDays int
+	// IssueMarginDays moves each demand of the item earlier by that many working
+	// days (FR-22.5); ReorderMarginDays adds working days to the lead time of its
+	// planned orders, so they are released earlier. Safety stock is not an issue.
+	IssueMarginDays, ReorderMarginDays int
+	PositiveDays, NegativeDays         int
 	// FreezeDays, ActionDays and FuturesDays are the time fences of BR-22.4 in
 	// days from today. FreezeDays 0 freezes nothing; ActionDays and
 	// FuturesDays 0 mean the fence is unlimited.
@@ -90,10 +94,13 @@ type Item struct {
 	// FirmingDays is the firming time fence of FR-22.2 in days from today; 0
 	// means no fence. With AutoFirm set, a planned order whose order date
 	// falls inside it is firmed by the run itself (BR-22.4).
-	FirmingDays              int
-	AutoFirm                 bool
-	ReorderMin, ReorderMax   decimal.Decimal
-	OnHand, SafetyStock      decimal.Decimal
+	FirmingDays            int
+	AutoFirm               bool
+	ReorderMin, ReorderMax decimal.Decimal
+	OnHand, SafetyStock    decimal.Decimal
+	// SafetyPolicy is SafetyToday (also when empty) or SafetyFirstIssue: the
+	// safety stock is a demand at today or at the item's first issue date (BR-22.5).
+	SafetyPolicy             string
 	OrderType                string
 	LeadTimeDays             int
 	MinOrderQty, MultipleQty decimal.Decimal
@@ -101,6 +108,9 @@ type Item struct {
 	Demand, Receipts         []Requirement
 	Components               []BOMLine
 }
+
+// leadTotal is the lead time plus the reorder margin (FR-22.5).
+func (it *Item) leadTotal() int { return it.LeadTimeDays + it.ReorderMarginDays }
 
 // PlannedOrder is a proposed purchase, production or transfer order.
 type PlannedOrder struct {
@@ -116,6 +126,9 @@ type PlannedOrder struct {
 	// AutoFirmed marks an order the firming time fence firms during the run
 	// (BR-22.4); the store firms it in the run's transaction.
 	AutoFirmed bool
+	// VendorID, QuotaArrangementID and QuotaSourceID are set by ApplyQuota when
+	// a quota arrangement allocated the order to a source (FR-22.17).
+	VendorID, QuotaArrangementID, QuotaSourceID string
 }
 
 // Peg links one unit of supply to the demand it covers (ReqTransCov).
@@ -248,8 +261,13 @@ func validate(it *Item) error {
 	default:
 		return fmt.Errorf("%w: %q order type %q", ErrInvalidItem, it.ID, it.OrderType)
 	}
-	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
+	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.IssueMarginDays < 0 || it.ReorderMarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
+	}
+	switch it.SafetyPolicy {
+	case "", SafetyToday, SafetyFirstIssue:
+	default:
+		return fmt.Errorf("%w: %q safety-stock policy %q", ErrInvalidItem, it.ID, it.SafetyPolicy)
 	}
 	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 || it.CoverageDays < 0 || it.FirmingDays < 0 {
 		return fmt.Errorf("%w: %q time fences must not be negative", ErrInvalidItem, it.ID)
@@ -325,11 +343,11 @@ func reqLess(a, b Requirement) bool {
 func (rs *runState) plan(item *Item) error {
 	demands := make([]Requirement, 0, len(item.Demand)+1)
 	for _, d := range item.Demand {
-		d.Date = rs.demandDate(d.Date)
+		d.Date = rs.issueDate(item, d.Date)
 		demands = append(demands, d)
 	}
 	if item.SafetyStock.IsPositive() {
-		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.demandDate(rs.today), Qty: item.SafetyStock, Priority: PrioritySafety})
+		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.safetyDate(item), Qty: item.SafetyStock, Priority: PrioritySafety})
 	}
 	sort.SliceStable(demands, func(a, b int) bool { return reqLess(demands[a], demands[b]) })
 	receipts := slices.Clone(item.Receipts)
@@ -347,12 +365,17 @@ func (rs *runState) plan(item *Item) error {
 	if item.OnHand.IsPositive() {
 		L.addSupply(layer{ref: RefOnHand + ":" + item.ID, refType: RefOnHand, date: rs.today, qty: item.OnHand})
 	}
+	start := rs.demandDate(rs.today)
 	if item.Coverage == CoverageMinMax {
 		// BR-22.1 step 5: a min/max item is checked at today even with no events,
 		// so a stock level below minimum always reorders. Orders created here are
-		// counted as supply by the walk below.
-		if err := L.check(rs.demandDate(rs.today), nil, nil); err != nil {
-			return err
+		// counted as supply by the walk below. When something happens on or
+		// before today, the walk checks today itself after netting it, so the
+		// stock level is PAB after today's receipts and requirements.
+		if t0, ok := nextTime(demands, 0, receipts, 0, nil); !ok || t0 > start {
+			if err := L.check(start, nil, nil); err != nil {
+				return err
+			}
 		}
 	}
 	di, ri := 0, 0
@@ -360,6 +383,11 @@ func (rs *runState) plan(item *Item) error {
 		t, ok := nextTime(demands, di, receipts, ri, L.pending)
 		if !ok {
 			break
+		}
+		if item.Coverage == CoverageMinMax && t < start {
+			// An overdue receipt is part of today's stock level, not a check of
+			// its own before today's requirements are seen.
+			t = start
 		}
 		for ri < len(receipts) && receipts[ri].Date <= t {
 			r := receipts[ri]
@@ -482,11 +510,16 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 		if !need.IsPositive() {
 			return nil
 		}
+		// Supply dated on or before netted is already netted against need (the
+		// walk adds what is due by t; negative days subtract what is waited
+		// for), so the period window below must not count it again.
+		netted := t
 		if it.NegativeDays > 0 {
 			// FR-22.2 negative days (AX semantics): supply already scheduled
 			// within NegativeDays after the shortage is waited for instead of
 			// planning a new order; finish raises Advance for it.
 			limit := t + it.NegativeDays
+			netted = limit
 			for _, r := range receipts {
 				if r.Date > limit {
 					break
@@ -506,26 +539,11 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 			// FR-22.2 / BR-22.1 step 6: one order covers the net requirement of
 			// the whole period, so demand later in the window is added and supply
 			// already scheduled inside the window is netted against it. The
+			// order is the sum of the window's net requirements: the deepest
+			// cumulative shortfall on any day of the window, so supply that
+			// arrives after a requirement in the window does not cover it. The
 			// order never covers less than what is short today.
-			limit := t + it.PeriodDays - 1
-			window := need
-			for _, r := range rest {
-				if r.Date > limit {
-					break
-				}
-				window = window.Add(r.Qty)
-			}
-			for _, r := range receipts {
-				if r.Date <= limit {
-					window = window.Sub(r.Qty)
-				}
-			}
-			for _, p := range L.pending {
-				if p.date <= limit {
-					window = window.Sub(p.qty)
-				}
-			}
-			need = decimal.Max(need, window)
+			need = decimal.Max(need, L.windowShortfall(need, netted, t+it.PeriodDays-1, rest, receipts))
 		}
 		return L.order(t, need)
 	case CoverageMinMax:
@@ -539,6 +557,43 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 		return L.order(t, target.Sub(pab))
 	}
 	return nil
+}
+
+// windowShortfall walks the days up to limit from a shortfall of need and
+// returns the largest cumulative shortfall: requirements in rest add to it,
+// receipts and pending planned supply dated after netted (supply on or before
+// it is already in need) reduce it from their own day on.
+func (L *ledger) windowShortfall(need decimal.Decimal, netted, limit int, rest, receipts []Requirement) decimal.Decimal {
+	type move struct {
+		day int
+		qty decimal.Decimal
+	}
+	var moves []move
+	for _, r := range rest {
+		if r.Date <= limit {
+			moves = append(moves, move{r.Date, r.Qty})
+		}
+	}
+	for _, r := range receipts {
+		if r.Date > netted && r.Date <= limit {
+			moves = append(moves, move{r.Date, r.Qty.Neg()})
+		}
+	}
+	for _, p := range L.pending {
+		if p.date > netted && p.date <= limit {
+			moves = append(moves, move{p.date, p.qty.Neg()})
+		}
+	}
+	sort.SliceStable(moves, func(a, b int) bool { return moves[a].day < moves[b].day })
+	short, deepest := need, need
+	for i := 0; i < len(moves); {
+		day := moves[i].day
+		for ; i < len(moves) && moves[i].day == day; i++ {
+			short = short.Add(moves[i].qty)
+		}
+		deepest = decimal.Max(deepest, short)
+	}
+	return deepest
 }
 
 // increase raises Increase (FR-22.7) for a shortage at day t inside the
@@ -622,11 +677,11 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 		L.rs.seq++
 		number := fmt.Sprintf("PLN-%06d", L.rs.seq)
 		delivery := L.rs.back(t, it.MarginDays)
-		orderDate := L.rs.back(delivery, it.LeadTimeDays)
+		orderDate := L.rs.back(delivery, it.leadTotal())
 		if safetyOnly {
 			// BR-22.5: the safety-stock order is dated today + lead time.
 			orderDate = L.rs.demandDate(today)
-			delivery = L.rs.forward(orderDate, it.LeadTimeDays)
+			delivery = L.rs.forward(orderDate, it.leadTotal())
 		}
 		po := PlannedOrder{Number: number, ItemID: it.ID, OrderType: it.OrderType, Qty: q, OrderDate: orderDate, DeliveryDate: delivery, LotRule: rule,
 			AutoFirmed: it.AutoFirm && insideFirmingFence(today, orderDate, it.FirmingDays)}
@@ -634,7 +689,7 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 			// BR-22.1 step 7: the order cannot be placed in the past, so it is
 			// expected at today + lead time. The delay message is raised by
 			// propagateFutures once delays from components are known.
-			futures := L.rs.forward(today, it.LeadTimeDays)
+			futures := L.rs.forward(today, it.leadTotal())
 			po.FuturesDate = &futures
 			po.DelayDays = futures - delivery
 		}
@@ -771,7 +826,14 @@ func (rs *runState) propagateFutures(levels []*Item) {
 						continue
 					}
 					parent := &orders[pi]
-					delivery := rs.forward(ready, rs.index[parent.ItemID].LeadTimeDays)
+					// The component's issue margin is a cushion before the
+					// parent starts (FR-22.5): the parent can start that many
+					// working days after the component is ready.
+					start := rs.forward(ready, it.IssueMarginDays)
+					delivery := rs.forward(start, rs.index[parent.ItemID].leadTotal())
+					if delivery <= parent.DeliveryDate {
+						continue
+					}
 					if parent.FuturesDate == nil || delivery > *parent.FuturesDate {
 						parent.FuturesDate = &delivery
 						parent.DelayDays = delivery - parent.DeliveryDate
@@ -1029,4 +1091,30 @@ func hashResult(r Result) string {
 		fmt.Fprintf(h, "M|%s|%s|%s|%s|%d|%d|%s\n", m.Action, m.ItemID, m.SupplyRef, m.DemandRef, m.SuggestedDate, m.DelayDays, m.Qty)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// safetyDate is the day an item's safety stock is netted as a demand (BR-22.5):
+// today, or with policy first-issue the earliest day of its other demands. An
+// item with no other demand keeps the safety stock at today so the buffer is
+// still built.
+func (rs *runState) safetyDate(it *Item) int {
+	day := rs.demandDate(rs.today)
+	if it.SafetyPolicy != SafetyFirstIssue || len(it.Demand) == 0 {
+		return day
+	}
+	first := rs.issueDate(it, it.Demand[0].Date)
+	for _, d := range it.Demand[1:] {
+		first = min(first, rs.issueDate(it, d.Date))
+	}
+	return first
+}
+
+// issueDate is the day a demand of it is netted on: the issue margin moves it
+// that many working days earlier (FR-22.5), counted from the working day the
+// demand would fall on without a margin, and never before today (BR-22.8).
+func (rs *runState) issueDate(it *Item, day int) int {
+	if it.IssueMarginDays > 0 {
+		day = rs.back(rs.demandDate(day), it.IssueMarginDays)
+	}
+	return rs.demandDate(day)
 }

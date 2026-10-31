@@ -5,9 +5,12 @@ import (
 	"log/slog"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
@@ -15,9 +18,13 @@ import (
 func buildPorts(getenv func(string) string) (api.Ports, error) {
 	allowFakes := getenv("PASSAGE_ALLOW_FAKES") == "1"
 	var ports api.Ports
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return api.Ports{}, err
+	}
 	switch url := getenv("LEDGER_URL"); {
 	case url != "":
-		ports.Ledger = ledger.New(url, nil)
+		ports.Ledger = ledger.New(url, nil).WithSigner(signer)
 	case allowFakes:
 		slog.Warn("LEDGER_URL is empty: journal entries go to an in-memory fake and are lost on restart", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.Ledger = &domain.FakeLedger{}
@@ -26,7 +33,7 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("CLOSE_URL"); {
 	case url != "":
-		ports.Periods = periods.New(url, nil)
+		ports.Periods = periods.New(url, nil).WithSigner(signer)
 	case allowFakes:
 		slog.Warn("CLOSE_URL is empty: every AP period reads as open", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.Periods = domain.FakePeriods{Status: domain.PeriodOpen}
@@ -35,16 +42,54 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("PURCHASING_URL"); {
 	case url != "":
-		ports.PurchaseOrders = purchasing.New(url, nil)
+		client := purchasing.New(url, nil).WithSigner(signer)
+		ports.PurchaseOrders, ports.InvoicingPlans, ports.PlanRowSettlements = client, client, client
+		ports.RequirePOLine = true
 	case allowFakes:
-		slog.Warn("PURCHASING_URL is empty: purchase order lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
-		ports.PurchaseOrders = domain.FakePurchaseOrders{}
+		slog.Warn("PURCHASING_URL is empty: purchase order and invoicing plan lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.PurchaseOrders, ports.InvoicingPlans = domain.FakePurchaseOrders{}, domain.FakeInvoicingPlans{}
+		ports.PlanRowSettlements = domain.FakePlanRowSettlements{}
 	default:
 		return api.Ports{}, fmt.Errorf("PURCHASING_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
 	}
+	switch url := getenv("INVENTORY_URL"); {
+	case url != "":
+		ports.OwnershipChanges = inventory.New(url, nil).WithSigner(signer)
+	case allowFakes:
+		slog.Warn("INVENTORY_URL is empty: consignment settlement finds no ownership changes", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.OwnershipChanges = domain.FakeOwnershipChanges{}
+	default:
+		slog.Warn("INVENTORY_URL is empty: consignment settlement answers 503 until it is set")
+	}
+	switch url := getenv("PARTY_URL"); {
+	case url != "":
+		ports.VendorGroups = party.New(url, nil).WithSigner(signer)
+	case allowFakes:
+		slog.Warn("PARTY_URL is empty: invoice.posted carries no vendor_group_id", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.VendorGroups = domain.FakeVendorGroups{}
+	default:
+		slog.Warn("PARTY_URL is empty: invoice.posted carries no vendor_group_id")
+	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
-	return ports, err
+	if err != nil {
+		return ports, err
+	}
+	var sampler *domain.Sampler
+	switch seed := getenv("AUDIT_SAMPLE_SEED"); {
+	case seed != "":
+		sampler, err = domain.NewSampler([]byte(seed))
+	case allowFakes:
+		slog.Warn("AUDIT_SAMPLE_SEED is empty: using a random seed, so audit draws are not reproducible across restarts", "flag", "PASSAGE_ALLOW_FAKES")
+		sampler, err = domain.NewRandomSampler()
+	default:
+		return api.Ports{}, fmt.Errorf("AUDIT_SAMPLE_SEED is required (at least 16 characters, from a secret; set PASSAGE_ALLOW_FAKES=1 only for local development)")
+	}
+	if err != nil {
+		return api.Ports{}, fmt.Errorf("AUDIT_SAMPLE_SEED: %w", err)
+	}
+	ports.AuditSampler = sampler
+	return ports, nil
 }
 
 var profileEnv = []struct {

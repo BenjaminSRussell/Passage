@@ -368,3 +368,115 @@ func TestGenerate_ConcurrentRetryReplays(t *testing.T) {
 		t.Fatalf("active kanbans = %d, want 2", rule.ActiveKanbans)
 	}
 }
+
+// FR-24.8: a flow is versioned, not edited. A new version is a draft copy with
+// the changes applied; activating it expires the version it replaces.
+func TestFlows_NewVersionExpiresPrevious(t *testing.T) {
+	s, admin := setup(t)
+	ctx := ctxFor(1)
+	v1, _, err := s.CreateFlow(ctx, demoFlow("Line 1", true), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.NewFlowVersion(ctx, v1.ID, 1, store.NewVersion{}, store.Idem{}); problemCode(err) != store.CodeFlowNotActive {
+		t.Fatalf("revising a draft: %v", err)
+	}
+	start := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	v1, _, err = s.ActivateFlow(ctx, v1.ID, 1, start, nil, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.NewFlowVersion(ctx, v1.ID, 1, store.NewVersion{}, store.Idem{}); problemCode(err) != store.CodeVersionConflict {
+		t.Fatalf("stale version: %v", err)
+	}
+	changes := store.NewVersion{SetTakt: true, TaktTimeS: ptr(50)}
+	v2, fresh, err := s.NewFlowVersion(ctx, v1.ID, v1.Version, changes, store.Idem{Key: "nv-1", Fingerprint: "fp"})
+	if err != nil || !fresh || v2.Status != "draft" || v2.FlowVersion != 2 || v2.PreviousFlowID == nil || *v2.PreviousFlowID != v1.ID ||
+		v2.Name != "Line 1" || *v2.TaktTimeS != 50 || v2.ValueStreamID != v1.ValueStreamID || len(v2.Activities) != 3 {
+		t.Fatalf("new version fresh=%v %+v err=%v", fresh, v2, err)
+	}
+	if v2.Activities[2].Predecessors[0] != 1 || v2.Activities[2].Predecessors[1] != 2 || v2.Activities[0].ID == v1.Activities[0].ID {
+		t.Fatalf("copied activities %+v", v2.Activities)
+	}
+	if again, fresh, err := s.NewFlowVersion(ctx, v1.ID, v1.Version, changes, store.Idem{Key: "nv-1", Fingerprint: "fp"}); err != nil || fresh || again.ID != v2.ID {
+		t.Fatalf("replay fresh=%v id=%s err=%v", fresh, again.ID, err)
+	}
+	if _, _, err := s.NewFlowVersion(ctx, v1.ID, v1.Version, store.NewVersion{}, store.Idem{}); problemCode(err) != store.CodeFlowHasNewVersion {
+		t.Fatalf("second successor: %v", err)
+	}
+	// The old version is untouched until the new one goes live.
+	if old, _ := s.GetFlow(ctx, v1.ID); old.Status != "active" {
+		t.Fatalf("old version %+v", old)
+	}
+	if _, _, err := s.ActivateFlow(ctx, v2.ID, 1, start, nil, store.Idem{}); problemCode(err) != store.CodeFlowStartsTooEarly {
+		t.Fatalf("start on or before the old start: %v", err)
+	}
+	if still, _ := s.GetFlow(ctx, v2.ID); still.Status != "draft" {
+		t.Fatalf("refused activation changed the draft: %+v", still)
+	}
+	v2, _, err = s.ActivateFlow(ctx, v2.ID, 1, start.AddDate(0, 0, 30), nil, store.Idem{})
+	if err != nil || v2.Status != "active" {
+		t.Fatalf("activate v2: %+v %v", v2, err)
+	}
+	old, _ := s.GetFlow(ctx, v1.ID)
+	if old.Status != "expired" || old.ActiveTo == nil || *old.ActiveTo != "2026-12-01" || old.Version != v1.Version+1 {
+		t.Fatalf("v1 after v2 went live: %+v", old)
+	}
+	if list, _ := s.ListFlows(ctx, "active", 10); len(list) != 1 || list[0].ID != v2.ID {
+		t.Fatalf("active flows %+v", list)
+	}
+	if _, _, err := s.NewFlowVersion(ctx, v1.ID, old.Version, store.NewVersion{}, store.Idem{}); problemCode(err) != store.CodeFlowNotActive {
+		t.Fatalf("revising an expired flow: %v", err)
+	}
+	expired := outboxEvents(t, admin, leanevents.FlowExpired)
+	var ed leanevents.FlowExpiredData
+	if len(expired) != 1 || json.Unmarshal(expired[0].Data, &ed) != nil || ed.FlowID != v1.ID || ed.FlowVersion != 1 ||
+		ed.ActiveTo != "2026-12-01" || ed.SupersededBy != v2.ID {
+		t.Fatalf("flow expired events %+v", ed)
+	}
+	activated := outboxEvents(t, admin, leanevents.FlowActivated)
+	var ad leanevents.FlowActivatedData
+	if len(activated) != 2 || json.Unmarshal(activated[1].Data, &ad) != nil || ad.FlowID != v2.ID || ad.FlowVersion != 2 ||
+		ad.PreviousFlowID == nil || *ad.PreviousFlowID != v1.ID {
+		t.Fatalf("flow activated events %d %+v", len(activated), ad)
+	}
+	// Another tenant cannot see or revise it.
+	if _, _, err := s.NewFlowVersion(ctxFor(2), v2.ID, v2.Version, store.NewVersion{}, store.Idem{}); problemCode(err) != store.CodeFlowNotFound {
+		t.Fatalf("cross-tenant revise: %v", err)
+	}
+}
+
+// A new version can replace the activities; an end date the old version
+// already had that is earlier than the day before the new start is kept, and
+// the expiry event reports it.
+func TestFlows_NewVersionReplacesActivitiesAndKeepsEarlierEnd(t *testing.T) {
+	s, admin := setup(t)
+	ctx := ctxFor(1)
+	v1, _, err := s.CreateFlow(ctx, demoFlow("Line 2", true), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
+	if v1, _, err = s.ActivateFlow(ctx, v1.ID, 1, start, &end, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	acts := []store.Activity{{Sequence: 1, Name: "Blend", Kind: "process", CycleTimeS: 20, OutputLocationID: ptr(ids.New()), Predecessors: []int{}}}
+	v2, _, err := s.NewFlowVersion(ctx, v1.ID, v1.Version, store.NewVersion{Activities: acts}, store.Idem{})
+	if err != nil || len(v2.Activities) != 1 || v2.Activities[0].Name != "Blend" || v2.TaktTimeS == nil || *v2.TaktTimeS != 60 {
+		t.Fatalf("new version %+v %v", v2, err)
+	}
+	if got, _ := s.GetFlow(ctx, v2.ID); got.ActivityCount != 1 || got.FlowVersion != 2 {
+		t.Fatalf("stored new version %+v", got)
+	}
+	if _, _, err := s.ActivateFlow(ctx, v2.ID, 1, end.AddDate(0, 0, 10), nil, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := s.GetFlow(ctx, v1.ID); old.Status != "expired" || old.ActiveTo == nil || *old.ActiveTo != "2026-11-30" {
+		t.Fatalf("old version %+v", old)
+	}
+	var ed leanevents.FlowExpiredData
+	if evts := outboxEvents(t, admin, leanevents.FlowExpired); len(evts) != 1 || json.Unmarshal(evts[0].Data, &ed) != nil || ed.ActiveTo != "2026-11-30" {
+		t.Fatalf("expired event %+v", ed)
+	}
+}

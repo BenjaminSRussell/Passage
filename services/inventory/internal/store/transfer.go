@@ -416,6 +416,9 @@ func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc documen
 			return err
 		}
 	}
+	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", orderedRows(rows, order)); err != nil {
+		return err
+	}
 	type posted struct {
 		r  *row
 		pl domain.PostedLine
@@ -518,15 +521,12 @@ func scanTransfer(row pgx.Row) (domain.TransferOrder, error) {
 	return o, nil
 }
 
-// scanTransferLine scans transferLineColumns, preceded by the order id when
-// orderID is not nil.
-func scanTransferLine(rows pgx.Rows, orderID *string) (domain.TransferLine, error) {
+// scanTransferLine scans transferLineColumns, preceded by the columns scanned
+// into prefix.
+func scanTransferLine(rows pgx.Rows, prefix ...any) (domain.TransferLine, error) {
 	var l domain.TransferLine
 	var dimsText, qty, shipped, received, under, over string
-	dest := []any{&l.ID, &l.LineNo, &l.ProductID, &dimsText, &l.Unit, &qty, &shipped, &received, &under, &over, &l.Closed}
-	if orderID != nil {
-		dest = append([]any{orderID}, dest...)
-	}
+	dest := append(prefix, &l.ID, &l.LineNo, &l.ProductID, &dimsText, &l.Unit, &qty, &shipped, &received, &under, &over, &l.Closed)
 	if err := rows.Scan(dest...); err != nil {
 		return l, err
 	}
@@ -564,7 +564,7 @@ func loadTransfer(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.
 	}
 	defer rows.Close()
 	for rows.Next() {
-		l, err := scanTransferLine(rows, nil)
+		l, err := scanTransferLine(rows)
 		if err != nil {
 			return o, err
 		}
@@ -619,4 +619,90 @@ func transferData(o domain.TransferOrder, moved map[string]decimal.Decimal, rece
 		})
 	}
 	return out
+}
+
+// TransferLineFilter narrows the transfer order line inquiry. Empty fields do
+// not filter; From and To (inclusive, nil for none) bound the planned or actual
+// ship date. LateOnly keeps the lines late as of AsOf
+// (domain.TransferLineLateness with LateReceiptDays).
+type TransferLineFilter struct {
+	LegalEntityID   string
+	Status          string
+	ProductID       string
+	FromWarehouse   string
+	ToWarehouse     string
+	From            *time.Time
+	To              *time.Time
+	LateOnly        bool
+	AsOf            time.Time
+	LateReceiptDays int
+}
+
+// TransferLineRow is one transfer order line with its order header.
+type TransferLineRow struct {
+	OrderID       string
+	LegalEntityID string
+	Number        string
+	Status        string
+	FromWarehouse string
+	ToWarehouse   string
+	ShipDate      time.Time
+	Line          domain.TransferLine
+}
+
+// maxTransferLineList caps the transfer order line inquiry.
+const maxTransferLineList = 1000
+
+// ListTransferLines is the cross-order transfer line inquiry (FR-16.15): lines
+// of every order in the caller's legal entities matching the filter, oldest
+// planned or actual ship date first. It returns at most maxTransferLineList
+// lines and reports whether more matched. The late filter is the SQL form of
+// domain.TransferLineLateness.
+func (s *Postgres) ListTransferLines(ctx context.Context, f TransferLineFilter) ([]TransferLineRow, bool, error) {
+	tp, _ := tenant.FromContext(ctx)
+	out := []TransferLineRow{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select o.id::text, o.legal_entity_id::text, o.number, o.status, o.from_warehouse, o.to_warehouse,
+			to_char(o.ship_date, 'YYYY-MM-DD'), `+transferLineColumns+`
+			from transfer_order_line l
+			join transfer_order o on o.tenant_id = l.tenant_id and o.id = l.transfer_order_id
+			join dimension_set d on d.tenant_id = l.tenant_id and d.hash = l.dimension_set_hash
+			where l.tenant_id = $1
+			  and ($2 = '' or o.legal_entity_id::text = $2)
+			  and ($3 = '' or o.status = $3)
+			  and ($4 = '' or l.product_id::text = $4)
+			  and ($5 = '' or o.from_warehouse = $5)
+			  and ($6 = '' or o.to_warehouse = $6)
+			  and ($7::date is null or o.ship_date >= $7::date)
+			  and ($8::date is null or o.ship_date <= $8::date)
+			  and (not $9 or (o.status = 'CREATED' and o.ship_date < $10::date)
+			       or (o.status in ('SHIPPED', 'PARTIALLY_RECEIVED') and not l.closed and l.shipped_qty > l.received_qty
+			           and o.ship_date < $10::date - $11::int))
+			order by o.ship_date, o.number, l.line_no
+			limit $12`, tp.TenantID, f.LegalEntityID, f.Status, f.ProductID, f.FromWarehouse, f.ToWarehouse, f.From,
+			f.To, f.LateOnly, f.AsOf, f.LateReceiptDays, maxTransferLineList+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r TransferLineRow
+			var ship string
+			if r.Line, err = scanTransferLine(rows, &r.OrderID, &r.LegalEntityID, &r.Number, &r.Status, &r.FromWarehouse, &r.ToWarehouse, &ship); err != nil {
+				return err
+			}
+			if r.ShipDate, err = time.Parse(dateLayout, ship); err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out) > maxTransferLineList {
+		return out[:maxTransferLineList], true, nil
+	}
+	return out, false, nil
 }

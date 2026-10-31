@@ -1,13 +1,26 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"pgregory.net/rapid"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 )
+
+func testKeys(t testing.TB, fill byte) *fieldcrypt.Keys {
+	t.Helper()
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": []byte(strings.Repeat(string([]byte{fill}), 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
 
 var privacyNow = time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 
@@ -115,7 +128,7 @@ func TestApplyPrivacyTransition(t *testing.T) {
 
 func TestPseudonymizeSubject(t *testing.T) {
 	record := map[string]string{"name": "Ada Lovelace", "email": "ada@example.com", "tax_id": "GB123", "amount": "1200.00", "currency": "GBP", "posting_date": "2026-10-01"}
-	in := PseudonymizeInput{SubjectRef: "party-42", Record: record}
+	in := PseudonymizeInput{Keys: testKeys(t, 1), TenantID: "tenant-a", SubjectRef: "party-42", Record: record}
 
 	held := in
 	held.HoldIDs = []string{"HOLD-7"}
@@ -148,8 +161,48 @@ func TestPseudonymizeSubject(t *testing.T) {
 	}
 }
 
+func TestPseudonymsAreKeyedPerTenant(t *testing.T) {
+	record := map[string]string{"email": "ada@example.com"}
+	pseudonym := func(keys *fieldcrypt.Keys, tenant string) string {
+		res, err := PseudonymizeSubject(PseudonymizeInput{Keys: keys, TenantID: tenant, SubjectRef: "party-42", Record: record})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Record["email"]
+	}
+	a := pseudonym(testKeys(t, 1), "tenant-a")
+	if a != pseudonym(testKeys(t, 1), "tenant-a") {
+		t.Fatal("pseudonym must be deterministic per tenant")
+	}
+	if a == pseudonym(testKeys(t, 1), "tenant-b") || a == pseudonym(testKeys(t, 2), "tenant-a") {
+		t.Fatal("pseudonym must differ across tenants and keys")
+	}
+	plain := sha256.Sum256([]byte("party-42|email"))
+	if strings.Contains(a, hex.EncodeToString(plain[:8])) {
+		t.Fatal("pseudonym must not be the unkeyed hash")
+	}
+	if hexPart := strings.TrimPrefix(a, "ERASED-"); len(hexPart) < 32 {
+		t.Fatalf("pseudonym carries %d hex chars, want at least 32", len(hexPart))
+	}
+}
+
+func TestPseudonymizeFailsClosedWithoutKey(t *testing.T) {
+	record := map[string]string{"email": "ada@example.com"}
+	for name, in := range map[string]PseudonymizeInput{
+		"no keys":   {TenantID: "tenant-a", SubjectRef: "party-42", Record: record},
+		"no tenant": {Keys: testKeys(t, 1), SubjectRef: "party-42", Record: record},
+	} {
+		res, err := PseudonymizeSubject(in)
+		if err == nil || res.Record != nil {
+			t.Fatalf("%s: want refusal, got %+v", name, res)
+		}
+		expectPrivacyCode(t, err, CodePrivacyKey)
+	}
+}
+
 func TestPseudonymizeSubjectProperty(t *testing.T) {
 	keys := append([]string{"amount", "currency", "posting_date", "line_no"}, ErasedFields...)
+	pseudonymKeys := testKeys(t, 1)
 	rapid.Check(t, func(t *rapid.T) {
 		rec := map[string]string{}
 		for _, k := range keys {
@@ -157,7 +210,7 @@ func TestPseudonymizeSubjectProperty(t *testing.T) {
 				rec[k] = rapid.StringMatching(`[A-Za-z0-9 ]{1,12}`).Draw(t, k)
 			}
 		}
-		res, err := PseudonymizeSubject(PseudonymizeInput{SubjectRef: "s", Record: rec})
+		res, err := PseudonymizeSubject(PseudonymizeInput{Keys: pseudonymKeys, TenantID: "tenant-a", SubjectRef: "s", Record: rec})
 		if err != nil {
 			t.Fatal(err)
 		}

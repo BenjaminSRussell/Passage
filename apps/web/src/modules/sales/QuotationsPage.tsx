@@ -222,8 +222,8 @@ export function NewQuotationPage() {
           {header("customerId", "Customer", "UUID of the customer party.", { mono: true })}
           {header("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
           {header("currency", "Currency")}
-          {header("validUntil", "Valid until", "Leave empty for 30 days from today.", { type: "date", optional: true })}
-          {header("probabilityPct", "Win probability %", "Leave empty for 50%.", { optional: true, numeric: true })}
+          {header("validUntil", "Valid until", "Leave empty for the legal entity's quotation expiry (30 days unless changed in Sales parameters).", { type: "date", optional: true })}
+          {header("probabilityPct", "Win probability %", "Leave empty for the legal entity's default (50% unless changed in Sales parameters).", { optional: true, numeric: true })}
           <LinesEditor lines={values.lines} errors={errors} newLineDate={start} onChange={(lines) => update({ lines })} />
           {failure ? (
             <div className={styles.formActions}>

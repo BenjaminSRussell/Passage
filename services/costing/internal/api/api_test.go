@@ -55,11 +55,16 @@ func server() (http.Handler, *fakeStore) {
 	return r, fs
 }
 
+const testLE = repLE
+
+func scopedTo(le string) map[string]string { return map[string]string{"X-Passage-Legal-Entity": le} }
+
 func call(h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Passage-Tenant", testTenant)
 	req.Header.Set("X-Passage-Duties", duties)
+	req.Header.Set("X-Passage-Legal-Entity", testLE)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -153,9 +158,61 @@ func TestPPV_AC204(t *testing.T) {
 	}
 }
 
+func TestPPV_PostsCostTransactionOnReceiptAndInvoice(t *testing.T) {
+	h, f := server()
+	const product, site = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
+	ref := func(le, line string) string {
+		return `"legalEntityId":"` + le + `","productId":"` + product + `","siteId":"` + site + `","financialDate":"2026-03-05","sourceLineId":"` + line + `"`
+	}
+	receipt := func(le, line string) string {
+		return `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref(le, line) + `}`
+	}
+	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"100","poUnitPrice":"10.50","invoiceUnitPrice":"10.80","sourceDocumentId":"INV-1",` + ref(testLE, "1") + `}`
+	otherLE := ids.New()
+	posts := []struct{ body, le string }{
+		{receipt(testLE, "1"), testLE}, {invoice, testLE}, {receipt(testLE, "1"), testLE},
+		{receipt(testLE, "2"), testLE}, {receipt(otherLE, "1"), otherLE},
+	}
+	for _, p := range posts {
+		rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", p.body, allDuties, scopedTo(p.le))
+		if m, _ := decodeMap(rec); rec.Code != http.StatusOK || m["recorded"] != true {
+			t.Fatalf("status %d body %v, want recorded", rec.Code, m)
+		}
+	}
+	if len(f.costTxns) != 4 {
+		t.Fatalf("stored %d rows, want 4 (the replayed receipt line is one source key; two lines and two entities are four)", len(f.costTxns))
+	}
+	if r := f.costTxns["ppv:RECEIPT:"+testLE+":GR-1:1"]; r.Kind != "PPV" || r.Amount != "50" || r.Qty != "100" || r.Currency != "EUR" {
+		t.Errorf("receipt row = %+v, want PPV 50 on qty 100", r)
+	}
+	if r := f.costTxns["ppv:INVOICE:"+testLE+":INV-1:1"]; r.Kind != "PPV" || r.Amount != "30" || r.Qty != "0" {
+		t.Errorf("invoice row = %+v, want PPV 30 on qty 0", r)
+	}
+	for _, key := range []string{"ppv:RECEIPT:" + testLE + ":GR-1:2", "ppv:RECEIPT:" + otherLE + ":GR-1:1"} {
+		if _, ok := f.costTxns[key]; !ok {
+			t.Errorf("no row under %s", key)
+		}
+	}
+	partial := `{"kind":"RECEIPT","currency":"EUR","qty":"1","standardUnitCost":"1","poUnitPrice":"2","sourceDocumentId":"GR-2","productId":"` + product + `"}`
+	rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", partial, allDuties, nil)
+	if m, _ := decodeMap(rec); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"legalEntityId"`) || strings.Contains(rec.Body.String(), "ppv.") {
+		t.Errorf("partial reference status %d body %v, want 400 naming the request's own fields", rec.Code, m)
+	}
+	noLine := strings.Replace(receipt(testLE, "1"), `,"sourceLineId":"1"`, "", 1)
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", noLine, allDuties, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "sourceLineId") {
+		t.Errorf("missing line status %d: %s, want 400 on sourceLineId", rec.Code, rec.Body.String())
+	}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", receipt(ids.New(), "1"), allDuties, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("other legal entity status %d, want 403", rec.Code)
+	}
+	if len(f.costTxns) != 4 {
+		t.Errorf("refused calls stored rows: %d", len(f.costTxns))
+	}
+}
+
 func TestCreateVersion_RequiresIdempotencyKeyAndScope(t *testing.T) {
 	h, _ := server()
-	le := ids.New()
+	le := testLE
 	body := `{"legalEntityId":"` + le + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
 	rec := call(h, http.MethodPost, "/v1/costing/versions", body, allDuties, nil)
 	if rec.Code != http.StatusBadRequest {
@@ -235,7 +292,7 @@ func TestCreateVersion_ReplayIsNotCountedAsCreated(t *testing.T) {
 	a := New(fs)
 	r := httpx.NewRouter()
 	a.Register(r)
-	body := `{"legalEntityId":"` + ids.New() + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
+	body := `{"legalEntityId":"` + testLE + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
 	for i := 0; i < 2; i++ {
 		if rec := call(r, http.MethodPost, "/v1/costing/versions", body, allDuties, map[string]string{"Idempotency-Key": "same"}); rec.Code != http.StatusCreated {
 			t.Fatalf("call %d status %d: %s", i, rec.Code, rec.Body.String())
@@ -243,5 +300,22 @@ func TestCreateVersion_ReplayIsNotCountedAsCreated(t *testing.T) {
 	}
 	if got := a.versionsCreated.Load(); got != 1 {
 		t.Errorf("versions created counter = %d, want 1 (the replay is not a creation)", got)
+	}
+}
+
+func TestCreateVersion_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	h, fs := server()
+	body := `{"legalEntityId":"` + testLE + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
+	rec := call(h, http.MethodPost, "/v1/costing/versions", body, allDuties, map[string]string{"Idempotency-Key": "k-noscope", "X-Passage-Legal-Entity": ""})
+	if rec.Code != http.StatusForbidden || len(fs.versions) != 0 {
+		t.Fatalf("status %d versions %d, want 403 and nothing stored: %s", rec.Code, len(fs.versions), rec.Body)
+	}
+}
+
+func TestListAgingBucketSets_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	h, _ := server()
+	rec := call(h, http.MethodGet, "/v1/costing/aging/bucket-sets", "", allDuties, scopedTo(""))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body)
 	}
 }

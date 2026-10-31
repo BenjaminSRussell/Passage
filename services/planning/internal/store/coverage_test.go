@@ -48,6 +48,7 @@ func TestCoverageGroups(t *testing.T) {
 
 	changed := spec
 	changed.FirmingFenceDays, changed.AutoFirm, changed.CoverageTimeFenceDays = 5, true, 60
+	changed.SafetyStockPolicy = domain.SafetyFirstIssue
 	updated, err := st.UpdateCoverageGroup(ctx, 1, changed)
 	if err != nil || updated.Version != 2 || updated.ID != g.ID {
 		t.Fatalf("update = %+v, %v", updated, err)
@@ -73,6 +74,12 @@ func TestCoverageGroups(t *testing.T) {
 	bad.AutoFirm = true
 	if _, _, err := st.CreateCoverageGroup(ctx, store.CoverageCreate{Spec: bad}); err == nil {
 		t.Fatal("auto-firm without a firming fence was stored")
+	}
+
+	badPolicy := domain.DefaultCoverageGroup("BADP", domain.CoverageRequirement)
+	badPolicy.SafetyStockPolicy = "monthly"
+	if _, _, err := st.CreateCoverageGroup(ctx, store.CoverageCreate{Spec: badPolicy}); err == nil {
+		t.Fatal("an unknown safety-stock policy was stored")
 	}
 
 	other := testkit.Ctx(testkit.TenantID(2), "planning.setup.maintain")

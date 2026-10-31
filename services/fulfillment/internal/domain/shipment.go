@@ -42,7 +42,8 @@ var transitions = map[ShipmentStatus][]ShipmentStatus{
 	StatusReleased: {StatusPicking, StatusCancelled},
 	StatusPicking:  {StatusPicked, StatusCancelled},
 	StatusPicked:   {StatusPacked, StatusCancelled},
-	StatusPacked:   {StatusShipped, StatusPartiallyShipped, StatusCancelled},
+	// Unpacking a container takes a PACKED shipment back to PICKED.
+	StatusPacked: {StatusShipped, StatusPartiallyShipped, StatusPicked, StatusCancelled},
 	// A partial shipment re-enters picking for the remaining schedule
 	// quantity (FR-28.8), or returns to PACKED when its slip is cancelled.
 	StatusPartiallyShipped: {StatusPicking, StatusPacked},
@@ -112,8 +113,7 @@ func PostTarget(lines []LineQty) ShipmentStatus {
 }
 
 // CancelShipment applies BR-28.6: a shipment cancels only before anything ships
-// and only while it holds no container (unpack first is not built, so a packed
-// shipment cannot cancel). It returns the status after cancelling.
+// and only while it holds no container (unpack the containers first). It returns the status after cancelling.
 func CancelShipment(from ShipmentStatus, lines []LineQty, containers int) (ShipmentStatus, error) {
 	if from == StatusCancelled {
 		return from, fmt.Errorf("%w: shipment is already cancelled", ErrInvalidMove)
@@ -127,6 +127,54 @@ func CancelShipment(from ShipmentStatus, lines []LineQty, containers int) (Shipm
 		return from, fmt.Errorf("%w: shipment has %d packed containers", ErrInvalidMove, containers)
 	}
 	return Advance(from, StatusCancelled)
+}
+
+// ErrNothingShipped rejects closing a remainder when no quantity has shipped:
+// such a shipment is cancelled, not closed.
+var ErrNothingShipped = fmt.Errorf("%w: nothing has shipped, cancel the shipment instead", ErrInvalidMove)
+
+// ClosedQty is what closing the remainder of one line gives up: Closed of the
+// planned quantity will not ship, PickedUnpacked of the picked quantity was never
+// packed and returns to stock.
+type ClosedQty struct {
+	Closed         decimal.Decimal
+	PickedUnpacked decimal.Decimal
+}
+
+// CloseRemainder applies FR-28.8 CANCEL_REMAINDER: a shipment that has shipped
+// something and still owes quantity (PARTIALLY_SHIPPED, or its remainder
+// being picked) is closed at what shipped. Nothing may be packed and waiting
+// to ship, so the packer posts or the shipment is left open. It returns the
+// per-line quantities in line order (zero for a fully shipped line) and the
+// new status SHIPPED.
+func CloseRemainder(from ShipmentStatus, lines []LineQty) (ShipmentStatus, []ClosedQty, error) {
+	switch from {
+	case StatusPartiallyShipped, StatusPicking, StatusPicked:
+	default:
+		return from, nil, fmt.Errorf("%w: a %s shipment has no open remainder to close", ErrInvalidMove, from)
+	}
+	shippedAny := false
+	open := false
+	out := make([]ClosedQty, len(lines))
+	for i, l := range lines {
+		if l.Shipped.IsPositive() {
+			shippedAny = true
+		}
+		if l.Packed.GreaterThan(l.Shipped) {
+			return from, nil, fmt.Errorf("%w: packed quantity is waiting to ship, post it first", ErrInvalidMove)
+		}
+		out[i] = ClosedQty{Closed: l.Planned.Sub(l.Shipped), PickedUnpacked: l.Picked.Sub(l.Shipped)}
+		if out[i].Closed.IsPositive() {
+			open = true
+		}
+	}
+	if !shippedAny {
+		return from, nil, ErrNothingShipped
+	}
+	if !open {
+		return from, nil, fmt.Errorf("%w: every line has shipped its planned quantity", ErrInvalidMove)
+	}
+	return StatusShipped, out, nil
 }
 
 // CanPack checks that packing qty more keeps packed <= picked (BR-28.1 invariant).
@@ -169,4 +217,27 @@ func Backorder(status ShipmentStatus, planned, picked decimal.Decimal) (remainde
 		remainder = decimal.Zero
 	}
 	return remainder, remainder.IsPositive() && status != StatusCancelled
+}
+
+// ErrContainerNotUnpackable rejects unpacking a container that already left
+// on a packing slip or was unpacked before.
+var ErrContainerNotUnpackable = fmt.Errorf("%w: only a CLOSED container can be unpacked", ErrInvalidMove)
+
+// UnpackContainer applies the unpack rule: a CLOSED container of a shipment
+// that is PICKING, PICKED or PACKED is taken apart and its quantities return
+// to the unpacked pool. A PACKED shipment is no longer fully packed and goes
+// back to PICKED. It returns the shipment status after unpacking.
+func UnpackContainer(from ShipmentStatus, containerStatus string) (ShipmentStatus, error) {
+	switch from {
+	case StatusPicking, StatusPicked, StatusPacked:
+	default:
+		return from, fmt.Errorf("%w: a %s shipment has no containers to unpack", ErrInvalidMove, from)
+	}
+	if containerStatus != "CLOSED" {
+		return from, fmt.Errorf("%w (container is %s)", ErrContainerNotUnpackable, containerStatus)
+	}
+	if from == StatusPacked {
+		return StatusPicked, nil
+	}
+	return from, nil
 }

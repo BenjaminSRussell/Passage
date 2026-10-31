@@ -24,9 +24,9 @@ ticket is a later slice of PSG-48 unless marked handoff.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| AC2: 50 planted conflicts detected; mitigation records approvals | built | domain fixture test, store reconciliation test and the `sod_mitigation` record |
+| AC2: 50 planted conflicts detected; mitigation records approvals | built | fx-sod-50 (50 users) and fx-sod-50-distinct (50 pairwise distinct role combinations, 81 conflicts over all 11 seed rules, 12 near misses, checked by the independent `testdata/sod_ref.py`): `TestDetect_PlantedFixtureNoFalseNegatives`, `TestDetect_FiftyDistinctCombinationsAndNearMisses`, `TestEvaluate_PlantedFiftyReconcileWithRecomputation`, `TestMitigate_RecordsApprovalAndExpires`, `TestMitigate_FiftyDistinctCombinationsRecordEveryApproval` (every conflict mitigated by a second approver, 81 approval records and events) |
 | AC-48.3: an OPEN HIGH conflict blocks the save | partial | `POST /v1/sod/simulate` answers `blocked` with `SOD-1101`; refusing the save itself is the wave-2 role-assignment service's job, which calls simulate before it saves |
-| AC1: statutory fixtures per pack | later slice of PSG-48 | owned by `services/localization` and `countrypacks/`; see that service's NOT-IMPLEMENTED |
+| AC1: statutory fixtures per pack | partial (localization) | all seven packs ship a validated fixture; what stays open is in `services/localization/NOT-IMPLEMENTED.md` |
 | AC3: backup and restore drill (RPO 5 min, RTO 1 h) | handoff | CNPG backup configuration and the drill job live in `deploy/` and the ops platform (wave 1 / wave 50) |
 | AC4: external pen-test high/critical = 0 | handoff | a wave-exit activity owned by the security lead; not a code deliverable |
 | Deliverable 3 / FR-48.4: nightly SoD evaluation at 00:30 (`sod.nightly_time`) | later slice of PSG-48 | `POST /v1/sod/evaluations` is the per-user evaluation; the nightly job needs the wave-2 role assignment store to enumerate users |

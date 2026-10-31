@@ -41,6 +41,7 @@ type fakeStore struct {
 	fund       fundState
 	camp       campaignState
 	claims     []store.VendorClaim
+	free       freeGoodsState
 }
 
 func newFake() *fakeStore {

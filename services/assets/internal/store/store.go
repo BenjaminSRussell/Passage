@@ -545,7 +545,16 @@ func (s *Postgres) Dispose(ctx context.Context, assetID string, in DisposalInput
 				if err != nil {
 					return Disposal{}, err
 				}
-				t, err := insertTransaction(ctx, tx, p.TenantID, book, txType, in.Date, d.DisposedCost.Neg(), d.DisposedAccumulated.Neg(), in.Proceeds, d.GainLoss)
+				// The impairment within accumulated depreciation leaves with the
+				// disposed share too, so a later reversal is capped at what the
+				// remaining asset still carries (FR-37.9).
+				var impairment decimal.Decimal
+				if err := tx.QueryRow(ctx, `select coalesce(sum(impairment_amount), 0) from asset_transaction where tenant_id = $1 and asset_book_id = $2`,
+					p.TenantID, book.ID).Scan(&impairment); err != nil {
+					return Disposal{}, err
+				}
+				t, err := postTransaction(ctx, tx, p.TenantID, book, txRow{Type: txType, Date: in.Date, Cost: d.DisposedCost.Neg(), Accumulated: d.DisposedAccumulated.Neg(),
+					Impairment: domain.DisposedShare(impairment, in.Percentage, book.Currency).Neg(), Proceeds: in.Proceeds, GainLoss: d.GainLoss, SourceType: "manual"})
 				if err != nil {
 					return Disposal{}, err
 				}

@@ -16,6 +16,23 @@ export function CountPlansPage() {
     { key: "name", header: "Plan" },
     { key: "warehouse", header: "Warehouse", render: (row) => row.warehouse || "All warehouses" },
     { key: "tolerance", header: "Approval above", render: (row) => `${row.tolerancePct} % or ${row.toleranceValue} ${row.currency}` },
+    {
+      key: "selection",
+      header: "Selection",
+      render: (row) =>
+        [
+          row.locationFrom || row.locationTo ? `Locations ${row.locationFrom || "start"} to ${row.locationTo || "end"}` : "",
+          row.abcClass ? `Class ${row.abcClass}` : "",
+          row.samplePct ? `${row.samplePct} % sample` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ") || "Everything",
+    },
+    {
+      key: "control",
+      header: "Control",
+      render: (row) => [row.freezeStock ? "Freezes stock" : "", row.fourEyes ? "Four eyes" : ""].filter(Boolean).join(" · ") || "None",
+    },
     { key: "unit", header: "Unit" },
     { key: "blind", header: "Blind count", render: (row) => (row.blind ? "Yes" : "No") },
     {

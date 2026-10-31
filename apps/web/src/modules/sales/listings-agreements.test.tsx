@@ -300,7 +300,7 @@ describe("Sales agreements", () => {
   });
 
   it("validateAgreement and validateRelease mirror the service rules", () => {
-    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", productId: PRODUCT, unit: "EA", unitPrice: "1", currency: "USD", commitmentQty: "10", validFrom: "", validTo: "" };
+    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", productId: PRODUCT, unit: "EA", unitPrice: "1", currency: "USD", commitmentQty: "10", validFrom: "", validTo: "", cumTolerance: "" };
     expect(validateAgreement(base).input).toBeDefined();
     expect(validateAgreement({ ...base, commitmentQty: "0" }).errors.commitmentQty).toMatch(/above 0/);
     expect(validateAgreement({ ...base, unitPrice: "1.00001" }).errors.unitPrice).toMatch(/4 decimals/);

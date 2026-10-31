@@ -17,7 +17,7 @@
 // Memory growth is not visible to k6: export container_memory_working_set_bytes
 // per service for the run window and check it with check_soak.py.
 
-import { soakFraction, thresholds } from './lib.js';
+import { arrivalRate, soakFraction, thresholds } from './lib.js';
 import { s1JournalPost, s3Interactive } from './scenarios.js';
 
 // k6 calls scenario functions by their export name from the entry module.
@@ -39,7 +39,7 @@ export const options = {
     soak_journal_post: {
       executor: 'constant-arrival-rate',
       exec: 's1JournalPost',
-      rate: part(34),
+      rate: arrivalRate(34, FRACTION),
       timeUnit: '1m',
       duration: DURATION,
       preAllocatedVUs: part(40),

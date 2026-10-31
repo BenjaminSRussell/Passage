@@ -156,7 +156,9 @@ the packaging fee lines and a shipped material without a rate is FUL-0014.
 | POST | `/v1/fulfillment/shipments/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; nothing shipped and no container (BR-28.6) |
 | POST | `/v1/fulfillment/waves:preview` | WarehouseRelease | Read-only workbench preview; filter, `groupBy`, `maxLines` (200), `maxOrders` (50) |
 | POST | `/v1/fulfillment/waves` | WarehouseRelease | Idempotency-Key; creates the waves, shipments to PICKING; FUL-0016 message; FUL-0053 when stale |
-| GET | `/v1/fulfillment/waves`, `/waves/{id}` | WarehouseView | Waves newest first (`warehouseId`, `limit`); one wave with its shipments |
+| GET | `/v1/fulfillment/waves`, `/waves/{id}` | WarehouseView | Waves newest first (`warehouseId`, `status`, `picker`, `unassigned`, `limit`); one wave with its shipments, lines and picker |
+| POST | `/v1/fulfillment/waves/{id}:assign` | WarehouseRelease | Idempotency-Key, If-Match (wave version); body `picker`; assigns or reassigns an OPEN wave; `wave.assigned` |
+| POST | `/v1/fulfillment/waves/{id}:close` | WarehouseRelease | Idempotency-Key, If-Match (wave version); closes when every line is picked or on a cancelled shipment, else FUL-0055; `wave.closed`; a CLOSED wave refuses `:confirm-pick` (FUL-0001) |
 | GET | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseView | Tracking events, newest first |
 | POST | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseShip | One event per provider event key (201, or 200 `created: false`); DELIVERED moves SHIPPED to DELIVERED |
 | GET | `/v1/fulfillment/shipments/{id}/containers/{cid}/label` | WarehouseView | GS1-128 SSCC label as ZPL (`application/zpl`) |
@@ -225,6 +227,7 @@ Codes raised in this slice:
 | `FUL-0051` | `Idempotency-Key` header missing or longer than 255 characters |
 | `FUL-0052` | Wave not found (404) |
 | `FUL-0053` | A shipment left RELEASED, or a line is already in a wave, since the preview (409) |
+| `FUL-0055` | A wave cannot close: a line of a live shipment is still to pick (422) |
 | `FUL-0054` | Container not found on the shipment (404) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |

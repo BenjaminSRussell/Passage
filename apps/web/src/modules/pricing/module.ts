@@ -6,6 +6,8 @@ import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CommissionSettlementPage } from "./CommissionSettlementPage";
 import { CommissionTransactionsPage } from "./CommissionTransactionsPage";
+import { FreeGoodsDetailPage } from "./FreeGoodsDetailPage";
+import { FreeGoodsPage } from "./FreeGoodsPage";
 import { FundDetailPage } from "./FundDetailPage";
 import { FundsPage } from "./FundsPage";
 import { ImportJournalPage } from "./ImportJournalPage";
@@ -14,6 +16,7 @@ import { JournalsPage } from "./JournalsPage";
 import { NewAgreementPage } from "./NewAgreementPage";
 import { NewCampaignPage } from "./NewCampaignPage";
 import { NewFundPage } from "./NewFundPage";
+import { NewFreeGoodsPage } from "./NewFreeGoodsPage";
 import { NewJournalPage } from "./NewJournalPage";
 import { NewProcedurePage } from "./NewProcedurePage";
 import { NewPromotionPage } from "./NewPromotionPage";
@@ -36,7 +39,7 @@ const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
+    "Trade agreements, campaigns, free goods, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -45,6 +48,9 @@ const pricing: PassageModule = {
     { path: "/pricing/campaigns", element: createElement(CampaignsPage), handle: { title: "Campaigns" } },
     { path: "/pricing/campaigns/new", element: createElement(NewCampaignPage), handle: { title: "New campaign" } },
     { path: "/pricing/campaigns/:id", element: createElement(CampaignDetailPage), handle: { title: "Campaign" } },
+    { path: "/pricing/free-goods", element: createElement(FreeGoodsPage), handle: { title: "Free goods" } },
+    { path: "/pricing/free-goods/new", element: createElement(NewFreeGoodsPage), handle: { title: "New free goods rule" } },
+    { path: "/pricing/free-goods/:id", element: createElement(FreeGoodsDetailPage), handle: { title: "Free goods rule" } },
     { path: "/pricing/procedures", element: createElement(ProceduresPage), handle: { title: "Pricing procedures" } },
     { path: "/pricing/procedures/new", element: createElement(NewProcedurePage), handle: { title: "New pricing procedure" } },
     { path: "/pricing/procedures/:id", element: createElement(ProcedureDetailPage), handle: { title: "Pricing procedure" } },
@@ -74,6 +80,7 @@ const pricing: PassageModule = {
     { label: "Overview", to: "/pricing", duty: "pricing.view" },
     { label: "Trade agreements", to: "/pricing/agreements", duty: "pricing.view" },
     { label: "Campaigns", to: "/pricing/campaigns", duty: "pricing.view" },
+    { label: "Free goods", to: "/pricing/free-goods", duty: "pricing.view" },
     { label: "Pricing procedures", to: "/pricing/procedures", duty: "pricing.view" },
     { label: "Price journals", to: "/pricing/journals", duty: "pricing.view" },
     { label: "Rebate agreements", to: "/pricing/rebates", duty: "pricing.rebate.view" },

@@ -34,14 +34,20 @@ type rig struct {
 	st     *memstore.Store
 	ledger *domain.FakeLedger
 	keys   int
+
+	confirmErsPrice string
 }
 
 func newRig(periods domain.PeriodStatus) *rig { return newRigOn(memstore.New(), periods) }
 
 func newRigOn(st *memstore.Store, periods domain.PeriodStatus) *rig {
+	return newRigWithGroups(st, periods, nil)
+}
+
+func newRigWithGroups(st *memstore.Store, periods domain.PeriodStatus, groups domain.VendorGroups) *rig {
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
-		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger,
+		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger, VendorGroups: groups,
 		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 		ResolveMinAge: time.Nanosecond,
 	})
@@ -61,7 +67,7 @@ func (rg *rig) key() string {
 }
 
 func duty(name, key string, extra ...string) headers {
-	h := headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": name, "Idempotency-Key": key}
+	h := headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Legal-Entity": legalEntityID, "X-Passage-Duties": name, "Idempotency-Key": key, "X-Passage-User": "test-user"}
 	for i := 0; i+1 < len(extra); i += 2 {
 		h[extra[i]] = extra[i+1]
 	}
@@ -113,7 +119,28 @@ func (rg *rig) direct(t *testing.T, slip string, ordered, qty int) receiptJSON {
 func (rg *rig) posted(t *testing.T, slip string, ordered, qty int) receiptJSON {
 	t.Helper()
 	r := rg.direct(t, slip, ordered, qty)
-	return decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	posted := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	if rg.confirmErsPrice != "" {
+		for _, l := range posted.Lines {
+			body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, rg.confirmErsPrice)
+			rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, posted.ID, l.LineNo), body, userDuty("ErsPriceConfirm", rg.key(), "buyer"))
+		}
+	}
+	return posted
+}
+
+func (rg *rig) confirmPrice(t *testing.T, receiptID string, lineNo int, price string, want int) {
+	t.Helper()
+	rg.confirmPriceAs(t, receiptID, lineNo, price, "buyer", want)
+}
+
+func (rg *rig) confirmPriceAs(t *testing.T, receiptID string, lineNo int, price, user string, want int) {
+	t.Helper()
+	body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, price)
+	rec := rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, receiptID, lineNo), body, userDuty("ErsPriceConfirm", rg.key(), user))
+	if rec.Code != want {
+		t.Fatalf("confirm price: %d %s, want %d", rec.Code, rec.Body.String(), want)
+	}
 }
 
 func problemCode(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
@@ -160,6 +187,15 @@ func TestDirectReceipt_ValidationAndAuth(t *testing.T) {
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"Idempotency-Key": "k"}), http.StatusUnauthorized, "AUTH-0001")
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), duty("ReceivingMaintain", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain"}), http.StatusBadRequest, "COM-0001")
+}
+
+func TestDirectReceipt_CallerWithoutEntityScopeIsForbidden(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain(entityHeader, "")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain(entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
+	if rec := rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain()); rec.Code != http.StatusCreated {
+		t.Fatalf("scoped caller: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestDirectReceipt_DomainConflicts(t *testing.T) {
@@ -431,6 +467,45 @@ func TestInvoice_PostsClearsGrirAndEmits(t *testing.T) {
 	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
 	if page.Items[0].Status != "CLEARED" || page.Items[0].OpenAmount != "0.00" {
 		t.Fatalf("grir %+v", page.Items)
+	}
+}
+
+func TestInvoice_EventCarriesVendorGroupFromParty(t *testing.T) {
+	const group = "00000000-0000-4000-8000-0000000000c1"
+	cases := []struct {
+		name   string
+		groups domain.VendorGroups
+		want   string
+		failed string
+	}{
+		{"known vendor", domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}}, `"vendor_group_id":"` + group + `"`, "0"},
+		{"party unreachable", domain.FakeVendorGroups{Err: errors.New("party down")}, "", "1"},
+		{"unknown vendor", domain.FakeVendorGroups{}, "", "1"},
+		{"group is not a uuid", domain.FakeVendorGroups{Groups: map[string]string{vendorID: "not-a-uuid"}}, "", "1"},
+		{"party not configured", nil, "", "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rg := newRigWithGroups(memstore.New(), domain.PeriodOpen, tc.groups)
+			r := rg.posted(t, "PS-1", 10, 4)
+			decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 4, ""), rg.apPoster()), http.StatusCreated)
+			evts := rg.st.Events()
+			data := string(evts[len(evts)-1].Data)
+			if evts[len(evts)-1].Type != "dev.passage.payables.invoice.posted.v1" {
+				t.Fatalf("last event %s", evts[len(evts)-1].Type)
+			}
+			if tc.want != "" && !strings.Contains(data, tc.want) {
+				t.Fatalf("event %s lacks %s", data, tc.want)
+			}
+			if tc.want == "" && strings.Contains(data, "vendor_group_id") {
+				t.Fatalf("event %s carries a vendor group the lookup did not return", data)
+			}
+			metrics := httptest.NewRecorder()
+			rg.api.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+			if !strings.Contains(metrics.Body.String(), "receiving_vendor_group_lookups_failed_total "+tc.failed+"\n") {
+				t.Fatalf("metrics %s, want failed lookups %s", metrics.Body.String(), tc.failed)
+			}
+		})
 	}
 }
 

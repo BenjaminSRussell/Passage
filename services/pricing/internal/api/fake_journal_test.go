@@ -166,6 +166,7 @@ func (f *fakeStore) CreateAgreement(_ context.Context, a domain.RebateAgreement,
 	defer f.mu.Unlock()
 	a.ID = f.nextID("0005")
 	a.PartyRole = domain.PartyRoleOf(a)
+	a.Status, a.Version = domain.AgreementActive, 1
 	f.agreements[a.ID] = a
 	return a, nil
 }

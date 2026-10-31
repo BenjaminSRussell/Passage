@@ -6,10 +6,12 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 export const scopeLabels: Record<Run["scope"], string> = { site: "Whole site", selection: "Selection", move: "Gantt move" };
+export const directionLabels: Record<string, string> = { forward: "Forward", backward: "Backward" };
 
 const columns: DataTableColumn<Run>[] = [
   { key: "id", header: "Run", mono: true, render: (row) => shortId(row.id) },
   { key: "scope", header: "Scope", render: (row) => scopeLabels[row.scope] ?? row.scope },
+  { key: "direction", header: "Direction", render: (row) => directionLabels[row.direction] ?? row.direction },
   { key: "finite", header: "Capacity", render: (row) => <Badge tone={row.finite ? "info" : "neutral"}>{row.finite ? "Finite" : "Infinite"}</Badge> },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
   { key: "operationsCount", header: "Operations", align: "end" },

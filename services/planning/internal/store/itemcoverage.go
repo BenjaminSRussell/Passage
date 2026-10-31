@@ -28,6 +28,7 @@ const (
 	CodeCoverageGroupUnknown = "PLAN-COVERAGE-GROUP-UNKNOWN"
 
 	foreignKeyViolation               = "23503"
+	insufficientPrivilege             = "42501"
 	itemCoverageScopeConstraint       = "item_coverage_scope_key"
 	itemCoverageIdempotencyConstraint = "item_coverage_idempotency_key"
 	itemCoverageGroupConstraint       = "item_coverage_group_fkey"
@@ -46,13 +47,14 @@ type ItemCoverage struct {
 // ItemCoverageCreate is one create command; IdempotencyKey and InputHash are
 // empty when the caller sent no Idempotency-Key.
 type ItemCoverageCreate struct {
+	LegalEntityID  string
 	IdempotencyKey string
 	InputHash      string
 	Spec           domain.ItemCoverageSpec
 }
 
 const itemCoverageSelect = `select c.id::text, c.version, g.code, c.item_id::text, c.site_id::text, coalesce(c.warehouse_id::text, ''),
-	c.coverage_group_id::text, c.min_qty::text, c.max_qty::text, c.safety_margin_receipt_days, c.lead_time_days,
+	c.coverage_group_id::text, c.min_qty::text, c.max_qty::text, c.safety_margin_receipt_days, c.safety_margin_issue_days, c.safety_margin_reorder_days, c.lead_time_days,
 	coalesce(c.vendor_id::text, ''), c.planned_order_type, c.planning_strategy_code, c.planning_scope, c.decoupling_point,
 	coalesce(c.buffer_profile_id::text, ''), c.required_shelf_life_days, c.priority_based
 	from item_coverage c join coverage_group g on g.tenant_id = c.tenant_id and g.id = c.coverage_group_id`
@@ -62,7 +64,7 @@ func scanItemCoverage(row pgx.Row) (ItemCoverage, error) {
 	s := &c.Spec
 	var minQty, maxQty string
 	if err := row.Scan(&c.ID, &c.Version, &c.CoverageGroupCode, &s.ItemID, &s.SiteID, &s.WarehouseID, &s.CoverageGroupID,
-		&minQty, &maxQty, &s.SafetyMarginReceiptDays, &s.LeadTimeDays, &s.VendorID, &s.PlannedOrderType, &s.PlanningStrategy,
+		&minQty, &maxQty, &s.SafetyMarginReceiptDays, &s.SafetyMarginIssueDays, &s.SafetyMarginReorderDays, &s.LeadTimeDays, &s.VendorID, &s.PlannedOrderType, &s.PlanningStrategy,
 		&s.PlanningScope, &s.DecouplingPoint, &s.BufferProfileID, &s.RequiredShelfLifeDays, &s.PriorityBased); err != nil {
 		return ItemCoverage{}, err
 	}
@@ -156,7 +158,11 @@ func (s *Postgres) CreateItemCoverage(ctx context.Context, req ItemCoverageCreat
 	if req.IdempotencyKey != "" {
 		key, hash = &req.IdempotencyKey, &req.InputHash
 	}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, req.LegalEntityID)
+	if err != nil {
+		return ItemCoverage{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
 			var stored, id string
 			err := tx.QueryRow(ctx, `select input_hash, id::text from item_coverage where tenant_id = $1 and idempotency_key = $2`,
@@ -176,12 +182,12 @@ func (s *Postgres) CreateItemCoverage(ctx context.Context, req ItemCoverageCreat
 		c := req.Spec
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into item_coverage (tenant_id, id, item_id, site_id, warehouse_id, coverage_group_id,
-			min_qty, max_qty, safety_margin_receipt_days, lead_time_days, vendor_id, planned_order_type, planning_strategy_code,
-			planning_scope, decoupling_point, buffer_profile_id, required_shelf_life_days, priority_based, idempotency_key, input_hash)
-			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			min_qty, max_qty, safety_margin_receipt_days, safety_margin_issue_days, safety_margin_reorder_days, lead_time_days, vendor_id, planned_order_type, planning_strategy_code,
+			planning_scope, decoupling_point, buffer_profile_id, required_shelf_life_days, priority_based, idempotency_key, input_hash, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::uuid)`,
 			p.TenantID, id, c.ItemID, c.SiteID, optional(c.WarehouseID), c.CoverageGroupID, c.MinQty.String(), c.MaxQty.String(),
-			c.SafetyMarginReceiptDays, c.LeadTimeDays, optional(c.VendorID), c.PlannedOrderType, c.PlanningStrategy,
-			c.PlanningScope, c.DecouplingPoint, optional(c.BufferProfileID), c.RequiredShelfLifeDays, c.PriorityBased, key, hash); err != nil {
+			c.SafetyMarginReceiptDays, c.SafetyMarginIssueDays, c.SafetyMarginReorderDays, c.LeadTimeDays, optional(c.VendorID), c.PlannedOrderType, c.PlanningStrategy,
+			c.PlanningScope, c.DecouplingPoint, optional(c.BufferProfileID), c.RequiredShelfLifeDays, c.PriorityBased, key, hash, entity); err != nil {
 			return err
 		}
 		var err error
@@ -215,12 +221,13 @@ func (s *Postgres) UpdateItemCoverage(ctx context.Context, id string, expectedVe
 		if _, err := tx.Exec(ctx, `update item_coverage set item_id = $3, site_id = $4, warehouse_id = $5, coverage_group_id = $6,
 			min_qty = $7::numeric, max_qty = $8::numeric, safety_margin_receipt_days = $9, lead_time_days = $10, vendor_id = $11,
 			planned_order_type = $12, planning_strategy_code = $13, planning_scope = $14, decoupling_point = $15,
-			buffer_profile_id = $16, required_shelf_life_days = $17, priority_based = $18, version = version + 1, updated_at = now()
+			buffer_profile_id = $16, required_shelf_life_days = $17, priority_based = $18,
+			safety_margin_issue_days = $19, safety_margin_reorder_days = $20, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`,
 			p.TenantID, id, spec.ItemID, spec.SiteID, optional(spec.WarehouseID), spec.CoverageGroupID, spec.MinQty.String(),
 			spec.MaxQty.String(), spec.SafetyMarginReceiptDays, spec.LeadTimeDays, optional(spec.VendorID), spec.PlannedOrderType,
 			spec.PlanningStrategy, spec.PlanningScope, spec.DecouplingPoint, optional(spec.BufferProfileID),
-			spec.RequiredShelfLifeDays, spec.PriorityBased); err != nil {
+			spec.RequiredShelfLifeDays, spec.PriorityBased, spec.SafetyMarginIssueDays, spec.SafetyMarginReorderDays); err != nil {
 			return err
 		}
 		out, err = scanItemCoverage(tx.QueryRow(ctx, itemCoverageSelect+` where c.tenant_id = $1 and c.id = $2`, p.TenantID, id))

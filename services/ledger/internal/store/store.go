@@ -64,10 +64,40 @@ type Store interface {
 	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
 	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
 	ListLines(ctx context.Context, f LineFilter) (LinePage, error)
+	ListRecurring(ctx context.Context, status string) ([]RecurringJournal, error)
+	GetRecurring(ctx context.Context, id string) (RecurringJournal, error)
+	PutRecurring(ctx context.Context, id string, version int, in RecurringInput) (RecurringJournal, bool, error)
+	SetRecurringStatus(ctx context.Context, id string, version int, status string, today time.Time) (RecurringJournal, error)
+	GenerateRecurring(ctx context.Context, in GenerateRecurringInput) (RecurringRun, bool, error)
+	ListRecurringRuns(ctx context.Context, id string) ([]RecurringRun, error)
 	CreateLedgerSet(ctx context.Context, in LedgerSetInput) (LedgerSet, error)
 	GetLedgerSet(ctx context.Context, id string) (LedgerSet, error)
 	CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error)
 	PostSetEntry(ctx context.Context, setID string, in PostInput) (EntryResult, error)
+	ListOpenItemAccounts(ctx context.Context, ledgerID string) ([]OpenItemAccount, error)
+	PutOpenItemAccount(ctx context.Context, ledgerID, number string, enabled bool) (OpenItemAccount, bool, error)
+	ListToleranceGroups(ctx context.Context, ledgerID string) ([]ToleranceGroup, error)
+	GetToleranceGroup(ctx context.Context, ledgerID, code string) (ToleranceGroup, error)
+	PutToleranceGroup(ctx context.Context, ledgerID, code string, version int, in ToleranceGroup) (ToleranceGroup, bool, error)
+	ListOpenItems(ctx context.Context, f OpenItemFilter) (OpenItemPage, error)
+	SimulateClearing(ctx context.Context, in ClearingInput) (ClearingPreview, error)
+	ClearItems(ctx context.Context, in ClearingInput) (ClearingDocument, bool, error)
+	ListClearings(ctx context.Context, ledgerID, status string) ([]ClearingDocument, error)
+	GetClearing(ctx context.Context, id string) (ClearingDocument, error)
+	ResetClearing(ctx context.Context, in ResetInput) (ClearingDocument, error)
+	ListAutoClearingRules(ctx context.Context, ledgerID string) ([]AutoClearingRule, error)
+	GetAutoClearingRule(ctx context.Context, ledgerID, id string) (AutoClearingRule, error)
+	PutAutoClearingRule(ctx context.Context, ledgerID, id string, version int, in AutoClearingRule) (AutoClearingRule, bool, error)
+	RunAutoClearing(ctx context.Context, in AutoClearingInput) (AutoClearingRun, bool, error)
+	ListAutoClearingRuns(ctx context.Context, ledgerID string) ([]AutoClearingRun, error)
+	GetAutoClearingRun(ctx context.Context, id string) (AutoClearingRun, error)
+	ListLookupTables(ctx context.Context, ledgerID string) ([]domain.LookupTable, error)
+	GetLookupTable(ctx context.Context, ledgerID, id string) (domain.LookupTable, error)
+	PutLookupTable(ctx context.Context, ledgerID, id string, version int, in domain.LookupTable) (domain.LookupTable, bool, error)
+	ListDerivationStrategies(ctx context.Context, ledgerID string) ([]domain.DerivationStrategy, error)
+	GetDerivationStrategy(ctx context.Context, ledgerID string, version int) (domain.DerivationStrategy, error)
+	PutDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int, in domain.DerivationStrategy) (domain.DerivationStrategy, bool, error)
+	ActivateDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int) (domain.DerivationStrategy, error)
 	Ping(ctx context.Context) error
 }
 
@@ -175,6 +205,10 @@ type ReverseInput struct {
 	Today         time.Time
 
 	CanPostLedgerSpecific bool
+
+	// clearingReset is set by ResetClearing, which reverses its own difference
+	// entry while that entry's open item is still cleared by the document.
+	clearingReset bool
 }
 
 // Idempotency reports the replay state of a keyed request.
@@ -234,6 +268,8 @@ type Line struct {
 	SourceLineRef          string            `json:"sourceLineRef,omitempty"`
 	ReversalOfLineID       *string           `json:"reversalOfLineId,omitempty"`
 	NegativePosting        bool              `json:"negativePosting,omitempty"`
+	// DerivedByStepIDs names the derivation steps that filled dimensions on the line (FR-11.22).
+	DerivedByStepIDs []string `json:"derivedByStepIds,omitempty"`
 }
 
 // BalanceFilter selects balances for a trial balance.
@@ -371,7 +407,7 @@ func loadAccounts(ctx context.Context, tx pgx.Tx, tenantID, chart string, number
 	if len(numbers) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `select id, account_number, is_postable, suspended_from::text, reconciliation_account_type
+	rows, err := tx.Query(ctx, `select id, account_number, is_postable, suspended_from::text, reconciliation_account_type, account_type
 		from main_account where tenant_id = $1 and chart_code = $2 and account_number = any($3)`, tenantID, chart, numbers)
 	if err != nil {
 		return nil, err
@@ -380,7 +416,7 @@ func loadAccounts(ctx context.Context, tx pgx.Tx, tenantID, chart string, number
 	for rows.Next() {
 		var a domain.Account
 		var susp *string
-		if err := rows.Scan(&a.ID, &a.Number, &a.Postable, &susp, &a.ReconType); err != nil {
+		if err := rows.Scan(&a.ID, &a.Number, &a.Postable, &susp, &a.ReconType, &a.Type); err != nil {
 			return nil, err
 		}
 		if susp != nil {

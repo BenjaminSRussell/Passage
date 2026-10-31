@@ -12,6 +12,13 @@ on:
       py:
         type: boolean
         required: true
+      warehouse:
+        type: boolean
+        required: true
+      agents:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -54,7 +61,7 @@ jobs:
       - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
         with:
           version: 1.21.4
-      - run: opa test policies/authz
+      - run: opa test --timeout 120s policies/authz
       - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f .github/postgres-test-setup.sql
       - run: make vet
       - run: make test-go
@@ -67,7 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax, tools/connectors
-        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport, tools/rlscheck]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -95,8 +102,54 @@ jobs:
       - run: npm ci
       - run: npx vitest --run
       - run: npx tsc --noEmit
+      - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+
+  warehouse-mobile:
+    if: inputs.warehouse
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/warehouse-mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/warehouse-mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Wave 47: agent runtime, MCP gateway and the eval harness (gate thresholds,
+  # metrics, authorization and audit contract tests). `npm run eval` is not a
+  # step: it gates the deterministic baselines, which fail the thresholds by
+  # design until an agent predictor exists (evals/README.md).
+  agents:
+    name: agents (${{ matrix.package }})
+    if: inputs.agents
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [services/agents-ts, services/mcp-ts, evals]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
   py:
     name: py (${{ matrix.package }}, ortools=${{ matrix.ortools }})
@@ -113,6 +166,9 @@ jobs:
             extras: test
           - package: scheduler-py
             ortools: true
+            extras: dev
+          - package: dispatch-py
+            ortools: false
             extras: dev
     defaults:
       run:

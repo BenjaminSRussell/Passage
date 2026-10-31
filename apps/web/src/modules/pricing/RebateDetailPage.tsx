@@ -25,6 +25,7 @@ import {
   retroRecompute,
   type Problem,
   type RebateAccrual,
+  type RebateAgreement,
   type RebateTier,
   type RetroDelta,
   type RetroLineInput,
@@ -34,6 +35,7 @@ import { DAY, SIGNED_DECIMAL, sumDecimals } from "./format";
 import styles from "./pages.module.css";
 import { basisLabel, describePosting, describeRebateCustomer, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { RebateLifecycleCard } from "./RebateLifecycleCard";
 import { VendorClaimsCard } from "./VendorClaimsCard";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
@@ -100,6 +102,8 @@ export function RebateDetailPage() {
   const [retroResult, setRetroResult] = useState<RetroResult | null>(null);
   const [retroBusy, setRetroBusy] = useState(false);
   const retroKey = useRef(newKey());
+  // An agreement returned by a revise or close belongs to this id only; another id shows its own load.
+  const [changed, setChanged] = useState<RebateAgreement | null>(null);
 
   if (state.error) {
     return (
@@ -111,7 +115,7 @@ export function RebateDetailPage() {
       </div>
     );
   }
-  const agreement = state.data;
+  const agreement = changed && changed.id === id ? changed : state.data;
   if (!agreement) {
     return (
       <div className={styles.stack} aria-busy="true">
@@ -235,6 +239,7 @@ export function RebateDetailPage() {
           )}
         </div>
       </Card>
+      <RebateLifecycleCard key={agreement.id} agreement={agreement} onChange={setChanged} />
       {vendor ? <VendorClaimsCard agreement={agreement} /> : null}
       <Card title="Retroactive recompute">
         <form className={styles.form} onSubmit={recompute} noValidate>

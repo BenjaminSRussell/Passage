@@ -24,6 +24,7 @@ const (
 	idempotencyKey = "Idempotency-Key"
 	dutyRead       = "numbering.read"
 	dutyWrite      = "numbering.write"
+	dutyAllocate   = "numbering.sequence.allocate"
 )
 
 // API is the numbering HTTP surface.
@@ -50,13 +51,14 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/numbering/sequences", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/numbering/sequences/{code}", a.get)
-	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/numbering/sequences/{code}/next", a.allocate)
+	r.With(authz.RequireAnyDuty(dutyWrite, dutyAllocate)).Post("/v1/numbering/sequences/{code}/next", a.allocate)
 }
 
 // Metrics renders Prometheus text.
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		_, _ = fmt.Fprintf(w, "# HELP numbering_allocated_total Numbers issued.\n# TYPE numbering_allocated_total counter\nnumbering_allocated_total %d\n", a.allocated.Load())
 		_, _ = fmt.Fprintf(w, "# HELP numbering_failed_total Failed allocations or creates.\n# TYPE numbering_failed_total counter\nnumbering_failed_total %d\n", a.failed.Load())
 	})
@@ -141,8 +143,8 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != "*" && !ids.Valid(p.LegalEntityID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
+	if p.LegalEntityID != "" && len(tenant.LegalEntityScopeList(p)) == 0 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity claim holds no valid UUID"))
 		return false
 	}
 	return true

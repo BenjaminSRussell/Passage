@@ -76,6 +76,7 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"GET /v1/planning/planned-orders":                     dutyRead,
 		"GET /v1/planning/planned-orders/{id}":                dutyRead,
 		"GET /v1/planning/planned-orders/{id}/pegging":        dutyRead,
+		"GET /v1/planning/plans/{planCode}/diff":              dutyRead,
 		"GET /v1/planning/messages":                           dutyRead,
 		"GET /v1/planning/net-requirements":                   dutyRead,
 		"PATCH /v1/planning/planned-orders/{id}":              dutyMaintainOrders,
@@ -109,6 +110,11 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/planning/quota-arrangements":                dutyMaintainSetup,
 		"GET /v1/planning/quota-arrangements/{id}":            dutyRead,
 		"PUT /v1/planning/quota-arrangements/{id}":            dutyMaintainSetup,
+		"GET /v1/planning/scenarios":                          dutyRead,
+		"POST /v1/planning/scenarios":                         dutySimulate,
+		"GET /v1/planning/scenarios/{code}":                   dutyRead,
+		"PUT /v1/planning/scenarios/{code}":                   dutySimulate,
+		"POST /v1/planning/scenarios/{code}:run":              dutySimulate,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

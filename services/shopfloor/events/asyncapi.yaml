@@ -8,7 +8,7 @@ info:
     change. Source is `shopfloor`; the Kafka key is the aggregate id
     (registration id, worker id for payday approvals, batch id for payroll
     exports, alert id for andon, message id for process messages, resource id
-    for OEE buckets).
+    for OEE buckets, profile id for time profiles, agreement id for pay agreements).
     Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -22,6 +22,40 @@ channels:
     messages:
       paydayApproved:
         $ref: "#/components/messages/PaydayApproved"
+  registrationCorrected:
+    address: passage.shopfloor.registration-corrected
+    description: |
+      A supervisor changed the times of a registration with a reason (FR-25.8). Not in
+      the PRD event table; consumers that posted the old hours (w21 job card) replace them.
+    messages:
+      registrationCorrected:
+        $ref: "#/components/messages/RegistrationCorrected"
+  paydayRevised:
+    address: passage.shopfloor.payday-revised
+    description: |
+      An approved worker-day was revised with reversal lines (BR-25.8, AC-25.8). Not in
+      the PRD event table; payroll applies the reversed and added lines.
+    messages:
+      paydayRevised:
+        $ref: "#/components/messages/PaydayRevised"
+  timeProfileSaved:
+    address: passage.shopfloor.timeprofile
+    description: A time profile was created or changed (FR-25.7). Not in the PRD event table.
+    messages:
+      timeProfileSaved:
+        $ref: "#/components/messages/TimeProfileSaved"
+  payAgreementSaved:
+    address: passage.shopfloor.payagreement
+    description: A pay agreement was created or changed (FR-25.7). Not in the PRD event table.
+    messages:
+      payAgreementSaved:
+        $ref: "#/components/messages/PayAgreementSaved"
+  workerAssigned:
+    address: passage.shopfloor.worker
+    description: A worker was linked to, or unlinked from, a time profile and a pay agreement. Not in the PRD event table.
+    messages:
+      workerAssigned:
+        $ref: "#/components/messages/WorkerAssigned"
   paydayExported:
     address: passage.shopfloor.pay-export
     messages:
@@ -104,30 +138,78 @@ operations:
       $ref: "#/channels/processMessages"
     messages:
       - $ref: "#/channels/processMessages/messages/processMessageDeleted"
+  publishRegistrationCorrected:
+    action: send
+    summary: Registration corrected
+    description: Sends the registration corrected event through the outbox.
+    channel:
+      $ref: "#/channels/registrationCorrected"
+    messages:
+      - $ref: "#/channels/registrationCorrected/messages/registrationCorrected"
+  publishPaydayRevised:
+    action: send
+    summary: Payday revised
+    description: Sends the payday revised event through the outbox.
+    channel:
+      $ref: "#/channels/paydayRevised"
+    messages:
+      - $ref: "#/channels/paydayRevised/messages/paydayRevised"
   publishPaydayExported:
     action: send
+    summary: Payday exported
+    description: Sends the payday exported event through the outbox.
     channel:
       $ref: "#/channels/paydayExported"
     messages:
       - $ref: "#/channels/paydayExported/messages/paydayExported"
   publishAndonRaised:
     action: send
+    summary: Andon raised
+    description: Sends the andon raised event through the outbox.
     channel:
       $ref: "#/channels/andonRaised"
     messages:
       - $ref: "#/channels/andonRaised/messages/andonRaised"
   publishRegistrationPosted:
     action: send
+    summary: Registration posted
+    description: Sends the registration posted event through the outbox.
     channel:
       $ref: "#/channels/registrationPosted"
     messages:
       - $ref: "#/channels/registrationPosted/messages/registrationPosted"
   publishPaydayApproved:
     action: send
+    summary: Payday approved
+    description: Sends the payday approved event through the outbox.
     channel:
       $ref: "#/channels/paydayApproved"
     messages:
       - $ref: "#/channels/paydayApproved/messages/paydayApproved"
+  publishTimeProfileSaved:
+    action: send
+    summary: Time profile saved
+    description: Sends the time profile saved event through the outbox.
+    channel:
+      $ref: "#/channels/timeProfileSaved"
+    messages:
+      - $ref: "#/channels/timeProfileSaved/messages/timeProfileSaved"
+  publishPayAgreementSaved:
+    action: send
+    summary: Pay agreement saved
+    description: Sends the pay agreement saved event through the outbox.
+    channel:
+      $ref: "#/channels/payAgreementSaved"
+    messages:
+      - $ref: "#/channels/payAgreementSaved/messages/payAgreementSaved"
+  publishWorkerAssigned:
+    action: send
+    summary: Worker assigned
+    description: Sends the worker assigned event through the outbox.
+    channel:
+      $ref: "#/channels/workerAssigned"
+    messages:
+      - $ref: "#/channels/workerAssigned/messages/workerAssigned"
 components:
   messages:
     JobReported:
@@ -151,21 +233,64 @@ components:
     RegistrationPosted:
       name: dev.passage.shopfloor.registration.posted.v1
       contentType: application/cloudevents+json
+      summary: Published once per stored time registration (or batch item)
+      description: Published once per stored time registration (or batch item), in the same transaction; closed job registrations carry hours and bundle id for the w21 job-card consumer.
       payload:
         $ref: "#/components/schemas/RegistrationPostedData"
+    RegistrationCorrected:
+      name: dev.passage.shopfloor.registration.corrected.v1
+      contentType: application/cloudevents+json
+      summary: Registration corrected
+      description: Published once per supervisor correction of a registration, in the same transaction; hours is the new elapsed time of a closed registration. A supervisor's confirmation of an auto clock-out (BR-25.3) is published the same way with the new times equal to the old ones.
+      payload:
+        $ref: "#/components/schemas/RegistrationCorrectedData"
+    TimeProfileSaved:
+      name: dev.passage.shopfloor.timeprofile.saved.v1
+      contentType: application/cloudevents+json
+      summary: Time profile created or changed
+      description: Published in the transaction that creates or replaces a time profile; version is 1 for a new profile.
+      payload:
+        $ref: "#/components/schemas/TimeProfileSavedData"
+    PayAgreementSaved:
+      name: dev.passage.shopfloor.payagreement.saved.v1
+      contentType: application/cloudevents+json
+      summary: Pay agreement created or changed
+      description: Published in the transaction that creates or replaces a pay agreement; decimals are strings.
+      payload:
+        $ref: "#/components/schemas/PayAgreementSavedData"
+    WorkerAssigned:
+      name: dev.passage.shopfloor.worker.assigned.v1
+      contentType: application/cloudevents+json
+      summary: Worker linked to a time profile and pay agreement
+      description: Published when a worker's profile or agreement link changes; a null id means the defaults apply. Days already calculated keep their pay lines until recalculated.
+      payload:
+        $ref: "#/components/schemas/WorkerAssignedData"
+    PaydayRevised:
+      name: dev.passage.shopfloor.payday.revised.v1
+      contentType: application/cloudevents+json
+      summary: Approved payday revised
+      description: Published once per approved worker-day revised with reversal lines; reversed lines carry negative hours and amounts.
+      payload:
+        $ref: "#/components/schemas/PaydayRevisedData"
     PaydayApproved:
       name: dev.passage.shopfloor.payday.approved.v1
       contentType: application/cloudevents+json
+      summary: Published when a supervisor approves a worker day
+      description: Published when a supervisor approves a worker day; the pay lines are locked and ready for export.
       payload:
         $ref: "#/components/schemas/PaydayApprovedData"
     PaydayExported:
       name: dev.passage.shopfloor.payday.exported.v1
       contentType: application/cloudevents+json
+      summary: Published once per payroll export batch with the approved pay lines it contains
+      description: Published once per payroll export batch with the approved pay lines it contains, in the same transaction as the batch.
       payload:
         $ref: "#/components/schemas/PaydayExportedData"
     AndonRaised:
       name: dev.passage.shopfloor.andon.raised.v1
       contentType: application/cloudevents+json
+      summary: Published when a machine downtime stays open past the andon threshold (10 minutes) and an alert is raised
+      description: Published when a machine downtime stays open past the andon threshold (10 minutes) and an alert is raised.
       payload:
         $ref: "#/components/schemas/AndonRaisedData"
     ProcessMessageReceived:
@@ -485,12 +610,190 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
           description: |
-            Review flags. `job-finished-conflict` on a job-start for a job the
+            Review flags. `auto-clock-out` on a clock-out the auto clock-out
+            sweep wrote (D2h). `job-finished-conflict` on a job-start for a job the
             server had already finished (BR-25.7); `auto-stopped` (and
             `auto-stop-capped` past 24 hours) on a closed job-stop the server
             wrote when the worker started another job (FR-25.3). Empty otherwise.
+    RegistrationCorrectedData:
+      type: object
+      required: [registrationId, workerId, kind, jobId, oldStartedAt, oldStoppedAt, newStartedAt, newStoppedAt, hours, reason, correctedBy]
+      additionalProperties: false
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [clock-in, clock-out, job-start, job-stop, absence, indirect]
+        jobId:
+          type: [string, "null"]
+          format: uuid
+        oldStartedAt:
+          type: string
+          format: date-time
+        oldStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        newStartedAt:
+          type: string
+          format: date-time
+        newStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        hours:
+          type: [string, "null"]
+          description: New elapsed hours of a closed registration.
+        reason:
+          type: string
+        correctedBy:
+          type: string
+          description: >-
+            The supervisor who corrected the registration, or
+            `system:offline-replay` when the server cancels its own auto-stop
+            (to 0 hours) because the kiosk's job-stop for the same start arrived.
+    TimeProfileSavedData:
+      type: object
+      required: [profileId, code, name, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        profileId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    PayAgreementSavedData:
+      type: object
+      required: [agreementId, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, shiftPremiums, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        agreementId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+        shiftPremiums:
+          type: array
+          description: Premium windows of the agreement; empty when it has none.
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, from, to, premium]
+            properties:
+              name:
+                type: string
+              from:
+                type: string
+                description: Local HH:MM start of the window.
+              to:
+                type: string
+                description: Local HH:MM end; not after from means the window crosses midnight.
+              premium:
+                type: string
+                description: Decimal string, the extra share of the worker's rate.
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    WorkerAssignedData:
+      type: object
+      required: [workerId, profileId, payAgreementId, assignedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        profileId:
+          type: [string, "null"]
+          format: uuid
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
+        assignedBy:
+          type: string
+    PaydayRevisedData:
+      type: object
+      required: [workerId, workDate, revision, reason, reversedLines, addedLines, revisedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        workDate:
+          type: string
+          format: date
+        revision:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+        reversedLines:
+          type: array
+          items:
+            type: object
+            required: [type, hours, multiplier, amount, currency]
+            properties:
+              type:
+                type: string
+              hours:
+                type: string
+              multiplier:
+                type: string
+              amount:
+                type: string
+              currency:
+                type: string
+                pattern: "^[A-Z]{3}$"
+        addedLines:
+          type: array
+          items:
+            type: object
+            required: [type, hours, multiplier, amount, currency]
+            properties:
+              type:
+                type: string
+              hours:
+                type: string
+              multiplier:
+                type: string
+              amount:
+                type: string
+              currency:
+                type: string
+                pattern: "^[A-Z]{3}$"
+        revisedBy:
+          type: string
     PaydayApprovedData:
       type: object
       required: [workerId, workDate, payLines, approvedBy]

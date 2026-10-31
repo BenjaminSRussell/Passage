@@ -6,6 +6,10 @@ export const base = "/api/v1/sales";
 export const ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION", "RETURNED"] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
+/** The order types a legal entity may set as its default_order_type (PRD §5.27.13); RETURNED is not one. */
+export const DEFAULT_ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION"] as const;
+export type DefaultOrderType = (typeof DEFAULT_ORDER_TYPES)[number];
+
 export const ORDER_STATUSES = ["DRAFT", "OPEN", "CONFIRMED", "PARTIALLY_SHIPPED", "SHIPPED", "INVOICED", "CLOSED", "CANCELLED"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -108,6 +112,8 @@ export interface CreditEvaluation {
 }
 
 export interface Order {
+  /** Set only on the 202 result of a change that was stored for approval instead of applied. */
+  pendingChange?: ChangeRequest;
   id: string;
   legalEntityId: string;
   orderNumber: string;
@@ -161,7 +167,8 @@ export interface NewOrder {
   legalEntityId: string;
   customerId: string;
   invoiceAccountId: string;
-  orderType: OrderType;
+  /** Omitted: the legal entity's default order type applies. */
+  orderType?: OrderType;
   currency: string;
   requestedShipDate: string;
   channel?: string;
@@ -198,6 +205,8 @@ export interface AgreementInput {
   commitmentQty: Decimal;
   validFrom?: string;
   validTo?: string;
+  /** How far a scheduling release's cumulative received quantity may differ from the shipped quantity (default 0). */
+  cumTolerance?: Decimal;
 }
 
 export interface AgreementRelease {
@@ -209,7 +218,7 @@ export interface AgreementRelease {
   releasedAt: string;
 }
 
-export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo">> {
+export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance">> {
   id: string;
   agreementNumber: string;
   releasedQty: Decimal;
@@ -217,6 +226,10 @@ export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "
   status: AgreementStatus;
   validFrom?: string;
   validTo?: string;
+  /** Cumulative settings of scheduling releases (BR-27.12); absent on older responses. */
+  cumTolerance?: Decimal;
+  cumShipped?: Decimal;
+  cumResetDate?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -532,6 +545,36 @@ export function putCreditProfile(legalEntityId: string, customerId: string, inpu
   });
 }
 
+/** The per legal entity sales parameters (PRD §5.27.13), named as in the PRD. */
+export interface SalesParametersInput {
+  quotationExpiryDays: number;
+  quotationProbabilityDefault: number;
+  creditReleaseValidityDays: number;
+  creditHoldSlaBusinessDays: number;
+  defaultOrderType: DefaultOrderType;
+}
+
+/** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */
+export interface SalesParameters extends SalesParametersInput {
+  legalEntityId: string;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getSalesParameters(legalEntityId: string, signal?: AbortSignal): Promise<Versioned<SalesParameters>> {
+  return versioned<SalesParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
+}
+
+/** Creates (etag "0") or replaces the parameters at the given ETag. */
+export function putSalesParameters(legalEntityId: string, input: SalesParametersInput, etag: string): Promise<Versioned<SalesParameters>> {
+  return versioned<SalesParameters>(`/parameters${query({ legalEntityId })}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
 /** Stateless ATP promise check over entered buckets (BR-27.1). */
 export function atpCheck(input: AtpCheckInput): Promise<AtpCheckResult> {
   return json<AtpCheckResult>("/atp:check", { method: "POST", body: JSON.stringify(input) });
@@ -740,6 +783,8 @@ export interface HoldQueueItem {
   currency: string;
   appliedBy: string;
   appliedAt: string;
+  /** When the hold is due for release: appliedAt plus the legal entity's SLA in business days. */
+  slaDueAt: string;
   /** The failed rule of the last credit check (CREDIT holds). */
   failedRule?: CreditRule;
   creditLimit?: Decimal;
@@ -916,4 +961,462 @@ export async function evaluateProposals(input: ProposalEvaluationInput, signal?:
 /** Records the user's accept or decline of one proposal; a retry with the same key is counted once. */
 export function respondToProposal(input: ProposalResponseInput, key: string = newKey()): Promise<ProposalResponse> {
   return json<ProposalResponse>("/product-proposals:respond", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+export interface AllocationQuotaInput {
+  legalEntityId: string;
+  productId: string;
+  /** Absent means every customer of the legal entity. */
+  customerId?: string;
+  periodStart: string;
+  periodEnd: string;
+  quotaQty: Decimal;
+}
+
+export interface AllocationConsumption {
+  id: string;
+  orderId: string;
+  lineId: string;
+  lineNo: number;
+  quantity: Decimal;
+  consumedAt: string;
+  /** Set when the order or line was cancelled or changed. */
+  returnedAt?: string;
+}
+
+export interface AllocationQuota extends Omit<AllocationQuotaInput, "quotaQty"> {
+  id: string;
+  quotaQty: Decimal;
+  consumedQty: Decimal;
+  remainingQty: Decimal;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Present on a single read, newest first. */
+  consumptions?: AllocationConsumption[];
+}
+
+export interface AllocationFilter {
+  legalEntityId?: string;
+  productId?: string;
+  customerId?: string;
+  onDate?: string;
+}
+
+/** The quota inquiry per product and period (FR-27.16). */
+export async function listAllocationQuotas(filter: AllocationFilter = {}, signal?: AbortSignal): Promise<AllocationQuota[]> {
+  const body = await json<{ items?: AllocationQuota[] }>(
+    `/allocation-quotas${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, customerId: filter.customerId, onDate: filter.onDate, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getAllocationQuota(id: string, signal?: AbortSignal): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>(`/allocation-quotas/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createAllocationQuota(input: AllocationQuotaInput, key: string = newKey()): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>("/allocation-quotas", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Sets a new quota quantity at the given ETag; below the consumed quantity is refused (BR-27.15). */
+export function changeAllocationQuota(id: string, etag: string, quotaQty: Decimal): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>(`/allocation-quotas/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quotaQty }),
+    headers: { "If-Match": etag },
+  });
+}
+
+export const SCHEDULE_STATUSES = ["CONFIRMED", "BACKORDER", "UNPROMISED"] as const;
+export type ScheduleStatus = (typeof SCHEDULE_STATUSES)[number];
+
+/** One delivery slice of an order line (FR-27.6); no date while UNPROMISED. */
+export interface ScheduleLine {
+  id: string;
+  lineNo: number;
+  seq: number;
+  quantity: Decimal;
+  deliveryDate?: string;
+  status: ScheduleStatus;
+  /** LINE copies the line's confirmed ship date; ATP was placed by a promise. */
+  source: "LINE" | "ATP";
+  /** The ATP bucket a dated ATP slice drew on. */
+  bucketDate?: string;
+}
+
+export interface PromiseLineInput {
+  completeOnly: boolean;
+  periods: AtpPeriod[];
+}
+
+export interface PromiseLineResult {
+  order: Order;
+  scheduleLines: ScheduleLine[];
+}
+
+export interface BackorderItem {
+  scheduleLineId: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  orderVersion: number;
+  customerId: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  quantity: Decimal;
+  requestedShipDate: string;
+  promisedDate?: string;
+  daysLate?: number;
+  status: "BACKORDER" | "UNPROMISED";
+}
+
+export interface BackorderFilter {
+  legalEntityId?: string;
+  productId?: string;
+  customerId?: string;
+  promisedTo?: string;
+}
+
+/** Places a line of a confirmed order against ATP buckets and stores its schedule lines (FR-27.6). */
+export function promiseLine(orderId: string, lineNo: number, etag: string, input: PromiseLineInput): Promise<Versioned<PromiseLineResult>> {
+  return versioned<PromiseLineResult>(`/orders/${encodeURIComponent(orderId)}/lines/${lineNo}:promise`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** The order's active schedule lines by line and sequence. */
+export async function listScheduleLines(orderId: string, signal?: AbortSignal): Promise<ScheduleLine[]> {
+  const body = await json<{ items?: ScheduleLine[] }>(`/orders/${encodeURIComponent(orderId)}/schedule-lines`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Lines promised after the requested date or not at all, by promised date (AC-27.8). */
+export async function listBackorders(filter: BackorderFilter = {}, signal?: AbortSignal): Promise<BackorderItem[]> {
+  const body = await json<{ items?: BackorderItem[] }>(
+    `/backorders${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, customerId: filter.customerId, promisedTo: filter.promisedTo, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export const RELEASE_TYPES = ["FORECAST", "JIT"] as const;
+export type ReleaseType = (typeof RELEASE_TYPES)[number];
+export type ScheduleReleaseStatus = "ACCEPTED" | "HELD" | "REJECTED" | "SUPERSEDED";
+
+export interface ScheduleReleaseLine {
+  id: string;
+  dueDate: string;
+  quantity: Decimal;
+  status: "OPEN" | "SUPERSEDED";
+}
+
+/** A stored scheduling-agreement release (FR-27.20); lines are present on a single read and after a write. */
+export interface ScheduleRelease {
+  id: string;
+  agreementId: string;
+  agreementNumber: string;
+  releaseNo: string;
+  releaseType: ReleaseType;
+  status: ScheduleReleaseStatus;
+  cumReceived: Decimal;
+  cumShipped: Decimal;
+  /** Shipped quantity of cumulative periods closed by a later reset date that still counts against this release. */
+  shippedOffset?: Decimal;
+  tolerance: Decimal;
+  difference: Decimal;
+  openQuantity: Decimal;
+  code?: string;
+  serviceCode?: string;
+  buckets: ReleaseBucket[];
+  lines?: ScheduleReleaseLine[];
+  receivedBy: string;
+  receivedAt: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionReason?: string;
+  version: number;
+}
+
+export interface ScheduleReleaseInput {
+  releaseNo: string;
+  releaseType: ReleaseType;
+  cumReceived: Decimal;
+  buckets: ReleaseBucket[];
+}
+
+export async function listScheduleReleases(agreementId: string, signal?: AbortSignal): Promise<ScheduleRelease[]> {
+  const body = await json<{ items?: ScheduleRelease[] }>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases?limit=200`, {}, signal);
+  return body.items ?? [];
+}
+
+export function getScheduleRelease(agreementId: string, id: string, signal?: AbortSignal): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Stores a release; a cumulative mismatch answers 201 with status HELD, not an error (BR-27.12). */
+export function createScheduleRelease(agreementId: string, input: ScheduleReleaseInput, key: string = newKey()): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": key },
+  });
+}
+
+/** Accepts (override) or rejects a HELD release at its ETag. */
+export function resolveScheduleRelease(agreementId: string, id: string, etag: string, decision: "ACCEPT" | "REJECT", reason: string): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases/${encodeURIComponent(id)}:resolve`, {
+    method: "POST",
+    body: JSON.stringify({ decision, reason }),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** Sets the agreement's cumulative shipped quantity at its ETag and recalculates the release in effect. */
+export function recordAgreementShipped(agreementId: string, etag: string, cumShipped: Decimal, cumResetDate?: string): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${encodeURIComponent(agreementId)}:record-shipped`, {
+    method: "POST",
+    body: JSON.stringify({ cumShipped, ...(cumResetDate ? { cumResetDate } : {}) }),
+    headers: { "If-Match": etag },
+  });
+}
+
+export const BACKORDER_RUN_STATUSES = ["PREVIEW", "COMMITTED"] as const;
+export type BackorderRunStatus = (typeof BACKORDER_RUN_STATUSES)[number];
+
+export interface BackorderRunInput {
+  legalEntityId: string;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  strategy: BackorderStrategy;
+  supply: Decimal;
+  supplyDate: string;
+  loseThreshold?: number;
+  defaultPriorityClass?: number;
+  priorityClasses?: Record<string, number>;
+}
+
+/** One open order line of a stored run: the quantity with a promised date now and after the run (FR-27.17). */
+export interface BackorderRunLine {
+  seq: number;
+  orderId: string;
+  orderNumber: string;
+  orderVersion: number;
+  lineId: string;
+  lineNo: number;
+  customerId: string;
+  priorityClass: number;
+  requestedDate: string;
+  orderValue: Decimal;
+  demand: Decimal;
+  before: Decimal;
+  after: Decimal;
+  changed: boolean;
+  deconfirmed: boolean;
+  gainDate?: string;
+}
+
+export interface BackorderRun {
+  id: string;
+  legalEntityId: string;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  strategy: BackorderStrategy;
+  supply: Decimal;
+  supplyDate: string;
+  loseThreshold: number;
+  defaultPriorityClass: number;
+  status: BackorderRunStatus;
+  allocated: Decimal;
+  deconfirmedCount: number;
+  changedCount: number;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  committedBy?: string;
+  committedAt?: string;
+  warning?: string;
+  warningCode?: string;
+  lines?: BackorderRunLine[];
+}
+
+export interface BackorderRunFilter {
+  legalEntityId?: string;
+  productId?: string;
+  status?: BackorderRunStatus | "";
+}
+
+/** Stored backorder runs, newest first, without their lines. */
+export async function listBackorderRuns(filter: BackorderRunFilter = {}, signal?: AbortSignal): Promise<BackorderRun[]> {
+  const body = await json<{ items?: BackorderRun[] }>(
+    `/backorder-runs${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, status: filter.status, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getBackorderRun(id: string, signal?: AbortSignal): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>(`/backorder-runs/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Plans a run over the open lines held by the service and stores it as a PREVIEW; nothing changes until commit. */
+export function createBackorderRun(input: BackorderRunInput, key: string = newKey()): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>("/backorder-runs", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Applies a PREVIEW run at its ETag in one transaction; an order changed since the preview is refused (SLS-0042). */
+export function commitBackorderRun(id: string, etag: string): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>(`/backorder-runs/${encodeURIComponent(id)}:commit`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+/** One quotation moved to EXPIRED by an expiry run. */
+export interface ExpiredQuotation {
+  id: string;
+  quotationNumber: string;
+  legalEntityId: string;
+  customerId: string;
+  validUntil: string;
+  previousStatus: "DRAFT" | "SENT";
+  version: number;
+}
+
+export interface ExpireResult {
+  expired: ExpiredQuotation[];
+  count: number;
+  /** True when the 500-quotation batch limit stopped the run; run it again. */
+  more: boolean;
+}
+
+/** Moves every DRAFT or SENT quotation past its validity to EXPIRED (FR-27.1). Repeating it is harmless. */
+export async function expireQuotations(legalEntityId = "", signal?: AbortSignal): Promise<ExpireResult> {
+  return json<ExpireResult>(`/quotations:expire${query({ legalEntityId })}`, { method: "POST" }, signal);
+}
+
+export interface PipelineCurrency {
+  currency: string;
+  openCount: number;
+  openNet: Decimal;
+  /** Sum of net total times win probability. */
+  weightedNet: Decimal;
+}
+
+/** Workspace tiles and quotation pipeline KPIs (PRD §5.27.14). */
+export interface SalesSummary {
+  activeHolds: number;
+  backorderLines: number;
+  quotationsExpiring: number;
+  quotationsLapsed: number;
+  pipeline: PipelineCurrency[];
+  windowDays: number;
+  won: number;
+  lost: number;
+  expired: number;
+  /** Percent at one place; absent when nothing closed in the window. */
+  conversionRatePct?: Decimal;
+}
+
+/** Workspace scope and the pipeline KPI filters (status, expiry window, probability; PRD §5.27.14). */
+export interface SalesSummaryFilter {
+  legalEntityId?: string;
+  windowDays?: number;
+  /** Pipeline only: DRAFT or SENT; both when absent. */
+  status?: "DRAFT" | "SENT";
+  /** Pipeline only: the lowest win probability included. */
+  minProbabilityPct?: number;
+  /** Pipeline only: last valid day within this many days from today. */
+  expiringWithinDays?: number;
+}
+
+export function getSalesSummary(filter: SalesSummaryFilter = {}, signal?: AbortSignal): Promise<SalesSummary> {
+  const { legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays } = filter;
+  return json<SalesSummary>(`/summary${query({ legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays })}`, {}, signal);
+}
+
+// ---- Change approval (FR-27.9) ----
+
+export const CHANGE_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+export type ChangeStatus = (typeof CHANGE_STATUSES)[number];
+
+/** A change of a confirmed order that waits for, or has had, a decision. */
+export interface ChangeRequest {
+  id: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  status: ChangeStatus;
+  /** The order version the change was made against; approval needs the order still at it. */
+  baseVersion: number;
+  reason: string;
+  change: ChangeOrderInput;
+  diff: FieldChange[];
+  requestedBy: string;
+  requestedAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  decisionComment: string;
+  appliedVersion?: number;
+  version: number;
+}
+
+export interface ChangeRequestFilter {
+  legalEntityId?: string;
+  status?: ChangeStatus | "";
+  orderId?: string;
+}
+
+export async function listChangeRequests(filter: ChangeRequestFilter = {}, signal?: AbortSignal): Promise<ChangeRequest[]> {
+  const body = await json<{ items?: ChangeRequest[] }>(
+    `/change-requests${query({ legalEntityId: filter.legalEntityId, status: filter.status, orderId: filter.orderId })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getChangeRequest(id: string, signal?: AbortSignal): Promise<Versioned<ChangeRequest>> {
+  return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Approves the request at its ETag; the change is applied to the order in the same call. */
+export function approveChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<{ request: ChangeRequest; order: Order }>> {
+  return versioned(`/change-requests/${encodeURIComponent(id)}:approve`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
+}
+
+export function rejectChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<ChangeRequest>> {
+  return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}:reject`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
+}
+
+export interface ChangePolicy {
+  legalEntityId: string;
+  customerId: string;
+  approvalRequired: boolean;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getChangePolicy(legalEntityId: string, customerId: string, signal?: AbortSignal): Promise<Versioned<ChangePolicy>> {
+  return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {}, signal);
+}
+
+/** Creates (etag "0") or replaces the switch at the given ETag. */
+export function putChangePolicy(legalEntityId: string, customerId: string, approvalRequired: boolean, etag: string): Promise<Versioned<ChangePolicy>> {
+  return versioned<ChangePolicy>(`/customers/${encodeURIComponent(customerId)}/change-policy${query({ legalEntityId })}`, {
+    method: "PUT",
+    body: JSON.stringify({ approvalRequired }),
+    headers: { "If-Match": etag },
+  });
 }

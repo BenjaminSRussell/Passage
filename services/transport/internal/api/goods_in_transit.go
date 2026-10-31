@@ -20,6 +20,8 @@ type goodsInTransitRequest struct {
 	Incoterm     string `json:"incoterm"`
 	SiteID       string `json:"siteId"`
 	ReceiptLines []int  `json:"receiptLines"`
+	// LegalEntityID owns the order; required for callers scoped to several entities or all of them.
+	LegalEntityID string `json:"legalEntityId"`
 }
 
 type shipRequest struct {
@@ -56,7 +58,7 @@ func (a *API) createGoodsInTransit(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	g, err := a.store.CreateGoodsInTransit(r.Context(), req.VoyageID, incoterm, req.SiteID, req.ReceiptLines, idem)
+	g, err := a.store.CreateGoodsInTransit(r.Context(), req.VoyageID, incoterm, req.SiteID, req.LegalEntityID, req.ReceiptLines, idem)
 	if err != nil {
 		a.fail(w, r, "create goods in transit failed", err)
 		return

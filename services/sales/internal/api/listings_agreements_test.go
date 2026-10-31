@@ -172,7 +172,7 @@ func TestCreateOrder_ListingOverrideNeedsApproveDuty(t *testing.T) {
 		{[]string{dutyWrite, dutyOrderApprove}, true},
 	} {
 		s := &slice3Store{}
-		rec := serveBody(t, s, http.MethodPost, orders, orderBody(ids.New()), principal(tc.duties...), map[string]string{idempotencyKey: "k1"})
+		rec := serveBody(t, s, http.MethodPost, orders, orderBody(testLE), principal(tc.duties...), map[string]string{idempotencyKey: "k1"})
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 		}

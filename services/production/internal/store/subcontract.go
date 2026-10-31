@@ -21,7 +21,7 @@ import (
 // lock makes the request once per operation: a reset and second release, a bulk
 // retry or a later edit of the order finds nothing left to request.
 func claimSubcontractRequests(ctx context.Context, tx pgx.Tx, tenantID, orderID, actor string) ([]prodevents.SubcontractPORequestedData, error) {
-	rows, err := tx.Query(ctx, `update production_operation p set po_requested_at = now()
+	rows, err := tx.Query(ctx, `update production_operation p set po_requested_at = now(), po_cancelled_at = null
 		from production_order o
 		where p.tenant_id = $1 and p.order_id = $2 and p.subcontract and p.po_requested_at is null
 		  and o.tenant_id = p.tenant_id and o.id = p.order_id
@@ -107,6 +107,7 @@ type SubcontractRow struct {
 	Amount        decimal.Decimal
 	OperStatus    domain.OperStatus
 	PORequestedAt *time.Time
+	POCancelledAt *time.Time
 }
 
 // SubcontractTotal sums the planned subcontract amount per currency over every
@@ -128,7 +129,7 @@ type SubcontractReport struct {
 const subcontractOps = `with sub as (
 	select o.id, o.order_number, o.status, o.legal_entity_id, o.site_id, o.currency::text as currency, o.delivery_date,
 		p.oper_number, p.resource_id, p.process_qty, p.qty_good, p.subcontract_price,
-		round(p.subcontract_price * p.process_qty, 4) as amount, p.status as oper_status, p.po_requested_at
+		round(p.subcontract_price * p.process_qty, 4) as amount, p.status as oper_status, p.po_requested_at, p.po_cancelled_at
 	from production_operation p
 	join production_order o on o.tenant_id = p.tenant_id and o.id = p.order_id
 	where p.tenant_id = $1 and p.subcontract
@@ -156,7 +157,7 @@ func (s *Postgres) SubcontractOperations(ctx context.Context, f SubcontractFilte
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, subcontractOps+`select id::text, order_number, status, legal_entity_id::text, site_id::text, currency,
 				delivery_date::text, oper_number, resource_id::text, process_qty::text, qty_good::text, subcontract_price::text, amount::text,
-				oper_status, po_requested_at
+				oper_status, po_requested_at, po_cancelled_at
 			from sub where ($9 = '' or (id, oper_number) > (nullif($9, '')::uuid, $10::integer))
 			order by id, oper_number limit $11`, append(args, f.CursorOrder, f.CursorOper, f.Limit+1)...)
 		if err != nil {
@@ -166,7 +167,7 @@ func (s *Postgres) SubcontractOperations(ctx context.Context, f SubcontractFilte
 			var r SubcontractRow
 			var status, qty, good, price, amount, operStatus string
 			if err := rows.Scan(&r.OrderID, &r.OrderNumber, &status, &r.LegalEntityID, &r.SiteID, &r.Currency, &r.DueDate, &r.OperNumber,
-				&r.ResourceID, &qty, &good, &price, &amount, &operStatus, &r.PORequestedAt); err != nil {
+				&r.ResourceID, &qty, &good, &price, &amount, &operStatus, &r.PORequestedAt, &r.POCancelledAt); err != nil {
 				rows.Close()
 				return err
 			}
@@ -203,4 +204,94 @@ func (s *Postgres) SubcontractOperations(ctx context.Context, f SubcontractFilte
 		out.NextCursor = fmt.Sprintf("%s:%d", last.OrderID, last.OperNumber)
 	}
 	return out, nil
+}
+
+// requestedPOs is what purchasing was last told for an order: the subcontract
+// operations with a live request, in route order, and the order's delivery date
+// then (the PO due date).
+type requestedPOs struct {
+	ops     []domain.RequestedOp
+	dueDate *string
+}
+
+// requestedSubcontracts reads what purchasing was last told for the order. Call
+// it under the order lock before a change to the order's operations or delivery
+// date, then settle it with settleSubcontracts once the change is written.
+func requestedSubcontracts(ctx context.Context, tx pgx.Tx, tenantID, orderID string) (requestedPOs, error) {
+	out := requestedPOs{ops: []domain.RequestedOp{}}
+	rows, err := tx.Query(ctx, `select oper_number, resource_id::text, process_qty::text, subcontract_price::text
+		from production_operation where tenant_id = $1 and order_id = $2 and po_requested_at is not null order by oper_number`, tenantID, orderID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r domain.RequestedOp
+		var qty, price string
+		if err := rows.Scan(&r.OperNumber, &r.ResourceID, &qty, &price); err != nil {
+			return out, err
+		}
+		r.Qty, r.UnitPrice = dec(qty), dec(price)
+		out.ops = append(out.ops, r)
+	}
+	if err := rows.Err(); err != nil || len(out.ops) == 0 {
+		return out, err
+	}
+	err = tx.QueryRow(ctx, `select delivery_date::text from production_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&out.dueDate)
+	return out, err
+}
+
+// settleSubcontracts tells purchasing what a change to the order did to the
+// requests read before it (FR-21.10): a pochanged event for an operation whose
+// quantity or price moved, or for every kept one when the delivery date moved, a
+// pocancelled event for one that is gone, no longer subcontracted, with another
+// vendor or on a cancelled order. A cancel clears the operation's request marker
+// and stamps po_cancelled_at, so a later claim requests afresh. It runs in the
+// caller's transaction after the change is written and before the claim of new
+// requests.
+func settleSubcontracts(ctx context.Context, tx pgx.Tx, tenantID, orderID, actor string, before requestedPOs, orderCancelled bool) error {
+	if len(before.ops) == 0 {
+		return nil
+	}
+	ops, err := loadOperations(ctx, tx, tenantID, orderID)
+	if err != nil {
+		return err
+	}
+	var number, legalEntity, currency string
+	var due *string
+	if err := tx.QueryRow(ctx, `select order_number, legal_entity_id::text, currency::text, delivery_date::text
+		from production_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&number, &legalEntity, &currency, &due); err != nil {
+		return err
+	}
+	dueChanged := (due == nil) != (before.dueDate == nil) || (due != nil && *due != *before.dueDate)
+	plans := domain.PlanSubcontractChanges(before.ops, ops, orderCancelled, dueChanged)
+	for _, pl := range plans {
+		prev := pl.Previous
+		prevAmount := domain.SubcontractAmount(prev.UnitPrice, prev.Qty)
+		if pl.Action == domain.SubcontractChange {
+			if err := enqueue(ctx, tx, orderID, prodevents.SubcontractPOChanged, tenantID, actor, prodevents.SubcontractPOChangedData{
+				OrderID: orderID, OrderNumber: number, LegalEntityID: legalEntity, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID,
+				PreviousQty: prev.Qty.String(), Qty: pl.Qty.String(), PreviousUnitPrice: prev.UnitPrice.String(), UnitPrice: pl.UnitPrice.String(),
+				PreviousAmount: prevAmount.StringFixed(4), Amount: pl.Amount.StringFixed(4), Currency: currency, PreviousDueDate: before.dueDate,
+				DueDate: due, Actor: actor,
+			}); err != nil {
+				return err
+			}
+			continue
+		}
+		if pl.KeepRow {
+			if _, err := tx.Exec(ctx, `update production_operation set po_requested_at = null, po_cancelled_at = now()
+				where tenant_id = $1 and order_id = $2 and oper_number = $3`, tenantID, orderID, pl.OperNumber); err != nil {
+				return err
+			}
+		}
+		if err := enqueue(ctx, tx, orderID, prodevents.SubcontractPOCancelled, tenantID, actor, prodevents.SubcontractPOCancelledData{
+			OrderID: orderID, OrderNumber: number, LegalEntityID: legalEntity, OperNumber: pl.OperNumber, ResourceID: prev.ResourceID,
+			Qty: prev.Qty.String(), UnitPrice: prev.UnitPrice.String(), Amount: prevAmount.StringFixed(4), Currency: currency,
+			Reason: pl.Reason, Actor: actor,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

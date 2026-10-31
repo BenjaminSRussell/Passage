@@ -34,6 +34,7 @@ import {
   type CostView,
   type Operation,
   type OperationCommand,
+  type CoProduct,
   type OrderLine,
   type OrderSummary,
   type Problem,
@@ -52,6 +53,7 @@ import {
   addDecimals,
   amount,
   commandLabel,
+  coProductTypeLabel,
   costGroupLabel,
   dash,
   describeReference,
@@ -96,6 +98,15 @@ const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "unitCost", header: "Unit cost", align: "end" },
 ];
 
+const coProductColumns: DataTableColumn<CoProduct>[] = [
+  { key: "lineNo", header: "Line", mono: true },
+  { key: "type", header: "Type", render: (row) => coProductTypeLabel[row.type] ?? row.type },
+  { key: "itemId", header: "Item", mono: true },
+  { key: "qtyPer", header: "Per unit", align: "end" },
+  { key: "qtyPlanned", header: "Planned", align: "end" },
+  { key: "qtyReported", header: "Received", align: "end" },
+];
+
 const operationColumns: DataTableColumn<Operation>[] = [
   { key: "operNumber", header: "Operation", align: "end" },
   { key: "resourceId", header: "Resource", mono: true },
@@ -108,7 +119,13 @@ const operationColumns: DataTableColumn<Operation>[] = [
   {
     key: "subcontract",
     header: "Subcontract",
-    render: (row) => (!row.subcontract ? "No" : row.poRequestedAt ? `Yes, PO requested ${row.poRequestedAt.slice(0, 10)}` : "Yes"),
+    render: (row) => (!row.subcontract
+        ? "No"
+        : row.poRequestedAt
+          ? `Yes, PO requested ${row.poRequestedAt.slice(0, 10)}`
+          : row.poCancelledAt
+            ? `Yes, PO request withdrawn ${row.poCancelledAt.slice(0, 10)}`
+            : "Yes"),
   },
 ];
 
@@ -553,6 +570,12 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
         />
       </Card>
 
+      {(current.coProducts ?? []).length > 0 ? (
+        <Card title="Co-products and by-products" padded={false}>
+          <DataTable label="Order co-products" columns={coProductColumns} rows={current.coProducts ?? []} getRowKey={(row) => row.lineNo} />
+        </Card>
+      ) : null}
+
       <Card title="Route" padded={false}>
         <DataTable
           label="Order operations"
@@ -580,7 +603,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
         />
       ) : null}
 
-      <JournalsPanel order={current} onChanged={reload} />
+      <JournalsPanel order={current} onChanged={reload} onOpenOrder={onOpenOrder} />
 
       <TriggerPointsPanel order={current} onOpenOrder={onOpenOrder} />
 

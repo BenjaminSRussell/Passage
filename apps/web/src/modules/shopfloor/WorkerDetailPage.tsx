@@ -30,6 +30,7 @@ import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatH
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
+import { WorkerPaySetup } from "./WorkerPaySetup";
 
 /** Longest range GET registrations accepts, in days. */
 const MAX_LIST_DAYS = 31;
@@ -51,6 +52,18 @@ const registrationColumns: DataTableColumn<Registration>[] = [
     key: "bundleId",
     header: "Bundle",
     render: (row) => (row.bundleId ? <Link to={`/shopfloor/bundles/${row.bundleId}`}>View bundle</Link> : dash),
+  },
+  {
+    key: "correct",
+    header: "Action",
+    render: (row) =>
+      row.bundleId ? (
+        dash
+      ) : (
+        <Link to={`/shopfloor/registrations/${row.id}/correct`} state={{ registration: row }} aria-label={`Correct ${row.kind} at ${formatDateTime(row.startedAt)}`}>
+          Correct
+        </Link>
+      ),
   },
   {
     key: "offline",
@@ -147,6 +160,9 @@ export function WorkerDetailPage() {
             <Button variant="primary" loading={busy} onClick={calculate}>
               Calculate pay
             </Button>
+            <Link className={buttonClassName("secondary")} to={`/shopfloor/workers/${id}/revise`}>
+              Revise pay
+            </Link>
             <Link className={buttonClassName("secondary")} to="/shopfloor/time">
               Time approval
             </Link>
@@ -173,6 +189,7 @@ export function WorkerDetailPage() {
           </div>
         </dl>
       </Card>
+      <WorkerPaySetup key={worker.id} worker={worker} onSaved={state.reload} />
       <div className={styles.toolbar}>
         <FormField id="worker-from" label="From">
           {(control) => <Input {...control} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />}

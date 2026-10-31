@@ -46,7 +46,7 @@ func (a *API) Register(r *chi.Mux) {
 	r.Group(func(g chi.Router) {
 		g.Use(authz.RequireDuty(DutyView))
 		g.Get("/v1/analytics/metrics", a.listMetrics)
-		g.Post("/v1/analytics/query", a.query)
+		g.Method(http.MethodPost, "/v1/analytics/query", tenant.ReadOnlyPOST(http.HandlerFunc(a.query)))
 	})
 	r.With(authz.RequireDuty(DutyFinance)).Get("/v1/analytics/reconciliation", a.reconciliation)
 	a.registerSlice2(r)
@@ -100,7 +100,7 @@ func (a *API) query(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, qerr := domain.BuildPlan(domain.Query{
 		Measures: req.Measures, Dimensions: req.Dimensions, From: from, To: to,
-	}, a.catalog, domain.ScopeFromPrincipal(p.LegalEntityID))
+	}, a.catalog, domain.ScopeFromPrincipal(p))
 	if qerr != nil {
 		httpx.Fail(w, r, problemOf(qerr))
 		return

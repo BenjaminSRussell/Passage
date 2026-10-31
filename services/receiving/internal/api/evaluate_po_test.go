@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -22,9 +24,10 @@ import (
 const (
 	evalPOID   = "00000000-0000-4000-8000-0000000000b1"
 	callerUser = "00000000-0000-4000-8000-0000000000c1"
+	evalLE     = "00000000-0000-4000-8000-0000000000e1"
 )
 
-const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"NONE","rowVersion":2,
+const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"` + evalLE + `","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"NONE","rowVersion":2,
 "lines":[{"lineNo":1,"productId":"p-1","unit":"EA","qty":"10","unitPrice":"250.00","priceUnit":"100","discountPct":"0","grossAmount":"25.00","lineAmount":"25.00","receivedQty":"10","invoicedQty":"0","status":"OPEN"}]}`
 
 func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*httptest.ResponseRecorder, *http.Request) {
@@ -45,6 +48,7 @@ func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*htt
 	a.Register(r)
 	req := httptest.NewRequest(http.MethodPost, evaluatePath, strings.NewReader(poBody(`"poLineNo":1`)))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Legal-Entity", evalLE)
 	req.Header.Set("X-Passage-User", callerUser)
 	req.Header.Set("X-Passage-Duties", "MatchingPolicyMaintain,PurchaseOrderInquire")
 	req.Header.Set("X-Request-Id", "req-42")
@@ -273,5 +277,63 @@ func TestEvaluateKeepsBodyErrorWhenPoReferenceErrorSharesTheKey(t *testing.T) {
 	want := map[string]string{"lines[0].poCurrency": "must be a 3-letter ISO 4217 code; " + poOverride}
 	if rec.Code != http.StatusBadRequest || !maps.Equal(p.Errors, want) || lookups.Load() != 0 {
 		t.Fatalf("got %d %+v after %d lookups", rec.Code, p, lookups.Load())
+	}
+}
+
+func TestEvaluateSignsThePurchaseOrderReadWithTheNamedLegalEntity(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("receiving", priv)
+	verifier := tenant.NewServiceVerifier("purchasing", map[string]ed25519.PublicKey{"receiving": pub})
+	const otherLE = "00000000-0000-4000-8000-0000000000e2"
+	var seen http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		_, _ = w.Write([]byte(purchasingOrder))
+	}))
+	t.Cleanup(srv.Close)
+	a := api.New(memstore.New(), api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: purchasing.New(srv.URL, nil).WithSigner(signer),
+	})
+	r := httpx.NewRouter()
+	a.Register(r)
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, evaluatePath, strings.NewReader(body))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Legal-Entity", evalLE+","+otherLE)
+		req.Header.Set("X-Passage-User", callerUser)
+		req.Header.Set("X-Passage-Duties", "MatchingPolicyMaintain")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	named := strings.Replace(poBody(`"poLineNo":1`), `"currency"`, `"legalEntityId":"`+evalLE+`","currency"`, 1)
+	if rec := post(named); rec.Code != http.StatusOK {
+		t.Fatalf("named entity: %d %s", rec.Code, rec.Body)
+	}
+	claims, err := verifier.Verify(seen.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Le != evalLE || claims.Act != callerUser || seen.Get("X-Passage-Duties") != "" || len(claims.Duties) != 1 || claims.Duties[0] != "procurement.purchase-order.lookup" {
+		t.Fatalf("claims %+v err %v headers %v", claims, err, seen)
+	}
+
+	seen = nil
+	wrongOwner := strings.Replace(named, evalLE, otherLE, 1)
+	if rec := post(wrongOwner); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "purchase order's legal entity") {
+		t.Fatalf("an entity other than the purchase order's must be refused: %d %s", rec.Code, rec.Body)
+	}
+
+	seen = nil
+	if rec := post(poBody(`"poLineNo":1`)); rec.Code != http.StatusOK || seen.Get(tenant.HeaderServiceToken) != "" || seen.Get("X-Passage-User") != callerUser {
+		t.Fatalf("without a named entity a multi-entity user is forwarded: %d %v", rec.Code, seen)
+	}
+
+	seen = nil
+	outside := strings.Replace(named, evalLE, "00000000-0000-4000-8000-0000000000e9", 1)
+	if rec := post(outside); rec.Code != http.StatusForbidden || seen != nil {
+		t.Fatalf("an entity outside the caller scope is refused before any call: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post(strings.Replace(named, evalLE, "not-a-uuid", 1)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "legalEntityId") {
+		t.Fatalf("malformed entity: %d %s", rec.Code, rec.Body)
 	}
 }

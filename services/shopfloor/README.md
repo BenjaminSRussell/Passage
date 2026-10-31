@@ -3,6 +3,50 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 12: shift premiums on the pay agreement (FR-25.7, pay type `shift-premium`)
+
+A pay agreement carries up to six premium windows `{name, from, to, premium}` (migration
+`0011_shift_premium.sql`, column `pay_agreement.shift_premiums`). `pay:calculate` and `pay:revise`
+add one `shift-premium` pay line per window and day: its hours are the paid hours (unpaid breaks
+taken out) that fall inside the window, to 0.01 h, and its multiplier is the premium, so the amount
+is rate x hours x premium. The line supplements the base or overtime lines of the same hours; the
+day's hours are not counted twice. A window whose end is not after its start crosses midnight (the
+part of a night window before 06:00 counts for a shift that starts after midnight), and a shift that
+runs past midnight earns the windows of the next morning too (a 20:00-04:00 shift has four hours in
+a 00:00-06:00 window), all on the day the shift started. Window times are local wall-clock times.
+Windows of an agreement must not overlap. A `PUT` replaces the agreement, so it must send the
+windows it keeps. `payagreement.saved` carries `shiftPremiums`. On the web the pay
+agreement list shows the windows and the create form adds and removes them.
+
+## Slice 11: time profiles, pay agreements and the worker link (FR-25.7, BR-25.2, BR-25.8)
+
+- `time-profiles` (`POST`, `GET`, `GET {id}`, `PUT {id}`): a profile holds one `days` entry per
+  day type (`weekday`, `saturday`, `sunday`) with `shiftStart`/`shiftEnd` ("HH:MM", both or
+  neither), unpaid `breaks`, `roundingMinutes` (1 to 15), `toleranceBeforeMin` and
+  `toleranceAfterMin` (0 to 60) and `flexAllowed` (stored; the flex balance is not calculated).
+  A day type the profile does not define uses `DefaultProfile` (10 before, 5 after, 1 minute
+  rounding, no breaks).
+- `pay-agreements` (same four routes): `dailyThreshold` (0 to 24 h), `weeklyThreshold` (0 to
+  168 h), `overtimeMultiplier` and `sundayMultiplier` (1 to 5), `weekStart` (0 Sunday to 6).
+  A worker without an agreement is calculated with `DefaultRules`.
+- `POST workers/{id}:assign-setup` links a worker to a profile and an agreement (null clears a
+  link). A newly chosen profile or agreement must exist (SF-0140, SF-0141) and be active
+  (SF-0144); the one the worker already has may stay linked after it was deactivated, so the
+  other link can still be changed.
+- Creates take an `Idempotency-Key`. `PUT` and the assignment take `If-Match` with the version
+  read as an entity tag (`"3"`); every read and write returns the new `ETag`, and a stale
+  version is SF-0143 (412). The code of a profile or agreement never changes (SF-0142 on a
+  duplicate at create).
+- `pay:calculate` and `pay:revise` read the worker's setup first: the week start decides which
+  earlier days the weekly threshold sees, the profile of the day a segment starts on rounds its
+  punches and takes its breaks off, and the agreement sets the thresholds and multipliers.
+  Deactivating a profile or agreement stops new assignments but keeps applying to workers
+  already linked, so pay never changes silently. Days already calculated keep their lines until
+  recalculated (an approved day through `pay:revise`).
+- Events `dev.passage.shopfloor.timeprofile.saved.v1`, `payagreement.saved.v1` and
+  `worker.assigned.v1` are written through the outbox in the same transaction.
+- Duty: `shopfloor.setup.maintain` writes, `shopfloor.view` reads (both exist already).
+
 ## Slice 8: job start and stop from registrations
 
 - Job-start dispatch (FR-25.3) in `POST registrations`: a new `job-start` for a job on the
@@ -14,7 +58,13 @@ Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
   runs from its earliest start and is split by the good quantity on its starts, or equally
   (BR-25.1, `domain.SplitBundleHours`). Starts sharing the incoming `bundleId` stay open,
   so a bundle starts in one batch. A start older than an open unit (a late offline replay)
-  is itself closed at that unit's start. A unit open for more than 24 hours is stopped at
+  is itself closed at that unit's start, or earlier at the worker's next job-start after
+  it, so it never overlaps work registered in between. A member of that unit with its own
+  job-stop (same job, starting at or after it and before the next start of that job) stored
+  or in the same batch is left out: the stop carries its time and the server writes none.
+  When the own stop arrives in a later batch, the server's stop is corrected to zero length
+  (`registration_correction` by `system:offline-replay`, `registration.corrected`), so a
+  replayed start and stop are never counted twice. A unit open for more than 24 hours is stopped at
   24 hours and also flagged `auto-stop-capped`. Each auto-stop emits
   `registration.posted` (kind `job-stop`, `hours`, `flags`) in the same transaction and
   comes back in the item's `autoStopped` with warning SF-0002. The worker row is locked
@@ -70,6 +120,44 @@ Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
   detail (`/shopfloor/jobs/:id`) with checks and their results, the report form (quantities,
   scrap reason, check values, *Save report* and *Report and finish*) and the supervisor
   override form shown when a finish is blocked.
+
+## Slice 9: supervisor corrections and pay revision with reversal (FR-25.8, AC-25.8)
+
+- `POST registrations/{id}:correct` (duty `shopfloor.time.correct`, `Idempotency-Key`, a reason
+  of 1 to 500 characters) changes `startedAt` and/or `stoppedAt` of one registration. Rules
+  in `domain.PlanCorrection`: a clock-in or clock-out takes no stop, a closed registration
+  lasts at most 24 hours and its hours are recomputed, a bundled job registration is refused
+  (SF-0127), a job-start already closed by a job-stop is refused (SF-0127; the job-stop
+  carries the interval and hours, so it is the one to correct), a missing reason or no change is SF-0128, and the worker's own user cannot
+  correct (SF-0106). The before and after are kept in `registration_correction`
+  (migration 0009) and `dev.passage.shopfloor.registration.corrected.v1` is written through
+  the outbox. A day calculated before a correction is stale for approval (SF-0104).
+- `POST pay:revise` (duty `shopfloor.pay.revise`) recalculates a range and applies it:
+  days that are not approved are replaced as in `pay:calculate`; an approved day keeps its
+  lines. `domain.PlanRevision` compares the effective lines with the recalculation; lines
+  that differ are cancelled by reversal lines (`reversal_of`, negative hours and amount) and
+  the new lines are added, all with the day's next `revision`. The pay of a day is the sum of
+  its lines. The `pay_line` trigger still refuses updates and deletes of approved lines and
+  only admits inserts that carry a revision. Reversal and new lines join the next payroll
+  export. Event `dev.passage.shopfloor.payday.revised.v1`. No difference in any day is
+  SF-0129; an approved day that would carry open flags is SF-0006.
+- `GET registration-corrections?from&to[&workerId]` lists the audit trail.
+- `POST registrations:auto-clock-out[?afterHours=16&limit=100]` (duty `shopfloor.time.autoclockout`)
+  is the hourly auto clock-out job (D2h). Each worker whose latest clock punch is a clock-in
+  older than `afterHours` (4 to 24, else SF-0130) gets a clock-out at clock-in plus
+  `afterHours`, flagged `auto-clock-out`, with `registration.posted` in the same transaction.
+  Workers are locked `skip locked` (concurrent sweeps close a shift once) and the insert
+  re-checks that no later clock punch exists. Repeating is safe. BR-25.3: the calculated day
+  counts the hours but carries `missing-clock-out` (approval is SF-0006) until a supervisor
+  confirms the clock-out (`registrations/{id}:correct` with its stored `startedAt`, allowed
+  once for an unreviewed auto clock-out) or corrects its time; then recalculate and approve.
+  `GET auto-clock-outs?from&to[&timeZone][&workerId]` lists the flagged clock-outs with
+  `reviewed` once a supervisor confirmed or corrected them.
+  Web: *Auto clock-outs* (`/shopfloor/auto-clock-outs`) with the run-now button and a
+  confirm-or-correct link per row.
+- Web: *Time corrections* list (`/shopfloor/corrections`), the correction form
+  (`/shopfloor/registrations/:id/correct`, linked from the worker's registrations), and the
+  revise form with the reversed and added lines (`/shopfloor/workers/:id/revise`).
 
 ## Slice 6: idle detection, OEE rollup, kiosk badge login, who is clocked in
 
@@ -205,11 +293,14 @@ Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
   this slice (SF-0109).
 - Machine-event ingest (`POST machine-events`, called by the iot-edge gateway with the
   `shopfloor.machine.ingest` duty): batches of up to 500 events, classified per machine by
-  BR-25.4. Events with seq at or below the machine's last stored seq and events older than
-  7 days are dropped and counted; missing seq runs are returned in `gaps` (SF-0008, a
-  warning) so the edge can replay them. Accepted events are stored under
-  `(tenant, machine, seq)` with the machine row locked, so a replayed batch never double
-  counts. An unknown machine code rejects the whole batch (SF-0108).
+  BR-25.4. Events older than 7 days and events whose `(machine, seq)` is already stored
+  are dropped and counted; missing seq runs above the last stored seq are returned in
+  `gaps` (SF-0008, a warning) so the edge can replay them. An event at or below the last
+  stored seq that is not stored yet (a gap replay, or a batch that commits after a later
+  one across a broker restart) is stored and counted as accepted; it feeds counts and OEE
+  but not the downtime record, which follows the newest state. Accepted events are stored
+  under `(tenant, machine, seq)` with the machine row locked, so a replayed batch never
+  double counts. An unknown machine code rejects the whole batch (SF-0108).
 - Downtime and andon (FR-25.11, BR-25.10): a DOWN state opens a downtime and any other
   state ends it. When an ingest finds a downtime open for more than 10 minutes (server
   time), it raises one andon per (resource, kind) and emits
@@ -309,6 +400,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
+| POST and PUT `/time-profiles`, `/pay-agreements`; POST `/workers/{id}:assign-setup` | `shopfloor.setup.maintain` |
+| GET `/time-profiles`, `/pay-agreements` and their `{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
 | POST `/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
@@ -321,6 +414,10 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
+| POST `/v1/shopfloor/registrations/{id}:correct` | `shopfloor.time.correct` (supervisor; not in the PRD duty table) |
+| POST `/v1/shopfloor/pay:revise` | `shopfloor.pay.revise` (supervisor; not in the PRD duty table) |
+| POST `/v1/shopfloor/registrations:auto-clock-out` | `shopfloor.time.autoclockout` (platform scheduler identity or supervisor; not in the PRD duty table) |
+| GET `/v1/shopfloor/registration-corrections` | `shopfloor.view` |
 | POST `/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
@@ -368,6 +465,16 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0123` | 422 | A check value names a check that is not defined on the job |
 | `SF-0124` | 422 | The `feedbackId` was already used for another job |
 | `SF-0125` | 422 | A check value cannot be evaluated (not a number, not pass or fail, or blank); `errors` names it |
+| `SF-0126` | 404 | The registration to correct does not exist |
+| `SF-0127` | 422 | The registration cannot be corrected (a bundled job registration, a job-start already closed by a job-stop, or a stop time on a clock-in or clock-out) |
+| `SF-0128` | 422 | The correction is invalid (no reason, stop before start, over 24 hours, or nothing changes; keeping the time is allowed once, to confirm an unreviewed auto clock-out) |
+| `SF-0129` | 422 | `pay:revise` found the recalculated pay equal to the stored pay in every day of the range |
+| `SF-0130` | 422 | `registrations:auto-clock-out` got `afterHours` outside 4 to 24 |
+| `SF-0140` | 404 or 422 | Time profile not found (422 when named by an assignment) |
+| `SF-0141` | 404 or 422 | Pay agreement not found (422 when named by an assignment) |
+| `SF-0142` | 409 | The profile or agreement code is already used |
+| `SF-0143` | 412 | `If-Match` is not the stored version of the profile, agreement or worker |
+| `SF-0144` | 422 | The profile or agreement newly chosen by an assignment is inactive |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

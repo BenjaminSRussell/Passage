@@ -12,6 +12,7 @@ const Source = "lean"
 // Event types.
 const (
 	FlowActivated      = "dev.passage.lean.flow.activated.v1"
+	FlowExpired        = "dev.passage.lean.flow.expired.v1"
 	KanbanCreated      = "dev.passage.lean.kanban.created.v1"
 	KanbanStateChanged = "dev.passage.lean.kanban.statechanged.v1"
 	JobStateChanged    = "dev.passage.lean.kanbanjob.statechanged.v1"
@@ -20,7 +21,7 @@ const (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{FlowActivated, KanbanCreated, KanbanStateChanged, JobStateChanged, FlowPeriodSettled}
+	return []string{FlowActivated, FlowExpired, KanbanCreated, KanbanStateChanged, JobStateChanged, FlowPeriodSettled}
 }
 
 // FlowActivatedData is the payload of FlowActivated.
@@ -31,6 +32,20 @@ type FlowActivatedData struct {
 	Name          string `json:"name"`
 	ActiveFrom    string `json:"activeFrom"`
 	Activities    int    `json:"activities"`
+	// FlowVersion is 1 for a first version; PreviousFlowID names the version
+	// this one replaces, which is expired in the same transaction.
+	FlowVersion    int     `json:"flowVersion"`
+	PreviousFlowID *string `json:"previousFlowId"`
+}
+
+// FlowExpiredData is the payload of FlowExpired: a flow version was replaced by
+// a newer version that went active.
+type FlowExpiredData struct {
+	FlowID       string `json:"flowId"`
+	Name         string `json:"name"`
+	FlowVersion  int    `json:"flowVersion"`
+	ActiveTo     string `json:"activeTo"`
+	SupersededBy string `json:"supersededBy"`
 }
 
 // KanbanCreatedData is the payload of KanbanCreated (PRD 4.24.5: kanbanId,

@@ -43,6 +43,8 @@ export const entryLineSchema = z.object({
   text: z.string().optional(),
   reversalOfLineId: z.string().optional(),
   negativePosting: z.boolean().optional(),
+  /** Derivation steps that filled dimensions on the line (FR-11.22). */
+  derivedByStepIds: z.array(z.string()).optional(),
 });
 
 export const entrySchema = z.object({
@@ -703,4 +705,579 @@ export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = de
   if (q.cursor) params.set("cursor", q.cursor);
   if (q.limit) params.set("limit", String(q.limit));
   return getJSON(`/api/v1/ledger/journal-lines?${params.toString()}`, journalLinePageSchema, fetchImpl);
+}
+
+/** Recurring journal frequencies (FR-11.10). */
+export const RECURRING_FREQUENCIES = ["monthly", "quarterly", "yearly"] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+/** A template line: a fixed amount, or a percentage of the base amount. */
+export const recurringLineSchema = z.object({
+  lineNumber: z.number().int(),
+  account: z.string(),
+  dimensions: z.record(z.string()).optional(),
+  debitCredit: z.enum(["D", "C"]),
+  amountKind: z.enum(["fixed", "percent"]),
+  amount: z.string(),
+  currency: z.string(),
+  text: z.string().optional(),
+});
+export type RecurringLine = z.infer<typeof recurringLineSchema>;
+
+/** Recurring journal (FR-11.10). `lines` is present on single reads only. */
+export const recurringJournalSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  legalEntityId: z.string(),
+  journalName: z.string(),
+  name: z.string(),
+  description: z.string(),
+  frequency: z.enum(RECURRING_FREQUENCIES),
+  dayOfMonth: z.number().int(),
+  startDate: z.string(),
+  endDate: z.string().optional(),
+  baseAmount: z.string().optional(),
+  status: z.enum(["active", "paused"]),
+  nextRunDate: z.string().optional(),
+  lastRunDate: z.string().optional(),
+  version: z.number().int(),
+  lineCount: z.number().int(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lines: z.array(recurringLineSchema).optional(),
+});
+export type RecurringJournal = z.infer<typeof recurringJournalSchema>;
+
+export const recurringRunSchema = z.object({
+  id: z.string(),
+  recurringId: z.string(),
+  scheduledDate: z.string(),
+  batchId: z.string(),
+  generatedBy: z.string(),
+  generatedAt: z.string(),
+});
+export type RecurringRun = z.infer<typeof recurringRunSchema>;
+
+/** Body of PUT /api/v1/ledger/recurring-journals/{id}; amounts are decimal strings, percent lines carry the percentage. */
+export interface RecurringJournalInput {
+  ledgerId: string;
+  journalName: string;
+  name: string;
+  description: string;
+  frequency: RecurringFrequency;
+  dayOfMonth: number;
+  startDate: string;
+  endDate?: string;
+  baseAmount?: string;
+  lines: {
+    account: string;
+    dimensions?: Record<string, string>;
+    debitCredit: "D" | "C";
+    amountKind: "fixed" | "percent";
+    amount: { currency: string; value: string };
+    text?: string;
+  }[];
+}
+
+const recurringListSchema = z.object({ items: z.array(recurringJournalSchema) });
+const recurringRunListSchema = z.object({ items: z.array(recurringRunSchema) });
+
+/** GET /api/v1/ledger/recurring-journals, optionally only active or paused ones. */
+export async function fetchRecurringJournals(status = "", fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal[]> {
+  const body = await getJSON(`/api/v1/ledger/recurring-journals${status ? `?status=${encodeURIComponent(status)}` : ""}`, recurringListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/recurring-journals/{id} with its lines. */
+export function fetchRecurringJournal(id: string, fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal> {
+  return getJSON(`/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}`, recurringJournalSchema, fetchImpl);
+}
+
+/** PUT /api/v1/ledger/recurring-journals/{id}: creates, or replaces at `version` (If-Match) when given. */
+export function putRecurringJournal(
+  id: string,
+  input: RecurringJournalInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RecurringJournal> {
+  return sendJSON("PUT", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}`, recurringJournalSchema, fetchImpl, input, version ? ifMatch(version) : {});
+}
+
+/** POST .../pause or .../resume at the version the user saw. */
+export function recurringStatusAction(id: string, action: "pause" | "resume", version: number, fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal> {
+  return sendJSON("POST", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/${action}`, recurringJournalSchema, fetchImpl, undefined, ifMatch(version));
+}
+
+/** POST .../generate: the draft batch of a scheduled date of the schedule (required); a date with a run replays it. */
+export function generateRecurringJournal(
+  id: string,
+  input: { scheduledDate: string; baseAmount?: string },
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RecurringRun> {
+  return sendJSON("POST", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/generate`, recurringRunSchema, fetchImpl, input);
+}
+
+/** GET .../runs: generated batches, newest scheduled date first. */
+export async function fetchRecurringRuns(id: string, fetchImpl: FetchLike = defaultFetch): Promise<RecurringRun[]> {
+  const body = await getJSON(`/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/runs`, recurringRunListSchema, fetchImpl);
+  return body.items;
+}
+
+// --- open items and clearing (FR-11.19, FR-11.20) --------------------------------
+
+export const OPEN_ITEM_STATUSES = ["open", "cleared", "reset_open", "voided"] as const;
+export type OpenItemStatus = (typeof OPEN_ITEM_STATUSES)[number];
+
+/** One open item; amount is absolute, debitCredit says the side. */
+export const openItemSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  account: z.string(),
+  accountName: z.string(),
+  dimensions: z.record(z.string()),
+  sourceType: z.enum(["gl_line", "residual"]),
+  amount: z.string(),
+  debitCredit: z.enum(["D", "C"]),
+  currency: z.string(),
+  assignment: z.string().optional(),
+  postingDate: z.string(),
+  status: z.enum(OPEN_ITEM_STATUSES),
+  clearingDocumentId: z.string().optional(),
+  residualOfItemId: z.string().optional(),
+  entryId: z.string().optional(),
+  voucher: z.string().optional(),
+  lineNumber: z.number().optional(),
+});
+export type OpenItem = z.infer<typeof openItemSchema>;
+
+const openItemPageSchema = z.object({ items: z.array(openItemSchema), nextCursor: z.string().optional() });
+export type OpenItemPage = z.infer<typeof openItemPageSchema>;
+
+export interface OpenItemQuery {
+  ledgerId: string;
+  account?: string;
+  status?: string;
+  assignment?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET /api/v1/ledger/open-items, one keyset page. */
+export function fetchOpenItems(q: OpenItemQuery, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemPage> {
+  const params = new URLSearchParams({ ledger: q.ledgerId });
+  if (q.account) params.set("account", q.account);
+  if (q.status) params.set("status", q.status);
+  if (q.assignment) params.set("assignment", q.assignment);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  return getJSON(`/api/v1/ledger/open-items?${params.toString()}`, openItemPageSchema, fetchImpl);
+}
+
+export const CLEARING_OUTCOMES = ["balanced", "difference", "residual", "unbalanced"] as const;
+
+export const clearingPreviewSchema = z.object({
+  ledgerId: z.string(),
+  account: z.string(),
+  currency: z.string(),
+  itemCount: z.number(),
+  debit: z.string(),
+  credit: z.string(),
+  net: z.string(),
+  toleranceGroup: z.string().optional(),
+  outcome: z.enum(CLEARING_OUTCOMES),
+  differenceAmount: z.string(),
+  residualAmount: z.string(),
+});
+export type ClearingPreview = z.infer<typeof clearingPreviewSchema>;
+
+export const clearingDocumentSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  account: z.string(),
+  clearingDate: z.string(),
+  mode: z.string(),
+  itemIds: z.array(z.string()),
+  toleranceGroup: z.string().optional(),
+  differenceAmount: z.string(),
+  differenceEntryId: z.string().optional(),
+  residualItemId: z.string().optional(),
+  status: z.enum(["cleared", "reset"]),
+  resetReasonCode: z.string().optional(),
+  resetComment: z.string().optional(),
+  resetBy: z.string().optional(),
+  resetAt: z.string().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  items: z.array(openItemSchema).optional(),
+});
+export type ClearingDocument = z.infer<typeof clearingDocumentSchema>;
+
+export interface ClearingInput {
+  ledgerId: string;
+  itemIds: string[];
+  clearingDate: string;
+  toleranceGroup?: string;
+  residualItem?: boolean;
+}
+
+/** POST /api/v1/ledger/clearings:simulate: residual and outcome, nothing written. */
+export function simulateClearing(input: ClearingInput, fetchImpl: FetchLike = defaultFetch): Promise<ClearingPreview> {
+  return sendJSON("POST", "/api/v1/ledger/clearings:simulate", clearingPreviewSchema, fetchImpl, input);
+}
+
+/** POST /api/v1/ledger/clearings. One Idempotency-Key per user-intended clearing, so a retry replays. */
+export function createClearing(input: ClearingInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return sendJSON("POST", "/api/v1/ledger/clearings", clearingDocumentSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
+}
+
+const clearingListSchema = z.object({ items: z.array(clearingDocumentSchema) });
+
+/** GET /api/v1/ledger/clearings, newest first, optionally only cleared or reset ones. */
+export async function fetchClearings(ledgerId: string, status = "", fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument[]> {
+  const params = new URLSearchParams({ ledger: ledgerId });
+  if (status) params.set("status", status);
+  return (await getJSON(`/api/v1/ledger/clearings?${params.toString()}`, clearingListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/clearings/{id} with its items. */
+export function fetchClearing(id: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return getJSON(`/api/v1/ledger/clearings/${encodeURIComponent(id)}`, clearingDocumentSchema, fetchImpl);
+}
+
+export interface ResetClearingInput {
+  reasonCode: string;
+  comment?: string;
+}
+
+/** POST /api/v1/ledger/clearings/{id}/reset: the whole document, with its own Idempotency-Key. */
+export function resetClearing(id: string, input: ResetClearingInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return sendJSON("POST", `/api/v1/ledger/clearings/${encodeURIComponent(id)}/reset`, clearingDocumentSchema, fetchImpl, input, {
+    "Idempotency-Key": idempotencyKey,
+  });
+}
+
+export const TOLERANCE_CODE = /^[A-Z0-9_]{1,10}$/;
+
+export const toleranceGroupSchema = z.object({
+  ledgerId: z.string(),
+  code: z.string(),
+  name: z.string(),
+  debitLimit: z.string(),
+  creditLimit: z.string(),
+  percentLimit: z.string(),
+  differenceAccount: z.string(),
+  active: z.boolean(),
+  version: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ToleranceGroup = z.infer<typeof toleranceGroupSchema>;
+
+export interface ToleranceGroupInput {
+  name: string;
+  debitLimit: string;
+  creditLimit: string;
+  percentLimit: string;
+  differenceAccount: string;
+  active: boolean;
+}
+
+const toleranceListSchema = z.object({ items: z.array(toleranceGroupSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/tolerance-groups */
+export async function fetchToleranceGroups(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<ToleranceGroup[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups`, toleranceListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/ledgers/{ledger}/tolerance-groups/{code} */
+export function fetchToleranceGroup(ledgerId: string, code: string, fetchImpl: FetchLike = defaultFetch): Promise<ToleranceGroup> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups/${encodeURIComponent(code)}`, toleranceGroupSchema, fetchImpl);
+}
+
+/** PUT .../tolerance-groups/{code}: creates, or replaces at `version` (If-Match) when given. */
+export function putToleranceGroup(
+  ledgerId: string,
+  code: string,
+  input: ToleranceGroupInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<ToleranceGroup> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups/${encodeURIComponent(code)}`,
+    toleranceGroupSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const openItemAccountSchema = z.object({
+  ledgerId: z.string(),
+  account: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  openItems: z.number(),
+  changedBy: z.string(),
+  changedAt: z.string(),
+});
+export type OpenItemAccount = z.infer<typeof openItemAccountSchema>;
+
+const openItemAccountListSchema = z.object({ items: z.array(openItemAccountSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/open-item-accounts */
+export async function fetchOpenItemAccounts(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemAccount[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-accounts`, openItemAccountListSchema, fetchImpl)).items;
+}
+
+/** PUT .../open-item-accounts/{account}: switches open-item management on or off. */
+export function putOpenItemAccount(ledgerId: string, account: string, enabled: boolean, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemAccount> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-accounts/${encodeURIComponent(account)}`,
+    openItemAccountSchema,
+    fetchImpl,
+    { enabled },
+  );
+}
+
+/** Criteria a rule may group by (FR-11.20); dim.{ATTRIBUTE} is accepted as well. */
+export const AUTO_CRITERION = /^(assignment|source_line_ref|document_id|amount_txn|posting_date|dim\.[A-Z][A-Z0-9_]{0,19})$/;
+export const MAX_AUTO_CRITERIA = 5;
+
+export const autoClearingRuleSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  name: z.string(),
+  accountFrom: z.string(),
+  accountTo: z.string(),
+  criteria: z.array(z.string()),
+  allowTolerance: z.boolean(),
+  toleranceGroup: z.string().optional(),
+  sequence: z.number(),
+  active: z.boolean(),
+  version: z.number(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AutoClearingRule = z.infer<typeof autoClearingRuleSchema>;
+
+export interface AutoClearingRuleInput {
+  name: string;
+  accountFrom: string;
+  accountTo: string;
+  criteria: string[];
+  allowTolerance: boolean;
+  toleranceGroup?: string;
+  sequence: number;
+  active: boolean;
+}
+
+const autoRuleListSchema = z.object({ items: z.array(autoClearingRuleSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/auto-clearing-rules, in run order. */
+export async function fetchAutoClearingRules(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRule[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules`, autoRuleListSchema, fetchImpl)).items;
+}
+
+/** GET .../auto-clearing-rules/{id} */
+export function fetchAutoClearingRule(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRule> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules/${encodeURIComponent(id)}`, autoClearingRuleSchema, fetchImpl);
+}
+
+/** PUT .../auto-clearing-rules/{id}: creates under a client-chosen id, or replaces at `version` (If-Match) when given. */
+export function putAutoClearingRule(
+  ledgerId: string,
+  id: string,
+  input: AutoClearingRuleInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<AutoClearingRule> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/auto-clearing-rules/${encodeURIComponent(id)}`,
+    autoClearingRuleSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const autoClearingGroupSchema = z.object({
+  no: z.number(),
+  ruleId: z.string(),
+  account: z.string(),
+  itemCount: z.number(),
+  net: z.string(),
+  status: z.enum(["proposed", "cleared", "skipped"]),
+  reasonCode: z.string().optional(),
+  reason: z.string().optional(),
+  clearingDocumentId: z.string().optional(),
+  itemIds: z.array(z.string()).optional(),
+});
+export type AutoClearingGroup = z.infer<typeof autoClearingGroupSchema>;
+
+export const autoClearingRunSchema = z.object({
+  id: z.string().optional(),
+  ledgerId: z.string(),
+  ruleId: z.string().optional(),
+  mode: z.enum(["simulate", "clear"]),
+  clearingDate: z.string(),
+  groupsFound: z.number(),
+  groupsCleared: z.number(),
+  groupsSkipped: z.number(),
+  itemsCleared: z.number(),
+  unmatchedItems: z.number(),
+  truncated: z.boolean(),
+  createdBy: z.string().optional(),
+  createdAt: z.string().optional(),
+  groups: z.array(autoClearingGroupSchema).optional(),
+});
+export type AutoClearingRun = z.infer<typeof autoClearingRunSchema>;
+
+export interface AutoClearingRunInput {
+  ledgerId: string;
+  ruleId?: string;
+  mode: "simulate" | "clear";
+  clearingDate?: string;
+}
+
+/** POST /api/v1/ledger/auto-clearing:run. Simulation needs no key; a clear carries one key per user-intended run. */
+export function runAutoClearing(input: AutoClearingRunInput, idempotencyKey?: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun> {
+  return sendJSON("POST", "/api/v1/ledger/auto-clearing:run", autoClearingRunSchema, fetchImpl, input, idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {});
+}
+
+const autoRunListSchema = z.object({ items: z.array(autoClearingRunSchema) });
+
+/** GET /api/v1/ledger/auto-clearing-runs, newest first. */
+export async function fetchAutoClearingRuns(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun[]> {
+  return (await getJSON(`/api/v1/ledger/auto-clearing-runs?ledger=${encodeURIComponent(ledgerId)}`, autoRunListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/auto-clearing-runs/{id} with its group log. */
+export function fetchAutoClearingRun(id: string, fetchImpl: FetchLike = defaultFetch): Promise<AutoClearingRun> {
+  return getJSON(`/api/v1/ledger/auto-clearing-runs/${encodeURIComponent(id)}`, autoClearingRunSchema, fetchImpl);
+}
+
+/** Lookup table row (FR-11.22): a source tuple of exact values or `*`, the target value and its validity. */
+export const lookupRowSchema = z.object({
+  source: z.array(z.string()),
+  target: z.string(),
+  validFrom: z.string(),
+  validTo: z.string().optional(),
+});
+export type LookupRow = z.infer<typeof lookupRowSchema>;
+
+export const lookupTableSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  name: z.string(),
+  sourceFields: z.array(z.string()),
+  target: z.string(),
+  rowCount: z.number(),
+  version: z.number(),
+  rows: z.array(lookupRowSchema).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type LookupTable = z.infer<typeof lookupTableSchema>;
+
+export interface LookupTableInput {
+  name: string;
+  sourceFields: string[];
+  target: string;
+  rows: LookupRow[];
+}
+
+const lookupListSchema = z.object({ items: z.array(lookupTableSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/lookup-tables (without rows). */
+export async function fetchLookupTables(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables`, lookupListSchema, fetchImpl)).items;
+}
+
+/** GET .../lookup-tables/{id} (with rows). */
+export function fetchLookupTable(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables/${encodeURIComponent(id)}`, lookupTableSchema, fetchImpl);
+}
+
+/** PUT .../lookup-tables/{id}: creates, or replaces the table and all rows at `version` (If-Match) when given. */
+export function putLookupTable(ledgerId: string, id: string, input: LookupTableInput, version?: number, fetchImpl: FetchLike = defaultFetch): Promise<LookupTable> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/lookup-tables/${encodeURIComponent(id)}`,
+    lookupTableSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const DERIVATION_KINDS = ["table_lookup", "move", "clear", "constant"] as const;
+export type DerivationKind = (typeof DERIVATION_KINDS)[number];
+export const CONDITION_OPS = ["eq", "ne", "in", "blank", "notblank"] as const;
+
+export const derivationStepSchema = z.object({
+  id: z.string().optional(),
+  sequence: z.number(),
+  kind: z.enum(DERIVATION_KINDS),
+  condition: z.object({ field: z.string(), op: z.enum(CONDITION_OPS), values: z.array(z.string()).optional() }).optional(),
+  sourceFields: z.array(z.string()),
+  target: z.string(),
+  lookupTableId: z.string().optional(),
+  value: z.string().optional(),
+  overwrite: z.boolean(),
+});
+export type DerivationStep = z.infer<typeof derivationStepSchema>;
+
+export const derivationStrategySchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  version: z.number(),
+  lockVersion: z.number(),
+  name: z.string(),
+  status: z.enum(["draft", "active", "retired"]),
+  steps: z.array(derivationStepSchema),
+  activatedBy: z.string().optional(),
+  activatedAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type DerivationStrategy = z.infer<typeof derivationStrategySchema>;
+
+export interface DerivationStrategyInput {
+  name: string;
+  steps: DerivationStep[];
+}
+
+const strategyListSchema = z.object({ items: z.array(derivationStrategySchema) });
+const strategyUrl = (ledgerId: string, version: number) =>
+  `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/derivation-strategies/${version}`;
+
+/** GET /api/v1/ledger/ledgers/{ledger}/derivation-strategies (newest version first). */
+export async function fetchDerivationStrategies(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/derivation-strategies`, strategyListSchema, fetchImpl)).items;
+}
+
+/** GET .../derivation-strategies/{version}. */
+export function fetchDerivationStrategy(ledgerId: string, version: number, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy> {
+  return getJSON(strategyUrl(ledgerId, version), derivationStrategySchema, fetchImpl);
+}
+
+/** PUT .../derivation-strategies/{version}: the next draft, or a replacement of a draft at `lockVersion` (If-Match). */
+export function putDerivationStrategy(
+  ledgerId: string,
+  version: number,
+  input: DerivationStrategyInput,
+  lockVersion?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<DerivationStrategy> {
+  return sendJSON("PUT", strategyUrl(ledgerId, version), derivationStrategySchema, fetchImpl, input, lockVersion ? ifMatch(lockVersion) : {});
+}
+
+/** POST .../derivation-strategies/{version}/activate. */
+export function activateDerivationStrategy(ledgerId: string, version: number, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy> {
+  return sendJSON("POST", `${strategyUrl(ledgerId, version)}/activate`, derivationStrategySchema, fetchImpl, undefined, lockVersion ? ifMatch(lockVersion) : {});
 }

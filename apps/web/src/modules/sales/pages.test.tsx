@@ -376,6 +376,9 @@ describe("form validation", () => {
     const ok = validateOrder({ ...base, lines: [{ ...emptyLine("2027-03-04"), productId: PRODUCT, siteId: SITE, warehouseId: WAREHOUSE, unitPrice: "10.5" }] });
     expect(ok.input?.invoiceAccountId).toBe(CUSTOMER);
     expect(ok.input?.lines[0].unitPrice).toBe("10.5");
+    expect(ok.input?.orderType).toBe("ORDER");
+    const byDefault = validateOrder({ ...base, orderType: "", lines: [{ ...emptyLine("2027-03-04"), productId: PRODUCT, siteId: SITE, warehouseId: WAREHOUSE, unitPrice: "10.5" }] });
+    expect(byDefault.input && "orderType" in byDefault.input).toBe(false);
     const bad = validateOrder({ ...base, lines: [{ ...emptyLine("2027-03-04"), quantity: "0", discPct: "101" }] });
     expect(bad.input).toBeUndefined();
     expect(bad.errors["lines[0].quantity"]).toBeDefined();

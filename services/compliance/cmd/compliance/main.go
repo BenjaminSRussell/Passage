@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/api"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
@@ -60,6 +61,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	cfg, err := config(getenv)
 	if err != nil {
 		return err
+	}
+	if cfg.Keys, err = fieldcrypt.FromEnv(getenv); err != nil {
+		return fmt.Errorf("field encryption keys: %w", err)
 	}
 	a := api.New(store.New(pool), cfg)
 	router := httpx.NewRouter()

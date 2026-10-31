@@ -11,9 +11,11 @@ describe("inventory module", () => {
 
   it("guards reads with inventory.read and journal creation with inventory.journal.write", () => {
     expect(Object.fromEntries(inventory.nav.map((n) => [n.to, n.duty]))).toEqual({
+      "/inventory/workspace": "inventory.read",
       "/inventory/onhand": "inventory.read",
       "/inventory/journals": "inventory.read",
       "/inventory/journals/new": "inventory.journal.write",
+      "/inventory/journal-names": "inventory.read",
       "/inventory/transactions": "inventory.read",
       "/inventory/status-changes": "inventory.read",
       "/inventory/reservations": "inventory.read",
@@ -21,10 +23,15 @@ describe("inventory module", () => {
       "/inventory/count-plans": "inventory.read",
       "/inventory/count-sheets": "inventory.read",
       "/inventory/transfer-orders": "inventory.read",
+      "/inventory/transfer-lines": "inventory.read",
       "/inventory/in-transit": "inventory.read",
       "/inventory/abc-runs": "inventory.read",
       "/inventory/consignment-orders": "inventory.read",
       "/inventory/consignment/stock": "inventory.read",
+      "/inventory/reports/count-variance": "inventory.read",
+      "/inventory/reports/negative-onhand": "inventory.read",
+      "/inventory/reports/tracking-trace": "inventory.read",
+      "/inventory/reports/dimension-combinations": "inventory.read",
       "/inventory/reconciliations": "inventory.read",
     });
   });
@@ -49,6 +56,7 @@ describe("inventory module", () => {
   it("routes every slice 3 screen", () => {
     const paths = inventory.routes.map((r) => r.path);
     for (const path of [
+      "/inventory/transfer-lines",
       "/inventory/transfer-orders",
       "/inventory/transfer-orders/new",
       "/inventory/transfer-orders/:id",

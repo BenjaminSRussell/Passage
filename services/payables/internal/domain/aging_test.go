@@ -187,3 +187,35 @@ func TestReconcile_LedgerOnlyBalanceIsADifference(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestGroupBreakdown_PerCurrencyAndGroupUnassignedLast(t *testing.T) {
+	g1, g2 := "00000000-0000-0000-0000-0000000000b1", "00000000-0000-0000-0000-0000000000b2"
+	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	rows := []domain.AgingRow{
+		{VendorID: "v1", VendorGroupID: g2, Currency: "USD", DueDate: due, OpenAmount: amount("100.10")},
+		{VendorID: "v2", VendorGroupID: g2, Currency: "USD", DueDate: due, OpenAmount: amount("200.20")},
+		{VendorID: "v3", VendorGroupID: g1, Currency: "USD", DueDate: due, OpenAmount: amount("0.07")},
+		{VendorID: "v4", Currency: "USD", DueDate: due, OpenAmount: amount("50.00")},
+		{VendorID: "v5", VendorGroupID: g1, Currency: "EUR", DueDate: due, OpenAmount: amount("10.00")},
+		{VendorID: "v6", VendorGroupID: g1, Currency: "USD", DueDate: due, OpenAmount: amount("0")},
+	}
+	want := []struct{ currency, group, total string }{
+		{"EUR", g1, "10"}, {"USD", g1, "0.07"}, {"USD", g2, "300.3"}, {"USD", domain.UnassignedGroup, "50"},
+	}
+	got := domain.GroupBreakdown(rows)
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines, want %d: %+v", len(got), len(want), got)
+	}
+	grand := decimal.Zero
+	for i, w := range want {
+		if got[i].Currency != w.currency || got[i].VendorGroupID != w.group || got[i].SubledgerTotal.String() != w.total || got[i].Comparable || got[i].Reason != domain.ReasonSingleControlAccount {
+			t.Errorf("line %d = %+v, want %+v", i, got[i], w)
+		}
+		if w.currency == "USD" {
+			grand = grand.Add(got[i].SubledgerTotal)
+		}
+	}
+	if !grand.Equal(amount("350.37")) {
+		t.Fatalf("USD groups sum to %s, want 350.37", grand)
+	}
+}

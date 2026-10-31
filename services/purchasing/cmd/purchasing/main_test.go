@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -11,6 +12,14 @@ func TestRun_RequiresDatabaseURL(t *testing.T) {
 	err := run(context.Background(), func(string) string { return "" })
 	if err == nil || err.Error() != "DATABASE_URL is required" {
 		t.Fatalf("run without DATABASE_URL = %v", err)
+	}
+}
+
+func TestRun_StopsOnMalformedServicePublicKeys(t *testing.T) {
+	env := map[string]string{"PASSAGE_SERVICE_NAME": "purchasing", "PASSAGE_SERVICE_PUBLIC_KEYS": "receiving=zzz", "DATABASE_URL": "://bad"}
+	err := run(context.Background(), func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
+		t.Fatalf("run with a malformed key = %v", err)
 	}
 }
 

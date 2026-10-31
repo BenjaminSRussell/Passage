@@ -39,11 +39,13 @@ const (
 	dutyHold           = "sales.order.hold"
 	dutyCreditRelease  = "sales.credit.release"
 	dutyCreditMaintain = "sales.credit.maintain"
+	dutyParameter      = "sales.parameter.maintain"
 	dutyAgreement      = "sales.agreement.maintain"
 	dutyBackorder      = "sales.backorder.run"
 	dutyListing        = "sales.listing.maintain"
 	dutyOrderApprove   = "sales.order.approve"
 	dutyQuotation      = "sales.quotation.maintain"
+	dutyAllocation     = "sales.allocation.maintain"
 
 	orders          = "/v1/sales/orders"
 	creditProfiles  = "/v1/sales/credit-profiles"
@@ -58,6 +60,8 @@ const (
 	proposalRules   = "/v1/sales/product-proposal-rules"
 	proposalEval    = "/v1/sales/product-proposals:evaluate"
 	proposalRespond = "/v1/sales/product-proposals:respond"
+	allocationQuota = "/v1/sales/allocation-quotas"
+	parameters      = "/v1/sales/parameters"
 )
 
 var (
@@ -111,8 +115,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Patch(orders+"/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:cancel", a.cancelOrder)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
+	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}/lines/{lineNo}:promise", a.promiseLine)
+	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/schedule-lines", a.listScheduleLines)
+	r.With(authz.RequireDuty(dutyRead)).Get(backorders, a.listBackorders)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(releaseCheck, a.checkRelease)
 	r.With(authz.RequireDuty(dutyBackorder)).Post(backorderRun, a.previewBackorder)
+	r.With(authz.RequireDuty(dutyBackorder)).Post(backorderRuns, a.createBackorderRun)
+	r.With(authz.RequireDuty(dutyRead)).Get(backorderRuns, a.listBackorderRuns)
+	r.With(authz.RequireDuty(dutyRead)).Get(backorderRuns+"/{id}", a.getBackorderRun)
+	r.With(authz.RequireDuty(dutyBackorder)).Post(backorderRuns+"/{id}:commit", a.commitBackorderRun)
 	r.With(authz.RequireDuty(dutyHold)).Post(orders+"/{id}/holds", a.applyHold)
 	r.With(requireAny(dutyCreditRelease, dutyHold)).Post(orders+"/{id}/holds/{holdId}:release", a.releaseHold)
 	r.With(authz.RequireDuty(dutyListing)).Post(productListings, a.createListing)
@@ -122,16 +133,31 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(agreements, a.listAgreements)
 	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}", a.getAgreement)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:release-order", a.releaseOrder)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}/schedule-releases", a.createScheduleRelease)
+	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}/schedule-releases", a.listScheduleReleases)
+	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}/schedule-releases/{releaseId}", a.getScheduleRelease)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}/schedule-releases/{releaseId}:resolve", a.resolveScheduleRelease)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:record-shipped", a.recordShipped)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/sales/atp:check", a.atpCheck)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles, a.listCreditProfiles)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles+"/{customerId}", a.getCreditProfile)
 	r.With(authz.RequireDuty(dutyCreditMaintain)).Put(creditProfiles+"/{customerId}", a.putCreditProfile)
+	r.With(authz.RequireDuty(dutyRead)).Get(changeRequests, a.listChangeRequests)
+	r.With(authz.RequireDuty(dutyRead)).Get(changeRequests+"/{id}", a.getChangeRequest)
+	r.With(authz.RequireDuty(dutyOrderApprove)).Post(changeRequests+"/{id}:approve", a.approveChangeRequest)
+	r.With(authz.RequireDuty(dutyOrderApprove)).Post(changeRequests+"/{id}:reject", a.rejectChangeRequest)
+	r.With(authz.RequireDuty(dutyRead)).Get(changePolicy, a.getChangePolicy)
+	r.With(authz.RequireDuty(dutyOrderApprove)).Put(changePolicy, a.putChangePolicy)
+	r.With(authz.RequireDuty(dutyRead)).Get(parameters, a.getParameters)
+	r.With(authz.RequireDuty(dutyParameter)).Put(parameters, a.putParameters)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations, a.createQuotation)
 	r.With(authz.RequireDuty(dutyRead)).Get(quotations, a.listQuotations)
 	r.With(authz.RequireDuty(dutyRead)).Get(quotations+"/{id}", a.getQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:send", a.sendQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:lose", a.loseQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:convert", a.convertQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(expirationRun, a.expireQuotations)
+	r.With(authz.RequireDuty(dutyRead)).Get(summaryPath, a.getSummary)
 	r.With(requireAny(dutyCreditRelease, dutyHold)).Get(holdQueue, a.listHolds)
 	r.With(authz.RequireDuty(dutyListing)).Post(suppRules, a.createSupplementaryRule)
 	r.With(authz.RequireDuty(dutyRead)).Get(suppRules, a.listSupplementaryRules)
@@ -142,6 +168,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyListing)).Delete(proposalRules+"/{id}", a.deleteProposalRule)
 	r.With(authz.RequireDuty(dutyRead)).Post(proposalEval, a.evaluateProposals)
 	r.With(requireAny(dutyWrite, dutyIntake)).Post(proposalRespond, a.respondToProposal)
+	r.With(authz.RequireDuty(dutyAllocation)).Post(allocationQuota, a.createAllocationQuota)
+	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota, a.listAllocationQuotas)
+	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota+"/{id}", a.getAllocationQuota)
+	r.With(authz.RequireDuty(dutyAllocation)).Patch(allocationQuota+"/{id}", a.changeAllocationQuota)
 }
 
 // Metrics serves the admin port's Prometheus text.

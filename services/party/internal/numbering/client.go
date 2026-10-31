@@ -15,18 +15,28 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 const (
-	CodeUnavailable = "PTY-NUMBERING-UNAVAILABLE"
-	timeout         = 3 * time.Second
-	maxResponse     = 1 << 20
+	CodeUnavailable    = "PTY-NUMBERING-UNAVAILABLE"
+	CodeEntityRequired = "PTY-LEGAL-ENTITY-REQUIRED"
+	timeout            = 3 * time.Second
+	maxResponse        = 1 << 20
 )
+
+const audience = "numbering"
 
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string) *Client { return NewWithTimeout(baseURL, timeout) }
@@ -46,6 +56,9 @@ func unavailable() error {
 }
 
 func (c *Client) Next(ctx context.Context, code, idempotencyKey string) (string, error) {
+	if p, _ := tenant.FromContext(ctx); !ids.Valid(p.LegalEntityID) {
+		return "", httpx.NewProblem(http.StatusUnprocessableEntity, CodeEntityRequired, "a single legal entity (X-Passage-Legal-Entity) is required to allocate a party number")
+	}
 	formatted, err := c.allocate(ctx, code, idempotencyKey)
 	if err != nil {
 		slog.Error("numbering allocation failed", "err", err, "code", code, "correlationId", middleware.GetReqID(ctx))
@@ -60,14 +73,21 @@ func (c *Client) allocate(ctx context.Context, code, idempotencyKey string) (str
 		return "", err
 	}
 	p, _ := tenant.FromContext(ctx)
-	duties := make([]string, 0, len(p.Duties))
-	for d := range p.Duties {
-		duties = append(duties, d)
+	signed, err := c.signer.ApplyDuties(req, p, audience, "", []string{"numbering.sequence.allocate"})
+	if err != nil {
+		return "", err
 	}
-	sort.Strings(duties)
-	req.Header.Set(tenant.HeaderTenant, p.TenantID)
-	req.Header.Set(tenant.HeaderUser, p.UserID)
-	req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+	if !signed {
+		duties := make([]string, 0, len(p.Duties))
+		for d := range p.Duties {
+			duties = append(duties, d)
+		}
+		sort.Strings(duties)
+		req.Header.Set(tenant.HeaderTenant, p.TenantID)
+		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
+		req.Header.Set(tenant.HeaderUser, p.UserID)
+		req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+	}
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := c.http.Do(req)
 	if err != nil {

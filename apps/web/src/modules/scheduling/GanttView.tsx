@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent } from "react";
 import { cx } from "../../shell/ui/cx";
 import type { GanttBar } from "./api/client";
-import { formatAmount, formatDateTime } from "./format";
+import { formatAmount, formatDateTime, shortId } from "./format";
 import { barPosition, changeoverSpan, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
 import styles from "./GanttView.module.css";
 
@@ -125,6 +125,8 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const pos = barPosition(bar, from, to);
                 if (!pos) return null;
                 const violation = violations[bar.jobId];
+                // AC-23.7: a booked job a later downtime overlaps is outlined like a violation.
+                const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
@@ -137,6 +139,10 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const setup = changeover
                   ? `, starts with a ${bar.changeoverMinutes} min changeover${bar.setupGroup ? ` to ${bar.setupGroup}` : ""}${priced.length > 0 ? ` (${priced.join(", ")})` : ""}`
                   : "";
+                const tools =
+                  bar.secondaryResourceIds.length > 0
+                    ? `, with secondary ${bar.secondaryResourceIds.map((id) => resources.find((r) => r.id === id)?.code ?? shortId(id)).join(", ")}`
+                    : "";
                 return (
                   <g key={`${bar.jobId}-${bar.segment}`}>
                     <rect
@@ -152,7 +158,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                         styles[`tone${orderTone(bar.orderId)}`],
                         bar.lateMinutes > 0 && styles.late,
                         bar.firmed && styles.firmed,
-                        violation && styles.violation,
+                        (violation || bar.outsideCapacity) && styles.violation,
                         selectedJobId === bar.jobId && styles.selected,
                         dragging && styles.dragging,
                       )}
@@ -163,7 +169,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${late}${bar.firmed ? ", firmed" : ""}`}
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

@@ -24,15 +24,50 @@ var (
 	// SubcontractPORequested asks purchasing for the vendor PO of one subcontract
 	// operation of a released order (FR-21.10); the PRD's subcontract.po-requested.
 	SubcontractPORequested = events.Type(Context, "subcontract", "porequested", 1)
+	// SubcontractPOChanged tells purchasing that the quantity or price of an operation
+	// it was asked to buy changed; SubcontractPOCancelled that the request is withdrawn
+	// (order cancelled or merged away, operation removed, subcontracting turned off or the
+	// vendor changed). FR-21.10.
+	SubcontractPOChanged   = events.Type(Context, "subcontract", "pochanged", 1)
+	SubcontractPOCancelled = events.Type(Context, "subcontract", "pocancelled", 1)
 	// OperationStatusChanged reports an operation finished or reopened by its
 	// `:finish` or `:reopen` command (FR-21.6), for scheduling and the shop floor.
 	OperationStatusChanged = events.Type(Context, "operation", "statuschanged", 1)
+	// OrderChangeDetected reports an open order whose BOM or route snapshot an ECO
+	// superseded (FR-21.16); OrderChangeApplied that the planner applied the change,
+	// OrderChangeDismissed that it was set aside.
+	OrderChangeDetected  = events.Type(Context, "orderchange", "detected", 1)
+	OrderChangeApplied   = events.Type(Context, "orderchange", "applied", 1)
+	OrderChangeDismissed = events.Type(Context, "orderchange", "dismissed", 1)
+	// ParametersSaved reports the production parameters of a site created or replaced
+	// (PRD 4.21.13); the aggregate is the legal entity.
+	ParametersSaved = events.Type(Context, "parameters", "saved", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested, OperationStatusChanged}
+		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed, ParametersSaved}
+}
+
+// OrderChangeData is the payload of orderchange.detected.v1, .applied.v1 and
+// .dismissed.v1: the change record after the event. Counts are the delta between
+// the order and the ECO's BOM and route; ChangeCost is BR-21.12's new minus old
+// planned cost plus the profile surcharge, in the order currency.
+type OrderChangeData struct {
+	ChangeID     string `json:"changeId"`
+	OrderID      string `json:"orderId"`
+	OrderNumber  string `json:"orderNumber"`
+	EcoID        string `json:"ecoId"`
+	Status       string `json:"status"`
+	ProfileMode  string `json:"profileMode"`
+	NeedsReview  bool   `json:"needsReview"`
+	DeltaCount   int    `json:"deltaCount"`
+	ChangeCost   string `json:"changeCost"`
+	Currency     string `json:"currency"`
+	OrderVersion int    `json:"orderVersion"`
+	Actor        string `json:"actor"`
+	OccurredAt   string `json:"occurredAt"`
 }
 
 // OperationStatusChangedData is the payload of operation.statuschanged.v1: one
@@ -47,6 +82,45 @@ type OperationStatusChangedData struct {
 	OrderVersion int    `json:"orderVersion"`
 	Actor        string `json:"actor"`
 	OccurredAt   string `json:"occurredAt"`
+}
+
+// SubcontractPOChangedData is the payload of subcontract.pochanged.v1: the figures
+// purchasing was last given (Previous*) and the ones now in force, for the same
+// operation and vendor resource: quantity, unit price, amount (at 4 places) and
+// the due date (the order's delivery date until scheduling dates the operation).
+type SubcontractPOChangedData struct {
+	OrderID           string  `json:"orderId"`
+	OrderNumber       string  `json:"orderNumber"`
+	LegalEntityID     string  `json:"legalEntityId"`
+	OperNumber        int     `json:"operNumber"`
+	ResourceID        string  `json:"resourceId"`
+	PreviousQty       string  `json:"previousQty"`
+	Qty               string  `json:"qty"`
+	PreviousUnitPrice string  `json:"previousUnitPrice"`
+	UnitPrice         string  `json:"unitPrice"`
+	PreviousAmount    string  `json:"previousAmount"`
+	Amount            string  `json:"amount"`
+	Currency          string  `json:"currency"`
+	PreviousDueDate   *string `json:"previousDueDate"`
+	DueDate           *string `json:"dueDate"`
+	Actor             string  `json:"actor"`
+}
+
+// SubcontractPOCancelledData is the payload of subcontract.pocancelled.v1: the
+// request withdrawn, with the quantity and amount it had and the Reason
+// (order-cancelled, operation-removed, subcontract-off or vendor-changed).
+type SubcontractPOCancelledData struct {
+	OrderID       string `json:"orderId"`
+	OrderNumber   string `json:"orderNumber"`
+	LegalEntityID string `json:"legalEntityId"`
+	OperNumber    int    `json:"operNumber"`
+	ResourceID    string `json:"resourceId"`
+	Qty           string `json:"qty"`
+	UnitPrice     string `json:"unitPrice"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	Reason        string `json:"reason"`
+	Actor         string `json:"actor"`
 }
 
 // SubcontractPORequestedData is the payload of subcontract.porequested.v1: one
@@ -116,7 +190,7 @@ type OrderStatusChangedData struct {
 }
 
 // JournalLine is one posted line of journal.posted.v1: an issue of a BOM line,
-// hours on an operation, or the finished receipt. Quantities and amounts are
+// hours on an operation, the finished receipt, or a co-product receipt. Quantities and amounts are
 // decimal strings, negative on a reversal journal.
 type JournalLine struct {
 	Kind       string  `json:"kind"`
@@ -127,6 +201,8 @@ type JournalLine struct {
 	UnitCost   string  `json:"unitCost"`
 	Amount     string  `json:"amount"`
 	Hours      *string `json:"hours"`
+	// CoProductLineNo names the co-product line of a coproduct receipt (FR-21.14).
+	CoProductLineNo *string `json:"coProductLineNo,omitempty"`
 }
 
 // Posting is one ledger line of a journal or settlement, for the general
@@ -141,16 +217,18 @@ type Posting struct {
 // JournalPostedData is the payload of journal.posted.v1 (PRD 4.21.5).
 // JournalEntryID stays null until the general ledger (wave 11) books the postings.
 type JournalPostedData struct {
-	JournalID      string        `json:"journalId"`
-	JournalNumber  string        `json:"journalNumber"`
-	OrderID        string        `json:"orderId"`
-	Type           string        `json:"type"`
-	PostingDate    string        `json:"postingDate"`
-	Currency       string        `json:"currency"`
-	ReversalOf     *string       `json:"reversalOf"`
-	Lines          []JournalLine `json:"lines"`
-	Postings       []Posting     `json:"postings"`
-	JournalEntryID *string       `json:"journalEntryId"`
+	JournalID     string  `json:"journalId"`
+	JournalNumber string  `json:"journalNumber"`
+	OrderID       string  `json:"orderId"`
+	Type          string  `json:"type"`
+	PostingDate   string  `json:"postingDate"`
+	Currency      string  `json:"currency"`
+	ReversalOf    *string `json:"reversalOf"`
+	// CounterpartOrderID is the other order of a split-transfer journal (BR-21.11); null otherwise.
+	CounterpartOrderID *string       `json:"counterpartOrderId"`
+	Lines              []JournalLine `json:"lines"`
+	Postings           []Posting     `json:"postings"`
+	JournalEntryID     *string       `json:"journalEntryId"`
 }
 
 // CostByGroup is planned or actual cost per cost group, to the currency's minor unit.
@@ -257,4 +335,20 @@ type TriggerPointFiredData struct {
 	InsertedOperations []int           `json:"insertedOperations"`
 	ReworkOrderID      *string         `json:"reworkOrderId"`
 	Actor              string          `json:"actor"`
+}
+
+// ParametersSavedData is the payload of parameters.saved.v1: the parameters after the save.
+type ParametersSavedData struct {
+	LegalEntityID        string `json:"legalEntityId"`
+	SiteID               string `json:"siteId"`
+	RAFTolerancePct      string `json:"rafTolerancePct"`
+	OverConsumptionPct   string `json:"overConsumptionPct"`
+	AutoStartOnFeedback  bool   `json:"autoStartOnFeedback"`
+	EstimateOnCreate     bool   `json:"estimateOnCreate"`
+	SplitAllocation      string `json:"splitAllocation"`
+	TriggerPointsEnabled bool   `json:"triggerPointsEnabled"`
+	AsBuiltRequired      bool   `json:"asBuiltRequired"`
+	Version              int    `json:"version"`
+	Actor                string `json:"actor"`
+	OccurredAt           string `json:"occurredAt"`
 }

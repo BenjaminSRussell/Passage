@@ -129,6 +129,13 @@ type Store interface {
 	ListProcedures(ctx context.Context, legalEntityID string, limit int) ([]domain.Procedure, error)
 	ReviseProcedure(ctx context.Context, id string, revision int, steps []domain.ProcedureStep, idempotencyKey string) (domain.Procedure, error)
 	ActivateProcedure(ctx context.Context, id string, idempotencyKey string) (domain.Procedure, error)
+	CreateFreeGoodsRule(ctx context.Context, r domain.FreeGoodsDef, idempotencyKey string) (domain.FreeGoodsDef, error)
+	GetFreeGoodsRule(ctx context.Context, id string) (domain.FreeGoodsDef, error)
+	ListFreeGoodsRules(ctx context.Context, legalEntityID, productID string, limit int) ([]domain.FreeGoodsDef, error)
+	ActiveFreeGoodsRules(ctx context.Context, legalEntityID string, productIDs []string, asOf time.Time) ([]domain.FreeGoodsDef, error)
+	WithdrawFreeGoodsRule(ctx context.Context, id string, version int, idempotencyKey string) (domain.FreeGoodsDef, error)
+	ReviseAgreement(ctx context.Context, rev AgreementRevision, idempotencyKey string) (domain.RebateAgreement, error)
+	CloseAgreement(ctx context.Context, id string, version int, closeDate time.Time, idempotencyKey string) (domain.RebateAgreement, error)
 	Ping(ctx context.Context) error
 }
 

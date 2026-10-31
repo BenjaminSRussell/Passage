@@ -15,3 +15,9 @@ config:
   reopenApprovers: 2
   lockWaitMs: 5000
   reopenSweepInterval: 1m
+
+ledgerUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+  publicKeys: ""

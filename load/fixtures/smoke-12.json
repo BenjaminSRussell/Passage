@@ -14,8 +14,7 @@
         {"action": "create_goods_receipt", "method": "POST", "path": "/api/v1/receiving/receipts"},
         {"action": "post_goods_receipt", "method": "POST", "path": "/api/v1/receiving/receipts/{id}:post"},
         {"action": "post_vendor_invoice", "method": "POST", "path": "/api/v1/receiving/invoices:post"},
-        {"action": "run_payment", "method": "POST", "path": "/api/v1/payables/payment-runs",
-         "unverified": "payables serves only settlements:preview and payment-files:preview; no payment run route on main"}
+        {"action": "run_payment", "method": "POST", "path": "/api/v1/payables/payment-runs"}
       ],
       "assert": "vendor invoice is paid, GR/IR is cleared for the receipt and the AP subledger equals the journal control account"
     },

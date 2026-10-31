@@ -52,7 +52,7 @@ func TestProposalFlow_RealStoreAndFXServer(t *testing.T) {
 	seed(itemTwo, vendorOne, "2026-01-08", "EUR", "200.00")
 	held := seed(itemThree, vendorTwo, "2026-01-09", "USD", "75.00")
 	seed("00000000-0000-0000-0000-0000000000f4", vendorTwo, "2026-02-09", "USD", "75.00")
-	if err := pg.SetPaymentHold(seedCtx, held.ID, true); err != nil {
+	if _, err := pg.SetPaymentHold(seedCtx, held.ID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,8 +1,6 @@
 package domain
 
 import (
-	"math"
-
 	"github.com/shopspring/decimal"
 )
 
@@ -24,8 +22,7 @@ const (
 	MethodAQL     Method = "AQL"
 )
 
-// InspectionLevelII is the default general inspection level (FR-33.2). Other
-// levels need Table I rows that are not loaded in this slice.
+// InspectionLevelII is the default general inspection level (FR-33.2).
 const InspectionLevelII = "II"
 
 // SamplingPlan is the sampling rule of a test group association or a manual order.
@@ -48,67 +45,25 @@ type SampleDraw struct {
 	InspectionLevel string          `json:"inspectionLevel"`
 }
 
-type codeBand struct {
-	upTo   int64
-	letter string
-}
+// storedAQLs are the AQL columns a plan stored on an association or a manual
+// order may name: the quality_association.aql column is numeric(4,2) and the
+// web plan form offers these three. Sizing itself (DrawSample) has every column.
+var storedAQLs = []string{"1.0", "2.5", "4.0"}
 
-// codeLetterLevelII is Z1.4 Table I for general inspection level II.
-var codeLetterLevelII = []codeBand{
-	{8, "A"}, {15, "B"}, {25, "C"}, {50, "D"}, {90, "E"}, {150, "F"}, {280, "G"}, {500, "H"},
-	{1200, "J"}, {3200, "K"}, {10000, "L"}, {35000, "M"}, {150000, "N"}, {500000, "P"}, {math.MaxInt64, "Q"},
-}
-
-// sampleSize is the sample size n for each code letter (Table I).
-var sampleSize = map[string]int64{
-	"A": 2, "B": 3, "C": 5, "D": 8, "E": 13, "F": 20, "G": 32, "H": 50, "J": 80,
-	"K": 125, "L": 200, "M": 315, "N": 500, "P": 800, "Q": 1250,
-}
-
-// cell is one Table II-A entry after arrow resolution: the code letter whose
-// sample size applies and its acceptance and rejection numbers.
-type cell struct {
-	letter string
-	ac, re int
-}
-
-// aqlColumns maps the AQL values loaded in this slice to their column index.
-var aqlColumns = map[string]int{"1.0": 0, "2.5": 1, "4.0": 2}
-
-// normalSingle is the excerpt of Table II-A (normal, single sampling) used by
-// BR-33.1, columns AQL 1.0, 2.5, 4.0. Arrow cells are stored resolved.
-var normalSingle = map[string][3]cell{
-	"A": {{"E", 0, 1}, {"D", 0, 1}, {"C", 0, 1}},
-	"B": {{"E", 0, 1}, {"D", 0, 1}, {"C", 0, 1}},
-	"C": {{"E", 0, 1}, {"D", 0, 1}, {"C", 0, 1}},
-	"D": {{"E", 0, 1}, {"D", 0, 1}, {"E", 1, 2}},
-	"E": {{"E", 0, 1}, {"F", 1, 2}, {"E", 1, 2}},
-	"F": {{"G", 1, 2}, {"F", 1, 2}, {"F", 2, 3}},
-	"G": {{"G", 1, 2}, {"G", 2, 3}, {"G", 3, 4}},
-	"H": {{"H", 2, 3}, {"H", 3, 4}, {"H", 5, 6}},
-	"J": {{"J", 3, 4}, {"J", 5, 6}, {"J", 7, 8}},
-	"K": {{"K", 5, 6}, {"K", 7, 8}, {"K", 10, 11}},
-	"L": {{"L", 7, 8}, {"L", 10, 11}, {"L", 14, 15}},
-	"M": {{"M", 10, 11}, {"M", 14, 15}, {"M", 21, 22}},
-	"N": {{"N", 14, 15}, {"N", 21, 22}, {"N", 21, 22}},
-	"P": {{"P", 21, 22}, {"P", 21, 22}, {"P", 21, 22}},
-	"Q": {{"Q", 21, 22}, {"Q", 21, 22}, {"Q", 21, 22}},
-}
-
-// AQLSupported reports whether the Z1.4 excerpt loaded in this slice has the AQL column.
+// AQLSupported reports whether a plan stored on an association or a manual order
+// may use the AQL value (see storedAQLs).
 func AQLSupported(aql decimal.Decimal) bool {
-	_, ok := aqlColumns[aql.StringFixed(1)]
-	return ok && aql.Equal(decimal.RequireFromString(aql.StringFixed(1)))
-}
-
-// CodeLetter returns the Z1.4 code letter for a lot of n units at level II.
-func CodeLetter(lot int64) string {
-	for _, b := range codeLetterLevelII {
-		if lot <= b.upTo {
-			return b.letter
+	for _, s := range storedAQLs {
+		if aql.Equal(decimal.RequireFromString(s)) {
+			return true
 		}
 	}
-	return "Q"
+	return false
+}
+
+func validLevel(level string) bool {
+	_, ok := tableI[level]
+	return ok
 }
 
 // DrawSample sizes the sample for a lot. An AQL sample larger than the lot is
@@ -121,8 +76,8 @@ func DrawSample(p SamplingPlan, lot decimal.Decimal) (SampleDraw, error) {
 	if level == "" {
 		level = InspectionLevelII
 	}
-	if level != InspectionLevelII {
-		return SampleDraw{}, fail(CodeTableNotLoaded, "inspection level "+level+" is not loaded yet")
+	if !validLevel(level) {
+		return SampleDraw{}, invalid("inspectionLevel must be S-1, S-2, S-3, S-4, I, II or III")
 	}
 	sev := p.Severity
 	if sev == "" {
@@ -150,20 +105,25 @@ func DrawSample(p SamplingPlan, lot decimal.Decimal) (SampleDraw, error) {
 }
 
 func drawAQL(aql, lot decimal.Decimal, sev Severity, level string) (SampleDraw, error) {
-	if sev != SeverityNormal {
-		return SampleDraw{}, fail(CodeTableNotLoaded, "severity "+string(sev)+" needs Table II-B or II-C, not loaded yet")
+	if _, ok := masterTables[sev]; !ok {
+		return SampleDraw{}, invalid("severity must be NORMAL, TIGHTENED or REDUCED")
 	}
 	if !isWhole(lot) || lot.LessThan(decimal.NewFromInt(2)) {
 		return SampleDraw{}, invalid("AQL sizing needs a whole lot of at least 2")
 	}
-	if !AQLSupported(aql) {
-		return SampleDraw{}, fail(CodeTableNotLoaded, "AQL column is not loaded; this slice has 1.0, 2.5 and 4.0")
+	if _, ok := aqlColumn(aql); !ok {
+		return SampleDraw{}, fail(CodeTableNotLoaded, "AQL is not a Z1.4 column (0.010 to 1000)")
 	}
-	col := aqlColumns[aql.StringFixed(1)]
-	letter := CodeLetter(lot.IntPart())
-	c := normalSingle[letter][col]
-	n := decimal.NewFromInt(sampleSize[c.letter])
-	return SampleDraw{CodeLetter: letter, SampleQty: decimal.Min(n, lot), AcceptNo: c.ac, RejectNo: c.re, Severity: sev, InspectionLevel: level}, nil
+	n := lot.IntPart()
+	if !lot.Equal(decimal.NewFromInt(n)) { // beyond int64
+		n = 1<<63 - 1
+	}
+	letter, _ := Z14CodeLetter(level, n)
+	plan, ok := Z14Resolve(sev, letter, aql)
+	if !ok {
+		return SampleDraw{}, fail(CodeTableNotLoaded, "no Z1.4 plan for code letter "+letter)
+	}
+	return SampleDraw{CodeLetter: letter, SampleQty: decimal.Min(decimal.NewFromInt(plan.SampleSize), lot), AcceptNo: plan.AcceptNo, RejectNo: plan.RejectNo, Severity: sev, InspectionLevel: level}, nil
 }
 
 func isWhole(d decimal.Decimal) bool { return d.Equal(d.Floor()) }
@@ -181,17 +141,21 @@ func SampleCount(sampleQty decimal.Decimal) int {
 
 // ValidatePlan returns field errors (keyed under prefix) for a sampling plan
 // stored on an association or sent with a manual order, so a plan that cannot
-// size a sample is refused when it is saved rather than on every order.
+// size a sample is refused when it is saved rather than on every order. Sizing
+// has every Z1.4 level, AQL and severity, but a stored plan is still level II,
+// NORMAL and AQL 1.0, 2.5 or 4.0: the association columns hold only those,
+// switching (BR-33.2) is not applied, and evaluating a reduced lot between Ac
+// and Re (accept, reinstate normal) is not built.
 func ValidatePlan(prefix string, p SamplingPlan) map[string]string {
 	fields := map[string]string{}
 	if p.InspectionLevel != "" && p.InspectionLevel != InspectionLevelII {
-		fields[prefix+".inspectionLevel"] = "only level II is loaded in this slice"
+		fields[prefix+".inspectionLevel"] = "only level II is stored on associations and orders yet"
 	}
 	switch p.Severity {
 	case "", SeverityNormal:
 	case SeverityTightened, SeverityReduced:
 		if p.Method == MethodAQL {
-			fields[prefix+".severity"] = "Tables II-B and II-C are not loaded yet; use NORMAL"
+			fields[prefix+".severity"] = "stored AQL plans are NORMAL until switching is applied"
 		}
 	default:
 		fields[prefix+".severity"] = "must be NORMAL, TIGHTENED or REDUCED"
@@ -207,7 +171,7 @@ func ValidatePlan(prefix string, p SamplingPlan) map[string]string {
 		}
 	case MethodAQL:
 		if !AQLSupported(p.AQL) {
-			fields[prefix+".aql"] = "must be 1.0, 2.5 or 4.0 in this slice"
+			fields[prefix+".aql"] = "must be 1.0, 2.5 or 4.0 on a stored plan"
 		}
 	default:
 		fields[prefix+".method"] = "must be FIXED, PERCENT or AQL"

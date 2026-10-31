@@ -48,7 +48,7 @@ func newEffectiveRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
 }
 
 func getReport(router http.Handler, tenantID, path string, duties ...string) *httptest.ResponseRecorder {
-	return getReportScoped(router, tenantID, "", path, duties...)
+	return getReportScoped(router, tenantID, "", path, append([]string{tenant.DutyAllScope}, duties...)...)
 }
 
 func getReportScoped(router http.Handler, tenantID, legalEntityID, path string, duties ...string) *httptest.ResponseRecorder {
@@ -158,7 +158,10 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403, body = %s", rec.Code, rec.Body.String())
 		}
-		if rec := getReportScoped(router, tenantA, "*", path, view); rec.Code != http.StatusOK {
+		if rec := getReportScoped(router, tenantA, "", path, view); rec.Code != http.StatusForbidden {
+			t.Fatalf("unscoped caller without all-scope duty: status = %d, want 403", rec.Code)
+		}
+		if rec := getReport(router, tenantA, path, view); rec.Code != http.StatusOK {
 			t.Fatalf("all-entity caller status = %d", rec.Code)
 		}
 	})
@@ -193,4 +196,43 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestEffectivePermissionsThroughTenantMiddleware_AllScopeIsReadOnly(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	router := tenant.Middleware(newEffectiveRouter(t, app))
+	path := "/v1/identity/users/" + userID + "/effective-permissions"
+	call := func(method, duties string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set(tenant.HeaderTenant, tenantA)
+		req.Header.Set(tenant.HeaderUser, "caller")
+		req.Header.Set(tenant.HeaderDuties, duties)
+		req.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := call(http.MethodGet, "View effective permissions,"+tenant.DutyAllScope); rec.Code != http.StatusOK {
+		t.Fatalf("GET with ALL and the duty: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(http.MethodGet, "View effective permissions"); rec.Code != http.StatusForbidden {
+		t.Fatalf("GET with ALL but no all-scope duty: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(http.MethodGet, tenant.DutyAllScope); rec.Code != http.StatusForbidden {
+		t.Fatalf("GET with ALL but no view duty: %d %s", rec.Code, rec.Body)
+	}
+	var seen bool
+	probe := tenant.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		p, _ := tenant.FromContext(r.Context())
+		seen = p.HasDuty(tenant.DutyAllScope)
+	}))
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set(tenant.HeaderTenant, tenantA)
+	req.Header.Set(tenant.HeaderDuties, tenant.DutyAllScope)
+	req.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
+	probe.ServeHTTP(httptest.NewRecorder(), req)
+	if seen {
+		t.Fatal("POST with ALL kept the all-scope duty")
+	}
 }

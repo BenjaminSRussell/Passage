@@ -15,25 +15,42 @@ import styles from "./pages.module.css";
 
 export function EngineeringHome({
   onOpenWhereUsed,
+  onOpenBoms,
   onOpenRoutes,
   onOpenResources,
   onOpenResourceGroups,
   onOpenCapabilities,
+  onOpenCalendars,
 }: {
   onOpenWhereUsed?: () => void;
+  onOpenBoms?: () => void;
   onOpenRoutes?: () => void;
   onOpenResources?: () => void;
   onOpenResourceGroups?: () => void;
   onOpenCapabilities?: () => void;
+  onOpenCalendars?: () => void;
 }) {
   const resourceCards = [
     { title: "Resources", text: "Machines, tools, labor, vendors and locations, with their capabilities and calendars.", open: onOpenResources },
     { title: "Resource groups", text: "Groups of resources by site, each linking to its members.", open: onOpenResourceGroups },
     { title: "Capabilities", text: "Skills and abilities, each linking to the resources that hold it.", open: onOpenCapabilities },
+    { title: "Work calendars", text: "Shift calendars with their weekly template, closed dates and generated days.", open: onOpenCalendars },
   ];
   return (
     <>
       <PageHeader title="Engineering data" description="Bills of material, routings and change orders." />
+      <Card
+        title="Bills of material"
+        actions={
+          onOpenBoms ? (
+            <Button size="sm" onClick={onOpenBoms}>
+              Open Bills of material
+            </Button>
+          ) : undefined
+        }
+      >
+        <p className={styles.lead}>Browse BOM versions and their components, and create new versions.</p>
+      </Card>
       <Card
         title="Routings"
         actions={

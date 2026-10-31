@@ -41,6 +41,10 @@ const columns: DataTableColumn<SubcontractRow>[] = [
         <Badge tone="info">
           Requested <time dateTime={row.poRequestedAt}>{row.poRequestedAt.slice(0, 10)}</time>
         </Badge>
+      ) : row.poCancelledAt ? (
+        <Badge tone="warning">
+          Withdrawn <time dateTime={row.poCancelledAt}>{row.poCancelledAt.slice(0, 10)}</time>
+        </Badge>
       ) : (
         <Badge tone="neutral">At release</Badge>
       ),

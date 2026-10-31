@@ -19,6 +19,11 @@ Quarterly, first Tuesday 14:00 UTC (`gameday.cron`). Pass: RTO <= 1 h, RPO <= 5 
    workflows resumed and reconciliation jobs are green.
 6. Run the 12-process smoke suite (`fx-smoke-12`) in the new primary:
    `SMOKE_TOKEN=... python3 load/tools/smoke12.py --base-url <new primary> --report smoke.json`.
-7. Measure RTO and RPO. CDC lag must recover below 60 s within 15 min (AC-50.4).
+7. Measure RTO and RPO. Write the failover timeline (`fencedAt`, `dnsVerifiedAt`, `lagAtFenceSeconds`) and run
+   `python3 deploy/multi-region/gameday/score.py --timeline timeline.json --verify-report report.json`
+   (RTO, RPO and the step 5 verify report against the chart targets). The verify report covers rows up to
+   the baseline only; commits acknowledged between the baseline and the fence are covered only when the old
+   primary is read back fenced and compared (as `deploy/multi-region/gameday/local_drill.py` does).
+   CDC lag must recover below 60 s within 15 min (AC-50.4).
 8. Fail back in a planned window ([failback](failback.md)).
 9. Post-game review; actions tracked to closure. Publish the game-day report (SOC 2 CC7.5 evidence).

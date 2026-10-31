@@ -22,7 +22,7 @@ func TestClassify_BR25_4(t *testing.T) {
 		gaps     []SeqGap
 	}{
 		{"first batch with no history accepts without gap", 0, []MachineEvent{{Seq: 5, At: at(0)}, {Seq: 6, At: at(1)}}, []int64{5, 6}, 0, 0, nil},
-		{"seq at or below last seen is dropped", 6, []MachineEvent{{Seq: 6, At: at(0)}, {Seq: 7, At: at(1)}}, []int64{7}, 1, 0, nil},
+		{"seq at or below last seen is late, for the store to check", 6, []MachineEvent{{Seq: 6, At: at(0)}, {Seq: 7, At: at(1)}}, []int64{7}, 0, 0, nil},
 		{"out of order batch is sorted and gaps reported", 2, []MachineEvent{{Seq: 6, At: at(0)}, {Seq: 4, At: at(1)}}, []int64{4, 6}, 0, 0, []SeqGap{{From: 3, To: 3}, {From: 5, To: 5}}},
 		{"event older than 7 days is stale", 0, []MachineEvent{{Seq: 1, At: floorNow.Add(-MaxEventAge - time.Second)}, {Seq: 2, At: at(0)}}, []int64{2}, 1, 1, nil},
 		{"duplicate within batch counts once", 0, []MachineEvent{{Seq: 3, At: at(0)}, {Seq: 3, At: at(0)}}, []int64{3}, 1, 0, nil},
@@ -48,8 +48,23 @@ func TestClassify_BR25_4(t *testing.T) {
 	}
 }
 
-// Property: accepted events strictly increase past lastSeq, nothing is lost or
-// double counted, and every gap is a non-empty run of missing sequence numbers.
+// Regression (AC-25.3): the ingest reports seq 7-8 as a gap after 9 arrived, so
+// the edge replays 7 and 8 below the high-water mark. They must come back as late
+// (the store keeps them unless stored), not be dropped as duplicates; a repeat
+// within the replay counts once, and no new gap is reported for late events.
+func TestClassify_GapReplayIsLateNotDropped(t *testing.T) {
+	c := Classify(9, floorNow, []MachineEvent{{Seq: 8, At: floorNow}, {Seq: 7, At: floorNow}, {Seq: 8, At: floorNow}, {Seq: 10, At: floorNow}})
+	if got := seqs(c.Late); !equalSeqs(got, []int64{7, 8}) {
+		t.Fatalf("late %v, want [7 8]", got)
+	}
+	if got := seqs(c.Accepted); !equalSeqs(got, []int64{10}) || c.Dropped != 1 || len(c.Gaps) != 0 {
+		t.Fatalf("accepted %v dropped %d gaps %+v, want [10] 1 none", got, c.Dropped, c.Gaps)
+	}
+}
+
+// Property: accepted events strictly increase past lastSeq, late events are at
+// or below it and distinct, nothing is lost or double counted, and every gap is
+// a non-empty run of missing sequence numbers above lastSeq.
 func TestClassify_PropertyNoLossNoDuplicate(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		last := rapid.Int64Range(0, 50).Draw(t, "lastSeq")
@@ -66,8 +81,22 @@ func TestClassify_PropertyNoLossNoDuplicate(t *testing.T) {
 			}
 			prev = e.Seq
 		}
-		if len(c.Accepted)+c.Dropped != n {
-			t.Fatalf("accepted %d + dropped %d != %d", len(c.Accepted), c.Dropped, n)
+		prevLate := int64(0)
+		for _, e := range c.Late {
+			if e.Seq > last || e.Seq <= prevLate {
+				t.Fatalf("late %d after %d with lastSeq %d", e.Seq, prevLate, last)
+			}
+			prevLate = e.Seq
+		}
+		if len(c.Accepted)+len(c.Late)+c.Dropped != n {
+			t.Fatalf("accepted %d + late %d + dropped %d != %d", len(c.Accepted), len(c.Late), c.Dropped, n)
+		}
+		distinct := map[int64]bool{}
+		for _, e := range in {
+			distinct[e.Seq] = true
+		}
+		if len(c.Accepted)+len(c.Late) != len(distinct) {
+			t.Fatalf("kept %d events, want one per distinct seq (%d)", len(c.Accepted)+len(c.Late), len(distinct))
 		}
 		for _, g := range c.Gaps {
 			if g.From > g.To || g.From <= last {

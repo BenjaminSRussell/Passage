@@ -8,10 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
+	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 	"github.com/BenjaminSRussell/passage/services/party/internal/vies"
@@ -21,6 +26,8 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+
+	defaultVIESTimeout = 5 * time.Second
 )
 
 func main() {
@@ -43,6 +50,9 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -62,14 +72,28 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 		slog.Info("migrations applied")
 	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	var sequencer api.Sequencer = numbering.Unavailable{}
 	if url := getenv("NUMBERING_URL"); url != "" {
-		sequencer = numbering.New(url)
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		sequencer = numbering.New(url).WithSigner(signer)
 	} else {
 		slog.Warn("NUMBERING_URL is empty, party creation returns 503 until it is set")
 	}
-	parties := store.New(pool)
-	a := api.New(vies.Unavailable{}, parties, parties, sequencer).WithCredit(parties)
+	keys, err := fieldcrypt.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("field encryption keys: %w", err)
+	}
+	if keys == nil {
+		slog.Warn("FIELDCRYPT_KEYS is empty, vendor bank accounts cannot be stored or read until it is set")
+	}
+	parties := store.New(pool).WithKeys(keys)
+	a := api.New(taxChecker(getenv), parties, parties, sequencer).WithCredit(parties).WithVendors(parties)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -88,4 +112,17 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func taxChecker(getenv func(string) string) domain.Checker {
+	url := getenv("PARTY_VIES_URL")
+	if url == "" {
+		slog.Warn("PARTY_VIES_URL is empty, VAT numbers stay unverified")
+		return vies.Unavailable{}
+	}
+	timeout := defaultVIESTimeout
+	if ms, err := strconv.Atoi(getenv("PARTY_VIES_TIMEOUT_MS")); err == nil && ms > 0 {
+		timeout = time.Duration(ms) * time.Millisecond
+	}
+	return vies.New(url, timeout)
 }

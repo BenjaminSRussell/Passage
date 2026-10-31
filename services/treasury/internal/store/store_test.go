@@ -42,7 +42,7 @@ func newStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
 
 // ctxFor is a principal of tenant n; an empty legal entity means every entity.
 func ctxFor(n int, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID, UserID: "user-test", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID, UserID: "user-test", Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 func problemCode(t *testing.T, err error) string {

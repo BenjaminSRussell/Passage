@@ -80,7 +80,7 @@ func (f *fakeStore) ListGateVisits(_ context.Context, filter store.GateVisitFilt
 	return []domain.GateVisit{f.visit}, nil
 }
 
-func (f *fakeStore) CreateGoodsInTransit(_ context.Context, voyage, incoterm, site string, lines []int, idem store.Idem) (domain.GoodsInTransit, error) {
+func (f *fakeStore) CreateGoodsInTransit(_ context.Context, voyage, incoterm, site, legalEntity string, lines []int, idem store.Idem) (domain.GoodsInTransit, error) {
 	f.gitCall = fakeGITCreate{voyageID: voyage, incoterm: incoterm, siteID: site, lines: lines, idem: idem}
 	return f.git, f.gitErr
 }

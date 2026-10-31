@@ -36,28 +36,32 @@ const (
 	KindIssue   = "issue"
 	KindHours   = "hours"
 	KindReceipt = "receipt"
+	// KindCoProduct is the receipt of a co-product or by-product (FR-21.14).
+	KindCoProduct = "coproduct"
 )
 
 // Journal is a production journal (PRD 4.21.4 ProductionJournal) with its
 // lines and, once posted, its WIP postings.
 type Journal struct {
-	ID             string             `json:"id"`
-	OrderID        string             `json:"orderId"`
-	Type           domain.JournalType `json:"type"`
-	JournalNumber  string             `json:"journalNumber"`
-	PostingDate    string             `json:"postingDate"`
-	Posted         bool               `json:"posted"`
-	PostedAt       *time.Time         `json:"postedAt,omitempty"`
-	PostedBy       *string            `json:"postedBy,omitempty"`
-	QtyGood        decimal.Decimal    `json:"qtyGood"`
-	QtyError       decimal.Decimal    `json:"qtyError"`
-	ReversalOf     *string            `json:"reversalOf,omitempty"`
-	ReversedBy     *string            `json:"reversedBy,omitempty"`
-	JournalEntryID *string            `json:"journalEntryId,omitempty"`
-	CreatedBy      string             `json:"createdBy"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	Lines          []JournalLine      `json:"lines"`
-	Postings       []domain.Posting   `json:"postings"`
+	ID            string             `json:"id"`
+	OrderID       string             `json:"orderId"`
+	Type          domain.JournalType `json:"type"`
+	JournalNumber string             `json:"journalNumber"`
+	PostingDate   string             `json:"postingDate"`
+	Posted        bool               `json:"posted"`
+	PostedAt      *time.Time         `json:"postedAt,omitempty"`
+	PostedBy      *string            `json:"postedBy,omitempty"`
+	QtyGood       decimal.Decimal    `json:"qtyGood"`
+	QtyError      decimal.Decimal    `json:"qtyError"`
+	ReversalOf    *string            `json:"reversalOf,omitempty"`
+	ReversedBy    *string            `json:"reversedBy,omitempty"`
+	// CounterpartOrderID is the other order of a split transfer (BR-21.11).
+	CounterpartOrderID *string          `json:"counterpartOrderId,omitempty"`
+	JournalEntryID     *string          `json:"journalEntryId,omitempty"`
+	CreatedBy          string           `json:"createdBy"`
+	CreatedAt          time.Time        `json:"createdAt"`
+	Lines              []JournalLine    `json:"lines"`
+	Postings           []domain.Posting `json:"postings"`
 	// TriggerFirings are the trigger points a posted route card made due (FR-21.17).
 	TriggerFirings []TriggerFiring `json:"triggerFirings,omitempty"`
 }
@@ -66,17 +70,19 @@ type Journal struct {
 // on an operation (Qty is the hours, with good and error quantities), or the
 // finished receipt of a report as finished (Qty is the good quantity).
 type JournalLine struct {
-	Kind           string          `json:"kind"`
-	LineNo         *string         `json:"lineNo,omitempty"`
-	OperNumber     *int            `json:"operNumber,omitempty"`
-	ItemID         *string         `json:"itemId,omitempty"`
-	Qty            decimal.Decimal `json:"qty"`
-	QtyGood        decimal.Decimal `json:"qtyGood"`
-	QtyError       decimal.Decimal `json:"qtyError"`
-	Finished       bool            `json:"finished"`
-	UnitCost       decimal.Decimal `json:"unitCost"`
-	Amount         decimal.Decimal `json:"amount"`
-	OverheadAmount decimal.Decimal `json:"overheadAmount"`
+	Kind       string  `json:"kind"`
+	LineNo     *string `json:"lineNo,omitempty"`
+	OperNumber *int    `json:"operNumber,omitempty"`
+	// CoProductLineNo names the order's co-product line of a coproduct receipt.
+	CoProductLineNo *string         `json:"coProductLineNo,omitempty"`
+	ItemID          *string         `json:"itemId,omitempty"`
+	Qty             decimal.Decimal `json:"qty"`
+	QtyGood         decimal.Decimal `json:"qtyGood"`
+	QtyError        decimal.Decimal `json:"qtyError"`
+	Finished        bool            `json:"finished"`
+	UnitCost        decimal.Decimal `json:"unitCost"`
+	Amount          decimal.Decimal `json:"amount"`
+	OverheadAmount  decimal.Decimal `json:"overheadAmount"`
 }
 
 // IssueInput is an explicit picking line. A nil UnitCost issues at the line's
@@ -102,18 +108,22 @@ type HoursInput struct {
 // report as finished over finish-flushed lines. AutoStart lets a route card be
 // created on a Released order (FR-21.6).
 type NewJournal struct {
-	OrderID        string
-	Type           domain.JournalType
-	PostingDate    string
-	Proposal       domain.Proposal
-	QtyGood        decimal.Decimal
-	QtyError       decimal.Decimal
-	Issues         []IssueInput
-	Hours          []HoursInput
-	AutoStart      bool
-	Actor          string
-	IdempotencyKey string
-	RequestHash    string
+	OrderID     string
+	Type        domain.JournalType
+	PostingDate string
+	Proposal    domain.Proposal
+	QtyGood     decimal.Decimal
+	QtyError    decimal.Decimal
+	Issues      []IssueInput
+	Hours       []HoursInput
+	// CoProducts are the co-product receipts of a report as finished;
+	// CoProductsProportional proposes them from the product quantity instead.
+	CoProducts             []CoProductInput
+	CoProductsProportional bool
+	AutoStart              bool
+	Actor                  string
+	IdempotencyKey         string
+	RequestHash            string
 }
 
 // PostRequest posts a draft journal. The duty and the two tolerances come
@@ -170,7 +180,11 @@ func (s *Postgres) CreateJournal(ctx context.Context, in NewJournal) (Journal, b
 		if err != nil {
 			return err
 		}
-		if !domain.JournalAllowed(in.Type, h.status, in.AutoStart) {
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{AutoStartOnFeedback: in.AutoStart})
+		if err != nil {
+			return err
+		}
+		if !domain.JournalAllowed(in.Type, h.status, prm.AutoStartOnFeedback) {
 			return journalNotAllowed(in.Type, h.status)
 		}
 		if in.PostingDate == "" {
@@ -197,7 +211,11 @@ func createJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead
 	if err != nil {
 		return Journal{}, err
 	}
-	planned, err := planJournal(in, *h, lines, ops)
+	cos, err := loadCoProducts(ctx, tx, tenantID, h.id)
+	if err != nil {
+		return Journal{}, err
+	}
+	planned, err := planJournal(in, *h, lines, ops, cos)
 	if err != nil {
 		return Journal{}, err
 	}
@@ -226,16 +244,22 @@ func lineProblem(format string, args ...any) error {
 // planJournal builds the lines of a new journal from explicit input or from
 // the proposal. The share of a proportional proposal is the order's reported
 // quantity (good and error, including this RAF) over its quantity.
-func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []domain.Operation) ([]JournalLine, error) {
+func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []domain.Operation, cos []domain.CoProduct) ([]JournalLine, error) {
 	reported := h.qtyRAF.Add(h.qtyError)
 	if in.Type == domain.JournalReportFinished {
 		reported = reported.Add(in.QtyGood).Add(in.QtyError)
 	}
-	share := reported.Div(h.quantity)
 	var out []JournalLine
 	if in.Type == domain.JournalReportFinished {
 		product := h.productID
 		out = append(out, JournalLine{Kind: KindReceipt, ItemID: &product, Qty: in.QtyGood, QtyGood: in.QtyGood, QtyError: in.QtyError})
+		coLines, err := planCoProducts(in, h, cos)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, coLines...)
+	} else if len(in.CoProducts) > 0 || in.CoProductsProportional {
+		return nil, lineProblem("only a report as finished takes co-products")
 	}
 	switch in.Type {
 	case domain.JournalPickingList, domain.JournalReportFinished:
@@ -266,7 +290,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 			if !proposed {
 				continue
 			}
-			if q := domain.ProposeQty(in.Proposal, l.QtyRequired, l.QtyConsumed, share); q.IsPositive() {
+			if q := domain.ProposeQty(in.Proposal, l.QtyRequired, l.QtyConsumed, reported, h.quantity); q.IsPositive() {
 				out = append(out, issueLine(l, q, l.UnitCost))
 			}
 		}
@@ -299,7 +323,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 				continue
 			}
 			planned := op.SetupH.Add(op.RunHPer.Mul(op.ProcessQty))
-			if hours := domain.ProposeHours(in.Proposal, planned, op.HoursReported, share); !hours.LessThan(domain.MinHours) {
+			if hours := domain.ProposeHours(in.Proposal, planned, op.HoursReported, reported, h.quantity); !hours.LessThan(domain.MinHours) {
 				out = append(out, hoursLine(op, hours, decimal.Zero, decimal.Zero, false))
 			}
 		}
@@ -363,10 +387,10 @@ func nextJournalNumber(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 func insertJournalLines(ctx context.Context, tx pgx.Tx, tenantID, journalID string, lines []JournalLine) error {
 	for i, l := range lines {
 		if _, err := tx.Exec(ctx, `insert into production_journal_line (tenant_id, journal_id, line_seq, kind, bom_line_number, oper_number, item_id,
-				qty, qty_good, qty_error, finish_operation, unit_cost, amount, overhead_amount)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				qty, qty_good, qty_error, finish_operation, unit_cost, amount, overhead_amount, coproduct_line_number)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			tenantID, journalID, i+1, l.Kind, l.LineNo, l.OperNumber, l.ItemID, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(),
-			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String()); err != nil {
+			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String(), l.CoProductLineNo); err != nil {
 			return err
 		}
 	}
@@ -415,7 +439,12 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 		if j.Posted {
 			return httpx.NewProblem(http.StatusConflict, CodeJournalPosted, "the journal is already posted")
 		}
-		if !domain.JournalAllowed(j.Type, h.status, r.AutoStart) {
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{AutoStartOnFeedback: r.AutoStart,
+			OverConsumptionPct: r.OverConsumptionPct, RAFTolerancePct: r.RAFTolerancePct})
+		if err != nil {
+			return err
+		}
+		if !domain.JournalAllowed(j.Type, h.status, prm.AutoStartOnFeedback) {
 			return journalNotAllowed(j.Type, h.status)
 		}
 		from := h.status
@@ -429,7 +458,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: r.OverConsumptionPct, rafTolerancePct: r.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}
@@ -495,7 +524,14 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 		return err
 	}
 	var plannedTotal decimal.Decimal
+	var cos []domain.CoProduct
+	costBase := h.quantity
 	if j.Type == domain.JournalReportFinished {
+		if cos, err = loadCoProducts(ctx, tx, tenantID, h.id); err != nil {
+			return err
+		}
+		// FR-21.14: with co-products the planned cost spreads over every output unit.
+		costBase = domain.CostBase(h.quantity, cos)
 		costs, err := loadCosts(ctx, tx, tenantID, h.id)
 		if err != nil {
 			return err
@@ -544,10 +580,32 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 				return domainProblem(err)
 			}
 			after := h.qtyRAF.Add(l.QtyGood)
-			l.Amount = domain.ReceiptValue(plannedTotal, h.quantity, h.qtyRAF, after, h.currency)
+			l.Amount = domain.ReceiptValue(plannedTotal, costBase, h.qtyRAF, after, h.currency)
 			l.UnitCost = l.Amount.Div(l.QtyGood).Round(6)
 			postings = append(postings, domain.ReceiptPostings(profile, l.Amount)...)
 			h.qtyRAF, h.qtyError = after, h.qtyError.Add(l.QtyError)
+		case KindCoProduct:
+			ci := -1
+			for k := range cos {
+				if l.CoProductLineNo != nil && cos[k].LineNo == *l.CoProductLineNo {
+					ci = k
+				}
+			}
+			if ci < 0 {
+				return lineProblem("line %v is not a co-product of the order", l.CoProductLineNo)
+			}
+			if err := domain.CheckCoProductReport(cos[ci], l.Qty, o.rafTolerancePct); err != nil {
+				return domainProblem(err)
+			}
+			after := cos[ci].QtyReported.Add(l.Qty)
+			// A by-product carries no cost (BR-9.12): it is received at zero.
+			l.Amount, l.UnitCost = decimal.Zero, decimal.Zero
+			if cos[ci].CarriesCost() {
+				l.Amount = domain.ReceiptValue(plannedTotal, costBase, cos[ci].QtyReported, after, h.currency)
+				l.UnitCost = l.Amount.Div(l.Qty).Round(6)
+				postings = append(postings, domain.ReceiptPostings(profile, l.Amount)...)
+			}
+			cos[ci].QtyReported = after
 		}
 	}
 	if !domain.Balanced(postings) {
@@ -593,6 +651,10 @@ func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID str
 				where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, *l.LineNo, l.Qty.String()); err != nil {
 				return err
 			}
+		case KindCoProduct:
+			if err := bookCoProduct(ctx, tx, tenantID, orderID, *l.CoProductLineNo, l.Qty); err != nil {
+				return err
+			}
 		case KindHours:
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
 					qty_good = qty_good + $5, qty_error = qty_error + $6,
@@ -628,9 +690,9 @@ func eventPostings(ps []domain.Posting) []prodevents.Posting {
 
 func enqueueJournalPosted(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, j Journal, actor string) error {
 	data := prodevents.JournalPostedData{JournalID: j.ID, JournalNumber: j.JournalNumber, OrderID: h.id, Type: string(j.Type),
-		PostingDate: j.PostingDate, Currency: h.currency, ReversalOf: j.ReversalOf, Lines: []prodevents.JournalLine{}, Postings: eventPostings(j.Postings)}
+		PostingDate: j.PostingDate, Currency: h.currency, ReversalOf: j.ReversalOf, CounterpartOrderID: j.CounterpartOrderID, Lines: []prodevents.JournalLine{}, Postings: eventPostings(j.Postings)}
 	for _, l := range j.Lines {
-		line := prodevents.JournalLine{Kind: l.Kind, LineNo: l.LineNo, OperNumber: l.OperNumber, ItemID: l.ItemID, Qty: l.Qty.String(),
+		line := prodevents.JournalLine{Kind: l.Kind, LineNo: l.LineNo, CoProductLineNo: l.CoProductLineNo, OperNumber: l.OperNumber, ItemID: l.ItemID, Qty: l.Qty.String(),
 			UnitCost: l.UnitCost.String(), Amount: l.Amount.Add(l.OverheadAmount).String()}
 		if l.Kind == KindHours {
 			hours := l.Qty.String()
@@ -768,6 +830,10 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 				where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, *l.LineNo, l.Qty.String()); err != nil {
 				return err
 			}
+		case KindCoProduct:
+			if err := bookCoProduct(ctx, tx, tenantID, orderID, *l.CoProductLineNo, l.Qty); err != nil {
+				return err
+			}
 		case KindHours:
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
 					qty_good = qty_good + $5, qty_error = qty_error + $6,
@@ -820,8 +886,16 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 			return err
 		}
 		vars = domain.ReworkVariances(byGroup)
-	} else if vars, err = domain.SettleWIP(h.quantity, h.qtyRAF, planned, actual, balance, h.currency); err != nil {
-		return domainProblem(err)
+	} else {
+		// FR-21.14: co-product output counts toward the share of planned cost earned.
+		cos, err := loadCoProducts(ctx, tx, tenantID, h.id)
+		if err != nil {
+			return err
+		}
+		basisQty, basisRAF := domain.SettleBasis(h.quantity, h.qtyRAF, cos)
+		if vars, err = domain.SettleWIP(basisQty, basisRAF, planned, actual, balance, h.currency); err != nil {
+			return domainProblem(err)
+		}
 	}
 	var postings []domain.Posting
 	if !balance.IsZero() || len(vars) > 0 {
@@ -1043,10 +1117,10 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 		suffix = " " + lock[0]
 	}
 	err := q.QueryRow(ctx, `select id::text, order_id::text, journal_type, journal_number, posting_date::text, posted, posted_at, posted_by,
-			qty_good::text, qty_error::text, reversal_of::text, journal_entry_id::text, created_by, created_at,
+			qty_good::text, qty_error::text, reversal_of::text, journal_entry_id::text, created_by, created_at, counterpart_order_id::text,
 			(select r.id::text from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id)
 		from production_journal j where tenant_id = $1 and id = $2`+suffix, tenantID, id).Scan(&j.ID, &j.OrderID, &typ, &j.JournalNumber,
-		&j.PostingDate, &j.Posted, &j.PostedAt, &j.PostedBy, &qg, &qe, &j.ReversalOf, &j.JournalEntryID, &j.CreatedBy, &j.CreatedAt, &j.ReversedBy)
+		&j.PostingDate, &j.Posted, &j.PostedAt, &j.PostedBy, &qg, &qe, &j.ReversalOf, &j.JournalEntryID, &j.CreatedBy, &j.CreatedAt, &j.CounterpartOrderID, &j.ReversedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Journal{}, journalNotFound()
 	}
@@ -1055,7 +1129,7 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 	}
 	j.Type, j.QtyGood, j.QtyError = domain.JournalType(typ), dec(qg), dec(qe)
 	rows, err := q.Query(ctx, `select kind, bom_line_number, oper_number, item_id::text, qty::text, qty_good::text, qty_error::text,
-			finish_operation, unit_cost::text, amount::text, overhead_amount::text
+			finish_operation, unit_cost::text, amount::text, overhead_amount::text, coproduct_line_number
 		from production_journal_line where tenant_id = $1 and journal_id = $2 order by line_seq`, tenantID, id)
 	if err != nil {
 		return Journal{}, err
@@ -1065,7 +1139,7 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 	for rows.Next() {
 		var l JournalLine
 		var qty, good, bad, unit, amount, overhead string
-		if err := rows.Scan(&l.Kind, &l.LineNo, &l.OperNumber, &l.ItemID, &qty, &good, &bad, &l.Finished, &unit, &amount, &overhead); err != nil {
+		if err := rows.Scan(&l.Kind, &l.LineNo, &l.OperNumber, &l.ItemID, &qty, &good, &bad, &l.Finished, &unit, &amount, &overhead, &l.CoProductLineNo); err != nil {
 			return Journal{}, err
 		}
 		l.Qty, l.QtyGood, l.QtyError, l.UnitCost, l.Amount, l.OverheadAmount = dec(qty), dec(good), dec(bad), dec(unit), dec(amount), dec(overhead)

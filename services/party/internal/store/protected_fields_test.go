@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
@@ -99,6 +101,13 @@ func TestProtectedFields_IsolatedByTenantAndScope(t *testing.T) {
 	}
 	if _, err := s.SetProtectedFields(asUser(1, legalEntityB, approver), legalEntityA, []string{}); problemCode(t, err) != store.CodeOutOfScope {
 		t.Fatalf("write outside scope: %v", err)
+	}
+	noScope := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: approver})
+	if _, err := s.ProtectedFields(noScope, legalEntityA); problemCode(t, err) != store.CodeOutOfScope {
+		t.Fatalf("read without any scope: %v", err)
+	}
+	if _, err := s.SetProtectedFields(noScope, legalEntityA, []string{}); problemCode(t, err) != store.CodeOutOfScope {
+		t.Fatalf("write without any scope: %v", err)
 	}
 	ctx := principalContext(1, legalEntityB)
 	err = dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {

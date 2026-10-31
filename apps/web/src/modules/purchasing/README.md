@@ -31,6 +31,8 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/trade-agreements/new` | New PRICE row; PRC-TA-002 overlap shown inline | `POST /trade-agreements` |
 | `/purchasing/trade-agreements/:id` | One price row | `GET /trade-agreements/{id}` |
 | `/purchasing/pricing` | Price lookup with the explain table | `GET /pricing/lookup` |
+| `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt), open any legal entity by id | `GET /purchasing-policies` |
+| `/purchasing/policies/:legalEntityId` | The three settings with their meaning; Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 
 Pages use the shell primitives from `src/shell/ui` and `pages.module.css` tokens only.
 Every data page has loading, empty and error states; errors show the service's stable

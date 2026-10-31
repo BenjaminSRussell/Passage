@@ -70,13 +70,13 @@ func TestCreateRun_DrillSumsAndReplay(t *testing.T) {
 		}
 		for _, s := range seed {
 			if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, adjustment,
-				account, combination, dims, currency_type, net, closing_net)
-				values($1,$2,$3,$4,1,false,$5,'-','{}','acct',$6::numeric,0)`,
-				testkit.TenantID(1), ledger, s.year, s.no, s.account, s.net); err != nil {
+				account, combination, dims, currency_type, net, closing_net, legal_entity_id)
+				values($1,$2,$3,$4,1,false,$5,'-','{}','acct',$6::numeric,0,nullif($7,'')::uuid)`,
+				testkit.TenantID(1), ledger, s.year, s.no, s.account, s.net, legalEntityOf(ctx)); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence) values($1,$2,42)`, testkit.TenantID(1), ledger)
+		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence, legal_entity_id) values($1,$2,42,nullif($3,'')::uuid)`, testkit.TenantID(1), ledger, legalEntityOf(ctx))
 		return err
 	})
 	if err != nil {
@@ -113,6 +113,11 @@ func TestCreateRun_DrillSumsAndReplay(t *testing.T) {
 	if _, err := st.CreateRun(ctx, spec); err == nil {
 		t.Fatal("reusing an Idempotency-Key for a different request must fail")
 	}
+}
+
+func legalEntityOf(ctx context.Context) string {
+	p, _ := tenant.FromContext(ctx)
+	return p.LegalEntityID
 }
 
 func migrated(t *testing.T) (*Postgres, context.Context) {
@@ -161,12 +166,12 @@ func seedBalance(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ledger s
 	t.Helper()
 	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 		p, _ := tenant.FromContext(ctx)
-		if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net)
-			values($1,$2,$3,$4,1,$5,'-',$6,$7::numeric)`, p.TenantID, ledger, year, no, account, currency, net); err != nil {
+		if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, legal_entity_id)
+			values($1,$2,$3,$4,1,$5,'-',$6,$7::numeric,nullif($8,'')::uuid)`, p.TenantID, ledger, year, no, account, currency, net, p.LegalEntityID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence) values($1,$2,$3)
-			on conflict (tenant_id, ledger_id) do update set posting_sequence = excluded.posting_sequence`, p.TenantID, ledger, hwm)
+		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence, legal_entity_id) values($1,$2,$3,nullif($4,'')::uuid)
+			on conflict (tenant_id, ledger_id) do update set posting_sequence = excluded.posting_sequence`, p.TenantID, ledger, hwm, p.LegalEntityID)
 		return err
 	})
 	if err != nil {

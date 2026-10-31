@@ -34,6 +34,8 @@ const (
 	CodeFormulaDuplicate    = "PMF-0103"
 	CodeVersionConflict     = "PMF-0104"
 	CodeOrderNotRescalable  = "PMF-0105"
+	CodeOrderState          = "PMF-0106"
+	CodeReportInvalid       = "PMF-0107"
 	CodeIdempotencyReuse    = "idempotency_key_reuse"
 	CodeIdempotencyInFlight = "idempotency_key_in_flight"
 
@@ -83,6 +85,8 @@ type OrderLine struct {
 	Scalable          bool            `json:"scalable"`
 	PercentControlled bool            `json:"percentControlled"`
 	Qty               decimal.Decimal `json:"qty"`
+	// RafQty is the quantity reported as finished of a co- or by-product line.
+	RafQty *decimal.Decimal `json:"rafQty,omitempty"`
 }
 
 // BatchOrder is a batch order (FR-24.2). List results omit Lines.
@@ -103,7 +107,14 @@ type BatchOrder struct {
 	CreatedBy      string          `json:"createdBy"`
 	CreatedAt      time.Time       `json:"createdAt"`
 	UpdatedAt      time.Time       `json:"updatedAt"`
-	Lines          []OrderLine     `json:"lines,omitempty"`
+	ReleasedAt     *time.Time      `json:"releasedAt,omitempty"`
+	StartedAt      *time.Time      `json:"startedAt,omitempty"`
+	ReportedAt     *time.Time      `json:"reportedAt,omitempty"`
+	EndedAt        *time.Time      `json:"endedAt,omitempty"`
+	// ActualQty is the quantity of the order's own item reported as finished.
+	ActualQty  *decimal.Decimal `json:"actualQty,omitempty"`
+	Lines      []OrderLine      `json:"lines,omitempty"`
+	Allocation *Allocation      `json:"allocation,omitempty"`
 }
 
 // NewBatchOrder is the create command.
@@ -129,6 +140,16 @@ type Store interface {
 	ListBatchOrders(ctx context.Context, f OrderFilter) ([]BatchOrder, error)
 	GetBatchOrder(ctx context.Context, id string) (BatchOrder, error)
 	RescaleBatchOrder(ctx context.Context, id string, batchSize decimal.Decimal, version int, idem Idem) (BatchOrder, bool, error)
+	AdvanceBatchOrder(ctx context.Context, id, command string, version int, idem Idem) (BatchOrder, bool, error)
+	ReportBatchOrder(ctx context.Context, id string, in ReportInput, version int, idem Idem) (BatchOrder, bool, error)
+	EndBatchOrder(ctx context.Context, id string, in EndInput, version int, idem Idem) (BatchOrder, bool, error)
+	DefineAttribute(ctx context.Context, in AttributeDefinition, idem Idem) (AttributeDefinition, bool, error)
+	ListAttributeDefinitions(ctx context.Context, itemID string, limit int) ([]AttributeDefinition, error)
+	RegisterBatch(ctx context.Context, in NewBatch, idem Idem) (Batch, bool, error)
+	ListBatches(ctx context.Context, f BatchFilter) ([]Batch, error)
+	GetBatch(ctx context.Context, id string) (Batch, error)
+	RecordAttributes(ctx context.Context, id string, values map[string]domain.Value, version int, idem Idem) (AttributesResult, bool, error)
+	ChangeDisposition(ctx context.Context, id, to, reason string, version int, idem Idem) (Batch, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -387,12 +408,14 @@ func (s *Postgres) CreateBatchOrder(ctx context.Context, in NewBatchOrder, idem 
 }
 
 const orderCols = `id, legal_entity_id, order_number, formula_id, formula_code, formula_version, item_id, unit,
-	formula_size, batch_size, scale_factor, status, version, created_by, created_at, updated_at`
+	formula_size, batch_size, scale_factor, status, version, created_by, created_at, updated_at,
+	released_at, started_at, reported_at, ended_at, actual_qty`
 
 func scanOrder(row pgx.Row) (BatchOrder, error) {
 	var o BatchOrder
 	err := row.Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.FormulaID, &o.FormulaCode, &o.FormulaVersion, &o.ItemID, &o.Unit,
-		&o.FormulaSize, &o.BatchSize, &o.ScaleFactor, &o.Status, &o.Version, &o.CreatedBy, &o.CreatedAt, &o.UpdatedAt)
+		&o.FormulaSize, &o.BatchSize, &o.ScaleFactor, &o.Status, &o.Version, &o.CreatedBy, &o.CreatedAt, &o.UpdatedAt,
+		&o.ReleasedAt, &o.StartedAt, &o.ReportedAt, &o.EndedAt, &o.ActualQty)
 	return o, err
 }
 
@@ -443,7 +466,7 @@ func loadOrder(ctx context.Context, tx pgx.Tx, id, lock string) (BatchOrder, err
 	if err != nil {
 		return o, err
 	}
-	rows, err := tx.Query(ctx, `select line_number, item_id, line_type, formula_qty, percent, scalable, percent_controlled, qty
+	rows, err := tx.Query(ctx, `select line_number, item_id, line_type, formula_qty, percent, scalable, percent_controlled, qty, raf_qty
 		from batch_order_line where order_id = $1 order by line_number`, id)
 	if err != nil {
 		return o, err
@@ -452,12 +475,19 @@ func loadOrder(ctx context.Context, tx pgx.Tx, id, lock string) (BatchOrder, err
 	o.Lines = []OrderLine{}
 	for rows.Next() {
 		var l OrderLine
-		if err := rows.Scan(&l.LineNumber, &l.ItemID, &l.Type, &l.FormulaQty, &l.Percent, &l.Scalable, &l.PercentControlled, &l.Qty); err != nil {
+		if err := rows.Scan(&l.LineNumber, &l.ItemID, &l.Type, &l.FormulaQty, &l.Percent, &l.Scalable, &l.PercentControlled, &l.Qty, &l.RafQty); err != nil {
 			return o, err
 		}
 		o.Lines = append(o.Lines, l)
 	}
-	return o, rows.Err()
+	if err := rows.Err(); err != nil {
+		return o, err
+	}
+	rows.Close()
+	if o.Status == domain.StatusEnded {
+		o.Allocation, err = loadAllocation(ctx, tx, id)
+	}
+	return o, err
 }
 
 // replay returns the stored response of a command key, if any.

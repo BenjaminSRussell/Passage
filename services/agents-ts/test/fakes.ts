@@ -120,13 +120,18 @@ export function makeRequest(over: Partial<RunRequest> = {}): RunRequest {
   };
 }
 
-/** A proposal the model would make: the IBAN is pseudonymized in its args. */
-export function proposal(confidence: number, amount = "1200", tool = "passage.ap.invoice.post"): ModelResponse {
+/** A proposal the model would make: by default the IBAN is pseudonymized in its args. */
+export function proposal(
+  confidence: number,
+  amount = "1200",
+  tool = "passage.ap.invoice.post",
+  args: Record<string, unknown> = { invoiceId: "INV-7", remitTo: "[IBAN-1]" },
+): ModelResponse {
   return {
     text: "Proposed posting for INV-7 to the vendor's account [IBAN-1].",
     proposal: {
       tool,
-      args: { invoiceId: "INV-7", remitTo: "[IBAN-1]" },
+      args,
       confidence,
       amount: usd(amount),
     },

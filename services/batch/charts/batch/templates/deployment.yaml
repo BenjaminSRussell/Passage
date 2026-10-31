@@ -1,9 +1,19 @@
+{{- if and .Values.notify.enabled (not .Values.notify.smtp.enabled) (not .Values.notify.webhook.enabled) }}
+{{- fail "notify.enabled requires notify.smtp.enabled or notify.webhook.enabled" }}
+{{- end }}
+{{- if and .Values.productUrl (not .Values.serviceIdentity.signingKeySecret) }}
+{{- fail "productUrl requires serviceIdentity.signingKeySecret" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}
   labels:
     app.kubernetes.io/name: batch
+  {{- if and .Values.notify.enabled .Values.notify.reloader }}
+  annotations:
+    reloader.stakater.com/auto: "true"
+  {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -16,6 +26,11 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.notify.enabled }}
+        fsGroup: {{ .Values.notify.fsGroup }}
+        {{- else if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -35,6 +50,57 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: batch
+            {{- if .Values.productUrl }}
+            - name: PRODUCT_URL
+              value: {{ .Values.productUrl | quote }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+            {{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+            {{- end }}
+            - name: DISPATCH_INTERVAL
+              value: {{ .Values.dispatcher.interval | quote }}
+            - name: DISPATCH_CONCURRENCY
+              value: {{ .Values.dispatcher.concurrency | quote }}
+            - name: DISPATCH_MAX_RUN_ATTEMPTS
+              value: {{ .Values.dispatcher.maxRunAttempts | quote }}
+            - name: DISPATCH_RETRY_AFTER
+              value: {{ .Values.dispatcher.retryAfter | quote }}
+            {{- end }}
+            {{- if .Values.notify.enabled }}
+            - name: NOTIFY_SECRETS_DIR
+              value: {{ .Values.notify.mountPath | quote }}
+            - name: NOTIFY_DISTRIBUTE_INTERVAL
+              value: {{ .Values.notify.distributeInterval | quote }}
+            {{- if .Values.notify.smtp.enabled }}
+            - name: NOTIFY_SMTP_ENABLED
+              value: "true"
+            - name: NOTIFY_SMTP_TLS
+              value: {{ .Values.notify.smtp.tls | quote }}
+            - name: NOTIFY_SMTP_FROM
+              value: {{ required "notify.smtp.from is required when notify.smtp.enabled" .Values.notify.smtp.from | quote }}
+            {{- end }}
+            {{- if .Values.notify.webhook.enabled }}
+            - name: NOTIFY_WEBHOOK_ENABLED
+              value: "true"
+            - name: NOTIFY_WEBHOOK_URL
+              value: {{ required "notify.webhook.url is required when notify.webhook.enabled" .Values.notify.webhook.url | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if or .Values.notify.enabled .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            {{- if .Values.notify.enabled }}
+            - name: notify-secrets
+              mountPath: {{ .Values.notify.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+            {{- end }}
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -48,3 +114,18 @@ spec:
             httpGet: { path: /readyz, port: http }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if or .Values.notify.enabled .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        {{- if .Values.notify.enabled }}
+        - name: notify-secrets
+          secret:
+            secretName: {{ .Values.notify.secretName }}
+            defaultMode: 0440
+        {{- end }}
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+        {{- end }}
+      {{- end }}

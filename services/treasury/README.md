@@ -42,6 +42,7 @@ always run, including the OpenAPI-matches-routes contract test.
 - `internal/store`: pgx repositories, tenant-scoped transactions (RLS).
 - `internal/api`: HTTP handlers, RFC 9457 problems, idempotency and `If-Match`.
 - `internal/events`: event type constants and payloads.
+- `internal/bankconnect`: bank file sending. `Signer` (Vault transit `sign`; private keys never leave Vault), an EBICS upload-order subset, and `Sender`, which audits every file in `bank_file_audit` (migration 0007) before and after it is sent. Not yet wired to a route.
 - `migrations/0001_init.sql`: tables `bank_account`, `bank_statement`,
   `bank_statement_line`, `cash_forecast_entry`, `idempotency_keys`, `outbox`.
 - `migrations/0002_checks_facilities_loans.sql`: `bank_account.next_check_number`

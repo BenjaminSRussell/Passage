@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Receipt, ReceiptLine } from "./api/client";
-import { emptyArrival, toArrivalInput, validateArrival } from "./NewArrivalPage";
+import { emptyArrival, pickPOLine, toArrivalInput, validateArrival } from "./NewArrivalPage";
 import { validateCorrection, validatePostingDate, validateRegister } from "./ReceiptPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
@@ -76,12 +76,22 @@ describe("client-side checks", () => {
       legalEntityId: UUID_A,
       packingSlip: "PS-1",
       receiptDate: "2026-10-25",
-      lines: [{ ...emptyArrival.lines[0], poLineId: UUID_C, productId: UUID_D, orderedRemaining: "10", unitPrice: "2.5", unit: "EA" }],
+      lines: [{ ...emptyArrival.lines[0], poLineNo: "2", productId: UUID_D, unit: "EA" }],
     };
     expect(validateArrival(ok)).toEqual({});
-    expect(toArrivalInput(ok).lines[0]).toMatchObject({ orderedRemaining: "10", overDeliveryPct: "0", unitPrice: "2.5" });
-    const bad = validateArrival({ ...ok, vendorId: "x", packingSlip: " ", currency: "usd", lines: [{ ...ok.lines[0], orderedRemaining: "0", overDeliveryPct: "101", unit: "" }] });
-    expect(Object.keys(bad).sort()).toEqual(["currency", "lines[0].orderedRemaining", "lines[0].overDeliveryPct", "lines[0].unit", "packingSlip", "vendorId"]);
+    expect(toArrivalInput(ok).lines[0]).toEqual({ poLineNo: 2, productId: UUID_D, overDeliveryPct: "0", unit: "EA", batchTracked: false, serialTracked: false });
+    const bad = validateArrival({ ...ok, vendorId: "x", packingSlip: " ", currency: "usd", lines: [{ ...ok.lines[0], poLineNo: "0", overDeliveryPct: "101", unit: "" }] });
+    expect(Object.keys(bad).sort()).toEqual(["currency", "lines[0].overDeliveryPct", "lines[0].poLineNo", "lines[0].unit", "packingSlip", "vendorId"]);
+    expect(validateArrival({ ...ok, lines: [{ ...ok.lines[0], poLineNo: "x" }] })).toHaveProperty("lines[0].poLineNo");
+    expect(validateArrival({ ...ok, lines: [ok.lines[0], ok.lines[0]] })).toEqual({ "lines[1].poLineNo": "Use each purchase order line once." });
+  });
+
+  it("copies product and unit from the picked purchase order line", () => {
+    const poLines = [{ lineNo: 2, productId: UUID_D, qty: "10", unit: "BOX", status: "OPEN" }, { lineNo: 3, qty: "1", unit: "HR", status: "OPEN" }];
+    const base = { ...emptyArrival.lines[0], productId: UUID_C };
+    expect(pickPOLine(base, "2", poLines)).toMatchObject({ poLineNo: "2", productId: UUID_D, unit: "BOX" });
+    expect(pickPOLine(base, "3", poLines)).toMatchObject({ poLineNo: "3", productId: UUID_C, unit: "HR" });
+    expect(pickPOLine(base, "", poLines)).toEqual({ ...base, poLineNo: "" });
   });
 
   it("requires one serial per unit and a batch where tracked", () => {
@@ -151,18 +161,26 @@ describe("record arrival", () => {
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
 
-  function fillValid() {
+  function fillHeader() {
     fill("Vendor ID", UUID_A);
     fill("Purchase order ID", UUID_B);
     fill("Legal entity ID", UUID_A);
     fill("Packing slip", "PS-1");
     fill("Receipt date", "2026-10-25");
-    fill("Line 1 PO line ID", UUID_C);
+  }
+
+  function fillValid() {
+    fillHeader();
+    fill("Line 1 PO line", "1");
     fill("Line 1 product ID", UUID_D);
-    fill("Line 1 ordered remaining", "10");
-    fill("Line 1 unit price", "2.5");
     fill("Line 1 unit", "EA");
   }
+
+  const poPath = `/api/v1/procurement/purchase-orders/${UUID_B}`;
+  const poLines = [
+    { lineNo: 1, productId: UUID_C, qty: "5", unit: "EA", status: "CANCELLED" },
+    { lineNo: 2, productId: UUID_D, description: "Bolts", qty: "10", unit: "BOX", status: "OPEN" },
+  ];
 
   it("blocks an empty form with field errors and sends nothing", async () => {
     const { container } = renderAt("/receiving/receipts/new");
@@ -174,17 +192,53 @@ describe("record arrival", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("posts with an Idempotency-Key and opens the new receipt", async () => {
+  it("posts poLineNo with an Idempotency-Key and opens the new receipt", async () => {
     serve(receipt(), () => json(201, receipt()));
     renderAt("/receiving/receipts/new");
     fillValid();
+    expect(await screen.findByText("Could not read the purchase order's lines; enter the line number.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`/receiving/receipts/${ID}`));
     const [call] = commandCalls();
     expect(call.url.pathname).toBe("/api/v1/receiving/arrivals");
     expect(idempotencyKey(call)).toMatch(/^[0-9a-f-]{36}$/);
-    expect(call.body).toMatchObject({ packingSlip: "PS-1", currency: "USD", lines: [{ orderedRemaining: "10", unitPrice: "2.5", unit: "EA" }] });
+    expect(call.body).toMatchObject({ packingSlip: "PS-1", currency: "USD" });
+    expect((call.body as { lines: unknown[] }).lines).toEqual([{ poLineNo: 1, productId: UUID_D, overDeliveryPct: "0", unit: "EA", batchTracked: false, serialTracked: false }]);
+  });
+
+  it("picks the line from the purchase order and fills its product and unit", async () => {
+    server.handler = (url, init) => {
+      if (method(init) === "POST") return json(201, receipt());
+      if (url.pathname === poPath) return json(200, { id: UUID_B, number: "PO-1", lines: poLines });
+      if (url.pathname === `/api/v1/receiving/receipts/${ID}`) return json(200, receipt());
+      return undefined;
+    };
+    const { container } = renderAt("/receiving/receipts/new");
+    fillHeader();
+    const select = await screen.findByRole("combobox", { name: "Line 1 PO line" });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose a line", "2: Bolts (10 BOX)"]);
+    expect(pageViolations(container)).toEqual([]);
+
+    fireEvent.change(select, { target: { value: "2" } });
+    expect(screen.getByLabelText("Line 1 product ID")).toHaveValue(UUID_D);
+    expect(screen.getByLabelText("Line 1 unit")).toHaveValue("BOX");
+    fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
+
+    await waitFor(() => expect(commandCalls()).toHaveLength(1));
+    expect(server.calls.some((c) => c.method === "GET" && c.url.pathname === poPath)).toBe(true);
+    expect((commandCalls()[0].body as { lines: unknown[] }).lines).toEqual([{ poLineNo: 2, productId: UUID_D, overDeliveryPct: "0", unit: "BOX", batchTracked: false, serialTracked: false }]);
+  });
+
+  it("requires a PO line before sending", async () => {
+    server.handler = (url) => (url.pathname === poPath ? json(200, { id: UUID_B, lines: poLines }) : undefined);
+    renderAt("/receiving/receipts/new");
+    fillHeader();
+    await screen.findByRole("combobox", { name: "Line 1 PO line" });
+    fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
+    expect(await screen.findByText("Choose the purchase order line.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Line 1 PO line" })).toBeInvalid();
+    expect(commandCalls()).toHaveLength(0);
   });
 
   it("shows the service's field error and keeps what was typed", async () => {

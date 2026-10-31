@@ -96,11 +96,11 @@ func TestBuildQuotation_DefaultsAndNets(t *testing.T) {
 	if len(fields) != 0 {
 		t.Fatalf("unexpected field errors: %v", fields)
 	}
-	if want := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC); !in.ValidUntil.Equal(want) {
-		t.Fatalf("validUntil = %s, want %s (+30 days)", in.ValidUntil, want)
+	if !in.ValidUntil.IsZero() || !in.IssuedAt.Equal(today) {
+		t.Fatalf("validUntil %s issuedAt %s: an omitted validity is left to the store's parameters", in.ValidUntil, in.IssuedAt)
 	}
-	if in.ProbabilityPct != domain.DefaultProbabilityPct || in.InvoiceAccountID != req.CustomerID {
-		t.Fatalf("defaults: probability %d invoice %s", in.ProbabilityPct, in.InvoiceAccountID)
+	if in.ProbabilityPct != nil || in.InvoiceAccountID != req.CustomerID {
+		t.Fatalf("defaults: probability %v (an omitted one is left to the store's parameters) invoice %s", in.ProbabilityPct, in.InvoiceAccountID)
 	}
 	// 3 × 19.99 less 10% = 53.973 at four places.
 	if len(in.Lines) != 2 || in.Lines[1].LineNo != 2 || !in.Lines[0].LineNet.Equal(decimal.RequireFromString("53.973")) {
@@ -140,6 +140,7 @@ func TestBuildQuotation_RejectsBadFields(t *testing.T) {
 
 func TestCreateQuotation_KeyScopeAndDuty(t *testing.T) {
 	req := quoteRequest(1)
+	req.LegalEntityID = testLE
 	raw, _ := json.Marshal(req)
 	body := string(raw)
 
@@ -225,7 +226,7 @@ func TestListQuotations_Filters(t *testing.T) {
 		t.Fatalf("unknown status: %d", rec.Code)
 	}
 	cust := ids.New()
-	rec := serve(t, s, http.MethodGet, quotations+"?status=SENT&customerId="+cust+"&limit=10", principal(dutyRead), nil)
+	rec := serve(t, s, http.MethodGet, quotations+"?status=SENT&customerId="+cust+"&limit=10", allScopePrincipal(dutyRead), nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "{\"items\":[]}\n" {
 		t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
 	}
@@ -285,7 +286,8 @@ func TestBuildSupplementaryRule_Table(t *testing.T) {
 }
 
 func TestSupplementaryHandlers(t *testing.T) {
-	le, parent, manual := ids.New(), ids.New(), ids.New()
+	parent, manual := ids.New(), ids.New()
+	le := testLE
 	s := &slice4Store{rules: []domain.SupplementaryRule{{ID: "r1", LegalEntityID: le, ParentProductID: parent, SupplementaryProduct: manual,
 		Unit: "EA", Requirement: domain.SuppMandatory, BaseQuantity: decimal.NewFromInt(10), QuantityPerBase: decimal.NewFromInt(1), Pricing: domain.SuppFree}}}
 

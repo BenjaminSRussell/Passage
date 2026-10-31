@@ -26,7 +26,7 @@ paths:
             schema: { $ref: '#/components/schemas/ResourceRequest' }
       responses:
         '201':
-          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          description: 'Created, with ETag "<version>". An idempotent replay returns 200 with Idempotent-Replayed: true.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Resource' }
@@ -57,11 +57,50 @@ paths:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: The resource
+          description: 'The resource, with ETag "<version>" for the If-Match of an update'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Resource' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateResource
+      summary: Change a resource's name, time zone or weekly calendar and list the jobs it no longer covers (FR-23.1, AC-23.7)
+      description: >
+        Send at least one of name, timeZone or shifts; shifts replace the whole
+        weekly calendar. The code and the finite flag never change. The change
+        needs the resource version in If-Match (the ETag of a read) so a stale
+        screen cannot overwrite another planner. Booked jobs whose booking after
+        the request time now lies outside the resource's open capacity (calendar
+        and downtimes applied), as the primary or as a secondary resource, are
+        returned in affectedJobs and listed in resource.updated; hours a running
+        job has already used do not count. The jobs stay where they are until
+        they are moved or the schedule is run again.
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The resource version from its ETag, for example "3". A stale version gets 412 SCHED-0124.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResourcePatch' }
+      responses:
+        '200':
+          description: 'The updated resource with ETag "<version>" and its affected jobs. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResourceUpdate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/resources/{id}/capacity:
     get:
       operationId: getResourceCapacity
@@ -89,6 +128,79 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Interval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/capacity-overrides:
+    post:
+      operationId: createCapacityOverride
+      summary: Close a span of a resource calendar (downtime) or open one (extra shift) (FR-23.1)
+      description: >
+        A downtime removes the span from the resource's open capacity and
+        wins over an overlapping extra shift; an extra shift adds it. Runs,
+        moves, the capacity inquiry, block utilization and the weekly load all
+        read the calendar with overrides applied. The booked jobs a downtime
+        overlaps are returned in affectedJobs and stay where they are until
+        they are moved or the schedule is run again (AC-23.7). A span is at
+        most 31 days.
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CapacityOverrideRequest' }
+      responses:
+        '201':
+          description: 'Created. A replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityOverrideResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCapacityOverrides
+      summary: Downtimes and extra shifts of a resource, optionally those overlapping a window
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Overrides by start (at most 1,000)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapacityOverride' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/capacity-overrides/{overrideId}:
+    delete:
+      operationId: deleteCapacityOverride
+      summary: Remove a downtime or extra shift; later runs and moves see the plain calendar again
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: overrideId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/operations:
@@ -145,7 +257,7 @@ paths:
   /v1/scheduling/runs:
     post:
       operationId: createRun
-      summary: Run the forward heuristic over the site or a selection of operations
+      summary: Run the forward or backward heuristic over the site or a selection of operations
       description: >
         The run applies resource networks (FR-23.13: an operation naming a
         network runs only on a resource with an edge from its predecessor's,
@@ -155,7 +267,19 @@ paths:
         of the process minutes from the group the resource is in; a missing
         entry uses the route setup and warns SCHED-0012) and capacity blocks
         (FR-23.17: a job runs in a block only if it matches; a job matching no
-        block on its resource warns SCHED-0014).
+        block on its resource warns SCHED-0014). The run honours order pegs
+        (FR-23.8): an order is placed after its parent orders, and its first
+        operation starts no earlier than the last end of its parents, whether
+        the parent is scheduled in this run or already holds jobs; an order
+        whose parent could not be placed (in this run, or holding an unplaced
+        operation outside it) is unplaced too. Secondary resources (BR-23.4)
+        are booked for the same segments as the primary: a finite secondary is
+        never held by two jobs at once, and when one is not free, or closed,
+        the primary slot is skipped and the next start tried (an operation
+        with no such slot in the horizon is unplaced with a SCHED-0005
+        message). An infinite run
+        books no capacity on secondaries either, but each segment must still
+        lie in the secondary's open time.
       x-passage-duty: scheduling.run
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -261,6 +385,8 @@ paths:
         with their successors, parents first, up to 500 orders or 5 pegging
         levels (BR-23.10); truncated reports a walk cut at a limit
         (SCHED-0007), and a conflict in any dependent refuses the whole move.
+        A move also needs each secondary resource of the operation (and of every
+        job it pushes) free for the same segments, otherwise SCHED-0005.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -930,6 +1056,27 @@ components:
           items: { $ref: '#/components/schemas/Shift' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+    ResourcePatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        timeZone: { type: string, description: IANA time zone name. }
+        shifts:
+          type: array
+          minItems: 1
+          maxItems: 14
+          items: { $ref: '#/components/schemas/Shift' }
+    ResourceUpdate:
+      allOf:
+        - $ref: '#/components/schemas/Resource'
+        - type: object
+          required: [affectedJobs]
+          properties:
+            affectedJobs:
+              type: array
+              description: Booked jobs outside the new open capacity, by start (at most 500), each with the span of all its segments.
+              items: { $ref: '#/components/schemas/AffectedJob' }
     OperationRequest:
       type: object
       required: [orderId, operNumber, minutes, resourceIds]
@@ -946,6 +1093,16 @@ components:
           maxItems: 50
           items: { type: string, format: uuid }
           description: Candidate resources, named resource first (FR-23.2).
+        secondaryResourceIds:
+          type: array
+          maxItems: 5
+          items: { type: string, format: uuid }
+          description: >
+            Secondary resources (tools, crews) booked for the same segments as
+            the primary resource (BR-23.4). Distinct, existing, and not among
+            the candidates. A finite secondary is never held by two jobs at once;
+            when one is not free the primary slot is skipped. Unknown resources
+            are refused with SCHED-0107 (422).
         setupGroup: { type: string, minLength: 1, maxLength: 32, description: "Setup group that drives changeovers against the resource's setup matrix (FR-23.15)." }
         setupMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: 'Route setup time, used when the matrix has no entry for a pair (SCHED-0012).' }
         attributes:
@@ -967,6 +1124,9 @@ components:
         resourceIds:
           type: array
           items: { type: string, format: uuid }
+        secondaryResourceIds:
+          type: array
+          items: { type: string, format: uuid }
         setupGroup: { type: [string, 'null'] }
         setupMinutes: { type: integer }
         attributes:
@@ -978,8 +1138,13 @@ components:
     RunRequest:
       type: object
       description: >
-        Heuristic run, always forward from start (backward direction and the
-        cp-sat algorithm are later slices; see NOT-IMPLEMENTED.md). finite
+        Heuristic run, forward from start or backward from each order's due
+        date (the cp-sat algorithm is a later slice; see NOT-IMPLEMENTED.md).
+        A backward run starts each order with a due date as late as it can
+        while ending by that date; an order that cannot (or whose latest start
+        is within an hour of the run start) is scheduled forward and, when
+        late, reported with a SCHED-0003 warning (BR-23.2). Orders without a
+        due date are scheduled forward. finite
         false is an infinite-capacity run: jobs stay inside open calendar time
         but may overlap and do not reserve capacity.
       required: [scope]
@@ -987,6 +1152,7 @@ components:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
         mode: { type: string, enum: [operations, jobs], default: jobs, description: Recorded on the run; both modes place at minute granularity in this slice. }
         finite: { type: boolean, default: true }
+        direction: { type: string, enum: [forward, backward], default: forward, description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2)' }
         operationIds:
           type: array
           maxItems: 5000
@@ -1000,7 +1166,7 @@ components:
         id: { type: string, format: uuid }
         scope: { type: string, enum: [site, selection, move] }
         mode: { type: string }
-        direction: { type: string }
+        direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }
         algorithm: { type: string, enum: [heuristic] }
         status: { type: string }
@@ -1016,13 +1182,13 @@ components:
           items: { type: string }
         warnings:
           type: array
-          description: Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014).
+          description: Findings on placed operations (SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014).
           items: { $ref: '#/components/schemas/RunWarning' }
         createdAt: { type: string, format: date-time }
     RunWarning:
       type: object
       properties:
-        code: { type: string, enum: [SCHED-0010, SCHED-0012, SCHED-0014] }
+        code: { type: string, enum: [SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014] }
         operationId: { type: string, format: uuid }
         detail: { type: string }
     Bar:
@@ -1046,6 +1212,11 @@ components:
             - { type: 'null' }
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
+        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment.' }
+        secondaryResourceIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: Resources booked for the same segments as the primary resource (BR-23.4); empty when the operation needs none.
     MoveRequest:
       type: object
       required: [start]
@@ -1108,6 +1279,43 @@ components:
       properties:
         parentOrderId: { type: string, format: uuid, description: Order whose output is consumed. }
         dependentOrderId: { type: string, format: uuid, description: Order that consumes it; must differ from the parent. }
+    CapacityOverrideRequest:
+      type: object
+      required: [kind, start, end]
+      properties:
+        kind: { type: string, enum: [downtime, extra] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time, description: After start, at most 31 days later. }
+        reason: { type: string, maxLength: 200 }
+    CapacityOverride:
+      allOf:
+        - $ref: '#/components/schemas/CapacityOverrideRequest'
+        - type: object
+          required: [id, resourceId, reason, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            resourceId: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    AffectedJob:
+      type: object
+      required: [jobId, orderId, operNumber, start, end, firmed]
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        firmed: { type: boolean }
+    CapacityOverrideResult:
+      allOf:
+        - $ref: '#/components/schemas/CapacityOverride'
+        - type: object
+          required: [affectedJobs]
+          properties:
+            affectedJobs:
+              type: array
+              description: Booked jobs a downtime overlaps (empty for extra shifts); at most 500.
+              items: { $ref: '#/components/schemas/AffectedJob' }
     Peg:
       allOf:
         - $ref: '#/components/schemas/PegRequest'

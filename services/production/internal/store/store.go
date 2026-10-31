@@ -62,9 +62,11 @@ type Order struct {
 	Version          int                `json:"version"`
 	Lines            []domain.OrderLine `json:"lines"`
 	Operations       []domain.Operation `json:"operations"`
-	Costs            []domain.CostRow   `json:"costs"`
-	CreatedAt        time.Time          `json:"createdAt"`
-	UpdatedAt        time.Time          `json:"updatedAt"`
+	// CoProducts are the co-products and by-products declared on the order (FR-21.14).
+	CoProducts []domain.CoProduct `json:"coProducts"`
+	Costs      []domain.CostRow   `json:"costs"`
+	CreatedAt  time.Time          `json:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt"`
 }
 
 // OrderSummary is one row of the order list (PRD 4.21.14 "Production orders list").
@@ -138,6 +140,8 @@ type NewOrder struct {
 	ReworkReference *domain.ReworkRef
 	Lines           []domain.OrderLine
 	Operations      []domain.Operation
+	// CoProducts are the co-products and by-products the order yields (FR-21.14), planned.
+	CoProducts []domain.CoProduct
 	// EstimateOnCreate runs `:estimate` in the create transaction (PRD 4.21.13
 	// "Estimate on create"), so the order is created Estimated with its planned cost.
 	EstimateOnCreate bool
@@ -207,7 +211,20 @@ type Store interface {
 	ListTriggerPoints(ctx context.Context, orderID string) ([]TriggerPoint, error)
 	DeleteTriggerPoint(ctx context.Context, id string) error
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
+	OperationsOverview(ctx context.Context, f OperationFilter) (OperationsOverview, error)
+	JournalInquiry(ctx context.Context, f JournalFilter) (JournalInquiry, error)
+	KPIs(ctx context.Context, f KPIFilter) (KPIReport, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
+	ListParameters(ctx context.Context, legalEntityID string) ([]StoredParameters, error)
+	SaveParameters(ctx context.Context, in ParametersSave) (StoredParameters, bool, error)
+	ListOCMProfiles(ctx context.Context, legalEntityID string) ([]OCMProfile, error)
+	SaveOCMProfile(ctx context.Context, in OCMProfileSave) (OCMProfile, bool, error)
+	DetectOrderChanges(ctx context.Context, in ChangeDetect) (ChangeDetectResult, error)
+	ListOrderChanges(ctx context.Context, f ChangeFilter) (ChangePage, error)
+	GetOrderChange(ctx context.Context, id string) (OrderChange, error)
+	PreviewOrderChange(ctx context.Context, id string) (ChangePreview, error)
+	ApplyOrderChange(ctx context.Context, in ChangeApply) (ChangeApplyResult, error)
+	DismissOrderChange(ctx context.Context, in ChangeDismiss) (OrderChange, error)
 }
 
 // Postgres is the production store.
@@ -275,11 +292,15 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 				return err
 			}
 		}
+		prm, err := effectiveParameters(ctx, tx, p.TenantID, in.LegalEntityID, in.SiteID, domain.Parameters{EstimateOnCreate: in.EstimateOnCreate})
+		if err != nil {
+			return err
+		}
 		id, err := insertOrder(ctx, tx, p.TenantID, p.UserID, in)
 		if err != nil {
 			return err
 		}
-		if in.EstimateOnCreate {
+		if prm.EstimateOnCreate {
 			if err := estimateOnCreate(ctx, tx, p.TenantID, p.UserID, id, in); err != nil {
 				return err
 			}
@@ -351,6 +372,9 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 		return "", err
 	}
 	if err := insertOperations(ctx, tx, tenantID, id, in.Operations); err != nil {
+		return "", err
+	}
+	if err := insertCoProducts(ctx, tx, tenantID, id, in.LegalEntityID, in.CoProducts); err != nil {
 		return "", err
 	}
 	data := prodevents.OrderCreatedData{
@@ -576,6 +600,12 @@ func (s *Postgres) UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error
 			return domainProblem(err)
 		}
 		qty := h.quantity
+		// FR-21.10: what purchasing was asked for before the quantity or the delivery
+		// date (the PO due date) moves; settled once the header is written.
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, u.OrderID)
+		if err != nil {
+			return err
+		}
 		if u.Quantity != nil {
 			qty = *u.Quantity
 			if err := requantify(ctx, tx, p.TenantID, u.OrderID, qty); err != nil {
@@ -591,6 +621,9 @@ func (s *Postgres) UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error
 				delivery_date = case when $4 then $5::date else delivery_date end,
 				version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, u.OrderID, qty.String(), u.SetDeliveryDate, u.DeliveryDate); err != nil {
+			return err
+		}
+		if err := settleSubcontracts(ctx, tx, p.TenantID, u.OrderID, u.Actor, requested, false); err != nil {
 			return err
 		}
 		out, err = loadOrder(ctx, tx, p.TenantID, u.OrderID)
@@ -621,6 +654,9 @@ func requantify(ctx context.Context, tx pgx.Tx, tenantID, orderID string, qty de
 	}
 	if ops, err = domain.PlanOperations(ops, qty); err != nil {
 		return domainProblem(err)
+	}
+	if err := replanCoProducts(ctx, tx, tenantID, orderID, qty); err != nil {
+		return err
 	}
 	return writeQuantities(ctx, tx, tenantID, orderID, lines, ops)
 }
@@ -687,10 +723,30 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		if err != nil {
 			return domainProblem(err)
 		}
+		// FR-21.16: an automatic OCM profile applies the order's pending changes at
+		// its next status transition, before the command takes effect.
+		if domain.CheckChangeEligible(from) == nil {
+			if err := autoApplyChanges(ctx, tx, p.TenantID, t.OrderID, t.Command, t.Actor, t.TraceID); err != nil {
+				return err
+			}
+		}
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{RAFTolerancePct: t.RAFTolerancePct})
+		if err != nil {
+			return err
+		}
 		switch t.Command {
 		case domain.CmdEnd:
 			if err := domain.CheckEnd(from, h.qtyRAF, t.ZeroOutputDuty); err != nil {
 				return domainProblem(err)
+			}
+			if prm.AsBuiltRequired {
+				n, err := countAttachedAsBuilt(ctx, tx, p.TenantID, h.id)
+				if err != nil {
+					return err
+				}
+				if err := domain.CheckAsBuiltRequired(true, h.qtyRAF, n); err != nil {
+					return domainProblem(err)
+				}
 			}
 			if err := settleOrder(ctx, tx, p.TenantID, h, t.Actor); err != nil {
 				return err
@@ -700,11 +756,12 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				return err
 			}
 		case domain.CmdReportFinished:
-			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, t.RAFTolerancePct); err != nil {
+			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, prm.RAFTolerancePct); err != nil {
 				return domainProblem(err)
 			}
-			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error}
-			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, t.RAFTolerancePct); err != nil {
+			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error,
+				CoProductsProportional: true}
+			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, prm.RAFTolerancePct); err != nil {
 				return err
 			}
 		case domain.CmdEstimate:
@@ -714,6 +771,9 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		case domain.CmdResetStatus:
 			// FR-21.9: a reset reverses what the statuses it leaves posted.
 			if types := reversedBy(from, to); len(types) > 0 {
+				if err := checkNoSplitTransfer(ctx, tx, p.TenantID, t.OrderID, types); err != nil {
+					return err
+				}
 				if err := reverseJournals(ctx, tx, p.TenantID, &h, types, t.Actor, "sys:reset:"+t.IdempotencyKey); err != nil {
 					return err
 				}
@@ -727,6 +787,16 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				if _, err := tx.Exec(ctx, `delete from production_cost_estimate where tenant_id = $1 and order_id = $2`, p.TenantID, t.OrderID); err != nil {
 					return err
 				}
+			}
+		}
+		if to == domain.Cancelled {
+			// FR-21.10: a cancelled order withdraws the vendor POs it asked for.
+			requested, err := requestedSubcontracts(ctx, tx, p.TenantID, t.OrderID)
+			if err != nil {
+				return err
+			}
+			if err := settleSubcontracts(ctx, tx, p.TenantID, t.OrderID, t.Actor, requested, true); err != nil {
+				return err
 			}
 		}
 		if _, err := tx.Exec(ctx, `update production_order set status = $3, qty_raf = $4, qty_error = $5, version = version + 1, updated_at = now()
@@ -814,7 +884,8 @@ func domainProblem(err error) error {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
-		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState:
+		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState, domain.CodeChangeNotEligible,
+		domain.CodeChangeSuperseded, domain.CodeSplitRefused:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
@@ -843,6 +914,9 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 		return Order{}, err
 	}
 	if o.Operations, err = loadOperations(ctx, q, tenantID, id); err != nil {
+		return Order{}, err
+	}
+	if o.CoProducts, err = loadCoProducts(ctx, q, tenantID, id); err != nil {
 		return Order{}, err
 	}
 	o.Costs, err = loadCosts(ctx, q, tenantID, id)
@@ -876,7 +950,7 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([]domain.Operation, error) {
 	rows, err := q.Query(ctx, `select oper_number, resource_id::text, setup_time_h::text, run_time_h_per::text, process_qty::text, scrap_pct::text,
 		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status,
-		po_requested_at
+		po_requested_at, po_cancelled_at
 		from production_operation where tenant_id = $1 and order_id = $2 order by oper_number`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -887,7 +961,7 @@ func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([
 		var op domain.Operation
 		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status string
 		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub,
-			&hours, &good, &bad, &status, &op.PORequestedAt); err != nil {
+			&hours, &good, &bad, &status, &op.PORequestedAt, &op.POCancelledAt); err != nil {
 			return nil, err
 		}
 		op.HoursReported, op.QtyGood, op.QtyError, op.Status = dec(hours), dec(good), dec(bad), domain.OperStatus(status)

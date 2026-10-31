@@ -71,6 +71,7 @@ func TestListLines_ValidationStopsBeforeStore(t *testing.T) {
 		{"voucher too long", "ledger=" + testLedger + "&voucher=" + strings.Repeat("V", 31), "voucher"},
 		{"limit above page cap", "ledger=" + testLedger + "&limit=5000", "limit"},
 		{"limit zero", "ledger=" + testLedger + "&limit=0", "limit"},
+		{"documentId not a uuid", "ledger=" + testLedger + "&documentId=doc-1", "documentId"},
 		{"malformed cursor", "ledger=" + testLedger + "&cursor=oops", "cursor"},
 	}
 	for _, tt := range tests {
@@ -159,5 +160,13 @@ func TestListLines_UnknownLedgerIs404(t *testing.T) {
 	rec := call(server(fs), http.MethodGet, linesPath+"?ledger="+testLedger, "", dutyRead, nil)
 	if rec.Code != http.StatusNotFound || decode(t, rec)["code"] != "LEDGER_NOT_FOUND" {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListLines_PassesDocumentIDAndAcceptsTheLookupDuty(t *testing.T) {
+	fs := &fakeStore{}
+	rec := call(server(fs), http.MethodGet, linesPath+"?ledger="+testLedger+"&documentId="+testDoc, "", dutyEntryLookup, nil)
+	if rec.Code != http.StatusOK || len(fs.lineFilters) != 1 || fs.lineFilters[0].DocumentID != testDoc {
+		t.Fatalf("status %d filters %+v", rec.Code, fs.lineFilters)
 	}
 }

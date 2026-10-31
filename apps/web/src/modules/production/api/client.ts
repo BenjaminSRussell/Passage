@@ -52,6 +52,9 @@ export type Flushing = "manual" | "start" | "finish" | "available-at-location";
 
 export type JournalType = "picking-list" | "route-card" | "report-as-finished";
 
+/** A journal as listed: also the system journal a split of a Started order posts on both orders (BR-21.11). */
+export type ListedJournalType = JournalType | "split-transfer";
+
 export type Proposal = "remaining" | "proportional" | "none";
 
 /** The four variance types of BR-21.6, and rework for a rework order (FR-21.20). */
@@ -109,6 +112,8 @@ export interface Operation {
   status?: OperStatus;
   /** When release asked purchasing for this subcontract operation's vendor PO (FR-21.10). */
   poRequestedAt?: string;
+  /** When that request was withdrawn: order cancelled or merged, operation removed, subcontracting off or vendor changed. */
+  poCancelledAt?: string;
 }
 
 export interface CostRow {
@@ -145,6 +150,8 @@ export interface ProductionOrder {
   version: number;
   lines: OrderLine[];
   operations: Operation[];
+  /** Co-products and by-products (FR-21.14); absent on an order without them. */
+  coProducts?: CoProduct[];
   costs: CostRow[];
   createdAt: string;
   updatedAt: string;
@@ -207,6 +214,31 @@ export interface OperationInput {
   scrapPct?: string;
 }
 
+/** A co-product shares the order's cost by quantity; a by-product carries none (BR-9.12). */
+export type CoProductType = "co-product" | "by-product";
+
+/** A co-product or by-product declared on a new order (FR-21.14). */
+export interface CoProductInput {
+  lineNo: string;
+  /** Defaults to co-product. */
+  type?: CoProductType;
+  itemId: string;
+  /** Planned quantity per unit of the order's product. */
+  qtyPer: string;
+}
+
+/** A declared co-product with its planned and received quantities. */
+export interface CoProduct extends CoProductInput {
+  type: CoProductType;
+  qtyPlanned: string;
+  qtyReported: string;
+}
+
+export interface CoProductReport {
+  lineNo: string;
+  quantity: string;
+}
+
 export interface CreateOrderInput {
   itemGroup?: string;
   /** Rework makes a rework order; it needs the Create rework orders duty. */
@@ -224,6 +256,8 @@ export interface CreateOrderInput {
   multiple?: string;
   bom: BOMComponentInput[];
   operations: OperationInput[];
+  /** Not allowed on a rework order. */
+  coProducts?: CoProductInput[];
 }
 
 export interface Variance {
@@ -251,8 +285,10 @@ export interface CostView {
 }
 
 export interface JournalLine {
-  kind: "issue" | "hours" | "receipt";
+  kind: "issue" | "hours" | "receipt" | "coproduct";
   lineNo?: string;
+  /** On a coproduct receipt: the order's co-product line. */
+  coProductLineNo?: string;
   operNumber?: number;
   itemId?: string;
   qty: string;
@@ -275,7 +311,7 @@ export interface Posting {
 export interface Journal {
   id: string;
   orderId: string;
-  type: JournalType;
+  type: ListedJournalType;
   journalNumber: string;
   postingDate: string;
   posted: boolean;
@@ -285,6 +321,8 @@ export interface Journal {
   qtyError: string;
   reversalOf?: string;
   reversedBy?: string;
+  /** On a split-transfer journal: the other order of the pair (BR-21.11). */
+  counterpartOrderId?: string;
   journalEntryId?: string;
   createdBy: string;
   createdAt: string;
@@ -388,6 +426,8 @@ export interface CreateJournalInput {
   errorQuantity?: string;
   issues?: IssueInput[];
   hours?: HoursInput[];
+  /** Co-product receipts of a report as finished (FR-21.14). */
+  coProducts?: CoProductReport[];
 }
 
 export interface PostingProfileAccounts {
@@ -485,7 +525,11 @@ export interface SplitInput {
   splitQty: string;
   minimumQty?: string;
   multiple?: string;
+  /** Started orders only: proportional moves the share of posted consumption, hours and WIP; keep-on-original moves nothing (BR-21.11). */
+  allocation?: SplitAllocation;
 }
+
+export type SplitAllocation = "proportional" | "keep-on-original";
 
 export interface SplitResult {
   original: ProductionOrder;
@@ -647,6 +691,8 @@ export interface SubcontractRow {
   operStatus: OperStatus;
   /** Null until release requests the vendor PO. */
   poRequestedAt: string | null;
+  /** Set while the vendor PO request is withdrawn; null otherwise. */
+  poCancelledAt?: string | null;
 }
 
 export interface SubcontractReport {
@@ -662,6 +708,99 @@ export interface SubcontractQuery {
   siteId?: string;
   dueFrom?: string;
   dueTo?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** One operation of the operations overview (4.21.14). */
+export interface OperationOverviewRow {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: ProductionStatus;
+  legalEntityId: string;
+  siteId: string;
+  productId: string;
+  /** The order's delivery date until scheduling dates the operation. */
+  dueDate: string | null;
+  operNumber: number;
+  resourceId: string;
+  subcontract: boolean;
+  processQty: string;
+  /** Setup + run × process quantity, two places. */
+  plannedHours: string;
+  /** Hours posted by route cards, two places. */
+  hoursReported: string;
+  qtyGood: string;
+  qtyError: string;
+  operStatus: OperStatus;
+}
+
+export interface OperationOverviewTotals {
+  operations: number;
+  open: number;
+  started: number;
+  finished: number;
+  plannedHours: string;
+  hoursReported: string;
+  qtyGood: string;
+  qtyError: string;
+}
+
+export interface OperationsOverview {
+  items: OperationOverviewRow[];
+  totals: OperationOverviewTotals;
+  nextCursor?: string;
+}
+
+export interface OperationsQuery {
+  status?: OperStatus | "";
+  orderStatus?: ProductionStatus | "";
+  resourceId?: string;
+  siteId?: string;
+  orderId?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** One journal of the journal inquiry across orders (4.21.14). */
+export interface JournalInquiryRow {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  legalEntityId: string;
+  type: ListedJournalType;
+  journalNumber: string;
+  postingDate: string;
+  posted: boolean;
+  postedAt: string | null;
+  qtyGood: string;
+  qtyError: string;
+  reversalOf: string | null;
+  journalEntryId: string | null;
+  currency: string;
+  lines: number;
+  /** Issue and hours lines, rounded to the currency's minor unit, negative on a reversal; set when the journal posts. */
+  consumed: string;
+  /** Receipt and co-product lines, rounded to the currency's minor unit, negative on a reversal; set when the journal posts. */
+  received: string;
+}
+
+export interface JournalInquiry {
+  items: JournalInquiryRow[];
+  total: number;
+  nextCursor?: string;
+}
+
+export interface JournalInquiryQuery {
+  type?: ListedJournalType | "";
+  posted?: "true" | "false" | "";
+  orderId?: string;
+  /** The exact order number (unique per legal entity). */
+  orderNumber?: string;
+  from?: string;
+  to?: string;
   cursor?: string;
   limit?: number;
 }
@@ -1007,7 +1146,7 @@ export async function listOrderEdits(id: string, signal?: AbortSignal): Promise<
 
 /** The BOM and route can be edited after explosion and before Started (FR-21.18). */
 export function canEditBOM(status: ProductionStatus): boolean {
-  return canSplit(status);
+  return canMerge(status);
 }
 
 function query(values: Record<string, string | number | undefined>): string {
@@ -1055,9 +1194,236 @@ export async function getSubcontractOperations(
   };
 }
 
-/** Split and merge take orders before Started (FR-21.15; a Started split needs the WIP transfer of a later slice). */
-export function canSplit(status: ProductionStatus): boolean {
+/** The operations of every order with planned and reported hours and quantities, totals over the filter (4.21.14). */
+export async function getOperationsOverview({ limit = 50, ...filter }: OperationsQuery = {}, signal?: AbortSignal): Promise<OperationsOverview> {
+  const body = await requestAt<Partial<OperationsOverview>>(`${root}/operations?${query({ ...filter, limit })}`, { signal });
+  const zero = "0.00";
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: body.totals ?? { operations: 0, open: 0, started: 0, finished: 0, plannedHours: zero, hoursReported: zero, qtyGood: "0", qtyError: "0" },
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The production journals across orders, newest ids last (4.21.14). */
+export async function getJournalInquiry({ limit = 50, ...filter }: JournalInquiryQuery = {}, signal?: AbortSignal): Promise<JournalInquiry> {
+  const body = await requestAt<Partial<JournalInquiry>>(`${root}/journals?${query({ ...filter, limit })}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    total: typeof body.total === "number" ? body.total : 0,
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** One group of the order KPIs (4.21.14); rates are null when there is nothing to measure. */
+export interface OrderKpiGroup {
+  /** The site or product id of the group; absent on the totals and without grouping. */
+  key?: string;
+  ended: number;
+  dated: number;
+  onTime: number;
+  onTimePct: string | null;
+  avgCycleDays: string | null;
+  qtyFinished: string;
+  qtyError: string;
+  scrapPct: string | null;
+  open: number;
+  overdue: number;
+}
+
+export type KpiGroupBy = "site" | "product";
+
+export interface OrderKpis {
+  asOf: string;
+  groupBy?: KpiGroupBy;
+  groups: OrderKpiGroup[];
+  groupsTotal: number;
+  totals: OrderKpiGroup;
+}
+
+export interface OrderKpiQuery {
+  siteId?: string;
+  productId?: string;
+  from?: string;
+  to?: string;
+  asOf?: string;
+  groupBy?: KpiGroupBy | "";
+  limit?: number;
+}
+
+const noKpi: OrderKpiGroup = {
+  ended: 0,
+  dated: 0,
+  onTime: 0,
+  onTimePct: null,
+  avgCycleDays: null,
+  qtyFinished: "0",
+  qtyError: "0",
+  scrapPct: null,
+  open: 0,
+  overdue: 0,
+};
+
+/** Orders ended in a period with on-time %, cycle days, scrap % and the open and overdue orders (4.21.14). */
+export async function getOrderKpis({ limit = 50, ...filter }: OrderKpiQuery = {}, signal?: AbortSignal): Promise<OrderKpis> {
+  const body = await requestAt<Partial<OrderKpis>>(`${root}/kpi?${query({ ...filter, limit })}`, { signal });
+  return {
+    asOf: body.asOf ?? "",
+    groupBy: body.groupBy,
+    groups: Array.isArray(body.groups) ? body.groups : [],
+    groupsTotal: typeof body.groupsTotal === "number" ? body.groupsTotal : 0,
+    totals: body.totals ?? noKpi,
+  };
+}
+
+// ---- Order change management (FR-21.16, BR-21.12) ----
+
+export type OCMMode = "automatic" | "manual" | "none";
+
+export const OCM_MODES: OCMMode[] = ["automatic", "manual", "none"];
+
+export type ChangeStatus = "pending" | "applied" | "dismissed";
+
+export const CHANGE_STATUSES: ChangeStatus[] = ["pending", "applied", "dismissed"];
+
+export interface OCMProfileInput {
+  /** An item group, or All. */
+  itemGroup: string;
+  /** A site id, or All. */
+  siteId: string;
+  mode: OCMMode;
+  surchargeFixed: string;
+  surchargePct: string;
+}
+
+export interface OCMProfile extends OCMProfileInput {
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface ChangeDelta {
+  linesAdded: number;
+  linesRemoved: number;
+  linesChanged: number;
+  operationsAdded: number;
+  operationsRemoved: number;
+  operationsChanged: number;
+}
+
+/** An OrderChangeRecord: an open order an ECO's BOM or route supersedes. */
+export interface OrderChange {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  productId: string;
+  siteId: string;
+  ecoId: string;
+  status: ChangeStatus;
+  profileMode: "automatic" | "manual";
+  /** The order was edited by hand (FR-21.18): flagged for manual review. */
+  needsReview: boolean;
+  changesBom: boolean;
+  changesRoute: boolean;
+  delta: ChangeDelta;
+  deltaCount: number;
+  currency: string;
+  changeCost: string;
+  beforeHash: string | null;
+  afterHash: string | null;
+  note: string;
+  version: number;
+  detectedBy: string;
+  detectedAt: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+}
+
+export interface ChangeQuery {
+  status?: ChangeStatus | "";
+  needsReview?: boolean;
+  ecoId?: string;
+  orderId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ChangePage {
+  items: OrderChange[];
+  nextCursor?: string;
+}
+
+export interface ChangeCost {
+  oldPlanned: string;
+  newPlanned: string;
+  delta: string;
+  surcharge: string;
+  total: string;
+}
+
+export interface ChangePreview {
+  change: OrderChange;
+  delta: ChangeDelta;
+  cost: ChangeCost;
+  /** Why applying would be refused now, or null. */
+  blocked: { code: string; detail: string } | null;
+}
+
+export async function listOCMProfiles(signal?: AbortSignal): Promise<OCMProfile[]> {
+  const body = await requestAt<{ items?: OCMProfile[] }>(`${root}/ocm-profiles`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** Creates an OCM profile (no version) or replaces it under If-Match. */
+export function saveOCMProfile(input: OCMProfileInput, version?: number): Promise<OCMProfile> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (version !== undefined) {
+    headers["If-Match"] = `"${version}"`;
+  }
+  return requestAt<OCMProfile>(`${root}/ocm-profiles`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+/** The order change worklist, newest first. */
+export async function listOrderChanges({ limit = 50, ...filter }: ChangeQuery = {}, signal?: AbortSignal): Promise<ChangePage> {
+  const params = query({ ...filter, needsReview: filter.needsReview === undefined ? undefined : String(filter.needsReview), limit });
+  const body = await requestAt<Partial<ChangePage>>(`${root}/order-changes?${params}`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor };
+}
+
+export function getOrderChange(id: string, signal?: AbortSignal): Promise<OrderChange> {
+  return requestAt<OrderChange>(`${root}/order-changes/${encodeURIComponent(id)}`, { signal });
+}
+
+/** What applying the change does to the order as it is now, with the change cost. */
+export function previewOrderChange(id: string, signal?: AbortSignal): Promise<ChangePreview> {
+  return requestAt<ChangePreview>(`${root}/order-changes/${encodeURIComponent(id)}:preview`, { method: "POST", signal });
+}
+
+/** Applies a pending change; a retry with the same key replays the first result. */
+export function applyOrderChange(id: string, version: number, idempotencyKey: string): Promise<{ change: OrderChange; order: ProductionOrder }> {
+  return requestAt(`${root}/order-changes/${encodeURIComponent(id)}:apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+    body: "{}",
+  });
+}
+
+export function dismissOrderChange(id: string, version: number, note: string): Promise<OrderChange> {
+  return requestAt<OrderChange>(`${root}/order-changes/${encodeURIComponent(id)}:dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": `"${version}"` },
+    body: JSON.stringify({ note }),
+  });
+}
+
+/** Merge takes orders before Started, where nothing is posted yet (FR-21.15). */
+export function canMerge(status: ProductionStatus): boolean {
   return status === "Created" || status === "Estimated" || status === "Scheduled" || status === "Released";
+}
+
+/** A split takes Created to Started orders; a Started one moves its posted share (FR-21.15, BR-21.11). */
+export function canSplit(status: ProductionStatus): boolean {
+  return canMerge(status) || status === "Started";
 }
 
 /** The forward command for a status, or null at the end of the line (BR-21.1). */
@@ -1105,4 +1471,46 @@ export function resetTargets(status: ProductionStatus): ProductionStatus[] {
   const order: ProductionStatus[] = ["Created", "Estimated", "Scheduled", "Released", "Started", "ReportedAsFinished"];
   const at = order.indexOf(status);
   return at <= 0 ? [] : order.slice(0, at).reverse();
+}
+
+// ---- Production parameters (PRD 4.21.13) ----
+
+export const SPLIT_ALLOCATIONS: SplitAllocation[] = ["proportional", "keep-on-original"];
+
+export interface ProductionParametersInput {
+  /** A site id, or All. */
+  siteId: string;
+  rafTolerancePct: string;
+  overConsumptionPct: string;
+  autoStartOnFeedback: boolean;
+  estimateOnCreate: boolean;
+  splitAllocation: SplitAllocation;
+  triggerPointsEnabled: boolean;
+  asBuiltRequired: boolean;
+}
+
+export interface ProductionParameters extends ProductionParametersInput {
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+/** The stored parameters of the caller's legal entity and the service defaults that apply to a site with none. */
+export interface ProductionParametersList {
+  items: ProductionParameters[];
+  defaults: ProductionParametersInput | null;
+}
+
+export async function listProductionParameters(signal?: AbortSignal): Promise<ProductionParametersList> {
+  const body = await requestAt<{ items?: ProductionParameters[]; defaults?: ProductionParametersInput }>(`${root}/parameters`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], defaults: body.defaults ?? null };
+}
+
+/** Creates the parameters of a site (no version) or replaces them under If-Match. */
+export function saveProductionParameters(input: ProductionParametersInput, version?: number): Promise<ProductionParameters> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (version !== undefined) {
+    headers["If-Match"] = `"${version}"`;
+  }
+  return requestAt<ProductionParameters>(`${root}/parameters`, { method: "PUT", headers, body: JSON.stringify(input) });
 }

@@ -21,50 +21,59 @@ import (
 
 // fakeStore records what the handlers pass and answers with canned results.
 type fakeStore struct {
-	pingErr     error
-	created     []store.NewOrder
-	replayHash  map[string]string // idempotency key → request hash already stored
-	order       store.Order
-	getErr      error
-	listFilter  store.ListFilter
-	transitions []store.Transition
-	transErr    error
-	updates     []store.OrderUpdate
-	log         []store.StatusLogEntry
-	costs       store.CostSummary
-	journals    []store.NewJournal
-	posts       []store.PostRequest
-	journal     store.Journal
-	journalErr  error
-	deleted     []string
-	profiles    []store.PostingProfile
-	saved       []store.ProfileSave
-	assigned    []store.NewAsBuilt
-	asBuiltF    []store.AsBuiltFilter
-	detached    []string
-	asBuiltErr  error
-	splits      []store.Split
-	merges      []store.Merge
-	bulks       []store.Bulk
-	batchErr    error
-	edits       []store.OrderEdit
-	editErr     error
-	editLog     []store.OrderEditEntry
-	wipFilters  []store.WIPFilter
-	wip         store.WIPReport
-	varFilters  []store.VarianceFilter
-	variances   store.VarianceReport
-	triggers    []store.NewTriggerPoint
-	triggerList []store.TriggerPoint
-	triggerDel  []string
-	triggerErr  error
-	triggerOld  bool // CreateTriggerPoint answers as a replay
-	subFilters  []store.SubcontractFilter
-	subcontract store.SubcontractReport
+	pingErr        error
+	created        []store.NewOrder
+	replayHash     map[string]string // idempotency key → request hash already stored
+	order          store.Order
+	getErr         error
+	listFilter     store.ListFilter
+	transitions    []store.Transition
+	transErr       error
+	updates        []store.OrderUpdate
+	log            []store.StatusLogEntry
+	costs          store.CostSummary
+	journals       []store.NewJournal
+	posts          []store.PostRequest
+	journal        store.Journal
+	journalErr     error
+	deleted        []string
+	profiles       []store.PostingProfile
+	saved          []store.ProfileSave
+	assigned       []store.NewAsBuilt
+	asBuiltF       []store.AsBuiltFilter
+	detached       []string
+	asBuiltErr     error
+	splits         []store.Split
+	merges         []store.Merge
+	bulks          []store.Bulk
+	batchErr       error
+	edits          []store.OrderEdit
+	editErr        error
+	editLog        []store.OrderEditEntry
+	wipFilters     []store.WIPFilter
+	wip            store.WIPReport
+	varFilters     []store.VarianceFilter
+	variances      store.VarianceReport
+	triggers       []store.NewTriggerPoint
+	triggerList    []store.TriggerPoint
+	triggerDel     []string
+	triggerErr     error
+	triggerOld     bool // CreateTriggerPoint answers as a replay
+	subFilters     []store.SubcontractFilter
+	opFilters      []store.OperationFilter
+	opOverview     store.OperationsOverview
+	journalFilters []store.JournalFilter
+	journalPage    store.JournalInquiry
+	kpiFilters     []store.KPIFilter
+	kpi            store.KPIReport
+	subcontract    store.SubcontractReport
 	// operation commands (FR-21.6)
 	operCommands []store.OperationCommand
 	operOutcome  store.OperationOutcome
 	operErr      error
+	// order change management (FR-21.16)
+	ocm    ocmFake
+	params paramsFake
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -700,5 +709,27 @@ func TestParseIfMatch(t *testing.T) {
 		if !ok || p.Status != tt.status {
 			t.Errorf("%q: want status %d, got %v", tt.raw, tt.status, err)
 		}
+	}
+}
+
+func TestWrites_RefuseACallerWithNoLegalEntityScope(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	noScope := map[string]string{tenant.HeaderLegalEntity: ""}
+	create := createBody(func(m map[string]any) { m["legalEntityId"] = entityID })
+	rec := do(h, call{method: http.MethodPost, path: "/v1/production/orders", body: create, duties: []string{DutyWrite},
+		headers: map[string]string{idempotencyName: "k", tenant.HeaderLegalEntity: ""}})
+	if p := expectProblem(t, rec, http.StatusBadRequest, validationCode); p.Errors["legalEntityId"] == "" {
+		t.Fatalf("create errors: %v", p.Errors)
+	}
+	profile := `{"legalEntityId":"` + entityID + `","itemGroup":"All","siteId":"All","wipAccount":"1400","inventoryAccount":"1300","finishedGoodsAccount":"1350",
+		"laborAbsorptionAccount":"5100","overheadAbsorptionAccount":"5200","lotSizeVarianceAccount":"5810","quantityVarianceAccount":"5820",
+		"priceVarianceAccount":"5830","substitutionVarianceAccount":"5840"}`
+	rec = do(h, call{method: http.MethodPut, path: "/v1/production/posting-profiles", body: profile, duties: []string{DutySetupWrite}, headers: noScope})
+	if p := expectProblem(t, rec, http.StatusBadRequest, validationCode); p.Errors["legalEntityId"] == "" {
+		t.Fatalf("profile errors: %v", p.Errors)
+	}
+	if len(f.created) != 0 || len(f.saved) != 0 {
+		t.Fatal("a caller with no legal-entity scope reached the store")
 	}
 }

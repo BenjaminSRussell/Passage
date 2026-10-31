@@ -8,6 +8,47 @@ export interface UsedBy {
   parents?: UsedBy[];
 }
 
+export interface BomLine {
+  lineNo?: number;
+  componentProductId: string;
+  quantity: string;
+  series?: string;
+  lineType?: string;
+  scrapConst: string;
+  scrapVarPct: string;
+  roundUp?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+}
+
+export interface BomVersion {
+  id: string;
+  productId: string;
+  siteId?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  fromQty?: string;
+  toQty?: string;
+  status: string;
+  lines?: BomLine[];
+}
+
+export interface BomVersionInput {
+  productId: string;
+  siteId?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status?: string;
+  lines: BomLine[];
+}
+
+export interface BomVersionFilters {
+  productId?: string;
+  siteId?: string;
+  status?: string;
+  asOf?: string;
+}
+
 export interface RouteVersionHeader {
   id: string;
   productId: string;
@@ -44,6 +85,16 @@ export interface RouteVersionOperation {
 }
 
 export interface RouteVersion extends RouteVersionHeader {
+  operations: RouteVersionOperation[];
+}
+
+export interface RouteVersionInput {
+  productId: string;
+  siteId: string;
+  routeCode: string;
+  versionNo?: number;
+  effectiveFrom: string;
+  effectiveTo?: string;
   operations: RouteVersionOperation[];
 }
 
@@ -120,6 +171,24 @@ export interface CalendarDay {
   totalH: string;
 }
 
+export interface Shift {
+  start: string;
+  end: string;
+  efficiencyPct?: string;
+}
+
+export interface WorkCalendar {
+  id: string;
+  code: string;
+  name: string;
+  template: Shift[][];
+  closedDates: string[];
+  version: number;
+  generatedFrom?: string;
+  generatedTo?: string;
+  warnings?: string[];
+}
+
 export interface ResourceFilters {
   siteId?: string;
   type?: string;
@@ -141,21 +210,26 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** Per-field validation messages from a 400 COM-0001 problem. */
+    readonly errors: Record<string, string> = {},
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
+function fieldErrors(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = init ? await fetch(`${base}${path}`, init) : await fetch(`${base}${path}`);
   if (!res.ok) {
-    const problem: { code?: unknown; title?: unknown } = await res.json().catch(() => ({}));
-    throw new ApiError(
-      typeof problem.title === "string" ? problem.title : "Request failed",
-      res.status,
-      typeof problem.code === "string" ? problem.code : undefined,
-    );
+    const problem: { code?: unknown; title?: unknown; detail?: unknown; errors?: unknown } = await res.json().catch(() => ({}));
+    // The service puts the readable reason in detail; title is only the HTTP status text.
+    const message = typeof problem.detail === "string" && problem.detail ? problem.detail : typeof problem.title === "string" ? problem.title : "Request failed";
+    throw new ApiError(message, res.status, typeof problem.code === "string" ? problem.code : undefined, fieldErrors(problem.errors));
   }
   return res.json();
 }
@@ -179,6 +253,14 @@ export function listRouteVersions(filters: RouteVersionFilters, cursor?: string)
 
 export function getRouteVersion(id: string): Promise<RouteVersion> {
   return request(`/route-versions/${encodeURIComponent(id)}`);
+}
+
+export function createRouteVersion(body: RouteVersionInput, idempotencyKey: string): Promise<RouteVersion> {
+  return request("/route-versions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
 }
 
 export function activateRouteVersion(id: string): Promise<RouteVersion> {
@@ -211,4 +293,105 @@ export function listCapabilities(cursor?: string): Promise<Page<Capability>> {
 
 export function getCalendarDays(id: string, from: string, to: string): Promise<Page<CalendarDay>> {
   return request(`/calendars/${encodeURIComponent(id)}/days${query({ from, to })}`);
+}
+
+export function getResourceGroup(id: string): Promise<ResourceGroup> {
+  return request(`/resource-groups/${encodeURIComponent(id)}`);
+}
+
+export function getCapability(id: string): Promise<Capability> {
+  return request(`/capabilities/${encodeURIComponent(id)}`);
+}
+
+export function listCalendars(cursor?: string): Promise<Page<WorkCalendar>> {
+  return request(`/calendars${query({ cursor })}`);
+}
+
+export function getCalendar(id: string): Promise<WorkCalendar> {
+  return request(`/calendars/${encodeURIComponent(id)}`);
+}
+
+export function listBomVersions(filters: BomVersionFilters, cursor?: string): Promise<Page<BomVersion>> {
+  return request(`/bom-versions${query({ ...filters, cursor })}`);
+}
+
+export function getBomVersion(id: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}`);
+}
+
+export function createBomVersion(body: BomVersionInput, idempotencyKey: string): Promise<BomVersion> {
+  return request("/bom-versions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+export interface EcoReplacement {
+  oldVersionId: string;
+  newVersionId: string;
+}
+
+export interface Eco {
+  id: string;
+  number: string;
+  state: string;
+  releaseDate?: string;
+  decidedBy?: string;
+  replaces: EcoReplacement[];
+}
+
+export interface EcoInput {
+  number: string;
+  releaseDate?: string;
+  replaces: EcoReplacement[];
+}
+
+export function listEcos(state: string, cursor?: string): Promise<Page<Eco>> {
+  return request(`/ecos${query({ state, cursor })}`);
+}
+
+export function getEco(id: string): Promise<Eco> {
+  return request(`/ecos/${encodeURIComponent(id)}`);
+}
+
+export interface EcoLineChange {
+  componentProductId: string;
+  change: "added" | "removed" | "changed";
+  oldQuantity?: string;
+  newQuantity?: string;
+}
+
+export interface EcoImpactProduct {
+  productId: string;
+  reason: "replaced" | "parent";
+  level: number;
+  topLevel: boolean;
+  siteIds: string[];
+  versionIds: string[];
+}
+
+export interface EcoImpact {
+  asOf: string;
+  replacements: { oldVersionId: string; newVersionId: string; productId: string; changes: EcoLineChange[] }[];
+  products: EcoImpactProduct[];
+  siteIds: string[];
+  openProductionOrders: number;
+  openPlannedOrders: number;
+}
+
+export function getEcoImpact(id: string, asOf?: string): Promise<EcoImpact> {
+  return request(`/ecos/${encodeURIComponent(id)}/impact${query({ asOf })}`);
+}
+
+export function createEco(body: EcoInput, idempotencyKey: string): Promise<Eco> {
+  return request("/ecos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+export function releaseEco(id: string, idempotencyKey: string): Promise<Eco> {
+  return request(`/ecos/${encodeURIComponent(id)}:release`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey } });
 }

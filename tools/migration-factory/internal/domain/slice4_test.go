@@ -167,7 +167,7 @@ func TestStepTiming_RunningDoneAndNotStarted(t *testing.T) {
 	}
 }
 
-func TestPackCatalog_NinePacksAllSystemsTwoAvailable(t *testing.T) {
+func TestPackCatalog_NinePacksAllSystemsThreeAvailable(t *testing.T) {
 	cat := PackCatalog()
 	if len(cat) != len(Packs) {
 		t.Fatalf("catalog has %d packs, want %d", len(cat), len(Packs))
@@ -187,8 +187,8 @@ func TestPackCatalog_NinePacksAllSystemsTwoAvailable(t *testing.T) {
 			available = append(available, e.Pack)
 		}
 	}
-	if len(available) != 2 || available[0] != PackOpenItems || available[1] != PackProjectWIP {
-		t.Fatalf("available packs %v, want open_items and project_wip", available)
+	if len(available) != 3 || available[0] != PackOpenItems || available[1] != PackGLBalances || available[2] != PackProjectWIP {
+		t.Fatalf("available packs %v, want open_items, gl_balances and project_wip", available)
 	}
 	cat[0].Systems[0] = "X"
 	if PackCatalog()[0].Systems[0] != SourceAX2012 {

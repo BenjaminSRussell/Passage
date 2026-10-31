@@ -11,9 +11,18 @@ Test: `go vet ./... && go test ./...` (`-short` skips the full-size 50k/20k/100k
 | `POST /v1/integration/migration-runs` | `migration.run` | 202 job envelope (`jobId`, `statusUrl`, `estimatedCompletionSeconds`) and the run; honours `Idempotency-Key` |
 | `GET /v1/integration/migration-runs/{id}` | `migration.run` | counts, rejects, absent keys, reconciliation |
 | `POST /v1/integration/migration-runs/{id}:rerun` | `migration.run` | new run linked by `parentRunId` that reprocesses only the exception queue |
+| `GET /v1/integration/migration-runs` | `migration.run` | runs newest first; filters `entity`, `status`, `limit` |
+| `POST /v1/integration/mapping-specs` | `migration.spec.write` | parses the mapping, requires at least one test case and runs the tests, stores an immutable (entity, version); same content returns 200, different content under a used version 409 `MIG-SPEC-VERSION-EXISTS` |
+| `GET /v1/integration/mapping-specs`, `GET .../{id}` | `migration.run` | published versions; the single read includes the mapping |
+| `POST /v1/integration/config-packages:diff` | `migration.run` | verifies a signed package and reports per file, in dependency order, the records apply would create or update; writes nothing |
+| `POST /v1/integration/config-packages:apply` | `migration.package.apply` | verifies, writes created and updated records in dependency order, never deletes, appends an `applied` entry; `Idempotency-Key` is required and a replay returns the original answer; `version` is required and at most 20 characters (400 otherwise) |
+| `POST /v1/integration/data-templates` | `migration.spec.write` | stores an immutable (entity, name, version) of default values for mapping targets; same content returns 200, different content under a used version 409 `MIG-TEMPLATE-VERSION-EXISTS`; a bad shape is 422 `MIG-TEMPLATE-INVALID` |
+| `GET /v1/integration/data-templates`, `GET .../{id}` | `migration.run` | published templates (filter `entity`, `limit`); the single read includes the defaults |
+| `GET /v1/integration/migration-runs/{id}/ledger` | `migration.run` | per-row lineage in source key order; `templated=true` keeps only rows that took a template default (`defaultFromTemplate`) |
+| `GET /v1/integration/config-packages`, `GET .../{id}` | `migration.run` | applied packages newest first; the single read includes the manifest files |
 | `POST /v1/integration/parallel-run-diffs` | `migration.run` | 501 `MIG-PARALLEL-RUN-DEFERRED` (wave 49) |
 
-Runs execute inside the request. Callers must be tenant-wide: a legal-entity-scoped caller gets 403. The deployment wires no extract or load backend yet, so `POST` returns 501 `MIG-BACKEND-NOT-CONFIGURED` until slice 3 supplies the connectors and the batch-API loader.
+`POST /migration-runs` takes either an inline `mapping` or a `mappingSpecId` (an unknown id is 422 `MIG-SPEC-UNKNOWN`); an `Idempotency-Key` replays only for the same source, mode, entity, dry-run flag, mapping version and spec. Runs execute inside the request. Callers must be tenant-wide: a legal-entity-scoped caller gets 403. The deployment wires no extract or load backend yet, so `POST` returns 501 `MIG-BACKEND-NOT-CONFIGURED` until a later slice supplies the connectors and the batch-API loader.
 
 Environment: `DATABASE_URL` (required), `MIGRATE_ON_START=true` applies `migrations/`, `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
 
@@ -41,17 +50,26 @@ Functions (`fn`), each with a fixed declared type:
 - `sap_dats` (`date`, or `timestamp` when `timeSource` names a `HHMMSS` column read in `sourceTimezone`; a blank time is `000000`): `YYYYMMDD`. `00000000` and `99991231` are absent.
 - `sap_lead_zero` (`string`, `width` 1 to 40 required): an all-digit value is left-padded with zeros to `width`; a digit value longer than `width` rejects; any other value passes through unchanged.
 
+- `codepage_normalize` (`string`): cleans text that passed through a legacy code page. Bytes that are not valid UTF-8 are read as Windows-1252 (so `0x92` becomes a quote and `0x80` the euro sign), the text is put in Unicode NFC, control characters are dropped, typographic quotes, dashes, the ellipsis, non-breaking spaces and a byte order mark become ASCII or nothing, and runs of white space collapse to one space.
+
 Further field options:
+
+- `format` (`date`, `timestamp` and `decimal` fields, not with `fn`): the explicit source format of the text. Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM/DD/YYYY`, `DD/MM/YYYY`, `YYYYMMDD`. Timestamps (read in `sourceTimezone`, emitted in UTC): `DD.MM.YYYY HH:mm:ss`, `MM/DD/YYYY HH:mm:ss`, `DD/MM/YYYY HH:mm:ss`. Decimals: `decimal_comma` (`1.234,56`) and `decimal_point` (`1,234.56`), both with correctly placed thousands separators only and with SAP's trailing minus (`1.000,50-` is -1000.5). Text that does not match the format is `MIG-MAP-COERCE`, never guessed (so `29/02/2023` is rejected, and the text `1234.56` under `decimal_comma` is rejected, not read as 123456); decimals then follow the normal scale and magnitude rules. Rule `default`, `value`, `enum` targets and data template values must be written in the same format. A JSON number on a `decimal` field is already a number and is not re-read in the format (`1.234` stays 1.234 under `decimal_comma`); a JSON number under `YYYYMMDD` is read as a date. An unknown format, or one that does not suit the type, is `MIG-MAP-INVALID`.
 
 - `enumDefault`: target value for a present value with no `enum` entry; the row is loaded with a `MIG-MAP-ENUM-DEFAULT` warning. Without it the row rejects with `MIG-MAP-ENUM`.
 - `scale` (0 to 6, decimals only): the value is rounded half-even (`RoundBank`) to `scale`. When rounding changes it, the row is loaded with a `MAP-PRECISION-LOSS` warning carrying the absolute delta. The magnitude check still applies after rounding.
 
 Mapping options:
 
+- `rejectWhen`: up to 50 conditions `{field, op, value | values, code}` evaluated on the mapped output once every field rule has succeeded (a row with a field reject gets only its field rejects). `field` must be a mapping target. `op` is `empty` (target absent or blank, no value), `eq`, `ne` (`value`), `in`, `notIn` (`values`, 1 to 200) or `match` (`value` is an RE2 pattern of at most 200 characters, compiled at parse). Comparisons use the string form of the mapped value (`true`, not `Yes`, after `ax_noyes`; the padded value after `sap_lead_zero`). `ne` and `notIn` also hit an absent target; `eq`, `in` and `match` do not. `code` is the reason shown in the exception queue: upper-case words joined by hyphens (`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$`, at most 64 characters, for example `CUST-NO-GROUP`) and never starting with `MIG-`. Each matching condition adds `{field, code, "matched rejectWhen <op>"}`, in condition order, and `expectRejects` tests can assert the codes. An unknown op is `MIG-MAP-UNKNOWN-FN`; any other bad condition is `MIG-MAP-INVALID`.
 - `sourceTimezone`: IANA zone for the `ax_datetime` and `sap_dats` time sources; an unknown name rejects with `MIG-MAP-INVALID`.
 - `tests`: `[{name, input, expect | expectRejects}]`. `expect` is the exact mapped output as strings per target; `expectRejects` lists the reject codes. Each case has exactly one of the two; names are unique. `POST /v1/integration/migration-runs` runs the tests after parsing and before any backend call: a failing case answers 422 `MIG-MAP-TEST-FAIL` with each failed name in `errors`. A mapping without tests is accepted. `POST .../{id}:rerun` uses the stored mapping and does not re-run tests.
 
 Warnings are reported per row in `warnings` and counted in `counts.warned` on the run view; warned rows are still loaded. Rejects remain the exception queue.
+
+## Data templates
+
+A data template (`domain.DataTemplate`, FR-10.18) is `{name, entity, version, defaults: {target: value}}`. `POST /migration-runs` may name one with `dataTemplateId`. Per row, a mapping target whose source is absent (or a null marker) takes the template value instead of the rule `default`; a source value always wins, and a template value satisfies `required`. Template values skip `enum` like rule defaults do and must satisfy the target's type. `CheckTemplate` runs when a run starts: the template must be for the mapping's entity and name only mapping targets that are filled from a source column (a `const` rule is never absent), else 422 `MIG-TEMPLATE-INVALID`; an unknown id is 422 `MIG-TEMPLATE-UNKNOWN`. Template values are part of the content hash, so a re-run over unchanged rows is unchanged. The run pins `dataTemplateId` (kept on `:rerun`), `counts.templated` counts the mapped rows that took a default, and `migration.run_ledger.template_fields` records the targets per row (`default_from_template`).
 
 ## Error codes
 
@@ -62,21 +80,39 @@ Warnings are reported per row in `warnings` and counted in `counts.warned` on th
 | MIG-MAP-COERCE | value not convertible to the declared type |
 | MIG-MAP-ENUM | value has no enum mapping |
 | MIG-MAP-RANGE | decimal scale above 6 (or above `scale`) or magnitude at or above 1e14 |
-| MIG-MAP-UNKNOWN-FN | unknown `rule` or `fn` in the mapping document (422) |
+| MIG-MAP-UNKNOWN-FN | unknown `rule`, `fn` or `rejectWhen` `op` in the mapping document (422) |
 | MIG-MAP-TEST-FAIL | one or more mapping tests failed; the failed names are in `errors` (422) |
 | MIG-MAP-ENUM-DEFAULT | warning: unmatched enum value mapped to `enumDefault`; the row is loaded |
 | MAP-PRECISION-LOSS | warning: decimal rounded to `scale`; the detail carries the absolute delta; the row is loaded |
-| MIG-ROW-DUPLICATE-KEY | source key repeated within one extract |
+| MIG-ROW-DUPLICATE-KEY | source key repeated within one extract; exact repeats load once, repeats with different values reject every occurrence so extract order cannot decide the load |
 | MIG-LOAD-FAILED | target loader error for the batch |
 | MIG-BACKEND-NOT-CONFIGURED | no extract and load backend wired (501) |
+| MIG-PKG-SIGNATURE | package signature or a file sha256 does not match the manifest (422) |
+| MIG-PKG-SCHEMA-NEWER | package schema is newer than the target supports (422) |
+| MIG-PKG-INVALID | cyclic or unknown-file dependency, repeated file or record key, bad schema version (422) |
+| MIG-NOT-CONFIGURED | no package target or signing key wired (501) |
+| COPY-KEY-EXISTS | row rejected: rewritten key already exists in the target and was not created by this copy project |
+| MIG-COPY-INVALID | copy into the same legal entity or one of another tenant, missing project, entity, legal entities or tenants, or no target reader to detect existing keys without `Upsert` |
 | MIG-PARALLEL-RUN-DEFERRED | parallel-run diffs not built (501) |
+| MIG-TEMPLATE-INVALID | data template shape wrong, or it does not fit the mapping of the run (422) |
+| MIG-TEMPLATE-UNKNOWN | `dataTemplateId` names no published template (422) |
+| MIG-TEMPLATE-VERSION-EXISTS | the entity, name and version already hold a different template (409) |
 | AUTH-0404 | unknown run, or a run of another tenant (404) |
 | idempotency_key_reuse | `Idempotency-Key` replayed with a different request (422) |
+
+## Configuration packages and legal-entity copy
+
+A package is `{version, schemaVersion, manifest, files}`. Each file is `{name, entity, records: [{key, body}]}`; the manifest lists the files with `sha256` of each file's canonical JSON (sorted keys, numbers in shortest decimal form) and `dependsOn`. The signature is an HMAC-SHA256 (`domain.HMACSigner`; the tenant key from Vault is a handoff) over the canonical `{version, schemaVersion, files}` of the manifest, so a package cannot be relabelled as an older schema. `domain.Seal` fills the file hashes and `domain.Sign` signs.
+
+Diff and apply (`domain.Diff`, `domain.Apply`) check the signature and every file hash, then the schema version, then apply files in dependency order. Records are compared by canonical content hash into `create`, `update` and `unchanged`; only create and update records are written, records present only in the target are never deleted, a second apply reports no changes, and a dry run returns the same diff and writes nothing. The deployment wires no package target or signing key, so both routes answer 501 `MIG-NOT-CONFIGURED` until a later slice supplies them (`api.API.WithPackages`). Applied packages are stored in `migration.config_package` with an append-only `applied` history (`tenant_id`, `applied_at`, idempotency key, `diff_counts`).
+
+Legal-entity copy (`domain.CopyRun`) copies one entity through the migration pipeline: `domain.RewriteKeys` rewrites every legal-entity-scoped natural key (a field value starting with `from` gets `to` in its place, the first matching rule per field wins, `@key` names the record key) before hashing. The copy project id is the xref source system, so a second run over unchanged rows skips every row. A rewritten key that already exists in the target and was not created by the project is rejected `COPY-KEY-EXISTS` unless `Upsert` is set. Copying into the same legal entity, or into one of another tenant, is `MIG-COPY-INVALID`, and so is a copy wired without a target reader (existing keys could not be detected) unless `Upsert` is set. Rewrite rules persist in `migration.key_rewrite_rule`. The extractor, loader and reader are tagged with the source or target legal entity through `domain.WithLegalEntity`; wiring to real contexts is listed in `NOT-IMPLEMENTED.md`.
 
 ## Pipeline rules
 
 - Idempotency key is `sha256(source_system|source_entity|source_key|content_hash)`, independent of the run.
 - The target id is minted once and stored in the xref before the loader is called; the content hash is recorded only after a successful load, so a failed row retries with the same target id.
+- `GET /v1/integration/xref` browses the cross-reference read-only (exact legacy key, literal key prefix, Passage id; keyset `nextCursor`) and `/xref/summary` counts keys per source system and entity.
 - Loads go through `TargetLoader` in batches of at most 1000; no direct SQL into target contexts.
 - Source rows missing since the last run are reported in `Report.Absent`, never deleted.
 - `Rerun` reprocesses only the keys in the previous report's exception queue and skips reconciliation.

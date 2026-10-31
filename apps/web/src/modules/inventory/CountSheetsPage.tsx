@@ -12,6 +12,7 @@ const columns: DataTableColumn<CountSheetSummary>[] = [
   { key: "planName", header: "Plan" },
   { key: "status", header: "Status", render: (row) => <Badge tone={stateTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
   { key: "counted", header: "Counted", align: "end", render: (row) => `${row.countedCount} of ${row.lineCount}` },
+  { key: "recount", header: "Recounts", align: "end", render: (row) => (row.recountLines > 0 ? String(row.recountLines) : "None") },
   { key: "createdAt", header: "Generated", render: (row) => formatDateTime(row.createdAt) },
   { key: "postedAt", header: "Posted", render: (row) => formatDateTime(row.postedAt) },
 ];
@@ -37,7 +38,10 @@ export function CountSheetsPage() {
           {(control) => (
             <Select {...control} value={status} onChange={(event) => setStatus(event.target.value as CountSheetStatus | "")}>
               <option value="OPEN">Open</option>
+              <option value="COUNTED">Counted</option>
+              <option value="APPROVED">Approved</option>
               <option value="POSTED">Posted</option>
+              <option value="CANCELLED">Cancelled</option>
               <option value="">All</option>
             </Select>
           )}

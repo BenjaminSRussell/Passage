@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -26,7 +27,7 @@ import (
 func d(n int64) decimal.Decimal { return decimal.NewFromInt(n) }
 
 func principalCtx(user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 func problemCode(t *testing.T, err error) string {
@@ -319,7 +320,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 		if !enabled || !forced || !tenantPolicy {
 			t.Errorf("%s: rls enabled=%v forced=%v tenant policy=%v", name, enabled, forced, tenantPolicy)
 		}
-		if hasLE && name != "sales_number_sequence" && !restrictive {
+		if hasLE && !restrictive {
 			t.Errorf("%s carries legal_entity_id without a legal-entity scope policy", name)
 		}
 	}
@@ -330,7 +331,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 
 	s := New(appOf(t, pool))
 	leA, leB := ids.New(), ids.New()
-	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: map[string]struct{}{}})
+	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: testkit.ScopeDuties("")})
 	mk := func(c context.Context, le, hash string) Order {
 		line := Line{LineNo: 1, ProductID: ids.New(), Quantity: d(1), Unit: "EA", SiteID: ids.New(), WarehouseID: ids.New(), UnitPrice: d(1), DiscPct: d(0), LineNet: d(1), RequestedShipDate: "2027-03-04"}
 		c2 := ids.New()
@@ -388,6 +389,46 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 	}
 	if n := visible(testkit.TenantID(1), leB, "sales_order_version"); n != 0 {
 		t.Fatalf("tenant 1 scoped to another entity: %d versions", n)
+	}
+	for _, c := range []struct {
+		tenantID, scopes string
+		want             int
+	}{
+		{testkit.TenantID(1), "*", 2},
+		{testkit.TenantID(1), leA, 1},
+		{testkit.TenantID(1), leB, 1},
+		{testkit.TenantID(1), ids.New(), 0},
+		{testkit.TenantID(1), "", 0},
+		{testkit.TenantID(2), "*", 1},
+		{testkit.TenantID(3), "*", 0},
+	} {
+		if n := visible(c.tenantID, c.scopes, "sales_number_sequence"); n != c.want {
+			t.Errorf("sales_number_sequence tenant %s scopes %q: %d rows, want %d", c.tenantID, c.scopes, n, c.want)
+		}
+	}
+}
+
+func TestPostgres_NumberSequenceRejectsOtherLegalEntity(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := principalCtx("sales-rep")
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	app := appOf(t, pool)
+	own, foreign := ids.New(), ids.New()
+	principal := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "x", LegalEntityID: own}
+	scoped := tenant.With(context.Background(), principal)
+	alloc := func(le string) error {
+		return dbx.WithTenantTx(scoped, app, func(tx pgx.Tx) error {
+			_, err := nextSequence(scoped, tx, principal.TenantID, le, "SO")
+			return err
+		})
+	}
+	if err := alloc(own); err != nil {
+		t.Fatalf("own legal entity: %v", err)
+	}
+	if err := alloc(foreign); err == nil {
+		t.Fatal("allocation for a legal entity outside the caller's scope succeeded")
 	}
 }
 

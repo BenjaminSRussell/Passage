@@ -49,8 +49,8 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | Method | Path | Duty | PRD duty |
 |---|---|---|---|
 | POST | `/v1/inventory/journals` | `inventory.journal.write` | InventoryJournalMaintain |
-| GET | `/v1/inventory/journals` | `inventory.read` | InventoryInquire |
-| GET | `/v1/inventory/journals/{id}` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/journals` | `inventory.read`, or the service-only `inventory.ownership-change.read` (receiving's signed token, #305; sees only OWNERSHIP_CHANGE journals: other types answer 403 on list, 404 on get) | InventoryInquire |
+| GET | `/v1/inventory/journals/{id}` | `inventory.read`, or the service-only `inventory.ownership-change.read` (OWNERSHIP_CHANGE journals only) | InventoryInquire |
 | POST | `/v1/inventory/journals/{id}/lines:bulk` | `inventory.journal.write` | InventoryJournalMaintain |
 | POST | `/v1/inventory/journals/{id}:post` | `inventory.journal.post` | InventoryJournalPost |
 | GET | `/v1/inventory/onhand` | `inventory.read` | InventoryInquire |
@@ -92,6 +92,10 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/journals/{id}:reject` | `inventory.journal.post` | InventoryJournalPost (approval task) |
 | POST | `/v1/inventory/journals/{id}:reopen` | `inventory.journal.write` | InventoryJournalMaintain |
 | POST | `/v1/inventory/journals/{id}:cancel` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/journal-names` | `inventory.journal-name.write` | InventorySetupMaintain (journal names) |
+| GET | `/v1/inventory/journal-names` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/journal-names/{id}` | `inventory.read` | InventoryInquire |
+| PATCH | `/v1/inventory/journal-names/{id}` | `inventory.journal-name.write` | InventorySetupMaintain (journal names) |
 | POST | `/v1/inventory/consignment-orders` | `inventory.consignment.write` | ConsignmentMaintain |
 | GET | `/v1/inventory/consignment-orders` | `inventory.read` | InventoryInquire |
 | GET | `/v1/inventory/consignment-orders/{id}` | `inventory.read` | InventoryInquire |
@@ -310,6 +314,12 @@ PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app@.../db go test ./...   # st
 Store tests use `platform/go/testkit` (`DBWithApp`): migrations run as the owner and every
 query runs as `passage_app` (NOSUPERUSER, NOBYPASSRLS), so row-level security is exercised.
 They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgregory.net/rapid`.
+
+The Wave 16 proof tests (`internal/store/wave16_ac*_test.go`) cover the issue's acceptance
+criteria: 10,000 concurrent issues (AC1), rebuild-and-compare after N transactions (AC2;
+40,000 by default, `PASSAGE_INVENTORY_AC2_TXNS=1000000` for the issue's 1M), the GL entry of
+every journal type (AC3) and the `testdata/inv-fefo-100.json` FEFO fixture (AC4), whose
+expected picks come from `testdata/gen_fefo_100.py` (`python3 -I gen_fefo_100.py > inv-fefo-100.json`).
 
 ## Error codes
 

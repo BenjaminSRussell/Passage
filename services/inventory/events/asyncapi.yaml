@@ -49,6 +49,18 @@ channels:
     messages:
       ownershipChanged:
         $ref: '#/components/messages/OwnershipChanged'
+  countSheet:
+    address: passage.inventory.countsheet
+    messages:
+      countSheetChanged:
+        $ref: '#/components/messages/CountSheetChanged'
+  journalName:
+    address: passage.inventory.journalname
+    messages:
+      journalNameCreated:
+        $ref: '#/components/messages/JournalNameCreated'
+      journalNameUpdated:
+        $ref: '#/components/messages/JournalNameUpdated'
   reconciliationDiff:
     address: passage.inventory.reconciliation
     messages:
@@ -83,6 +95,14 @@ operations:
     action: send
     channel: { $ref: '#/channels/ownershipChanged' }
     summary: An OWNERSHIP_CHANGE journal posted, moving vendor-owned stock to the legal entity (FR-16.17); wave 18 settles it
+  publishCountSheetChanged:
+    action: send
+    channel: { $ref: '#/channels/countSheet' }
+    summary: A count sheet was submitted for review, approved, had a recount requested, was cancelled or was posted (FR-16.9); POSTED and CANCELLED lift the stock freeze
+  publishJournalName:
+    action: send
+    channel: { $ref: '#/channels/journalName' }
+    summary: A journal name was created or changed (PRD 3.16.13); consumers refresh their copy of the approval rule
   publishReconciliationDiff:
     action: send
     channel: { $ref: '#/channels/reconciliationDiff' }
@@ -90,66 +110,112 @@ operations:
 components:
   messages:
     TransactionPosted:
+      title: Inventory transaction posted
+      summary: An inventory transaction was registered or moved to a new status; carries the dimension, quantity and posted value.
       name: dev.passage.inventory.transaction.posted.v1
       x-passage-type: dev.passage.inventory.transaction.posted.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransactionPostedData'
     OnhandChanged:
+      title: On-hand changed
+      summary: The on-hand projection of one dimension combination changed.
       name: dev.passage.inventory.onhand.changed.v1
       x-passage-type: dev.passage.inventory.onhand.changed.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OnhandChangedData'
     JournalPosted:
+      title: Inventory journal posted
+      summary: An inventory journal was posted and its lines became ledger transactions.
       name: dev.passage.inventory.journal.posted.v1
       x-passage-type: dev.passage.inventory.journal.posted.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/JournalPostedData'
     ReservationCreated:
+      title: Reservation created
+      summary: Stock was reserved against a dimension combination.
       name: dev.passage.inventory.reservation.created.v1
       x-passage-type: dev.passage.inventory.reservation.created.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ReservationData'
     ReservationReleased:
+      title: Reservation released
+      summary: A reservation was released and its quantity returned to available.
       name: dev.passage.inventory.reservation.released.v1
       x-passage-type: dev.passage.inventory.reservation.released.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ReservationData'
     BlockingCreated:
+      title: Blocking created
+      summary: A quantity was blocked or quarantined with a reason.
       name: dev.passage.inventory.blocking.created.v1
       x-passage-type: dev.passage.inventory.blocking.created.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
     BlockingReleased:
+      title: Blocking released
+      summary: A blocking was released back to a usable inventory status.
       name: dev.passage.inventory.blocking.released.v1
       x-passage-type: dev.passage.inventory.blocking.released.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
+    JournalNameCreated:
+      title: Journal name created
+      summary: A journal name was created for a legal entity.
+      name: dev.passage.inventory.journalname.created.v1
+      x-passage-type: dev.passage.inventory.journalname.created.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalNameData'
+    JournalNameUpdated:
+      title: Journal name updated
+      summary: The description, approval rule, offset account or active flag of a journal name changed.
+      name: dev.passage.inventory.journalname.updated.v1
+      x-passage-type: dev.passage.inventory.journalname.updated.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalNameData'
     TransferShipped:
+      title: Transfer shipped
+      summary: A transfer order shipped and stock moved into the in-transit warehouse.
       name: dev.passage.inventory.transfer.shipped.v1
       x-passage-type: dev.passage.inventory.transfer.shipped.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
     TransferReceived:
+      title: Transfer received
+      summary: A transfer order was received at the destination warehouse.
       name: dev.passage.inventory.transfer.received.v1
       x-passage-type: dev.passage.inventory.transfer.received.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
     OwnershipChanged:
+      title: Ownership changed
+      summary: Vendor-owned consignment stock became legal-entity owned.
       name: dev.passage.inventory.ownership.changed.v1
       x-passage-type: dev.passage.inventory.ownership.changed.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OwnershipChangedData'
+    CountSheetChanged:
+      title: Count sheet changed
+      summary: A count sheet moved through its review steps; the action names which one.
+      name: dev.passage.inventory.countsheet.changed.v1
+      x-passage-type: dev.passage.inventory.countsheet.changed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CountSheetChangedData'
     ReconciliationDiff:
+      title: Reconciliation difference
+      summary: A daily inventory-to-ledger run found a non-zero difference.
       name: dev.passage.inventory.reconciliation.diff.v1
       x-passage-type: dev.passage.inventory.reconciliation.diff.v1
       contentType: application/json
@@ -222,8 +288,8 @@ components:
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'Origin type of the transaction; OWNERSHIP_CHANGE is the receipt leg of an ownership-change line; PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
-        journalId: { type: [string, 'null'], format: uuid, description: 'Inventory journal of a journal line (both legs of an ownership change); null for other origins' }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'Origin type of the transaction; OWNERSHIP_CHANGE is the receipt leg of an ownership-change line; TRANSFER_IN is the destination receipt leg of a TRANSFER journal line; PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
+        journalId: { type: [string, 'null'], format: uuid, description: 'Inventory journal of a journal line (both legs of an ownership change or of a transfer journal line); null for other origins' }
         referenceId: { type: [string, 'null'], description: 'Source document of a non-journal origin: the blocking, transfer or replenishment order id, or the document reference a caller of transactions:apply gave; null for journal lines' }
         originId: { type: string, format: uuid }
         productId: { type: string, format: uuid }
@@ -257,12 +323,13 @@ components:
       properties:
         journalId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE] }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE, TRANSFER] }
         postingDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         lineCount: { type: integer }
         glLines:
           type: array
+          description: Balanced GL lines of the posting; empty for a TRANSFER journal, whose two legs stay on the inventory account
           items:
             type: object
             required: [account, debit, credit]
@@ -286,6 +353,19 @@ components:
         demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); empty when unsegmented (FR-16.20)' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+    JournalNameData:
+      type: object
+      required: [active, code, description, journalNameId, journalType, legalEntityId, offsetAccountId, requiresApproval, version]
+      properties:
+        journalNameId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE, TRANSFER] }
+        requiresApproval: { type: boolean }
+        offsetAccountId: { type: [string, 'null'] }
+        active: { type: boolean }
+        version: { type: integer }
     BlockingData:
       type: object
       required: [blockingId, legalEntityId, productId, dimensionSet, qty, targetStatus, reason, state, disposition]
@@ -299,6 +379,21 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }
+    CountSheetChangedData:
+      type: object
+      required: [sheetId, legalEntityId, planId, number, action, status, lineCount, countedCount, recountLines, lineId, reason]
+      properties:
+        sheetId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        planId: { type: string, format: uuid }
+        number: { type: string, description: Count sheet number }
+        action: { type: string, enum: [SUBMITTED, APPROVED, RECOUNT_REQUESTED, CANCELLED, POSTED] }
+        status: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED], description: Sheet status after the action }
+        lineCount: { type: integer }
+        countedCount: { type: integer }
+        recountLines: { type: integer, description: Lines still flagged for recount after the action }
+        lineId: { type: [string, 'null'], format: uuid, description: The line a recount was requested for }
+        reason: { type: [string, 'null'], description: The supervisor's recount reason }
     ReconciliationDiffData:
       type: object
       required: [account, currency, diff, inventoryValue, ledgerBalance, ledgerSource, legalEntityId, negativeRows, runDate, runId]

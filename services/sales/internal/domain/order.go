@@ -17,6 +17,9 @@ const (
 	OrderOpen      = "OPEN"
 	OrderConfirmed = "CONFIRMED"
 
+	// OrderTypeJournal orders never reserve or consume ATP (BR-27.7).
+	OrderTypeJournal = "JOURNAL"
+
 	HoldCredit      = "CREDIT"
 	HoldFraud       = "FRAUD"
 	HoldManual      = "MANUAL"
@@ -25,7 +28,9 @@ const (
 	HoldActive   = "ACTIVE"
 	HoldReleased = "RELEASED"
 
-	// CreditReleaseDays is how long a CREDIT release stays valid (BR-27.4).
+	// CreditReleaseDays is the default credit_release_validity_days: how long
+	// a CREDIT release stays valid when the legal entity saved no parameters
+	// (BR-27.4).
 	CreditReleaseDays = 7
 	quantityScale     = 6
 	lineScale         = 4
@@ -75,9 +80,10 @@ func ReleaseCovers(heldAmount, current decimal.Decimal) bool {
 	return current.LessThanOrEqual(limit)
 }
 
-// ReleaseValidUntil is the end of a CREDIT release's validity window.
-func ReleaseValidUntil(releasedAt time.Time) time.Time {
-	return releasedAt.Add(CreditReleaseDays * 24 * time.Hour)
+// ReleaseValidUntil is the end of a CREDIT release's validity window of days
+// days (the legal entity's credit_release_validity_days).
+func ReleaseValidUntil(releasedAt time.Time, days int) time.Time {
+	return releasedAt.Add(time.Duration(days) * 24 * time.Hour)
 }
 
 // FormatOrderNumber renders the SO- document number for sequence value seq.

@@ -78,7 +78,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/requisitions/{id}:submit` | RequisitionCreate | Idempotency-Key and If-Match (version) required; requester only; routes approvers |
 | POST `/purchase-orders` | PurchaseOrderMaintain | Idempotency-Key required; missing unit prices come from trade agreements |
 | GET `/purchase-orders` | PurchaseOrderInquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
-| GET `/purchase-orders/{id}` | PurchaseOrderInquire | ETag = row version |
+| GET `/purchase-orders/{id}` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
 | PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
 | POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
 | POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
@@ -86,10 +86,11 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/purchase-orders:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | The run over a page of CONFIRMED POs (`legalEntityId`, `vendorId`, `tradeAgreementId`, `limit` ≤ 100, `cursor`); apply needs an Idempotency-Key and writes each PO on its own |
 | GET `/purchase-orders/{id}/versions` | PurchaseOrderInquire | Every stored version oldest first, a pending change included |
 | GET `/purchase-orders/{id}/versions/{n}/diff` | PurchaseOrderInquire | RFC 6902 patch from version n−1 to n |
-| GET `/purchase-orders/{id}/invoicing-plans` | PurchaseOrderInquire | Every invoicing plan of the PO in line order |
+| GET `/purchase-orders/{id}/invoicing-plans` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` | Every invoicing plan of the PO in line order |
 | GET `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderInquire | One line's plan; ETag = PO row version |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the plan, bumps the row version (new ETag) |
 | DELETE `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
 | POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
@@ -115,6 +116,9 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/scheduling-agreements/{id}:release` | AgreementMaintain | Idempotency-Key required; `kind` FRC or JIT, `runDate` (default today), `cumulativeReset`; 201 for a new release, 200 for the release of the same kind, date and schedule version |
 | GET `/scheduling-agreements/{id}/releases` | AgreementMaintain or PurchaseOrderInquire | Release headers in release order |
 | GET `/scheduling-agreements/{id}/releases/{releaseNo}` | AgreementMaintain or PurchaseOrderInquire | Release documentation with every line |
+| GET `/purchasing-policies` | ProcurementPolicyMaintain or PurchaseOrderInquire | Saved purchasing policies of the caller's legal entities |
+| GET `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain or PurchaseOrderInquire | The policy, or the defaults at version 0; ETag is the version |
+| PUT `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -283,6 +287,18 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   reset (`cumulativeReset`, kept on the release). The monitor's next release due
   is the validity start before any release, else the last run plus one release
   period, and is empty after the validity ends.
+- **Purchasing policy (FR-17.13).** One row per legal entity with three flags;
+  a legal entity with no row has the defaults (change management on, the other
+  two off) at version 0. `changeManagementDefault` is the `changeManagement` of a
+  new PO that does not say. `allowInvoiceBeforeReceipt` lowers the PO edit floor
+  of BR-17.7 from invoiced to received (never below received, PRC-PO-007).
+  `poFourEyes` keeps the user who created (`created_by`), submitted
+  (`submitted_by`) or last changed the content of (`changed_by`, an edit or a
+  reprice apply) a PO from `:approve` and `:confirm` (403 PRC-POL-002), so the
+  editor of a change order cannot approve it either. A caller with no user id is
+  refused while the policy is on; an actor not recorded on an older PO blocks no
+  one. The routes live under `/purchasing-policies` so `/policies` stays free for
+  the FR-17.16 policy framework.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -343,8 +359,11 @@ store codes are returned as the `code` field.
 | PRC-IP-001 | 422 | Invoicing plan total ≠ line amount, percents not 100, a milestone rounding to nothing, or a line amount change the plan cannot absorb |
 | PRC-IP-002 | 422 | The plan has invoiced rows: it cannot be replaced or removed, nor its line cancelled |
 | PRC-IP-003 | 422 | The PO is cancelled or finalized, or the line is cancelled |
-| PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan |
+| PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan (or no such row on a settlement report) |
+| PRC-IP-004 | 409 | The plan row is settled under another reference or amount, or the line cannot absorb the settled amount |
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
+| PRC-POL-002 | 403 | Four-eyes policy: a user who created, submitted or last changed the PO (or a caller with no user id) cannot approve or confirm it |
+| PRC-POL-003 | 412 | If-Match is not the saved purchasing policy version (0 when none is saved) |
 | PRC-SA-001 | 422 | A firm-zone schedule line is reduced, moved or removed without a reason code |
 | PRC-SA-002 | 422 | A schedule line would drop below the quantity already received against it |
 | PRC-SA-003 | 422 | A release would lower cumulative released below the previous release without a cumulative reset |
@@ -366,4 +385,4 @@ and detail pages, the consolidation board, the price lookup with explain, sealed
 and scoring screens on the RFQ, the invoicing plan page per PO line, the price
 change pages (one PO, and the run over many), and the scheduling agreement
 monitor, create form, detail page (schedule editor, release run, releases) and
-release documentation. See its README.
+release documentation, and the purchasing policy list and editor. See its README.

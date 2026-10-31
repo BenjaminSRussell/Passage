@@ -13,7 +13,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
+	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 	"github.com/BenjaminSRussell/passage/services/close/migrations"
 )
@@ -92,6 +94,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	cfg, err := loadConfig(getenv)
 	if err != nil {
 		return err
@@ -109,7 +114,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	a := api.New(store.New(pool))
+	if url := getenv("LEDGER_URL"); url != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		a.WithLedgers(ledger.New(url, nil, signer))
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

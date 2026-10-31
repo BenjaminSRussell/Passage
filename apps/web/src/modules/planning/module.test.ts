@@ -40,6 +40,7 @@ describe("planning module", () => {
       "/planning/messages",
       "/planning/net-requirements",
       "/planning/runs",
+      "/planning/runs/compare",
       "/planning/runs/new",
       "/planning/forecast",
       "/planning/calculators",
@@ -56,6 +57,9 @@ describe("planning module", () => {
       "/planning/quota-arrangements",
       "/planning/quota-arrangements/new",
       "/planning/quota-arrangements/:id",
+      "/planning/scenarios",
+      "/planning/scenarios/new",
+      "/planning/scenarios/:code",
     ]);
     for (const route of planning.routes) {
       expect(route.element).not.toBeNull();
@@ -75,6 +79,7 @@ describe("planning module", () => {
     expect(duties["/planning/buffer-profiles"]).toBe("planning.read");
     expect(duties["/planning/ddmrp-buffers"]).toBe("planning.read");
     expect(duties["/planning/quota-arrangements"]).toBe("planning.read");
+    expect(duties["/planning/scenarios"]).toBe("planning.read");
   });
 
   it("is auto-discovered by the registry", () => {

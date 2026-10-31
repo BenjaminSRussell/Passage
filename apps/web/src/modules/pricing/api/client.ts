@@ -123,6 +123,8 @@ export interface ResolveResponse {
   explainRef: string;
   explainTruncated?: boolean;
   trace?: TraceStep[];
+  /** Zero-priced free goods line proposals (FR-26.22); empty when no live rule applies. */
+  freeGoods: FreeGoodsProposal[];
 }
 
 /** Problem details (RFC 9457) surfaced to the UI with the stable service code and field errors. */
@@ -362,7 +364,9 @@ export interface RebateAgreementInput {
 export interface RebateAgreement extends RebateAgreementInput {
   id: string;
   partyRole: RebatePartyRole;
-  status: "ACTIVE";
+  status: "ACTIVE" | "CLOSED";
+  /** Optimistic lock: 1 on create, incremented by every revise and close. */
+  version: number;
   accrualAccount: string;
   expenseAccount: string;
 }
@@ -392,6 +396,16 @@ export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<Re
 
 export function createRebateAgreement(body: RebateAgreementInput, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>("/rebates/agreements", body, key);
+}
+
+/** POST /rebates/agreements/{id}:revise - change the name, end date or (before any accrual) tiers of an ACTIVE agreement. */
+export function reviseRebateAgreement(id: string, body: { version: number; name?: string; validTo?: string; tiers?: RebateTier[] }, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:revise`, body, key);
+}
+
+/** POST /rebates/agreements/{id}:close - end an ACTIVE agreement on closeDate (the last day invoices accrue). */
+export function closeRebateAgreement(id: string, version: number, closeDate: string, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:close`, { version, closeDate }, key);
 }
 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
@@ -784,6 +798,67 @@ export function killCampaign(id: string, version: number, key: string = newKey()
 /** POST /campaigns/{id}:restore - the records rejoin the next resolve inside the campaign validity. */
 export function restoreCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
   return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:restore`, { version }, key);
+}
+
+// ---- Free goods rules (FR-26.22): free units per N ordered, inclusive or exclusive.
+
+export const FREE_GOODS_KINDS = ["INCLUSIVE", "EXCLUSIVE"] as const;
+export type FreeGoodsKind = (typeof FREE_GOODS_KINDS)[number];
+export const FREE_GOODS_CALC_RULES = ["PROPORTIONAL", "UNIT_REFERENCE", "WHOLE_UNITS"] as const;
+export type FreeGoodsCalcRule = (typeof FREE_GOODS_CALC_RULES)[number];
+export type FreeGoodsCustomerKind = "customer" | "customer_group" | "all";
+
+export interface FreeGoodsRuleInput {
+  legalEntityId: string;
+  customerKind: FreeGoodsCustomerKind;
+  /** Customer or customer group id; empty when customerKind is all. */
+  customerKey: string;
+  productId: string;
+  unit: string;
+  kind: FreeGoodsKind;
+  calcRule: FreeGoodsCalcRule;
+  everyQuantity: string;
+  freeQuantity: string;
+  minQuantity: string;
+  validFrom: string;
+  validTo: string;
+}
+
+export interface FreeGoodsRule extends FreeGoodsRuleInput {
+  id: string;
+  withdrawn: boolean;
+  version: number;
+}
+
+/** A zero-priced supplementary line proposal that sales adds to the order (FR-27.14). */
+export interface FreeGoodsProposal {
+  lineNo: number;
+  productId: string;
+  unit: string;
+  ruleId: string;
+  kind: FreeGoodsKind;
+  orderedQuantity: string;
+  pricedQuantity: string;
+  freeQuantity: string;
+  /** PRC-0014 when the line is already priced at nothing. */
+  warning?: string;
+}
+
+export function listFreeGoodsRules(filter: { legalEntityId?: string; productId?: string } = {}, signal?: AbortSignal): Promise<FreeGoodsRule[]> {
+  return items<FreeGoodsRule>(`/free-goods-rules${query({ legalEntityId: filter.legalEntityId, productId: filter.productId })}`, signal);
+}
+
+export function getFreeGoodsRule(id: string, signal?: AbortSignal): Promise<FreeGoodsRule> {
+  return send<FreeGoodsRule>(`/free-goods-rules/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createFreeGoodsRule(body: FreeGoodsRuleInput, key: string = newKey()): Promise<FreeGoodsRule> {
+  return post<FreeGoodsRule>("/free-goods-rules", body, key);
+}
+
+/** POST /free-goods-rules/{id}:withdraw - the rule leaves the next resolve. */
+export function withdrawFreeGoodsRule(id: string, version: number, key: string = newKey()): Promise<FreeGoodsRule> {
+  return post<FreeGoodsRule>(`/free-goods-rules/${encodeURIComponent(id)}:withdraw`, { version }, key);
 }
 
 // ---- Pricing procedures (FR-26.1): versioned step sequences; ACTIVE and SUPERSEDED versions are immutable.

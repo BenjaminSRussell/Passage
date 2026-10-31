@@ -61,6 +61,9 @@ func servedOperations(t *testing.T) map[string]bool {
 		if route == "/v1/production/as-built/{id}" && method == http.MethodPost {
 			route = "/v1/production/as-built/{id}:detach"
 		}
+		if route == "/v1/production/order-changes/{id}" && method == http.MethodPost {
+			route = "/v1/production/order-changes/{id}:{command}"
+		}
 		if route == "/v1/production/orders/{id}/operations/{operCommand}" {
 			route = "/v1/production/orders/{id}/operations/{operNumber}:{command}"
 		}
@@ -77,7 +80,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 30 {
+	if len(served) != 41 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -119,8 +122,9 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		store.CodeTriggerOrderClosed, string(domain.FnInsertOperations), string(domain.FnCreateReworkOrder), string(domain.FnNotify),
 		unknownActionCode, "PRODUCTION_ILLEGAL_TRANSITION", "PRODUCTION_RAF_EXCEEDS_REMAINING", "PRODUCTION_FIELD_NOT_EDITABLE",
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
-		"precondition_required", "idempotency_key_reuse", domain.CodeOrderQuantity, domain.CodeOperationState,
-		store.CodeOperationNotFound, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE"} {
+		"precondition_required", "idempotency_key_reuse", domain.CodeAsBuiltRequired, domain.CodeOrderQuantity, domain.CodeOperationState,
+		store.CodeOperationNotFound, DutyApplyChange, store.CodeChangeNotFound, domain.CodeChangeNoDelta, domain.CodeChangeResolved,
+		domain.CodeChangeNotEligible, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE"} {
 		if !strings.Contains(spec, name) {
 			t.Errorf("openapi.yaml does not mention %s", name)
 		}

@@ -74,6 +74,10 @@ type RunSpec struct {
 	Mapping      Mapping
 	DryRun       bool
 	OnlyKeys     map[string]bool
+	// Passthrough loads extracted fields unchanged (copy projects); Mapping is then ignored.
+	Passthrough bool
+	// Template supplies default values for absent source fields (FR-10.18); nil applies none.
+	Template *DataTemplate
 }
 
 type RowReject struct {
@@ -87,6 +91,8 @@ type LedgerEntry struct {
 	IdempotencyKey string
 	ContentHash    string
 	Action         string
+	// TemplateFields are the targets filled from the data template (lineage default_from_template).
+	TemplateFields []string
 }
 
 type Report struct {
@@ -97,6 +103,7 @@ type Report struct {
 	Created        int              `json:"created"`
 	Updated        int              `json:"updated"`
 	Unchanged      int              `json:"unchanged"`
+	Templated      int              `json:"templated"`
 	Rejects        []RowReject      `json:"rejects"`
 	Warnings       []RowWarning     `json:"warnings"`
 	Ledger         []LedgerEntry    `json:"-"`
@@ -146,8 +153,15 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	rep.Extracted = len(rows)
 	seen := make(map[string]bool, len(rows))
 	var mapped []Record
+	templated := map[string][]string{}
+	conflicting := conflictingKeys(rows, spec.OnlyKeys)
 	for _, r := range rows {
 		if spec.OnlyKeys != nil && !spec.OnlyKeys[r.Key] {
+			continue
+		}
+		if conflicting[r.Key] {
+			seen[r.Key] = true
+			rep.Rejects = append(rep.Rejects, RowReject{r.Key, []Reject{{"", CodeDuplicate, "source key repeated in extract with different values"}}})
 			continue
 		}
 		if seen[r.Key] {
@@ -155,7 +169,11 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			continue
 		}
 		seen[r.Key] = true
-		out, warnings, rejects := spec.Mapping.ApplyWithWarnings(r.Fields)
+		out, warnings, rejects := r.Fields, []Warning(nil), []Reject(nil)
+		var fromTemplate []string
+		if !spec.Passthrough {
+			out, warnings, rejects, fromTemplate = spec.Mapping.ApplyTemplate(r.Fields, spec.Template)
+		}
 		if len(rejects) > 0 {
 			rep.Rejects = append(rep.Rejects, RowReject{r.Key, rejects})
 			continue
@@ -164,6 +182,10 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			rep.Warnings = append(rep.Warnings, RowWarning{r.Key, warnings})
 		}
 		rep.Mapped++
+		if len(fromTemplate) > 0 {
+			templated[r.Key] = fromTemplate
+			rep.Templated++
+		}
 		mapped = append(mapped, Record{r.Key, out})
 	}
 	known, err := p.knownXrefs(ctx, spec, mapped)
@@ -178,7 +200,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		idemKey := IdempotencyKey(spec.SourceSystem, spec.Entity, r.Key, hash)
 		if found && x.ContentHash == hash {
 			rep.Unchanged++
-			rep.Ledger = append(rep.Ledger, LedgerEntry{r.Key, x.TargetID, idemKey, hash, ActionUnchanged})
+			rep.Ledger = append(rep.Ledger, LedgerEntry{r.Key, x.TargetID, idemKey, hash, ActionUnchanged, templated[r.Key]})
 			continue
 		}
 		action := ActionUpdated
@@ -189,7 +211,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			x.TargetID = p.IDGen()
 			reserve = append(reserve, XrefItem{r.Key, XrefEntry{TargetID: x.TargetID}})
 		}
-		entry := LedgerEntry{r.Key, x.TargetID, idemKey, hash, action}
+		entry := LedgerEntry{r.Key, x.TargetID, idemKey, hash, action, templated[r.Key]}
 		if spec.DryRun {
 			rep.count(action)
 			rep.Ledger = append(rep.Ledger, entry)
@@ -233,6 +255,32 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		rep.Status = StatusSucceeded
 	}
 	return rep, nil
+}
+
+// conflictingKeys returns the source keys that repeat in the extract with different field values. No occurrence of
+// such a key loads: keeping the first would make the target depend on extract order, so re-running the same rows in
+// another order would change it. Exact repeats still load once and only the extra occurrences are rejected.
+func conflictingKeys(rows []Record, only map[string]bool) map[string]bool {
+	count := make(map[string]int, len(rows))
+	for _, r := range rows {
+		if only == nil || only[r.Key] {
+			count[r.Key]++
+		}
+	}
+	first := map[string]string{}
+	conflicting := map[string]bool{}
+	for _, r := range rows {
+		if count[r.Key] < 2 {
+			continue
+		}
+		h := ContentHash(r.Fields)
+		if prev, ok := first[r.Key]; !ok {
+			first[r.Key] = h
+		} else if prev != h {
+			conflicting[r.Key] = true
+		}
+	}
+	return conflicting
 }
 
 func (p *Pipeline) knownXrefs(ctx context.Context, spec RunSpec, rows []Record) (map[string]XrefEntry, error) {

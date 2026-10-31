@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
@@ -71,7 +72,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect pending-posting pool: %w", err)
 	}
 	defer pendingPool.Close()
-	a := api.New(store.New(pool).WithPendingPool(pendingPool), ports)
+	keys, err := fieldcrypt.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	ports.FieldCrypt = keys
+	a := api.New(store.New(pool).WithPendingPool(pendingPool).WithFieldCrypt(keys), ports)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

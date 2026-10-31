@@ -5,6 +5,28 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 /** Decimal with up to 6 places, as the service accepts (never parsed to float). */
 export const DECIMAL = /^\d+(\.\d{1,6})?$/;
 
+const SCALE = 6;
+
+function toMicros(value: string): bigint {
+  const negative = value.startsWith("-");
+  const [whole = "0", fraction = ""] = value.replace(/^[-+]/, "").split(".");
+  const micros = BigInt(whole || "0") * 10n ** BigInt(SCALE) + BigInt((fraction + "0".repeat(SCALE)).slice(0, SCALE) || "0");
+  return negative ? -micros : micros;
+}
+
+function fromMicros(micros: bigint): string {
+  const negative = micros < 0n;
+  const abs = negative ? -micros : micros;
+  const unit = 10n ** BigInt(SCALE);
+  const fraction = (abs % unit).toString().padStart(SCALE, "0").replace(/0+$/, "");
+  return `${negative ? "-" : ""}${abs / unit}${fraction ? `.${fraction}` : ""}`;
+}
+
+/** a − b for decimal strings of up to 6 places, exact (never parsed to float): "0.1", "0.3" → "-0.2". */
+export function subtractDecimal(a: string, b: string): string {
+  return fromMicros(toMicros(a) - toMicros(b));
+}
+
 /** The first block of an id, enough to tell rows apart on screen. */
 export function shortId(id: string): string {
   return id.split("-")[0] ?? id;

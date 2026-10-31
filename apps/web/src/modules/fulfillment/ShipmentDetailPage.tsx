@@ -3,10 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Problem, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { dash, formatDate, formatDateTime, formatMoney, shortId, subtractDecimal } from "./format";
+import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
-import { canCancelShipment, CancelShipmentPanel, LabelButton, LabelPanel, TrackingCard } from "./ShipmentTracking";
+import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
+import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -23,7 +24,19 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "qtyPacked", header: "Packed", align: "end" },
   { key: "qtyShipped", header: "Shipped", align: "end" },
   { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
+  { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
+  {
+    key: "tracking",
+    header: "Batch / serial",
+    render: (row) => {
+      const entries = row.tracking ?? [];
+      if (entries.length === 0) return row.trackingRequired ? "Required" : dash;
+      const text = entries.map((e) => [e.serialNo ?? e.batchNo, e.locationCode ? `@${e.locationCode}` : "", e.serialNo ? "" : ` × ${e.qty}`].join("")).join(", ");
+      return row.trackingRequired ? `${text} (${trackingCover(row)})` : text;
+    },
+  },
+  { key: "shortPickReason", header: "Short reason", render: (row) => (row.shortPickReason ? (SHORT_PICK_REASONS[row.shortPickReason] ?? row.shortPickReason) : dash) },
 ];
 
 function containerColumns(lines: ShipmentLine[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {
@@ -114,12 +127,14 @@ export function ShipmentDetailPage() {
         </dl>
       </Card>
       {canCancelShipment(shipment) ? <CancelShipmentPanel key={`cancel-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
+      {canCloseRemainder(shipment) ? <CloseRemainderPanel key={`close-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {shipment.status === "PARTIALLY_SHIPPED" ? (
         <Alert tone="info" title="Partially shipped">
-          A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity.
+          A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity. If the remainder will not ship, close it instead.
         </Alert>
       ) : null}
       <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />
+      {trackableLines(shipment).length > 0 ? <TrackingForm key={`tracking-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canPick ? <PickForm key={`pick-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {autoPacked ? (
         <Alert tone={autoPacked.warnings.length > 0 ? "warning" : "success"} title={`Auto-pack closed ${autoPacked.containers.length} container${autoPacked.containers.length === 1 ? "" : "s"}`} live="status">
@@ -152,7 +167,10 @@ export function ShipmentDetailPage() {
         <DataTable
           label="Containers"
           columns={containerColumns(shipment.lines, (row) => (
-            <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+            <span className={styles.actions}>
+              <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+              {canUnpack(shipment, row) ? <UnpackButton key={`unpack-${shipment.version}-${row.id}`} shipment={shipment} container={row} onDone={state.reload} /> : null}
+            </span>
           ))}
           rows={shipment.containers}
           getRowKey={(row) => row.id}

@@ -25,6 +25,9 @@ type RouteOperation struct {
 	QueueAfterH   decimal.Decimal `json:"queueAfter"`
 	TransitH      decimal.Decimal `json:"transit"`
 	EfficiencyPct decimal.Decimal `json:"efficiencyPct"`
+	// OverlapQty is the transfer batch: the next operation may start once this
+	// many units are done (BR-23.5). Zero, or at least the quantity, is no overlap.
+	OverlapQty decimal.Decimal `json:"overlapQty"`
 }
 
 type LeadTimeResult struct {
@@ -34,21 +37,59 @@ type LeadTimeResult struct {
 
 func (o RouteOperation) isPrimary() bool { return o.Priority == "" || o.Priority == PriorityPrimary }
 
-func (o RouteOperation) duration(qty decimal.Decimal) decimal.Decimal {
+// runFor is the run time for units, scaled by efficiency (BR-9.8: setup is not).
+func (o RouteOperation) runFor(units decimal.Decimal) decimal.Decimal {
 	eff := o.EfficiencyPct
 	if eff.IsZero() {
 		eff = hundred
 	}
-	run := o.RunH.Mul(qty).Div(o.ProcessQty).Mul(hundred).Div(eff)
-	return o.SetupH.Add(run).Add(o.QueueBeforeH).Add(o.QueueAfterH).Add(o.TransitH)
+	return o.RunH.Mul(units).Div(o.ProcessQty).Mul(hundred).Div(eff)
+}
+
+func (o RouteOperation) overlaps(qty decimal.Decimal) bool {
+	return o.OverlapQty.IsPositive() && o.OverlapQty.LessThan(qty)
 }
 
 func validateOperation(o RouteOperation) error {
 	if !o.ProcessQty.IsPositive() || o.SetupH.IsNegative() || o.RunH.IsNegative() || o.QueueBeforeH.IsNegative() ||
-		o.QueueAfterH.IsNegative() || o.TransitH.IsNegative() || o.EfficiencyPct.IsNegative() {
-		return errf(CodeRouteQty, "operation %d has a non-positive process quantity or a negative time", o.No)
+		o.QueueAfterH.IsNegative() || o.TransitH.IsNegative() || o.EfficiencyPct.IsNegative() || o.OverlapQty.IsNegative() {
+		return errf(CodeRouteQty, "operation %d has a non-positive process quantity or a negative time or overlap", o.No)
 	}
 	return nil
+}
+
+// opTiming holds when an operation starts, ends its run and finishes (after
+// its queue-after and transit).
+type opTiming struct{ start, runEnd, finish decimal.Decimal }
+
+// arrival is when the batch that completes `done` units of p reaches the next
+// operation; a starved operation's batches are timed back from its run end.
+func arrival(p RouteOperation, t opTiming, qty, done decimal.Decimal) decimal.Decimal {
+	return t.runEnd.Sub(p.runFor(qty.Sub(done))).Add(p.QueueAfterH).Add(p.TransitH)
+}
+
+// overlapRunEnd is the earliest run end of o fed by p in batches of p's
+// overlap quantity: o cannot end before batch i arrives and the units from
+// batch i on are run. That bound is linear in i over the full batches, so only
+// batch 2, the second to last and the last (which holds the rest) can bind.
+func overlapRunEnd(o, p RouteOperation, pt opTiming, qty decimal.Decimal) decimal.Decimal {
+	k := p.OverlapQty
+	whole, rest := qty.QuoRem(k, 0)
+	batches := whole
+	if !rest.IsZero() {
+		batches = whole.Add(decimal.NewFromInt(1))
+	}
+	two := decimal.NewFromInt(2)
+	end := decimal.Zero
+	for _, i := range []decimal.Decimal{two, batches.Sub(decimal.NewFromInt(1)), batches} {
+		if i.LessThan(two) || i.GreaterThan(batches) {
+			continue
+		}
+		done := decimal.Min(k.Mul(i), qty)
+		left := qty.Sub(k.Mul(i.Sub(decimal.NewFromInt(1))))
+		end = decimal.Max(end, arrival(p, pt, qty, done).Add(o.runFor(left)))
+	}
+	return end
 }
 
 func successors(ops []RouteOperation) (map[int]int, error) {
@@ -98,41 +139,66 @@ func LeadTime(ops []RouteOperation, qty, hoursPerDay decimal.Decimal) (LeadTimeR
 	if err != nil {
 		return LeadTimeResult{}, err
 	}
-	preds := map[int][]int{}
+	preds, primariesAt := map[int][]int{}, map[int][]int{}
 	for no, n := range next {
 		preds[n] = append(preds[n], no)
+		if byNo[no].isPrimary() {
+			primariesAt[n] = append(primariesAt[n], no)
+		}
 	}
-	finish := map[int]decimal.Decimal{}
+	timing := map[int]opTiming{}
 	visiting := map[int]bool{}
-	var finishOf func(no int) (decimal.Decimal, error)
-	finishOf = func(no int) (decimal.Decimal, error) {
-		if f, ok := finish[no]; ok {
-			return f, nil
+	var timingOf func(no int) (opTiming, error)
+	timingOf = func(no int) (opTiming, error) {
+		if t, ok := timing[no]; ok {
+			return t, nil
 		}
 		if visiting[no] {
-			return decimal.Zero, errf(CodeRouteCycle, "operation %d is part of a cycle", no)
+			return opTiming{}, errf(CodeRouteCycle, "operation %d is part of a cycle", no)
 		}
 		visiting[no] = true
+		o := byNo[no]
 		start := decimal.Zero
 		for _, p := range preds[no] {
-			pf, err := finishOf(p)
+			pt, err := timingOf(p)
 			if err != nil {
-				return decimal.Zero, err
+				return opTiming{}, err
 			}
-			start = decimal.Max(start, pf)
+			release := pt.finish
+			if po := byNo[p]; po.overlaps(qty) {
+				release = arrival(po, pt, qty, po.OverlapQty)
+			}
+			start = decimal.Max(start, release)
+		}
+		// BR-9.7: a secondary runs alongside the primary at its join, so it
+		// cannot start before that primary does.
+		if !o.isPrimary() {
+			for _, p := range primariesAt[next[no]] {
+				pt, err := timingOf(p)
+				if err != nil {
+					return opTiming{}, err
+				}
+				start = decimal.Max(start, pt.start)
+			}
+		}
+		runEnd := start.Add(o.QueueBeforeH).Add(o.SetupH).Add(o.runFor(qty))
+		for _, p := range preds[no] {
+			if po := byNo[p]; po.overlaps(qty) {
+				runEnd = decimal.Max(runEnd, overlapRunEnd(o, po, timing[p], qty))
+			}
 		}
 		visiting[no] = false
-		finish[no] = start.Add(byNo[no].duration(qty))
-		return finish[no], nil
+		timing[no] = opTiming{start: start, runEnd: runEnd, finish: runEnd.Add(o.QueueAfterH).Add(o.TransitH)}
+		return timing[no], nil
 	}
 	total, ends := decimal.Zero, 0
 	for _, o := range ordered {
-		f, err := finishOf(o.No)
+		t, err := timingOf(o.No)
 		if err != nil {
 			return LeadTimeResult{}, err
 		}
 		if next[o.No] == 0 {
-			total, ends = decimal.Max(total, f), ends+1
+			total, ends = decimal.Max(total, t.finish), ends+1
 		}
 	}
 	if ends == 0 && len(ordered) > 0 {
@@ -161,7 +227,6 @@ type VersionOperation struct {
 	RouteOperation
 	OperationID  string
 	LinkType     string
-	OverlapQty   decimal.Decimal
 	ScrapPercent decimal.Decimal
 	Requirements []OperationRequirement
 }
@@ -201,7 +266,7 @@ func validateVersionOperation(o VersionOperation) error {
 		}
 	}
 	if !slices.Contains([]string{"", PriorityPrimary, "secondary1", "secondary2", "secondary3"}, o.Priority) || (o.LinkType != "" && o.LinkType != LinkHard && o.LinkType != LinkSoft) ||
-		len(o.OperationID) > maxOperationIDLength || o.OverlapQty.IsNegative() || o.ScrapPercent.IsNegative() || o.ScrapPercent.GreaterThan(hundred) {
+		len(o.OperationID) > maxOperationIDLength || o.ScrapPercent.IsNegative() || o.ScrapPercent.GreaterThan(hundred) {
 		return errf(CodeRouteQty, "operation %d has an invalid priority, link type, operation id, overlap quantity or scrap percent", o.No)
 	}
 	for i, r := range o.Requirements {
@@ -223,11 +288,15 @@ func ValidateRouteVersion(v RouteVersion) error {
 		return errf(CodeRouteOpsLimit, "route version has %d operations, the limit is %d", len(v.Operations), maxRouteOperations)
 	}
 	next := make(map[int]int, len(v.Operations))
+	primaryJoins := make(map[int]bool, len(v.Operations))
 	for _, o := range v.Operations {
 		if _, dup := next[o.No]; dup {
 			return errf(CodeRouteOpDup, "operation number %d appears more than once", o.No)
 		}
 		next[o.No] = o.NextNo
+		if o.isPrimary() {
+			primaryJoins[o.NextNo] = true
+		}
 	}
 	for _, o := range v.Operations {
 		if _, ok := next[o.NextNo]; o.NextNo != 0 && !ok {
@@ -235,6 +304,12 @@ func ValidateRouteVersion(v RouteVersion) error {
 		}
 		if err := validateVersionOperation(o); err != nil {
 			return err
+		}
+	}
+	// BR-9.7: a secondary operation runs alongside a primary that joins the same next operation.
+	for _, o := range v.Operations {
+		if !o.isPrimary() && !primaryJoins[o.NextNo] {
+			return errf(CodeRouteNoPrimary, "Secondary operation %d has no primary at its join.", o.No)
 		}
 	}
 	for start := range next {

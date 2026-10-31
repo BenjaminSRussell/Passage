@@ -12,6 +12,7 @@ import (
 // Method is the depreciation method of one asset book. StraightLine depreciates
 // per month over Life months; DecliningBalance depreciates per year over Life
 // years, with an optional switch to straight line (MACRS-style at Factor 2).
+// MethodMACRS (macrs.go) applies the IRS percentage tables per year.
 type Method string
 
 const (
@@ -95,6 +96,8 @@ func Schedule(in Input) ([]Line, error) {
 			return nil, fail(CodeInvalidDepreciation, "declining-balance factor must be between 1 and 3")
 		}
 		return declining(in, basis, minor)
+	case MethodMACRS:
+		return macrs(in, minor)
 	default:
 		return nil, fail(CodeInvalidDepreciation, "unknown depreciation method "+string(in.Method))
 	}

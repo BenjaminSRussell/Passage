@@ -620,7 +620,10 @@ paths:
       description: >
         Checks the BR-35.4 required elements, the VAT category rules that need no schematron (rate 0
         for Z, E, AE, K, G and no rate for O, an exemption reason for E, AE, K, G and O, the supplier VAT
-        identifier with S, both VAT identifiers with AE and K) and the arithmetic rules, then returns
+        identifier with every category but O, both VAT identifiers with AE and K, O alone and without
+        VAT identifiers, the delivery date and country with K), the GLN (0088) and Norwegian
+        organisation number (0192) check digits, the Peppol rules for a German supplier and customer
+        (seller contact, city and post code, buyer reference) and the arithmetic rules, then returns
         the UBL XML. There is one VAT breakdown per category and rate; document allowances and charges
         lower or raise the taxable amount of their category and rate. A credit note carries the due
         date as PaymentMeans/PaymentDueDate. Blocking issues (EINV-0110, EINV-0111) come back with
@@ -651,6 +654,8 @@ paths:
                   type: object
                   additionalProperties: { type: string }
                   description: TaxExemptionReason per VAT category code
+                deliveryDate: { type: string, format: date, description: 'ActualDeliveryDate (BT-72); required with category K (BR-IC-11)' }
+                deliveryCountry: { type: string, description: 'Deliver-to country (BT-80); required with category K (BR-IC-12)' }
                 allowanceCharges:
                   type: array
                   maxItems: 5000
@@ -841,7 +846,14 @@ components:
         endpointScheme: { type: string, description: 'EAS code, e.g. 0088 (GLN)' }
         endpointId: { type: string }
         countryCode: { type: string, description: ISO 3166-1 alpha-2 }
-        vatId: { type: string }
+        vatId: { type: string, description: 'Required with every VAT category except O; must be absent with O (BR-O-02)' }
+        legalId: { type: string, description: 'PartyLegalEntity/CompanyID; a supplier needs it or vatId (BR-CO-26)' }
+        streetName: { type: string }
+        cityName: { type: string, description: Required for both parties when supplier and customer are in Germany (DE-R-003, DE-R-008) }
+        postalZone: { type: string, description: Required for both parties when supplier and customer are in Germany (DE-R-004, DE-R-009) }
+        contactName: { type: string, description: Seller contact; name, phone and email are required when supplier and customer are in Germany (DE-R-002) }
+        contactPhone: { type: string }
+        contactEmail: { type: string }
     Issue:
       type: object
       required: [code, detail, reject]

@@ -541,7 +541,8 @@ paths:
         Expires each pending attempt whose deadline has passed, offers the load
         to the next carrier or fails the tender with a planner task (TMS-0106)
         after the last one, and publishes one tender.expired event per expired
-        attempt. At most 500 tenders per call. A Temporal TenderWorkflow timer
+        attempt. At most 500 tenders per call. Only tenders in the caller's legal
+        entities expire, so the sweep must run as an all-entity principal. A Temporal TenderWorkflow timer
         will drive the same rule; until then a scheduler or the tender board calls this.
       x-passage-duty: TMS_TENDER
       responses:
@@ -1289,6 +1290,7 @@ components:
       type: object
       required: [capacity, shipments]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the loads. Defaults to the caller's single legal entity; required (422) for a caller scoped to several or to all legal entities; 403 outside the caller's scope." }
         capacity: { $ref: '#/components/schemas/Capacity' }
         shipments:
           type: array
@@ -1537,7 +1539,8 @@ components:
       type: object
       required: [loadId, carrierId, currency, expectedLines]
       properties:
-        loadId: { type: string, format: uuid }
+        loadId: { type: string, format: uuid, description: The load the bill is for; it must be visible to the caller (404 otherwise) and the bill inherits its legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Assertion only: 422 when it differs from the load's legal entity." }
         carrierId: { type: string, format: uuid }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         expectedLines:
@@ -1595,7 +1598,8 @@ components:
         invoiceNo: { type: string, minLength: 1, maxLength: 40 }
         invoiceDate: { type: string, format: date }
         source: { type: string, enum: [EDI210, MANUAL, API] }
-        freightBillId: { type: string, format: uuid, description: The bill to match; absent makes the invoice UNEXPECTED_INVOICE }
+        freightBillId: { type: string, format: uuid, description: The bill to match; absent makes the invoice UNEXPECTED_INVOICE. A matched invoice inherits the bill's legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of an invoice without a bill; same rules as on a load build. Assertion only when freightBillId is present." }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         lines:
           type: array
@@ -1703,6 +1707,7 @@ components:
       type: object
       required: [reference, currency, legs, costLines, receiptLines]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the voyage and its legs, containers, folios, cost lines and receipt lines. Defaults to the caller's single legal entity; required (422) for a caller scoped to several or to all legal entities; 403 outside the caller's scope." }
         reference: { type: string, minLength: 1, maxLength: 40 }
         currency: { type: string, pattern: '^[A-Za-z]{3}$' }
         legs:
@@ -1817,6 +1822,7 @@ components:
         incoterm: { type: string, description: Incoterms 2020 rule; only EXW, FCA, FAS, FOB, CFR, CIF, CPT and CIP open an order }
         siteId: { type: string, format: uuid, description: 'Destination site; the in-transit warehouse is TRANSIT-{site}' }
         receiptLines: { type: array, items: { type: integer, minimum: 1 }, maxItems: 3000, description: Voyage receipt lines, each once; empty means every line }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the order; same rules as on a load build." }
     GoodsInTransit:
       type: object
       required: [id, voyageId, voyageReference, siteId, incoterm, transferEvent, inTransitWarehouse, currency, status, lines, goodsValue, estimatedTotal, version, createdAt]
@@ -1860,7 +1866,8 @@ components:
       properties:
         siteId: { type: string, format: uuid }
         direction: { type: string, enum: [INBOUND, OUTBOUND] }
-        loadId: { type: string, format: uuid }
+        loadId: { type: string, format: uuid, description: When present the load must be visible to the caller (404 otherwise) and the visit inherits its legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of a visit without a load; assertion only when loadId is present." }
         carrierScac: { type: string, pattern: '^[A-Za-z]{2,4}$' }
         trailerNo: { type: string, minLength: 1, maxLength: 20, description: Trailer or container number }
         sealNo: { type: string, maxLength: 20, description: Seal of an inbound sealed trailer }
@@ -1953,6 +1960,7 @@ components:
       type: object
       required: [depot, stops, vehicles]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the plan; same rules as on a voyage. The request hash is the idempotency key within one legal entity, and the field is not part of the hash." }
         depot: { $ref: '#/components/schemas/RoutePoint' }
         stops:
           type: array
@@ -2015,6 +2023,7 @@ components:
       required: [id, requestHash, stopCount, vehicleCount, routeCount, droppedCount, totalDistanceKm, timeLimitS, createdBy, createdAt]
       properties:
         id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
         requestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         stopCount: { type: integer }
         vehicleCount: { type: integer }

@@ -175,7 +175,7 @@ func TestCapexDecision_GuardsDutyUserVersionAndSoD(t *testing.T) {
 func TestMidQuarterTest_Validation(t *testing.T) {
 	f := newFake()
 	h := server(f)
-	le := ids.New()
+	le := testLE
 	path := "/v1/assets/mid-quarter-test?legalEntityId=" + le + "&bookCode=TAX&year=2026"
 	if rec := call(h, http.MethodGet, path, "", "AssetMaintain", false); rec.Code != http.StatusForbidden {
 		t.Fatalf("without AssetView or AssetDepreciate status = %d", rec.Code)

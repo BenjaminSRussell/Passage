@@ -1289,7 +1289,13 @@ components:
         percent: { $ref: "#/components/schemas/Decimal" }
         aql: { $ref: "#/components/schemas/Decimal" }
         severity: { $ref: "#/components/schemas/Severity" }
-        inspectionLevel: { type: string, enum: [II], description: Only level II is loaded in this slice. }
+        inspectionLevel:
+          type: string
+          enum: [S-1, S-2, S-3, S-4, I, II, III]
+          description: >-
+            Z1.4 inspection level (default II). Sizing (sampling-plans:size) takes every level, every
+            AQL column from 0.010 to 1000 and every severity (Tables II-A, II-B, II-C); a plan stored on
+            an association or a manual order is still level II, NORMAL and AQL 1.0, 2.5 or 4.0.
     SizeRequest:
       allOf:
         - $ref: "#/components/schemas/SamplingPlan"

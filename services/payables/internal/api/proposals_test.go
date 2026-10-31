@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -62,6 +63,17 @@ type fakeStore struct {
 	approveDay string
 	cancelErr  error
 	canceller  string
+
+	summaries   []store.ProposalSummary
+	listPropErr error
+	propFilter  store.ProposalFilter
+	propLimit   int
+
+	holdErr    error
+	holdNoop   bool
+	holdCalls  []string
+	blockErr   error
+	blockCalls []string
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{proposals: map[string]store.Proposal{}} }
@@ -134,7 +146,7 @@ func (f *fakeStore) CancelProposal(_ context.Context, id, user string) (store.Pr
 	return p, err
 }
 
-func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today string) (store.Proposal, error) {
+func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today string, _ ...store.GroupBank) (store.Proposal, error) {
 	f.approver, f.approveDay = approver, today
 	if f.approveErr != nil {
 		return store.Proposal{}, f.approveErr
@@ -145,13 +157,33 @@ func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today strin
 	return p, err
 }
 
+func (f *fakeStore) ListProposals(_ context.Context, filter store.ProposalFilter, limit int) ([]store.ProposalSummary, error) {
+	f.propFilter, f.propLimit = filter, limit
+	return f.summaries[:min(limit, len(f.summaries))], f.listPropErr
+}
+
+func (f *fakeStore) SetPaymentHold(_ context.Context, id string, held bool, reason string) (bool, error) {
+	f.holdCalls = append(f.holdCalls, fmt.Sprintf("%s:%t:%s", id, held, reason))
+	return !f.holdNoop, f.holdErr
+}
+
+func (f *fakeStore) BlockVendor(_ context.Context, le, vendorID, reason string) error {
+	f.blockCalls = append(f.blockCalls, "block:"+le+":"+vendorID+":"+reason)
+	return f.blockErr
+}
+
+func (f *fakeStore) UnblockVendor(_ context.Context, le, vendorID string) error {
+	f.blockCalls = append(f.blockCalls, "unblock:"+le+":"+vendorID)
+	return f.blockErr
+}
+
 type fakeRates struct {
 	rates map[string]string
 	err   error
 	calls []string
 }
 
-func (f *fakeRates) Rate(_ context.Context, from, to string, date time.Time) (decimal.Decimal, error) {
+func (f *fakeRates) Rate(_ context.Context, _, from, to string, date time.Time) (decimal.Decimal, error) {
 	f.calls = append(f.calls, from+">"+to+"@"+date.Format(time.DateOnly))
 	if f.err != nil {
 		return decimal.Decimal{}, f.err
@@ -166,12 +198,20 @@ func proposalRouter(s *fakeStore, rates api.RateSource) (*chi.Mux, *api.API) {
 	return r, a
 }
 
-type caller struct{ duties, user, entity string }
+type caller struct {
+	duties, user, entity string
+	noScope              bool
+}
 
 func (c caller) send(r http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
-	req.Header.Set("X-Passage-Duties", c.duties)
+	duties := c.duties
+	if c.entity == "" && !c.noScope {
+		duties += "," + tenant.DutyAllScope
+	}
+	req.Header.Set("X-Passage-Duties", duties)
+	req.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
 	if c.user != "" {
 		req.Header.Set("X-Passage-User", c.user)
 	}
@@ -283,6 +323,8 @@ func TestOpenItemRoutes_AuthAndEntityScope(t *testing.T) {
 	wantProblem(t, caller{duties: "aging.read", entity: entityA}.send(r, http.MethodGet, "/v1/payables/open-items", ""), http.StatusForbidden, "AUTH-0003")
 	wantProblem(t, caller{duties: dutyRead}.send(r, http.MethodGet, "/v1/payables/open-items", ""), http.StatusBadRequest, "COM-0001")
 	wantProblem(t, reader.send(r, http.MethodGet, "/v1/payables/open-items?legal_entity="+entityB, ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, caller{duties: dutyRead, noScope: true}.send(r, http.MethodGet, "/v1/payables/open-items?legal_entity="+entityB, ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, caller{duties: dutyWrite, noScope: true}.send(r, http.MethodPost, "/v1/payables/payment-proposals", proposalBody), http.StatusForbidden, "AUTH-0003")
 	if rec := (caller{duties: dutyRead}).send(r, http.MethodGet, "/v1/payables/open-items?legal_entity="+entityB, ""); rec.Code != http.StatusOK || s.listFilter.LegalEntityID != entityB {
 		t.Fatalf("an unscoped caller names the entity explicitly: %d %s", rec.Code, rec.Body)
 	}

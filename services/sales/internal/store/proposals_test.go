@@ -128,7 +128,7 @@ func TestPostgres_ProposalResponses(t *testing.T) {
 		IdempotencyKey: "k4", RequestHash: "h4", Actor: "sales-rep", At: at}); problemCode(t, err) != CodeProposalNotFound {
 		t.Fatalf("a rule outside the legal entity: %v", err)
 	}
-	otherTenant := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: map[string]struct{}{}})
+	otherTenant := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: testkit.ScopeDuties("")})
 	if _, _, err := s.RecordProposalResponse(otherTenant, NewProposalResponse{LegalEntityID: le, RuleID: rule.ID, Accepted: true,
 		IdempotencyKey: "k5", RequestHash: "h5", Actor: "x", At: at}); problemCode(t, err) != CodeProposalNotFound {
 		t.Fatalf("another tenant's rule: %v", err)

@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -184,6 +185,11 @@ func principal(ctx context.Context) tenant.Principal {
 	return p
 }
 
+const (
+	fieldNationalID  = "worker_pii.national_id"
+	fieldBankAccount = "worker_pii.bank_account"
+)
+
 // CreateWorker stores a worker, seals its P3 values into worker_pii and writes
 // an audit row recording which P3 fields were set (never their values).
 func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotencyKey string) (Worker, bool, error) {
@@ -205,13 +211,13 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 				return err
 			}
 		}
-		nationalID, err := s.sealer.Seal(in.NationalID)
+		nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
 		if err != nil {
 			return err
 		}
 		var bank []byte
 		if in.BankAccount != "" {
-			if bank, err = s.sealer.Seal(in.BankAccount); err != nil {
+			if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
 				return err
 			}
 		}
@@ -281,14 +287,14 @@ func (s *Postgres) ReadPII(ctx context.Context, workerID string, reveal bool, re
 		if err != nil {
 			return err
 		}
-		nid, err := s.sealer.Open(nationalID)
+		nid, err := s.sealer.Open(p.TenantID, fieldNationalID, nationalID)
 		if err != nil {
 			return err
 		}
 		view = PIIView{NationalID: domain.MaskNationalID(nid), Masked: !reveal}
 		var bankPlain *string
 		if bank != nil {
-			b, err := s.sealer.Open(bank)
+			b, err := s.sealer.Open(p.TenantID, fieldBankAccount, bank)
 			if err != nil {
 				return err
 			}
@@ -308,6 +314,93 @@ func (s *Postgres) ReadPII(ctx context.Context, workerID string, reveal bool, re
 		return audit(ctx, tx, p, action, workerID, fields, reason, requestID)
 	})
 	return view, err
+}
+
+// PIIOpenCounts reports P3 opens that needed the legacy HR_PII_KEY and opens that failed both keys.
+func (s *Postgres) PIIOpenCounts() (legacy, failed int64) {
+	if s == nil || s.sealer == nil {
+		return 0, 0
+	}
+	return s.sealer.OpenCounts()
+}
+
+// resealBatchSize is the rows per re-seal transaction; tests shrink it to cross batches.
+var resealBatchSize = 500
+
+type sealedPII struct {
+	workerID         string
+	nationalID, bank []byte
+}
+
+// ResealPII re-seals, under the current fieldcrypt key, every worker_pii value of
+// the context tenant that opens only through the legacy HR_PII_KEY or names an
+// older key id. It walks the rows in worker id order, one transaction per batch,
+// writes a p3_change audit row per rewritten worker, and returns how many rows it
+// rewrote. A value that opens under neither key stops the run with its worker id.
+func (s *Postgres) ResealPII(ctx context.Context) (int, error) {
+	p := principal(ctx)
+	rewritten, after := 0, ids.Nil
+	for {
+		var batch []sealedPII
+		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `select worker_id::text, national_id_sealed, bank_account_sealed from worker_pii
+				where tenant_id = $1 and worker_id > $2 order by worker_id limit $3 for update`, p.TenantID, after, resealBatchSize)
+			if err != nil {
+				return err
+			}
+			if batch, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (sealedPII, error) {
+				var v sealedPII
+				return v, r.Scan(&v.workerID, &v.nationalID, &v.bank)
+			}); err != nil {
+				return err
+			}
+			for _, row := range batch {
+				changed, err := s.resealRow(ctx, tx, p, row)
+				if err != nil {
+					return fmt.Errorf("worker %s: %w", row.workerID, err)
+				}
+				if changed {
+					rewritten++
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return rewritten, err
+		}
+		if len(batch) < resealBatchSize {
+			return rewritten, nil
+		}
+		after = batch[len(batch)-1].workerID
+	}
+}
+
+func (s *Postgres) resealRow(ctx context.Context, tx pgx.Tx, p tenant.Principal, row sealedPII) (bool, error) {
+	nationalID, nidChanged, err := s.sealer.Reseal(p.TenantID, fieldNationalID, row.nationalID)
+	if err != nil {
+		return false, err
+	}
+	bank, bankChanged := row.bank, false
+	if row.bank != nil {
+		if bank, bankChanged, err = s.sealer.Reseal(p.TenantID, fieldBankAccount, row.bank); err != nil {
+			return false, err
+		}
+	}
+	if !nidChanged && !bankChanged {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $3, bank_account_sealed = $4 where tenant_id = $1 and worker_id = $2`,
+		p.TenantID, row.workerID, nationalID, bank); err != nil {
+		return false, err
+	}
+	var fields []string
+	if nidChanged {
+		fields = append(fields, "national_id")
+	}
+	if bankChanged {
+		fields = append(fields, "bank_account")
+	}
+	return true, audit(ctx, tx, p, "p3_change", row.workerID, fields, "re-sealed under the current fieldcrypt key; value unchanged", "")
 }
 
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, action, entityID string, fields []string, reason, requestID string) error {

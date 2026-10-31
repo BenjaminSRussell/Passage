@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -18,28 +19,73 @@ func codeOf(err error) string {
 
 func TestProposeQty(t *testing.T) {
 	tests := []struct {
-		name                      string
-		mode                      Proposal
-		required, consumed, share string
-		want                      string
+		name                                 string
+		mode                                 Proposal
+		required, consumed, reported, ordQty string
+		want                                 string
 	}{
-		{"remaining takes what is left", ProposeRemaining, "315", "100", "0", "215"},
-		{"remaining never goes negative", ProposeRemaining, "315", "320", "0", "0"},
-		{"proportional to the reported share", ProposeProportional, "33.9966", "0", "0.4", "13.59864"},
-		{"proportional rounds up at 6 places", ProposeProportional, "10", "0", "0.3333333", "3.333333"},
-		{"proportional less what was consumed", ProposeProportional, "33.9966", "13.59864", "1", "20.39796"},
-		{"none proposes nothing", ProposeNone, "315", "0", "1", "0"},
+		{"remaining takes what is left", ProposeRemaining, "315", "100", "0", "100", "215"},
+		{"remaining never goes negative", ProposeRemaining, "315", "320", "0", "100", "0"},
+		{"proportional to the reported share", ProposeProportional, "33.9966", "0", "40", "100", "13.59864"},
+		{"proportional rounds up at 6 places", ProposeProportional, "10", "0", "1", "3", "3.333334"},
+		{"proportional less what was consumed", ProposeProportional, "33.9966", "13.59864", "100", "100", "20.39796"},
+		{"none proposes nothing", ProposeNone, "315", "0", "100", "100", "0"},
+		// Regression: 306 × 100 ÷ 150 is 204 exactly; a rounded share 0.6666666666666667 gave 204.000001.
+		{"RAF 100 of 150 consumes 2 × 100 × 1.02 exactly", ProposeProportional, "306", "0", "100", "150", "204"},
+		{"RAF 2 of 3 consumes two thirds of 30 exactly", ProposeProportional, "30", "0", "2", "3", "20"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ProposeQty(tc.mode, d(tc.required), d(tc.consumed), d(tc.share)); !got.Equal(d(tc.want)) {
+			if got := ProposeQty(tc.mode, d(tc.required), d(tc.consumed), d(tc.reported), d(tc.ordQty)); !got.Equal(d(tc.want)) {
 				t.Fatalf("want %s, got %s", tc.want, got)
 			}
 		})
 	}
-	if got := ProposeHours(ProposeProportional, d("50"), d("10"), d("0.333")); !got.Equal(d("6.65")) {
+	if got := ProposeHours(ProposeProportional, d("50"), d("10"), d("333"), d("1000")); !got.Equal(d("6.65")) {
 		t.Fatalf("hours rounds to 2 places: %s", got)
 	}
+	if got := ProposeHours(ProposeProportional, d("30"), d("0"), d("2"), d("3")); !got.Equal(d("20")) {
+		t.Fatalf("hours of 2 of 3: %s", got)
+	}
+}
+
+// ratCeil6 is the exact reference for the proportional proposal: ceil(x × 10^6) / 10^6
+// over big.Rat, independent of the decimal package's division.
+func ratCeil6(x *big.Rat) *big.Rat {
+	scaled := new(big.Rat).Mul(x, big.NewRat(1_000_000, 1))
+	q, m := new(big.Int).DivMod(scaled.Num(), scaled.Denom(), new(big.Int))
+	if m.Sign() != 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return new(big.Rat).SetFrac(q, big.NewInt(1_000_000))
+}
+
+func ratOf(t *rapid.T, v decimal.Decimal) *big.Rat {
+	r, ok := new(big.Rat).SetString(v.String())
+	if !ok {
+		t.Fatalf("not a rational: %s", v)
+	}
+	return r
+}
+
+// AC3 (property): after each proportional RAF the cumulative consumption of a
+// finish-flushed line is exactly ceil6(required × reported ÷ order quantity),
+// checked against big.Rat arithmetic, for any order quantity and RAF split.
+func TestProposeQty_ProportionalMatchesExactRational(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		required := decimal.New(rapid.Int64Range(1, 1_000_000_000).Draw(t, "required"), -6)
+		orderQty := decimal.NewFromInt(rapid.Int64Range(1, 997).Draw(t, "qty"))
+		consumed, reported := decimal.Zero, decimal.Zero
+		for reported.LessThan(orderQty) {
+			step := decimal.NewFromInt(rapid.Int64Range(1, orderQty.Sub(reported).IntPart()).Draw(t, "raf"))
+			reported = reported.Add(step)
+			consumed = consumed.Add(ProposeQty(ProposeProportional, required, consumed, reported, orderQty))
+			exact := new(big.Rat).Mul(ratOf(t, required), new(big.Rat).SetFrac(ratOf(t, reported).Num(), ratOf(t, orderQty).Num()))
+			if want := ratCeil6(exact); ratOf(t, consumed).Cmp(want) != 0 {
+				t.Fatalf("after %s of %s: consumed %s, want %s", reported, orderQty, consumed, want.FloatString(6))
+			}
+		}
+	})
 }
 
 // AC-21.4: successive proportional RAFs consume exactly the requirement once
@@ -52,7 +98,7 @@ func TestProposeQty_ProportionalSumsToTheRequirement(t *testing.T) {
 		for reported.LessThan(orderQty) {
 			step := decimal.NewFromInt(rapid.Int64Range(1, orderQty.Sub(reported).IntPart()).Draw(t, "raf"))
 			reported = reported.Add(step)
-			consumed = consumed.Add(ProposeQty(ProposeProportional, required, consumed, reported.Div(orderQty)))
+			consumed = consumed.Add(ProposeQty(ProposeProportional, required, consumed, reported, orderQty))
 		}
 		if !consumed.Equal(required) {
 			t.Fatalf("consumed %s, required %s", consumed, required)

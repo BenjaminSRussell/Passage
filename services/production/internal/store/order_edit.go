@@ -54,7 +54,21 @@ type OrderEditEntry struct {
 func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out Order
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = editOrderTx(ctx, tx, p.TenantID, in, true)
+		return err
+	})
+	return out, err
+}
+
+// editOrderTx is the body of EditOrder inside the caller's transaction.
+// markModified sets orderBomModified: an order-specific edit does, a change
+// applied from an ECO (FR-21.16) does not, because the order then matches the
+// new version again.
+func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, markModified bool) (Order, error) {
+	p := tenant.Principal{TenantID: tenantID}
+	var out Order
+	err := func() error {
 		h, err := lockOrder(ctx, tx, p.TenantID, in.OrderID, in.IfMatch)
 		if err != nil {
 			return err
@@ -82,6 +96,10 @@ func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 		if err != nil {
 			return domainProblem(err)
 		}
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
+		if err != nil {
+			return err
+		}
 		if err := writeEditedLines(ctx, tx, p.TenantID, in.OrderID, lines, res.Lines); err != nil {
 			return err
 		}
@@ -107,12 +125,22 @@ func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `update production_order set order_bom_modified = true, version = $3, updated_at = now()
-			where tenant_id = $1 and id = $2`, p.TenantID, in.OrderID, version); err != nil {
+		if _, err := tx.Exec(ctx, `update production_order set order_bom_modified = order_bom_modified or $4, version = $3, updated_at = now()
+			where tenant_id = $1 and id = $2`, p.TenantID, in.OrderID, version, markModified); err != nil {
 			return err
+		}
+		if markModified {
+			if err := flagPendingForReview(ctx, tx, p.TenantID, in.OrderID); err != nil {
+				return err
+			}
 		}
 		// FR-21.10: a subcontract operation added to (or turned on in) a released
 		// order is requested like the ones release requested.
+		// FR-21.10: an edit that changed, removed or switched off a requested
+		// operation changes or cancels its PO first.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, in.OrderID, in.Actor, requested, false); err != nil {
+			return err
+		}
 		var requests []prodevents.SubcontractPORequestedData
 		if h.status == domain.Released {
 			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {
@@ -138,7 +166,7 @@ func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 			return err
 		}
 		return enqueueSubcontractRequests(ctx, tx, p.TenantID, in.OrderID, in.Actor, requests)
-	})
+	}()
 	return out, err
 }
 

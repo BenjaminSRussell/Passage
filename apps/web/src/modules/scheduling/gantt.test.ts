@@ -17,6 +17,8 @@ const base: GanttBar = {
   changeoverCost: null,
   changeoverCurrency: null,
   cleaningSetId: null,
+  secondaryResourceIds: [],
+  outsideCapacity: false,
 };
 
 describe("changeoverSpan", () => {
@@ -98,6 +100,12 @@ describe("grouping and jobs", () => {
     expect(jobs.map((j) => j.jobId)).toEqual(["job-c", "job-b", "job-a"]);
     const a = jobs.find((j) => j.jobId === "job-a");
     expect([a?.start, a?.end]).toEqual(["2026-10-26T14:00:00Z", "2026-10-27T11:00:00Z"]);
+  });
+
+  it("flags a merged job outside capacity when any of its segments is", () => {
+    const split = [segs[0], { ...segs[1], outsideCapacity: true }];
+    expect(jobsOf(split)[0].outsideCapacity).toBe(true);
+    expect(jobsOf(segs).every((j) => !j.outsideCapacity)).toBe(true);
   });
 
   it("finds local overlaps on the same resource only", () => {

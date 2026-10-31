@@ -112,3 +112,26 @@
   font-size: var(--text-sm-size);
   line-height: var(--text-sm-leading);
 }
+
+/* Destination group of a transfer line: same grid as the form it sits in. */
+.fieldset {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-block-start: 1px solid var(--color-border);
+}
+
+.fieldset legend {
+  padding-inline-end: var(--space-2);
+  font-weight: 600;
+}
+
+.rowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

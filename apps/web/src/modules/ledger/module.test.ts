@@ -34,6 +34,27 @@ describe("ledger module", () => {
       "/ledger/journal-names",
       "/ledger/journal-names/new",
       "/ledger/journal-names/:code",
+      "/ledger/recurring-journals",
+      "/ledger/recurring-journals/new",
+      "/ledger/recurring-journals/:id",
+      "/ledger/open-items",
+      "/ledger/open-item-accounts",
+      "/ledger/clearings",
+      "/ledger/clearings/:id",
+      "/ledger/tolerance-groups",
+      "/ledger/tolerance-groups/new",
+      "/ledger/tolerance-groups/:code",
+      "/ledger/auto-clearing",
+      "/ledger/auto-clearing-runs/:id",
+      "/ledger/auto-clearing-rules",
+      "/ledger/auto-clearing-rules/new",
+      "/ledger/auto-clearing-rules/:id",
+      "/ledger/lookup-tables",
+      "/ledger/lookup-tables/new",
+      "/ledger/lookup-tables/:id",
+      "/ledger/derivation-strategies",
+      "/ledger/derivation-strategies/new",
+      "/ledger/derivation-strategies/:version",
       "/ledger/trial-balance",
       "/ledger/transactions",
       "/ledger/entries/:id",
@@ -62,8 +83,18 @@ describe("ledger module", () => {
     // GET /api/v1/ledger/journal-batches and /journal-names require ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/journal-batches")?.duty).toBe("ledger.journal.read");
     expect(ledger.nav.find((n) => n.to === "/ledger/journal-names")?.duty).toBe("ledger.journal.read");
+    // GET /api/v1/ledger/recurring-journals requires ledger.journal.read.
+    expect(ledger.nav.find((n) => n.to === "/ledger/recurring-journals")?.duty).toBe("ledger.journal.read");
+    // GET /api/v1/ledger/open-items, /clearings, .../open-item-accounts and .../tolerance-groups require ledger.journal.read.
+    for (const to of ["/ledger/open-items", "/ledger/clearings", "/ledger/open-item-accounts", "/ledger/tolerance-groups", "/ledger/auto-clearing", "/ledger/auto-clearing-rules"]) {
+      expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
+    }
     // GET /api/v1/ledger/journal-lines requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/transactions")?.duty).toBe("ledger.journal.read");
+    // GET .../lookup-tables and .../derivation-strategies require ledger.journal.read; the writes need ledger.rules.write (service only).
+    for (const to of ["/ledger/lookup-tables", "/ledger/derivation-strategies"]) {
+      expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
+    }
     // GET /api/v1/ledger/description-templates requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/description-templates")?.duty).toBe("ledger.journal.read");
   });

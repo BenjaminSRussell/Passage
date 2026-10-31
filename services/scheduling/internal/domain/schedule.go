@@ -36,6 +36,9 @@ type Resource struct {
 	Blocks       []CapacityBlock
 	Matrix       SetupMatrix
 	CurrentGroup string
+	// Overrides are downtimes and extra shifts layered over the calendar
+	// (FR-23.1).
+	Overrides []CapacityOverride
 }
 
 // Operation is one schedulable operation of an order. Candidates are resource
@@ -60,6 +63,9 @@ type Operation struct {
 	SetupMinutes int
 	Attributes   map[string]string
 	Network      string
+	// Secondaries are resources booked for the same segments as the primary
+	// (tools, crews, BR-23.4). They are never candidates of the operation.
+	Secondaries []string
 }
 
 // Busy is booked time on a resource held by one job. Group and Setup are the
@@ -105,6 +111,8 @@ type Placement struct {
 	ChangeoverMinutes int
 	ChangeoverCost    *money.Amount
 	CleaningSetID     string
+	// Secondaries are the resources booked with the primary (BR-23.4).
+	Secondaries []string
 }
 
 // withSlot copies the changeover a slot was priced with onto the placement.
@@ -149,6 +157,17 @@ type Problem struct {
 	HorizonDays      int
 	NetworkDelayDays int
 	Infinite         bool
+	// Backward schedules each order with a due date as late as it can run
+	// and still end by that date (FR-23.2); BR-23.2 describes the fallback.
+	Backward bool
+	// Pegs link a parent order to the orders that consume its output; a
+	// dependent starts no earlier than its parents end (FR-23.8). ParentEnds
+	// holds the last end of each parent order that is not part of this run;
+	// UnplacedParents names the parent orders outside the run that hold an
+	// unplaced operation, whose dependents cannot be placed either.
+	Pegs            []Peg
+	ParentEnds      map[string]time.Time
+	UnplacedParents map[string]bool
 }
 
 // Unplaced is an operation the heuristic could not place within the horizon.
@@ -183,7 +202,7 @@ type capacity struct {
 func capacities(rs []Resource, from time.Time, days int) map[string]capacity {
 	out := make(map[string]capacity, len(rs))
 	for _, r := range rs {
-		iv := OpenIntervals(r.Location, r.Shifts, from, days)
+		iv := r.Open(from, days)
 		open := 0
 		for _, i := range iv {
 			open += i.Minutes()
@@ -306,7 +325,7 @@ func startCandidates(busy []Busy, ready time.Time) []time.Time {
 
 func newPlacement(op Operation, resourceID string, segs []Segment) Placement {
 	pl := Placement{OperationID: op.ID, OrderID: op.OrderID, OperNumber: op.OperNumber, ResourceID: resourceID,
-		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End}
+		Segments: segs, Start: segs[0].Start, End: segs[len(segs)-1].End, Secondaries: op.Secondaries}
 	if !op.DueAt.IsZero() && pl.End.After(op.DueAt) {
 		pl.LateMinutes = minutesBetween(op.DueAt, pl.End)
 	}
@@ -397,13 +416,57 @@ func Schedule(p Problem) Result {
 	}
 	var res Result
 	ops := orderPlan(p.Operations)
+	var chains [][]Operation
 	for i := 0; i < len(ops); {
 		j := i + 1
 		for j < len(ops) && ops[j].OrderID == ops[i].OrderID {
 			j++
 		}
-		e.placeChain(ops[i:j], fixed[ops[i].OrderID], p.Start, &res)
+		chains = append(chains, ops[i:j])
 		i = j
+	}
+	chains = pegPlan(chains, p.Pegs)
+	ends := map[string]time.Time{}
+	unplacedOrders := map[string]bool{}
+	for oid, un := range p.UnplacedParents {
+		unplacedOrders[oid] = un
+	}
+	for oid, fs := range fixed {
+		for _, f := range fs {
+			if f.End.After(ends[oid]) {
+				ends[oid] = f.End
+			}
+		}
+	}
+	for _, chain := range chains {
+		oid := chain[0].OrderID
+		if len(p.Pegs) > 0 {
+			floor, blocked := pegFloor(oid, p.Pegs, ends, p.ParentEnds, unplacedOrders)
+			if blocked != "" {
+				for _, op := range chain {
+					res.Unplaced = append(res.Unplaced, Unplaced{op.ID, pegBlockedReason(blocked)})
+				}
+				unplacedOrders[oid] = true
+				continue
+			}
+			if floor.After(chain[0].ReadyAt) {
+				chain[0].ReadyAt = floor
+			}
+		}
+		nPl, nUn := len(res.Placements), len(res.Unplaced)
+		if p.Backward {
+			e.placeBackward(chain, fixed[oid], p.Start, &res)
+		} else {
+			e.placeChain(chain, fixed[oid], p.Start, time.Time{}, &res)
+		}
+		for _, pl := range res.Placements[nPl:] {
+			if pl.End.After(ends[oid]) {
+				ends[oid] = pl.End
+			}
+		}
+		if len(res.Unplaced) > nUn {
+			unplacedOrders[oid] = true
+		}
 	}
 	return res
 }
@@ -512,7 +575,7 @@ func PlanMove(in MoveInput) MovePlan {
 	}
 	old, wasPlaced := in.Current[mv.ID]
 	if wasPlaced {
-		busy[old.ResourceID] = removeJob(busy[old.ResourceID], mv.ID)
+		dropJob(busy, mv.ID)
 		touch(old.ResourceID, old.Start)
 	}
 	var bs []Busy
@@ -523,10 +586,16 @@ func PlanMove(in MoveInput) MovePlan {
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
+	if sec := secondaryChecker(caps, busy, *mv, false); sec != nil {
+		if shift, detail := sec(s.segs); shift > 0 {
+			return MovePlan{Conflict: &Conflict{Code: CodeSecondaryBusy, Detail: detail, JobID: mv.ID}}
+		}
+	}
 	moved := newPlacement(*mv, in.ResourceID, s.segs).withSlot(s)
 	if c.res.Finite {
 		busy[in.ResourceID] = insertBusy(busy[in.ResourceID], busyOf(*mv, moved)...)
 	}
+	bookSecondaries(busy, caps, moved)
 	touch(in.ResourceID, moved.Start)
 
 	// push re-places the placed operations of chain (sorted by operation
@@ -552,12 +621,12 @@ func PlanMove(in MoveInput) MovePlan {
 				continue
 			}
 			cc := caps[cur.ResourceID]
-			busy[cur.ResourceID] = removeJob(busy[cur.ResourceID], op.ID)
+			dropJob(busy, op.ID)
 			var sbs []Busy
 			if cc.res.Finite {
 				sbs = busy[cur.ResourceID]
 			}
-			ns, conf := placeOn(cc, op, sbs, ready, sequenced(cc, op, false))
+			ns, conf := placeOnSec(cc, op, sbs, ready, sequenced(cc, op, false), secondaryChecker(caps, busy, op, false))
 			if conf != nil {
 				return nil, conf
 			}
@@ -565,6 +634,7 @@ func PlanMove(in MoveInput) MovePlan {
 			if cc.res.Finite {
 				busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
 			}
+			bookSecondaries(busy, caps, next)
 			if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || !sameChangeover(next, cur) {
 				out = append(out, next)
 				touch(cur.ResourceID, cur.Start)

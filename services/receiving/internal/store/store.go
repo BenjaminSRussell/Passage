@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
@@ -21,6 +22,8 @@ var (
 	ErrPostingSuperseded = errors.New("the pending posting was resolved while the command was running")
 	ErrNotFound          = errors.New("receipt not found")
 	ErrGrirNotFound      = errors.New("no open GR/IR item for the receipt line")
+	ErrLineInvoiced      = errors.New("the purchase order line has invoiced GR/IR quantity")
+	ErrInvoiceNotFound   = errors.New("vendor invoice not found")
 )
 
 type DuplicatePackingSlipError struct{ ReceiptNumber string }
@@ -32,6 +35,8 @@ func (e *DuplicatePackingSlipError) Error() string {
 type Line struct {
 	LineNo           int
 	POLineID         string
+	POLineNo         int
+	OtherReceived    decimal.Decimal
 	ProductID        string
 	Qty              decimal.Decimal
 	InvoicedQty      decimal.Decimal
@@ -68,6 +73,7 @@ type Receipt struct {
 	ExchangeRate    decimal.Decimal
 	PostingDate     *time.Time
 	PostedAt        *time.Time
+	PostedBy        string
 	LedgerEntryID   string
 	CreatedAt       time.Time
 	Lines           []Line
@@ -132,31 +138,116 @@ type InvoiceLine struct {
 	UnitPrice     decimal.Decimal
 	Amount        decimal.Decimal
 	StandardCost  bool
+	GrirCleared   decimal.Decimal
 }
 
 type Invoice struct {
-	ID             string
-	LegalEntityID  string
-	VendorID       string
-	InvoiceNumber  string
-	InvoiceDate    time.Time
-	PostingDate    time.Time
-	Currency       string
-	LedgerID       string
-	FiscalPeriodID string
-	LedgerEntryID  string
-	Total          decimal.Decimal
-	CreatedAt      time.Time
-	Lines          []InvoiceLine
+	ID               string
+	LegalEntityID    string
+	VendorID         string
+	InvoiceNumber    string
+	InvoiceDate      time.Time
+	PostingDate      time.Time
+	Currency         string
+	LedgerID         string
+	FiscalPeriodID   string
+	LedgerEntryID    string
+	Total            decimal.Decimal
+	CreatedAt        time.Time
+	Source           string
+	Status           string
+	PostedBy         string
+	OneTimePayeeID   string
+	AuditReason      string
+	AuditRuleVersion int
+	ReleasedBy       string
+	ReleasedAt       *time.Time
+	RejectedBy       string
+	RejectedAt       *time.Time
+	RejectReason     string
+	Lines            []InvoiceLine
 }
 
 type InvoiceOutcome struct {
 	LedgerEntryID string
 	Total         decimal.Decimal
+	Blocked       bool
+	Clearings     []decimal.Decimal
 	Event         events.Event
 }
 
 type InvoiceFunc func(items []*domain.GrirItem) (InvoiceOutcome, error)
+
+type ReleaseFunc func(inv Invoice) (InvoiceOutcome, error)
+
+type RejectFunc func(inv Invoice) (events.Event, error)
+
+type PriceConfirmation struct {
+	Price decimal.Decimal
+	By    string
+}
+
+type ErsPriceFunc func(old decimal.NullDecimal) (events.Event, error)
+
+type AuditPolicyFunc func(old, next domain.AuditPolicy) (events.Event, error)
+
+type ErsVendorFunc func(old bool) (events.Event, error)
+
+type InvoiceAdjustment struct {
+	ID                string
+	OriginalInvoiceID string
+	LegalEntityID     string
+	VendorID          string
+	Kind              string
+	DocumentNumber    string
+	DocumentDate      time.Time
+	PostingDate       time.Time
+	Currency          string
+	LedgerID          string
+	FiscalPeriodID    string
+	LedgerEntryID     string
+	Total             decimal.Decimal
+	CreatedAt         time.Time
+	Lines             []domain.AdjustmentLine
+}
+
+type InvoiceBase struct {
+	Invoice Invoice
+	Lines   []domain.InvoiceLineState
+}
+
+type AdjustmentOutcome struct {
+	LedgerEntryID string
+	Total         decimal.Decimal
+	Event         events.Event
+}
+
+type InvoiceAdjustmentFunc func(base InvoiceBase) (AdjustmentOutcome, error)
+
+type Settlement struct {
+	ID              string
+	Kind            string
+	SourceRef       string
+	LegalEntityID   string
+	VendorID        string
+	Currency        string
+	Amount          decimal.Decimal
+	PostingDate     time.Time
+	LedgerID        string
+	FiscalPeriodID  string
+	LedgerEntryID   string
+	CreatedAt       time.Time
+	PurchaseOrderID string
+	POLineNo        int
+	ProductID       string
+}
+
+type SettlementOutcome struct {
+	LedgerEntryID string
+	Event         events.Event
+}
+
+type SettlementFunc func() (SettlementOutcome, error)
 
 type ReceiptFilter struct {
 	VendorID        string
@@ -181,7 +272,22 @@ type Store interface {
 	Post(ctx context.Context, id string, fn PostFunc) (Receipt, error)
 	Correct(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	Cancel(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
+	CreateOneTimePayee(ctx context.Context, in OneTimePayee) (OneTimePayee, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
+	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
+	RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn RejectFunc) (Invoice, error)
+	InvoiceVendor(ctx context.Context, id string) (string, error)
+	RejectedInvoiceCount(ctx context.Context, vendorID, number string) (int, error)
+	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error
+	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)
+	ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error)
+	ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string, fn ErsPriceFunc) error
+	ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]PriceConfirmation, error)
+	SetAuditPolicy(ctx context.Context, legalEntityID string, policy domain.AuditPolicy, by string, fn AuditPolicyFunc) error
+	AuditPolicy(ctx context.Context, legalEntityID string) (domain.AuditPolicy, error)
+	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)
+	PostSettlement(ctx context.Context, in Settlement, fn SettlementFunc) (out Settlement, replayed bool, err error)
+	SettledSources(ctx context.Context, kind string, sources []string) (map[string]struct{}, error)
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
@@ -203,6 +309,7 @@ var _ Store = (*Postgres)(nil)
 type Postgres struct {
 	pool    *pgxpool.Pool
 	pending *pgxpool.Pool
+	crypt   *fieldcrypt.Keys
 }
 
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }

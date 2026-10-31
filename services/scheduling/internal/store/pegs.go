@@ -170,3 +170,63 @@ func pegsAmong(pegs []domain.Peg, orders []string) []domain.Peg {
 	}
 	return out
 }
+
+// pegsForRun loads the pegs whose dependent order is part of a run and, for
+// each parent order outside it, its last scheduled end and whether it holds
+// an unplaced operation (FR-23.8): a run places a dependent no earlier than
+// its parents end, and not at all behind an unplaced parent.
+func pegsForRun(ctx context.Context, tx pgx.Tx, orderIDs []string) ([]domain.Peg, map[string]time.Time, map[string]bool, error) {
+	rows, err := tx.Query(ctx, `select parent_order_id::text, dependent_order_id::text from scheduling_order_peg
+		where dependent_order_id = any($1::uuid[]) order by parent_order_id, dependent_order_id`, orderIDs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer rows.Close()
+	var pegs []domain.Peg
+	var outside []string
+	inRun := map[string]bool{}
+	for _, id := range orderIDs {
+		inRun[id] = true
+	}
+	for rows.Next() {
+		var p domain.Peg
+		if err := rows.Scan(&p.ParentOrderID, &p.DependentOrderID); err != nil {
+			return nil, nil, nil, err
+		}
+		pegs = append(pegs, p)
+		if !inRun[p.ParentOrderID] {
+			outside = append(outside, p.ParentOrderID)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+	ends, unplaced := map[string]time.Time{}, map[string]bool{}
+	if len(outside) == 0 {
+		return pegs, ends, unplaced, nil
+	}
+	er, err := tx.Query(ctx, `select o.order_id::text, bool_or(o.status = 'unplaced'), max(j.end_at)
+		from scheduling_operation o
+		left join scheduled_job j on j.tenant_id = o.tenant_id and j.job_id = o.id
+		where o.order_id = any($1::uuid[]) group by o.order_id`, outside)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer er.Close()
+	for er.Next() {
+		var id string
+		var blocked bool
+		var end *time.Time
+		if err := er.Scan(&id, &blocked, &end); err != nil {
+			return nil, nil, nil, err
+		}
+		if blocked {
+			unplaced[id] = true
+		}
+		if end != nil {
+			ends[id] = *end
+		}
+	}
+	return pegs, ends, unplaced, er.Err()
+}

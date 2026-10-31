@@ -35,7 +35,45 @@ channels:
     messages:
       batchStatusChanged:
         $ref: "#/components/messages/BatchStatusChanged"
+  recurringGenerated:
+    address: passage.ledger.recurring
+    description: |
+      A recurring journal (FR-11.10) created a draft batch for a scheduled date, written to the outbox
+      in the transaction that created the batch (aggregate type recurring_journal).
+    messages:
+      recurringGenerated:
+        $ref: "#/components/messages/RecurringGenerated"
+  openItemCleared:
+    address: passage.ledger.openitem
+    description: |
+      A clearing document (FR-11.19) was committed or reset, written to the outbox in the transaction
+      that changed it (aggregate type clearing). The PRD's open-item.cleared is spelled openitem
+      because the platform naming rule allows only letters and digits in the entity.
+    messages:
+      openItemCleared:
+        $ref: "#/components/messages/OpenItemCleared"
+  rulesChanged:
+    address: passage.ledger.rules
+    description: |
+      A derivation strategy was activated or a lookup table was replaced (FR-11.22), written to the
+      outbox in the same transaction (aggregate type derivation_strategy or lookup_table). Posting
+      caches invalidate on it.
+    messages:
+      rulesChanged:
+        $ref: "#/components/messages/RulesChanged"
 operations:
+  publishRulesChanged:
+    action: send
+    channel: { $ref: "#/channels/rulesChanged" }
+    summary: A derivation strategy or lookup table changed.
+  publishOpenItemCleared:
+    action: send
+    channel: { $ref: "#/channels/openItemCleared" }
+    summary: Open items were cleared or a clearing was reset.
+  publishRecurringGenerated:
+    action: send
+    channel: { $ref: "#/channels/recurringGenerated" }
+    summary: A recurring journal generated a draft batch.
   publishBatchStatusChanged:
     action: send
     channel: { $ref: "#/channels/batchStatusChanged" }
@@ -56,6 +94,8 @@ components:
   messages:
     JournalPosted:
       name: dev.passage.ledger.journal.posted.v1
+      title: Journal entry posted
+      summary: Journal entry posted.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -93,6 +133,8 @@ components:
               traceId: { type: string, minLength: 32, maxLength: 32 }
     JournalReversed:
       name: dev.passage.ledger.journal.reversed.v1
+      title: Journal entry reversed
+      summary: Journal entry reversed.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -114,6 +156,8 @@ components:
               reasonComment: { type: string, maxLength: 255 }
     BatchStatusChanged:
       name: dev.passage.ledger.batch.statuschanged.v1
+      title: Journal batch changed status
+      summary: Journal batch changed status.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -134,8 +178,61 @@ components:
               to: { type: string, enum: [draft, validated, in_approval, approved, rejected, posted, cancelled] }
               actor: { type: string, description: User who caused the transition }
               postedEntryId: { type: string, format: uuid, description: Set when to = posted }
+    RecurringGenerated:
+      name: dev.passage.ledger.recurring.generated.v1
+      title: Recurring journal generated
+      summary: Recurring journal generated a draft batch.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.recurring.generated.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Recurring journal id }
+          data:
+            type: object
+            required: [recurringId, batchId, ledgerId, journalName, scheduledDate, actor]
+            properties:
+              recurringId: { type: string, format: uuid }
+              batchId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              journalName: { type: string }
+              scheduledDate: { type: string, format: date, description: Run date, also the posting date of the draft batch }
+              actor: { type: string, description: User who generated the batch }
+    OpenItemCleared:
+      name: dev.passage.ledger.openitem.cleared.v1
+      title: Open items cleared
+      summary: A clearing document was committed or reset.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.openitem.cleared.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Clearing document id }
+          data:
+            type: object
+            required: [clearingDocumentId, ledgerId, account, mode, itemIds, differenceAmount, status, actor]
+            properties:
+              clearingDocumentId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              account: { type: string, description: Account number of the cleared items }
+              mode: { type: string, enum: [manual, auto], description: auto when an automatic clearing run made the document }
+              itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected, or the items of the automatic group }
+              differenceAmount: { type: string, description: Residual written off to the tolerance difference account, decimal string, signed (debit positive); 0 when none }
+              differenceEntryId: { type: string, format: uuid, description: Journal entry of the difference lines }
+              residualItemId: { type: string, format: uuid, description: New open item carrying a residual outside tolerance }
+              status: { type: string, enum: [cleared, reset] }
+              reasonCode: { type: string, description: Reset reason code }
+              actor: { type: string }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
+      title: Balance projection rebuilt
+      summary: Balance projection rebuilt.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -154,3 +251,25 @@ components:
               rowsWritten: { type: integer, format: int64 }
               rowsDiffering: { type: integer, format: int64, description: Greater than zero raises a P1 alert }
               durationMs: { type: integer, format: int64 }
+    RulesChanged:
+      name: dev.passage.ledger.rules.changed.v1
+      title: Ledger rules changed
+      summary: A derivation strategy was activated or a lookup table was replaced.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.rules.changed.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Strategy row id or lookup table id }
+          data:
+            type: object
+            required: [ledgerId, kind, id, version, actor]
+            properties:
+              ledgerId: { type: string, format: uuid }
+              kind: { type: string, enum: [derivation_strategy, lookup_table] }
+              id: { type: string, format: uuid }
+              version: { type: integer, description: Strategy version number, or the lookup table replacement counter }
+              actor: { type: string, description: User who activated or replaced }

@@ -24,11 +24,14 @@ import (
 // minimum order quantity and multiple (zero: no rule); the caller passes them
 // until released-product settings (wave 8) are read here.
 type Split struct {
-	OrderID        string
-	IfMatch        int
-	SplitQty       decimal.Decimal
-	MinQty         decimal.Decimal
-	Multiple       decimal.Decimal
+	OrderID  string
+	IfMatch  int
+	SplitQty decimal.Decimal
+	MinQty   decimal.Decimal
+	Multiple decimal.Decimal
+	// Allocation decides, for a Started order, whether the posted consumption,
+	// hours and WIP move in proportion (default) or stay on the original (BR-21.11).
+	Allocation     domain.Allocation
 	Actor          string
 	TraceID        string
 	IdempotencyKey string
@@ -42,7 +45,7 @@ type SplitResult struct {
 	Replayed bool  `json:"-"`
 }
 
-// SplitOrder splits a Created to Released order (FR-21.15). The original keeps
+// SplitOrder splits a Created to Started order (FR-21.15). The original keeps
 // quantity − splitQty; the new order receives splitQty, the same header, BOM and
 // route snapshot and status, a number from the legal entity's sequence, origin
 // Split with originId and splitFromOrderId set to the original. Both orders are
@@ -50,6 +53,9 @@ type SplitResult struct {
 // order is announced by order.created and the original by order.updated. The
 // Idempotency-Key is stored on the new order: a replay with the same request
 // returns the pair with replayed=true, any other request is refused.
+// A Started order also moves its share of the posted consumption, route hours
+// and WIP to the new order (BR-21.11) through a pair of posted split-transfer
+// journals, unless the allocation keeps everything on the original.
 func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out SplitResult
@@ -88,6 +94,9 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := domain.CheckSplittable(h.status); err != nil {
 			return domainProblem(err)
 		}
+		if err := checkNoCoProducts(ctx, tx, p.TenantID, in.OrderID); err != nil {
+			return err
+		}
 		lines, err := loadLines(ctx, tx, p.TenantID, in.OrderID)
 		if err != nil {
 			return err
@@ -99,6 +108,24 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		plan, err := domain.SplitOrder(h.quantity, in.SplitQty, in.MinQty, in.Multiple, lines, ops)
 		if err != nil {
 			return domainProblem(err)
+		}
+		var transfer domain.Transfer
+		if in.Allocation == "" {
+			prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{})
+			if err != nil {
+				return err
+			}
+			in.Allocation = prm.SplitAllocation
+		}
+		if h.status == domain.Started {
+			if err := checkStartedSplit(ctx, tx, p.TenantID, h); err != nil {
+				return err
+			}
+			if in.Allocation != domain.AllocKeepOnOriginal {
+				if transfer, err = planTransfer(ctx, tx, p.TenantID, h, in.SplitQty, lines, ops); err != nil {
+					return err
+				}
+			}
 		}
 
 		var seq int64
@@ -128,7 +155,15 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := insertOperations(ctx, tx, p.TenantID, newID, plan.NewOps); err != nil {
 			return err
 		}
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
+		if err != nil {
+			return err
+		}
 		if err := writeQuantities(ctx, tx, p.TenantID, in.OrderID, plan.OriginalLines, plan.OriginalOps); err != nil {
+			return err
+		}
+		// FR-21.10: the original keeps its PO at the smaller quantity.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, in.OrderID, in.Actor, requested, false); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
@@ -150,7 +185,7 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		// FR-21.10: the new order of a released split needs its own vendor PO; the
 		// original keeps its request (the PO quantity change is purchasing's).
 		var requests []prodevents.SubcontractPORequestedData
-		if h.status == domain.Released {
+		if h.status == domain.Released || h.status == domain.Started {
 			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor); err != nil {
 				return err
 			}
@@ -173,6 +208,19 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		}
 		if err := enqueueSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor, requests); err != nil {
 			return err
+		}
+		// The transfer follows order.created, so a consumer knows the new order
+		// before the journals that name it; the orders are read again with the moved figures.
+		if !transfer.Empty() {
+			if err := applyTransfer(ctx, tx, p.TenantID, h, newID, transfer, ops, in); err != nil {
+				return err
+			}
+			if out.Original, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
+				return err
+			}
+			if out.New, err = loadOrder(ctx, tx, p.TenantID, newID); err != nil {
+				return err
+			}
 		}
 		return enqueueUpdated(ctx, tx, p.TenantID, in.Actor, out.Original)
 	})
@@ -247,6 +295,9 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		if err := checkMergeJournals(ctx, tx, p.TenantID, survivorID, out.Merged); err != nil {
 			return err
 		}
+		if err := checkNoCoProducts(ctx, tx, p.TenantID, append([]string{survivorID}, out.Merged...)...); err != nil {
+			return err
+		}
 		inputs := make([]domain.MergeInput, 0, len(in.Orders))
 		// The survivor carries the merged orders' BOM, so it is flagged when any of them was edited (FR-21.18).
 		modified := false
@@ -266,7 +317,15 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		}
 
 		survivor := heads[survivorID]
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, survivorID)
+		if err != nil {
+			return err
+		}
 		if err := writeQuantities(ctx, tx, p.TenantID, survivorID, merged.Lines, merged.Operations); err != nil {
+			return err
+		}
+		// FR-21.10: the survivor's PO grows with the merged quantity.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, survivorID, in.Actor, requested, false); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, order_bom_modified = order_bom_modified or $4, version = version + 1,
@@ -285,6 +344,14 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		}
 		for _, id := range out.Merged {
 			h := heads[id]
+			// FR-21.10: an order merged away withdraws its vendor POs.
+			cancelled, err := requestedSubcontracts(ctx, tx, p.TenantID, id)
+			if err != nil {
+				return err
+			}
+			if err := settleSubcontracts(ctx, tx, p.TenantID, id, in.Actor, cancelled, true); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `update production_order set status = 'Cancelled', merged_into_order_id = $3, version = version + 1, updated_at = now()
 				where tenant_id = $1 and id = $2`, p.TenantID, id, survivorID); err != nil {
 				return err

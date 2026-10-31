@@ -98,7 +98,7 @@ describe("Planned order maintenance", () => {
     );
     renderAt(`/planning/planned-orders/${order.id}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Order approved."));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Order approved. The next plan run firms it"));
     expect(JSON.parse(callsOf(fetchMock, "PATCH")[0][1]?.body as string)).toEqual({ status: "approved" });
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
@@ -149,6 +149,23 @@ describe("Planned order maintenance", () => {
     renderAt(`/planning/planned-orders/${order.id}`);
     expect(await screen.findByText("This planned order is firmed")).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Change planned order" })).not.toBeInTheDocument();
+  });
+
+  it("links the quota arrangement a run allocated the order to", async () => {
+    const arrangement = "00000000-0000-0000-0000-0000000000f1";
+    const source = "00000000-0000-0000-0000-0000000000f2";
+    orderApi(() => json({ ...order, vendorId: vendor, quotaArrangementId: arrangement, quotaSourceId: source }));
+    renderAt(`/planning/planned-orders/${order.id}`);
+    const link = await screen.findByRole("link", { name: arrangement });
+    expect(link).toHaveAttribute("href", `/planning/quota-arrangements/${arrangement}`);
+    expect(screen.getByText(source)).toBeInTheDocument();
+  });
+
+  it("shows no quota rows for an order without an arrangement", async () => {
+    orderApi(() => json(order));
+    renderAt(`/planning/planned-orders/${order.id}`);
+    expect(await screen.findByText("PLN-000005")).toBeInTheDocument();
+    expect(screen.queryByText("Quota arrangement")).not.toBeInTheDocument();
   });
 
   it("validateOrderChange sends only changed fields and refuses an empty change", () => {

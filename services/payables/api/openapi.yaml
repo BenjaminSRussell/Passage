@@ -107,6 +107,7 @@ paths:
         - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: as_of, in: query, required: false, schema: { type: string, format: date } }
         - { name: ledger, in: query, required: true, description: Ledger holding the control account for the legal entity., schema: { type: string, format: uuid } }
+        - { name: group_by, in: query, required: false, description: "vendorGroup adds vendorGroups, the open AP per currency and vendor group (open items without a group are UNASSIGNED). The ledger exposes one AP control balance per ledger, so group lines are a breakdown of the currency total and are never comparable; reconciled still reflects the per-currency comparison. The aging report rejects vendorGroup.", schema: { type: string, enum: [vendor, vendorGroup, none], default: none } }
       responses:
         '200':
           description: Per-currency differences and the overall reconciled flag.
@@ -168,13 +169,127 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
         '502': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items/{id}:hold:
+    post:
+      operationId: setPaymentHold
+      x-passage-duty: payment-hold.manage
+      description: Places a payment hold on an open item, so proposals skip it and approval or run start refuse a proposal that still holds it. Optional body {reason} (at most 500 characters) is stored with the hold and the user who placed it (payment_hold_reason, payment_held_by) and carried in the event. Idempotent, so holding a held item emits no event, counts nothing and logs no audit line. A SETTLED or REVERSED item is a 409 (AP-OPN-001). The change is audited by a structured log line and a dev.passage.payables.openitem.held.v1 event carrying the actor. The version is not bumped. The caller needs an identified user (X-Passage-User); an item outside the caller's legal-entity scope is a 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentHoldRequest' }
+      responses:
+        '200':
+          description: The open item with its current paymentHold.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items/{id}:release:
+    post:
+      operationId: releasePaymentHold
+      x-passage-duty: payment-hold.manage
+      description: Releases the payment hold of an open item (dev.passage.payables.openitem.released.v1 when the hold changes). A proposal that was built before the hold stays valid. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentHoldRequest' }
+      responses:
+        '200':
+          description: The open item with its current paymentHold.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendors/{id}:block:
+    post:
+      operationId: blockVendorPayments
+      x-passage-duty: vendor-block.manage
+      description: Blocks a vendor for payment in one legal entity (legalEntityId, defaulting to the caller's legal-entity scope; an entity outside the caller's scope is a 403), so proposals of that entity skip the vendor's items and approval or run start refuse a proposal that includes them; other legal entities are unaffected. Blocking again replaces the reason. The vendor id is not validated against a vendor master until the party service (wave 07) exists. Audited by a structured log line and a dev.passage.payables.vendor.blocked.v1 event carrying the actor and reason. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorBlockRequest' }
+      responses:
+        '200':
+          description: The vendor is blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendors/{id}:unblock:
+    post:
+      operationId: unblockVendorPayments
+      x-passage-duty: vendor-block.manage
+      description: Removes the payment block of a vendor in one legal entity (optional body {legalEntityId}, default as for block; dev.passage.payables.vendor.unblocked.v1). A vendor that is not blocked in that entity is a 404. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorUnblockRequest' }
+      responses:
+        '200':
+          description: The vendor is no longer blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/payables/payment-proposals:
+    get:
+      operationId: listPaymentProposals
+      x-passage-duty: payment-proposal.read
+      description: Payment proposals of one legal entity without groups or lines, newest run date first (then id), with keyset pagination (limit 1 to 200, default 50; pass the previous nextCursor as cursor). legal_entity defaults to the caller's legal-entity scope and is required for an unscoped caller; naming an entity outside the caller's scope is a 403. totalValued is the sum of the group valuations in legalEntityCurrency. Fetch one proposal for its groups and lines.
+      parameters:
+        - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [DRAFT, APPROVED, CANCELLED, EXECUTING, EXECUTED, FAILED] } }
+        - { name: run_from, in: query, required: false, description: Run date on or after., schema: { type: string, format: date } }
+        - { name: run_to, in: query, required: false, description: Run date on or before., schema: { type: string, format: date } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of proposal summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
     post:
       operationId: createPaymentProposal
       x-passage-duty: payment-proposal.write
       description: |
         Selects the legal entity's open items with due_date on or before dueBy (default runDate) that are not on payment hold, whose vendor is not blocked and that are not already on a proposal. A cash discount is taken when runDate is on or before the item's discount date, the item is still OPEN (not partially settled) and the discount is smaller than the open amount. Items are grouped per vendor, currency and payment method (vendorPaymentMethods overrides paymentMethod per vendor) and valued in legalEntityCurrency at the spot rate of runDate (today when runDate is in the future) from the fx service. The proposal is saved as DRAFT with the caller as creator.
-        runDate is the payment date and may not be earlier than today (UTC; 400 on the runDate field); cash-discount eligibility is decided against it, so a backdated date cannot revive an expired discount. Replaying an existing run is still allowed after its day has passed. Creation is idempotent per (legal entity, runDate, runId): repeating the same request returns the stored proposal with 200 and Idempotent-Replayed: true; the same key with a different request is a 409 (AP-PRP-001). A 409 with the same code also reports that items changed, were held or were taken by another proposal while it was built; retry. Withholding tax is not applied (wave 13). A run with nothing due after the filters is a 422 (AP-PRP-005) and nothing is stored. Null and an empty vendorPaymentMethods are the same request for replay.
+        runDate is the payment date and may not be earlier than today (UTC; 400 on the runDate field); cash-discount eligibility is decided against it, so a backdated date cannot revive an expired discount. Replaying an existing run is still allowed after its day has passed. Creation is idempotent per (legal entity, runDate, runId): repeating the same request returns the stored proposal with 200 and Idempotent-Replayed: true; the same key with a different request is a 409 (AP-PRP-001). A 409 with the same code also reports that items changed, were held or were taken by another proposal while it was built; retry. Withholding: withholdingCodes maps vendor ids to a code from the legal entity's posting profile (withholdingCodes); payables calls the tax service (POST /v1/tax/withholding/calculate, signed token) once per line of those vendors with the vendor's year-to-date paid amount (lines of APPROVED, EXECUTING and EXECUTED proposals of the same vendor and currency) and records withheld per line and group; a code missing from the profile or a tax rule rejection is a 422 AP-PRP-006, tax unreachable is a retryable 502 COM-0502 (a tax refusal such as 403 is a non-retryable 500 COM-0500), tax not configured a 503 COM-0503. If a vendor's year-to-date payments changed between proposal and approval (a concurrent draft was approved first) the approval is a 409 AP-PRP-001 and a new proposal is needed. With payment runs enabled, approval also needs the party service (503 COM-0503 otherwise) and field encryption keys, because it binds each group's bank account. Bank details are never part of a proposal. A run with nothing due after the filters is a 422 (AP-PRP-005) and nothing is stored. Null and an empty vendorPaymentMethods are the same request for replay.
       requestBody:
         required: true
         content:
@@ -223,7 +338,7 @@ paths:
       operationId: approvePaymentProposal
       x-passage-duty: payment-proposal.approve
       description: |
-        Moves a DRAFT proposal to APPROVED. Segregation of duties: the approver must be a different user than the creator (403, AP-PRP-003); the database also refuses a row whose approver equals its creator. Approval locks every line's open item and re-checks version, open amount, payment hold, vendor block and status; if any line changed since the proposal was created the call is a 409 (AP-PRP-001) naming the open item ids. A proposal that is not a draft is a 409 (AP-PRP-002). A proposal whose runDate is before today (UTC) can no longer be approved: 409 AP-PRP-004, create a new proposal. Both the creator and the approver need an identified user (X-Passage-User). Executing an approved proposal as a payment run is a later slice (#102).
+        Moves a DRAFT proposal to APPROVED. Segregation of duties: the approver must be a different user than the creator (403, AP-PRP-003); the database also refuses a row whose approver equals its creator. Approval locks every line's open item and re-checks version, open amount, payment hold, vendor block and status; if any line changed since the proposal was created the call is a 409 (AP-PRP-001) naming the open item ids. A proposal that is not a draft is a 409 (AP-PRP-002). A proposal whose runDate is before today (UTC) can no longer be approved: 409 AP-PRP-004, create a new proposal. Both the creator and the approver need an identified user (X-Passage-User). An approved proposal is executed by a payment run (POST /v1/payables/payment-runs).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -252,6 +367,191 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs:
+    post:
+      operationId: startPaymentRun
+      x-passage-duty: payment-run.execute
+      description: |
+        Starts the payment run of an APPROVED proposal (duty payment-run.execute, distinct from payment-proposal.approve). The body names only the legal entity and the proposal: the ledger, GL accounts and paying bank account come from the server-side posting profile of the legal entity (PAYABLES_POSTING_PROFILES; none is a 422 AP-RUN-013) and the payee bank details are fetched from the party vendor master at file generation, so any other field is a 400 and a request can redirect nothing. The executor must be neither the proposal's creator nor its approver (403 AP-PRP-003; the database refuses it too, and a replay by the creator or approver is refused the same way instead of returning the run). A caller without an identified user is a 403 AP-RUN-016. Idempotent per (legal entity, proposal): repeating returns the stored run with 200 and Idempotent-Replayed: true, also after the run date. The call verifies the profile's ledger belongs to the legal entity, that every group is TRANSFER or WIRE, in the legal-entity currency (foreign-currency groups are a 422 until realized FX exists) and that the profile has a discount account when the proposal takes a discount and a withholding account when it withholds tax (422 AP-RUN-013); the party service must be configured (422 AP-RUN-013); a run date before today (UTC) is a 409 AP-PRP-004. It then locks the proposal, moves it APPROVED to EXECUTING and re-checks every line like approval does. If a line changed (hold, vendor block, version, amount) the run is created FAILED, the proposal becomes FAILED and its lines are released, and the response is 201 with status FAILED. A proposal that is not APPROVED is a 409 (AP-PRP-002). The activity calls below are driven by the workflow in services/workflow-ts with a signed service token and are each safe to repeat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentRunRequest' }
+      responses:
+        '200':
+          description: Replay of an existing run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '201':
+          description: Run started (status RUNNING) or failed at start (status FAILED).
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:
+    get:
+      operationId: getPaymentRun
+      x-passage-duty: payment-run.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run with its payments and step timestamps.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}/file:
+    get:
+      operationId: getPaymentRunFile
+      x-passage-duty: payment-run.execute
+      description: The generated pain.001.001.09 file, which carries the payees' full bank details, so it needs the execute duty and every read is audited (log line "audit: payment file read" and payables_payment_file_reads_total). 404 until the generate-file step has run.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The pain.001 document.
+          content:
+            application/xml:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:generate-file:
+    post:
+      operationId: generatePaymentRunFile
+      x-passage-duty: payment-run.execute
+      description: |
+        Builds one pain.001.001.09 payment per proposal group (a bank account whose id or fingerprint differs from the one bound at approval is a terminal 422 AP-RUN-017), paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor_bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable (transport failure or 5xx) is a retryable 502 COM-0502, while a party refusal (400, 401, 403, a missing signing key or scope) is a terminal 422 AP-RUN-013 configuration fault. The file is then validated against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run after the step (also when the step was already done).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:post-journal:
+    post:
+      operationId: postPaymentRunJournal
+      x-passage-duty: payment-run.execute
+      description: |
+        Posts one balanced journal to the ledger through POST /v1/ledger/journal-entries with Idempotency-Key payables:payment-run:<run id>: debit the control account per group (gross, valued in the legal-entity currency), credit the bank clearing account (paid, valued) and credit the discount account (the rounding-exact difference) when a discount is taken. Crash-safe: a retry after a lost reply replays the same ledger entry. Needs the file step (409 AP-RUN-012). Only a ledger 400 or 422 is terminal (422 AP-RUN-014, recorded; the journal is never requested again). Any other ledger answer or a transport failure is a retryable 502 that records nothing.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run after the step (also when the step was already done).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:settle:
+    post:
+      operationId: settlePaymentRunItems
+      x-passage-duty: payment-run.execute
+      description: |
+        Settles every unsettled line of the proposal in one transaction: open_amount reduced by the line open amount (discount included), status PARTIALLY_SETTLED or SETTLED, version bumped, payables.openitem.settled outbox event with the run id as settlement id. A line is marked settled so a repeat settles nothing twice. Needs the journal step (409 AP-RUN-012). An item changed since approval is a 409 (AP-RUN-015) and nothing is settled.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run after the step (also when the step was already done).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:complete:
+    post:
+      operationId: completePaymentRun
+      x-passage-duty: payment-run.execute
+      description: |
+        Marks the run COMPLETED and the proposal EXECUTED. Needs the settle step (409 AP-RUN-012); repeating on a completed run returns it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run after the step (also when the step was already done).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}:fail:
+    post:
+      operationId: failPaymentRun
+      x-passage-duty: payment-run.execute
+      description: Marks a run whose journal is not yet posted FAILED, the proposal FAILED and releases the proposal's lines so the items can be proposed again. Once the journal is posted the money is committed and the call is a 409 (AP-RUN-011); the run must complete instead. Repeating on a failed run returns it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: The failed run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentRun' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -311,6 +611,18 @@ components:
         controlAccount: { type: string }
         ledgerPeriod: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
         reconciled: { type: boolean, description: True only when every currency reconciles. }
+        vendorGroups:
+          type: array
+          description: Present with group_by=vendorGroup; the subledger total per currency and vendor group, UNASSIGNED last per currency.
+          items:
+            type: object
+            required: [vendorGroupId, currency, subledgerTotal, comparable, reason]
+            properties:
+              vendorGroupId: { type: string, description: Vendor group uuid or UNASSIGNED. }
+              currency: { type: string }
+              subledgerTotal: { type: string }
+              comparable: { type: boolean }
+              reason: { type: string }
         currencies:
           type: array
           items:
@@ -332,6 +644,7 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         vendorId: { type: string, format: uuid }
+        vendorGroupId: { type: string, format: uuid, description: Vendor group at creation (invoice.posted vendor_group_id); absent when the event carried none. }
         sourceInvoiceId: { type: string, format: uuid }
         invoiceNumber: { type: string }
         invoiceDate: { type: string, format: date }
@@ -362,6 +675,57 @@ components:
           type: array
           items: { $ref: '#/components/schemas/OpenItem' }
         nextCursor: { type: string, description: Absent on the last page. }
+    PaymentHoldRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 500, description: Why the item is held; ignored on release. }
+    VendorBlockRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal-entity scope; required for an unscoped caller. }
+        reason: { type: string, minLength: 1, maxLength: 500, description: Why the vendor is blocked; trimmed. }
+    VendorUnblockRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        reason: { type: string, description: Ignored. }
+    VendorBlock:
+      type: object
+      required: [vendorId, legalEntityId, blocked]
+      properties:
+        vendorId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        blocked: { type: boolean }
+        reason: { type: string, description: Present when blocked. }
+    PaymentProposalSummary:
+      type: object
+      required: [id, legalEntityId, runDate, runId, dueBy, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, totalValued]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        runId: { type: string }
+        dueBy: { type: string, format: date }
+        legalEntityCurrency: { type: string }
+        paymentMethod: { type: string }
+        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED, EXECUTING, EXECUTED, FAILED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        totalValued: { type: string }
+    PaymentProposalPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentProposalSummary' }
+        nextCursor: { type: string, description: Absent on the last page. }
     PaymentProposalRequest:
       type: object
       additionalProperties: false
@@ -378,6 +742,11 @@ components:
           maxProperties: 500
           description: Vendor id to payment method, overriding paymentMethod.
           additionalProperties: { type: string, enum: [TRANSFER, ACH, CHECK, CARD, WIRE] }
+        withholdingCodes:
+          type: object
+          maxProperties: 500
+          description: Vendor id to a withholding code defined in the legal entity's posting profile. Part of the request hash.
+          additionalProperties: { type: string, minLength: 1, maxLength: 40 }
     PaymentProposal:
       type: object
       required: [id, legalEntityId, runDate, runId, dueBy, rateDate, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, groups, totalValued]
@@ -390,14 +759,17 @@ components:
         rateDate: { type: string, format: date }
         legalEntityCurrency: { type: string }
         paymentMethod: { type: string }
-        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED] }
+        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED, EXECUTING, EXECUTED, FAILED], description: 'APPROVED moves to EXECUTING when a payment run starts, then to EXECUTED or, if the run fails before its journal posts, FAILED (lines released).' }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         approvedBy: { type: string }
         approvedAt: { type: string, format: date-time }
         cancelledBy: { type: string }
         cancelledAt: { type: string, format: date-time }
+        executedAt: { type: string, format: date-time }
+        failedAt: { type: string, format: date-time }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
+        totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
         groups:
           type: array
           items:
@@ -410,7 +782,10 @@ components:
               paymentMethod: { type: string }
               gross: { type: string, description: Sum of open amounts in the group currency. }
               discount: { type: string }
-              net: { type: string, description: Gross minus discount; the amount to pay in the group currency. }
+              withheld: { type: string, description: Tax withheld in the group currency. }
+              bankAccountId: { type: string, description: Party bank account id bound at approval; absent on a draft. }
+              bankLast4: { type: string, description: Last four digits of the bound account number. }
+              net: { type: string, description: Gross minus discount minus withheld; the amount paid to the vendor in the group currency. }
               valued: { type: string, description: Sum of line valued amounts in legalEntityCurrency. }
               lines:
                 type: array
@@ -421,9 +796,58 @@ components:
                     openItemId: { type: string, format: uuid }
                     openAmount: { type: string }
                     discount: { type: string }
-                    pay: { type: string }
+                    pay: { type: string, description: Open amount minus discount, before withholding. }
+                    withheld: { type: string }
+                    withholdingCode: { type: string }
                     rate: { type: string, description: Group currency to legalEntityCurrency; 1 for the same currency. }
-                    valued: { type: string, description: pay times rate rounded to the minor unit of legalEntityCurrency. }
+                    valued: { type: string, description: (pay minus withheld) times rate rounded to the minor unit of legalEntityCurrency. }
+    PaymentRunRequest:
+      type: object
+      additionalProperties: false
+      required: [proposalId]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal-entity scope; required for an unscoped caller. }
+        proposalId: { type: string, format: uuid }
+    PaymentRun:
+      type: object
+      required: [id, legalEntityId, proposalId, status, requestedBy, ledgerId, bankAccount, controlAccount, createdAt, payments]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        proposalId: { type: string, format: uuid }
+        status: { type: string, enum: [RUNNING, COMPLETED, FAILED] }
+        requestedBy: { type: string }
+        ledgerId: { type: string, format: uuid }
+        bankAccount: { type: string }
+        controlAccount: { type: string }
+        discountAccount: { type: string }
+        withholdingAccount: { type: string }
+        fileNumber: { type: string }
+        fileSha256: { type: string }
+        paymentCount: { type: integer }
+        fileGeneratedAt: { type: string, format: date-time }
+        journalRequestedAt: { type: string, format: date-time, description: Set before the ledger is called; from then on the run can no longer be failed unless the ledger rejected the journal. }
+        journalRejectedAt: { type: string, format: date-time }
+        journalEntryId: { type: string }
+        journalPostedAt: { type: string, format: date-time }
+        settledAt: { type: string, format: date-time }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        payments:
+          type: array
+          items:
+            type: object
+            required: [groupId, vendorId, currency, paymentMethod, endToEndId, amount, valuedAmount]
+            properties:
+              id: { type: string, format: uuid }
+              groupId: { type: string, format: uuid }
+              vendorId: { type: string, format: uuid }
+              currency: { type: string }
+              paymentMethod: { type: string }
+              endToEndId: { type: string }
+              amount: { type: string }
+              valuedAmount: { type: string }
     DecimalString:
       type: string
       pattern: '^[0-9]+(\.[0-9]+)?$'
@@ -482,7 +906,10 @@ components:
                 additionalProperties: false
                 required: [type, format]
                 properties:
-                  type: { type: string, enum: [TRANSFER, WIRE] }
+                  type:
+                    type: string
+                    enum: [TRANSFER, WIRE]
+                    description: Narrower than the bank profile method enum (TRANSFER, ACH, CHECK, CARD, WIRE) on purpose. The preview only renders pain.001, and only TRANSFER and WIRE map to the PAIN001 format; ACH (NACHA), CHECK and CARD cannot be sent as pain.001.
                   format: { type: string, enum: [PAIN001] }
                   minPayment: { $ref: '#/components/schemas/DecimalString' }
                   maxPayment: { $ref: '#/components/schemas/DecimalString' }

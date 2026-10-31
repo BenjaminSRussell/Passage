@@ -104,9 +104,16 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p, _ := tenant.FromContext(r.Context())
+		in.Approver = p.HasDuty(dutyOrderApprove)
 		order, err := a.store.ChangeOrder(r.Context(), id, version, in, p.UserID, a.now())
 		if err != nil {
 			a.fail(w, r, "change order", err)
+			return
+		}
+		if order.PendingChange != nil {
+			// The customer's changes need approval: nothing was applied.
+			setETag(w, order.Version)
+			httpx.JSON(w, http.StatusAccepted, order)
 			return
 		}
 		if order.Version != version {

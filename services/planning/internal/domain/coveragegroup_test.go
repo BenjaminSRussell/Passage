@@ -17,6 +17,9 @@ func TestCoverageGroupValidate(t *testing.T) {
 		{name: "period with period days", mutate: func(g *CoverageGroupSpec) { g.CoverageCode = CoveragePeriod; g.PeriodDays = 7 }},
 		{name: "fence beyond max", mutate: func(g *CoverageGroupSpec) { g.FreezeFenceDays = 3651 }, field: "freezeFenceDays"},
 		{name: "auto-firm without firming fence", mutate: func(g *CoverageGroupSpec) { g.AutoFirm = true }, field: "autoFirm"},
+		{name: "first-issue safety policy", mutate: func(g *CoverageGroupSpec) { g.SafetyStockPolicy = SafetyFirstIssue }},
+		{name: "unknown safety policy", mutate: func(g *CoverageGroupSpec) { g.SafetyStockPolicy = "monthly" }, field: "safetyStockPolicy"},
+		{name: "empty safety policy", mutate: func(g *CoverageGroupSpec) { g.SafetyStockPolicy = "" }, field: "safetyStockPolicy"},
 		{name: "auto-firm with firming fence", mutate: func(g *CoverageGroupSpec) { g.AutoFirm = true; g.FirmingFenceDays = 5 }},
 	}
 	for _, tc := range cases {
@@ -41,6 +44,9 @@ func TestDefaultCoverageGroup_FR22_2(t *testing.T) {
 	g := DefaultCoverageGroup("REQ", CoverageRequirement)
 	if g.CoverageTimeFenceDays != 100 || g.NegativeDays != 1 || g.PositiveDays != 0 {
 		t.Fatalf("defaults = %+v, want fence 100, negative 1, positive 0", g)
+	}
+	if g.SafetyStockPolicy != SafetyToday {
+		t.Fatalf("safety policy default = %q, want today", g.SafetyStockPolicy)
 	}
 	if !g.GenerateActions || !g.GenerateFutures || g.AutoFirm {
 		t.Fatalf("message defaults wrong: %+v", g)

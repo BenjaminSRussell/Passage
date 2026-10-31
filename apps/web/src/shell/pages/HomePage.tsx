@@ -1,6 +1,9 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { PassageModule } from "../../modules/registry";
 import { copy } from "../copy";
+import { visibleModules } from "../dutyGate";
+import { usePrincipalDuties } from "../principal";
 import { Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
 import { workspaceIcon } from "../workspaceIcons";
 import styles from "./pages.module.css";
@@ -9,7 +12,9 @@ export interface HomePageProps {
   modules: PassageModule[];
 }
 
-export function HomePage({ modules }: HomePageProps) {
+export function HomePage({ modules: allModules }: HomePageProps) {
+  const duties = usePrincipalDuties();
+  const modules = useMemo(() => visibleModules(allModules, duties), [allModules, duties]);
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />

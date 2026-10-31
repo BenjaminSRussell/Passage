@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -45,6 +46,13 @@ type fakeStore struct {
 	firms    map[string]fakeFirm
 	firmed   map[string]bool
 	lastFirm store.FirmRequest
+	// firmedSupply is what FirmedSupply returns for plan MAIN (carry_test.go).
+	firmedSupply   []store.FirmedSupply
+	firmedErr      error
+	lastFirmedFrom time.Time
+	// quotas is what RunQuotas returns (run_quota_test.go).
+	runQuotas    []domain.RunQuota
+	runQuotasErr error
 	// lastLimit is the page size the last list read received.
 	lastLimit int
 	// editors are the users who wrote cells of each forecast model
@@ -70,8 +78,14 @@ type fakeStore struct {
 	quotaQuery  store.QuotaQuery
 	// Stored site-scope coverage by item that runs read (run_coverage_test.go)
 	// and the site of the last read.
-	runCovs    map[string]store.RunCoverage
-	runCovSite string
+	runCovs      map[string]store.RunCoverage
+	runCovSite   string
+	runCovEntity string
+	// Scenarios and simulation runs (scenario_test.go).
+	scenarios   []store.Scenario
+	scenarioKey map[string]string
+	lastSim     store.SimulationRequest
+	simulations int
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {
@@ -293,12 +307,15 @@ func TestListVersions(t *testing.T) {
 
 func TestRun_RejectsInvalidLines(t *testing.T) {
 	cases := map[string]struct{ from, to, field string }{
-		"negative receipt": {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"2026-11-10","qty":"-5"}]`, "items[0].receipts"},
-		"receipt bad date": {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"10/11/2026","qty":"5"}]`, "items[0].receipts.date"},
-		"unknown ref type": {`"refType":"sales-line"`, `"refType":"wish"`, "items[0].demand"},
-		"bad component":    {`"components":[]`, `"components":[{"itemId":"x","qty":"1"}]`, "items[0].components"},
-		"negative on hand": {`"onHand":"20"`, `"onHand":"-1"`, "items[0].quantities"},
-		"negative days":    {`"marginDays":0`, `"marginDays":-1`, "items[0].coverage"},
+		"negative receipt":         {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"2026-11-10","qty":"-5"}]`, "items[0].receipts"},
+		"receipt bad date":         {`"receipts":[]`, `"receipts":[{"ref":"PO-1","refType":"purchase-line","date":"10/11/2026","qty":"5"}]`, "items[0].receipts.date"},
+		"unknown ref type":         {`"refType":"sales-line"`, `"refType":"wish"`, "items[0].demand"},
+		"bad component":            {`"components":[]`, `"components":[{"itemId":"x","qty":"1"}]`, "items[0].components"},
+		"negative on hand":         {`"onHand":"20"`, `"onHand":"-1"`, "items[0].quantities"},
+		"negative days":            {`"marginDays":0`, `"marginDays":0,"positiveDays":-1`, "items[0].coverage"},
+		"negative margin":          {`"marginDays":0`, `"marginDays":-1`, "items[0].coverage.marginDays"},
+		"issue margin over a year": {`"marginDays":0`, `"marginDays":0,"issueMarginDays":366`, "items[0].coverage.issueMarginDays"},
+		"negative reorder margin":  {`"marginDays":0`, `"marginDays":0,"reorderMarginDays":-1`, "items[0].coverage.reorderMarginDays"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

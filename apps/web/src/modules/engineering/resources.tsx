@@ -34,7 +34,7 @@ import styles from "./pages.module.css";
 const resourceTypes = ["machine", "tool", "labor", "vendor", "location"];
 const notFoundStatus = 404;
 
-function usePagedList<T, F>(fetchPage: (filters: F, cursor?: string) => Promise<Page<T>>, filters: F) {
+export function usePagedList<T, F>(fetchPage: (filters: F, cursor?: string) => Promise<Page<T>>, filters: F) {
   const [rows, setRows] = useState<T[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loading, setLoading] = useState(true);
@@ -86,7 +86,7 @@ function usePagedList<T, F>(fetchPage: (filters: F, cursor?: string) => Promise<
   return { rows, nextCursor, loading, loadingMore, error, loadMore, retry: () => setAttempt((n) => n + 1) };
 }
 
-function PagedTable<T, F>({
+export function PagedTable<T, F>({
   label,
   emptyTitle,
   columns,
@@ -215,8 +215,8 @@ const capabilityColumns: DataTableColumn<ResourceCapability>[] = [
   { key: "effectiveTo", header: "Effective to" },
 ];
 
-function calendarLink(calendarId?: string): ReactNode {
-  return calendarId ? <Link to={`/engineering/calendars/${encodeURIComponent(calendarId)}`}>Calendar days</Link> : "";
+export function calendarLink(calendarId?: string): ReactNode {
+  return calendarId ? <Link to={`/engineering/calendars/${encodeURIComponent(calendarId)}/days`}>Calendar days</Link> : "";
 }
 
 export function ResourceDetailPage({ id, onBack }: { id: string; onBack?: () => void }) {
@@ -308,7 +308,7 @@ const groupColumns: DataTableColumn<ResourceGroup>[] = [
     key: "code",
     header: "Code",
     mono: true,
-    render: (row) => <Link to={`/engineering/resources?groupId=${encodeURIComponent(row.id)}`}>{row.code}</Link>,
+    render: (row) => <Link to={`/engineering/resource-groups/${encodeURIComponent(row.id)}`}>{row.code}</Link>,
   },
   { key: "name", header: "Name" },
   { key: "siteId", header: "Site" },
@@ -354,7 +354,7 @@ const capabilityListColumns: DataTableColumn<Capability>[] = [
     key: "code",
     header: "Code",
     mono: true,
-    render: (row) => <Link to={`/engineering/resources?capabilityId=${encodeURIComponent(row.id)}`}>{row.code}</Link>,
+    render: (row) => <Link to={`/engineering/capabilities/${encodeURIComponent(row.id)}`}>{row.code}</Link>,
   },
   { key: "name", header: "Name" },
 ];

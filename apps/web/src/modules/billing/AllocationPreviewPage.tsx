@@ -19,7 +19,7 @@ import {
   type SchedulePeriod,
   type SspSource,
 } from "./api/client";
-import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS } from "./format";
+import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, RESIDUAL_SSP_HINT, SSP_SOURCE_LABELS } from "./format";
 import styles from "./pages.module.css";
 
 type Errors = Record<string, string>;
@@ -57,7 +57,7 @@ export function validatePreview(v: PreviewValues): Errors {
     const id = o.id.trim();
     if (id === "" || id.length > 64 || seen.has(id)) errors[at("id")] = "Enter a unique name of up to 64 characters.";
     seen.add(id);
-    if (!DECIMAL.test(o.ssp.trim()) || Number(o.ssp) <= 0) errors[at("ssp")] = "Enter a standalone selling price above zero.";
+    if (o.sspSource !== "RESIDUAL" && (!DECIMAL.test(o.ssp.trim()) || Number(o.ssp) <= 0)) errors[at("ssp")] = "Enter a standalone selling price above zero.";
     if (o.method === "RATABLE" && (!DAY.test(o.termStart) || !DAY.test(o.termEnd) || o.termEnd < o.termStart)) {
       errors[at("term")] = "A ratable obligation needs a term start and an end on or after it.";
     }
@@ -73,7 +73,7 @@ export function toPreviewInput(v: PreviewValues): AllocationPreviewInput {
     ratableBasis: v.ratableBasis,
     obligations: v.obligations.map((o): ObligationInput => ({
       id: o.id.trim(),
-      ssp: o.ssp.trim(),
+      ...(o.sspSource === "RESIDUAL" ? {} : { ssp: o.ssp.trim() }),
       sspSource: o.sspSource,
       method: o.method,
       ...(o.method === "RATABLE" ? { termStart: o.termStart, termEnd: o.termEnd } : {}),
@@ -205,8 +205,7 @@ export function AllocationPreviewPage() {
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Obligation ${i + 1}`}</legend>
               {text(i, "id", "Name", {})}
-              {text(i, "ssp", "Standalone selling price", { mono: true, decimal: true })}
-              <FormField id={`rr-ob-${i}-source`} label="SSP source">
+              <FormField id={`rr-ob-${i}-source`} label="SSP source" hint={o.sspSource === "RESIDUAL" ? RESIDUAL_SSP_HINT : undefined}>
                 {(c) => (
                   <Select {...c} value={o.sspSource} onChange={(e) => setObligation(i, { sspSource: e.target.value as SspSource })}>
                     {SSP_SOURCES.map((s) => (
@@ -217,6 +216,7 @@ export function AllocationPreviewPage() {
                   </Select>
                 )}
               </FormField>
+              {o.sspSource === "RESIDUAL" ? null : text(i, "ssp", "Standalone selling price", { mono: true, decimal: true })}
               <FormField id={`rr-ob-${i}-method`} label="Recognition">
                 {(c) => (
                   <Select {...c} value={o.method} onChange={(e) => setObligation(i, { method: e.target.value as RecognitionMethod })}>

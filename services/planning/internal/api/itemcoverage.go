@@ -29,6 +29,8 @@ type itemCoverageDTO struct {
 	MinQty                  string  `json:"minQty"`
 	MaxQty                  string  `json:"maxQty"`
 	SafetyMarginReceiptDays int     `json:"safetyMarginReceiptDays"`
+	SafetyMarginIssueDays   int     `json:"safetyMarginIssueDays"`
+	SafetyMarginReorderDays int     `json:"safetyMarginReorderDays"`
 	LeadTimeDays            *int    `json:"leadTimeDays"`
 	VendorID                *string `json:"vendorId"`
 	PlannedOrderType        string  `json:"plannedOrderType"`
@@ -51,7 +53,7 @@ func itemCoverageDTOOf(c store.ItemCoverage) itemCoverageDTO {
 	s := c.Spec
 	return itemCoverageDTO{ID: c.ID, Version: c.Version, ItemID: s.ItemID, SiteID: s.SiteID, WarehouseID: optionalString(s.WarehouseID),
 		CoverageGroupID: s.CoverageGroupID, CoverageGroupCode: c.CoverageGroupCode, MinQty: s.MinQty.String(), MaxQty: s.MaxQty.String(),
-		SafetyMarginReceiptDays: s.SafetyMarginReceiptDays, LeadTimeDays: s.LeadTimeDays, VendorID: optionalString(s.VendorID),
+		SafetyMarginReceiptDays: s.SafetyMarginReceiptDays, SafetyMarginIssueDays: s.SafetyMarginIssueDays, SafetyMarginReorderDays: s.SafetyMarginReorderDays, LeadTimeDays: s.LeadTimeDays, VendorID: optionalString(s.VendorID),
 		PlannedOrderType: s.PlannedOrderType, PlanningStrategy: s.PlanningStrategy, PlanningScope: s.PlanningScope,
 		DecouplingPoint: s.DecouplingPoint, BufferProfileID: optionalString(s.BufferProfileID),
 		RequiredShelfLifeDays: s.RequiredShelfLifeDays, PriorityBased: s.PriorityBased}
@@ -67,6 +69,7 @@ func writeItemCoverage(w http.ResponseWriter, status int, c store.ItemCoverage) 
 // orders, the mts-net strategy and site scope); an explicit null leaves the
 // default too. Quantities are decimal strings, never floats.
 type itemCoverageRequest struct {
+	LegalEntityID           string `json:"legalEntityId"`
 	ItemID                  string `json:"itemId"`
 	SiteID                  string `json:"siteId"`
 	WarehouseID             string `json:"warehouseId"`
@@ -74,6 +77,8 @@ type itemCoverageRequest struct {
 	MinQty                  string `json:"minQty"`
 	MaxQty                  string `json:"maxQty"`
 	SafetyMarginReceiptDays int    `json:"safetyMarginReceiptDays"`
+	SafetyMarginIssueDays   int    `json:"safetyMarginIssueDays"`
+	SafetyMarginReorderDays int    `json:"safetyMarginReorderDays"`
 	LeadTimeDays            *int   `json:"leadTimeDays"`
 	VendorID                string `json:"vendorId"`
 	PlannedOrderType        string `json:"plannedOrderType"`
@@ -87,16 +92,17 @@ type itemCoverageRequest struct {
 
 // decodeItemCoverage reads and validates the body; it answers the request
 // itself and returns false when the body is unusable.
-func decodeItemCoverage(w http.ResponseWriter, r *http.Request) (domain.ItemCoverageSpec, bool) {
+func decodeItemCoverage(w http.ResponseWriter, r *http.Request) (domain.ItemCoverageSpec, string, bool) {
 	d := domain.DefaultItemCoverage("", "", "")
 	req := itemCoverageRequest{MinQty: "0", MaxQty: "0", PlannedOrderType: d.PlannedOrderType,
 		PlanningStrategy: d.PlanningStrategy, PlanningScope: d.PlanningScope}
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
-		return domain.ItemCoverageSpec{}, false
+		return domain.ItemCoverageSpec{}, "", false
 	}
 	spec := domain.ItemCoverageSpec{ItemID: req.ItemID, SiteID: req.SiteID, WarehouseID: req.WarehouseID,
 		CoverageGroupID: req.CoverageGroupID, SafetyMarginReceiptDays: req.SafetyMarginReceiptDays,
+		SafetyMarginIssueDays: req.SafetyMarginIssueDays, SafetyMarginReorderDays: req.SafetyMarginReorderDays,
 		LeadTimeDays: req.LeadTimeDays, VendorID: req.VendorID, PlannedOrderType: req.PlannedOrderType,
 		PlanningStrategy: req.PlanningStrategy, PlanningScope: req.PlanningScope, DecouplingPoint: req.DecouplingPoint,
 		BufferProfileID: req.BufferProfileID, RequiredShelfLifeDays: req.RequiredShelfLifeDays, PriorityBased: req.PriorityBased}
@@ -115,9 +121,9 @@ func decodeItemCoverage(w http.ResponseWriter, r *http.Request) (domain.ItemCove
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return domain.ItemCoverageSpec{}, false
+		return domain.ItemCoverageSpec{}, "", false
 	}
-	return spec, true
+	return spec, req.LegalEntityID, true
 }
 
 // itemCoverageID reads {id}; an ill-formed id cannot exist, so it is 404.
@@ -184,13 +190,13 @@ func (a *API) createItemCoverage(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{idempotencyKey: "must be at most 255 characters"})
 		return
 	}
-	spec, ok := decodeItemCoverage(w, r)
+	spec, legalEntityID, ok := decodeItemCoverage(w, r)
 	if !ok {
 		return
 	}
-	body, _ := json.Marshal(spec)
+	body, _ := json.Marshal([]any{legalEntityID, spec})
 	c, replayed, err := a.store.CreateItemCoverage(r.Context(), store.ItemCoverageCreate{
-		IdempotencyKey: key, InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), Spec: spec,
+		LegalEntityID: legalEntityID, IdempotencyKey: key, InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), Spec: spec,
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -218,7 +224,7 @@ func (a *API) updateItemCoverage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	spec, ok := decodeItemCoverage(w, r)
+	spec, _, ok := decodeItemCoverage(w, r)
 	if !ok {
 		return
 	}

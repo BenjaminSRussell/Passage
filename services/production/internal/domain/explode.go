@@ -117,7 +117,7 @@ func Requantify(lines []OrderLine, orderQty decimal.Decimal) ([]OrderLine, error
 // The feedback fields (hours, good and error quantity, status) are booked by
 // route-card journals (FR-21.6) and read-only on create. PORequestedAt is when
 // release asked purchasing for the vendor PO of a subcontract operation
-// (FR-21.10); it is read-only too.
+// (FR-21.10); it is read-only too, as is POCancelledAt (when that request was withdrawn).
 type Operation struct {
 	OperNumber       int             `json:"operNumber"`
 	ResourceID       string          `json:"resourceId"`
@@ -134,6 +134,7 @@ type Operation struct {
 	QtyError         decimal.Decimal `json:"qtyError"`
 	Status           OperStatus      `json:"status,omitempty"`
 	PORequestedAt    *time.Time      `json:"poRequestedAt,omitempty"`
+	POCancelledAt    *time.Time      `json:"poCancelledAt,omitempty"`
 }
 
 // OperStatus is the feedback status of an operation: open until the first

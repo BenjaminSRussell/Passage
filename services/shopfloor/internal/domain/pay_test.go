@@ -73,10 +73,11 @@ func TestBuildDays_PairsAndFlags(t *testing.T) {
 		flags   []string
 		hours   float64
 	}{
-		{"one pair", []Punch{{"a", KindClockIn, at(0, 9)}, {"b", KindClockOut, at(0, 17)}}, 1, nil, 8},
-		{"unpaired clock-in is flagged", []Punch{{"a", KindClockIn, at(0, 9)}}, 1, []string{FlagMissingClockOut}, 0},
-		{"orphan clock-out is flagged", []Punch{{"b", KindClockOut, at(0, 17)}}, 1, []string{FlagOrphanClockOut}, 0},
-		{"two days stay separate", []Punch{{"a", KindClockIn, at(0, 9)}, {"b", KindClockOut, at(0, 17)}, {"c", KindClockIn, at(1, 9)}, {"d", KindClockOut, at(1, 12)}}, 2, nil, 11},
+		{"one pair", []Punch{{ID: "a", Kind: KindClockIn, At: at(0, 9)}, {ID: "b", Kind: KindClockOut, At: at(0, 17)}}, 1, nil, 8},
+		{"unpaired clock-in is flagged", []Punch{{ID: "a", Kind: KindClockIn, At: at(0, 9)}}, 1, []string{FlagMissingClockOut}, 0},
+		{"orphan clock-out is flagged", []Punch{{ID: "b", Kind: KindClockOut, At: at(0, 17)}}, 1, []string{FlagOrphanClockOut}, 0},
+		{"unconfirmed auto clock-out pays but flags the day (BR-25.3)", []Punch{{ID: "a", Kind: KindClockIn, At: at(0, 6)}, {ID: "b", Kind: KindClockOut, At: at(0, 22), Unconfirmed: true}}, 1, []string{FlagMissingClockOut}, 16},
+		{"two days stay separate", []Punch{{ID: "a", Kind: KindClockIn, At: at(0, 9)}, {ID: "b", Kind: KindClockOut, At: at(0, 17)}, {ID: "c", Kind: KindClockIn, At: at(1, 9)}, {ID: "d", Kind: KindClockOut, At: at(1, 12)}}, 2, nil, 11},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

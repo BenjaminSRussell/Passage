@@ -131,7 +131,22 @@ type Line = Entry["lines"][number];
 const lineColumns: DataTableColumn<Line>[] = [
   { key: "lineNumber", header: "Line", align: "end" },
   { key: "account", header: "Account", mono: true },
-  { key: "displayName", header: "Dimensions", mono: true },
+  {
+    key: "displayName",
+    header: "Dimensions",
+    mono: true,
+    render: (l) => (
+      <>
+        {l.displayName}
+        {l.derivedByStepIds && l.derivedByStepIds.length > 0 ? (
+          <>
+            {" "}
+            <Badge tone="info">Derived by {l.derivedByStepIds.length} {l.derivedByStepIds.length === 1 ? "step" : "steps"}</Badge>
+          </>
+        ) : null}
+      </>
+    ),
+  },
   {
     key: "debitCredit",
     header: "D/C",

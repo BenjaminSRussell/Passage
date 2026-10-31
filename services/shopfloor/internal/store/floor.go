@@ -234,6 +234,29 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 		res.Gaps = append(res.Gaps, GapReport{MachineID: code, From: g.From, To: g.To})
 	}
 
+	// A late event (seq at or below last_seq) is a duplicate only when its seq
+	// is stored; otherwise it fills a gap and is kept, so a replayed gap or a
+	// batch that commits after a later one loses nothing. It feeds counts and
+	// OEE (computed from the events), not the downtime record, which follows
+	// the newest state.
+	for _, e := range c.Late {
+		it := group[e.Index]
+		tag, err := tx.Exec(ctx, `insert into machine_event (tenant_id, machine_id, seq, kind, ts, good_count, reject_count,
+				state, reason_code, measurement_name, measurement_value, unit, job_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			on conflict (tenant_id, machine_id, seq) do nothing`,
+			tenantID, m.id, e.Seq, e.Kind, e.At, e.GoodCount, e.RejectCount, nullable(e.State),
+			it.ReasonCode, it.MeasurementName, measurementString(it.MeasurementValue), it.Unit, it.JobID)
+		if err != nil {
+			return IngestResult{}, err
+		}
+		if tag.RowsAffected() == 1 {
+			res.Accepted++
+		} else {
+			res.Dropped++
+		}
+	}
+
 	var open *openDown
 	var d openDown
 	err = tx.QueryRow(ctx, `select id::text, started_at from downtime_record

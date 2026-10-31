@@ -6,6 +6,7 @@ import { checkAxeAA } from "../../shell/a11y";
 import inventory from "./module";
 import { validateLine } from "./JournalDetailPage";
 import { validateJournal } from "./NewJournalPage";
+import { isIsoDate } from "./format";
 
 const JOURNAL_ID = "0a1b2c3d-0000-4000-8000-000000000001";
 const PRODUCT_ID = "5f2c1e7a-0000-4000-8000-000000000002";
@@ -122,6 +123,33 @@ describe("On-hand inquiry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
     expect(calls.length).toBe(before);
+  });
+
+  it("replays the ledger on a date, drops the availability columns and says why", async () => {
+    handler = () => json(200, { items: [onHandRow], truncated: false });
+    renderAt("/inventory/onhand");
+    await screen.findByText("Negative stock");
+    expect(screen.getByRole("columnheader", { name: "Available physical" })).toBeInTheDocument();
+    // A replay carries no availability fields.
+    const replayed = { group: onHandRow.group, physicalInvent: onHandRow.physicalInvent, postedValue: onHandRow.postedValue,
+      currency: onHandRow.currency, negative: onHandRow.negative };
+    handler = () => json(200, { items: [replayed], truncated: false, asOf: "2026-09-30" });
+    fireEvent.change(screen.getByLabelText(/As of date/), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("asOf")).toBe("2026-09-30"));
+    expect(await screen.findByText("Stock as of 2026-09-30")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Available physical" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Physical" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.has("asOf")).toBe(false));
+  });
+
+  it("accepts only real calendar dates as the replay date", () => {
+    expect(isIsoDate("2026-09-30")).toBe(true);
+    expect(isIsoDate("2028-02-29")).toBe(true);
+    for (const bad of ["30/09/2026", "2026-02-30", "2026-13-01", "2026-9-30", ""]) {
+      expect(isIsoDate(bad)).toBe(false);
+    }
   });
 
   it("explains an empty result and warns when the result is cut", async () => {

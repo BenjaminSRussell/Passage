@@ -243,20 +243,6 @@ func (a *API) getVersion(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, v)
 }
 
-// inScope reports whether the caller's legal-entity scope (a comma list, or
-// empty or * for every entity) covers legalEntityID.
-func inScope(p tenant.Principal, legalEntityID string) bool {
-	if p.LegalEntityID == "" || p.LegalEntityID == "*" {
-		return true
-	}
-	for _, le := range strings.Split(p.LegalEntityID, ",") {
-		if strings.EqualFold(strings.TrimSpace(le), legalEntityID) {
-			return true
-		}
-	}
-	return false
-}
-
 // createVersion stores a new Open costing version (FR-39.3). Idempotency-Key
 // is required (PRD 7.39.5).
 func (a *API) createVersion(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +266,7 @@ func (a *API) createVersion(w http.ResponseWriter, r *http.Request) {
 		domainFailure(w, r, rule, "fallback")
 		return
 	}
-	if p, _ := tenant.FromContext(r.Context()); !inScope(p, spec.LegalEntityID) {
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, spec.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeLegalEntityScope, "legal entity "+spec.LegalEntityID+" is outside your scope"))
 		return
 	}

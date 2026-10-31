@@ -78,6 +78,7 @@ type editResult struct {
 // locked and loaded inside tx. It returns the PO as stored afterwards.
 func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, next PurchaseOrder) (PurchaseOrder, editResult, error) {
 	id := cur.ID
+	actor, _ := tenant.FromContext(ctx)
 	if err := checkRowVersion(cur, ifMatch); err != nil {
 		return PurchaseOrder{}, editResult{}, err
 	}
@@ -87,7 +88,11 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 	if err := checkHeaderUnchanged(cur, next); err != nil {
 		return PurchaseOrder{}, editResult{}, err
 	}
-	removed, err := checkLineChanges(cur.Lines, next.Lines)
+	pol, err := loadPolicy(ctx, tx, cur.LegalEntityID)
+	if err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	removed, err := checkLineChanges(cur.Lines, next.Lines, pol.AllowInvoiceBeforeReceipt)
 	if err != nil {
 		return PurchaseOrder{}, editResult{}, err
 	}
@@ -106,6 +111,11 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 		}
 		next.ApprovalStatus = status
 		if err := updateHeader(ctx, tx, next); err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		// The editor is one of the users four-eyes keeps from approving the change.
+		if _, err := tx.Exec(ctx, `update purchase_order set changed_by = $3 where tenant_id = $1 and id = $2`,
+			actor.TenantID, id, userOrNil(actor.UserID)); err != nil {
 			return PurchaseOrder{}, editResult{}, err
 		}
 		out, err := loadPurchaseOrder(ctx, tx, id)
@@ -167,6 +177,7 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 // PO as it is now.
 func (s *Postgres) ActOnPurchaseOrder(ctx context.Context, id string, ifMatch int, action string, idem Idem) (PurchaseOrder, error) {
 	var out PurchaseOrder
+	actor, _ := tenant.FromContext(ctx)
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		existing, replay, err := claimKey(ctx, tx, idem, id)
 		if err != nil {
@@ -187,6 +198,15 @@ func (s *Postgres) ActOnPurchaseOrder(ctx context.Context, id string, ifMatch in
 			return err
 		}
 		head := cur
+		if action == domain.POActionApprove || action == domain.POActionConfirm {
+			pol, err := loadPolicy(ctx, tx, cur.LegalEntityID)
+			if err != nil {
+				return err
+			}
+			if err := domain.CheckFourEyes(pol, actor.UserID, cur.CreatedBy, cur.SubmittedBy, cur.ChangedBy); err != nil {
+				return err
+			}
+		}
 		switch action {
 		case domain.POActionCancel:
 			if err := cancelOrder(ctx, tx, cur); err != nil {
@@ -208,6 +228,12 @@ func (s *Postgres) ActOnPurchaseOrder(ctx context.Context, id string, ifMatch in
 		}
 		if err := updateHeader(ctx, tx, head); err != nil {
 			return err
+		}
+		if action == domain.POActionSubmit {
+			if _, err := tx.Exec(ctx, `update purchase_order set submitted_by = $3 where tenant_id = $1 and id = $2`,
+				actor.TenantID, id, userOrNil(actor.UserID)); err != nil {
+				return err
+			}
 		}
 		if out, err = loadPurchaseOrder(ctx, tx, id); err != nil {
 			return err
@@ -391,7 +417,7 @@ func checkHeaderUnchanged(cur, next PurchaseOrder) error {
 // a changed link, a changed product, unit, quantity or amount on a line drawn
 // against an agreement, and quantities below received or invoiced (PRC-PO-007). It
 // returns the live lines that next leaves out, which the edit cancels.
-func checkLineChanges(cur, next []PurchaseOrderLine) ([]PurchaseOrderLine, error) {
+func checkLineChanges(cur, next []PurchaseOrderLine, allowInvoiceBeforeReceipt bool) ([]PurchaseOrderLine, error) {
 	byNo := make(map[int]PurchaseOrderLine, len(cur))
 	for _, l := range cur {
 		byNo[l.LineNo] = l
@@ -415,7 +441,7 @@ func checkLineChanges(cur, next []PurchaseOrderLine) ([]PurchaseOrderLine, error
 		if c.AgreementLineID != "" && (!c.Qty.Equal(n.Qty) || !c.LineAmount.Equal(n.LineAmount) || c.ProductID != n.ProductID || c.Unit != n.Unit) {
 			return nil, linkErr("line %d draws on a purchase agreement; its product, unit, quantity and amount cannot change (cancel the line and order again)", n.LineNo)
 		}
-		if err := domain.CheckReduction(n.LineNo, c.ReceivedQty, c.InvoicedQty, n.Qty, false); err != nil {
+		if err := domain.CheckReduction(n.LineNo, c.ReceivedQty, c.InvoicedQty, n.Qty, allowInvoiceBeforeReceipt); err != nil {
 			return nil, err
 		}
 	}
@@ -424,7 +450,7 @@ func checkLineChanges(cur, next []PurchaseOrderLine) ([]PurchaseOrderLine, error
 		if c.Status == domain.POLineCancelled || kept[c.LineNo] {
 			continue
 		}
-		if err := domain.CheckReduction(c.LineNo, c.ReceivedQty, c.InvoicedQty, decimal.Zero, false); err != nil {
+		if err := domain.CheckReduction(c.LineNo, c.ReceivedQty, c.InvoicedQty, decimal.Zero, allowInvoiceBeforeReceipt); err != nil {
 			return nil, err
 		}
 		removed = append(removed, c)

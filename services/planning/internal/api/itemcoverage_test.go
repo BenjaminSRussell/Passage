@@ -223,6 +223,10 @@ func TestCreateItemCoverage_DuplicateUnknownGroupAndIdempotency(t *testing.T) {
 	if reuse.Code != http.StatusUnprocessableEntity || problemOf(t, reuse).Code != store.CodeIdempotencyReuse {
 		t.Fatalf("key reuse: %d %s", reuse.Code, reuse.Body.String())
 	}
+	otherEntity := do(t, st, http.MethodPost, itemCoveragePath, itemCoverageBody(fgID, g, `,"legalEntityId":"`+testkit.TenantID(77)+`"`), dutySetup, true, "ic-1")
+	if otherEntity.Code != http.StatusUnprocessableEntity || problemOf(t, otherEntity).Code != store.CodeIdempotencyReuse {
+		t.Fatalf("key reuse across entities: %d %s", otherEntity.Code, otherEntity.Body.String())
+	}
 	dup := do(t, st, http.MethodPost, itemCoveragePath, body, dutySetup, true, "")
 	if dup.Code != http.StatusConflict || problemOf(t, dup).Code != store.CodeItemCoverageExists {
 		t.Fatalf("duplicate: %d %s", dup.Code, dup.Body.String())
@@ -270,7 +274,7 @@ func TestItemCoverage_ListGetAndUpdate(t *testing.T) {
 		}
 	}
 
-	update := itemCoverageBody(fgID, g, `,"planningScope":"warehouse","warehouseId":"`+testkit.TenantID(7)+`","minQty":"10","maxQty":"40","leadTimeDays":3`)
+	update := itemCoverageBody(fgID, g, `,"planningScope":"warehouse","warehouseId":"`+testkit.TenantID(7)+`","minQty":"10","maxQty":"40","leadTimeDays":3,"safetyMarginIssueDays":2,"safetyMarginReorderDays":6`)
 	if rec := doIfMatch(t, st, http.MethodPut, path, update, "", dutySetup); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("update without If-Match: %d", rec.Code)
 	}
@@ -282,7 +286,8 @@ func TestItemCoverage_ListGetAndUpdate(t *testing.T) {
 		t.Fatalf("update: %d %s etag %q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
 	}
 	if c := decodeItemCoverageDTO(t, rec); c.PlanningScope != domain.PlanScopeWarehouse || c.WarehouseID == nil ||
-		c.MinQty != "10" || c.LeadTimeDays == nil || *c.LeadTimeDays != 3 || c.Version != 2 {
+		c.MinQty != "10" || c.LeadTimeDays == nil || *c.LeadTimeDays != 3 || c.Version != 2 ||
+		c.SafetyMarginIssueDays != 2 || c.SafetyMarginReorderDays != 6 {
 		t.Fatalf("updated coverage: %+v", c)
 	}
 	stale := doIfMatch(t, st, http.MethodPut, path, update, `"1"`, dutySetup)

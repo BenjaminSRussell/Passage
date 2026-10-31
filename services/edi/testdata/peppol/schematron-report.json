@@ -1,0 +1,377 @@
+{
+ "rules": {
+  "release": "3.0.21",
+  "files": {
+   "CEN-EN16931-UBL.sch": "268d4f7a2688676695e6c69cba6fba69a6802604fee12cb544a6b30ff09555a3",
+   "PEPPOL-EN16931-UBL.sch": "9616cfffb418f349b532c1e25d3c831b8af6a47f4f5607ca0df4b1336f48e5f3"
+  }
+ },
+ "validator": "ISO Schematron compiled by validate.py, run with Saxon-HE (saxonche)",
+ "xsd": "OASIS UBL 2.1 (xmllint)",
+ "documents": 50,
+ "passed": 50,
+ "results": [
+  {
+   "xsdValid": true,
+   "file": "01.xml",
+   "sha256": "66f2b37455a38f897c7d80aafb1ce093392482990ef965d875b6d3a120e15947",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "02.xml",
+   "sha256": "fc6e7ba68a5446f218d84be16e00ed562f82ee49e6d440f0788ffc911ffe9b98",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "03.xml",
+   "sha256": "8a0e71b3feb2d25ae14828439d3a9835ac4078bc3e267563737d6634c562486c",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "04.xml",
+   "sha256": "edff6dc5148649d808f7937c1e2bbf633e397ab84be1f42d4b31214b2ee54749",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "05.xml",
+   "sha256": "0c7e62f53686bfa0d04d985e6873846b3ea048908c3bd5012a548e0f1e717e16",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "06.xml",
+   "sha256": "e583aa967d643eeaefb9a8806e91901f10139ef1733b5529a44f9174805de39b",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "07.xml",
+   "sha256": "44c0124c2d260423af306caffbe23414d91422f53c91981be50aec1ebead9baa",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "08.xml",
+   "sha256": "2893114766384f20568072cbc12012c9d7c839f839950837ddb40ec96dffa1c6",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "09.xml",
+   "sha256": "945931890d2a135ae5c2bfd9ade9ad6984d2a2a5572914c6d1a8b66c760af644",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "10.xml",
+   "sha256": "4ccae3866ab60fe3993aa1ebc43d211426163b9eec1f8a642b3fe3b0213c43a8",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "11.xml",
+   "sha256": "58f12a8ca7a3b3079b8afb646b72bc26bafd1a51b4d13ff928dbfb4547ffa784",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "12.xml",
+   "sha256": "0f6ab9534e765be5beec6d37a5d8788a1a3134fcca2e46bc401688219d11c803",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "13.xml",
+   "sha256": "ec3973404e5b67215dce53a33d44e7896a87b2ed5572fab9f5992e5eadbfc3fa",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "14.xml",
+   "sha256": "593f4a177fa68524fc2a968ce160bb3472222465c2e7679c47ecf321a591ab62",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "15.xml",
+   "sha256": "d57786d5dd20aa293e068508aed3471aeb62b8ebe48c57c094a1b5d8926dfbcb",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "16.xml",
+   "sha256": "7b63f23761df734f0b85bf620231f34f9e6326a5a1a5f23bff64f6a6177626e9",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "17.xml",
+   "sha256": "2924347ddb95fd15c04f65ee850f6e9494c511605cc1c8d26fb741a279200097",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "18.xml",
+   "sha256": "1c24c4ca861d680940ee1ac79fc51b5feeca621faac036897a398fc07dfdd428",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "19.xml",
+   "sha256": "20d77941223511137e4b66b9ca9406278953a0e383350e2f159c5e495c7b5552",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "20.xml",
+   "sha256": "72999bb5bb1e18a07904f0940fd251fc599a4fd116e69b88dfacc3aabec4089e",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "21.xml",
+   "sha256": "70407ac714f76d5ba4a1110b8fe49013188a32525cf05d38e2431009f3dec0f3",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "22.xml",
+   "sha256": "4247103e82215b93980f3149dee6c83692d836652e72d78d0ac0ba530894cdc9",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "23.xml",
+   "sha256": "37f53f1825c69402d7940eecb80c0862e4d3f79f1e79e6861ea90fa17ddcb6bc",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "24.xml",
+   "sha256": "c8a123d0b0b77dff5f7ce472892acdfee3ae9695797cd999dd9dceb693b93c65",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "25.xml",
+   "sha256": "2857878036a2fcd487f05f0e9f138395f596fcbeab38200b87f475e9765c52c7",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "26.xml",
+   "sha256": "8bfbefcd6e614e14eefd5cc27250f43dcb3323a38585bcd8596ded40b8061300",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "27.xml",
+   "sha256": "783f935c19f18237d0b636f8f9ac9cb2769638215ac443ec250e93893f307a34",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "28.xml",
+   "sha256": "9ecf034d439ba2886060271c50bdd57fcb1819f52cc967e073c899a1bdb6231b",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "29.xml",
+   "sha256": "6effd7075fc3ce5e1f94e63a5ba5f1ee3d6504f9d4302dee02e6cc66c62aaa7e",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "30.xml",
+   "sha256": "c41df32234c8ff6b6fd020f8fcdc5cba0a80fcda2d6ffa1a8623486ad7bc4cf9",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "31.xml",
+   "sha256": "b5ab58f1f9321ca88f0b2a5580458e1be37daf8f62d47626ae8c51f9a778d381",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "32.xml",
+   "sha256": "e516b0ba3ee8990c2d0841dd505ed62a2ff02bb752dcf7cf7673d80cc5d62678",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "33.xml",
+   "sha256": "63e42d66f03a5c512f4920be71cb7efa2acca3df7e3dea730e043d79cddf3064",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "34.xml",
+   "sha256": "6ca6e6037c5a97327aae040cd63e0dea6109d276c1f0dc8378008d3929a1d67d",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "35.xml",
+   "sha256": "523b606fee944cc7a58ccba8a77965b5ebc461db0238c05cc3837ee2ef0cafc9",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "36.xml",
+   "sha256": "54b1a4475aaf14eea6a387c2575f19cf4363c50da2537d3f999e6e80ec75f063",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "37.xml",
+   "sha256": "23e0d4a4a516e8dd5a279b503669c0695dce88aa87536fee2ba239f5434ac418",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "38.xml",
+   "sha256": "a6bb8279baca1db8457237781265bb3da621e52261ab2df6530cd13369d1993d",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "39.xml",
+   "sha256": "9fd94b2c12c5993ef75669566bcd4d64861229a95a011f802deddc9cd43d71aa",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "40.xml",
+   "sha256": "b6f5ec993e6c38f34dfa4c3e76bb244c24cc413d1ab0dfb8c67d9b7aef985433",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "41.xml",
+   "sha256": "01e1d72bb4e3560ab9f0e8ef97e0bf912ea0f9ef4f93e02afd78ff45438bb7d8",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "42.xml",
+   "sha256": "bbf30039d7063e693d71f59cec801666f9aafbfa5d056c532c3f7b600df98eb3",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "43.xml",
+   "sha256": "a455f883cf1165010f7e569eddfd5a5cc48bf7feb3d0d13e88f24f5fb6f3d1ba",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "44.xml",
+   "sha256": "9f433ca9235a86c00da9b5a293293a8d70177e44da365143002fc35f82136a50",
+   "fatal": [],
+   "warnings": [
+    "NO-R-002"
+   ]
+  },
+  {
+   "xsdValid": true,
+   "file": "45.xml",
+   "sha256": "acbcf8f12f8bb0f2bf01fb5ca844e74a7ec9a53396aa55388226bcdfba30b81b",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "46.xml",
+   "sha256": "5f67759bd352914946be96889af2a9c49475f884af0c4d5d19800c8cc65d73f5",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "47.xml",
+   "sha256": "fada35dcbbe6384cf89fef3e5c6874bc215b0633c0fd57c98b17bf6373584672",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "48.xml",
+   "sha256": "20d6ab54e95e7cf2ce7645bc6345af8e5049c3b1cb995f1c414b289b4b683e1e",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "49.xml",
+   "sha256": "334ccc983a7ad4bb02da45c5a58db7fb1f230f5ca1f9c56c6d806e129a14d23e",
+   "fatal": [],
+   "warnings": []
+  },
+  {
+   "xsdValid": true,
+   "file": "50.xml",
+   "sha256": "5b92c149cc2ef31b60e2b38ab5c2c741a776b4bad3fe54bc1efd97dd5deafefa",
+   "fatal": [],
+   "warnings": []
+  }
+ ]
+}

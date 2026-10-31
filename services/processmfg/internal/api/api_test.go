@@ -42,6 +42,17 @@ type fakeStore struct {
 	gotLimit   int
 	gotVersion int
 	gotSize    decimal.Decimal
+	gotCmd     string
+	gotReport  store.ReportInput
+	gotEnd     store.EndInput
+	batch      store.Batch
+	gotDef     store.AttributeDefinition
+	gotNew     store.NewBatch
+	gotValues  map[string]domain.Value
+	gotTo      string
+	gotReason  string
+	gotItem    string
+	gotBatches store.BatchFilter
 }
 
 func (f *fakeStore) CreateFormula(_ context.Context, in store.Formula, idem store.Idem) (store.Formula, bool, error) {
@@ -79,6 +90,53 @@ func (f *fakeStore) GetBatchOrder(_ context.Context, _ string) (store.BatchOrder
 func (f *fakeStore) RescaleBatchOrder(_ context.Context, _ string, size decimal.Decimal, version int, idem store.Idem) (store.BatchOrder, bool, error) {
 	f.gotSize, f.gotVersion, f.gotIdem = size, version, idem
 	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) AdvanceBatchOrder(_ context.Context, _ string, cmd string, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotCmd, f.gotVersion, f.gotIdem = cmd, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) ReportBatchOrder(_ context.Context, _ string, in store.ReportInput, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotReport, f.gotVersion, f.gotIdem = in, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) EndBatchOrder(_ context.Context, _ string, in store.EndInput, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotEnd, f.gotVersion, f.gotIdem = in, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) DefineAttribute(_ context.Context, in store.AttributeDefinition, idem store.Idem) (store.AttributeDefinition, bool, error) {
+	f.gotDef, f.gotIdem = in, idem
+	return in, !f.replay, f.err
+}
+
+func (f *fakeStore) ListAttributeDefinitions(_ context.Context, itemID string, limit int) ([]store.AttributeDefinition, error) {
+	f.gotItem, f.gotLimit = itemID, limit
+	return []store.AttributeDefinition{f.gotDef}, f.err
+}
+
+func (f *fakeStore) RegisterBatch(_ context.Context, in store.NewBatch, idem store.Idem) (store.Batch, bool, error) {
+	f.gotNew, f.gotIdem = in, idem
+	return f.batch, !f.replay, f.err
+}
+
+func (f *fakeStore) ListBatches(_ context.Context, filter store.BatchFilter) ([]store.Batch, error) {
+	f.gotBatches = filter
+	return []store.Batch{f.batch}, f.err
+}
+
+func (f *fakeStore) GetBatch(_ context.Context, _ string) (store.Batch, error) { return f.batch, f.err }
+
+func (f *fakeStore) RecordAttributes(_ context.Context, _ string, values map[string]domain.Value, version int, idem store.Idem) (store.AttributesResult, bool, error) {
+	f.gotValues, f.gotVersion, f.gotIdem = values, version, idem
+	return store.AttributesResult{Batch: f.batch, Checks: []store.AttributeCheck{}}, !f.replay, f.err
+}
+
+func (f *fakeStore) ChangeDisposition(_ context.Context, _, to, reason string, version int, idem store.Idem) (store.Batch, bool, error) {
+	f.gotTo, f.gotReason, f.gotVersion, f.gotIdem = to, reason, version, idem
+	return f.batch, !f.replay, f.err
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }
@@ -384,5 +442,16 @@ func TestCoProductAllocate(t *testing.T) {
 	noCurrency := strings.Replace(body, `"currency":"USD",`, "", 1)
 	if rec := (call{method: "POST", path: "/v1/production/co-products:allocate", body: noCurrency, duties: DutyCoProductAllocate}).do(h); rec.Code != http.StatusBadRequest {
 		t.Fatalf("no currency: %d", rec.Code)
+	}
+}
+
+func TestCreateBatchOrder_RefusesACallerWithNoLegalEntityScope(t *testing.T) {
+	fs := &fakeStore{}
+	body := `{"formulaId":"` + formulaID + `","batchSize":"2500","legalEntityId":"` + entityID + `"}`
+	headers := key("o-1")
+	headers["X-Passage-Legal-Entity"] = ""
+	rec := call{method: "POST", path: "/v1/production/batch-orders", body: body, duties: DutyBatchOrderWrite, headers: headers}.do(newRouter(fs))
+	if rec.Code != http.StatusForbidden || problemOf(t, rec).Code != "AUTH-0003" || fs.gotOrder.FormulaID != "" {
+		t.Fatalf("no scope: %d %s", rec.Code, rec.Body)
 	}
 }

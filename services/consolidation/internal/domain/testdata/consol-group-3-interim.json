@@ -1,0 +1,50 @@
+{
+  "name": "consol-group-3-interim: P (USD parent) with S1 (USD, 100%, downstream sale) and S2 (EUR, 80%, upstream sale)",
+  "note": "INTERIM, hand-computed. Differs from the PRD consol-group-3 (P USD, S1 EUR 80%, S2 USD 100%, plus loans and dividends/E6). Replace with the accountant workbook fixture.",
+  "currency": "USD",
+  "pairs": [
+    {
+      "unit": "S1",
+      "sellerIsSubsidiary": false,
+      "ownershipPct": "100",
+      "rates": {"closing": "1", "average": "1", "opening": "1", "historical": "1"},
+      "icSales": "50000", "icCost": "40000", "unsoldShare": "0.5",
+      "icReceivable": "20000", "payableGroup": "20000",
+      "shareCapital": "100000", "preAcqRE": "50000", "investmentCost": "180000", "netIncome": "30000"
+    },
+    {
+      "unit": "S2",
+      "sellerIsSubsidiary": true,
+      "ownershipPct": "80",
+      "rates": {"closing": "1.20", "average": "1.25", "opening": "1.20", "historical": "1"},
+      "icSales": "40000", "icCost": "30000", "unsoldShare": "0.25",
+      "icReceivable": "10000", "payableGroup": "12400",
+      "shareCapital": "50000", "preAcqRE": "30000", "investmentCost": "90000", "netIncome": "20000"
+    }
+  ],
+  "workings": {
+    "E1": "S1 50000*1 = 50000; S2 40000*1.25 = 50000; revenue against COGS 100000",
+    "E2": "S1 payable 20000 vs receivable 20000*1 = 20000, no CTA; S2 payable 12400 vs receivable 10000*1.20 = 12000, CTA 400 credit; payable 32400, receivable 32000",
+    "E3": "S1 (50000-40000)*0.5 = 5000 downstream, no NCI; S2 (40000-30000)*0.25 = 2500 *1.25 = 3125 upstream, NCI 20% = 625; COGS/inventory 8125",
+    "E4": "S1 goodwill 180000-150000 = 30000; S2 NCI 20%*80000 = 16000, goodwill 90000+16000-80000 = 26000; share capital 150000, pre-acquisition RE 80000, goodwill 56000, investment 270000",
+    "E5": "S1 no NCI; S2 20000*1.25 = 25000, NCI 20% = 5000"
+  },
+  "expected": [
+    {"rule": "E1", "account": "IC_REVENUE", "debit": "100000.00", "credit": "0.00"},
+    {"rule": "E1", "account": "IC_COGS", "debit": "0.00", "credit": "100000.00"},
+    {"rule": "E2", "account": "IC_PAYABLE", "debit": "32400.00", "credit": "0.00"},
+    {"rule": "E2", "account": "IC_RECEIVABLE", "debit": "0.00", "credit": "32000.00"},
+    {"rule": "E2", "account": "CTA", "debit": "0.00", "credit": "400.00"},
+    {"rule": "E3", "account": "COGS", "debit": "8125.00", "credit": "0.00"},
+    {"rule": "E3", "account": "INVENTORY", "debit": "0.00", "credit": "8125.00"},
+    {"rule": "E3", "account": "NCI_EQUITY", "debit": "625.00", "credit": "0.00"},
+    {"rule": "E3", "account": "NCI_PROFIT", "debit": "0.00", "credit": "625.00"},
+    {"rule": "E4", "account": "SHARE_CAPITAL", "debit": "150000.00", "credit": "0.00"},
+    {"rule": "E4", "account": "PRE_ACQ_RE", "debit": "80000.00", "credit": "0.00"},
+    {"rule": "E4", "account": "GOODWILL", "debit": "56000.00", "credit": "0.00"},
+    {"rule": "E4", "account": "INVESTMENT", "debit": "0.00", "credit": "270000.00"},
+    {"rule": "E4", "account": "NCI_EQUITY", "debit": "0.00", "credit": "16000.00"},
+    {"rule": "E5", "account": "NCI_PROFIT", "debit": "5000.00", "credit": "0.00"},
+    {"rule": "E5", "account": "NCI_EQUITY", "debit": "0.00", "credit": "5000.00"}
+  ]
+}

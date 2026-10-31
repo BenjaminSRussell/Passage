@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -22,9 +23,13 @@ import (
 // and carrier tracking (FR-28.10) part of the store.
 type WorkbenchStore interface {
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
+	CloseRemainder(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
+	UnpackContainer(ctx context.Context, id string, version int, containerID string, idem Idem) (Shipment, error)
 	PreviewWaves(ctx context.Context, req WaveRequest) ([]WavePlan, error)
 	CreateWaves(ctx context.Context, req WaveRequest, idem Idem) ([]Wave, error)
 	ListWaves(ctx context.Context, f WaveFilter) ([]WaveSummary, error)
+	AssignWave(ctx context.Context, id string, version int, picker string, idem Idem) (Wave, error)
+	CloseWave(ctx context.Context, id string, version int, idem Idem) (Wave, error)
 	GetWave(ctx context.Context, id string) (Wave, error)
 	RecordTracking(ctx context.Context, shipmentID string, ev TrackingEvent) (TrackingEvent, bool, error)
 	ListTracking(ctx context.Context, shipmentID string) ([]TrackingEvent, error)
@@ -77,17 +82,42 @@ type WaveSummary struct {
 	LineCount     int       `json:"lineCount"`
 	OrderCount    int       `json:"orderCount"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// Version is the optimistic version of the wave (If-Match on assign and close).
+	Version    int        `json:"version"`
+	Picker     *string    `json:"picker"`
+	AssignedAt *time.Time `json:"assignedAt"`
+	ClosedAt   *time.Time `json:"closedAt"`
 }
 
 // Wave is a created pick wave with its shipments.
 type Wave struct {
 	WaveSummary
 	Shipments []WaveShipment `json:"shipments"`
+	// Lines are the wave's shipment lines with their pick state; GetWave fills
+	// them so the wave can be picked from one screen (confirm-pick).
+	Lines []WaveLine `json:"lines,omitempty"`
+}
+
+// WaveLine is one shipment line of a wave and what is picked of it.
+type WaveLine struct {
+	ShipmentLineID  string          `json:"shipmentLineId"`
+	ShipmentID      string          `json:"shipmentId"`
+	ShipmentNumber  string          `json:"shipmentNumber"`
+	ProductID       string          `json:"productId"`
+	Unit            string          `json:"unit"`
+	Zone            *string         `json:"zone"`
+	Planned         decimal.Decimal `json:"qtyPlanned"`
+	Picked          decimal.Decimal `json:"qtyPicked"`
+	PickConfirmed   bool            `json:"pickConfirmed"`
+	ShortPickReason *string         `json:"shortPickReason"`
 }
 
 // WaveFilter narrows the waves list. Empty fields do not filter.
 type WaveFilter struct {
 	WarehouseID string
+	Status      string // OPEN or CLOSED
+	Picker      string
+	Unassigned  bool
 	Limit       int
 }
 
@@ -230,7 +260,7 @@ func insertWave(ctx context.Context, tx pgx.Tx, tenantID string, req WaveRequest
 		return Wave{}, err
 	}
 	w := Wave{WaveSummary: WaveSummary{ID: ids.New(), WaveNumber: fmt.Sprintf("WV-%07d", seq), LegalEntityID: plan.LegalEntityID,
-		WarehouseID: req.WarehouseID, GroupBy: req.GroupBy, GroupKey: plan.GroupKey, Status: "OPEN",
+		WarehouseID: req.WarehouseID, GroupBy: req.GroupBy, GroupKey: plan.GroupKey, Status: "OPEN", Version: 1,
 		LineCount: len(plan.LineIDs), OrderCount: len(plan.OrderIDs)}, Shipments: []WaveShipment{}}
 	if err := tx.QueryRow(ctx, `insert into wave (tenant_id, id, wave_number, legal_entity_id, warehouse_id, group_by, group_key, status, line_count, order_count)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning created_at`, tenantID, w.ID, w.WaveNumber, w.LegalEntityID, w.WarehouseID,
@@ -275,11 +305,11 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-const waveColumns = `id, wave_number, legal_entity_id, warehouse_id, group_by, group_key, status, line_count, order_count, created_at`
+const waveColumns = `id, wave_number, legal_entity_id, warehouse_id, group_by, group_key, status, line_count, order_count, created_at, version, picker, assigned_at, closed_at`
 
 func scanWave(row pgx.Row) (WaveSummary, error) {
 	var r WaveSummary
-	err := row.Scan(&r.ID, &r.WaveNumber, &r.LegalEntityID, &r.WarehouseID, &r.GroupBy, &r.GroupKey, &r.Status, &r.LineCount, &r.OrderCount, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.WaveNumber, &r.LegalEntityID, &r.WarehouseID, &r.GroupBy, &r.GroupKey, &r.Status, &r.LineCount, &r.OrderCount, &r.CreatedAt, &r.Version, &r.Picker, &r.AssignedAt, &r.ClosedAt)
 	return r, err
 }
 
@@ -289,7 +319,10 @@ func (s *Postgres) ListWaves(ctx context.Context, f WaveFilter) ([]WaveSummary, 
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+waveColumns+` from wave
 			where ($1 = '' or warehouse_id::text = $1)
-			order by created_at desc, wave_number desc limit $2`, f.WarehouseID, f.Limit)
+			  and ($2 = '' or status = $2)
+			  and ($3 = '' or picker = $3)
+			  and (not $4 or picker is null)
+			order by created_at desc, wave_number desc limit $5`, f.WarehouseID, f.Status, f.Picker, f.Unassigned, f.Limit)
 		if err != nil {
 			return err
 		}
@@ -310,33 +343,64 @@ func (s *Postgres) ListWaves(ctx context.Context, f WaveFilter) ([]WaveSummary, 
 func (s *Postgres) GetWave(ctx context.Context, id string) (Wave, error) {
 	var w Wave
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		sum, err := scanWave(tx.QueryRow(ctx, `select `+waveColumns+` from wave where id = $1`, id))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpx.NewProblem(http.StatusNotFound, CodeWaveNotFound, "wave not found")
-		}
-		if err != nil {
-			return err
-		}
-		w = Wave{WaveSummary: sum, Shipments: []WaveShipment{}}
-		rows, err := tx.Query(ctx, `select s.id, s.shipment_number, s.order_id, s.customer_id, s.status, s.carrier_code, s.planned_ship_date,
-				(select count(*) from wave_line wl join shipment_line sl on sl.tenant_id = wl.tenant_id and sl.id = wl.shipment_line_id
-				 where wl.wave_id = ws.wave_id and sl.shipment_id = s.id)
-			from wave_shipment ws join shipment s on s.tenant_id = ws.tenant_id and s.id = ws.shipment_id
-			where ws.wave_id = $1 order by s.shipment_number`, id)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var ws WaveShipment
-			var status string
-			if err := rows.Scan(&ws.ID, &ws.ShipmentNumber, &ws.OrderID, &ws.CustomerID, &status, &ws.CarrierCode, &ws.PlannedShipDate, &ws.LineCount); err != nil {
-				return err
-			}
-			ws.Status = domain.ShipmentStatus(status)
-			w.Shipments = append(w.Shipments, ws)
-		}
-		return rows.Err()
+		var err error
+		w, err = getWaveTx(ctx, tx, id)
+		return err
 	})
 	return w, err
+}
+
+func getWaveTx(ctx context.Context, tx pgx.Tx, id string) (Wave, error) {
+	var w Wave
+	sum, err := scanWave(tx.QueryRow(ctx, `select `+waveColumns+` from wave where id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return w, httpx.NewProblem(http.StatusNotFound, CodeWaveNotFound, "wave not found")
+	}
+	if err != nil {
+		return w, err
+	}
+	w = Wave{WaveSummary: sum, Shipments: []WaveShipment{}}
+	rows, err := tx.Query(ctx, `select s.id, s.shipment_number, s.order_id, s.customer_id, s.status, s.carrier_code, s.planned_ship_date,
+			(select count(*) from wave_line wl join shipment_line sl on sl.tenant_id = wl.tenant_id and sl.id = wl.shipment_line_id
+			 where wl.wave_id = ws.wave_id and sl.shipment_id = s.id)
+		from wave_shipment ws join shipment s on s.tenant_id = ws.tenant_id and s.id = ws.shipment_id
+		where ws.wave_id = $1 order by s.shipment_number`, id)
+	if err != nil {
+		return w, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ws WaveShipment
+		var status string
+		if err := rows.Scan(&ws.ID, &ws.ShipmentNumber, &ws.OrderID, &ws.CustomerID, &status, &ws.CarrierCode, &ws.PlannedShipDate, &ws.LineCount); err != nil {
+			return w, err
+		}
+		ws.Status = domain.ShipmentStatus(status)
+		w.Shipments = append(w.Shipments, ws)
+	}
+	if err := rows.Err(); err != nil {
+		return w, err
+	}
+	rows.Close()
+	lrows, err := tx.Query(ctx, `select sl.id::text, s.id::text, s.shipment_number, sl.product_id::text, sl.unit, sl.zone_code,
+			sl.qty_planned::text, sl.qty_picked::text, sl.pick_confirmed, sl.short_pick_reason
+		from wave_line wl
+		join shipment_line sl on sl.tenant_id = wl.tenant_id and sl.id = wl.shipment_line_id
+		join shipment s on s.tenant_id = sl.tenant_id and s.id = sl.shipment_id
+		where wl.wave_id = $1 order by s.shipment_number, sl.id`, id)
+	if err != nil {
+		return w, err
+	}
+	defer lrows.Close()
+	w.Lines = []WaveLine{}
+	for lrows.Next() {
+		var l WaveLine
+		var planned, picked string
+		if err := lrows.Scan(&l.ShipmentLineID, &l.ShipmentID, &l.ShipmentNumber, &l.ProductID, &l.Unit, &l.Zone, &planned, &picked, &l.PickConfirmed, &l.ShortPickReason); err != nil {
+			return w, err
+		}
+		l.Planned, l.Picked = dec(planned), dec(picked)
+		w.Lines = append(w.Lines, l)
+	}
+	return w, lrows.Err()
 }

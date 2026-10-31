@@ -279,6 +279,24 @@ describe("Revenue allocation", () => {
     expect(toPreviewInput({ ...v, obligations: [v.obligations[1]] }).obligations[0]).not.toHaveProperty("termStart");
   });
 
+  it("does not ask for a residual SSP and shows the derived one unrounded", async () => {
+    const residual = { id: "b", ssp: "", sspSource: "RESIDUAL" as const, method: "POINT_IN_TIME" as const, termStart: "", termEnd: "" };
+    expect(validatePreview({ ...emptyPreview, transactionPrice: "100", obligations: [residual] })).toEqual({});
+    expect(toPreviewInput({ ...emptyPreview, obligations: [{ ...residual, ssp: "5" }] }).obligations[0]).not.toHaveProperty("ssp");
+    server.handler = () =>
+      json(200, { ...preview, transactionPrice: "100.00", obligations: [{ id: "b", ssp: "99.876544", sspSource: "RESIDUAL", method: "POINT_IN_TIME", allocated: "100.00" }] });
+    renderAt("/billing/revenue-allocation");
+    fill("Contract price", "100");
+    fill("Name", "b");
+    fireEvent.change(screen.getByLabelText("SSP source"), { target: { value: "RESIDUAL" } });
+    expect(screen.queryByLabelText("Standalone selling price")).not.toBeInTheDocument();
+    expect(screen.getByText(/contract price less the other obligations' prices/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
+    expect(await findTable({ name: "Allocation" })).toHaveTextContent("99.876544 USD");
+    expect(server.calls[0].body).toMatchObject({ obligations: [{ id: "b", sspSource: "RESIDUAL" }] });
+    expect(server.calls[0].body).not.toHaveProperty("obligations.0.ssp");
+  });
+
   it("allocates the BR-29.1 bundle and shows the support schedule", async () => {
     server.handler = (url, init) => (url.pathname === "/api/v1/revrec/allocations:preview" && init.method === "POST" ? json(200, preview) : undefined);
     const { container } = renderAt("/billing/revenue-allocation");

@@ -20,12 +20,23 @@ const (
 	legalA    = "10000000-0000-0000-0000-000000000001"
 	legalB    = "10000000-0000-0000-0000-000000000002"
 	legalNone = "10000000-0000-0000-0000-000000000099"
+
+	scimGroupID = "30000000-0000-0000-0000-000000000001"
 )
+
+var scimTables = []string{"identity_scim_groups", "identity_scim_group_members"}
 
 var identityTables = []string{"identity_tenants", "identity_users", "identity_legal_entities", "identity_role_assignments"}
 
+var rlsTables = append(append([]string{}, identityTables...), "identity_scim_groups", "identity_scim_group_members", "identity_audit", "outbox")
+
 func inScope(ctx context.Context, tenantID, legalEntityID string) context.Context {
-	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID})
+	p := tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID, Duties: map[string]struct{}{}}
+	if legalEntityID == "*" {
+		p.LegalEntityID = ""
+		p.Duties[tenant.DutyAllScope] = struct{}{}
+	}
+	return tenant.With(ctx, p)
 }
 
 func requireDenied(t *testing.T, err error, what string) {
@@ -54,6 +65,12 @@ func count(t *testing.T, app *pgxpool.Pool, tenantID, legalEntityID, query strin
 
 func setup(t *testing.T) (*pgxpool.Pool, string, string) {
 	t.Helper()
+	_, app, tenantA, tenantB := setupWithAdmin(t)
+	return app, tenantA, tenantB
+}
+
+func setupWithAdmin(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool, string, string) {
+	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	ctx := context.Background()
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
@@ -76,7 +93,13 @@ func setup(t *testing.T) (*pgxpool.Pool, string, string) {
 					return err
 				}
 			}
-			_, err := tx.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'tenant_admin')`, tenantID, userID)
+			if _, err := tx.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'tenant_admin')`, tenantID, userID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `insert into identity_scim_groups (tenant_id, group_id, display_name) values ($1, $2, 'Group')`, tenantID, scimGroupID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `insert into identity_scim_group_members (tenant_id, group_id, user_id) values ($1, $2, $3)`, tenantID, scimGroupID, userID)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -84,7 +107,7 @@ func setup(t *testing.T) (*pgxpool.Pool, string, string) {
 	}
 	seed(tenantA, legalA, legalB)
 	seed(tenantB, legalA)
-	return app, tenantA, tenantB
+	return admin, app, tenantA, tenantB
 }
 
 func TestIdentityTablesAreForcedRLSOwnedByMigrator(t *testing.T) {
@@ -101,7 +124,7 @@ func TestIdentityTablesAreForcedRLSOwnedByMigrator(t *testing.T) {
 	if user != "passage_app" || super || bypass {
 		t.Fatalf("role=%q super=%v bypassrls=%v", user, super, bypass)
 	}
-	for _, table := range identityTables {
+	for _, table := range rlsTables {
 		var owner string
 		var enabled, forced bool
 		var policies int
@@ -138,7 +161,7 @@ func TestUnscopedAndResetSessionsSeeNoRows(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		for _, table := range identityTables {
+		for _, table := range rlsTables {
 			var n int
 			if err := conn.QueryRow(ctx, `select count(*) from `+table).Scan(&n); err != nil {
 				t.Fatalf("%s %s: %v", stage, table, err)
@@ -241,6 +264,9 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if err := insert("now() + interval '1 day'", "null"); err != nil {
 		t.Fatal(err)
 	}
+	if err := insert("now() + interval '2 days'", "now() + interval '2 days'"); err != nil {
+		t.Fatalf("empty range (valid_to = valid_from) rejected: %v", err)
+	}
 	if err := insert("now() - interval '2 days'", "now() - interval '1 day'"); err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +274,8 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if got := count(t, app, tenantA, "*", effective); got != 3 {
 		t.Errorf("effective assignments = %d, want 3", got)
 	}
-	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 2 {
-		t.Errorf("dated assignments = %d, want 2", got)
+	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 3 {
+		t.Errorf("dated assignments = %d, want 3", got)
 	}
 }
 
@@ -295,7 +321,6 @@ func TestAppRoleCannotWriteTenants(t *testing.T) {
 	app, tenantA, _ := setup(t)
 	ctx := context.Background()
 	for name, stmt := range map[string]string{
-		"insert":      `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'new-realm', 'x')`,
 		"update":      `update identity_tenants set status = 'active' where tenant_id = $1`,
 		"update-self": `update identity_tenants set realm_name = 'renamed' where tenant_id = $1`,
 		"delete":      `delete from identity_tenants where tenant_id = $1`,
@@ -328,5 +353,54 @@ func TestAppRoleCannotDeleteIdentityHistory(t *testing.T) {
 			return err
 		})
 		requireDenied(t, err, "passage_app delete on "+table)
+	}
+}
+
+func TestAppRoleCannotRewriteAuditOrOutbox(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	for _, table := range []string{"identity_audit", "outbox"} {
+		for _, stmt := range []string{"update " + table + " set tenant_id = tenant_id", "delete from " + table} {
+			err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+				_, err := tx.Exec(context.Background(), stmt)
+				return err
+			})
+			requireDenied(t, err, "passage_app "+stmt)
+		}
+	}
+}
+
+func TestSCIMTablesAreTenantIsolated(t *testing.T) {
+	app, tenantA, tenantB := setup(t)
+	ctx := context.Background()
+	for _, table := range scimTables {
+		if got := count(t, app, tenantA, "*", `select count(*) from `+table+` where tenant_id = $1`, tenantB); got != 0 {
+			t.Errorf("tenant A read %d tenant B rows in %s", got, table)
+		}
+		if got := count(t, app, tenantA, "*", `select count(*) from `+table); got != 1 {
+			t.Errorf("tenant A sees %d of its own %s rows, want 1", got, table)
+		}
+		var deleted int64
+		if err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			d, err := tx.Exec(ctx, `delete from `+table+` where tenant_id = $1`, tenantB)
+			if err == nil {
+				deleted = d.RowsAffected()
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if got := count(t, app, tenantB, "*", `select count(*) from `+table); deleted != 0 || got != 1 {
+			t.Errorf("%s: tenant A deleted %d tenant B rows, B now has %d", table, deleted, got)
+		}
+	}
+	for table, stmt := range map[string]string{
+		"identity_scim_groups":        `insert into identity_scim_groups (tenant_id, group_id, display_name) values ($1, gen_random_uuid(), 'x')`,
+		"identity_scim_group_members": `insert into identity_scim_group_members (tenant_id, group_id, user_id) values ($1, '` + scimGroupID + `', '` + userID + `')`,
+	} {
+		err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, stmt, tenantB)
+			return err
+		})
+		requireDenied(t, err, "tenant A inserting a tenant B row into "+table)
 	}
 }

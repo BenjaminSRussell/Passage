@@ -5,6 +5,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -74,7 +75,21 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 	return nil
 }
 
-// WithTenantTx begins a transaction with app.tenant_id set from the context
+// LegalEntityScopes derives passage.legal_entity_scopes from the principal and
+// fails closed: its UUID legal entities when set (any other entry is dropped,
+// so '*' can never come from LegalEntityID), '*' only for a principal with no
+// legal entity that holds tenant.DutyAllScope, otherwise the empty list.
+func LegalEntityScopes(p tenant.Principal) string {
+	if p.LegalEntityID != "" {
+		return strings.Join(tenant.LegalEntityScopeList(p), ",")
+	}
+	if p.HasDuty(tenant.DutyAllScope) {
+		return "*"
+	}
+	return ""
+}
+
+// WithTenantTx begins a transaction with passage.tenant_id and passage.legal_entity_scopes set from the context
 // principal so RLS policies apply, runs fn, and commits or rolls back.
 func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	p, ok := tenant.FromContext(ctx)
@@ -85,11 +100,7 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 	if err != nil {
 		return err
 	}
-	scopes := p.LegalEntityID
-	if scopes == "" {
-		scopes = "*"
-	}
-	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', $2, true)`, p.TenantID, scopes); err != nil {
+	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', $2, true)`, p.TenantID, LegalEntityScopes(p)); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
 	}
@@ -98,6 +109,28 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+var ErrNotTenantWide = errors.New("dbx: a tenant-wide transaction needs a principal with no legal-entity claim, the tenant.administer duty and the named duty")
+
+// TenantWide reports whether p may run a transaction spanning every legal entity of its tenant:
+// no legal-entity claim AND tenant.administer AND the named duty.
+func TenantWide(p tenant.Principal, duty string) bool {
+	return tenant.IsTenantAdmin(p) && p.HasDuty(duty)
+}
+
+// WithTenantWideAdminTx runs fn with passage.legal_entity_scopes set to '*' for p's tenant, or
+// returns ErrNotTenantWide when p fails TenantWide(p, duty).
+func WithTenantWideAdminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, duty string, fn func(tx pgx.Tx) error) error {
+	if !TenantWide(p, duty) {
+		return ErrNotTenantWide
+	}
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 // RLSPolicy returns the DDL that enables tenant row-level security on table:
@@ -114,7 +147,8 @@ create policy %[1]s_tenant_access on %[1]s as permissive
 
 // LegalEntityScopePolicy returns the additional RESTRICTIVE policy for tables
 // that carry legal_entity_id: rows are visible only inside the caller's
-// legal-entity scopes (passage.legal_entity_scopes, a comma list or '*').
+// legal-entity scopes (passage.legal_entity_scopes, a comma list, or '*' for
+// a principal holding tenant.DutyAllScope; an empty list matches no rows).
 func LegalEntityScopePolicy(table string) string {
 	return fmt.Sprintf(`create policy %[1]s_legal_entity_scope on %[1]s as restrictive
   using (current_setting('passage.legal_entity_scopes', true) = '*'
@@ -143,3 +177,42 @@ const OutboxDDL = `create table if not exists outbox (
   payload jsonb not null,
   created_at timestamptz not null default now()
 );`
+
+// ServiceTokenReplayDDL is the table that lets every replica of a service
+// refuse a service token another replica already accepted
+// (tenant.ShareReplayCache). Copy it into the migration of each service that
+// verifies service tokens. Row-level security is enabled but not forced, so the
+// table owner (the SECURITY DEFINER purge function) can delete expired rows of
+// every tenant while passage_app stays bound by the tenant policy; the app
+// role may only insert and call the purge.
+var ServiceTokenReplayDDL = `create table service_token_replay (
+  tenant_id uuid not null,
+  jti text not null,
+  expires_at timestamptz not null,
+  primary key (tenant_id, jti)
+);
+create index service_token_replay_expires_idx on service_token_replay (tenant_id, expires_at);
+alter table service_token_replay enable row level security;
+create policy service_token_replay_tenant_access on service_token_replay as permissive
+  using (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+DO $do$
+BEGIN
+  EXECUTE format($f$
+    CREATE OR REPLACE FUNCTION service_token_replay_purge() RETURNS void
+      LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
+      AS $body$ DELETE FROM service_token_replay WHERE expires_at < pg_catalog.now() $body$;
+  $f$, current_schema());
+END
+$do$;
+REVOKE ALL ON FUNCTION service_token_replay_purge() FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
+    EXECUTE 'GRANT INSERT ON service_token_replay TO passage_app';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION service_token_replay_purge() TO passage_app';
+  END IF;
+END
+$$;
+`

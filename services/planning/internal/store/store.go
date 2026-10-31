@@ -28,11 +28,16 @@ const (
 	CodeVersionNotFound  = "PLAN-VERSION-NOT-FOUND"
 	CodeOrderNotFound    = "PLAN-ORDER-NOT-FOUND"
 	CodeAlreadyRunning   = "PLAN-0001"
+	CodeCodeTaken        = "PLAN-CODE-TAKEN"
+	CodeForecastEntity   = "PLAN-FORECAST-ENTITY"
 	CodeOrderNotEditable = "PLAN-ORDER-NOT-EDITABLE"
-	CodeOrderInvalid     = "PLAN-ORDER-INVALID"
-	CodeForecastNotFound = "PLAN-FORECAST-NOT-FOUND"
-	CodeVersionConflict  = "conflict_version"
-	CodeIdempotencyReuse = "idempotency_key_reuse"
+	// CodeSimulationNotFirmable is 409 for firming or changing a planned order
+	// of a simulation version (FR-22.15, BR-22.14; PLAN_SIMULATION_NOT_FIRMABLE in the PRD).
+	CodeSimulationNotFirmable = "PLAN-0003"
+	CodeOrderInvalid          = "PLAN-ORDER-INVALID"
+	CodeForecastNotFound      = "PLAN-FORECAST-NOT-FOUND"
+	CodeVersionConflict       = "conflict_version"
+	CodeIdempotencyReuse      = "idempotency_key_reuse"
 
 	uniqueViolation = "23505"
 	// idempotencyConstraint is Postgres' default name for UNIQUE (tenant_id, idempotency_key).
@@ -50,6 +55,7 @@ type Store interface {
 	RunPlan(ctx context.Context, req RunRequest) (Version, bool, error)
 	GetVersion(ctx context.Context, planCode string, number int) (Version, error)
 	ListVersions(ctx context.Context, planCode string, limit int) ([]Version, error)
+	DiffVersions(ctx context.Context, planCode string, from, to, limit int) (VersionDiff, error)
 	ListPlannedOrders(ctx context.Context, planCode string, f OrderFilter, limit int) ([]PlannedOrder, error)
 	GetPlannedOrder(ctx context.Context, id string) (PlannedOrder, error)
 	PegsOf(ctx context.Context, versionID, supplyRef string) ([]domain.PegLine, error)
@@ -57,13 +63,16 @@ type Store interface {
 	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
 	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
-	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
+	UpsertForecastLines(ctx context.Context, modelCode, legalEntityID string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
-	RunCoverages(ctx context.Context, siteID string, itemIDs []string) (map[string]RunCoverage, error)
+	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
+	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
+	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
+	RunQuotas(ctx context.Context, siteID, planEntity string, itemIDs []string, from, to time.Time) ([]domain.RunQuota, error)
 	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
@@ -82,6 +91,11 @@ type Store interface {
 	GetQuotaArrangement(ctx context.Context, id string) (QuotaArrangement, error)
 	CreateQuotaArrangement(ctx context.Context, req QuotaCreate) (QuotaArrangement, bool, error)
 	UpdateQuotaArrangement(ctx context.Context, id string, expectedVersion int, spec domain.QuotaArrangementSpec) (QuotaArrangement, error)
+	ListScenarios(ctx context.Context, q ScenarioQuery) ([]Scenario, error)
+	GetScenario(ctx context.Context, code string) (Scenario, error)
+	CreateScenario(ctx context.Context, req ScenarioCreate) (Scenario, bool, error)
+	UpdateScenario(ctx context.Context, expectedVersion int, spec domain.ScenarioSpec) (Scenario, error)
+	RunSimulation(ctx context.Context, req SimulationRequest) (Version, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -116,6 +130,8 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // RunRequest is one persisted plan run.
 type RunRequest struct {
 	PlanCode       string
+	LegalEntityID  string
+	ForecastModel  string
 	SiteID         string
 	AsOf           time.Time
 	ItemsPlanned   int
@@ -137,7 +153,14 @@ type Version struct {
 	Messages      int    `json:"messages"`
 	DurationMs    int64  `json:"durationMs"`
 	PlanHash      string `json:"planHash"`
-	inputHash     string
+	// ApprovedFirmed is how many planned orders approved in the previous
+	// version this run firmed (FR-22.11).
+	ApprovedFirmed int `json:"approvedFirmed"`
+	// Kind is static or simulation (FR-22.15); a simulation version names the
+	// scenario that produced it and is never the plan's current version.
+	Kind         string `json:"kind"`
+	ScenarioCode string `json:"scenarioCode,omitempty"`
+	inputHash    string
 }
 
 // PlannedOrder is one planned order row of a plan version. Status is
@@ -158,6 +181,10 @@ type PlannedOrder struct {
 	// Version is the order's ETag: every maintenance write bumps it.
 	Version  int     `json:"version"`
 	VendorID *string `json:"vendorId,omitempty"`
+	// QuotaArrangementID and QuotaSourceID name the quota arrangement and the
+	// source a run allocated the order to (FR-22.17).
+	QuotaArrangementID *string `json:"quotaArrangementId,omitempty"`
+	QuotaSourceID      *string `json:"quotaSourceId,omitempty"`
 	// FirmedTargetType and FirmedTargetID name the purchase, production or
 	// transfer order a firmed planned order became (FR-22.10).
 	FirmedTargetType *string `json:"firmedTargetType,omitempty"`
@@ -178,6 +205,8 @@ type Message struct {
 // OrderFilter narrows planned-order reads.
 type OrderFilter struct {
 	Status, ItemID string
+	// Version selects a version by number (a simulation, FR-22.15); 0 reads the current one.
+	Version int
 }
 
 func idempotencyReuse() error {
@@ -219,18 +248,29 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				return err
 			}
 		}
-		planID, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode)
+		planID, planEntity, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode, req.LegalEntityID)
 		if err != nil {
 			return err
+		}
+		if req.ForecastModel != "" {
+			if err := requireModelEntity(ctx, tx, p.TenantID, req.ForecastModel, planEntity); err != nil {
+				return err
+			}
 		}
 		var number int
 		if err := tx.QueryRow(ctx, `select coalesce(max(number), 0) + 1 from plan_version where tenant_id = $1 and plan_id = $2`, p.TenantID, planID).Scan(&number); err != nil {
 			return err
 		}
+		versionID := ids.New()
+		// FR-22.11: the orders a planner approved in the version this run
+		// replaces become firmed now, before that version is demoted.
+		approvedFirmed, err := firmApprovedOrders(ctx, tx, p.TenantID, planID, planEntity, versionID, req.Result.Hash)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update plan_version set status = 'complete' where tenant_id = $1 and plan_id = $2 and status = 'current'`, p.TenantID, planID); err != nil {
 			return err
 		}
-		versionID := ids.New()
 		var key *string
 		if req.IdempotencyKey != "" {
 			key = &req.IdempotencyKey
@@ -246,9 +286,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13)`,
-			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key, legal_entity_id, approved_firmed_count)
+			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13, nullif($14, '')::uuid, $15)`,
+			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key, planEntity, approvedFirmed); err != nil {
 			return err
 		}
 		// One round trip per kind of output row instead of one per row; COPY is
@@ -270,9 +310,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			if err != nil {
 				return err
 			}
-			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response)
-				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
-				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body)
+			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response, legal_entity_id)
+				values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
+				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body, planEntity)
 		}
 		for i, o := range r.Orders {
 			var futures *string
@@ -293,10 +333,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
 			}
 			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
-				status, firmed_batch_id, firmed_target_type, firmed_target_id)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16)`,
+				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16,
+				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid)`,
 				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				status, batchID, targetType, targetID)
+				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID)
 		}
 		for _, pg := range r.Pegging {
 			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
@@ -332,6 +373,18 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}
 		// One plannedorder.firmed.v1 per auto-firmed order, as a planner's
 		// firming writes, so the owning contexts create the target orders.
+		// The quantity of an order allocated by a quota arrangement is booked
+		// against its source as the order becomes firmed (FR-22.17).
+		var firmedIDs []string
+		for i := range r.Orders {
+			if _, ok := autoFirm.groupOf(orderIDs[i]); ok {
+				firmedIDs = append(firmedIDs, orderIDs[i])
+			}
+		}
+		quotaRefs, err := bookQuota(ctx, tx, p.TenantID, firmedIDs)
+		if err != nil {
+			return err
+		}
 		for i, o := range r.Orders {
 			g, ok := autoFirm.groupOf(orderIDs[i])
 			if !ok {
@@ -339,8 +392,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			}
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, orderIDs[i], p.TenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: orderIDs[i], PlanVersionID: versionID, BatchID: autoFirm.batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, Qty: o.Qty.String(),
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, VendorID: optional(o.VendorID), Qty: o.Qty.String(),
 				OrderDate: dayDate(req.AsOf, o.OrderDate), DeliveryDate: dayDate(req.AsOf, o.DeliveryDate),
+				QuotaArrangementID: quotaRefs[orderIDs[i]].arrangement(), QuotaSourceID: quotaRefs[orderIDs[i]].source(),
 			})
 			if err != nil {
 				return err
@@ -353,7 +407,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			return err
 		}
 		v = Version{ID: versionID, PlanCode: req.PlanCode, Number: number, Status: "current", AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
-			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, inputHash: req.InputHash}
+			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, ApprovedFirmed: approvedFirmed, Kind: planKindStatic, inputHash: req.InputHash}
 		return enqueue(ctx, tx, planevents.PlanCompleted, planID, p.TenantID, versionID, planevents.PlanCompletedData{
 			PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, VersionNumber: number, ItemsPlanned: req.ItemsPlanned,
 			PlannedOrders: counts, Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash,
@@ -387,27 +441,101 @@ func purgeVersions(ctx context.Context, tx pgx.Tx, tenantID, planID string, cut 
 }
 
 // lockPlan creates the plan on first use and locks its row for the run; a second
-// run that cannot take the lock immediately is refused (FR-22.1, AC-22.9).
-func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code string) (string, error) {
-	if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code) values ($1, $2, $3) on conflict (tenant_id, code) do nothing`, tenantID, ids.New(), code); err != nil {
-		return "", err
+// run that cannot take the lock immediately is refused (FR-22.1, AC-22.9). An
+// existing plan keeps its owner and the requested entity is only an assertion
+// (422 when it differs); a new plan is owned by the entity OwnerLegalEntity
+// resolves.
+func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code, requestedEntity string) (string, string, error) {
+	var visible string
+	err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, tenantID, code).Scan(&visible)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		newEntity, err := httpx.OwnerLegalEntity(ctx, requestedEntity)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code, legal_entity_id) values ($1, $2, $3, nullif($4, '')::uuid) on conflict (tenant_id, code) do nothing`,
+			tenantID, ids.New(), code, newEntity); err != nil {
+			return "", "", err
+		}
+	case err != nil:
+		return "", "", err
+	default:
+		if err := assertOwner(requestedEntity, visible); err != nil {
+			return "", "", err
+		}
 	}
-	var id string
-	err := tx.QueryRow(ctx, `select id::text from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id)
+	var id, entity string
+	err = tx.QueryRow(ctx, `select id::text, coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id, &entity)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
-		return "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable:
+		return "", "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", "", codeTaken("plan", code)
 	}
-	return id, err
+	return id, entity, err
+}
+
+// PlanLegalEntity is the entity a run of planCode works in: the owner of the
+// existing plan (requestedEntity is only an assertion), else the entity a new
+// plan would be created under.
+func (s *Postgres) PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error) {
+	p, _ := tenant.FromContext(ctx)
+	var entity string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, p.TenantID, planCode).Scan(&entity)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			entity, err = httpx.OwnerLegalEntity(ctx, requestedEntity)
+			return err
+		case err != nil:
+			return err
+		}
+		return assertOwner(requestedEntity, entity)
+	})
+	return entity, err
+}
+
+func codeTaken(what, code string) error {
+	return httpx.NewProblem(http.StatusConflict, CodeCodeTaken, what+" code "+code+" is already used by a "+what+" outside the caller's legal-entity scope, including one that has no legal entity yet; an administrator must assign one")
+}
+
+func assertOwner(requested, owner string) error {
+	if requested == "" {
+		return nil
+	}
+	if asserted, ok := ids.Canonical(requested); !ok || asserted != owner {
+		bad := httpx.NewProblem(http.StatusUnprocessableEntity, "COM-0001", "request failed validation")
+		bad.Errors = map[string]string{"legalEntityId": "does not match the legal entity that owns the existing record"}
+		return bad
+	}
+	return nil
+}
+
+func requireModelEntity(ctx context.Context, tx pgx.Tx, tenantID, modelCode, planEntity string) error {
+	var entity string
+	err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from forecast_model where tenant_id = $1 and code = $2`, tenantID, modelCode).Scan(&entity)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeForecastNotFound, "forecast model "+modelCode+" does not exist")
+	}
+	if err != nil {
+		return err
+	}
+	if entity != planEntity {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeForecastEntity, "forecast model "+modelCode+" belongs to a different legal entity than the plan")
+	}
+	return nil
 }
 
 const versionSelect = `select v.id::text, p.code, v.number, v.status, to_char(v.as_of, 'YYYY-MM-DD'), v.items_planned,
-	v.planned_orders_count, v.messages_count, v.duration_ms, v.plan_hash, v.input_hash
-	from plan_version v join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
+	v.planned_orders_count, v.messages_count, v.duration_ms, v.plan_hash, v.input_hash, v.kind, coalesce(sc.code, ''), v.approved_firmed_count
+	from plan_version v join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
+	left join planning_scenario sc on sc.tenant_id = v.tenant_id and sc.id = v.scenario_id`
 
 func scanVersion(row pgx.Row) (Version, error) {
 	var v Version
-	err := row.Scan(&v.ID, &v.PlanCode, &v.Number, &v.Status, &v.AsOf, &v.ItemsPlanned, &v.PlannedOrders, &v.Messages, &v.DurationMs, &v.PlanHash, &v.inputHash)
+	err := row.Scan(&v.ID, &v.PlanCode, &v.Number, &v.Status, &v.AsOf, &v.ItemsPlanned, &v.PlannedOrders, &v.Messages, &v.DurationMs, &v.PlanHash, &v.inputHash, &v.Kind, &v.ScenarioCode, &v.ApprovedFirmed)
 	return v, err
 }
 
@@ -449,13 +577,13 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
-	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.firmed_target_type, o.firmed_target_id::text
+	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.quota_arrangement_id::text, o.quota_source_id::text, o.firmed_target_type, o.firmed_target_id::text
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
-	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID,
+	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID, &o.QuotaArrangementID, &o.QuotaSourceID,
 		&o.FirmedTargetType, &o.FirmedTargetID)
 	return o, err
 }
@@ -466,9 +594,9 @@ func (s *Postgres) ListPlannedOrders(ctx context.Context, planCode string, f Ord
 	p, _ := tenant.FromContext(ctx)
 	out := []PlannedOrder{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and v.status = 'current'
+		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and (case when $6::int = 0 then v.status = 'current' else v.number = $6 end)
 			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4)
-			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit)
+			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version)
 		if err != nil {
 			return err
 		}

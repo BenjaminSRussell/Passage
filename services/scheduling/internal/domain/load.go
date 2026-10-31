@@ -71,5 +71,5 @@ func WeekStart(t time.Time) time.Time {
 // starting at the week of from. It starts a day early so a site east or west
 // of UTC contributes the local day that straddles Monday 00:00 UTC.
 func LoadIntervals(r Resource, from time.Time, weeks int) []Interval {
-	return OpenIntervals(r.Location, r.Shifts, WeekStart(from).AddDate(0, 0, -1), weeks*7+2)
+	return r.Open(WeekStart(from).AddDate(0, 0, -1), weeks*7+2)
 }

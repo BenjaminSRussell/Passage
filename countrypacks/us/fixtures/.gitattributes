@@ -1,0 +1,2 @@
+# IRS FIRE records are 750 positions with CR/LF in 749-750 (Publication 1220); keep the bytes as written.
+*.txt -text

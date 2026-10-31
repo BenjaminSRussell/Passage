@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime, money, sentence } from "./format";
 import { OrderHistory } from "./OrderHistory";
+import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -38,6 +39,11 @@ const ruleNames: Record<string, string> = {
 interface Outcome {
   tone: "success" | "warning";
   text: string;
+}
+
+/** The SLS-0013 notices of a confirmation: lines moved to a later period because their allocation quota was used up (FR-27.16). */
+function allocationNotes(warnings?: { code: string; message: string }[]): string[] {
+  return (warnings ?? []).filter((w) => w.code === "SLS-0013").map((w) => w.message);
 }
 
 /** One order: header, lines, holds and the last credit check, with confirm and release. */
@@ -94,14 +100,20 @@ export function OrderDetailPage() {
   const confirm = () =>
     run("confirm", () => confirmOrder(order.id, etag), (o) =>
       o.confirmed
-        ? { tone: "success", text: `Order ${o.orderNumber} is confirmed.` }
+        ? allocationNotes(o.warnings).length > 0
+          ? { tone: "warning", text: `Order ${o.orderNumber} is confirmed. ${allocationNotes(o.warnings).join(" ")}` }
+          : { tone: "success", text: `Order ${o.orderNumber} is confirmed.` }
         : { tone: "warning", text: "The credit check failed, so a credit hold was placed. A credit manager must release it." },
     );
   const release = (hold: Hold) =>
     run(`release-${hold.id}`, () => releaseHold(order.id, hold.id, etag), (o) =>
       o.confirmed
-        ? { tone: "success", text: `${sentence(hold.holdType)} hold released and order ${o.orderNumber} confirmed.` }
-        : { tone: "success", text: `${sentence(hold.holdType)} hold released.` },
+        ? allocationNotes(o.warnings).length > 0
+          ? { tone: "warning", text: `${sentence(hold.holdType)} hold released and order ${o.orderNumber} confirmed. ${allocationNotes(o.warnings).join(" ")}` }
+          : { tone: "success", text: `${sentence(hold.holdType)} hold released and order ${o.orderNumber} confirmed.` }
+        : allocationNotes(o.warnings).length > 0
+          ? { tone: "warning", text: `${sentence(hold.holdType)} hold released, but the order is not confirmed. ${allocationNotes(o.warnings).join(" ")}` }
+          : { tone: "success", text: `${sentence(hold.holdType)} hold released.` },
     );
 
   async function placeHold(event: FormEvent) {
@@ -264,6 +276,7 @@ export function OrderDetailPage() {
         </dl>
       </Card>
       <DataTable label="Order lines" columns={lineColumns} rows={order.lines} getRowKey={(l) => l.id} empty={{ title: "No lines" }} />
+      {order.status === "CONFIRMED" ? <OrderSchedule order={order} /> : null}
       <Card title="Holds">
         {order.holds.length === 0 ? (
           <EmptyState compact headingLevel={3} title="No holds" description="Holds placed by the credit check or by a sales manager appear here." />

@@ -53,6 +53,15 @@ const (
 	dutyRebuild      = "ledger.balance.rebuild"
 	dutyReasonWrite  = "ledger.reason.write"
 
+	// Narrow duties a route also accepts beside its umbrella duty above, so a
+	// service is granted one route instead of a family.
+	dutyEntryPost     = "ledger.entry.post"
+	dutyEntryValidate = "ledger.entry.validate"
+	dutyBatchPost     = "ledger.batch.post"
+	dutySetPost       = "ledger.set.post"
+	dutyEntryLookup   = "ledger.entry.lookup"
+	dutyLedgerLookup  = "ledger.ledger.lookup"
+
 	// Maintain account structures (§2.11.17) and the dimension register.
 	dutyStructureWrite = "ledger.structure.write"
 	dutyDimensionWrite = "ledger.dimension.write"
@@ -90,14 +99,14 @@ func New(s store.Store) *API { return &API{store: s, now: time.Now} }
 func (a *API) Register(r chi.Router) {
 	r.Route("/v1/ledger", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
-		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{id}", a.getLedger)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
 		r.With(authz.RequireDuty(dutyRead)).Get("/charts/{chart}/accounts", a.listAccounts)
-		r.With(authz.RequireDuty(dutyPost)).Post("/journal-entries", a.postEntry)
+		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
-		r.With(authz.RequireDuty(dutyPost)).Post("/validate", a.validateEntry)
-		r.With(authz.RequireDuty(dutyRead)).Get("/journal-lines", a.listLines)
+		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryValidate)).Post("/validate", a.validateEntry)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyEntryLookup)).Get("/journal-lines", a.listLines)
 		r.With(authz.RequireDuty(dutyBalanceRead)).Get("/balances", a.trialBalance)
 		r.With(authz.RequireDuty(dutyRebuild)).Post("/balances:rebuild", a.rebuildBalances)
 		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes", a.listReasonCodes)
@@ -112,7 +121,11 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates/{id}", a.getDescriptionTemplate)
 		r.With(authz.RequireDuty(dutySetupWrite)).Put("/description-templates/{id}", a.putDescriptionTemplate)
 		a.registerBatches(r)
+		a.registerRecurring(r)
 		a.registerLedgerSets(r)
+		a.registerOpenItems(r)
+		a.registerAutoClearing(r)
+		a.registerDerivation(r)
 	})
 }
 
@@ -130,6 +143,7 @@ func (a *API) Admin() http.Handler {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprintf(w, "# HELP ledger_entries_posted_total Journal entries posted (not counting replays).\n# TYPE ledger_entries_posted_total counter\nledger_entries_posted_total %d\n", a.posted.Load())
 		fmt.Fprintf(w, "# HELP ledger_idempotent_replays_total Keyed requests answered from the stored response.\n# TYPE ledger_idempotent_replays_total counter\nledger_idempotent_replays_total %d\n", a.replayed.Load())
 		fmt.Fprintf(w, "# HELP ledger_entries_reversed_total Reversing entries posted.\n# TYPE ledger_entries_reversed_total counter\nledger_entries_reversed_total %d\n", a.reversed.Load())
@@ -297,7 +311,7 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != req.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}
@@ -663,6 +677,10 @@ type validatedLine struct {
 	Account                string `json:"account"`
 	DisplayName            string `json:"displayName"`
 	DimensionCombinationID string `json:"dimensionCombinationId"`
+	// Dimensions are the line's values after derivation (FR-11.22); Derivation is the trace of the steps that set them.
+	Dimensions       map[string]string        `json:"dimensions"`
+	DerivedByStepIDs []string                 `json:"derivedByStepIds"`
+	Derivation       []domain.DerivationTrace `json:"derivation"`
 }
 
 type validateResponse struct {
@@ -703,7 +721,8 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range res.Lines {
 		out.Lines = append(out.Lines, validatedLine{Index: l.Index, Account: l.Account.Number, DisplayName: l.DisplayName,
-			DimensionCombinationID: hex.EncodeToString(l.CombinationID)})
+			DimensionCombinationID: hex.EncodeToString(l.CombinationID), Dimensions: l.Dimensions,
+			DerivedByStepIDs: append([]string{}, l.DerivedBy...), Derivation: append([]domain.DerivationTrace{}, res.Derivation[l.Index]...)})
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

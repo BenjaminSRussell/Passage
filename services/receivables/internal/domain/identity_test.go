@@ -189,21 +189,58 @@ func TestSubsets_OneCustomerAndPayerIdentity(t *testing.T) {
 	}
 }
 
-// R1 with R4 and R5 reaches the auto-apply threshold: a known payer quoting the invoice.
-func TestPayerIdentity_LiftsReferenceToAutoApply(t *testing.T) {
+// R1 with R4 and R5 reaches the auto-apply threshold only when the amount agrees:
+// a known payer quoting the invoice for its exact amount auto-applies, while a
+// different amount stays a suggestion (the payer may have quoted the wrong invoice).
+func TestPayerIdentity_ReferenceOnlyStaysSuggestedUnlessAmountAgrees(t *testing.T) {
 	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 	it := Item{ID: "i-1", CustomerID: "c1", Currency: "USD", DocumentNumber: "INV-30001", DueDate: due, OpenAmount: decimal.RequireFromString("1000")}
 	p := Payment{Amount: decimal.RequireFromString("400"), ValueDate: due.AddDate(0, 0, 30),
 		Remittance: []RemittanceLine{{Reference: "INV-30001"}}, PayerName: "Acme Inc.",
 		PayerCustomers: map[string]bool{"c1": true}, LearnedNames: map[string][]string{"c1": {"ACME INC"}}}
 	res := Match(p, []Item{it})
-	if res.Decision != DecisionAutoApply || res.Top[0].Score != weightR1+weightR4+weightR5 {
-		t.Fatalf("result = %+v, want AUTO_APPLY at 85", res)
+	if res.Decision != DecisionSuggested || res.Top[0].Score != weightR1+weightR4+weightR5 {
+		t.Fatalf("result = %+v, want SUGGESTED at 85 for a reference-only match", res)
 	}
+	p.Amount = it.OpenAmount
+	if res := Match(p, []Item{it}); res.Decision != DecisionAutoApply || res.Top[0].Score != weightR1+weightR2Single+weightR4+weightR5 {
+		t.Fatalf("exact amount: result = %+v, want AUTO_APPLY at 115", res)
+	}
+	p.Amount = decimal.RequireFromString("400")
 	// Without the payer identity the reference alone is a suggestion.
 	p.PayerCustomers, p.LearnedNames = nil, nil
 	if res := Match(p, []Item{it}); res.Decision != DecisionSuggested {
 		t.Fatalf("decision without identity = %s, want SUGGESTED", res.Decision)
+	}
+}
+
+// A known payer paying two quoted invoices exactly auto-applies both. Hand-derived:
+// the pair scores R2-SUBSET 25 + R1 60 + R4 15 + R5 10 = 110 and each invoice alone
+// R1 60 + R4 15 + R5 10 = 85; the singles are part of the pair, not rivals, so the
+// pair is the only set at 85 or more. Found by cash-app-500 in the store, where
+// payers are learned on apply.
+func TestPayerIdentity_MultiInvoiceStillAutoApplies(t *testing.T) {
+	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	open := []Item{
+		{ID: "i-1", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40001", DueDate: due, OpenAmount: decimal.RequireFromString("1200.00")},
+		{ID: "i-2", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40002", DueDate: due, OpenAmount: decimal.RequireFromString("380.50")},
+	}
+	p := Payment{Amount: decimal.RequireFromString("1580.50"), ValueDate: due.AddDate(0, 0, 30),
+		Remittance: []RemittanceLine{{Reference: "RE-40001 RE-40002"}}, PayerName: "Kunde GmbH",
+		PayerCustomers: map[string]bool{"c1": true}, LearnedNames: map[string][]string{"c1": {"KUNDE GMBH"}}}
+	res := Match(p, open)
+	if res.Decision != DecisionAutoApply || strings.Join(res.Top[0].ItemIDs, ",") != "i-1,i-2" || res.Top[0].Score != 110 {
+		t.Fatalf("result = %+v, want AUTO_APPLY of both at 110", res)
+	}
+	if len(res.Top) != 3 || res.Top[1].Score != 85 || res.Top[2].Score != 85 {
+		t.Fatalf("top = %+v, want both singles kept as candidates at 85", res.Top)
+	}
+	// A rival set outside the pair still blocks: a third quoted invoice of the same
+	// amount as the pair scores R1 60 + R2 30 + R4 15 + R5 10 = 115 on its own.
+	rival := Item{ID: "i-3", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40003", DueDate: due, OpenAmount: decimal.RequireFromString("1580.50")}
+	p.Remittance = []RemittanceLine{{Reference: "RE-40001 RE-40002 RE-40003"}}
+	if res := Match(p, append(open, rival)); res.Decision != DecisionSuggested {
+		t.Fatalf("with a rival set: %+v, want SUGGESTED", res)
 	}
 }
 
@@ -232,5 +269,19 @@ func TestLearnableName_NormalizesAndBounds(t *testing.T) {
 	}
 	if LearnableName("...") != "" {
 		t.Fatal("punctuation only must learn nothing")
+	}
+}
+
+func TestPayerIdentity_LearnedPayerLiftsShortPayWithReasonToAutoApply(t *testing.T) {
+	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	it := Item{ID: "i-1", CustomerID: "c1", Currency: "USD", DocumentNumber: "INV-30001", DueDate: due, OpenAmount: decimal.RequireFromString("1000")}
+	p := Payment{Amount: decimal.RequireFromString("980"), ValueDate: due.AddDate(0, 0, 30), ShortPayReason: "DAMAGED GOODS",
+		Remittance: []RemittanceLine{{Reference: "INV-30001"}}}
+	if res := Match(p, []Item{it}); res.Decision != DecisionSuggested || res.Top[0].Score != weightR1+weightR7 {
+		t.Fatalf("unlearned: %+v, want SUGGESTED at 80", res)
+	}
+	p.PayerCustomers = map[string]bool{"c1": true}
+	if res := Match(p, []Item{it}); res.Decision != DecisionAutoApply || res.Top[0].Score != weightR1+weightR7+weightR4 {
+		t.Fatalf("learned: %+v, want AUTO_APPLY at 95", res)
 	}
 }

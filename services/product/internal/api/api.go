@@ -35,6 +35,8 @@ const (
 	dutyConfigure     = "product.configure"
 	dutyGTIN          = "product.gtin.allocate"
 	dutyJobs          = "product.jobs.write"
+	dutyExplode       = "product.variants.explode"
+	dutyReleasedRead  = "product.released.read"
 
 	codeOrgUnavailable = "PRD-ORG-UNAVAILABLE"
 )
@@ -84,7 +86,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products", a.listProducts)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products:search", a.search)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}", a.getProduct)
-	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/variants:explode", a.explode)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyExplode)).Post("/v1/product/products/{id}/variants:explode", a.explode)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}/variants:lookup", a.lookup)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/attributes", a.setAttributes)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/identifiers", a.addIdentifier)
@@ -101,12 +103,13 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfigure)).Post("/v1/product/configuration-models/{id}:solve", a.solve)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/barcodes/{gtin}", a.barcode)
 	r.With(authz.RequireDuty(dutyJobs)).Post("/v1/product/jobs/group-change", a.groupChange)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/released-products", a.listReleased)
+	r.With(authz.RequireAnyDuty(dutyView, dutyReleasedRead)).Get("/v1/product/released-products", a.listReleased)
 }
 
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		_, _ = fmt.Fprintf(w, "# HELP product_created_total Products created.\n# TYPE product_created_total counter\nproduct_created_total %d\n", a.created.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_exploded_total Variant explosion jobs.\n# TYPE product_exploded_total counter\nproduct_exploded_total %d\n", a.exploded.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_released_total Products released.\n# TYPE product_released_total counter\nproduct_released_total %d\n", a.released.Load())

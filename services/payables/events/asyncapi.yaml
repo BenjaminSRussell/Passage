@@ -16,6 +16,28 @@ channels:
         $ref: "#/components/messages/OpenItemCreated"
       openItemSettled:
         $ref: "#/components/messages/OpenItemSettled"
+      openItemGrouped:
+        $ref: "#/components/messages/OpenItemGrouped"
+      openItemHeld:
+        $ref: "#/components/messages/OpenItemHeld"
+      openItemReleased:
+        $ref: "#/components/messages/OpenItemReleased"
+  vendorEvents:
+    address: passage.payables.vendor
+    messages:
+      vendorBlocked:
+        $ref: "#/components/messages/VendorBlocked"
+      vendorUnblocked:
+        $ref: "#/components/messages/VendorUnblocked"
+  paymentProposalEvents:
+    address: passage.payables.paymentproposal
+    messages:
+      proposalCreated:
+        $ref: "#/components/messages/ProposalCreated"
+      proposalApproved:
+        $ref: "#/components/messages/ProposalApproved"
+      proposalCancelled:
+        $ref: "#/components/messages/ProposalCancelled"
 operations:
   publishOpenItemCreated:
     action: send
@@ -27,6 +49,46 @@ operations:
     channel: { $ref: "#/channels/openItemEvents" }
     messages:
       - { $ref: "#/channels/openItemEvents/messages/openItemSettled" }
+  publishOpenItemGrouped:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemGrouped" }
+  publishOpenItemHeld:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemHeld" }
+  publishOpenItemReleased:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemReleased" }
+  publishVendorBlocked:
+    action: send
+    channel: { $ref: "#/channels/vendorEvents" }
+    messages:
+      - { $ref: "#/channels/vendorEvents/messages/vendorBlocked" }
+  publishVendorUnblocked:
+    action: send
+    channel: { $ref: "#/channels/vendorEvents" }
+    messages:
+      - { $ref: "#/channels/vendorEvents/messages/vendorUnblocked" }
+  publishProposalCreated:
+    action: send
+    channel: { $ref: "#/channels/paymentProposalEvents" }
+    messages:
+      - { $ref: "#/channels/paymentProposalEvents/messages/proposalCreated" }
+  publishProposalApproved:
+    action: send
+    channel: { $ref: "#/channels/paymentProposalEvents" }
+    messages:
+      - { $ref: "#/channels/paymentProposalEvents/messages/proposalApproved" }
+  publishProposalCancelled:
+    action: send
+    channel: { $ref: "#/channels/paymentProposalEvents" }
+    messages:
+      - { $ref: "#/channels/paymentProposalEvents/messages/proposalCancelled" }
 components:
   messages:
     OpenItemCreated:
@@ -45,6 +107,67 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/OpenItemSettledData"
+    OpenItemGrouped:
+      name: dev.passage.payables.openitem.grouped.v1
+      summary: >-
+        A redelivered dev.passage.payables.invoice.posted.v1 carried the vendor group of an open item that was created
+        without one, and the group was assigned. Emitted once per open item; a group is never overwritten.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemData"
+    OpenItemHeld:
+      name: dev.passage.payables.openitem.held.v1
+      summary: >-
+        A user placed a payment hold on an open item (POST /v1/payables/open-items/{id}:hold). Held items are excluded from
+        payment proposals. Emitted only when the hold changes.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemHoldData"
+    OpenItemReleased:
+      name: dev.passage.payables.openitem.released.v1
+      summary: >-
+        A user released the payment hold of an open item (POST /v1/payables/open-items/{id}:release). Emitted only when the
+        hold changes.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemHoldData"
+    VendorBlocked:
+      name: dev.passage.payables.vendor.blocked.v1
+      summary: >-
+        A user blocked a vendor for payment in one legal entity (POST /v1/payables/vendors/{id}:block). Re-blocking
+        replaces the reason and emits again.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/VendorBlockData"
+    VendorUnblocked:
+      name: dev.passage.payables.vendor.unblocked.v1
+      summary: A user removed the payment block of a vendor (POST /v1/payables/vendors/{id}:unblock).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/VendorBlockData"
+    ProposalCreated:
+      name: dev.passage.payables.paymentproposal.created.v1
+      summary: >-
+        A DRAFT payment proposal was stored. An idempotent replay of the same run emits nothing. Consumers: approval
+        notification.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ProposalData"
+    ProposalApproved:
+      name: dev.passage.payables.paymentproposal.approved.v1
+      summary: >-
+        A DRAFT proposal was approved by a user other than its creator. Consumers: payment run workflow.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ProposalData"
+    ProposalCancelled:
+      name: dev.passage.payables.paymentproposal.cancelled.v1
+      summary: >-
+        A DRAFT proposal was cancelled (the rejection path of the approval flow) and its open items were released for
+        another proposal.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ProposalData"
   schemas:
     OpenItemData:
       type: object
@@ -53,6 +176,7 @@ components:
         open_item_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
+        vendor_group_id: { type: string, format: uuid, description: "vendor group the open item was created under; absent when unknown" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this change" }
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
@@ -68,3 +192,34 @@ components:
         status: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
         settled_amount: { type: string, description: "decimal string; the amount this settlement applied" }
         settlement_id: { type: string, description: "reference of the settlement that applied the amount; absent when the caller gave none" }
+    OpenItemHoldData:
+      type: object
+      required: [open_item_id, legal_entity_id, vendor_id, payment_hold, actor]
+      properties:
+        open_item_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        payment_hold: { type: boolean, description: "the hold flag after this change" }
+        reason: { type: string, description: "why the item was held; held events only, absent when none was given" }
+        actor: { type: string, description: "user who made the change" }
+    VendorBlockData:
+      type: object
+      required: [vendor_id, legal_entity_id, actor]
+      properties:
+        vendor_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        reason: { type: string, description: "present on blocked events only" }
+        actor: { type: string, description: "user who made the change" }
+    ProposalData:
+      type: object
+      required: [proposal_id, legal_entity_id, run_date, run_id, status, actor]
+      properties:
+        proposal_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        run_date: { type: string, format: date }
+        run_id: { type: string }
+        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED] }
+        actor: { type: string, description: "creator on created, approver on approved, canceller on cancelled" }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "legal entity currency; created events only" }
+        total_valued: { type: string, description: "decimal string, proposal total in the legal entity currency, net of withheld tax; created events only" }
+        total_withheld: { type: object, additionalProperties: { type: string }, description: "currency to decimal string, tax withheld per group currency, absent when nothing is withheld; created events only" }

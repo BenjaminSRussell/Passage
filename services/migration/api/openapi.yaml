@@ -7,8 +7,24 @@ servers:
   - url: https://app.local.passage.dev
 paths:
   /v1/integration/migration-runs:
+    get:
+      operationId: listMigrationRuns
+      summary: List migration runs
+      description: Newest first, optionally filtered by entity and status. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [succeeded, partial, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Runs with counts, rejects and reconciliation.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MigrationRun' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createMigrationRun
+      summary: Run a migration
+      description: Extracts, maps, validates, loads and reconciles one entity from a legacy system. Give the mapping inline or reference a published mapping spec by id. The run executes inside the request.
       x-passage-duty: migration.run
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
@@ -25,12 +41,14 @@ paths:
           description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed; errors maps each failed test name to its reason. No backend is called.
+          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request. No backend is called.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-runs/{id}:
     get:
       operationId: getMigrationRun
+      summary: Get a migration run
+      description: Returns the counts, rejects, warnings, absent keys and reconciliation of one run.
       x-passage-duty: migration.run
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -42,6 +60,8 @@ paths:
   /v1/integration/migration-runs/{id}:rerun:
     post:
       operationId: rerunMigrationRun
+      summary: Re-run the exception queue of a run
+      description: Creates a child run linked by parentRunId that reprocesses only the rows the original run rejected.
       x-passage-duty: migration.run
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -53,11 +73,237 @@ paths:
             Location: { schema: { type: string } }
           content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRunAccepted' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/mapping-specs:
+    get:
+      operationId: listMappingSpecs
+      summary: List mapping specs
+      description: Published mapping versions, newest version first per entity. The mapping body is returned by the single-spec read.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Specs without their mapping body.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MappingSpec' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: publishMappingSpec
+      summary: Publish a mapping spec version
+      description: Parses the mapping and runs its tests (at least one test case is required), then stores it as an immutable version of its entity. Re-publishing identical content returns the stored spec; different content under a used version is a conflict.
+      x-passage-duty: migration.spec.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: Mapping DSL document with entity, version, fields (a field may name a source format or the codepage_normalize function), optional rejectWhen conditions (field, op, value or values, reason code) and at least one test. } } } } }
+      responses:
+        '201':
+          description: A new spec version was stored.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
+        '200':
+          description: The same content was already stored under this entity and version, or the Idempotency-Key was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
+        '409':
+          description: MIG-SPEC-VERSION-EXISTS, this entity and version already hold different content.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-MAP-INVALID (including a mapping with no test case), MIG-MAP-TEST-FAIL, or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/mapping-specs/{id}:
+    get:
+      operationId: getMappingSpec
+      summary: Get a mapping spec
+      description: Returns one published version including its mapping document.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The spec with its mapping.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/migration-runs/{id}/ledger:
+    get:
+      operationId: listMigrationRunLedger
+      summary: List the lineage of a run
+      description: One row per source key the run created, updated or found unchanged, in source key order, with the targets that took their value from the run's data template (default_from_template).
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: templated, in: query, description: When true only rows that took at least one template default are returned., schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Lineage rows of the run.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LedgerRow' } } } } } }
+        '404':
+          description: AUTH-0404, the run does not exist for this tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/data-templates:
+    get:
+      operationId: listDataTemplates
+      summary: List data templates
+      description: Published data templates, newest version first per entity and name. The defaults are returned by the single-template read.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Templates without their defaults.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DataTemplate' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: publishDataTemplate
+      summary: Publish a data template version
+      description: Stores per-entity default values (FR-10.18) as an immutable version of its entity and name. A default fills a mapping target only when the source row has no value for it. Re-publishing identical content returns the stored template; different content under a used version is a conflict. The template is checked against the mapping when a run uses it.
+      x-passage-duty: migration.spec.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PublishDataTemplate' } } }
+      responses:
+        '201':
+          description: A new template version was stored.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
+        '200':
+          description: The same content was already stored under this entity, name and version, or the Idempotency-Key was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
+        '409':
+          description: MIG-TEMPLATE-VERSION-EXISTS, this entity, name and version already hold different content.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-TEMPLATE-INVALID, or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/data-templates/{id}:
+    get:
+      operationId: getDataTemplate
+      summary: Get a data template
+      description: Returns one published version including its default values.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The template with its defaults.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataTemplate' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref:
+    get:
+      operationId: listXref
+      summary: Look up legacy keys in the cross-reference
+      description: Answers where a legacy record went. Filter by exact legacy key, key prefix (literal, no wildcards) or Passage id (a target id or the survivor a record was merged into), and page in source system, entity and key order with the opaque nextCursor. Callers scoped to one legal entity are refused.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: sourceSystem, in: query, schema: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] } }
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: sourceKey, in: query, description: Exact legacy key., schema: { type: string } }
+        - { name: keyPrefix, in: query, description: Legacy keys starting with this text., schema: { type: string } }
+        - { name: targetId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of mappings; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/XrefEntry' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref/summary:
+    get:
+      operationId: summarizeXref
+      summary: Count mapped legacy keys
+      description: The number of mapped legacy keys per source system and entity, for checking a cutover against the legacy record counts.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: One row per source system and entity.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/XrefCount' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:
+    get:
+      operationId: listConfigPackages
+      summary: List applied configuration packages
+      description: Packages applied to this tenant, newest first, with their applied history. The manifest files are returned by the single-package read.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Packages without their manifest files.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ConfigPackage' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages/{id}:
+    get:
+      operationId: getConfigPackage
+      summary: Get a configuration package
+      description: Returns one applied package with its manifest files and applied history.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The package with its manifest files.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackage' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:diff:
+    post:
+      operationId: diffConfigPackage
+      summary: Diff a configuration package against the target
+      description: Verifies the signature, file hashes and schema version, then reports per file, in dependency order, which records apply would create or update. Nothing is written and nothing is recorded.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageRequest' } } }
+      responses:
+        '200':
+          description: Counts and record keys per bucket; deletes are never reported because apply never deletes.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageDiff' } } }
+        '422':
+          description: MIG-PKG-SIGNATURE, the signature or a file sha256 does not match; MIG-PKG-SCHEMA-NEWER, the package schema is newer than the target supports; MIG-PKG-INVALID, the manifest is cyclic, lists an unknown file or repeats a record key. Messages never include record bodies.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-NOT-CONFIGURED, no package target or tenant signing key is wired in this deployment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:apply:
+    post:
+      operationId: applyConfigPackage
+      summary: Apply a configuration package
+      description: Verifies the package, writes created and updated records in manifest dependency order, never deletes target records, and appends an applied entry with the diff counts. A second apply of the same package reports no changes. The Idempotency-Key header is required; a replay returns the original response.
+      x-passage-duty: migration.package.apply
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageRequest' } } }
+      responses:
+        '200':
+          description: Applied counts and the stored package id, or the original response on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageApplied' } } }
+        '422':
+          description: MIG-PKG-SIGNATURE, MIG-PKG-SCHEMA-NEWER or MIG-PKG-INVALID as for diff; idempotency_key_reuse, the key was used with a different package. Nothing is written.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-NOT-CONFIGURED, no package target or tenant signing key is wired in this deployment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
     post:
       operationId: createParallelRunDiff
+      summary: Create a parallel-run diff (deferred)
+      description: Reserved for wave 49. Every call answers 501 today.
       x-passage-duty: migration.run
       responses:
+        '202':
+          description: Reserved. Accepted once the parallel-run harness ships in wave 49; today the service answers 501.
         '501':
           description: MIG-PARALLEL-RUN-DEFERRED, the parallel-run diff harness belongs to wave 49.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
@@ -65,12 +311,16 @@ paths:
   /healthz:
     get:
       operationId: liveness
+      summary: Liveness probe
+      description: Answers 200 while the process is running.
       x-passage-duty: public
       responses:
         '200': { description: Process is alive. }
   /readyz:
     get:
       operationId: readiness
+      summary: Readiness probe
+      description: Answers 200 when the database is reachable.
       x-passage-duty: public
       responses:
         '200': { description: Database reachable. }
@@ -78,18 +328,21 @@ paths:
 components:
   responses:
     Problem:
-      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse or MIG-MAP-*.
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse, MIG-MAP-* or MIG-PKG-*.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   schemas:
     CreateMigrationRun:
       type: object
       additionalProperties: false
-      required: [sourceSystem, mode, mapping]
+      description: Exactly one of mapping or mappingSpecId is required.
+      required: [sourceSystem, mode]
       properties:
         sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
         mode: { type: string, enum: [rehearsal, cutover, delta] }
         dryRun: { type: boolean }
         mapping: { type: object, description: Mapping DSL document with entity, version and fields. }
+        mappingSpecId: { type: string, format: uuid, description: A published mapping spec to run instead of an inline mapping. }
+        dataTemplateId: { type: string, format: uuid, description: A published data template whose defaults fill absent source fields before mapping. It must be for the mapping's entity and default only mapping targets filled from a source column. }
     MigrationRunAccepted:
       type: object
       required: [jobId, statusUrl, estimatedCompletionSeconds, run]
@@ -110,10 +363,12 @@ components:
         dryRun: { type: boolean }
         mappingVersion: { type: integer }
         parentRunId: { type: string, format: uuid }
+        mappingSpecId: { type: string, format: uuid }
+        dataTemplateId: { type: string, format: uuid, description: The data template the run applied, kept on re-runs. }
         counts:
           type: object
-          required: [extracted, mapped, created, updated, unchanged, rejected, warned]
-          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
+          required: [extracted, mapped, created, updated, unchanged, templated, rejected, warned]
+          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, templated: { type: integer, description: Mapped rows that took at least one data template default. }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
         rejects:
           type: array
           items:
@@ -139,6 +394,143 @@ components:
             source: { type: integer }
             target: { type: integer }
             checks: { type: array, items: { type: object, required: [name, ok, detail], properties: { name: { type: string, enum: [row_count, hash_total, sample_compare] }, ok: { type: boolean }, detail: { type: string } } } }
+        createdAt: { type: string, format: date-time }
+    LedgerRow:
+      type: object
+      required: [sourceKey, action, defaultFromTemplate]
+      properties:
+        sourceKey: { type: string }
+        targetId: { type: string, format: uuid, description: Absent on a dry run that created the row. }
+        action: { type: string, enum: [created, updated, unchanged] }
+        defaultFromTemplate: { type: array, items: { type: string }, description: Mapping targets filled from the data template for this row. }
+    PublishDataTemplate:
+      type: object
+      additionalProperties: false
+      required: [name, entity, version, defaults]
+      properties:
+        name: { type: string, maxLength: 80 }
+        entity: { type: string }
+        version: { type: integer, minimum: 1 }
+        defaults: { type: object, minProperties: 1, maxProperties: 200, additionalProperties: { type: string, maxLength: 500 }, description: Mapping target to default value; each value must satisfy the target's type. }
+    XrefEntry:
+      type: object
+      required: [sourceSystem, entity, sourceKey, targetId, updatedAt]
+      properties:
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        entity: { type: string }
+        sourceKey: { type: string }
+        targetId: { type: string, format: uuid }
+        contentHash: { type: string }
+        mergedIntoTargetId: { type: string, format: uuid, description: Set when the record was merged into another Passage record. }
+        updatedAt: { type: string, format: date-time }
+    XrefCount:
+      type: object
+      required: [sourceSystem, entity, count]
+      properties:
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        entity: { type: string }
+        count: { type: integer, minimum: 1 }
+    DataTemplate:
+      type: object
+      required: [id, entity, name, version, checksum, defaultCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entity: { type: string }
+        name: { type: string }
+        version: { type: integer }
+        checksum: { type: string, description: SHA-256 of the canonical template JSON. }
+        defaultCount: { type: integer }
+        defaults: { type: object, additionalProperties: { type: string }, description: Present on the single-template read and on publish. }
+        createdAt: { type: string, format: date-time }
+    MappingSpec:
+      type: object
+      required: [id, entity, version, checksum, fieldCount, testCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entity: { type: string }
+        version: { type: integer }
+        checksum: { type: string, description: SHA-256 of the canonical mapping JSON. }
+        fieldCount: { type: integer }
+        testCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        mapping: { type: object, description: Present on the single-spec read only. }
+    ConfigPackageRequest:
+      type: object
+      additionalProperties: false
+      required: [package, signature]
+      properties:
+        package:
+          type: object
+          required: [version, schemaVersion, manifest, files]
+          properties:
+            version: { type: string, minLength: 1, maxLength: 20 }
+            schemaVersion: { type: integer, minimum: 1 }
+            manifest: { type: object, required: [files], properties: { files: { type: array, items: { $ref: '#/components/schemas/ManifestFile' } } } }
+            files:
+              type: array
+              items:
+                type: object
+                required: [name, entity, records]
+                properties:
+                  name: { type: string }
+                  entity: { type: string }
+                  records: { type: array, items: { type: object, required: [key, body], properties: { key: { type: string }, body: { type: object } } } }
+        signature: { type: string, format: byte, description: Base64 signature over the canonical manifest (version, schemaVersion and file hashes). }
+    ManifestFile:
+      type: object
+      required: [name, sha256, dependsOn]
+      properties:
+        name: { type: string }
+        sha256: { type: string, description: SHA-256 of the file's canonical JSON. }
+        dependsOn: { type: array, items: { type: string } }
+    PackageCounts:
+      type: object
+      required: [create, update, unchanged]
+      properties: { create: { type: integer }, update: { type: integer }, unchanged: { type: integer } }
+    ConfigPackageDiff:
+      type: object
+      required: [version, schemaVersion, counts, files]
+      properties:
+        version: { type: string }
+        schemaVersion: { type: integer }
+        counts: { $ref: '#/components/schemas/PackageCounts' }
+        files:
+          type: array
+          description: In dependency order.
+          items:
+            type: object
+            required: [name, entity, create, update, unchanged]
+            properties:
+              name: { type: string }
+              entity: { type: string }
+              create: { type: array, items: { type: string } }
+              update: { type: array, items: { type: string } }
+              unchanged: { type: array, items: { type: string } }
+    ConfigPackageApplied:
+      type: object
+      required: [packageId, version, schemaVersion, appliedAt, counts]
+      properties:
+        packageId: { type: string, format: uuid }
+        version: { type: string }
+        schemaVersion: { type: integer }
+        appliedAt: { type: string, format: date-time }
+        counts: { $ref: '#/components/schemas/PackageCounts' }
+    ConfigPackage:
+      type: object
+      required: [id, version, schemaVersion, fileCount, applied, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: string }
+        schemaVersion: { type: integer }
+        fileCount: { type: integer }
+        files: { type: array, items: { $ref: '#/components/schemas/ManifestFile' }, description: Present on the single-package read only. }
+        applied:
+          type: array
+          items:
+            type: object
+            required: [tenantId, appliedAt, diffCounts]
+            properties: { tenantId: { type: string, format: uuid }, appliedAt: { type: string, format: date-time }, idempotencyKey: { type: string }, diffCounts: { $ref: '#/components/schemas/PackageCounts' } }
+        createdBy: { type: string }
         createdAt: { type: string, format: date-time }
     Problem:
       type: object

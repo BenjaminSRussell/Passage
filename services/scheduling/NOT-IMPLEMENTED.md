@@ -14,6 +14,59 @@ screens (Gantt workspace with drag, preview and firm; capacity load; runs list,
 start run and run detail; resources list, create and detail; operations list
 and create).
 
+Slice 10 builds: backward schedule runs with the BR-23.2 forward fallback and
+SCHED-0003 (domain, store, `direction` on `POST /runs`, migration 0008, direction
+selector and warning label on the web run screens); the OpenAPI and AsyncAPI
+specs have no FAIL lines on the doc gates.
+
+Slice 11 builds: schedule runs honour order pegs (FR-23.8). Parents are placed
+before their dependents, a dependent's first operation starts no earlier than
+its parents' last end (forward and backward runs, parents inside or outside the
+run selection), and a dependent behind an unplaced parent (placed in this run,
+or outside it with an operation stored as unplaced) is unplaced. No migration,
+no new endpoint; the createRun description and README say so.
+
+Slice 12 builds secondary resources booked with the primary (FR-23.4,
+BR-23.4, SCHED-0005). `POST /operations` takes `secondaryResourceIds` (at most
+5, distinct, existing, none a candidate; migration `0009_secondary_resources.sql`
+adds `scheduling_operation.secondary_resource_ids` and the
+`scheduled_job_secondary` table with its own GiST exclusion constraint, RLS and
+grants). A run books each secondary for the same segments as the primary: a
+slot whose secondary is booked or has no open capacity for a segment is
+skipped and the next start tried, in forward and backward runs; an infinite run
+ignores secondary bookings but still needs open time. A move and every job it
+pushes (including pegged dependents) needs its secondaries free, otherwise
+SCHED-0005; the booking moves with the job. Secondary bookings count in the
+weekly capacity load and in the `affectedJobs` of a downtime on a secondary,
+and a bar is flagged `outsideCapacity` when its secondary is closed for it.
+Back-to-back intervals on the secondary (two adjacent shifts, midnight on a
+24-hour calendar) count as one open stretch. An operation that never finds its
+secondaries free in the horizon is unplaced with a SCHED-0005 reason.
+The Gantt bars, `job.scheduled` and the jobs table carry
+`secondaryResourceIds`. Web: secondary resource pickers on the new-operation
+form (a candidate cannot be picked), a Secondary column on the operations list
+and the jobs table, and the bar title. No new duty. The OpenAPI and AsyncAPI
+specs have no FAIL lines on the doc gates.
+
+Slice 13 builds resource calendar maintenance (FR-23.1, AC-23.7).
+`PATCH /resources/{id}` (duty `scheduling.capacity.write`, Idempotency-Key and
+If-Match with the resource version, stale version 412 SCHED-0124) changes the
+name, time zone and the whole weekly calendar; the code and the finite flag
+stay. The answer carries `affectedJobs`, the booked jobs whose booking after
+the request time now lies outside the resource's open capacity (calendar and
+overrides applied; hours a running job already used do not count), as primary
+or as secondary resource, each with the span of all its segments; they stay
+where they are until moved or re-run, and every Gantt bar outside open
+capacity is flagged as before. A retry that races the first request waits on
+the resource lock and replays its answer. `resource.updated`
+goes through the outbox with the new calendar, version and affected job ids.
+`GET` and `POST` on resources now send an ETag. No migration (the table and
+its UPDATE grant exist). Web: an Edit calendar screen
+(`/scheduling/resources/:id/edit`: name, time zone, add and remove shifts,
+affected jobs after saving, stale-version message with a reload of the
+latest version), linked from the resource detail. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
+No new duty.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -174,6 +227,27 @@ noted it lacked); its `SetupPage.tsx` and `setup.ts` (main has had list,
 create and detail screens for networks, setup matrices, cleanout rules and
 capacity blocks since slice 2).
 
+Slice 9 builds capacity overrides (FR-23.1, AC-23.7): downtimes and extra
+shifts on a resource calendar (`scheduling_capacity_override`, migration
+`0007_capacity_overrides.sql`). `POST/GET /resources/{id}/capacity-overrides`
+and `DELETE /resources/{id}/capacity-overrides/{overrideId}`, idempotent, with
+`capacityoverride.created` and `capacityoverride.deleted` through the outbox. A
+span is at most 31 days; a downtime wins over an overlapping extra shift
+(`domain.ApplyOverrides`). Runs, moves, the capacity inquiry, block
+utilization and the weekly capacity load all read the calendar with overrides
+applied (`Resource.Overrides`, `domain.OpenWithOverrides`). Creating a downtime
+returns the booked jobs it overlaps (`affectedJobs`, firmed or not, at most
+500, each with the span of all its segments) and lists them in the event;
+those jobs are not moved automatically, the planner moves them or runs the
+schedule again. Until then every Gantt bar that lies outside its resource's
+open capacity, calendar and overrides applied, carries `outsideCapacity`
+(SCHED-0002) and the workspace outlines it and badges it in the jobs table.
+Web: capacity overrides list
+(by resource, remove) and create form (UTC times, reason, affected jobs shown
+after saving), linked from the resource detail screen and the navigation. The
+OpenAPI document and the AsyncAPI messages (title and summary on every message)
+pass the doc gates with no FAIL lines.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -184,10 +258,10 @@ moved-out handoff rows.
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
-| 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` | later slice of PSG-23 | `schedule_run.direction` is constrained to `forward`. Late minutes are already computed against the due time on forward runs. |
+| 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
 | 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
-| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | later slice of PSG-23 | No `secondary_resource_ids` on operations or jobs yet. |
+| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
 | 1 | Changeover kept in one piece: BR-23.3 says setup is never split across closed time and moves to the next open interval when it does not fit | built | `fillSlot` in `domain/constraints.go`; an exact move start that would split it is SCHED-0002. Route setup without a matrix is not laid as a separate block (see the job scheduling row above). |
@@ -207,7 +281,7 @@ moved-out handoff rows.
 | 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |
 | 6 | Capacity block windows and changeovers in the CP-SAT model | later slice of PSG-23 | The job-shop model has no calendars, blocks or setup times; the heuristic applies them. |
-| 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; secondary resources in general (BR-23.4) are a later slice. |
+| 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; operation secondaries (BR-23.4) are built in slice 12, the edge's transfer line is still not booked for the transfer window. |
 | 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks are create-and-read; update and deactivation are a later slice of PSG-23. |
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
@@ -231,12 +305,11 @@ moved-out handoff rows.
 
 | Item | Status | Reason |
 |---|---|---|
-| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar on every read and run (`GET /resources/{id}/capacity`). A stored table is worth building together with overrides and calendar events, which are what make it differ from the calendar; the swarm's table without them was not taken (see slice 6 above). |
-| `POST /v1/scheduling/resources/{id}/capacity-overrides` (downtime, extra shift) and the *Maintain capacity* screen for overrides | later slice of PSG-23 | Needs the materialized capacity table. |
-| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | later slice of PSG-23 | Depends on calendar events and the capacity table. |
+| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and per-day capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar plus downtimes and extra shifts (slice 9) on every read and run (`GET /resources/{id}/capacity`). A stored table is not needed while nothing else reads it; efficiency % and calendar events are wave 9. |
+| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself is built (slice 13, `PATCH /resources/{id}`, affected jobs returned and flagged on the Gantt); calendar events from wave 9 and per-job warning rows are not, and a calendar change does not re-run the schedule. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |
-| Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | later slice of PSG-23 | Only moves with `propagate` push dependents; a site run places orders independently. |
+| Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | built (slice 11) | `domain.Schedule` places parents first (`pegPlan`) and floors the dependent's first operation at the parents' last end (`pegFloor`; `store.pegsForRun` loads pegs and the ends of parents outside the run); an unplaced parent (in the run, or outside it with an operation stored as unplaced) leaves the dependent unplaced. Not yet: a peg-forced delay is not reported as a warning; `:move` without propagate still ignores pegs; a selection run that moves a parent later does not push its dependents outside the selection (run them too, or the site); a parent outside the run that was never scheduled sets no floor; a backward run schedules a parent against its own due date, not back from its dependent's start. |
 | PRD 4.23.17 limit of 100 orders in the propagation preview | later slice of PSG-23 | The preview walks the same 500 orders / 5 levels as the commit, so what is previewed is what is saved. |
 | FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30; per-order `:schedule` (scope `order`) | later slice of PSG-23 | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |
@@ -247,9 +320,9 @@ moved-out handoff rows.
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
-| `ScheduledJob.overlap_qty`, `secondary_resource_ids`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
+| `ScheduledJob.overlap_qty`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | later slice of PSG-23 | A run replaces the jobs it schedules; earlier runs stay as history rows only. |
-| Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources have a `version` column but no update endpoint yet. |
+| Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
 | Playwright Gantt move + propagate test (4.23.9) | later slice of PSG-23 | Covered by the store move and propagation tests and the page tests. |
 | `sched-propagation` fixture (pegged chains 5 deep, 4.23.9) | partial | The store test builds a 7-order chain in code and checks the 5-level cut; no fixture file under testdata. |

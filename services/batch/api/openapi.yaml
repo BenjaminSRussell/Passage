@@ -95,9 +95,12 @@ paths:
         - { name: code, in: path, required: true, schema: { type: string } }
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { rows: { type: integer } } } } }
+        content: { application/json: { schema: { $ref: '#/components/schemas/StartRun' } } }
       responses:
-        '201': { description: Run started. }
+        '201': { description: Run started. Product handlers also record the caller's single legal entity and user for the dispatcher's service token. }
+        '400': { description: Params failed the handler's schema (COM-0001, field errors under errors). }
+        '403': { description: A product handler's run needs the product duties it will use (product.variants.explode or product.write for explode; product.released.read or product.read, and product.jobs.write, for group-change) (AUTH-0003). }
+        '422': { description: legalEntityId missing or outside the caller's scope (COM-0001). }
         '409': { description: Exclusive job overlap (WFL-0409). }
   /v1/batch/runs/{id}:
     get:
@@ -141,6 +144,8 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Retry queued. }
+        '404': { description: Message not found. }
+        '409': { description: Only a failed message can be retried. }
   /v1/notify/preferences/me:
     put:
       operationId: putMyPreference
@@ -204,6 +209,37 @@ paths:
         '503': { description: Database unreachable. }
 components:
   schemas:
+    StartRun:
+      type: object
+      additionalProperties: false
+      properties:
+        rows: { type: integer }
+        legalEntityId: { type: string, format: uuid, description: Legal entity the run is bound to. Optional only when the caller is scoped to exactly one; otherwise required and must lie in the caller's scope. }
+        params:
+          description: Handler parameters stored on the run; the schema depends on the job's handler. Handlers without a schema accept none.
+          oneOf:
+            - $ref: '#/components/schemas/ProductExplodeParams'
+            - $ref: '#/components/schemas/NoParams'
+    ProductExplodeParams:
+      type: object
+      description: Params for handler product.explode.
+      additionalProperties: false
+      required: [masterId]
+      properties:
+        masterId: { type: string, format: uuid }
+        selected:
+          type: object
+          maxProperties: 64
+          additionalProperties:
+            type: array
+            minItems: 1
+            maxItems: 500
+            items: { type: string, minLength: 1, maxLength: 128 }
+    NoParams:
+      type: object
+      description: Params for handler product.group-change, which takes none.
+      additionalProperties: false
+      maxProperties: 0
     Definition:
       type: object
       additionalProperties: false

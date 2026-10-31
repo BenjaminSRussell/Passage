@@ -11,11 +11,16 @@ service:
   httpPort: 8080
   adminPort: 9090
 
-# DATABASE_URL and HR_PII_KEY are read from this secret (Vault via External Secrets).
+# DATABASE_URL, FIELDCRYPT_CURRENT_KEY_ID and the legacy HR_PII_KEY (opens values written before
+# fieldcrypt; optional, remove it once `hr reseal-pii` reports rewritten=0 for every tenant) are read
+# from this secret (Vault via External Secrets). Its FIELDCRYPT_KEYS entry is mounted as the file
+# /var/run/passage/field-crypt/keys (FIELDCRYPT_KEYS_FILE), not passed in the environment.
 secret:
   name: passage-hr-secrets
   databaseUrlKey: DATABASE_URL
   piiKeyKey: HR_PII_KEY
+  fieldcryptKeysKey: FIELDCRYPT_KEYS
+  fieldcryptCurrentKeyIdKey: FIELDCRYPT_CURRENT_KEY_ID
 
 config:
   managerMaxDepth: "10"
@@ -35,6 +40,8 @@ serviceMonitor:
 
 podSecurityContext:
   runAsNonRoot: true
+  # Lets the non-root user read the 0440 field-crypt key file.
+  fsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 

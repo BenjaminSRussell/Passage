@@ -72,6 +72,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/lean/flows", a.listFlows)
 	r.With(read).Get("/v1/lean/flows/{id}", a.getFlow)
 	r.With(authz.RequireDuty(DutyFlowWrite)).Post("/v1/lean/flows/{id}:activate", a.activateFlow)
+	r.With(authz.RequireDuty(DutyFlowWrite)).Post("/v1/lean/flows/{id}:new-version", a.newFlowVersion)
 	r.With(authz.RequireDuty(DutyFlowSettle)).Post("/v1/lean/flows/{id}/costing-periods", a.openPeriod)
 	r.With(read).Get("/v1/lean/flows/{id}/costing-periods", a.listPeriods)
 	r.With(authz.RequireDuty(DutyFlowSettle)).Post("/v1/lean/flows/{id}/costing-periods/{periodId}:settle", a.settlePeriod)
@@ -250,41 +251,21 @@ type flowRequest struct {
 	Activities    []activityRequest `json:"activities"`
 }
 
-func (a *API) createFlow(w http.ResponseWriter, r *http.Request) {
-	if _, ok := principal(w, r); !ok {
-		return
-	}
-	var req flowRequest
-	idem, ok := decodeCommand(w, r, &req)
-	if !ok {
-		return
-	}
-	fields := map[string]string{}
-	if !ids.Valid(req.ValueStreamID) {
-		fields["valueStreamId"] = "must be a UUID (the wave-6 value-stream operating unit)"
-	}
-	if !ids.Valid(req.SiteID) {
-		fields["siteId"] = "must be a UUID"
-	}
-	name := strings.TrimSpace(req.Name)
-	if n := len([]rune(name)); n < 1 || n > 120 {
-		fields["name"] = "must be 1 to 120 characters"
-	}
-	if req.TaktTimeS != nil && *req.TaktTimeS < 1 {
-		fields["taktTimeS"] = "must be a positive number of seconds"
-	}
-	if len(req.Activities) < 1 || len(req.Activities) > domain.MaxActivities {
+// buildActivities validates the activity list of a flow request and returns
+// the store activities; problems are added to fields.
+func buildActivities(fields map[string]string, reqs []activityRequest) []store.Activity {
+	if len(reqs) < 1 || len(reqs) > domain.MaxActivities {
 		fields["activities"] = fmt.Sprintf("must hold 1 to %d activities", domain.MaxActivities)
 	}
 	seqs := map[int]bool{}
-	for i, act := range req.Activities {
+	for i, act := range reqs {
 		if seqs[act.Sequence] {
 			fields[fmt.Sprintf("activities[%d].sequence", i)] = "is used by another activity"
 		}
 		seqs[act.Sequence] = true
 	}
-	acts := make([]store.Activity, len(req.Activities))
-	for i, act := range req.Activities {
+	acts := make([]store.Activity, len(reqs))
+	for i, act := range reqs {
 		at := func(f string) string { return fmt.Sprintf("activities[%d].%s", i, f) }
 		if act.Sequence < 1 {
 			fields[at("sequence")] = "must be 1 or more"
@@ -314,6 +295,33 @@ func (a *API) createFlow(w http.ResponseWriter, r *http.Request) {
 		acts[i] = store.Activity{Sequence: act.Sequence, Name: actName, Kind: act.Kind, CycleTimeS: act.CycleTimeS, WorkCellResourceID: act.WorkCellResourceID,
 			InputLocationID: act.InputLocationID, OutputLocationID: act.OutputLocationID, Predecessors: preds, PickingRequired: act.PickingRequired}
 	}
+	return acts
+}
+
+func (a *API) createFlow(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	var req flowRequest
+	idem, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.ValueStreamID) {
+		fields["valueStreamId"] = "must be a UUID (the wave-6 value-stream operating unit)"
+	}
+	if !ids.Valid(req.SiteID) {
+		fields["siteId"] = "must be a UUID"
+	}
+	name := strings.TrimSpace(req.Name)
+	if n := len([]rune(name)); n < 1 || n > 120 {
+		fields["name"] = "must be 1 to 120 characters"
+	}
+	if req.TaktTimeS != nil && *req.TaktTimeS < 1 {
+		fields["taktTimeS"] = "must be a positive number of seconds"
+	}
+	acts := buildActivities(fields, req.Activities)
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -410,6 +418,48 @@ func (a *API) activateFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeCommand(w, fresh, http.StatusOK, f)
+}
+
+type newVersionRequest struct {
+	Version    int               `json:"version"`
+	TaktTimeS  *int              `json:"taktTimeS"`
+	Activities []activityRequest `json:"activities"`
+}
+
+func (a *API) newFlowVersion(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req newVersionRequest
+	idem, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	if req.Version < 1 {
+		fields["version"] = "must be the version you read (1 or more)"
+	}
+	if req.TaktTimeS != nil && *req.TaktTimeS < 1 {
+		fields["taktTimeS"] = "must be a positive number of seconds"
+	}
+	in := store.NewVersion{SetTakt: req.TaktTimeS != nil, TaktTimeS: req.TaktTimeS}
+	if req.Activities != nil {
+		in.Activities = buildActivities(fields, req.Activities)
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	f, fresh, err := a.store.NewFlowVersion(r.Context(), id, req.Version, in, idem)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writeCommand(w, fresh, http.StatusCreated, f)
 }
 
 type ruleRequest struct {

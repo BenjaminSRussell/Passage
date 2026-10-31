@@ -34,15 +34,18 @@ type ItemCoverageSpec struct {
 	MinQty                  decimal.Decimal
 	MaxQty                  decimal.Decimal
 	SafetyMarginReceiptDays int
-	LeadTimeDays            *int
-	VendorID                string
-	PlannedOrderType        string
-	PlanningStrategy        string
-	PlanningScope           string
-	DecouplingPoint         bool
-	BufferProfileID         string
-	RequiredShelfLifeDays   int
-	PriorityBased           bool
+	// SafetyMarginIssueDays and SafetyMarginReorderDays are the FR-22.5 issue and
+	// reorder margins in working days.
+	SafetyMarginIssueDays, SafetyMarginReorderDays int
+	LeadTimeDays                                   *int
+	VendorID                                       string
+	PlannedOrderType                               string
+	PlanningStrategy                               string
+	PlanningScope                                  string
+	DecouplingPoint                                bool
+	BufferProfileID                                string
+	RequiredShelfLifeDays                          int
+	PriorityBased                                  bool
 }
 
 // DefaultItemCoverage is a site-scope coverage of item at site under the given
@@ -111,6 +114,12 @@ func (c ItemCoverageSpec) Validate() map[string]string {
 	}
 	if c.SafetyMarginReceiptDays < 0 || c.SafetyMarginReceiptDays > 365 {
 		errs["safetyMarginReceiptDays"] = "must be 0 to 365"
+	}
+	if c.SafetyMarginIssueDays < 0 || c.SafetyMarginIssueDays > 365 {
+		errs["safetyMarginIssueDays"] = "must be 0 to 365"
+	}
+	if c.SafetyMarginReorderDays < 0 || c.SafetyMarginReorderDays > 365 {
+		errs["safetyMarginReorderDays"] = "must be 0 to 365"
 	}
 	if c.LeadTimeDays != nil && (*c.LeadTimeDays < 0 || *c.LeadTimeDays > 3650) {
 		errs["leadTimeDays"] = "must be 0 to 3650"

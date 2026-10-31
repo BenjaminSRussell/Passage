@@ -20,6 +20,20 @@ describe("engineering module", () => {
     expect(engineering.nav.every((n) => n.to.startsWith("/engineering") && n.duty === "engineering.read")).toBe(true);
   });
 
+  it("declares the BOM routes and nav entry", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/engineering/boms", "/engineering/boms/new", "/engineering/boms/:id"]),
+    );
+    expect(engineering.nav.find((n) => n.label === "Bills of material")).toMatchObject({ to: "/engineering/boms", duty: "engineering.read" });
+  });
+
+  it("declares the ECO routes and nav entry", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/engineering/ecos", "/engineering/ecos/new", "/engineering/ecos/:id"]),
+    );
+    expect(engineering.nav.find((n) => n.label === "Change orders")).toMatchObject({ to: "/engineering/ecos", duty: "engineering.read" });
+  });
+
   it("declares the routing routes and nav entries", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(
       expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id"]),
@@ -34,15 +48,20 @@ describe("engineering module", () => {
         "/engineering/resources/:id",
         "/engineering/resource-groups",
         "/engineering/capabilities",
+        "/engineering/calendars",
         "/engineering/calendars/:id",
+        "/engineering/calendars/:id/days",
+        "/engineering/resource-groups/:id",
+        "/engineering/capabilities/:id",
       ]),
     );
     expect(engineering.routes.filter((r) => r.path !== "/engineering" && r.path !== "/engineering/where-used" && r.path !== "/engineering/routes").every((r) => r.handle?.title)).toBe(true);
-    const entries = engineering.nav.filter((n) => ["Resources", "Resource groups", "Capabilities"].includes(n.label));
+    const entries = engineering.nav.filter((n) => ["Resources", "Resource groups", "Capabilities", "Work calendars"].includes(n.label));
     expect(entries.map((n) => [n.label, n.to, n.duty])).toEqual([
       ["Resources", "/engineering/resources", "engineering.read"],
       ["Resource groups", "/engineering/resource-groups", "engineering.read"],
       ["Capabilities", "/engineering/capabilities", "engineering.read"],
+      ["Work calendars", "/engineering/calendars", "engineering.read"],
     ]);
   });
 

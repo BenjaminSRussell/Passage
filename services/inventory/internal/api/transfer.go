@@ -25,6 +25,7 @@ const (
 	dutyABCWrite       = "inventory.abc.write"
 	transferOrdersPath = "/v1/inventory/transfer-orders"
 	inTransitPath      = "/v1/inventory/transfers/in-transit"
+	transferLinesPath  = "/v1/inventory/transfer-order-lines"
 	abcRunsPath        = "/v1/inventory/abc-runs"
 	dateFormat         = "2006-01-02"
 	maxReceiptLines    = 1000
@@ -155,6 +156,7 @@ func (a *API) registerTransfers(r chi.Router) {
 	r.With(authz.RequireDuty(dutyTransferPost)).Post(transferOrdersPath+"/{id}:receive", transferRoute(a.receiveTransfer))
 	r.With(authz.RequireDuty(dutyTransferWrite)).Post(transferOrdersPath+"/{id}:cancel", transferRoute(a.cancelTransfer))
 	r.With(authz.RequireDuty(dutyRead)).Get(inTransitPath, a.listInTransit)
+	r.With(authz.RequireDuty(dutyRead)).Get(transferLinesPath, a.listTransferLines)
 	r.With(authz.RequireDuty(dutyABCWrite)).Post(abcRunsPath, a.runABC)
 	r.With(authz.RequireDuty(dutyRead)).Get(abcRunsPath, a.listABCRuns)
 	r.With(authz.RequireDuty(dutyRead)).Get(abcRunsPath+"/{id}", a.getABCRun)
@@ -554,4 +556,110 @@ func toTransferResponse(o domain.TransferOrder) transferResponse {
 func writeTransfer(w http.ResponseWriter, status int, o domain.TransferOrder) {
 	w.Header().Set("ETag", strconv.Quote(strconv.Itoa(o.Version)))
 	httpx.JSON(w, status, toTransferResponse(o))
+}
+
+type transferLineItem struct {
+	OrderID         string            `json:"orderId"`
+	LegalEntityID   string            `json:"legalEntityId"`
+	Number          string            `json:"number"`
+	OrderStatus     string            `json:"orderStatus"`
+	FromWarehouseID string            `json:"fromWarehouseId"`
+	ToWarehouseID   string            `json:"toWarehouseId"`
+	ShipDate        string            `json:"shipDate"`
+	LineID          string            `json:"lineId"`
+	LineNo          int               `json:"lineNo"`
+	ProductID       string            `json:"productId"`
+	Dimensions      map[string]string `json:"dimensions"`
+	Unit            string            `json:"unit"`
+	Qty             string            `json:"qty"`
+	ShippedQty      string            `json:"shippedQty"`
+	ReceivedQty     string            `json:"receivedQty"`
+	RemainingQty    string            `json:"remainingQty"`
+	InTransit       string            `json:"inTransit"`
+	DaysInTransit   int               `json:"daysInTransit"`
+	Closed          bool              `json:"closed"`
+	Late            string            `json:"late,omitempty"`
+	DaysLate        int               `json:"daysLate"`
+}
+
+// listTransferLines answers the transfer order line inquiry and late overview (FR-16.15, 3.16.14).
+func (a *API) listTransferLines(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	f := store.TransferLineFilter{LegalEntityID: strings.TrimSpace(q.Get("legalEntityId")), Status: strings.TrimSpace(q.Get("status")),
+		ProductID: strings.TrimSpace(q.Get("productId")), FromWarehouse: strings.TrimSpace(q.Get("fromWarehouseId")),
+		ToWarehouse: strings.TrimSpace(q.Get("toWarehouseId")), LateReceiptDays: domain.DefaultLateReceiptDays,
+		AsOf: time.Now().UTC().Truncate(24 * time.Hour)}
+	fields := map[string]string{}
+	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if f.Status != "" && !isTransferStatus(f.Status) {
+		fields["status"] = "unknown transfer order status"
+	}
+	if f.ProductID != "" && !ids.Valid(f.ProductID) {
+		fields["productId"] = "must be a UUID"
+	}
+	if raw := q.Get("late"); raw != "" {
+		late, err := strconv.ParseBool(raw)
+		if err != nil {
+			fields["late"] = "must be true or false"
+		}
+		f.LateOnly = late
+	}
+	if raw := q.Get("lateReceiptDays"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 0 || days > 3650 {
+			fields["lateReceiptDays"] = "must be a whole number of days from 0 to 3650"
+		} else {
+			f.LateReceiptDays = days
+		}
+	}
+	if raw := q.Get("asOf"); raw != "" {
+		if d, err := time.Parse(dateFormat, raw); err != nil {
+			fields["asOf"] = "must be a date (YYYY-MM-DD)"
+		} else {
+			f.AsOf = d
+		}
+	}
+	for name, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To} {
+		if raw := q.Get(name); raw != "" {
+			d, err := time.Parse(dateFormat, raw)
+			if err != nil {
+				fields[name] = "must be a date (YYYY-MM-DD)"
+				continue
+			}
+			*dst = &d
+		}
+	}
+	if f.From != nil && f.To != nil && f.To.Before(*f.From) {
+		fields["to"] = "must not be before from"
+	}
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	rows, truncated, err := a.store.ListTransferLines(r.Context(), f)
+	if err != nil {
+		a.failed(w, r, "list transfer order lines", err)
+		return
+	}
+	items := make([]transferLineItem, 0, len(rows))
+	for _, row := range rows {
+		l := row.Line
+		late, daysLate := domain.TransferLineLateness(row.Status, l, row.ShipDate, f.AsOf, f.LateReceiptDays)
+		inTransit := l.InTransit()
+		daysInTransit := 0
+		if inTransit.IsPositive() {
+			daysInTransit = domain.InTransitDays(row.ShipDate, f.AsOf)
+		}
+		items = append(items, transferLineItem{OrderID: row.OrderID, LegalEntityID: row.LegalEntityID, Number: row.Number, OrderStatus: row.Status,
+			FromWarehouseID: row.FromWarehouse, ToWarehouseID: row.ToWarehouse, ShipDate: row.ShipDate.Format(dateFormat), LineID: l.ID,
+			LineNo: l.LineNo, ProductID: l.ProductID, Dimensions: l.Dims, Unit: l.Unit, Qty: l.Qty.String(), ShippedQty: l.ShippedQty.String(),
+			ReceivedQty: l.ReceivedQty.String(), RemainingQty: domain.TransferLineRemaining(row.Status, l).String(), InTransit: inTransit.String(),
+			DaysInTransit: daysInTransit, Closed: l.Closed, Late: late, DaysLate: daysLate})
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }

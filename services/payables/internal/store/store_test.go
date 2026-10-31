@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -26,7 +28,7 @@ const (
 )
 
 func ctxFor(n int, le string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, Duties: testkit.ScopeDuties(le)})
 }
 
 func setup(t *testing.T) *Postgres {
@@ -35,7 +37,11 @@ func setup(t *testing.T) *Postgres {
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return New(app)
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{3}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(app).WithFieldCrypt(keys)
 }
 
 func invoice(le, vendor, source, due string) OpenItem {
@@ -301,5 +307,74 @@ func TestAgingRows_ThousandGeneratedItemsSumToOpenAmounts(t *testing.T) {
 	}
 	if !got.Equal(want) {
 		t.Fatalf("bucket total %s, want open total %s", got, want)
+	}
+}
+
+const (
+	groupA = "00000000-0000-0000-0000-0000000000b1"
+	groupB = "00000000-0000-0000-0000-0000000000b2"
+)
+
+func TestVendorGroup_StoredAggregatedAndBackfilledOnReplay(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	mk := func(source, vendor, group, amt string) OpenItem {
+		in := invoice(leA, vendor, source, "2027-03-31")
+		in.VendorGroupID = group
+		in.Amount = decimal.RequireFromString(amt)
+		o, _, err := s.CreateFromInvoice(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	first := mk(src1, vendor1, groupA, "100.10")
+	mk(src2, vendor2, groupA, "200.20")
+	mk("00000000-0000-0000-0000-0000000000f3", vendor2, groupB, "7.07")
+	legacy := mk("00000000-0000-0000-0000-0000000000f4", vendor1, "", "50.00")
+	if first.VendorGroupID != groupA || legacy.VendorGroupID != "" {
+		t.Fatalf("group on create = %q / %q", first.VendorGroupID, legacy.VendorGroupID)
+	}
+
+	rows, err := s.AgingRows(ctx, leA, "2027-06-30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, g := range domain.GroupBreakdown(rows) {
+		got[g.VendorGroupID] = g.SubledgerTotal.String()
+	}
+	if want := map[string]string{groupA: "300.3", groupB: "7.07", domain.UnassignedGroup: "50"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("breakdown = %v, want %v", got, want)
+	}
+
+	in := invoice(leA, vendor1, "00000000-0000-0000-0000-0000000000f4", "2027-03-31")
+	in.Amount, in.VendorGroupID = decimal.RequireFromString("50.00"), groupB
+	filled, created, err := s.CreateFromInvoice(ctx, in)
+	if err != nil || created || filled.VendorGroupID != groupB || filled.ID != legacy.ID {
+		t.Fatalf("backfill replay: %+v created=%v err=%v", filled, created, err)
+	}
+	in.VendorGroupID = groupA
+	kept, _, err := s.CreateFromInvoice(ctx, in)
+	if err != nil || kept.VendorGroupID != groupB {
+		t.Fatalf("an assigned group must not be overwritten: %+v err=%v", kept, err)
+	}
+}
+
+func TestVendorGroup_AggregationIsolatedByTenantAndEntity(t *testing.T) {
+	s := setup(t)
+	in := invoice(leA, vendor1, src1, "2027-03-31")
+	in.VendorGroupID = groupA
+	if _, _, err := s.CreateFromInvoice(ctxFor(1, leA), in); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		ctx context.Context
+		le  string
+	}{"other tenant": {ctxFor(2, leA), leA}, "scope excludes entity": {ctxFor(1, leB), leA}} {
+		rows, err := s.AgingRows(c.ctx, c.le, "2027-06-30")
+		if err != nil || len(domain.GroupBreakdown(rows)) != 0 {
+			t.Fatalf("%s: rows=%v err=%v, want none", name, rows, err)
+		}
 	}
 }

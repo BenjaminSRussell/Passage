@@ -5,7 +5,7 @@ info:
   description: >-
     Sales orders, ATP promise checks, credit profiles and order holds, change
     management, listings, agreements, quotations, the hold release queue and
-    supplementary item rules and product proposals (wave 27, slices 1 to 6). Every operation carries x-passage-duty. Errors are RFC 9457
+    supplementary item rules and product proposals (wave 27, slices 1 to 7). Every operation carries x-passage-duty. Errors are RFC 9457
     application/problem+json with a stable code listed in the service README.
 servers:
   - url: https://api.{env}.passage.dev
@@ -117,6 +117,15 @@ paths:
         parent's quantity recomputes it, cancels it when the parent drops below
         the rule's base quantity, and a change of the parent's dates moves it
         with the parent. Those follow-on changes are part of the version's diff.
+        On a CONFIRMED order, a line whose quantity or requested date changes,
+        or that is cancelled or reopened with its parent, returns its allocation
+        quota draw and draws again (BR-27.15); a line moved to a later period
+        gets an SLS-0013 entry in warnings and the moved date in the diff, and a
+        line no period can cover refuses the change with 422 SLS-0013.
+        When the order is CONFIRMED, its customer has change approval switched
+        on (change-policy) and the caller lacks sales.order.approve, the change
+        is validated and stored as a PENDING change request instead of applied
+        (202); a caller with sales.order.approve changes the order directly.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -134,11 +143,31 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Order"}
+        "202":
+          description: >-
+            the customer's changes to confirmed orders need approval (see
+            changeOrder description) and the caller lacks sales.order.approve:
+            nothing was applied, the order is returned unchanged with
+            pendingChange holding the stored change request
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0043 the order already has a change waiting for approval
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
-        "422": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0013 allocation quota cannot cover a changed line in any period
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}:confirm:
     post:
@@ -150,7 +179,9 @@ paths:
         - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
-          description: outcome; confirmed=false means the credit check failed and a CREDIT hold is now ACTIVE (creditCheck lists every rule)
+          description: >-
+            outcome; confirmed=false means the credit check failed and a CREDIT hold is now ACTIVE (creditCheck lists every rule).
+            A line moved to a later period because its allocation quota was used up has an SLS-0013 entry in order.warnings (FR-27.16).
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
           content:
@@ -159,7 +190,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it
+          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it; SLS-0013 allocation is exhausted for a line in every later period
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -170,7 +201,9 @@ paths:
         Release an ACTIVE hold. CREDIT holds need sales.credit.release, other types
         sales.order.hold; the user who applied the hold may not release it. Releasing
         the CREDIT hold of an unconfirmed order confirms it when no other hold blocks
-        confirmation (confirmed=true).
+        confirmation (confirmed=true). When allocation quota cannot cover a line of
+        that confirmation, the hold is still released, the order stays unconfirmed
+        (confirmed=false) and order.warnings carries the SLS-0013 refusal.
       operationId: releaseHold
       x-passage-duty: sales.credit.release | sales.order.hold
       parameters:
@@ -395,6 +428,171 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases:
+    get:
+      summary: Scheduling releases stored against an agreement, newest first, without schedule lines (FR-27.20)
+      operationId: listAgreementScheduleReleases
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: the releases with status, cumulative quantities, open quantity and requirement buckets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Store a forecast or JIT release against an agreement and reconcile its cumulative received
+        quantity with the shipped quantity (FR-27.20, BR-27.12). Within the tolerance it is ACCEPTED and
+        replaces the previous release's open schedule lines atomically; beyond it, it is stored HELD
+        with CUM_QTY_MISMATCH (SLS-0014) and no schedule line changes (AC-27.13).
+      operationId: createAgreementScheduleRelease
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleReleaseRequest"}
+      responses:
+        "201":
+          description: the release was stored, ACCEPTED or HELD
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored release
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0038 the release number was already received for the agreement, or a concurrent request stored this release first
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: SLS-0026 negative, unordered or decreasing buckets, SLS-0029 the agreement is not valid on the receipt date, or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases/{releaseId}:
+    get:
+      summary: One scheduling release with its schedule lines, open and superseded
+      operationId: getAgreementScheduleRelease
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the release
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases/{releaseId}:resolve:
+    post:
+      summary: >-
+        Decide a HELD release at its ETag. ACCEPT overrides the cumulative mismatch and replaces the
+        open schedule lines, with open quantity against the agreement's current shipped quantity;
+        REJECT closes it and changes nothing. Emits schedulerelease.resolved.
+      operationId: resolveAgreementScheduleRelease
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: {type: string, enum: [ACCEPT, REJECT]}
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: the release after the decision
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0039 the release is not HELD, or a newer release is already in effect, or SLS-0026 invalid buckets
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}:record-shipped:
+    post:
+      summary: >-
+        Set the agreement's cumulative shipped quantity at its ETag (until wave 28 shipments drive it)
+        and recalculate the open schedule lines of the release in effect (cumulative required less
+        shipped). The quantity may fall only when the reset date moves forward; the closed period's
+        shipped quantity then moves into the shippedOffset of the ACCEPTED and HELD releases.
+      operationId: recordAgreementShipped
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cumShipped]
+              properties:
+                cumShipped: {$ref: "#/components/schemas/Money"}
+                cumResetDate: {type: string, format: date, description: moving it forward starts a new cumulative period}
+      responses:
+        "200":
+          description: the agreement with its new cumulative shipped quantity
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0040 the quantity would fall without a later reset date, or the reset date moves back
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/atp:check:
     post:
       summary: Stateless ATP promise check over caller-supplied buckets (BR-27.1)
@@ -412,6 +610,220 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AtpCheckResponse"}
         "400": {$ref: "#/components/responses/Problem"}
+  /v1/sales/parameters:
+    parameters:
+      - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read the sales parameters of a legal entity (the defaults, at version 0, when none were saved)
+      operationId: getSalesParameters
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the parameters; the ETag is the version, 0 when the legal entity never saved them
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesParameters"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Replace the sales parameters (If-Match carries the current ETag; first save uses "0")
+      operationId: putSalesParameters
+      x-passage-duty: sales.parameter.maintain
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesParametersRequest"}
+      responses:
+        "200":
+          description: saved parameters; parameters.changed is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesParameters"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests:
+    get:
+      summary: Change requests awaiting approval (status=PENDING, oldest first) or the change history of an order (FR-27.9)
+      description: >-
+        A change of a CONFIRMED order for a customer whose changes need approval
+        is stored here instead of applied when the caller lacks
+        sales.order.approve. Each item carries the change, the field-level diff
+        it would make and the order version it was made against.
+      operationId: listChangeRequests
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: status, in: query, schema: {type: string, enum: [PENDING, APPROVED, REJECTED]}}
+        - {name: orderId, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: the change requests; PENDING oldest first, otherwise newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/ChangeRequest"}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:
+    get:
+      summary: Read one change request with its diff and decision
+      operationId: getChangeRequest
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the change request; the ETag is its version, used as If-Match by approve and reject
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangeRequest"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:approve:
+    post:
+      summary: Approve a change request and apply it to the order in the same transaction (FR-27.9)
+      description: >-
+        The order gets its new version through the same path as a direct PATCH
+        (diff, re-promise of the changed lines, allocation, credit re-check), as
+        the requester's change. orderchange.approved is written with
+        order.changed. The requester cannot approve their own request; an order
+        that moved since the request was made refuses the approval.
+      operationId: approveChangeRequest
+      x-passage-duty: sales.order.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ChangeDecisionRequest"}
+      responses:
+        "200":
+          description: the approved request and the order at its new version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request, order]
+                properties:
+                  request: {$ref: "#/components/schemas/ChangeRequest"}
+                  order: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403":
+          description: the caller lacks sales.order.approve, or SLS-0045 the caller requested the change
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0044 the request was already decided; SLS-0046 the order changed since the request was made
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0024 the stored change no longer applies; SLS-0013 allocation quota cannot cover a changed line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/change-requests/{id}:reject:
+    post:
+      summary: Reject a change request with a comment; the order stays as it was (FR-27.9)
+      operationId: rejectChangeRequest
+      x-passage-duty: sales.order.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ChangeDecisionRequest"
+                - {type: object, required: [comment]}
+      responses:
+        "200":
+          description: the rejected request; orderchange.rejected is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangeRequest"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0044 the request was already decided
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/customers/{customerId}/change-policy:
+    parameters:
+      - {name: customerId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read whether a customer's changes to confirmed orders need approval (change_approval_required, off at version 0)
+      operationId: getChangePolicy
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the switch; the ETag is the version, 0 when never saved
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangePolicy"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Turn change approval on or off for a customer (If-Match carries the current ETag; first save uses "0")
+      operationId: putChangePolicy
+      x-passage-duty: sales.order.approve
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approvalRequired]
+              properties:
+                approvalRequired: {type: boolean}
+      responses:
+        "200":
+          description: the saved switch; changepolicy.changed is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChangePolicy"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/credit-profiles:
     get:
       summary: List credit profiles of one legal entity, or of every legal entity in the caller's scope
@@ -530,6 +942,109 @@ paths:
                     items: {$ref: "#/components/schemas/OrderVersion"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/lines/{lineNo}:promise:
+    post:
+      summary: Promise one line of a confirmed order against ATP buckets and store its schedule lines (FR-27.6, BR-27.1, AC-27.8)
+      description: >-
+        Places the line quantity against the supplied buckets. The part that can ship by the requested date stays CONFIRMED, supply that
+        arrives later becomes BACKORDER lines and quantity no bucket covers an UNPROMISED line. The line's confirmed ship date becomes the
+        first dated schedule line (never earlier than the quota period it drew from, BR-27.15), its supplementary lines follow, the order
+        gets a new version with the diff, and order.changed and atp.promised are written in the same transaction.
+      operationId: promiseOrderLine
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: lineNo, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periods]
+              properties:
+                completeOnly: {type: boolean, default: false, description: ship the whole quantity on one date or backorder it in full}
+                periods:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: "#/components/schemas/AtpPeriod"}
+      responses:
+        "200":
+          description: the order after the promise and the active schedule lines of the order
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order, scheduleLines]
+                properties:
+                  order: {$ref: "#/components/schemas/Order"}
+                  scheduleLines:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleLine"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404":
+          description: SLS-0100 the order does not exist; SLS-0109 the order has no such line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0037 the order is not CONFIRMED or is a JOURNAL order, the line is past RESERVED or the line is a supplementary line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/schedule-lines:
+    get:
+      summary: The active schedule lines of an order by line and sequence (FR-27.6)
+      operationId: listScheduleLines
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: CONFIRMED, BACKORDER and UNPROMISED schedule lines; superseded and cancelled lines are not listed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleLine"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorders:
+    get:
+      summary: Backorder list - schedule lines promised after the requested date or not at all, by promised date (FR-27.6, AC-27.8)
+      operationId: listBackorders
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: promisedTo, in: query, description: only lines promised on or before this date (undated lines are always listed), schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: backorder lines of CONFIRMED orders, earliest promised date first, undated lines last
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BackorderItem"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/schedule-releases:check:
     post:
       summary: Stateless reconciliation of a scheduling-agreement release; a cumulative mismatch holds the release (BR-27.12, FR-27.20)
@@ -616,6 +1131,111 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorder-runs:
+    get:
+      summary: Stored backorder runs in the caller's scope, newest first, without their lines (Backorder run results)
+      operationId: listBackorderRuns
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [PREVIEW, COMMITTED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BackorderRun"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Plan a backorder processing run over the open lines of one product at a site and warehouse, read from
+        the CONFIRMED orders, and store it as a PREVIEW; no order changes until it is committed (FR-27.17, BR-27.11)
+      operationId: createBackorderRun
+      x-passage-duty: sales.backorder.run
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BackorderRunRequest"}
+      responses:
+        "200":
+          description: the stored run of an earlier request with the same Idempotency-Key and body
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "201":
+          description: the PREVIEW run with its lines in processing order; warningCode SLS-0015 when lines would be deconfirmed
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0027 no open line, more than 10000 lines, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation; or the Idempotency-Key was used with another body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/backorder-runs/{id}:
+    get:
+      summary: One stored backorder run with its lines in processing order
+      operationId: getBackorderRun
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the run
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorder-runs/{id}:commit:
+    post:
+      summary: >-
+        Commit a PREVIEW run at its ETag: in one transaction, serialised per product, site and warehouse, rewrite the
+        schedule lines of every changed line, move confirmed dates, version each order and emit order.changed,
+        atp.promised per changed line and backorderrun.committed
+      operationId: commitBackorderRun
+      x-passage-duty: sales.backorder.run
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: the COMMITTED run
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: >-
+            SLS-0041 the run was already committed (also for a retry at the old ETag), or SLS-0042 an order changed since the
+            preview or another open line of the product, site and warehouse holds another promised quantity, and nothing was applied
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/quotations:
     get:
       summary: Quotations in the caller's scope, newest first, without lines (Quotations pipeline)
@@ -782,6 +1402,47 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations:expire:
+    post:
+      summary: Expire lapsed quotations - every DRAFT or SENT quotation past its validity becomes EXPIRED, up to 500 per run (FR-27.1)
+      description: >-
+        The run the hourly quotation-expiry job calls. It is state-based, so repeating it is harmless and it
+        takes no Idempotency-Key. Each quotation's version is bumped and quotation.expired is written in the
+        same transaction. When more is true the batch limit stopped the run; call it again.
+      operationId: expireQuotations
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+      responses:
+        "200":
+          description: the quotations expired by this run, possibly none
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExpireResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/summary:
+    get:
+      summary: Sales workspace tiles (active holds, backorder lines, quotations expiring) and the quotation pipeline KPIs
+      description: >-
+        The tiles and the conversion rate ignore the pipeline filters (status, minProbabilityPct,
+        expiringWithinDays), which narrow the pipeline only. Days are UTC calendar days.
+      operationId: getSalesSummary
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: windowDays, in: query, description: Days over which the conversion rate is measured, schema: {type: integer, minimum: 1, maximum: 365, default: 90}}
+        - {name: status, in: query, description: Pipeline filter - only DRAFT or only SENT quotations (default both), schema: {type: string, enum: [DRAFT, SENT]}}
+        - {name: minProbabilityPct, in: query, description: Pipeline filter - only quotations whose win probability is at least this, schema: {type: integer, minimum: 0, maximum: 100, default: 0}}
+        - {name: expiringWithinDays, in: query, description: Pipeline filter - only quotations whose last valid day is today or within the next N-1 days (default any validity), schema: {type: integer, minimum: 1, maximum: 365}}
+      responses:
+        "200":
+          description: the counts and pipeline of the caller's legal entities
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesSummary"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/holds:
     get:
       summary: Release queue - ACTIVE holds oldest first with the failed credit rule and the customer's limit (holdType=CREDIT is the credit release queue)
@@ -894,6 +1555,126 @@ paths:
                     items: {$ref: "#/components/schemas/SupplementaryLine"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/allocation-quotas:
+    get:
+      summary: Allocation quota inquiry per product and period - quota, consumed and remaining (FR-27.16)
+      operationId: listAllocationQuotas
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: onDate, in: query, description: keeps quotas whose period contains this day, schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: quotas ordered by product and period, latest period first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Set a product allocation quota for a period, for one customer or every customer (FR-27.16, SAP OVZJ).
+        Confirmation of an order consumes it in requested-period order (BR-27.15).
+      operationId: createAllocationQuota
+      x-passage-duty: sales.allocation.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AllocationQuotaRequest"}
+      responses:
+        "201":
+          description: the stored quota with consumed quantity 0; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored quota
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0035 a quota for this product and customer already covers part of the period
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: the Idempotency-Key was used with a different request body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/allocation-quotas/{id}:
+    get:
+      summary: One allocation quota with its draw history, newest first
+      operationId: getAllocationQuota
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the quota with its consumptions
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      summary: Change a quota quantity under If-Match; below the consumed quantity is refused (BR-27.15)
+      operationId: changeAllocationQuota
+      x-passage-duty: sales.allocation.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quotaQty]
+              properties:
+                quotaQty: {type: string, description: new quota quantity as a decimal string, greater than 0, below 10^14, at most 6 places, example: "120"}
+      responses:
+        "200":
+          description: the quota after the change
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0036 the quantity is below what is consumed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412":
+          description: SLS-0006 the If-Match version is stale (every draw and return also moves the version)
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/product-proposal-rules:
     get:
       summary: Product proposal rules in the caller's scope with their recorded accept and decline counts (FR-27.21)
@@ -1065,6 +1846,95 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    ExpiredQuotation:
+      type: object
+      required: [id, quotationNumber, legalEntityId, customerId, validUntil, previousStatus, version]
+      properties:
+        id: {type: string, format: uuid}
+        quotationNumber: {type: string, example: "SQ-0000001"}
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        validUntil: {type: string, format: date}
+        previousStatus: {type: string, enum: [DRAFT, SENT]}
+        version: {type: integer, description: the quotation version after the expiry}
+    ExpireResult:
+      type: object
+      required: [expired, count, more]
+      properties:
+        expired:
+          type: array
+          items: {$ref: "#/components/schemas/ExpiredQuotation"}
+        count: {type: integer}
+        more: {type: boolean, description: true when the 500-quotation batch limit stopped the run}
+    PipelineCurrency:
+      type: object
+      required: [currency, openCount, openNet, weightedNet]
+      properties:
+        currency: {type: string, description: ISO 4217 alpha-3; currencies are never added together}
+        openCount: {type: integer}
+        openNet: {$ref: "#/components/schemas/Money"}
+        weightedNet: {allOf: [{$ref: "#/components/schemas/Money"}], description: sum of net total times win probability}
+    SalesSummary:
+      type: object
+      required: [activeHolds, backorderLines, quotationsExpiring, quotationsLapsed, pipeline, windowDays, won, lost, expired]
+      properties:
+        activeHolds: {type: integer, description: ACTIVE order holds of every type}
+        backorderLines: {type: integer, description: BACKORDER and UNPROMISED schedule lines of CONFIRMED orders}
+        quotationsExpiring: {type: integer, description: open quotations whose last valid day is today or one of the next 6 days}
+        quotationsLapsed: {type: integer, description: open quotations already past their validity that no expiry run has closed}
+        pipeline:
+          type: array
+          description: valid DRAFT and SENT quotations per currency, narrowed by the pipeline filters
+          items: {$ref: "#/components/schemas/PipelineCurrency"}
+        windowDays: {type: integer}
+        won: {type: integer, description: CONVERTED quotations last updated within the window}
+        lost: {type: integer, description: LOST quotations last updated within the window}
+        expired: {type: integer, description: EXPIRED quotations last updated within the window}
+        conversionRatePct:
+          type: string
+          description: won / (won + lost + expired) in percent at one place; absent when nothing closed in the window
+          example: "42.9"
+    AllocationQuotaRequest:
+      type: object
+      required: [legalEntityId, productId, periodStart, periodEnd, quotaQty]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: absent means every customer of the legal entity}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date, description: inclusive; not before periodStart}
+        quotaQty: {type: string, description: decimal string greater than 0 and below 10^14 with at most 6 places, example: "100"}
+    AllocationQuota:
+      type: object
+      required: [id, legalEntityId, productId, periodStart, periodEnd, quotaQty, consumedQty, remainingQty, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+        quotaQty: {type: string}
+        consumedQty: {type: string}
+        remainingQty: {type: string}
+        version: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        consumptions:
+          type: array
+          description: draw history, newest first; only on a single read
+          items:
+            type: object
+            required: [id, orderId, lineId, lineNo, quantity, consumedAt]
+            properties:
+              id: {type: string, format: uuid}
+              orderId: {type: string, format: uuid}
+              lineId: {type: string, format: uuid}
+              lineNo: {type: integer}
+              quantity: {type: string}
+              consumedAt: {type: string, format: date-time}
+              returnedAt: {type: string, format: date-time, description: set when the order or line was cancelled or changed}
     Problem:
       type: object
       required: [type, title, status]
@@ -1091,7 +1961,7 @@ components:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, format: uuid}
         invoiceAccountId: {type: string, format: uuid}
-        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], default: ORDER}
+        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], description: "omitted: the legal entity's defaultOrderType (ORDER unless set in the sales parameters)"}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         requestedShipDate: {type: string, format: date}
         channel: {type: string, pattern: "^[A-Za-z0-9_-]{1,40}$", default: UI}
@@ -1168,6 +2038,7 @@ components:
         commitmentQty: {$ref: "#/components/schemas/Money"}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
+        cumTolerance: {$ref: "#/components/schemas/Money", description: how far a release's cumulative received quantity may differ from the shipped quantity (BR-27.12); default 0}
     SalesAgreement:
       type: object
       required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, releasedQty, remainingQty, status, version]
@@ -1191,10 +2062,73 @@ components:
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+        cumTolerance: {$ref: "#/components/schemas/Money"}
+        cumShipped: {$ref: "#/components/schemas/Money", description: quantity shipped since the cumulative reset date}
+        cumResetDate: {type: string, format: date}
         releases:
           type: array
           description: release history, newest first; present on GET /agreements/{id} only
           items: {$ref: "#/components/schemas/AgreementReleaseRecord"}
+    ScheduleReleaseRequest:
+      type: object
+      required: [releaseNo, releaseType, cumReceived, buckets]
+      properties:
+        releaseNo: {type: string, minLength: 1, maxLength: 40, description: the customer's release number, unique per agreement}
+        releaseType: {type: string, enum: [FORECAST, JIT]}
+        cumReceived: {$ref: "#/components/schemas/Money", description: the customer's cumulative received quantity}
+        buckets:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [date, cumRequired]
+            properties:
+              date: {type: string, format: date}
+              cumRequired: {$ref: "#/components/schemas/Money"}
+    ScheduleRelease:
+      type: object
+      required: [id, agreementId, agreementNumber, releaseNo, releaseType, status, cumReceived, cumShipped, shippedOffset, tolerance, difference, openQuantity, buckets, receivedBy, receivedAt, version]
+      properties:
+        id: {type: string, format: uuid}
+        agreementId: {type: string, format: uuid}
+        agreementNumber: {type: string}
+        releaseNo: {type: string}
+        releaseType: {type: string, enum: [FORECAST, JIT]}
+        status: {type: string, enum: [ACCEPTED, HELD, REJECTED, SUPERSEDED]}
+        cumReceived: {$ref: "#/components/schemas/Money"}
+        cumShipped: {$ref: "#/components/schemas/Money", description: shipped quantity the release was last reconciled or recalculated against, on its own cumulative basis (shippedOffset included)}
+        shippedOffset: {$ref: "#/components/schemas/Money", description: shipped quantity of cumulative periods closed by a later reset date that still counts against this release}
+        tolerance: {$ref: "#/components/schemas/Money"}
+        difference: {$ref: "#/components/schemas/Money", description: cumulative received less shipped}
+        openQuantity: {$ref: "#/components/schemas/Money"}
+        code: {type: string, example: CUM_QTY_MISMATCH, description: present while the release is HELD}
+        serviceCode: {type: string, example: SLS-0014}
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [date, cumRequired]
+            properties:
+              date: {type: string, format: date}
+              cumRequired: {$ref: "#/components/schemas/Money"}
+        lines:
+          type: array
+          description: schedule lines; present on a single read and after a write
+          items:
+            type: object
+            required: [id, dueDate, quantity, status]
+            properties:
+              id: {type: string, format: uuid}
+              dueDate: {type: string, format: date}
+              quantity: {$ref: "#/components/schemas/Money"}
+              status: {type: string, enum: [OPEN, SUPERSEDED]}
+        receivedBy: {type: string}
+        receivedAt: {type: string, format: date-time}
+        resolvedBy: {type: string}
+        resolvedAt: {type: string, format: date-time}
+        resolutionReason: {type: string}
+        version: {type: integer, minimum: 1}
     AgreementReleaseRecord:
       type: object
       required: [id, quantity, salesOrderId, orderNumber, actor, releasedAt]
@@ -1259,9 +2193,12 @@ components:
         listingOverrides:
           type: array
           items: {$ref: "#/components/schemas/ListingOverride"}
+        pendingChange: {allOf: [{$ref: "#/components/schemas/ChangeRequest"}], description: set only on the 202 result of a change stored for approval}
         warnings:
           type: array
-          description: set only on the result of a create (and its replay), a quotation conversion or an agreement release
+          description: >-
+            set only on the result of a create (and its replay), a quotation conversion or an agreement release (SLS-0012),
+            and of a confirm, a CREDIT release or a change of a confirmed order that allocation quota affected (SLS-0013)
           items: {$ref: "#/components/schemas/Notice"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
@@ -1365,6 +2302,26 @@ components:
         exposure: {$ref: "#/components/schemas/Exposure"}
         version: {type: integer}
         updatedAt: {type: string, format: date-time}
+    SalesParametersRequest:
+      type: object
+      description: every value is required; the PUT replaces them all. Names are the PRD 5.27.13 parameter names.
+      required: [quotationExpiryDays, quotationProbabilityDefault, creditReleaseValidityDays, creditHoldSlaBusinessDays, defaultOrderType]
+      properties:
+        quotationExpiryDays: {type: integer, minimum: 1, maximum: 365, description: validity in days of a quotation created without validUntil (quotation_expiry_days)}
+        quotationProbabilityDefault: {type: integer, minimum: 0, maximum: 100, description: win probability of a quotation created without probabilityPct (quotation_probability_default)}
+        creditReleaseValidityDays: {type: integer, minimum: 1, maximum: 30, description: how long a CREDIT release stays valid (credit_release_validity_days, BR-27.4)}
+        creditHoldSlaBusinessDays: {type: integer, minimum: 1, maximum: 10, description: "business days (Monday to Friday) a hold may wait for release; the queue reports slaDueAt (credit_hold_sla_business_days, FR-27.8)"}
+        defaultOrderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION], description: order type of an order created without one (default_order_type)}
+    SalesParameters:
+      allOf:
+        - $ref: "#/components/schemas/SalesParametersRequest"
+        - type: object
+          required: [legalEntityId, version]
+          properties:
+            legalEntityId: {type: string, format: uuid}
+            version: {type: integer, description: 0 when never saved}
+            updatedBy: {type: string, description: absent when never saved}
+            updatedAt: {type: string, format: date-time, description: absent when never saved}
     CreditProfileRequest:
       type: object
       required: [limit, currency, limitType]
@@ -1438,6 +2395,38 @@ components:
           items: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         version: {type: integer}
         createdAt: {type: string, format: date-time}
+    ScheduleLine:
+      type: object
+      required: [id, lineNo, seq, quantity, status, source]
+      properties:
+        id: {type: string, format: uuid}
+        lineNo: {type: integer}
+        seq: {type: integer}
+        quantity: {$ref: "#/components/schemas/Money"}
+        deliveryDate: {type: string, format: date, description: absent on an UNPROMISED line}
+        status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
+        source: {type: string, enum: [LINE, ATP], description: LINE copies the line's confirmed ship date (confirm or change); ATP was placed by a promise}
+        bucketDate: {type: string, format: date, description: the ATP bucket a dated ATP slice drew on}
+    BackorderItem:
+      type: object
+      required: [scheduleLineId, legalEntityId, orderId, orderNumber, orderVersion, customerId, lineId, lineNo, productId, siteId, warehouseId, quantity, requestedShipDate, status]
+      properties:
+        scheduleLineId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        orderVersion: {type: integer}
+        customerId: {type: string, format: uuid}
+        lineId: {type: string, format: uuid}
+        lineNo: {type: integer}
+        productId: {type: string, format: uuid}
+        siteId: {type: string}
+        warehouseId: {type: string}
+        quantity: {$ref: "#/components/schemas/Money"}
+        requestedShipDate: {type: string, format: date}
+        promisedDate: {type: string, format: date, description: absent when no supply covers the quantity}
+        daysLate: {type: integer, description: promised date minus requested date}
+        status: {type: string, enum: [BACKORDER, UNPROMISED]}
     OrderVersion:
       type: object
       required: [version, actor, reason, diff, changedAt]
@@ -1457,6 +2446,50 @@ components:
               field: {type: string, example: quantity}
               old: {type: string}
               new: {type: string}
+    ChangeDecisionRequest:
+      type: object
+      properties:
+        comment: {type: string, maxLength: 500}
+    ChangePolicy:
+      type: object
+      required: [legalEntityId, customerId, approvalRequired, version]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        approvalRequired: {type: boolean}
+        version: {type: integer, minimum: 0}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
+    ChangeRequest:
+      type: object
+      required: [id, legalEntityId, orderId, orderNumber, customerId, status, baseVersion, reason, change, diff, requestedBy, requestedAt, decisionComment, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        customerId: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED]}
+        baseVersion: {type: integer, description: the order version the change was made against}
+        reason: {type: string}
+        change: {$ref: "#/components/schemas/ChangeOrderRequest"}
+        diff:
+          type: array
+          items:
+            type: object
+            required: [lineNo, field, old, new]
+            properties:
+              lineNo: {type: integer, description: 0 for a header field}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+        requestedBy: {type: string}
+        requestedAt: {type: string, format: date-time}
+        decidedBy: {type: string}
+        decidedAt: {type: string, format: date-time}
+        decisionComment: {type: string}
+        appliedVersion: {type: integer, description: the order version an approval produced}
+        version: {type: integer}
     ChangeOrderRequest:
       type: object
       description: At least one of lines or requestedShipDate. Absent line fields keep their value.
@@ -1475,6 +2508,70 @@ components:
               unitPrice: {$ref: "#/components/schemas/Money"}
               discPct: {$ref: "#/components/schemas/Money"}
               requestedShipDate: {type: string, format: date}
+    BackorderRunRequest:
+      type: object
+      required: [legalEntityId, productId, siteId, warehouseId, strategy, supply, supplyDate]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {$ref: "#/components/schemas/Money", description: the whole quantity available for the open lines, what they hold today included}
+        supplyDate: {type: string, format: date, description: the date the supply is available; a line that gains is promised no earlier}
+        loseThreshold: {type: integer, minimum: 1, maximum: 9, default: 3, description: LOSE may deconfirm only lines of this priority class or above}
+        defaultPriorityClass: {type: integer, minimum: 1, maximum: 9, default: 5, description: priority class of customers not listed in priorityClasses}
+        priorityClasses:
+          type: object
+          description: priority class (1 is highest) by customer id until the party master carries it
+          additionalProperties: {type: integer, minimum: 1, maximum: 9}
+    BackorderRunLine:
+      type: object
+      properties:
+        seq: {type: integer, description: position in processing order}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        orderVersion: {type: integer, description: the order version the preview was computed on; a commit refuses a newer one}
+        lineId: {type: string, format: uuid}
+        lineNo: {type: integer}
+        customerId: {type: string, format: uuid}
+        priorityClass: {type: integer}
+        requestedDate: {type: string, format: date}
+        orderValue: {$ref: "#/components/schemas/Money"}
+        demand: {$ref: "#/components/schemas/Money"}
+        before: {$ref: "#/components/schemas/Money", description: quantity with a promised date now}
+        after: {$ref: "#/components/schemas/Money", description: quantity with a promised date after the run}
+        changed: {type: boolean}
+        deconfirmed: {type: boolean}
+        gainDate: {type: string, format: date, description: date a gaining line is promised on}
+    BackorderRun:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {$ref: "#/components/schemas/Money"}
+        supplyDate: {type: string, format: date}
+        loseThreshold: {type: integer}
+        defaultPriorityClass: {type: integer}
+        status: {type: string, enum: [PREVIEW, COMMITTED]}
+        allocated: {$ref: "#/components/schemas/Money", description: quantity with a promised date across the lines after the run}
+        deconfirmedCount: {type: integer}
+        changedCount: {type: integer}
+        version: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        committedBy: {type: string}
+        committedAt: {type: string, format: date-time}
+        warning: {type: string}
+        warningCode: {type: string, example: SLS-0015}
+        lines:
+          type: array
+          description: absent from the list
+          items: {$ref: "#/components/schemas/BackorderRunLine"}
     BackorderPreviewRequest:
       type: object
       required: [strategy, available, lines]
@@ -1504,8 +2601,8 @@ components:
         customerId: {type: string, format: uuid}
         invoiceAccountId: {type: string, format: uuid, description: defaults to the customer}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        validUntil: {type: string, format: date, description: "today to today + 365 days; default today + 30 (quotation_expiry_days)"}
-        probabilityPct: {type: integer, minimum: 0, maximum: 100, default: 50}
+        validUntil: {type: string, format: date, description: "today to today + 365 days; default today + the legal entity's quotationExpiryDays (30 unless set)"}
+        probabilityPct: {type: integer, minimum: 0, maximum: 100, description: "default the legal entity's quotationProbabilityDefault (50 unless set)"}
         lines:
           type: array
           minItems: 1
@@ -1563,7 +2660,7 @@ components:
         order: {$ref: "#/components/schemas/Order"}
     HoldQueueItem:
       type: object
-      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt]
+      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
       properties:
         holdId: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -1577,6 +2674,7 @@ components:
         currency: {type: string}
         appliedBy: {type: string}
         appliedAt: {type: string, format: date-time}
+        slaDueAt: {type: string, format: date-time, description: appliedAt plus the legal entity's creditHoldSlaBusinessDays (Monday to Friday); a hold past it is overdue}
         failedRule:
           type: object
           description: the failed rule of the order's last credit check (CREDIT holds); for CR-1 value is exposure plus the order and threshold the limit with tolerance

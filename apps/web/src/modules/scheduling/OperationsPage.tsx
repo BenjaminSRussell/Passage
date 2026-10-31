@@ -41,6 +41,7 @@ export function OperationsPage() {
     { key: "dueAt", header: "Due", render: (row) => (row.dueAt ? formatDateTime(row.dueAt) : dash) },
     { key: "priority", header: "Priority", align: "end" },
     { key: "resourceIds", header: "Candidates", mono: true, render: (row) => row.resourceIds.map((id) => codes[id] ?? shortId(id)).join(", ") },
+    { key: "secondaryResourceIds", header: "Secondary", mono: true, render: (row) => (row.secondaryResourceIds.length > 0 ? row.secondaryResourceIds.map((id) => codes[id] ?? shortId(id)).join(", ") : dash) },
     { key: "setupGroup", header: "Setup group", mono: true, render: (row) => row.setupGroup ?? dash },
     { key: "networkId", header: "Network", mono: true, render: (row) => (row.networkId ? (networks[row.networkId] ?? shortId(row.networkId)) : dash) },
     { key: "attributes", header: "Attributes", render: (row) => describeAttributes(row.attributes) },

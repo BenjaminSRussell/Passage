@@ -28,10 +28,10 @@ export function SlipStatusBadge({ status, reversal }: { status: PackingSlipStatu
   return <Badge tone={slipTones[status] ?? "neutral"}>{slipLabels[status] ?? status}</Badge>;
 }
 
-const containerTones: Record<ContainerStatus, BadgeTone> = { OPEN: "neutral", CLOSED: "info", SHIPPED: "success" };
-const containerLabels: Record<ContainerStatus, string> = { OPEN: "Open", CLOSED: "Closed", SHIPPED: "Shipped" };
+const containerTones: Record<ContainerStatus, BadgeTone> = { OPEN: "neutral", CLOSED: "info", SHIPPED: "success", UNPACKED: "neutral" };
+const containerLabels: Record<ContainerStatus, string> = { OPEN: "Open", CLOSED: "Closed", SHIPPED: "Shipped", UNPACKED: "Unpacked" };
 
-/** Container state: CLOSED is packed and labelled, SHIPPED left on a packing slip. */
+/** Container state: CLOSED is packed and labelled, SHIPPED left on a packing slip, UNPACKED was taken apart (its SSCC stays void). */
 export function ContainerStatusBadge({ status }: { status: ContainerStatus }) {
   return <Badge tone={containerTones[status] ?? "neutral"}>{containerLabels[status] ?? status}</Badge>;
 }

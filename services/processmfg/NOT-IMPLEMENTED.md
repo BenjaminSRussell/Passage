@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1 to 3 (processmfg)
+# Not implemented in PSG-24 slices 1 to 3, 9 and 11 (processmfg)
 
 Built in slice 1: formulas with their lines (FR-24.1, PMF-0001), batch orders from a formula
 snapshot scaled to the batch size (FR-24.2, BR-24.1), rescale before Started with optimistic
@@ -26,12 +26,72 @@ plan with the FR-24.18 parameters (`POST /v1/production/rework-orders:preview`).
 of slice 3 also re-implemented lean flow and kanban-rule persistence; main already held the
 reviewed slice-1 version of that, so the duplicate was dropped (see services/lean).
 
+Built in slice 9: the batch-order lifecycle and co-product cost allocation on an order
+(Deliverable 1, FR-24.4, BR-24.3, AC-24.3 and the ticket's AC2). `:release`, `:start`,
+`:report-finished` and `:end` move a planned order through released, started and reported to
+ended, each with the order version, an Idempotency-Key (a retry replays the first answer and
+writes no second event) and one `batchorder.statechanged` event in the same transaction. Report
+as finished records the main quantity and the reported quantity of each co- and by-product line
+(a line left out is reported at its plan); End takes the batch cost (platform money rounding, a
+cost with more decimals than the currency's minor unit is refused) and the allocation method,
+splits it with the BR-24.3 rule over the main item, the co-products and the by-product
+burdens, stores the shares in `batch_order_allocation` (migration 0002; the shares add up to the
+batch cost exactly, checked in the rule and again by the test against the stored rows; when the
+main item weighs nothing, as with a zero standard cost under TCA, the few ten-thousandths that
+rounding the co-products up can overshoot are taken back one ten-thousandth at a time, largest
+co-product first, so no share is negative), writes
+`dev.passage.production.coproduct.allocated.v1` in the same transaction, and the order then
+carries its `allocation`. Rescale is refused from Started on (PMF-0105). The order detail screen
+gains the release, start, report and end steps and the cost split. Both AsyncAPI documents
+(processmfg and lean) now pass the documentation gate with no FAIL lines.
+
+Built in slice 11: the batch quality record (Deliverable 2, FR-24.5, AC-24.10). The service keeps
+its own register of the batches it records quality data for (`batch_record`, one per item and
+batch number, migration 0003) until the wave-16 inventory batch store exists. Attribute
+definitions per item (`POST` and `GET /v1/production/batch-attribute-definitions`, unique per item
+and name, numeric limits and enum options validated by `domain.ValidateDefinitions`, and the PRD
+`role` generic or potency, with at most one numeric potency attribute per item); batches
+(`POST /batches` with the caller's legal entity by default and an optional `batchOrderId` that must
+name a batch order of the same legal entity in the caller's scope, `GET /batches` filtered by item and
+disposition, `GET /batches/{id}` with the current value of each attribute, the full attribute
+history and the disposition history); `PUT /batches/{id}/attributes` records values through
+`domain.CheckAttributes` (an undefined attribute, a wrong type or a non-option is refused with
+COM-0001, a numeric value outside min/max is recorded with `pass = false`), appends them to an
+append-only history, sets the batch's expiry date from a date recorded under the `expiry`
+attribute (FR-24.6) and writes `batch.attributesrecorded` with the failure count and the value of
+the item's potency attribute when recorded; `POST /batches/{id}:disposition` moves a batch to
+available, on-hold, quarantine or rejected with a required reason, a history row and
+`batch.dispositionchanged`. A disposition change by a user who recorded attribute values on the
+same batch is flagged `segregationConflict` on the history row and the event (PRD 4.24.17), not
+refused. Every command takes an
+Idempotency-Key and the batch version (stale version PMF-0104, an unchanged disposition PMF-0111,
+PMF-0108/0109/0110 for not found and duplicates). The disposition command has its own duty,
+`production.batch-disposition.write`, apart from `production.batch-attribute.write`, so the person
+who records test values need not be the one who releases or blocks the batch. The web module gains
+the batch list, register form, batch detail (recording form per definition, current and historical
+values, disposition form hidden without the duty, both histories) and the attribute definitions
+page. The picking proposal and the other previews still take their batches as input; reading the
+stored batches into them is the row below.
+
+Wave 24 proof fixtures: `pmf-potency-adv-40.csv` and `pmf-coby-adv-23.json` under testdata/,
+written by the independent exact-rational references `gen_pmf_potency_adv.py` and
+`gen_pmf_coby_adv.py`; the co-product cases are also ended on batch orders in the store. Building
+them found that by-product burdens which fit the batch cost exactly (percent burdens totalling
+100 %) were refused with PMF-0021 when their 4-place rounding overshot the cost; the overshoot is
+now taken back off the burdens one ten-thousandth at a time, largest first, and burdens are
+refused only when they exceed the cost both exactly and rounded. Taking it all off the single
+largest share instead (burdens, and co-products under a weightless main item) went negative when
+many tiny shares rounded up (four CLF 0.0001 burdens on a cost of 0.0002); the three CLF cases
+at the end of the fixture cover that.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Deliverable 1: batch order state machine (release, start, report as finished, end) and journals "as w21" | later slice of PSG-24 | slice 1 stores orders in `planned` and allows rescale while planned or released; status transitions and journals reuse the wave-21 order engine (services/production), which this slice does not call yet |
-| Deliverable 1: co-product allocation on an order (`/batch-orders/{id}/co-products:allocate`, End with journal lines, `co-product.allocated` event, CoProductLine table) | later slice of PSG-24 | the allocation rule is built and exposed as a preview (`POST /v1/production/co-products:allocate`); binding it to an order's actual cost needs the wave-21 End and the ledger posting |
+| Deliverable 1: journals "as w21" on release, start, report and end (material issue, finished-goods receipt, WIP) | handoff | the status machine and the cost split are built here; posting issues, receipts and WIP journals is the wave-21 order engine (services/production) and the ledger, which consume `batchorder.statechanged` and `coproduct.allocated`. The `closed` status (period close) is not entered by this service; the batch cost is entered by the caller at End, because actual cost comes from wave-20 inventory costing and wave-21 WIP |
+| Deliverable 1: co-product allocation on an order: standard costs and by-product rates read from item cost records, the `/co-products:allocate` command path, CoProductLine table, ledger journal lines | partial | the allocation is bound to the order and stored at End (slice 9), with standard costs, percentages and by-product rates entered by the caller; the stand-alone preview stays at `POST /v1/production/co-products:allocate`. Reading standard costs from wave-20 costing, the per-line `allocation_pct` and `by_product_cost_type` formula columns, reversing an ended order's allocation, and the journal lines for the ledger are later slices |
 | Deliverable 1: potency role on items, pickability of batches outside min/max, consumption proposal (FR-24.3, AC-24.2 end to end) | partial | `ConsumePotency` and `PotencyInRange` are built and tested against pmf-potency-20 and exposed as a calculator; slice 3 adds the potency band to the picking proposal (`domain.CheckPickable`, PMF-0005) over batches the caller passes in. Reading the batches and the item's potency role from wave-16 inventory, and proposing the potency-adjusted quantity per picked batch on a batch order, need the batch store and the order engine; `PMF_POTENCY_TOLERANCE_PCT` is not read |
-| Deliverable 2: batch attributes and dispositions (PUT `/inventory/batches/{id}/attributes`, `:disposition`, history, `batch.attributes-recorded` event, AC-24.10) | partial | slice 3 builds the value check against attribute definitions (`domain.CheckAttributes`, `POST /v1/production/batch-attributes:check`) and the disposition block at picking (AC-24.10, PMF-0016, in the picking proposal). The BatchAttribute definition and BatchAttributeValue tables, the PUT and `:disposition` commands with their history, the `batch.attributes-recorded` event and the segregation between *Maintain batch attributes* and *Maintain batch disposition* need the wave-16 InventoryBatch store, so they are later slices; date limits on date attributes are not checked |
+| Deliverable 2: batch attributes and dispositions (PUT `/inventory/batches/{id}/attributes`, `:disposition`, history, `batch.attributes-recorded` event, AC-24.10) | partial | built in slice 11 under `/v1/production/batches` on this service's own batch register (the PRD path `/inventory/batches` is routed to services/inventory). Left: linking `batch_record` to the wave-16 InventoryBatch (the register is keyed by item and batch number, with no quantity or location), the attribute-definition editing and retiring (definitions are insert-only), date limits on date attributes (the type is checked, the range is not), making the picking proposal and the customer batch requirement check read the stored disposition and expiry instead of caller-supplied batches, and batch status changes from inventory postings. The PRD calls the PUT a full replace; this slice appends the values sent and keeps the others current (nothing is cleared), and the definition's `unit_id` is not modeled |
+| Segregation of *Maintain batch attributes* and *Maintain batch disposition* (PRD 4.24.17) | partial | the service enforces `production.batch-attribute.write` and the new `production.batch-disposition.write` on separate routes and flags a disposition change by a user who recorded attributes on the same batch (`segregationConflict`). Not built: flagging the reverse order (attributes recorded by the user who last changed the disposition), and the static conflict check when one role is granted both duties, which belongs to the role and duty administration of the security service; seeding the new duty in policies/authz/data.json is the handoff below |
+| Duty entry for `production.batch-disposition.write` in OPA data (and the issue #313 list) | handoff | policies/ is outside this wave's ownership; the nav items stay gated on duties that already exist (`production.batch-order.read`, `production.batch-attribute.write`) and the new duty is enforced in the service and on the disposition form only |
 | Deliverable 2: shelf life at RAF, FEFO on batch orders, expired-batch override duty (FR-24.6, BR-24.10, AC-24.4 `BATCH_EXPIRED`) | partial | `ShelfDates` and `ShortestExpiry` are built and tested; slice 3 builds FEFO, the PMF-0003 exclusion and the override with duty `production.batch.consume-expired` and a reason of at least 10 characters in the picking proposal. Dates at RAF, the audit-log entry of the override reason (it is returned as `expiredOverride` for the EBR exception, not stored) and picking on a real batch order belong with the order engine and inventory batches; the shelf-advice job is not built |
 | Deliverable 2: catch-weight dual UoM on inventory and production transactions (FR-24.7, AC-24.4 of the ticket) | partial | `ValidateCatchWeight` (BR-24.5) is built and exposed as a calculator; `cw_qty` on InventoryTransaction and journal lines is a handoff to wave 16 (inventory) and wave 21 (production) |
 | Deliverable 5: recipe and formula version control through ECO | handoff | `formula.bom_version_id` points at the wave-9 BOM version and orders snapshot the formula version; formula versioning and ECO submit belong to services/engineering (wave 9). Formulas cannot be edited in slice 1 |
@@ -54,4 +114,4 @@ reviewed slice-1 version of that, so the duplicate was dropped (see services/lea
 | Duty entries for `production.formula.write`, `production.batch-order.read`, `production.batch-order.write`, `production.batch-attribute.write`, `production.batch.merge`, `production.batch-record.approve`, `production.batch.consume-expired` in OPA data | handoff | policies/ is outside this wave's ownership; the service enforces duties from forwarded headers |
 | Label, CoA and batch ticket documents (PRD 4.24.15) | handoff | w5 document service, w32 print service, w48 country packs |
 | Performance budgets and load tests (PRD 4.24.19) | later slice of PSG-24 | no load path yet |
-| Web: formula designer with ECO submit, batch attribute recording and disposition change with history, derivation monitor, EBR review and signature prompts | later slice of PSG-24 | the backing endpoints are not built (see above); slice 2 adds screens for its five previews and slice 3 for the attribute check, picking proposal and rework plan; the module README lists every screen that exists |
+| Web: formula designer with ECO submit, derivation monitor, EBR review and signature prompts | later slice of PSG-24 | the backing endpoints are not built (see above), batch attribute recording and disposition change with history are built in slice 11; slice 2 adds screens for its five previews and slice 3 for the attribute check, picking proposal and rework plan; the module README lists every screen that exists |

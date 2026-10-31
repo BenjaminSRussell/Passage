@@ -23,6 +23,10 @@ export interface Worker {
   active: boolean;
   version: number;
   createdAt: string;
+  /** Time profile the worker's days are calculated with; null means the defaults (FR-25.7). */
+  profileId: string | null;
+  /** Pay agreement the worker's overtime follows; null means the defaults. */
+  payAgreementId: string | null;
 }
 
 export interface NewWorker {
@@ -52,7 +56,7 @@ export interface RegistrationInput {
 }
 
 /** Review flags on a registration (BR-25.7, FR-25.3). */
-export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped";
+export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped" | "auto-clock-out";
 
 /** A job the server stopped because the worker started another one (FR-25.3, SF-0002). */
 export interface AutoStop {
@@ -117,6 +121,10 @@ export interface PayLine {
   multiplier: string;
   amount: string;
   currency: string;
+  /** Worker-day revision that added the line; 0 or absent for the original calculation (AC-25.8). */
+  revision?: number;
+  /** A line with negative hours and amount that cancels an earlier line. */
+  reversal?: boolean;
 }
 
 export type DayFlag = "missing-clock-out" | "orphan-clock-out";
@@ -164,6 +172,10 @@ export interface WorkerDay {
   calculatedAt: string;
   approvedBy: string | null;
   approvedAt: string | null;
+  /** Supervisor revisions of an approved day; its pay lines then include reversal lines (AC-25.8). */
+  revision?: number;
+  revisedBy?: string | null;
+  revisedAt?: string | null;
   payLines: PayLine[];
 }
 
@@ -305,6 +317,107 @@ export function chunk<T>(list: readonly T[], size: number = MAX_BATCH): T[][] {
     out.push(list.slice(i, i + size));
   }
   return out;
+}
+
+// --- Supervisor corrections and pay revision (slice 9, FR-25.8, AC-25.8) ---
+
+/** The audit record of one supervisor edit of a registration. */
+export interface Correction {
+  id: string;
+  registrationId: string;
+  workerId: string;
+  reason: string;
+  oldStartedAt: string;
+  oldStoppedAt: string | null;
+  oldHours: string | null;
+  newStartedAt: string;
+  newStoppedAt: string | null;
+  newHours: string | null;
+  correctedBy: string;
+  correctedAt: string;
+}
+
+export interface CorrectionInput {
+  startedAt?: string;
+  stoppedAt?: string;
+  /** 1 to 500 characters, kept for audit. */
+  reason: string;
+}
+
+export interface RevisedDay {
+  workDate: string;
+  status: DayStatus;
+  revision: number;
+  changed: boolean;
+  /** Lines with negative hours and amount that cancel approved lines. */
+  reversedLines: PayLine[];
+  addedLines: PayLine[];
+}
+
+export interface PayRevision {
+  workerId: string;
+  from: string;
+  to: string;
+  reason: string;
+  days: RevisedDay[];
+}
+
+export function correctRegistration(id: string, input: CorrectionInput, key: string = newKey()): Promise<Correction> {
+  return post<Correction>(`/registrations/${encodeURIComponent(id)}:correct`, input, key);
+}
+
+export function listCorrections(
+  filter: { from: string; to: string; workerId?: string; timeZone?: string },
+  signal?: AbortSignal,
+): Promise<Correction[]> {
+  return items<Correction>(`/registration-corrections${query(filter)}`, signal);
+}
+
+/** Recalculates a range and revises approved days with reversal lines (SF-0129 when nothing differs). */
+export function revisePay(input: PayRange & { reason: string }, key: string = newKey()): Promise<PayRevision> {
+  return post<PayRevision>("/pay:revise", input, key);
+}
+
+// --- Auto clock-out (slice 10, D2h) ---
+
+/** Hours a clock-in may stay open before the sweep closes it (SF-0130 outside the bounds). */
+export const AUTO_CLOCK_OUT_HOURS = { min: 4, max: 24, default: 16 } as const;
+
+/** A clock-out the auto clock-out sweep wrote, for supervisor review. */
+export interface AutoClockOutReview {
+  registrationId: string;
+  workerId: string;
+  workerName: string;
+  clockedInAt: string | null;
+  clockedOutAt: string;
+  closedAt: string;
+  /** A supervisor confirmed or corrected the clock-out; until then its day cannot be approved (BR-25.3). */
+  reviewed: boolean;
+}
+
+export interface AutoClosed {
+  registrationId: string;
+  workerId: string;
+  clockInId: string;
+  clockedInAt: string;
+  clockedOutAt: string;
+}
+
+export interface AutoClockOutRun {
+  afterHours: number;
+  items: AutoClosed[];
+}
+
+export function listAutoClockOuts(
+  filter: { from: string; to: string; workerId?: string; timeZone?: string },
+  signal?: AbortSignal,
+): Promise<AutoClockOutReview[]> {
+  return items<AutoClockOutReview>(`/auto-clock-outs${query(filter)}`, signal);
+}
+
+/** Closes the clock-ins left open for more than afterHours (the hourly job, run by hand). */
+export function runAutoClockOut(afterHours: number): Promise<AutoClockOutRun> {
+  return post<AutoClockOutRun>(`/registrations:auto-clock-out${query({ afterHours })}`, {});
 }
 
 // --- Machines, downtime, andon, OEE and payroll export (slice 2) ---
@@ -702,4 +815,119 @@ export function getJob(id: string, signal?: AbortSignal): Promise<Job> {
  */
 export function recordJobFeedback(jobId: string, input: JobFeedbackInput): Promise<JobFeedbackResult> {
   return post<JobFeedbackResult>(`/jobs/${encodeURIComponent(jobId)}:feedback`, input);
+}
+
+// --- Time profiles and pay agreements (slice 11, D2f) ---
+
+export type DayType = "weekday" | "saturday" | "sunday";
+
+export const DAY_TYPES: readonly DayType[] = ["weekday", "saturday", "sunday"];
+
+/** An unpaid break as local HH:MM times. */
+export interface BreakWindow {
+  from: string;
+  to: string;
+}
+
+/** The day rules of one day type (ProfileDay). Shift start and end are both set or both null. */
+export interface ProfileDay {
+  dayType: DayType;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  breaks: BreakWindow[];
+  roundingMinutes: number;
+  toleranceBeforeMin: number;
+  toleranceAfterMin: number;
+  flexAllowed: boolean;
+}
+
+export interface TimeProfile {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  version: number;
+  days: ProfileDay[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewTimeProfile {
+  code: string;
+  name: string;
+  active?: boolean;
+  days: ProfileDay[];
+}
+
+/** A premium window: hours between from and to (local HH:MM; to not after from crosses midnight) earn the premium (0.15 is 15% extra). */
+export interface ShiftPremium {
+  name: string;
+  from: string;
+  to: string;
+  premium: string;
+}
+
+/** Decimal fields are strings; weekStart is 0 (Sunday) to 6 (Saturday). */
+export interface PayAgreement {
+  id: string;
+  code: string;
+  name: string;
+  dailyThreshold: string;
+  weeklyThreshold: string;
+  overtimeMultiplier: string;
+  sundayMultiplier: string;
+  weekStart: number;
+  shiftPremiums: ShiftPremium[];
+  active: boolean;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewPayAgreement {
+  code: string;
+  name: string;
+  active?: boolean;
+  dailyThreshold: string;
+  weeklyThreshold: string;
+  overtimeMultiplier: string;
+  sundayMultiplier: string;
+  weekStart: number;
+  shiftPremiums?: ShiftPremium[];
+}
+
+export function listTimeProfiles(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<TimeProfile[]> {
+  return items<TimeProfile>(`/time-profiles${query({ active: filter.active })}`, signal);
+}
+
+/** Creates a profile; reuse one key per form so a retried submit cannot create two. */
+export function createTimeProfile(input: NewTimeProfile, key: string = newKey()): Promise<TimeProfile> {
+  return post<TimeProfile>("/time-profiles", input, key);
+}
+
+export function listPayAgreements(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<PayAgreement[]> {
+  return items<PayAgreement>(`/pay-agreements${query({ active: filter.active })}`, signal);
+}
+
+export function createPayAgreement(input: NewPayAgreement, key: string = newKey()): Promise<PayAgreement> {
+  return post<PayAgreement>("/pay-agreements", input, key);
+}
+
+/**
+ * Links a worker to a time profile and a pay agreement (null clears the link). The worker version
+ * is the If-Match entity tag; another change in between is SF-0143 (412).
+ */
+export function assignWorkerSetup(
+  workerId: string,
+  version: number,
+  input: { profileId: string | null; payAgreementId: string | null },
+  key: string = newKey(),
+): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:assign-setup`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
 }

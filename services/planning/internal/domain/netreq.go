@@ -42,7 +42,8 @@ func (rs *runState) netView(items []*Item) []NetRow {
 
 // netRows builds the view of one item from the dates the netting used: its
 // final demand (with the dependent demand of the explosion and the safety
-// stock as a demand at today, BR-22.1 step 4), its receipts, and the planned
+// stock as a demand at today or, with policy first-issue, on the first demand
+// date, BR-22.1 step 4 and BR-22.5), its receipts, and the planned
 // orders delivered to it (orders must be this item's only). Nothing is dated
 // before today: what is past due counts at today. PAB(t) = PAB(t−1) + SR(t) +
 // PR(t) − GR(t), opening at on-hand.
@@ -62,7 +63,7 @@ func (rs *runState) netRows(it *Item, orders []PlannedOrder) []NetRow {
 		b.gross = b.gross.Add(d.Qty)
 	}
 	if it.SafetyStock.IsPositive() {
-		b := at(rs.demandDate(rs.today))
+		b := at(rs.safetyDate(it))
 		b.gross = b.gross.Add(it.SafetyStock)
 	}
 	for _, r := range it.Receipts {

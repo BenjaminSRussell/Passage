@@ -111,6 +111,17 @@ describe("buildChange", () => {
 });
 
 describe("Change sales order page", () => {
+  it("reports a line that allocation quota moved to a later period", async () => {
+    const warnings = [{ code: "SLS-0013", lineNo: 1, message: "Allocation for product x in the period of 2027-03-04 is exhausted; line 1 is promised for 2027-04-01 (source ALLOCATION)" }];
+    handler = (_url, init) =>
+      init.method === "PATCH" ? { status: 200, body: { ...order({ version: 4 }), warnings }, etag: '"4"' } : { status: 200, body: order(), etag: '"3"' };
+    renderAt(`/sales/orders/${ORDER_ID}/change`);
+    const line1 = await screen.findByRole("group", { name: "Line 1" });
+    fireEvent.change(within(line1).getByLabelText("Quantity"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/Saved as version 4\. Allocation for product x .* promised for 2027-04-01 \(source ALLOCATION\)/)).toBeInTheDocument();
+  });
+
   it("shows the diff, saves with If-Match and reports the new version", async () => {
     handler = (_url, init) =>
       init.method === "PATCH" ? { status: 200, body: order({ version: 4, netTotal: "87" }), etag: '"4"' } : { status: 200, body: order(), etag: '"3"' };
@@ -132,6 +143,33 @@ describe("Change sales order page", () => {
     expect(patch?.url.pathname).toBe(`/api/v1/sales/orders/${ORDER_ID}`);
     expect(patch?.headers.get("If-Match")).toBe('"3"');
     expect(patch?.body).toEqual({ lines: [{ lineNo: 1, quantity: "8" }] });
+  });
+
+  it("says the change was sent for approval when the service stored it (202) and keeps the order as it was", async () => {
+    const pending = {
+      id: "33333333-0000-4000-8000-000000000003",
+      legalEntityId: "11111111-0000-4000-8000-000000000001",
+      orderId: ORDER_ID,
+      orderNumber: "SO-0000042",
+      customerId: "22222222-0000-4000-8000-000000000002",
+      status: "PENDING",
+      baseVersion: 3,
+      reason: "",
+      change: { lines: [{ lineNo: 1, quantity: "8" }] },
+      diff: [{ lineNo: 1, field: "quantity", old: "5", new: "8" }],
+      requestedBy: "rep-1",
+      requestedAt: "2027-03-01T09:00:00Z",
+      decisionComment: "",
+      version: 1,
+    };
+    handler = (_url, init) =>
+      init.method === "PATCH" ? { status: 202, body: { ...order(), pendingChange: pending }, etag: '"3"' } : { status: 200, body: order(), etag: '"3"' };
+    renderAt(`/sales/orders/${ORDER_ID}/change`);
+    fireEvent.change(within(await screen.findByRole("group", { name: "Line 1" })).getByLabelText("Quantity"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/the change was sent to a sales manager for approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/Saved as version/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Line 1" })).getByLabelText("Quantity")).toHaveValue("5");
   });
 
   it("warns when the higher total placed a credit hold", async () => {

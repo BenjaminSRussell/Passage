@@ -28,6 +28,9 @@ type createAgreementRequest struct {
 	CommitmentQty    string  `json:"commitmentQty"`
 	ValidFrom        *string `json:"validFrom"`
 	ValidTo          *string `json:"validTo"`
+	// CumTolerance is how far a scheduling release's cumulative received
+	// quantity may differ from the shipped quantity (BR-27.12); default 0.
+	CumTolerance *string `json:"cumTolerance"`
 }
 
 // releaseOrderRequest is the body of POST /v1/sales/agreements/{id}:release-order:
@@ -71,7 +74,16 @@ func buildAgreement(req createAgreementRequest) (store.NewAgreement, map[string]
 		f["commitmentQty"] = err.Error()
 	}
 	validityFields(req.ValidFrom, req.ValidTo, f)
-	return store.NewAgreement{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
+	tolerance := decimal.Zero
+	if req.CumTolerance != nil {
+		var err error
+		if tolerance, err = decimal.NewFromString(*req.CumTolerance); err != nil {
+			f["cumTolerance"] = "must be a decimal of at least 0"
+		} else if err := domain.ValidateCumulative(tolerance); err != nil {
+			f["cumTolerance"] = err.Error()
+		}
+	}
+	return store.NewAgreement{CumTolerance: tolerance, LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
 		Unit: req.Unit, UnitPrice: price, Currency: req.Currency, Commitment: commitment, ValidFrom: req.ValidFrom, ValidTo: req.ValidTo}, f
 }
 

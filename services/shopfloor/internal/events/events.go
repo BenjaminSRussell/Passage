@@ -28,12 +28,21 @@ var (
 	// JobReported is not in the PRD event table: production (w21) needs the reported
 	// quantities and the finish of an operation, quality (w33) the failed checks.
 	JobReported = events.Type(Context, "job", "reported", 1)
+	// RegistrationCorrected and PaydayRevised are not in the PRD event table: payroll and
+	// the w21 job-card consumer must learn that approved or posted time changed (FR-25.8, AC-25.8).
+	RegistrationCorrected = events.Type(Context, "registration", "corrected", 1)
+	PaydayRevised         = events.Type(Context, "payday", "revised", 1)
+	// TimeProfileSaved, PayAgreementSaved and WorkerAssigned are not in the PRD event table:
+	// payroll (w43) and reporting need the pay rules a worker's hours were calculated under.
+	TimeProfileSaved  = events.Type(Context, "timeprofile", "saved", 1)
+	PayAgreementSaved = events.Type(Context, "payagreement", "saved", 1)
+	WorkerAssigned    = events.Type(Context, "worker", "assigned", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -175,7 +184,8 @@ type RegistrationPostedData struct {
 	Offline        bool             `json:"offline"`
 	// Flags are the registration's review flags: job-finished-conflict on a
 	// job-start (BR-25.7), auto-stopped and auto-stop-capped on a job-stop the
-	// server wrote when the worker started another job (FR-25.3).
+	// server wrote when the worker started another job (FR-25.3), auto-clock-out on
+	// a clock-out the auto clock-out sweep wrote (D2h).
 	Flags []string `json:"flags"`
 }
 
@@ -194,4 +204,76 @@ type PaydayApprovedData struct {
 	WorkDate   string        `json:"workDate"`
 	PayLines   []PayLineData `json:"payLines"`
 	ApprovedBy string        `json:"approvedBy"`
+}
+
+// RegistrationCorrectedData is the payload of dev.passage.shopfloor.registration.corrected.v1,
+// published when a supervisor changes the times of a registration with a reason (FR-25.8).
+// Hours is the new elapsed time of a closed registration; consumers that posted the old
+// hours (w21 job card) replace them.
+type RegistrationCorrectedData struct {
+	RegistrationID string           `json:"registrationId"`
+	WorkerID       string           `json:"workerId"`
+	Kind           string           `json:"kind"`
+	JobID          *string          `json:"jobId"`
+	OldStartedAt   time.Time        `json:"oldStartedAt"`
+	OldStoppedAt   *time.Time       `json:"oldStoppedAt"`
+	NewStartedAt   time.Time        `json:"newStartedAt"`
+	NewStoppedAt   *time.Time       `json:"newStoppedAt"`
+	Hours          *decimal.Decimal `json:"hours"`
+	Reason         string           `json:"reason"`
+	CorrectedBy    string           `json:"correctedBy"`
+}
+
+// PaydayRevisedData is the payload of dev.passage.shopfloor.payday.revised.v1, published
+// when a supervisor revises an approved worker-day (BR-25.8, AC-25.8). ReversedLines
+// carry negative hours and amounts and cancel lines that were approved (and possibly
+// exported); AddedLines are the new pay lines. Revision counts the day's revisions.
+type PaydayRevisedData struct {
+	WorkerID      string        `json:"workerId"`
+	WorkDate      string        `json:"workDate"`
+	Revision      int           `json:"revision"`
+	Reason        string        `json:"reason"`
+	ReversedLines []PayLineData `json:"reversedLines"`
+	AddedLines    []PayLineData `json:"addedLines"`
+	RevisedBy     string        `json:"revisedBy"`
+}
+
+// TimeProfileSavedData is the payload of dev.passage.shopfloor.timeprofile.saved.v1,
+// published when a time profile is created or changed. Version is 1 for a new profile.
+type TimeProfileSavedData struct {
+	ProfileID string `json:"profileId"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Active    bool   `json:"active"`
+	Version   int    `json:"version"`
+	SavedBy   string `json:"savedBy"`
+}
+
+// PayAgreementSavedData is the payload of dev.passage.shopfloor.payagreement.saved.v1,
+// published when a pay agreement is created or changed. Decimals are strings.
+type PayAgreementSavedData struct {
+	AgreementID        string `json:"agreementId"`
+	Code               string `json:"code"`
+	Name               string `json:"name"`
+	DailyThreshold     string `json:"dailyThreshold"`
+	WeeklyThreshold    string `json:"weeklyThreshold"`
+	OvertimeMultiplier string `json:"overtimeMultiplier"`
+	SundayMultiplier   string `json:"sundayMultiplier"`
+	WeekStart          int    `json:"weekStart"`
+	// ShiftPremiums are the premium windows; empty when the agreement has none.
+	ShiftPremiums []domain.ShiftPremiumInput `json:"shiftPremiums"`
+	Active        bool                       `json:"active"`
+	Version       int                        `json:"version"`
+	SavedBy       string                     `json:"savedBy"`
+}
+
+// WorkerAssignedData is the payload of dev.passage.shopfloor.worker.assigned.v1,
+// published when a worker's time profile or pay agreement changes. A nil id means the
+// worker is calculated with the defaults. Days already calculated keep their pay lines
+// until a supervisor recalculates them.
+type WorkerAssignedData struct {
+	WorkerID       string  `json:"workerId"`
+	ProfileID      *string `json:"profileId"`
+	PayAgreementID *string `json:"payAgreementId"`
+	AssignedBy     string  `json:"assignedBy"`
 }
