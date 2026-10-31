@@ -30,6 +30,12 @@ databaseSecret:
   name: passage-compliance-db
   key: url
 
+# Erasure pseudonyms are HMACs under a per-tenant key derived from these keys; without them erasure
+# previews return 503 PRV-1211. Mount a secret holding id=base64(32 bytes) lines under the key "keys".
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""
+
 resources:
   requests:
     cpu: 100m

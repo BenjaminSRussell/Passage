@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -125,5 +126,36 @@ func TestFromEnv(t *testing.T) {
 		if _, err := fieldcrypt.FromEnv(get(env)); err == nil {
 			t.Errorf("%s must fail", name)
 		}
+	}
+}
+
+func TestMACIsKeyedPerTenantAndSeparateFromSeal(t *testing.T) {
+	k := keysWith(t, "k1", "k1")
+	a, err := k.MAC("tenant-a", []byte("subject|email"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := k.MAC("tenant-a", []byte("subject|email"))
+	other, _ := k.MAC("tenant-b", []byte("subject|email"))
+	diff, _ := k.MAC("tenant-a", []byte("subject|phone"))
+	rotated, _ := keysWith(t, "k2", "k1", "k2").MAC("tenant-a", []byte("subject|email"))
+	if len(a) != 32 || !bytes.Equal(a, again) {
+		t.Fatal("mac must be 32 bytes and deterministic")
+	}
+	if bytes.Equal(a, other) || bytes.Equal(a, diff) || bytes.Equal(a, rotated) {
+		t.Fatal("mac must differ across tenants, messages and master keys")
+	}
+	if _, err := k.MAC("", []byte("x")); err == nil {
+		t.Fatal("mac without a tenant id must fail")
+	}
+}
+
+func TestMACKnownAnswer(t *testing.T) {
+	got, err := keysWith(t, "k1", "k1").MAC("tenant-a", []byte("subject|email"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex := fmt.Sprintf("%x", got); hex != "9d68c037adb7f1ab6a7e652dc822e16f9ef453aa924977cca7363d4b0ecaacd9" {
+		t.Fatalf("mac drifted: %s", hex)
 	}
 }
