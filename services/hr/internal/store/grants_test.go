@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -25,10 +24,7 @@ func appStore(t *testing.T) (*Postgres, context.Context) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := testSealer(t)
 	return New(app, sealer, 10), ctx
 }
 

@@ -184,6 +184,11 @@ func principal(ctx context.Context) tenant.Principal {
 	return p
 }
 
+const (
+	fieldNationalID  = "worker_pii.national_id"
+	fieldBankAccount = "worker_pii.bank_account"
+)
+
 // CreateWorker stores a worker, seals its P3 values into worker_pii and writes
 // an audit row recording which P3 fields were set (never their values).
 func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotencyKey string) (Worker, bool, error) {
@@ -205,13 +210,13 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 				return err
 			}
 		}
-		nationalID, err := s.sealer.Seal(in.NationalID)
+		nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
 		if err != nil {
 			return err
 		}
 		var bank []byte
 		if in.BankAccount != "" {
-			if bank, err = s.sealer.Seal(in.BankAccount); err != nil {
+			if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
 				return err
 			}
 		}
@@ -281,14 +286,14 @@ func (s *Postgres) ReadPII(ctx context.Context, workerID string, reveal bool, re
 		if err != nil {
 			return err
 		}
-		nid, err := s.sealer.Open(nationalID)
+		nid, err := s.sealer.Open(p.TenantID, fieldNationalID, nationalID)
 		if err != nil {
 			return err
 		}
 		view = PIIView{NationalID: domain.MaskNationalID(nid), Masked: !reveal}
 		var bankPlain *string
 		if bank != nil {
-			b, err := s.sealer.Open(bank)
+			b, err := s.sealer.Open(p.TenantID, fieldBankAccount, bank)
 			if err != nil {
 				return err
 			}

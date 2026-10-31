@@ -11,11 +11,14 @@ service:
   httpPort: 8080
   adminPort: 9090
 
-# DATABASE_URL and HR_PII_KEY are read from this secret (Vault via External Secrets).
+# DATABASE_URL, FIELDCRYPT_KEYS, FIELDCRYPT_CURRENT_KEY_ID and the legacy HR_PII_KEY (opens values
+# written before fieldcrypt; optional) are read from this secret (Vault via External Secrets).
 secret:
   name: passage-hr-secrets
   databaseUrlKey: DATABASE_URL
   piiKeyKey: HR_PII_KEY
+  fieldcryptKeysKey: FIELDCRYPT_KEYS
+  fieldcryptCurrentKeyIdKey: FIELDCRYPT_CURRENT_KEY_ID
 
 config:
   managerMaxDepth: "10"
