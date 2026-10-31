@@ -905,3 +905,23 @@ func TestPaymentRun_MissingFieldKeysAre503NotAnInternalErrorAndNeverBlockTheExec
 	wantProblem(t, f.step(f.erin, runID, "settle"), http.StatusConflict, "AP-RUN-012")
 	wantProblem(t, f.step(f.erin, runID, "generate-file"), http.StatusServiceUnavailable, "COM-0503")
 }
+
+func TestPaymentRun_ClosedLedgerPeriodRejectsTheJournalAndRecordsNothingAsPosted(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	f.ledger.rejectWith, f.ledger.rejectCode = http.StatusUnprocessableEntity, "LEDGER_PERIOD_CLOSED"
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-014")
+	got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+	if got["journalPostedAt"] != nil || got["journalEntryId"] != nil || got["journalRejectedAt"] == nil {
+		t.Fatalf("a closed period must leave the journal rejected and unposted: %v", got)
+	}
+	if f.ledger.posted() != 0 {
+		t.Fatalf("the ledger holds %d entries, want none", f.ledger.posted())
+	}
+	failed := f.erin.send(f.router, http.MethodPost, runsPath+"/"+runID+":fail", `{"reason":"period closed"}`)
+	if got := decode(t, failed); failed.Code != http.StatusOK || got["status"] != "FAILED" {
+		t.Fatalf("fail: %d %s", failed.Code, failed.Body)
+	}
+}

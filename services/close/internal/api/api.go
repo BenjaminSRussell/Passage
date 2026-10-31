@@ -18,7 +18,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
-	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
 
 const (
@@ -31,7 +30,7 @@ const (
 type Store interface {
 	PeriodRows(ctx context.Context, ledgerID, periodID string) ([]domain.Row, error)
 	PeriodSpans(ctx context.Context, legalEntityID, ledgerID string, date time.Time) ([]domain.Span, error)
-	RegisterPeriod(ctx context.Context, in store.PeriodRegistration) (bool, error)
+	RegisterPeriod(ctx context.Context, in domain.PeriodRegistration) (bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -237,7 +236,7 @@ func (a *API) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, v)
 		return
 	}
-	created, err := a.store.RegisterPeriod(r.Context(), store.PeriodRegistration{
+	created, err := a.store.RegisterPeriod(r.Context(), domain.PeriodRegistration{
 		LegalEntityID: p.LegalEntityID, LedgerID: req.LedgerID, FiscalPeriodID: periodID, Start: start, End: end, Actor: p.UserID,
 	})
 	if err != nil {
@@ -252,6 +251,7 @@ func (a *API) register(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
+		w.Header().Set("Location", r.URL.Path)
 	}
 	httpx.JSON(w, status, map[string]string{"fiscalPeriodId": periodID, "startDate": req.StartDate, "endDate": req.EndDate})
 }

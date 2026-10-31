@@ -2,10 +2,15 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
@@ -118,7 +123,7 @@ func TestRegisterPeriod_WritesDatesTheResolverReads(t *testing.T) {
 	s := store.New(app)
 	day := func(d string) time.Time { v, _ := time.Parse("2006-01-02", d); return v }
 	reg := func(period, start, end string) (bool, error) {
-		return s.RegisterPeriod(principal(1), store.PeriodRegistration{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: period, Start: day(start), End: day(end), Actor: "test"})
+		return s.RegisterPeriod(principal(1), domain.PeriodRegistration{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: period, Start: day(start), End: day(end), Actor: "test"})
 	}
 	jan, feb := "00000000-0000-0000-0000-0000000000b1", "00000000-0000-0000-0000-0000000000b2"
 	if created, err := reg(jan, "2026-01-01", "2026-01-31"); err != nil || !created {
@@ -151,5 +156,69 @@ func TestRegisterPeriod_WritesDatesTheResolverReads(t *testing.T) {
 	}
 	if spans, err = s.PeriodSpans(principal(1), entityID, ledgerID, day("2026-02-10")); err != nil || len(spans) != 1 {
 		t.Fatalf("backfilled dates resolve: %+v %v", spans, err)
+	}
+}
+
+func TestRegisterPeriod_LedgerBelongsToOneLegalEntityAndTenant(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	day := func(d string) time.Time { v, _ := time.Parse("2006-01-02", d); return v }
+	otherEntity := "00000000-0000-0000-0000-0000000000c2"
+	reg := func(ctx context.Context, entity, period string) (bool, error) {
+		return s.RegisterPeriod(ctx, domain.PeriodRegistration{LegalEntityID: entity, LedgerID: ledgerID, FiscalPeriodID: period, Start: day("2026-01-01"), End: day("2026-01-31"), Actor: "test"})
+	}
+	p := "00000000-0000-0000-0000-0000000000b1"
+	if _, err := reg(principal(1), entityID, p); err != nil {
+		t.Fatal(err)
+	}
+	_, err := reg(principal(1), otherEntity, p)
+	var prob *httpx.Problem
+	if !errors.As(err, &prob) || prob.Status != http.StatusForbidden {
+		t.Fatalf("another legal entity must get 403 on the ledger, got %v", err)
+	}
+	if created, err := reg(principal(2), otherEntity, p); err != nil || !created {
+		t.Fatalf("the same ids in another tenant are independent: %v %v", created, err)
+	}
+	var rows int
+	if err := admin.QueryRow(context.Background(), `select count(*) from period_status where legal_entity_id = $1`, otherEntity).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("rows for the other entity: %d %v", rows, err)
+	}
+}
+
+func TestRegisterPeriod_ConcurrentRegistrationsCreateOnce(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	in := domain.PeriodRegistration{LegalEntityID: entityID, LedgerID: ledgerID, FiscalPeriodID: periodID, Actor: "test"}
+	in.Start, in.End = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	const n = 8
+	var wg sync.WaitGroup
+	var created atomic.Int32
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, err := s.RegisterPeriod(principal(1), in)
+			if c {
+				created.Add(1)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent registration failed: %v", err)
+		}
+	}
+	if created.Load() != 1 {
+		t.Fatalf("created %d times, want once", created.Load())
 	}
 }

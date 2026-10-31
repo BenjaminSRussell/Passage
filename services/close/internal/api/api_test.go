@@ -18,7 +18,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/close/internal/api"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
-	"github.com/BenjaminSRussell/passage/services/close/internal/store"
 )
 
 const checkPath = "/v1/close/period-statuses:check"
@@ -28,6 +27,7 @@ type fakeStore struct {
 	spans       []domain.Span
 	readErr     error
 	created     bool
+	registered  *domain.PeriodRegistration
 	registerErr error
 	pingErr     error
 }
@@ -40,7 +40,10 @@ func (f fakeStore) PeriodSpans(context.Context, string, string, time.Time) ([]do
 	return f.spans, f.readErr
 }
 
-func (f fakeStore) RegisterPeriod(context.Context, store.PeriodRegistration) (bool, error) {
+func (f fakeStore) RegisterPeriod(_ context.Context, in domain.PeriodRegistration) (bool, error) {
+	if f.registered != nil {
+		*f.registered = in
+	}
 	return f.created, f.registerErr
 }
 
@@ -269,5 +272,32 @@ func TestRegisterPeriod(t *testing.T) {
 				t.Fatalf("got %d %s, want %d containing %q", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestRegisterPeriod_LegalEntityComesFromTheCaller(t *testing.T) {
+	ledger, entity, period := testkit.TenantID(7), testkit.TenantID(9), testkit.TenantID(8)
+	var got domain.PeriodRegistration
+	r, _ := newRouter(fakeStore{created: true, registered: &got})
+	send := func(payload string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/v1/close/periods/"+period, strings.NewReader(payload))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", "period.maintain")
+		req.Header.Set("X-Passage-Legal-Entity", entity)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := send(`{"ledgerId":"` + ledger + `","startDate":"2026-01-01","endDate":"2026-01-31"}`)
+	if rec.Code != http.StatusCreated || rec.Header().Get("Location") != "/v1/close/periods/"+period {
+		t.Fatalf("got %d %v", rec.Code, rec.Header())
+	}
+	if got.LegalEntityID != entity || got.LedgerID != ledger || got.FiscalPeriodID != period {
+		t.Fatalf("store received %+v", got)
+	}
+	got = domain.PeriodRegistration{}
+	rec = send(`{"ledgerId":"` + ledger + `","legalEntityId":"` + testkit.TenantID(10) + `","startDate":"2026-01-01","endDate":"2026-01-31"}`)
+	if rec.Code != http.StatusBadRequest || got.LegalEntityID != "" {
+		t.Fatalf("a body legal entity must be refused: %d %s %+v", rec.Code, rec.Body.String(), got)
 	}
 }

@@ -1,5 +1,16 @@
 package domain
 
+import "time"
+
+type PeriodRegistration struct {
+	LegalEntityID  string
+	LedgerID       string
+	FiscalPeriodID string
+	Start          time.Time
+	End            time.Time
+	Actor          string
+}
+
 const (
 	CodeInvalidTransition   = "CLOSE-0001"
 	CodeBusy                = "CLOSE-0002"
