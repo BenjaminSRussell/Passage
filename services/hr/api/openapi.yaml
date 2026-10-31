@@ -2534,7 +2534,11 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "403":
-          $ref: "#/components/responses/Problem"
+          description: HCM-QST-SCOPE when the questionnaire is anonymous and the caller's legal-entity scope is not every entity; or a missing duty
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "422":
           description: HCM-QST-002 when an anonymous breakdown has a group under 5 respondents
           content:

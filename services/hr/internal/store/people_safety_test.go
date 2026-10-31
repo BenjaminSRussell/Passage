@@ -527,9 +527,9 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	}); err != nil || withRespondent != 0 {
 		t.Fatalf("anonymous sessions carrying a respondent id = %d, %v", withRespondent, err)
 	}
-	_, err = s.QuestionnaireResults(ctx, sched.ID, false)
+	_, err = s.QuestionnaireResults(everyEntity(ctx), sched.ID, false)
 	requireCode(t, err, CodeResultsOpen)
-	_, err = s.QuestionnaireResults(ctx, sched.ID, true)
+	_, err = s.QuestionnaireResults(everyEntity(ctx), sched.ID, true)
 	requireCode(t, err, CodeResultsOpen)
 	var sessionIDs []string
 	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -562,11 +562,11 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 		t.Fatalf("session table has a worker link or a timestamp column: %d %v", finer, err)
 	}
 	at(s, day(time.April, 2))
-	res, err := s.QuestionnaireResults(ctx, sched.ID, false)
+	res, err := s.QuestionnaireResults(everyEntity(ctx), sched.ID, false)
 	if err != nil || res.Responded != 4 || res.Invited < 12 || !res.Suppressed || len(res.Overall.Questions) != 0 || len(res.Overall.ResultGroups) != 0 {
 		t.Fatalf("4 of 12 anonymous responses must report counts only: %+v %v", res, err)
 	}
-	_, err = s.QuestionnaireResults(ctx, sched.ID, true)
+	_, err = s.QuestionnaireResults(everyEntity(ctx), sched.ID, true)
 	requireCode(t, err, domain.CodeQuestionnaireThreshold)
 
 	at(s, day(time.March, 10))
@@ -574,7 +574,7 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 		t.Fatal(err)
 	}
 	at(s, day(time.April, 2))
-	full, err := s.QuestionnaireResults(ctx, sched.ID, false)
+	full, err := s.QuestionnaireResults(everyEntity(ctx), sched.ID, false)
 	if err != nil || full.Suppressed || len(full.Overall.ResultGroups) != 1 || *full.Overall.ResultGroups[0].MeanScore != "3.00" {
 		t.Fatalf("5 responses show the overall figures: %+v %v", full, err)
 	}
@@ -584,10 +584,16 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	}
 	_, _, err = s.CreateSchedule(ctx, small.ID, `legal_entity == "`+ids.New()+`"`, day(time.March, 1), day(time.March, 31), "")
 	requireCode(t, err, domain.CodeQuestionnaireThreshold)
-	grouped, err := s.QuestionnaireResults(ctx, sched.ID, true)
+	grouped, err := s.QuestionnaireResults(everyEntity(ctx), sched.ID, true)
 	if err != nil || len(grouped.Groups) != 1 || grouped.Groups[0].Stats.Respondents != 5 || grouped.Groups[0].DepartmentID == nil || *grouped.Groups[0].DepartmentID != dept {
 		t.Fatalf("grouped = %+v %v", grouped, err)
 	}
+
+	entityOnly := tenant.With(ctx, tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "scoped", Duties: testkit.ScopeDuties(le)})
+	_, err = s.QuestionnaireResults(entityOnly, sched.ID, false)
+	requireCode(t, err, CodeQuestionnaireScope)
+	_, err = s.QuestionnaireResults(entityOnly, sched.ID, true)
+	requireCode(t, err, CodeQuestionnaireScope)
 
 	requireCode(t, s.SubmitAnswers(userCtx(6), sched.ID, workers[5].ID, answersDoc(3)), domain.CodeQuestionnaireClosed)
 	at(s, day(time.March, 10))
@@ -651,4 +657,10 @@ func TestGrants_PeopleSafetyPathsWorkAsAppRole(t *testing.T) {
 			t.Errorf("%s: a caller scoped to another legal entity sees %d rows, %v", table, scoped, err)
 		}
 	}
+}
+
+func everyEntity(ctx context.Context) context.Context {
+	p, _ := tenant.FromContext(ctx)
+	p.LegalEntityID, p.Duties = "", testkit.ScopeDuties("")
+	return tenant.With(ctx, p)
 }

@@ -26,6 +26,7 @@ const (
 	CodeNotInvited             = "HCM-QST-NOT-INVITED"
 	CodeAlreadyAnswered        = "HCM-QST-ANSWERED"
 	CodeResultsOpen            = "HCM-QST-NOT-CLOSED"
+	CodeQuestionnaireScope     = "HCM-QST-SCOPE"
 
 	maxSessions = 10000
 )
@@ -443,6 +444,15 @@ func (s *Postgres) QuestionnaireResults(ctx context.Context, scheduleID string, 
 		v, err := s.loadScheduleView(ctx, tx, p.TenantID, scheduleID)
 		if err != nil {
 			return err
+		}
+		if v.Questionnaire.Anonymous {
+			all, err := scopeIsAll(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if !all {
+				return problem(http.StatusForbidden, CodeQuestionnaireScope, "results of an anonymous questionnaire are shown only to callers with access to every legal entity, so entity-scoped views cannot be subtracted to expose a small group")
+			}
 		}
 		if v.Questionnaire.Anonymous && v.Status != "CLOSED" {
 			return problem(http.StatusConflict, CodeResultsOpen, "results of an anonymous questionnaire are released after it closes on "+v.ClosesAt.Format(time.RFC3339))
