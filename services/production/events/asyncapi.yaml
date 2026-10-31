@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.10
+  version: 0.21.15
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -60,6 +60,10 @@ channels:
     messages:
       porequested:
         $ref: '#/components/messages/subcontractPORequested'
+      pochanged:
+        $ref: '#/components/messages/subcontractPOChanged'
+      pocancelled:
+        $ref: '#/components/messages/subcontractPOCancelled'
   passage.production.operation:
     address: passage.production.operation
     description: Keyed by order id (the outbox aggregate), so an order's operation changes stay ordered.
@@ -117,6 +121,14 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.subcontract' }
     messages: [{ $ref: '#/channels/passage.production.subcontract/messages/porequested' }]
+  onSubcontractPOChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.production.subcontract' }
+    messages: [{ $ref: '#/channels/passage.production.subcontract/messages/pochanged' }]
+  onSubcontractPOCancelled:
+    action: send
+    channel: { $ref: '#/channels/passage.production.subcontract' }
+    messages: [{ $ref: '#/channels/passage.production.subcontract/messages/pocancelled' }]
   onOperationStatusChanged:
     action: send
     channel: { $ref: '#/channels/passage.production.operation' }
@@ -359,6 +371,60 @@ components:
           dueDate: { type: [string, 'null'], format: date, description: The order's delivery date until scheduling (wave 23) dates the operation. }
           actor: { type: string }
       x-passage-type: dev.passage.production.subcontract.porequested.v1
+    subcontractPOChanged:
+      name: pochanged
+      title: Subcontract purchase order changed
+      description: |
+        Emitted in the transaction of a change that moves the process quantity, the vendor unit price or the due
+        date of a subcontract operation purchasing was already asked to buy: a quantity or delivery date PATCH, an
+        order BOM or route edit (also applied from an engineering change), the split of the order (the original
+        keeps a smaller PO) and the merge of orders (the survivor's PO grows). It carries the figures purchasing
+        was last given and the ones now in force. Consumer: purchasing (wave 17), which updates the vendor PO line.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, operNumber, resourceId, previousQty, qty, previousUnitPrice, unitPrice, previousAmount, amount, currency, previousDueDate, dueDate, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          operNumber: { type: integer }
+          resourceId: { type: string, format: uuid, description: The vendor resource of the operation. }
+          previousQty: { type: string, description: The process quantity of the request purchasing last received. }
+          qty: { type: string, description: The process quantity now. }
+          previousUnitPrice: { type: string }
+          unitPrice: { type: string }
+          previousAmount: { type: string, description: 'previousUnitPrice × previousQty at 4 places.' }
+          amount: { type: string, description: 'unitPrice × qty at 4 places: the subcontract row of the estimate.' }
+          currency: { type: string }
+          previousDueDate: { type: [string, 'null'], format: date, description: The due date purchasing last received. }
+          dueDate: { type: [string, 'null'], format: date, description: The order's delivery date now, until scheduling (wave 23) dates the operation. }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.subcontract.pochanged.v1
+    subcontractPOCancelled:
+      name: pocancelled
+      title: Subcontract purchase order request withdrawn
+      description: |
+        Emitted in the transaction that withdraws a request purchasing was given: the order is cancelled (also
+        by bulk status) or merged into another, an edit removed the operation, turned subcontracting off or
+        moved it to another vendor resource. The reason says which. The operation's poRequestedAt is cleared, so
+        a vendor change and a later release request afresh with subcontract.porequested; a reset below Released
+        withdraws nothing. Consumer: purchasing (wave 17), which cancels the vendor PO line.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, operNumber, resourceId, qty, unitPrice, amount, currency, reason, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          operNumber: { type: integer }
+          resourceId: { type: string, format: uuid, description: The vendor resource the request named. }
+          qty: { type: string, description: The process quantity that was requested. }
+          unitPrice: { type: string }
+          amount: { type: string, description: 'unitPrice × qty at 4 places.' }
+          currency: { type: string }
+          reason: { type: string, enum: [order-cancelled, operation-removed, subcontract-off, vendor-changed] }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.subcontract.pocancelled.v1
     operationStatusChanged:
       name: statuschanged
       title: Operation finished or reopened

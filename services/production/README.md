@@ -427,3 +427,16 @@ Slice 13 (read-only inquiries of 4.21.14, no migration):
   the finish), scrap % (error ÷ finished + error) and the open orders (current status) and those
   overdue as of the date, per group and in total; rates are null with nothing to measure
   (`production.order.read`). Read-only; no table or event of its own.
+
+Slice 15:
+
+- Subcontract purchase request changes (FR-21.10): purchasing hears about every change to an
+  operation it was asked to buy. `subcontract.pochanged` carries the previous and the current
+  quantity, unit price, amount and due date after a quantity or delivery date PATCH, an order BOM or
+  route edit (also from an engineering change), a split (the original's PO shrinks) or a merge (the
+  survivor's grows); `subcontract.pocancelled` withdraws the
+  request when the order is cancelled or merged away, or an edit removes the operation, turns
+  subcontracting off or changes the vendor resource. A cancel clears `poRequestedAt` and stamps
+  `poCancelledAt` (migration `0012_subcontract_changes.sql`), so a later release or a switch back on
+  requests afresh. The comparison is `domain.PlanSubcontractChanges`, run in the transaction of the
+  change. The subcontract inquiry and the order's route tab show a withdrawn request.

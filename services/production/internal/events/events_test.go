@@ -27,7 +27,7 @@ func TestEventTypesFollowTheKernelRule(t *testing.T) {
 			want = "passage.production.asbuilt"
 		case TriggerPointFired:
 			want = "passage.production.triggerpoint"
-		case SubcontractPORequested:
+		case SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled:
 			want = "passage.production.subcontract"
 		case OperationStatusChanged:
 			want = "passage.production.operation"
@@ -61,6 +61,8 @@ func TestAsyncAPIMatchesThePayloads(t *testing.T) {
 		{"orderBOMEdited", OrderBOMEdited, OrderBOMEditedData{}},
 		{"triggerPointFired", TriggerPointFired, TriggerPointFiredData{}},
 		{"subcontractPORequested", SubcontractPORequested, SubcontractPORequestedData{}},
+		{"subcontractPOChanged", SubcontractPOChanged, SubcontractPOChangedData{}},
+		{"subcontractPOCancelled", SubcontractPOCancelled, SubcontractPOCancelledData{}},
 		{"operationStatusChanged", OperationStatusChanged, OperationStatusChangedData{}},
 		{"orderChangeDetected", OrderChangeDetected, OrderChangeData{}},
 		{"orderChangeApplied", OrderChangeApplied, OrderChangeData{}},

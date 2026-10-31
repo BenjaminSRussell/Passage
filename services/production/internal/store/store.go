@@ -594,6 +594,12 @@ func (s *Postgres) UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error
 			return domainProblem(err)
 		}
 		qty := h.quantity
+		// FR-21.10: what purchasing was asked for before the quantity or the delivery
+		// date (the PO due date) moves; settled once the header is written.
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, u.OrderID)
+		if err != nil {
+			return err
+		}
 		if u.Quantity != nil {
 			qty = *u.Quantity
 			if err := requantify(ctx, tx, p.TenantID, u.OrderID, qty); err != nil {
@@ -609,6 +615,9 @@ func (s *Postgres) UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error
 				delivery_date = case when $4 then $5::date else delivery_date end,
 				version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, u.OrderID, qty.String(), u.SetDeliveryDate, u.DeliveryDate); err != nil {
+			return err
+		}
+		if err := settleSubcontracts(ctx, tx, p.TenantID, u.OrderID, u.Actor, requested, false); err != nil {
 			return err
 		}
 		out, err = loadOrder(ctx, tx, p.TenantID, u.OrderID)
@@ -759,6 +768,16 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				if _, err := tx.Exec(ctx, `delete from production_cost_estimate where tenant_id = $1 and order_id = $2`, p.TenantID, t.OrderID); err != nil {
 					return err
 				}
+			}
+		}
+		if to == domain.Cancelled {
+			// FR-21.10: a cancelled order withdraws the vendor POs it asked for.
+			requested, err := requestedSubcontracts(ctx, tx, p.TenantID, t.OrderID)
+			if err != nil {
+				return err
+			}
+			if err := settleSubcontracts(ctx, tx, p.TenantID, t.OrderID, t.Actor, requested, true); err != nil {
+				return err
 			}
 		}
 		if _, err := tx.Exec(ctx, `update production_order set status = $3, qty_raf = $4, qty_error = $5, version = version + 1, updated_at = now()
@@ -912,7 +931,7 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([]domain.Operation, error) {
 	rows, err := q.Query(ctx, `select oper_number, resource_id::text, setup_time_h::text, run_time_h_per::text, process_qty::text, scrap_pct::text,
 		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status,
-		po_requested_at
+		po_requested_at, po_cancelled_at
 		from production_operation where tenant_id = $1 and order_id = $2 order by oper_number`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -923,7 +942,7 @@ func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([
 		var op domain.Operation
 		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status string
 		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub,
-			&hours, &good, &bad, &status, &op.PORequestedAt); err != nil {
+			&hours, &good, &bad, &status, &op.PORequestedAt, &op.POCancelledAt); err != nil {
 			return nil, err
 		}
 		op.HoursReported, op.QtyGood, op.QtyError, op.Status = dec(hours), dec(good), dec(bad), domain.OperStatus(status)

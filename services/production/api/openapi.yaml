@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.10
+  version: 0.21.15
   description: |
     Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
@@ -220,7 +220,8 @@ components:
             qtyGood: { $ref: '#/components/schemas/Decimal' }
             qtyError: { $ref: '#/components/schemas/Decimal' }
             status: { type: string, enum: [open, started, finished] }
-            poRequestedAt: { type: string, format: date-time, readOnly: true, description: 'When release asked purchasing for the vendor PO of this subcontract operation (FR-21.10); absent before.' }
+            poRequestedAt: { type: string, format: date-time, readOnly: true, description: 'When release asked purchasing for the vendor PO of this subcontract operation (FR-21.10); absent before, and absent again once the request was withdrawn.' }
+            poCancelledAt: { type: string, format: date-time, readOnly: true, description: 'When the request was withdrawn (subcontract.pocancelled): the order was cancelled or merged away, or an edit removed the operation, turned subcontracting off or changed the vendor. Cleared when a new request is raised.' }
     OrderLine:
       type: object
       properties:
@@ -834,7 +835,7 @@ components:
         nextCursor: { type: string, format: uuid }
     SubcontractReportRow:
       type: object
-      required: [orderId, orderNumber, orderStatus, legalEntityId, siteId, currency, dueDate, operNumber, resourceId, qty, qtyGood, unitPrice, amount, operStatus, poRequestedAt]
+      required: [orderId, orderNumber, orderStatus, legalEntityId, siteId, currency, dueDate, operNumber, resourceId, qty, qtyGood, unitPrice, amount, operStatus, poRequestedAt, poCancelledAt]
       properties:
         orderId: { type: string, format: uuid }
         orderNumber: { type: string }
@@ -851,6 +852,7 @@ components:
         amount: { $ref: '#/components/schemas/Decimal', description: "Planned amount in the currency's minor unit." }
         operStatus: { type: string, enum: [open, started, finished] }
         poRequestedAt: { type: [string, 'null'], format: date-time }
+        poCancelledAt: { type: [string, 'null'], format: date-time, description: 'When the vendor PO request was withdrawn; null while requested or never requested.' }
     SubcontractReport:
       type: object
       properties:
@@ -1189,7 +1191,11 @@ paths:
         re-exploded and, once estimated, re-estimated; it emits
         dev.passage.production.order.updated.v1. Every other order becomes Cancelled with
         mergedIntoOrderId set, a `merge` status-log row and
-        dev.passage.production.order.statuschanged.v1. Refused (422
+        dev.passage.production.order.statuschanged.v1. Subcontracting (FR-21.10): the survivor's
+        requested vendor POs change with the summed quantity
+        (dev.passage.production.subcontract.pochanged.v1) and the requests of every order merged
+        away are withdrawn (dev.passage.production.subcontract.pocancelled.v1, reason
+        order-cancelled). Refused (422
         PRODUCTION_MERGE_REFUSED, PROD-0016) when any order has posted journals, an order
         to be cancelled has draft journals, or the orders differ.
       x-passage-duty: production.order.release
@@ -1234,6 +1240,12 @@ paths:
     patch:
       operationId: updateProductionOrder
       summary: Edit the header fields allowed for the current status
+      description: |
+        The quantity changes in Created and Estimated (re-exploding lines and operations), the
+        delivery date until Released. When a subcontract operation's vendor PO was already
+        requested (a released order reset below Released keeps it), a new process quantity or
+        delivery date reaches purchasing as dev.passage.production.subcontract.pochanged.v1 in
+        the same transaction (FR-21.10).
       x-passage-duty: production.order.write
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -1331,7 +1343,8 @@ paths:
         Subcontracting (FR-21.10): release emits
         dev.passage.production.subcontract.porequested.v1 for each subcontract operation not
         requested before and stamps the operation's poRequestedAt, so a reset and second
-        release requests nothing new.
+        release requests nothing new. Cancelling the order withdraws its requests
+        (dev.passage.production.subcontract.pocancelled.v1, reason order-cancelled).
       x-passage-duty: production.order.write | production.order.release | production.journal.post | production.order.end
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -1371,8 +1384,10 @@ paths:
         BR-21.8; each keeps its setup) and, once estimated, re-estimated. Emits
         dev.passage.production.order.created.v1 for the new order and
         dev.passage.production.order.updated.v1 for the original, and writes a `split`
-        status-log row on both. A Started order also moves its share of the posted consumption,
-        route hours and WIP to the new order (BR-21.11): with r = splitQty ÷ order quantity,
+        status-log row on both. Subcontracting (FR-21.10): the original's requested vendor POs
+        shrink (dev.passage.production.subcontract.pochanged.v1) and a Released or Started new
+        order requests its own (…subcontract.porequested.v1). A Started order also moves its
+        share of the posted consumption, route hours and WIP to the new order (BR-21.11): with r = splitQty ÷ order quantity,
         quantities move at round(x × r, 6), hours at round(x × r, 2) and amounts at round(x × r)
         in the currency's minor unit, the rounding residual stays on the original. The move is a
         pair of posted `split-transfer` journals (one per order, linked by counterpartOrderId)
@@ -1711,6 +1726,10 @@ paths:
         has consumption, route feedback or journals keeps its item or resource and cannot be
         removed. A Released order also needs the duty production.order.bom-after-release
         (Maintain order BOM after release). Emits dev.passage.production.order.bomedited.v1.
+        Subcontracting (FR-21.10): a requested operation whose process quantity or vendor price
+        changed emits dev.passage.production.subcontract.pochanged.v1; one removed, turned off or
+        moved to another vendor resource emits …subcontract.pocancelled.v1 (and, on a Released
+        order, the new vendor is requested with …subcontract.porequested.v1).
       x-passage-duty: production.order.write
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -1814,7 +1833,8 @@ paths:
         Every subcontract operation of the caller's orders, ordered by order and operation, with
         the vendor resource, the process quantity and what route cards reported good, the vendor
         unit price, the planned amount (unit price × quantity, as the estimate plans it) and when
-        release requested the vendor PO (dev.passage.production.subcontract.porequested.v1).
+        release requested the vendor PO (dev.passage.production.subcontract.porequested.v1) or
+        when that request was withdrawn (poCancelledAt, …subcontract.pocancelled.v1).
         status filters the operation's feedback status, orderStatus the order's; dueFrom and dueTo
         bound the due date, which is the order's delivery date until scheduling (wave 23). The
         PO line and its receipt status arrive with purchasing (wave 17). Totals are per currency

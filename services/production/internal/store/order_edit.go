@@ -96,6 +96,10 @@ func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, 
 		if err != nil {
 			return domainProblem(err)
 		}
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
+		if err != nil {
+			return err
+		}
 		if err := writeEditedLines(ctx, tx, p.TenantID, in.OrderID, lines, res.Lines); err != nil {
 			return err
 		}
@@ -132,6 +136,11 @@ func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, 
 		}
 		// FR-21.10: a subcontract operation added to (or turned on in) a released
 		// order is requested like the ones release requested.
+		// FR-21.10: an edit that changed, removed or switched off a requested
+		// operation changes or cancels its PO first.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, in.OrderID, in.Actor, requested, false); err != nil {
+			return err
+		}
 		var requests []prodevents.SubcontractPORequestedData
 		if h.status == domain.Released {
 			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {

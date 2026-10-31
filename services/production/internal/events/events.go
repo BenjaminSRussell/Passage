@@ -24,6 +24,12 @@ var (
 	// SubcontractPORequested asks purchasing for the vendor PO of one subcontract
 	// operation of a released order (FR-21.10); the PRD's subcontract.po-requested.
 	SubcontractPORequested = events.Type(Context, "subcontract", "porequested", 1)
+	// SubcontractPOChanged tells purchasing that the quantity or price of an operation
+	// it was asked to buy changed; SubcontractPOCancelled that the request is withdrawn
+	// (order cancelled or merged away, operation removed, subcontracting turned off or the
+	// vendor changed). FR-21.10.
+	SubcontractPOChanged   = events.Type(Context, "subcontract", "pochanged", 1)
+	SubcontractPOCancelled = events.Type(Context, "subcontract", "pocancelled", 1)
 	// OperationStatusChanged reports an operation finished or reopened by its
 	// `:finish` or `:reopen` command (FR-21.6), for scheduling and the shop floor.
 	OperationStatusChanged = events.Type(Context, "operation", "statuschanged", 1)
@@ -38,7 +44,7 @@ var (
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed}
+		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed}
 }
 
 // OrderChangeData is the payload of orderchange.detected.v1, .applied.v1 and
@@ -73,6 +79,45 @@ type OperationStatusChangedData struct {
 	OrderVersion int    `json:"orderVersion"`
 	Actor        string `json:"actor"`
 	OccurredAt   string `json:"occurredAt"`
+}
+
+// SubcontractPOChangedData is the payload of subcontract.pochanged.v1: the figures
+// purchasing was last given (Previous*) and the ones now in force, for the same
+// operation and vendor resource: quantity, unit price, amount (at 4 places) and
+// the due date (the order's delivery date until scheduling dates the operation).
+type SubcontractPOChangedData struct {
+	OrderID           string  `json:"orderId"`
+	OrderNumber       string  `json:"orderNumber"`
+	LegalEntityID     string  `json:"legalEntityId"`
+	OperNumber        int     `json:"operNumber"`
+	ResourceID        string  `json:"resourceId"`
+	PreviousQty       string  `json:"previousQty"`
+	Qty               string  `json:"qty"`
+	PreviousUnitPrice string  `json:"previousUnitPrice"`
+	UnitPrice         string  `json:"unitPrice"`
+	PreviousAmount    string  `json:"previousAmount"`
+	Amount            string  `json:"amount"`
+	Currency          string  `json:"currency"`
+	PreviousDueDate   *string `json:"previousDueDate"`
+	DueDate           *string `json:"dueDate"`
+	Actor             string  `json:"actor"`
+}
+
+// SubcontractPOCancelledData is the payload of subcontract.pocancelled.v1: the
+// request withdrawn, with the quantity and amount it had and the Reason
+// (order-cancelled, operation-removed, subcontract-off or vendor-changed).
+type SubcontractPOCancelledData struct {
+	OrderID       string `json:"orderId"`
+	OrderNumber   string `json:"orderNumber"`
+	LegalEntityID string `json:"legalEntityId"`
+	OperNumber    int    `json:"operNumber"`
+	ResourceID    string `json:"resourceId"`
+	Qty           string `json:"qty"`
+	UnitPrice     string `json:"unitPrice"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	Reason        string `json:"reason"`
+	Actor         string `json:"actor"`
 }
 
 // SubcontractPORequestedData is the payload of subcontract.porequested.v1: one

@@ -119,7 +119,13 @@ const operationColumns: DataTableColumn<Operation>[] = [
   {
     key: "subcontract",
     header: "Subcontract",
-    render: (row) => (!row.subcontract ? "No" : row.poRequestedAt ? `Yes, PO requested ${row.poRequestedAt.slice(0, 10)}` : "Yes"),
+    render: (row) => (!row.subcontract
+        ? "No"
+        : row.poRequestedAt
+          ? `Yes, PO requested ${row.poRequestedAt.slice(0, 10)}`
+          : row.poCancelledAt
+            ? `Yes, PO request withdrawn ${row.poCancelledAt.slice(0, 10)}`
+            : "Yes"),
   },
 ];
 

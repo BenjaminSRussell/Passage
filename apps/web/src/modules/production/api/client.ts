@@ -112,6 +112,8 @@ export interface Operation {
   status?: OperStatus;
   /** When release asked purchasing for this subcontract operation's vendor PO (FR-21.10). */
   poRequestedAt?: string;
+  /** When that request was withdrawn: order cancelled or merged, operation removed, subcontracting off or vendor changed. */
+  poCancelledAt?: string;
 }
 
 export interface CostRow {
@@ -689,6 +691,8 @@ export interface SubcontractRow {
   operStatus: OperStatus;
   /** Null until release requests the vendor PO. */
   poRequestedAt: string | null;
+  /** Set while the vendor PO request is withdrawn; null otherwise. */
+  poCancelledAt?: string | null;
 }
 
 export interface SubcontractReport {

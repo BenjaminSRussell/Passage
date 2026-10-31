@@ -148,7 +148,15 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := insertOperations(ctx, tx, p.TenantID, newID, plan.NewOps); err != nil {
 			return err
 		}
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
+		if err != nil {
+			return err
+		}
 		if err := writeQuantities(ctx, tx, p.TenantID, in.OrderID, plan.OriginalLines, plan.OriginalOps); err != nil {
+			return err
+		}
+		// FR-21.10: the original keeps its PO at the smaller quantity.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, in.OrderID, in.Actor, requested, false); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
@@ -302,7 +310,15 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		}
 
 		survivor := heads[survivorID]
+		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, survivorID)
+		if err != nil {
+			return err
+		}
 		if err := writeQuantities(ctx, tx, p.TenantID, survivorID, merged.Lines, merged.Operations); err != nil {
+			return err
+		}
+		// FR-21.10: the survivor's PO grows with the merged quantity.
+		if err := settleSubcontracts(ctx, tx, p.TenantID, survivorID, in.Actor, requested, false); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, order_bom_modified = order_bom_modified or $4, version = version + 1,
@@ -321,6 +337,14 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		}
 		for _, id := range out.Merged {
 			h := heads[id]
+			// FR-21.10: an order merged away withdraws its vendor POs.
+			cancelled, err := requestedSubcontracts(ctx, tx, p.TenantID, id)
+			if err != nil {
+				return err
+			}
+			if err := settleSubcontracts(ctx, tx, p.TenantID, id, in.Actor, cancelled, true); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `update production_order set status = 'Cancelled', merged_into_order_id = $3, version = version + 1, updated_at = now()
 				where tenant_id = $1 and id = $2`, p.TenantID, id, survivorID); err != nil {
 				return err

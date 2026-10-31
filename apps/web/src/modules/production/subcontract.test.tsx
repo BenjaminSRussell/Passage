@@ -116,6 +116,7 @@ describe("subcontract operations page (4.21.14, FR-21.10)", () => {
                 dueDate: null,
                 poRequestedAt: null,
               }),
+              subRow({ orderId: uuid(8), orderNumber: "PO-000003", orderStatus: "Cancelled", operNumber: 40, unitPrice: "3", amount: "300.00", dueDate: "2026-12-15", poRequestedAt: null, poCancelledAt: "2026-10-28T09:00:00Z" }),
             ],
             totals: [
               { currency: "EUR", operations: 1, amount: "33.30" },
@@ -134,7 +135,10 @@ describe("subcontract operations page (4.21.14, FR-21.10)", () => {
     expect(within(table).getByText("2026-11-30")).toBeInTheDocument();
     expect(within(table).getByText("2026-10-26")).toBeInTheDocument();
     expect(within(table).getByText("At release")).toBeInTheDocument();
-    expect(within(table).getAllByText(vendor)).toHaveLength(2);
+    expect(within(table).getByText("Withdrawn")).toBeInTheDocument();
+    expect(within(table).getByText("2026-10-28")).toBeInTheDocument();
+    expect(within(table).getByText("300.00 USD")).toBeInTheDocument();
+    expect(within(table).getAllByText(vendor)).toHaveLength(3);
     expect(screen.getByRole("list", { name: "Subcontract totals in USD" })).toHaveTextContent("Planned amount 125.00 USD");
     expect(screen.getByRole("list", { name: "Subcontract totals in EUR" })).toHaveTextContent("Operations 1");
     expect(calls(fetchMock)[0][0]).toBe("/api/v1/production/subcontract-operations?limit=50");
@@ -251,5 +255,38 @@ describe("order route tab", () => {
     renderAt(`/production/${orderId}`);
     expect(await screen.findByText("Yes, PO requested 2026-10-26")).toBeInTheDocument();
     expect(screen.getAllByText("Open").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("order route tab, withdrawn request", () => {
+  it("shows that the vendor PO request was withdrawn", async () => {
+    stubFetch((url) => {
+      if (url.endsWith(`/orders/${orderId}`)) {
+        return json(
+          order({
+            status: "Cancelled",
+            operations: [
+              {
+                operNumber: 20,
+                resourceId: vendor,
+                setupTimeH: "0",
+                runTimeHPer: "0",
+                scrapPct: "0",
+                laborRate: "0",
+                overheadRate: "0",
+                subcontract: true,
+                subcontractPrice: "1.25",
+                processQty: "100",
+                status: "open",
+                poCancelledAt: "2026-10-28T09:00:00Z",
+              },
+            ],
+          }),
+        );
+      }
+      return json({ items: [] });
+    });
+    renderAt(`/production/${orderId}`);
+    expect(await screen.findByText("Yes, PO request withdrawn 2026-10-28")).toBeInTheDocument();
   });
 });
