@@ -96,7 +96,9 @@ type Result struct {
 
 // Match scores candidate sets for a payment and decides (BR-30.1). Singles are
 // scored over all open items; multi-item sets are searched only among the first
-// MaxSubsetPool items by due date so the search stays bounded.
+// MaxSubsetPool items, those the remittance references first and then by due
+// date, so the search stays bounded and an unidentified payer's multi-invoice
+// payment still finds its referenced items among hundreds of open ones.
 func Match(p Payment, open []Item) Result {
 	p.nameScores = payerNameScores(p)
 	pool := append([]Item(nil), open...)
@@ -108,16 +110,25 @@ func Match(p Payment, open []Item) Result {
 	})
 
 	var sets []Candidate
+	subsetPool := make([]Item, 0, len(pool))
 	for _, it := range pool {
 		if c, ok := scoreSingle(p, it); ok {
 			sets = append(sets, c)
 		}
+		if referenced(p, it.DocumentNumber) {
+			subsetPool = append(subsetPool, it)
+		}
 	}
-	limit := len(pool)
+	for _, it := range pool {
+		if !referenced(p, it.DocumentNumber) {
+			subsetPool = append(subsetPool, it)
+		}
+	}
+	limit := len(subsetPool)
 	if limit > MaxSubsetPool {
 		limit = MaxSubsetPool
 	}
-	exactSubsets(pool[:limit], p.Amount, MaxSubsetSize, func(picked []Item) {
+	exactSubsets(subsetPool[:limit], p.Amount, MaxSubsetSize, func(picked []Item) {
 		// A payment settles one customer's items (apply refuses a mix), so a set
 		// spanning customers is never a candidate.
 		if oneCustomer(picked) {
@@ -142,16 +153,23 @@ func Match(p Payment, open []Item) Result {
 	if len(sets) == 0 {
 		return res
 	}
+	// A set made only of the top set's items is part of the same settlement,
+	// not a rival explanation of the payment, so it neither counts against
+	// "exactly one set >= 85" nor runs up. Without this, learning a payer
+	// (R4, R5) lifts each referenced invoice of a multi-invoice payment to 85 on
+	// its own and demotes the exact multi-invoice set to SUGGESTED.
 	top := sets[0]
-	atThreshold := 0
-	for _, c := range sets {
+	atThreshold, runnerUp := 0, 0
+	for i, c := range sets {
+		if i > 0 && within(c.ItemIDs, top.ItemIDs) {
+			continue
+		}
 		if c.Score >= AutoThreshold {
 			atThreshold++
 		}
-	}
-	runnerUp := 0
-	if len(sets) > 1 {
-		runnerUp = sets[1].Score
+		if i > 0 && c.Score > runnerUp {
+			runnerUp = c.Score
+		}
 	}
 	switch {
 	case top.Score >= AutoThreshold && atThreshold == 1 && runnerUp <= top.Score-AutoMargin:
@@ -234,6 +252,23 @@ func scoreSubset(p Payment, picked []Item) Candidate {
 		c.Rules = append(c.Rules, "R6")
 	}
 	return c
+}
+
+// within reports whether every id of part is in whole.
+func within(part, whole []string) bool {
+	for _, id := range part {
+		found := false
+		for _, w := range whole {
+			if w == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // oneCustomer reports whether every item belongs to the same customer.

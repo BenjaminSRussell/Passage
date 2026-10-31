@@ -207,6 +207,36 @@ func TestPayerIdentity_LiftsReferenceToAutoApply(t *testing.T) {
 	}
 }
 
+// A known payer paying two quoted invoices exactly auto-applies both. Hand-derived:
+// the pair scores R2-SUBSET 25 + R1 60 + R4 15 + R5 10 = 110 and each invoice alone
+// R1 60 + R4 15 + R5 10 = 85; the singles are part of the pair, not rivals, so the
+// pair is the only set at 85 or more. Found by cash-app-500 in the store, where
+// payers are learned on apply.
+func TestPayerIdentity_MultiInvoiceStillAutoApplies(t *testing.T) {
+	due := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	open := []Item{
+		{ID: "i-1", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40001", DueDate: due, OpenAmount: decimal.RequireFromString("1200.00")},
+		{ID: "i-2", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40002", DueDate: due, OpenAmount: decimal.RequireFromString("380.50")},
+	}
+	p := Payment{Amount: decimal.RequireFromString("1580.50"), ValueDate: due.AddDate(0, 0, 30),
+		Remittance: []RemittanceLine{{Reference: "RE-40001 RE-40002"}}, PayerName: "Kunde GmbH",
+		PayerCustomers: map[string]bool{"c1": true}, LearnedNames: map[string][]string{"c1": {"KUNDE GMBH"}}}
+	res := Match(p, open)
+	if res.Decision != DecisionAutoApply || strings.Join(res.Top[0].ItemIDs, ",") != "i-1,i-2" || res.Top[0].Score != 110 {
+		t.Fatalf("result = %+v, want AUTO_APPLY of both at 110", res)
+	}
+	if len(res.Top) != 3 || res.Top[1].Score != 85 || res.Top[2].Score != 85 {
+		t.Fatalf("top = %+v, want both singles kept as candidates at 85", res.Top)
+	}
+	// A rival set outside the pair still blocks: a third quoted invoice of the same
+	// amount as the pair scores R1 60 + R2 30 + R4 15 + R5 10 = 115 on its own.
+	rival := Item{ID: "i-3", CustomerID: "c1", Currency: "EUR", DocumentNumber: "RE-40003", DueDate: due, OpenAmount: decimal.RequireFromString("1580.50")}
+	p.Remittance = []RemittanceLine{{Reference: "RE-40001 RE-40002 RE-40003"}}
+	if res := Match(p, append(open, rival)); res.Decision != DecisionSuggested {
+		t.Fatalf("with a rival set: %+v, want SUGGESTED", res)
+	}
+}
+
 func TestAccountHash_NormalizesAndHidesTheAccount(t *testing.T) {
 	a := AccountHash("DE89 3704 0044 0532 0130 00")
 	if a == "" || len(a) != 64 || strings.Contains(a, "3704") {

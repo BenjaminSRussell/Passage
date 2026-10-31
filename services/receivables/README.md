@@ -83,10 +83,16 @@ Domain tests are table-driven plus `pgregory.net/rapid` properties. Store and AP
 integration tests use `platform/go/testkit` and skip unless
 `PASSAGE_TEST_DATABASE_URL` is set. Set it to run them against Postgres 17.
 
+Acceptance fixtures live in `testdata/` and load through `internal/fixtures`:
+`cash-app-500` (AC-30.1; regenerate with `go test ./internal/fixtures -update`,
+which must leave the files unchanged) and `dunning-60` (AC-30.3; letters and
+exclusions written by hand from BR-30.2).
+
 ## Matching rules implemented
 
 - R1 document number in the remittance as a whole token, so `INV-1001` does not match `INV-10012` (+60), R2 single item equal to the amount (+30) or a subset of up to 5 items (+25), R3 amount equals open minus available cash discount (+28), R6 value date within 7 days of due (+5).
-- Auto-apply when the top set scores ≥ 85 and the runner-up is ≤ winner − 20; 60–84 is suggested; below 60 goes on account.
+- Auto-apply when the top set is the only set scoring ≥ 85 and the runner-up is ≤ winner − 20; 60–84 is suggested; below 60 goes on account. A set made only of the top set's items (one quoted invoice of a multi-invoice payment) is part of the same settlement and is neither a rival nor the runner-up.
+- Multi-item sets are searched among the items the remittance quotes first, then by due date, up to 12 items; a match reads at most 500 open items, the quoted ones first, so an unidentified payer's invoices are never cut off.
 - R4 payer account hash bound to the item's customer (+15). Bindings are learned when a payment carrying the hash is applied to a customer; camt.053 payments carry the hash of the debtor's IBAN or other account id, manual payments the hash of `payerAccount`.
 - R5 payer name Jaro-Winkler ≥ 0.92 to a name the customer paid under before (+10), compared after upper-casing and dropping punctuation; names are learned on apply like R4.
 - R7 short of one item by less than 1% or less than 50.00 USD / 45.00 EUR, only with a short-pay reason (+20); not scored when R3 already explains the shortfall as the cash discount.

@@ -59,11 +59,11 @@ owner or a kernel change).
 
 | AC | Status | Reason |
 |---|---|---|
-| AC1 cash-application fixtures: 500 payments, ≥ 90% auto-match, zero false matches | later slice of PSG-30 | The `testdata/cash-app-500` fixture and the answer key are not created. The rules and the subset-sum bound are unit-tested, but the fixture-level accuracy is not measured. |
+| AC1 cash-application fixtures: 500 payments, ≥ 90% auto-match, zero false matches | met (matcher decision; no auto-apply job yet) | `testdata/cash-app-500`: 300 BAI2 checks, 150 camt.053 entries and 50 remittances against 923 open items (decoy numbers and amounts included), with an answer key. The generator (`internal/fixtures/cashapp_gen_test.go`, fixed seed, `-update`) builds each payment from the invoices it pays, so the key never comes from the matcher. `domain.TestCashApp500_AutoMatchesAtLeast450WithNoFalseMatch` runs the parsers and the matcher: 452 of 500 auto-apply, 0 false. `store.TestCashApp500_ImportMatchAndAutoApply` imports both files, records the remittances, then matches each payment in Postgres and applies every AUTO_APPLY at once (payers are learned along the way): 456 of 500, 0 false. Nothing in the service applies a payment on its own yet (see Payment lifecycle); the test plays that job. |
 | AC-30.14 balance confirmation: 20 customers, 15 agree, 2 disagree, 3 silent | met | `store/cases_downpayments_test.go` runs it against Postgres: the difference list has 2 rows with both balances and 2 DISPUTE cases exist. |
 | AC-30.15 down payment clearing: 2,000.00 against a 5,000.00 invoice | met, except the ledger posting | Tested against Postgres: the item shows 3,000.00 open and `downpayment.cleared.v1` carries Dr 2190 2,000.00 / Cr 1200 2,000.00; the ledger does not post it yet. |
 | AC-30.13 deduction: 300.00 short pay matched to a promotion fund and approved | met, except billing's credit note and the fund usage | `store/camt_deduction_test.go` runs it against Postgres: the 300.00 moves off the invoice, matches a 300.00 promotion fund claim, is approved, and `deduction.resolved.v1` carries APPROVED, the amount and the claim for billing and pricing. |
-| AC2 dunning run respects levels, grace and blocks | partly met | Levels, grace, minimum, interval, blocks, disputes and promises are unit-tested (`domain/dunning_test.go`) and tested end to end against Postgres (`store/collections_test.go`, including AC-30.4's 10-day interval and AC-30.9's dispute exclusion). The `dunning-60` fixture of AC-30.3 (60 customers, 31 expected letters) is not created. |
+| AC2 dunning run respects levels, grace and blocks | met | Unit-tested (`domain/dunning_test.go`) and end to end against Postgres (`store/collections_test.go`, including AC-30.4's 10-day interval and AC-30.9's dispute exclusion). AC-30.3: `testdata/dunning-60` holds 60 customers (5 blocked, 4 disputed, 3 with promises, plus grace, not-due, minimum, interval, at-level and one-level-per-run cases) with the 31 letters and 21 exclusions derived by hand from BR-30.2. `domain.TestDunning60_LettersForExactlyTheExpectedCustomers` checks the plan; `store.TestDunning60_RunIssuesLettersForExactlyTheExpectedCustomers` posts the items, disputes and promises, runs, reviews and issues: exactly those 31 letters at their levels, 7 USD 25.00 and 2 USD 50.00 fees, no disputed item on a letter, 31 `dunningletter.issued.v1`. Letters are still not rendered (docgen handoff, deliverable 2). |
 | AC3 RMA E2E: return, inspection, credit note posts to inventory and AR | handoff | Depends on sales, inventory and ledger. |
 | AC4 Phase 5 exit: one-month simulation, reconciliation pack signed | handoff | `sim/phase5-month` spans waves 3-5 and needs the accountant sign-off. Owned by testing-reconciliation. |
 | AC5 every deliverable has code or a reason in this file | met | This file lists every item not built. |
@@ -84,7 +84,8 @@ owner or a kernel change).
 ## Payment lifecycle not in this slice
 
 - `:on-account` and `:reverse` endpoints (BR-30.6): the apply path handles residual on account, but there is no explicit route, no reversal and no re-apply of ON_ACCOUNT payments.
-- `SUGGESTED` is never persisted. `:match` returns the decision without storing it, and nothing auto-applies on its own: the clerk applies the AUTO_APPLY candidate from the payment page. Auto-application on import arrives with the importers.
+- `SUGGESTED` is never persisted. `:match` returns the decision without storing it, and nothing auto-applies on its own: the clerk applies the AUTO_APPLY candidate from the payment page. Auto-application on import (a job that matches each imported payment and applies AUTO_APPLY) is not built; `store.TestCashApp500_ImportMatchAndAutoApply` drives `MatchPayment` and `ApplyPayment` the way it would.
+- Decision rule, as built for AC-30.1: a candidate set made only of the top set's items (a quoted invoice of a multi-invoice payment, scored alone) is not counted as a rival for BR-30.1's "exactly one set ≥ 85" or as the runner-up. Read literally, the rule demotes every multi-invoice payment of a learned payer (each quoted invoice alone reaches R1 + R4 + R5 = 85) to SUGGESTED. A set with any item outside the top set still blocks. This reading of BR-30.1 needs product confirmation.
 - `REVERSED` status and the reversal of an auto-application within the open period (BR-30.1) are not built.
 - `POST /payments` accepts only source MANUAL. LOCKBOX and CAMT053 payments come from their importers; PORTAL and REMITTANCE have no source yet.
 - Settlements are not partitioned by month (budget §5.30.19). A plain table is used.
@@ -122,7 +123,7 @@ owner or a kernel change).
 
 ## Testdata and fixtures
 
-- `testdata/` is absent. The PRD fixtures `cash-app-500`, `dunning-60`, `rma-30`, `disputes-20`, `rebate-settle-12` and `portal-e2e` are not created. The BAI2 parser is tested against inline spec-shaped samples and a property test (never panics; dropping a record breaks a count).
+- `testdata/cash-app-500` (AC-30.1) and `testdata/dunning-60` (AC-30.3) exist; `internal/fixtures` loads them for tests. The PRD fixtures `rma-30`, `disputes-20`, `rebate-settle-12` and `portal-e2e` are not created. The BAI2 parser is tested against inline spec-shaped samples and a property test (never panics; dropping a record breaks a count).
 
 ## Web module (`apps/web/src/modules/receivables/`)
 

@@ -161,6 +161,23 @@ func TestMatch_LongerDocumentNumberIsNoFalseMatch(t *testing.T) {
 	}
 }
 
+func TestMatch_SubsetSearchReachesReferencedItemsBeyondThePool(t *testing.T) {
+	// An unidentified payer pays INV-20101 (300.00) and INV-20102 (450.25), both
+	// due in May, while twelve other items fall due earlier and would fill the
+	// subset pool by due date. Hand-derived: the pair scores R2-SUBSET 25 + R1 60 =
+	// 85 (no R6: value date 2027-03-15 is far from the May due dates), each item
+	// alone R1 60, so the pair auto-applies with a margin of 25.
+	open := []Item{item("x", "INV-20101", "2027-05-10", "300.00"), item("y", "INV-20102", "2027-05-12", "450.25")}
+	for i := 0; i < MaxSubsetPool; i++ {
+		open = append(open, item(string(rune('a'+i)), "INV-3000"+string(rune('a'+i)), "2027-03-01", "1000.00"))
+	}
+	p := Payment{Amount: amt("750.25"), ValueDate: day("2027-03-15"), Remittance: []RemittanceLine{{Reference: "INV-20101 INV-20102"}}}
+	got := Match(p, open)
+	if got.Decision != DecisionAutoApply || !sameIDs(got.Top[0].ItemIDs, []string{"x", "y"}) || got.Top[0].Score != 85 {
+		t.Fatalf("got %s top %+v, want auto-apply of x and y at 85", got.Decision, got.Top)
+	}
+}
+
 func TestMatch_PropertySubsetBoundAndAutoRule(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		n := rapid.IntRange(0, 15).Draw(t, "n")
@@ -201,8 +218,11 @@ func TestMatch_PropertySubsetBoundAndAutoRule(t *testing.T) {
 			if top.Score < AutoThreshold {
 				t.Fatalf("auto-applied at score %d", top.Score)
 			}
-			if len(res.Top) > 1 && res.Top[1].Score > top.Score-AutoMargin {
-				t.Fatalf("auto-applied with runner-up %d against %d", res.Top[1].Score, top.Score)
+			// A runner-up is any listed set with an item outside the top set.
+			for _, c := range res.Top[1:] {
+				if !within(c.ItemIDs, top.ItemIDs) && c.Score > top.Score-AutoMargin {
+					t.Fatalf("auto-applied with runner-up %d against %d", c.Score, top.Score)
+				}
 			}
 		}
 	})

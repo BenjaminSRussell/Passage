@@ -1,0 +1,1810 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08">
+  <BkToCstmrStmt>
+    <GrpHdr><MsgId>CASHAPP500</MsgId><CreDtTm>2027-03-15T06:00:00</CreDtTm></GrpHdr>
+    <Stmt>
+      <Id>STMT-20270315</Id>
+      <Acct><Id><IBAN>DE89370400440532013000</IBAN></Id></Acct>
+      <Ntry>
+        <Amt Ccy="EUR">8249.42</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0001</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 030 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000030</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40001</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8123.37</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0002</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 030 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000030</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40002</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22332.44</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0003</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 018 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000018</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40003</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">12096.92</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0004</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 040 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000040</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40004</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22889.91</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0005</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 050 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000050</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40005</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1580.61</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0006</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40006</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7191.88</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0007</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 045 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000045</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40007</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3476.92</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0008</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 035 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000035</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40008</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">23865.97</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0009</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 018 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000018</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40009</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8181.36</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0010</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40010</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">14618.88</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0011</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 035 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000035</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40011</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21155.09</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0012</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 029 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000029</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40012</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1304.38</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0013</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 057 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000057</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40013</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8894.98</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0014</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 032 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000032</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40014</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">45970.36</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0015</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40015 RE-40016 RE-40017 RE-40018</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6563.43</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0016</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 033 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000033</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40019</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">13055.18</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0017</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 033 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000033</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40020</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3760.63</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0018</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 045 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000045</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Zahlung Maerz</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21633.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0019</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40022 RE-40023 RE-40024</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6850.41</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0020</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 038 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000038</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40025</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22262.43</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0021</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 059 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000059</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40026</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3003.89</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0022</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 036 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000036</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40027</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17658.88</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0023</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 030 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000030</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40028</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20273.10</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0024</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 028 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000028</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40029</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10722.29</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0025</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 034 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000034</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40030</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">14343.29</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0026</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 010 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000010</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40031</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">23612.69</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0027</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 027 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000027</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40032</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6318.01</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0028</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 002 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000002</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40033</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">4801.37</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0029</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 021 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000021</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40034</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16774.15</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0030</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 045 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000045</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40035</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6787.92</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0031</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 055 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000055</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40036</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9969.89</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0032</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40037</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">24154.38</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0033</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 059 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000059</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40038</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20026.74</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0034</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40039</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16269.82</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0035</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 036 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000036</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40040</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7544.26</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0036</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 021 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000021</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40041</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22702.74</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0037</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 028 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000028</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40042</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6475.94</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0038</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40043</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">19394.28</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0039</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 057 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000057</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40044</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">18933.82</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0040</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 046 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000046</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40045</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22042.35</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0041</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 038 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000038</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40046</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1177.54</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0042</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 030 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000030</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40047</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7462.41</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0043</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 051 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000051</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40048</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">531.80</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0044</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 046 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000046</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40049</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">13353.69</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0045</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 045 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000045</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40050</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6583.66</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0046</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40051</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20582.35</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0047</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 059 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000059</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40052</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20076.25</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0048</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 014 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000014</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40053</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11089.34</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0049</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 050 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000050</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40054</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">4118.59</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0050</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 039 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000039</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40055</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6256.02</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0051</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40056</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">14382.98</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0052</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 050 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000050</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40057 RE-40058</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">4016.70</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0053</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 027 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000027</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40059</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">2524.73</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0054</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 020 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000020</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40060</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9573.48</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0055</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 057 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000057</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40061</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6258.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0056</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Zahlung Maerz</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9326.98</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0057</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40063</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">75739.04</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0058</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 052 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000052</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40064 RE-40065 RE-40066 RE-40067</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">23474.37</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0059</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 020 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000020</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40068</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">35915.05</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0060</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 028 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000028</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40069 RE-40070 RE-40071 RE-40072</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6776.05</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0061</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 041 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000041</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40073</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21880.19</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0062</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 053 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000053</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40074</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11687.14</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0063</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 012 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000012</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40075</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1029.26</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0064</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 005 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000005</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40076</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">15239.64</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0065</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 010 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000010</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40077</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16048.27</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0066</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 041 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000041</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40078</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6908.45</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0067</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 010 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000010</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40079</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6415.74</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0068</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 011 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000011</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40080</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20412.97</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0069</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 022 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000022</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40081</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21389.96</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0070</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 027 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000027</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40082 RE-40083 RE-40084</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">349.32</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0071</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40085</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">15157.68</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0072</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 024 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000024</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40086</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11030.57</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0073</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 018 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000018</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40087</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16001.59</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0074</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40088</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">24492.14</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0075</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 046 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000046</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40089</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">760.04</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0076</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 013 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000013</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40090</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">5628.10</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0077</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 043 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000043</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40091</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">12846.92</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0078</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 035 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000035</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40092</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1186.94</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0079</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 027 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000027</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40093</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17814.40</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0080</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 012 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000012</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40094</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">23700.49</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0081</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40095</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">30921.07</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0082</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40096 RE-40097</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6156.40</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0083</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40098</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">43996.95</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0084</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 022 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000022</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40099 RE-40100 RE-40101 RE-40102</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8377.17</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0085</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 004 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000004</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40103</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">13786.61</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0086</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40104 RE-40105</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">23823.44</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0087</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 037 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000037</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40106</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">13499.46</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0088</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 009 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000009</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40107</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">24081.52</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0089</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 060 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000060</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40108</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3466.82</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0090</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 053 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000053</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40109</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">29815.13</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0091</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 056 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000056</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40110 RE-40111</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7690.13</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0092</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 010 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000010</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40112</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">14125.24</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0093</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40113</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10438.79</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0094</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 048 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000048</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Zahlung Maerz</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">51312.98</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0095</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 018 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000018</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40115 RE-40116 RE-40117</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">2545.99</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0096</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40118</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">19921.26</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0097</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 053 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000053</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40119</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8491.06</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0098</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 004 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000004</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40120</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22846.87</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0099</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 026 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000026</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Zahlung Maerz</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">24380.91</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0100</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 002 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000002</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40122</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">5860.95</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0101</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40123</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">70327.65</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0102</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 044 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000044</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40124 RE-40125 RE-40126 RE-40127</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">20339.32</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0103</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 001 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000001</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40128</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6161.30</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0104</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 019 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000019</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40129</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10432.12</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0105</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 048 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000048</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40130</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">4458.57</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0106</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40131</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9966.28</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0107</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 055 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000055</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40132</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9801.27</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0108</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 035 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000035</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40133</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11520.23</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0109</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 039 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000039</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40134</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17585.15</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0110</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 002 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000002</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40135</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">2432.19</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0111</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 051 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000051</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40136</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">22480.10</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0112</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 029 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000029</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40137</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6267.94</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0113</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 001 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000001</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40138</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17065.03</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0114</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 028 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000028</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40139</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21539.59</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0115</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 016 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000016</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40140</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">38791.15</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0116</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 051 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000051</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40141 RE-40142 RE-40143 RE-40144</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10021.44</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0117</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40145</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">18052.42</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0118</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 052 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000052</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40146</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3522.74</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0119</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 003 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000003</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40147</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">18659.76</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0120</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 003 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000003</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40148</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">5134.36</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0121</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 032 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000032</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40149</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1693.82</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0122</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 025 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000025</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40150</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">12769.17</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0123</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 031 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000031</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40151</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">18593.15</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0124</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 034 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000034</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40152</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">6580.08</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0125</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 007 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000007</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40153</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">4006.55</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0126</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 037 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000037</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40154</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">12656.93</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0127</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 014 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000014</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40155</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16069.63</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0128</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 057 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000057</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40156</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">21542.11</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0129</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 047 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000047</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Zahlung Maerz</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">37341.39</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0130</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 025 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000025</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40158 RE-40159 RE-40160 RE-40161</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10513.36</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0131</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 051 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000051</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40162</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">24092.66</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0132</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 059 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000059</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40163</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17940.59</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0133</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 042 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000042</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40164</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">8740.87</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0134</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 014 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000014</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40165</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">5157.14</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0135</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 046 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000046</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40166</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">14581.89</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0136</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 032 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000032</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40167</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7875.49</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0137</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 038 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000038</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40168</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">16236.32</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0138</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 035 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000035</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnungen RE-40169 RE-40170</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11864.52</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0139</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 006 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000006</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40171</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">10688.45</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0140</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 056 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000056</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40172</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">5438.69</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-10</Dt></ValDt>
+        <NtryRef>NTRY0141</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 023 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000023</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40173</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">15776.75</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0142</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 011 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000011</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40174</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">9903.35</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-12</Dt></ValDt>
+        <NtryRef>NTRY0143</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 038 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000038</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40175</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">19567.76</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0144</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 050 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000050</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40176</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">653.39</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-13</Dt></ValDt>
+        <NtryRef>NTRY0145</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 055 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000055</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40177</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">17278.93</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0146</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 059 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000059</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40178</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">7281.17</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0147</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 050 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000050</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40179</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">18826.88</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-15</Dt></ValDt>
+        <NtryRef>NTRY0148</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 021 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000021</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40180</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">15832.52</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-11</Dt></ValDt>
+        <NtryRef>NTRY0149</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 005 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000005</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Strd><CdtrRefInf><Ref>RE-40181</Ref></CdtrRefInf></Strd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">11068.42</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2027-03-15</Dt></BookgDt>
+        <ValDt><Dt>2027-03-14</Dt></ValDt>
+        <NtryRef>NTRY0150</NtryRef>
+        <NtryDtls><TxDtls>
+          <RltdPties><Dbtr><Pty><Nm>Kunde 012 GmbH</Nm></Pty></Dbtr><DbtrAcct><Id><IBAN>DE02370400440000000012</IBAN></Id></DbtrAcct></RltdPties>
+          <RmtInf><Ustrd>Rechnung RE-40182</Ustrd></RmtInf>
+        </TxDtls></NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>
