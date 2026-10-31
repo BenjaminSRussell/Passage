@@ -108,6 +108,8 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/ledger/recurring-journals/{id}/resume":                            dutyJournalWrite,
 		"POST /v1/ledger/recurring-journals/{id}/generate":                          dutyJournalWrite,
 		"GET /v1/ledger/recurring-journals/{id}/runs":                               dutyRead,
+		"GET /v1/ledger/ledger-sets":                                                dutyRead,
+		"GET /v1/ledger/ledgers/{id}/account-mappings":                              dutyRead,
 		"POST /v1/ledger/ledger-sets":                                               dutySetupWrite,
 		"GET /v1/ledger/ledger-sets/{setId}":                                        dutyRead,
 		"POST /v1/ledger/ledger-sets/{setId}/journal-entries":                       dutyPost,
