@@ -146,68 +146,87 @@ func TestDecide_AutoAlwaysHasUniqueLeader(t *testing.T) {
 	})
 }
 
-// TestDecide_RecordedFixturePrecision runs the scorer over a 1,000-line
-// fixture: 600 exact lines, 250 reference-only lines (amount and reference
-// agree, value date one day late, counterparty garbled) and 150 bank fees with
-// no book counterpart. No wrong line may be auto-matched; reference-only lines
-// are suggested, not auto-matched, in this slice.
-func TestDecide_RecordedFixturePrecision(t *testing.T) {
-	const transactions = 850 // the reference-only lines cover transactions 600..849
-	txs := make([]Facts, transactions)
-	for i := range txs {
-		cents := 10000 + (i%53)*100
-		day := 1 + i%28
-		txs[i] = Facts{
-			Amount:       decimal.New(int64(cents), -2),
-			ValueDate:    fmt.Sprintf("2026-10-%02d", day),
+func TestMatchLine_ReferenceRuleCarriesGarbledCounterparty(t *testing.T) {
+	tx := facts("120.00", "2026-10-22", "E2E00042", "Vendor 042 Holdings")
+	other := facts("120.00", "2026-10-22", "E2E00043", "Vendor 043 Holdings")
+	line := facts("120.00", "2026-10-23", "E2E00042", "ZQX unknown payer")
+	cands := map[string]Facts{"tx-42": tx, "tx-43": other}
+	if d := Decide([]Candidate{{"tx-42", Score(line, tx, tol)}, {"tx-43", Score(line, other, tol)}}, DefaultThresholds); d.Status == StatusMatched {
+		t.Fatalf("balanced rule alone must not auto-match, got %+v", d)
+	}
+	d := MatchLine(line, cands, DefaultRules(tol), DefaultThresholds)
+	if d.Status != StatusMatched || d.Best.ID != "tx-42" {
+		t.Fatalf("decision = %+v; want tx-42 auto-matched by the reference rule", d)
+	}
+}
+
+// TestMatchLine_Fixture1000AutoMatchRate runs a deterministic 1,000-line
+// fixture (AC1 / AC-36.2): 600 exact lines, 360 reference-only lines (amount and
+// reference agree, value date one day late, counterparty garbled), 20 lines whose
+// reference and counterparty both differ (a person must decide) and 20 bank fees
+// with no book counterpart. At least 95% of all lines must be auto-matched to the
+// right transaction and none to a wrong one.
+func TestMatchLine_Fixture1000AutoMatchRate(t *testing.T) {
+	const transactions = 980
+	txs := make(map[string]Facts, transactions)
+	for i := 0; i < transactions; i++ {
+		txs[fmt.Sprintf("tx-%d", i)] = Facts{
+			Amount:       decimal.New(int64(10000+(i%53)*100), -2),
+			ValueDate:    fmt.Sprintf("2026-10-%02d", 1+i%28),
 			Reference:    fmt.Sprintf("E2E%05d", i),
 			Counterparty: fmt.Sprintf("Vendor %03d Holdings", i),
 		}
 	}
 	type line struct {
 		facts    Facts
-		expected string // "" when no transaction should match
+		expected string
 	}
 	var lines []line
 	for i := 0; i < 600; i++ {
-		lines = append(lines, line{txs[i], fmt.Sprintf("tx-%d", i)})
+		lines = append(lines, line{txs[fmt.Sprintf("tx-%d", i)], fmt.Sprintf("tx-%d", i)})
 	}
-	for i := 600; i < 850; i++ {
-		l := txs[i]
-		l.Counterparty = "ZQX" + fmt.Sprint(i) + " unknown payer"
-		next, _ := Day(l.ValueDate)
-		l.ValueDate = next.AddDate(0, 0, 1).Format("2006-01-02")
+	for i := 600; i < 960; i++ {
+		l := txs[fmt.Sprintf("tx-%d", i)]
+		l.Counterparty = fmt.Sprintf("ZQX%d unknown payer", i)
+		day, _ := Day(l.ValueDate)
+		l.ValueDate = day.AddDate(0, 0, 1).Format("2006-01-02")
 		lines = append(lines, line{l, fmt.Sprintf("tx-%d", i)})
 	}
-	for i := 850; i < 1000; i++ {
-		fee := Facts{Amount: decimal.RequireFromString("-12.50"), ValueDate: "2026-10-05", Reference: fmt.Sprintf("FEE%d", i), Counterparty: "Example Bank AG"}
-		lines = append(lines, line{fee, ""})
+	for i := 960; i < 980; i++ {
+		l := txs[fmt.Sprintf("tx-%d", i)]
+		l.Reference = fmt.Sprintf("OTHER%d", i)
+		l.Counterparty = fmt.Sprintf("Someone Else %d", i)
+		lines = append(lines, line{l, ""})
+	}
+	for i := 0; i < 20; i++ {
+		lines = append(lines, line{Facts{Amount: decimal.RequireFromString("-12.50"), ValueDate: "2026-10-05", Reference: fmt.Sprintf("FEE%d", i), Counterparty: "Example Bank AG"}, ""})
+	}
+	if len(lines) != 1000 {
+		t.Fatalf("fixture has %d lines", len(lines))
 	}
 
-	var autoCorrect, autoWrong, suggestedCorrect int
+	var autoCorrect, autoWrong int
 	for _, l := range lines {
-		var cands []Candidate
-		for i, tx := range txs {
-			if l.facts.Amount.Sub(tx.Amount).Abs().GreaterThan(tol.Amount) {
-				continue
+		cands := map[string]Facts{}
+		for id, tx := range txs {
+			if l.facts.Amount.Sub(tx.Amount).Abs().LessThanOrEqual(tol.Amount) {
+				cands[id] = tx
 			}
-			cands = append(cands, Candidate{ID: fmt.Sprintf("tx-%d", i), Score: Score(l.facts, tx, tol)})
 		}
-		d := Decide(cands, DefaultThresholds)
+		d := MatchLine(l.facts, cands, DefaultRules(tol), DefaultThresholds)
 		switch {
-		case d.Status == StatusMatched && d.Best.ID == l.expected:
+		case d.Status != StatusMatched:
+		case d.Best.ID == l.expected:
 			autoCorrect++
-		case d.Status == StatusMatched:
+		default:
 			autoWrong++
-		case d.Status == StatusSuggested && d.Best != nil && d.Best.ID == l.expected:
-			suggestedCorrect++
 		}
 	}
-	t.Logf("auto correct %d, auto wrong %d, suggested correct %d of %d lines", autoCorrect, autoWrong, suggestedCorrect, len(lines))
+	t.Logf("auto-matched correctly %d of %d, wrongly %d", autoCorrect, len(lines), autoWrong)
 	if autoWrong != 0 {
 		t.Fatalf("%d lines were auto-matched to the wrong transaction", autoWrong)
 	}
-	if autoCorrect < 600 {
-		t.Fatalf("auto-matched %d exact lines; want all 600", autoCorrect)
+	if autoCorrect*100 < 95*len(lines) {
+		t.Fatalf("auto-matched %d of %d lines correctly; want at least 95%%", autoCorrect, len(lines))
 	}
 }

@@ -66,11 +66,22 @@ type Tolerance struct {
 }
 
 // Score returns the 0-100 match score of a candidate for a line (BR-36.1).
-func Score(line, cand Facts, tol Tolerance) int {
-	total := float64(WeightAmount)*amountResult(line.Amount, cand.Amount, tol.Amount) +
-		float64(WeightDate)*dateResult(line.ValueDate, cand.ValueDate, tol.DateWindowDays) +
-		float64(WeightReference)*referenceResult(line.Reference, cand.Reference) +
-		float64(WeightCounterparty)*similarity(line.Counterparty, cand.Counterparty)
+func Score(line, cand Facts, tol Tolerance) int { return ScoreWith(line, cand, tol, DefaultWeights) }
+
+// Weights are the criterion weights of one rule; they sum to 100.
+type Weights struct{ Amount, Date, Reference, Counterparty int }
+
+var (
+	DefaultWeights   = Weights{WeightAmount, WeightDate, WeightReference, WeightCounterparty}
+	ReferenceWeights = Weights{Amount: 40, Date: 10, Reference: 50}
+)
+
+// ScoreWith is Score under the weights of a rule.
+func ScoreWith(line, cand Facts, tol Tolerance, w Weights) int {
+	total := float64(w.Amount)*amountResult(line.Amount, cand.Amount, tol.Amount) +
+		float64(w.Date)*dateResult(line.ValueDate, cand.ValueDate, tol.DateWindowDays) +
+		float64(w.Reference)*referenceResult(line.Reference, cand.Reference) +
+		float64(w.Counterparty)*similarity(line.Counterparty, cand.Counterparty)
 	return int(math.Round(total))
 }
 
@@ -186,4 +197,38 @@ func Decide(cands []Candidate, t Thresholds) Decision {
 		return Decision{Status: StatusMatched, Best: &best, Ranked: ranked}
 	}
 	return Decision{Status: StatusSuggested, Best: &best, Ranked: ranked}
+}
+
+// Rule is one ordered matching rule (FR-36.3): a weight set and a tolerance.
+type Rule struct {
+	Name      string
+	Weights   Weights
+	Tolerance Tolerance
+}
+
+// DefaultRules run the balanced rule first, then the reference rule that
+// carries lines whose counterparty text the bank garbled.
+func DefaultRules(tol Tolerance) []Rule {
+	return []Rule{{"balanced", DefaultWeights, tol}, {"reference", ReferenceWeights, tol}}
+}
+
+// MatchLine ranks the candidates under each rule in order. The first rule that
+// auto-matches decides the line; otherwise the strongest suggestion wins, with
+// the earlier rule on equal scores. Candidates are keyed by ID.
+func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) Decision {
+	best := Decision{Status: StatusUnmatched}
+	for _, r := range rules {
+		scored := make([]Candidate, 0, len(cands))
+		for id, c := range cands {
+			scored = append(scored, Candidate{ID: id, Score: ScoreWith(line, c, r.Tolerance, r.Weights)})
+		}
+		d := Decide(scored, t)
+		if d.Status == StatusMatched {
+			return d
+		}
+		if d.Best != nil && (best.Best == nil || d.Best.Score > best.Best.Score) {
+			best = d
+		}
+	}
+	return best
 }

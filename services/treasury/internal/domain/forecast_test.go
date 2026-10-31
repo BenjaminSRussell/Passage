@@ -112,3 +112,49 @@ func TestBuild_AdditivityProperty(t *testing.T) {
 		}
 	})
 }
+
+// TestBuild_BucketEqualsSumOfSourcesProperty checks AC2 / AC-36.7 bucket by
+// bucket: for every source type, bucket key and currency the bucket's net equals
+// the sum of that source's contributions dated in the bucket, with the bucket
+// key and membership derived here from the calendar, not from Build.
+func TestBuild_BucketEqualsSumOfSourcesProperty(t *testing.T) {
+	sources := []string{"AP", "AR", "PO", "SO", "Recurring", "Manual", "Payroll", "Project"}
+	rapid.Check(t, func(t *rapid.T) {
+		n := rapid.IntRange(0, 300).Draw(t, "n")
+		cs := make([]Contribution, n)
+		for i := range cs {
+			cs[i] = Contribution{
+				SourceType:   rapid.SampledFrom(sources).Draw(t, "source"),
+				SourceID:     "s",
+				ExpectedDate: asOf.AddDate(0, 0, rapid.IntRange(-10, 40).Draw(t, "days")),
+				Amount:       decimal.New(rapid.Int64Range(-5000000, 5000000).Draw(t, "cents"), -2),
+				Currency:     rapid.SampledFrom([]string{"EUR", "USD"}).Draw(t, "cur"),
+			}
+		}
+		f, err := Build(asOf, LayoutDaily, cs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type cell struct{ key, cur string }
+		want := map[cell]decimal.Decimal{}
+		for _, c := range cs {
+			day := c.ExpectedDate
+			if day.Before(asOf) {
+				day = asOf
+			}
+			if day.After(asOf.AddDate(0, 0, 29)) {
+				continue
+			}
+			k := cell{day.Format("2006-01-02"), c.Currency}
+			want[k] = want[k].Add(c.Amount)
+		}
+		if len(f.Buckets) != len(want) {
+			t.Fatalf("%d buckets; want %d", len(f.Buckets), len(want))
+		}
+		for _, b := range f.Buckets {
+			if w, ok := want[cell{b.Key, b.Currency}]; !ok || !b.Net.Equal(w) {
+				t.Fatalf("bucket %s %s net %s; sources sum to %s", b.Key, b.Currency, b.Net, w)
+			}
+		}
+	})
+}
