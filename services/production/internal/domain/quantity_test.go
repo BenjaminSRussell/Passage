@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -23,6 +24,12 @@ func TestRequiredQty_BackflushIsExact(t *testing.T) {
 		{"fraction rounds up at 6 places", "1", "3", "0", false, "1", "0.333334"},
 		{"round up flag forces a whole unit", "3", "1", "5", true, "100", "315"},
 		{"round up flag on a fraction", "1", "3", "0", true, "1", "1"},
+		// Regression: dividing by the series before applying scrap rounded 200 ÷ 3 up
+		// at 16 places, and the round-up turned 80 into 80.000001.
+		{"series of 3 with 20% scrap is whole", "2", "3", "20", false, "100", "80"},
+		{"series of 3 with 50% scrap is whole", "1", "3", "50", false, "200", "100"},
+		{"series of 3 with 50% scrap and round up stays whole", "1", "3", "50", true, "200", "100"},
+		{"series of 12 with 2% scrap", "5", "12", "2", false, "36", "15.3"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -55,6 +62,28 @@ func TestRequiredQty_ScrapIsProportional(t *testing.T) {
 		want := qtyPer.Mul(orderQty).Mul(hundred.Add(scrap)).Div(hundred)
 		if !got.Equal(want) {
 			t.Fatalf("want %s, got %s", want, got)
+		}
+	})
+}
+
+// BR-21.2 (property): the requirement is ceil6(qtyPer × orderQty ÷ series ×
+// (1 + scrap/100)) exactly, against big.Rat, for series sizes and scrap
+// percentages that do not divide evenly.
+func TestRequiredQty_MatchesExactRational(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		qtyPer := decimal.New(rapid.Int64Range(1, 100_000_000).Draw(t, "qtyPer"), -4)
+		orderQty := decimal.NewFromInt(rapid.Int64Range(1, 1000).Draw(t, "order"))
+		series := decimal.NewFromInt(rapid.Int64Range(1, 24).Draw(t, "series"))
+		scrap := decimal.New(rapid.Int64Range(0, 9999).Draw(t, "scrap"), -2)
+		got, err := RequiredQty(qtyPer, orderQty, series, scrap, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exact := new(big.Rat).Mul(ratOf(t, qtyPer), ratOf(t, orderQty))
+		exact.Quo(exact, ratOf(t, series))
+		exact.Mul(exact, new(big.Rat).Add(big.NewRat(1, 1), new(big.Rat).Quo(ratOf(t, scrap), big.NewRat(100, 1))))
+		if want := ratCeil6(exact); ratOf(t, got).Cmp(want) != 0 {
+			t.Fatalf("%s × %s ÷ %s × (1 + %s%%): got %s, want %s", qtyPer, orderQty, series, scrap, got, want.FloatString(6))
 		}
 	})
 }

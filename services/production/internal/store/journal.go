@@ -249,7 +249,6 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 	if in.Type == domain.JournalReportFinished {
 		reported = reported.Add(in.QtyGood).Add(in.QtyError)
 	}
-	share := reported.Div(h.quantity)
 	var out []JournalLine
 	if in.Type == domain.JournalReportFinished {
 		product := h.productID
@@ -291,7 +290,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 			if !proposed {
 				continue
 			}
-			if q := domain.ProposeQty(in.Proposal, l.QtyRequired, l.QtyConsumed, share); q.IsPositive() {
+			if q := domain.ProposeQty(in.Proposal, l.QtyRequired, l.QtyConsumed, reported, h.quantity); q.IsPositive() {
 				out = append(out, issueLine(l, q, l.UnitCost))
 			}
 		}
@@ -324,7 +323,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 				continue
 			}
 			planned := op.SetupH.Add(op.RunHPer.Mul(op.ProcessQty))
-			if hours := domain.ProposeHours(in.Proposal, planned, op.HoursReported, share); !hours.LessThan(domain.MinHours) {
+			if hours := domain.ProposeHours(in.Proposal, planned, op.HoursReported, reported, h.quantity); !hours.LessThan(domain.MinHours) {
 				out = append(out, hoursLine(op, hours, decimal.Zero, decimal.Zero, false))
 			}
 		}

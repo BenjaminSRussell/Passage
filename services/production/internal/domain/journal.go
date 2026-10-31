@@ -72,11 +72,27 @@ func (p Proposal) Valid() bool {
 }
 
 // ProposeQty is the quantity still to issue on a BOM line. remaining targets
-// the full requirement; proportional targets the requirement × share, where
-// share is the order's reported-as-finished quantity over its quantity. The
-// result is rounded up to QtyScale (BR-21.2) and never negative.
-func ProposeQty(mode Proposal, required, consumed, share decimal.Decimal) decimal.Decimal {
-	return propose(mode, required, consumed, share, CeilQty)
+// the full requirement; proportional targets required × reportedQty ÷ orderQty,
+// the order's reported quantity over its quantity. The result is rounded up to
+// QtyScale (BR-21.2) and never negative. The share is passed as its two
+// quantities, not as a quotient: a rounded quotient such as 100 ÷ 150 =
+// 0.6666666666666667 makes a RAF of 100 of 150 consume 204.000001 of a 306
+// requirement instead of 204.
+func ProposeQty(mode Proposal, required, consumed, reportedQty, orderQty decimal.Decimal) decimal.Decimal {
+	var target decimal.Decimal
+	switch mode {
+	case ProposeRemaining:
+		target = required
+	case ProposeProportional:
+		if !orderQty.IsPositive() {
+			return decimal.Zero
+		}
+		// consumed has QtyScale places, so ceil(x) − consumed = ceil(x − consumed).
+		target = CeilQtyDiv(required.Mul(reportedQty), orderQty)
+	default:
+		return decimal.Zero
+	}
+	return decimal.Max(CeilQty(target.Sub(consumed)), decimal.Zero)
 }
 
 // StartIssueQty is the quantity the Released → Started backflush issues on a
@@ -88,24 +104,24 @@ func StartIssueQty(f Flushing, required, consumed decimal.Decimal) decimal.Decim
 	if f != FlushStart {
 		return decimal.Zero
 	}
-	return ProposeQty(ProposeRemaining, required, consumed, decimal.Zero)
+	return ProposeQty(ProposeRemaining, required, consumed, decimal.Zero, one)
 }
 
-// ProposeHours is the route-card proposal for an operation on the same basis,
-// rounded to 2 places (FR-21.6).
-func ProposeHours(mode Proposal, planned, reported, share decimal.Decimal) decimal.Decimal {
-	return propose(mode, planned, reported, share, func(d decimal.Decimal) decimal.Decimal { return d.Round(HoursScale) })
-}
-
-func propose(mode Proposal, target, done, share decimal.Decimal, round func(decimal.Decimal) decimal.Decimal) decimal.Decimal {
+// ProposeHours is the route-card proposal for an operation on the same basis
+// (planned × reportedQty ÷ orderQty for proportional), rounded to 2 places (FR-21.6).
+func ProposeHours(mode Proposal, planned, reported, reportedQty, orderQty decimal.Decimal) decimal.Decimal {
+	target := planned
 	switch mode {
 	case ProposeRemaining:
 	case ProposeProportional:
-		target = target.Mul(share)
+		if !orderQty.IsPositive() {
+			return decimal.Zero
+		}
+		target = planned.Mul(reportedQty).Div(orderQty)
 	default:
 		return decimal.Zero
 	}
-	return decimal.Max(round(target.Sub(done)), decimal.Zero)
+	return decimal.Max(target.Sub(reported).Round(HoursScale), decimal.Zero)
 }
 
 // CheckHours validates a reported hours value: at least 0.01 h, at most 2 decimals.
