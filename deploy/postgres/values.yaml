@@ -7,7 +7,6 @@ resources:
   limits: { cpu: "1", memory: 1Gi }
 clientApps: []
 cdc:
-  role: debezium_cdc
   kafkaNamespace: kafka
 secretName: ""
 externalSecret:

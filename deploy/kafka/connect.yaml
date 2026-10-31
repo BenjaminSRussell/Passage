@@ -81,8 +81,8 @@ spec:
     plugin.name: pgoutput
     database.hostname: postgres.batch.svc
     database.port: 5432
-    database.user: ${secrets:kafka/debezium-cdc:username}
-    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.user: ${secrets:kafka/debezium-cdc-batch:username}
+    database.password: ${secrets:kafka/debezium-cdc-batch:password}
     database.dbname: passage_platform
     topic.prefix: passage.platform
     slot.name: passage_outbox_batch
@@ -140,8 +140,8 @@ spec:
     plugin.name: pgoutput
     database.hostname: postgres.metadata.svc
     database.port: 5432
-    database.user: ${secrets:kafka/debezium-cdc:username}
-    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.user: ${secrets:kafka/debezium-cdc-metadata:username}
+    database.password: ${secrets:kafka/debezium-cdc-metadata:password}
     database.dbname: passage_metadata
     topic.prefix: passage.metadata
     slot.name: passage_outbox_metadata
@@ -168,56 +168,3 @@ spec:
     value.converter.schemas.enable: false
     producer.override.acks: all
     producer.override.enable.idempotence: true
----
-# Both connectors read ${secrets:kafka/debezium-cdc:*}. The password is the one the
-# metadata and batch Postgres charts give the debezium_cdc role (Vault key
-# <prefix>/kafka/debezium-cdc/password); the username is fixed here so it cannot drift from the role.
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: debezium-cdc
-  namespace: kafka
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: passage
-  target:
-    name: debezium-cdc
-    creationPolicy: Owner
-    template:
-      data:
-        username: debezium_cdc
-        password: "{{ .password }}"
-  data:
-    - secretKey: password
-      remoteRef:
-        key: passage/dev/kafka/debezium-cdc/password
-        property: value
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: passage-connect-read-debezium-cdc
-  namespace: kafka
-rules:
-  - apiGroups: [""]
-    resources: [secrets]
-    resourceNames: [debezium-cdc]
-    verbs: [get]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: passage-connect-read-debezium-cdc
-  namespace: kafka
-subjects:
-  - kind: ServiceAccount
-    name: passage-connect-connect
-    namespace: kafka
-roleRef:
-  kind: Role
-  name: passage-connect-read-debezium-cdc
-  apiGroup: rbac.authorization.k8s.io

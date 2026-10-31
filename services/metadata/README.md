@@ -33,7 +33,7 @@ The registry API publishes and diffs definitions, atomically applies customer ex
 
 ## CDC
 
-Migration `0004_cdc_publication` pre-creates the `passage_outbox_metadata` publication (the connector runs with `publication.autocreate.mode: disabled`, so the CDC role needs no CREATE or ownership) and `0006_cdc_role_grants` gives the `debezium_cdc` role SELECT on `outbox` when that role exists. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migrations 0004 and 0006. The database, role and `wal_level=logical` come from the `deploy/postgres` chart.
+Migration `0004_cdc_publication` pre-creates the `passage_outbox_metadata` publication (the connector runs with `publication.autocreate.mode: disabled`, so the CDC role needs no CREATE or ownership) and `0006_cdc_role_grants` gives the `debezium_cdc` role SELECT on `outbox` when that role exists. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migrations 0004 and 0006. The database, role and `wal_level=logical` come from the `deploy/postgres` chart. The CDC password is per database (Vault `<prefix>/<release>-postgres/cdc-password`) and each connector reads its own `debezium-cdc-<service>` Secret. `0006`/`0011` grant only if `debezium_cdc` exists when they run: if the service migrated before the database role existed, delete that row from `schema_migrations` and restart. Rotation steps are in `deploy/postgres/README.md`.
 
 ## Duties
 

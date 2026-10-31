@@ -15,8 +15,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: postgres
-      annotations:
-        checksum/init: {{ include (print $.Template.BasePath "/init.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -43,11 +41,7 @@ spec:
             - { name: POSTGRES_USER, value: passage }
             - { name: POSTGRES_DB, value: {{ required "database is required" .Values.database | quote }} }
             - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
-            {{- range $key := list "POSTGRES_PASSWORD" "APP_PASSWORD" "CDC_PASSWORD" }}
-            - name: {{ $key }}
-              valueFrom:
-                secretKeyRef: { name: {{ $secret }}, key: {{ $key }} }
-            {{- end }}
+            - { name: POSTGRES_PASSWORD_FILE, value: /run/secrets/outbox-postgres/POSTGRES_PASSWORD }
           ports:
             - { name: pg, containerPort: 5432 }
           readinessProbe:
@@ -58,7 +52,10 @@ spec:
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
             - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            - { name: credentials, mountPath: /run/secrets/outbox-postgres, readOnly: true }
       volumes:
+        - name: credentials
+          secret: { secretName: {{ $secret }}, defaultMode: 0440 }
         - name: init
           configMap: { name: {{ .Release.Name }}-postgres-init, defaultMode: 365 }
   volumeClaimTemplates:
