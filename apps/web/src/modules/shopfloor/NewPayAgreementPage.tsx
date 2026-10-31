@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createPayAgreement, describeProblem, newKey, type NewPayAgreement, type Problem } from "./api/client";
+import { createPayAgreement, describeProblem, newKey, type NewPayAgreement, type Problem, type ShiftPremium } from "./api/client";
 import { WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 
@@ -13,10 +13,51 @@ interface Values {
   overtimeMultiplier: string;
   sundayMultiplier: string;
   weekStart: string;
+  /** Premium windows; absent means none. */
+  premiums?: ShiftPremium[];
 }
 
-type Field = keyof Values;
+const MAX_PREMIUMS = 6;
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+type Field = Exclude<keyof Values, "premiums">;
 type Errors = Partial<Record<Field, string>>;
+/** Problems of premium rows, keyed "<row>.<name|from|to|premium>". */
+export type PremiumErrors = Record<string, string>;
+
+/** The windows overlap when one starts inside the other, on the 24 hour circle. */
+function clockMinutes(value: string): number {
+  return Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+}
+
+function premiumLength(w: ShiftPremium): number {
+  const length = clockMinutes(w.to) - clockMinutes(w.from);
+  return length <= 0 ? length + 1440 : length;
+}
+
+/** Checks that mirror the service for the premium windows. */
+export function validatePremiums(rows: ShiftPremium[]): { errors: PremiumErrors; input: ShiftPremium[] } {
+  const errors: PremiumErrors = {};
+  const input = rows.map((w) => ({ name: w.name.trim(), from: w.from.trim(), to: w.to.trim(), premium: w.premium.trim() }));
+  input.forEach((w, i) => {
+    if ([...w.name].length < 1 || [...w.name].length > 60) errors[`${i}.name`] = "Enter a name of up to 60 characters.";
+    if (!CLOCK.test(w.from)) errors[`${i}.from`] = "Enter a time as HH:MM.";
+    if (!CLOCK.test(w.to)) errors[`${i}.to`] = "Enter a time as HH:MM.";
+    if (CLOCK.test(w.from) && CLOCK.test(w.to) && w.from === w.to) errors[`${i}.to`] = "The end must differ from the start.";
+    if (!decimalWithin(w.premium, 0, 2, 4) || Number(w.premium) === 0) errors[`${i}.premium`] = "Enter a premium above 0 up to 2, such as 0.15.";
+  });
+  if (Object.keys(errors).length === 0) {
+    for (let i = 0; i < input.length; i++) {
+      for (let j = i + 1; j < input.length; j++) {
+        const a = input[i];
+        const b = input[j];
+        const inside = (x: string, w: ShiftPremium) => (clockMinutes(x) - clockMinutes(w.from) + 1440) % 1440 < premiumLength(w);
+        if (inside(a.from, b) || inside(b.from, a)) errors[`${j}.from`] = "Premium windows must not overlap.";
+      }
+    }
+  }
+  return { errors, input };
+}
 
 const FIELDS: Field[] = ["code", "name", "dailyThreshold", "weeklyThreshold", "overtimeMultiplier", "sundayMultiplier", "weekStart"];
 
@@ -30,7 +71,7 @@ function decimalWithin(raw: string, lo: number, hi: number, scale: number): bool
 }
 
 /** Checks that mirror the service, and the request the form sends. */
-export function validateAgreement(values: Values): { errors: Errors; input?: NewPayAgreement } {
+export function validateAgreement(values: Values): { errors: Errors; premiumErrors: PremiumErrors; input?: NewPayAgreement } {
   const errors: Errors = {};
   const code = values.code.trim();
   const name = values.name.trim();
@@ -42,8 +83,10 @@ export function validateAgreement(values: Values): { errors: Errors; input?: New
   if (!decimalWithin(values.sundayMultiplier, 1, 5, 4)) errors.sundayMultiplier = "Enter a multiplier from 1 to 5, such as 2.";
   const weekStart = Number(values.weekStart);
   if (!Number.isInteger(weekStart) || weekStart < 0 || weekStart > 6) errors.weekStart = "Choose a day.";
-  if (Object.keys(errors).length > 0) return { errors };
+  const premiums = validatePremiums(values.premiums ?? []);
+  if (Object.keys(errors).length > 0 || Object.keys(premiums.errors).length > 0) return { errors, premiumErrors: premiums.errors };
   return {
+    premiumErrors: {},
     errors,
     input: {
       code,
@@ -53,6 +96,7 @@ export function validateAgreement(values: Values): { errors: Errors; input?: New
       overtimeMultiplier: values.overtimeMultiplier.trim(),
       sundayMultiplier: values.sundayMultiplier.trim(),
       weekStart,
+      shiftPremiums: premiums.input,
     },
   };
 }
@@ -68,8 +112,10 @@ export function NewPayAgreementPage() {
     overtimeMultiplier: "1.5",
     sundayMultiplier: "2",
     weekStart: "1",
+    premiums: [],
   });
   const [errors, setErrors] = useState<Errors>({});
+  const [premiumErrors, setPremiumErrors] = useState<PremiumErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
@@ -81,8 +127,9 @@ export function NewPayAgreementPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const { errors: found, input } = validateAgreement(values);
+    const { errors: found, premiumErrors: foundPremiums, input } = validateAgreement(values);
     setErrors(found);
+    setPremiumErrors(foundPremiums);
     setFailure(null);
     if (!input) return;
     setBusy(true);
@@ -94,12 +141,24 @@ export function NewPayAgreementPage() {
       const fieldErrors: Errors = {};
       for (const name of FIELDS) if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       if (problem.code === "SF-0142") fieldErrors.code = "This code is already used.";
+      const rowErrors: PremiumErrors = {};
+      for (const [name, message] of Object.entries(problem.fields)) {
+        const match = /^shiftPremiums\[(\d+)\]\.(\w+)$/.exec(name);
+        if (match) rowErrors[`${match[1]}.${match[2]}`] = message;
+      }
+      if (Object.keys(rowErrors).length > 0) setPremiumErrors(rowErrors);
       if (Object.keys(fieldErrors).length > 0) setErrors(fieldErrors);
+      else if (Object.keys(rowErrors).length > 0) setFailure(null);
       else setFailure(problem);
       if (problem.code === "idempotency_key_reuse") key.current = newKey();
     } finally {
       setBusy(false);
     }
+  }
+
+  const premiums = values.premiums ?? [];
+  function setPremium(index: number, patch: Partial<ShiftPremium>) {
+    update({ premiums: premiums.map((w, i) => (i === index ? { ...w, ...patch } : w)) });
   }
 
   const field = (id: Exclude<Field, "weekStart">, label: string, hint?: string, extra?: Record<string, unknown>) => (
@@ -132,6 +191,33 @@ export function NewPayAgreementPage() {
               </Select>
             )}
           </FormField>
+          <fieldset className={styles.fieldset}>
+            <legend>Shift premiums</legend>
+            <p className={styles.hint}>Hours inside a window earn the premium on top of the pay type (0.15 pays 15% extra). A window that ends before it starts crosses midnight.</p>
+            {premiums.length === 0 ? <p className={styles.hint}>No premium windows.</p> : null}
+            {premiums.map((w, i) => (
+              <div key={i} className={styles.premiumRow} role="group" aria-label={`Premium window ${i + 1}`}>
+                <FormField id={`premium-${i}-name`} label="Window name" error={premiumErrors[`${i}.name`]}>
+                  {(control) => <Input {...control} maxLength={60} value={w.name} onChange={(event) => setPremium(i, { name: event.target.value })} invalid={Boolean(premiumErrors[`${i}.name`])} />}
+                </FormField>
+                <FormField id={`premium-${i}-from`} label="From (HH:MM)" error={premiumErrors[`${i}.from`]}>
+                  {(control) => <Input {...control} placeholder="22:00" value={w.from} onChange={(event) => setPremium(i, { from: event.target.value })} invalid={Boolean(premiumErrors[`${i}.from`])} />}
+                </FormField>
+                <FormField id={`premium-${i}-to`} label="To (HH:MM)" error={premiumErrors[`${i}.to`]}>
+                  {(control) => <Input {...control} placeholder="06:00" value={w.to} onChange={(event) => setPremium(i, { to: event.target.value })} invalid={Boolean(premiumErrors[`${i}.to`])} />}
+                </FormField>
+                <FormField id={`premium-${i}-premium`} label="Premium" error={premiumErrors[`${i}.premium`]}>
+                  {(control) => <Input {...control} inputMode="decimal" placeholder="0.15" value={w.premium} onChange={(event) => setPremium(i, { premium: event.target.value })} invalid={Boolean(premiumErrors[`${i}.premium`])} />}
+                </FormField>
+                <Button type="button" variant="ghost" onClick={() => update({ premiums: premiums.filter((_, k) => k !== i) })}>
+                  Remove window {i + 1}
+                </Button>
+              </div>
+            ))}
+            <Button type="button" onClick={() => update({ premiums: [...premiums, { name: "", from: "", to: "", premium: "" }] })} disabled={premiums.length >= MAX_PREMIUMS}>
+              Add premium window
+            </Button>
+          </fieldset>
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the pay agreement" live="alert">

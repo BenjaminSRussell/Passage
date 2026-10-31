@@ -87,6 +87,8 @@ func TestSetup_ValidationRefusesBadInput(t *testing.T) {
 		{"/v1/shopfloor/time-profiles", `{"code":"A","name":"x","days":[{"dayType":"weekday","roundingMinutes":1,"shiftStart":"09:00"}]}`, "days[0].shiftStart"},
 		{"/v1/shopfloor/pay-agreements", `{"code":"A","name":"x","dailyThreshold":"30","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1}`, "dailyThreshold"},
 		{"/v1/shopfloor/pay-agreements", `{"code":"A","name":"x","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":9}`, "weekStart"},
+		{"/v1/shopfloor/pay-agreements", `{"code":"A","name":"x","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1,"shiftPremiums":[{"name":"N","from":"22:00","to":"22:00","premium":"0.1"}]}`, "shiftPremiums[0].to"},
+		{"/v1/shopfloor/pay-agreements", `{"code":"A","name":"x","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1,"shiftPremiums":[{"name":"N","from":"22:00","to":"06:00","premium":"3"}]}`, "shiftPremiums[0].premium"},
 	}
 	for _, c := range cases {
 		rec := call(t, h, http.MethodPost, c.path, c.body, allDuty)
@@ -210,5 +212,19 @@ func TestSetup_CalculatePayUsesWorkerSetup(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Days[0].PayLines) != 1 || resp.Days[0].PayLines[0].Type != "base" || resp.Days[0].PayLines[0].Hours.String() != "10" {
 		t.Fatalf("with break: %s", rec.Body.String())
+	}
+}
+
+func TestSetup_AgreementCarriesShiftPremiums(t *testing.T) {
+	f := &fakeStore{}
+	h := newRouter(f)
+	body := `{"code":"US","name":"US night","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1,"shiftPremiums":[{"name":"Night","from":"22:00","to":"06:00","premium":"0.15"}]}`
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/pay-agreements", body, allDuty)
+	if rec.Code != http.StatusCreated || f.agreementIn == nil || len(f.agreementIn.Rules.ShiftPremiums) != 1 {
+		t.Fatalf("create: %d %s %+v", rec.Code, rec.Body.String(), f.agreementIn)
+	}
+	w := f.agreementIn.Rules.ShiftPremiums[0]
+	if w.From != 22*time.Hour || w.To != 6*time.Hour || w.Premium.String() != "0.15" {
+		t.Fatalf("window = %+v", w)
 	}
 }

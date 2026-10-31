@@ -13,6 +13,11 @@ const columns: DataTableColumn<PayAgreement>[] = [
   { key: "overtimeMultiplier", header: "Overtime", align: "end", render: (row) => `${row.overtimeMultiplier}x` },
   { key: "sundayMultiplier", header: "Sunday", align: "end", render: (row) => `${row.sundayMultiplier}x` },
   { key: "weekStart", header: "Pay week starts", render: (row) => WEEKDAYS[row.weekStart] ?? String(row.weekStart) },
+  {
+    key: "shiftPremiums",
+    header: "Shift premiums",
+    render: (row) => (row.shiftPremiums.length === 0 ? "None" : row.shiftPremiums.map((w) => `${w.name} ${w.from}-${w.to} +${w.premium}`).join("; ")),
+  },
   { key: "active", header: "Status", render: (row) => (row.active ? <Badge tone="success">Active</Badge> : <Badge tone="neutral">Inactive</Badge>) },
 ];
 
@@ -23,7 +28,7 @@ export function PayAgreementsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Pay agreements"
-        description="Overtime thresholds, multipliers and the first day of the pay week. A worker without an agreement is paid 1.5x over 8 hours a day and 40 hours a week, and 2.0x on Sunday."
+        description="Overtime thresholds, multipliers, shift premium windows and the first day of the pay week. A worker without an agreement is paid 1.5x over 8 hours a day and 40 hours a week, and 2.0x on Sunday."
         actions={
           <Link className={buttonClassName("primary")} to="/shopfloor/pay-agreements/new">
             New pay agreement

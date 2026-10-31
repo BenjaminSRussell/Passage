@@ -674,7 +674,7 @@ components:
           type: string
     PayAgreementSavedData:
       type: object
-      required: [agreementId, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, active, version, savedBy]
+      required: [agreementId, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, shiftPremiums, active, version, savedBy]
       additionalProperties: false
       properties:
         agreementId:
@@ -696,6 +696,25 @@ components:
           type: integer
           minimum: 0
           maximum: 6
+        shiftPremiums:
+          type: array
+          description: Premium windows of the agreement; empty when it has none.
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, from, to, premium]
+            properties:
+              name:
+                type: string
+              from:
+                type: string
+                description: Local HH:MM start of the window.
+              to:
+                type: string
+                description: Local HH:MM end; not after from means the window crosses midnight.
+              premium:
+                type: string
+                description: Decimal string, the extra share of the worker's rate.
         active:
           type: boolean
         version:

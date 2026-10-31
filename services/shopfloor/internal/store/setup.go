@@ -57,19 +57,20 @@ type TimeProfileInput struct {
 
 // PayAgreement is the overtime thresholds and multipliers of a group of workers (FR-25.7).
 type PayAgreement struct {
-	ID                 string          `json:"id"`
-	Code               string          `json:"code"`
-	Name               string          `json:"name"`
-	DailyThreshold     decimal.Decimal `json:"dailyThreshold"`
-	WeeklyThreshold    decimal.Decimal `json:"weeklyThreshold"`
-	OvertimeMultiplier decimal.Decimal `json:"overtimeMultiplier"`
-	SundayMultiplier   decimal.Decimal `json:"sundayMultiplier"`
-	WeekStart          int             `json:"weekStart"`
-	Active             bool            `json:"active"`
-	Version            int             `json:"version"`
-	CreatedBy          string          `json:"createdBy"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
+	ID                 string                     `json:"id"`
+	Code               string                     `json:"code"`
+	Name               string                     `json:"name"`
+	DailyThreshold     decimal.Decimal            `json:"dailyThreshold"`
+	WeeklyThreshold    decimal.Decimal            `json:"weeklyThreshold"`
+	OvertimeMultiplier decimal.Decimal            `json:"overtimeMultiplier"`
+	SundayMultiplier   decimal.Decimal            `json:"sundayMultiplier"`
+	WeekStart          int                        `json:"weekStart"`
+	ShiftPremiums      []domain.ShiftPremiumInput `json:"shiftPremiums"`
+	Active             bool                       `json:"active"`
+	Version            int                        `json:"version"`
+	CreatedBy          string                     `json:"createdBy"`
+	CreatedAt          time.Time                  `json:"createdAt"`
+	UpdatedAt          time.Time                  `json:"updatedAt"`
 }
 
 // PayAgreementInput is what a create or update writes.
@@ -286,12 +287,17 @@ func (s *Postgres) ListTimeProfiles(ctx context.Context, activeOnly bool, limit 
 }
 
 const agreementColumns = `id::text, code, name, daily_threshold::text, weekly_threshold::text, overtime_multiplier::text, sunday_multiplier::text,
-	week_start, active, version, created_by, created_at, updated_at`
+	week_start, shift_premiums, active, version, created_by, created_at, updated_at`
 
 func scanAgreement(row pgx.Row) (PayAgreement, error) {
 	var a PayAgreement
 	var daily, weekly, ot, sun string
-	if err := row.Scan(&a.ID, &a.Code, &a.Name, &daily, &weekly, &ot, &sun, &a.WeekStart, &a.Active, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	var premiums []byte
+	if err := row.Scan(&a.ID, &a.Code, &a.Name, &daily, &weekly, &ot, &sun, &a.WeekStart, &premiums, &a.Active, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		return PayAgreement{}, err
+	}
+	a.ShiftPremiums = []domain.ShiftPremiumInput{}
+	if err := json.Unmarshal(premiums, &a.ShiftPremiums); err != nil {
 		return PayAgreement{}, err
 	}
 	var err error
@@ -310,7 +316,7 @@ func agreementEvent(ctx context.Context, tx pgx.Tx, tenantID string, a PayAgreem
 	return enqueue(ctx, tx, agreementSource, a.ID, sfevents.PayAgreementSaved, tenantID, sfevents.PayAgreementSavedData{
 		AgreementID: a.ID, Code: a.Code, Name: a.Name, DailyThreshold: a.DailyThreshold.String(), WeeklyThreshold: a.WeeklyThreshold.String(),
 		OvertimeMultiplier: a.OvertimeMultiplier.String(), SundayMultiplier: a.SundayMultiplier.String(), WeekStart: a.WeekStart,
-		Active: a.Active, Version: a.Version, SavedBy: by})
+		ShiftPremiums: a.ShiftPremiums, Active: a.Active, Version: a.Version, SavedBy: by})
 }
 
 // CreatePayAgreement stores an agreement under the Idempotency-Key and publishes
@@ -319,12 +325,16 @@ func agreementEvent(ctx context.Context, tx pgx.Tx, tenantID string, a PayAgreem
 func (s *Postgres) CreatePayAgreement(ctx context.Context, in PayAgreementInput, createdBy string, idem Idem) (PayAgreement, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PayAgreement
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	premiums, err := json.Marshal(domain.ShiftPremiumInputs(in.Rules.ShiftPremiums))
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanAgreement(tx.QueryRow(ctx, `insert into pay_agreement (tenant_id, id, code, name, daily_threshold, weekly_threshold, overtime_multiplier, sunday_multiplier, week_start, active, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning `+agreementColumns,
+		out, err = scanAgreement(tx.QueryRow(ctx, `insert into pay_agreement (tenant_id, id, code, name, daily_threshold, weekly_threshold, overtime_multiplier, sunday_multiplier, week_start, shift_premiums, active, created_by)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning `+agreementColumns,
 			p.TenantID, ids.New(), in.Code, in.Name, in.Rules.DailyThreshold.String(), in.Rules.WeeklyThreshold.String(), in.Rules.OvertimeMultiplier.String(),
-			in.Rules.SundayMultiplier.String(), int(in.Rules.WeekStart), in.Active, createdBy))
+			in.Rules.SundayMultiplier.String(), int(in.Rules.WeekStart), premiums, in.Active, createdBy))
 		if err != nil {
 			return codeTaken(err)
 		}
@@ -342,13 +352,17 @@ func (s *Postgres) CreatePayAgreement(ctx context.Context, in PayAgreementInput,
 func (s *Postgres) UpdatePayAgreement(ctx context.Context, id string, version int, in PayAgreementInput, updatedBy string) (PayAgreement, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PayAgreement
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	premiums, err := json.Marshal(domain.ShiftPremiumInputs(in.Rules.ShiftPremiums))
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = scanAgreement(tx.QueryRow(ctx, `update pay_agreement set name = $3, daily_threshold = $4, weekly_threshold = $5, overtime_multiplier = $6,
-				sunday_multiplier = $7, week_start = $8, active = $9, version = version + 1, updated_at = now()
+				sunday_multiplier = $7, week_start = $8, shift_premiums = $11, active = $9, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 and version = $10 returning `+agreementColumns,
 			p.TenantID, id, in.Name, in.Rules.DailyThreshold.String(), in.Rules.WeeklyThreshold.String(), in.Rules.OvertimeMultiplier.String(),
-			in.Rules.SundayMultiplier.String(), int(in.Rules.WeekStart), in.Active, version))
+			in.Rules.SundayMultiplier.String(), int(in.Rules.WeekStart), in.Active, version, premiums))
 		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
 			if err := tx.QueryRow(ctx, `select exists (select 1 from pay_agreement where tenant_id = $1 and id = $2)`, p.TenantID, id).Scan(&exists); err != nil {
@@ -496,8 +510,12 @@ func (s *Postgres) LoadPaySetup(ctx context.Context, workerID string) (domain.Pa
 			if err != nil {
 				return err
 			}
+			prem, bad := domain.ShiftPremiums(a.ShiftPremiums)
+			if len(bad) > 0 {
+				return errors.New("stored pay agreement has invalid shift premiums")
+			}
 			setup.Rules = &domain.Rules{DailyThreshold: a.DailyThreshold, WeeklyThreshold: a.WeeklyThreshold, OvertimeMultiplier: a.OvertimeMultiplier,
-				SundayMultiplier: a.SundayMultiplier, WeekStart: time.Weekday(a.WeekStart)}
+				SundayMultiplier: a.SundayMultiplier, WeekStart: time.Weekday(a.WeekStart), ShiftPremiums: prem}
 		}
 		return nil
 	})

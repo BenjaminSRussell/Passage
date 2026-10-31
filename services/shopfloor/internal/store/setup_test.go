@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -106,13 +107,22 @@ func TestPayAgreement_CreateUpdateVersionAndEvents(t *testing.T) {
 	if _, err := s.UpdatePayAgreement(ctx, a.ID, 1, PayAgreementInput{Name: "x", Active: true, Rules: agreementRules(t, "9")}, "admin-2"); problemCode(err) != CodeVersionMismatch {
 		t.Fatalf("stale: %v", err)
 	}
+	rules := agreementRules(t, "10")
+	rules.ShiftPremiums, _ = domain.ShiftPremiums([]domain.ShiftPremiumInput{{Name: "Night", From: "22:00", To: "06:00", Premium: "0.15"}})
+	pu, err := s.UpdatePayAgreement(ctx, a.ID, 2, PayAgreementInput{Name: "US night", Active: true, Rules: rules}, "admin-2")
+	if err != nil || pu.Version != 3 || len(pu.ShiftPremiums) != 1 || pu.ShiftPremiums[0].Premium != "0.15" || pu.ShiftPremiums[0].From != "22:00" {
+		t.Fatalf("premium update = %+v, %v", pu, err)
+	}
+	if got, err := s.GetPayAgreement(ctx, a.ID); err != nil || len(got.ShiftPremiums) != 1 || got.ShiftPremiums[0].Name != "Night" {
+		t.Fatalf("premium read back = %+v, %v", got, err)
+	}
 	if _, err := s.GetPayAgreement(ctx, ids.New()); problemCode(err) != CodeAgreementNotFound {
 		t.Fatalf("unknown: %v", err)
 	}
 	if l, err := s.ListPayAgreements(ctx, true, 10); err != nil || len(l) != 1 {
 		t.Fatalf("list = %+v, %v", l, err)
 	}
-	if n := countEvents(t, app, tenantID, sfevents.PayAgreementSaved); n != 2 {
+	if n := countEvents(t, app, tenantID, sfevents.PayAgreementSaved); n != 3 {
 		t.Fatalf("payagreement.saved events = %d", n)
 	}
 	if l, _ := s.ListPayAgreements(testkit.Ctx(testkit.TenantID(34)), false, 10); len(l) != 0 {
@@ -222,5 +232,97 @@ func TestAssignWorkerSetup_DrivesCalculation(t *testing.T) {
 	rep, err := s.LookupReplay(ctx, idem("as-4"))
 	if err != nil || rep == nil || rep.Status != 200 {
 		t.Fatalf("replay = %+v, %v", rep, err)
+	}
+}
+
+// A worker linked to an agreement with a premium window is calculated with it: a 14:00-22:00
+// shift has four hours in the 18:00-22:00 window, as a shift-premium line.
+func TestLoadPaySetup_CarriesShiftPremiums(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(36))
+	w := mustWorker(t, s, ctx, "P-1", nil)
+	rules := agreementRules(t, "8")
+	rules.ShiftPremiums, _ = domain.ShiftPremiums([]domain.ShiftPremiumInput{{Name: "Evening", From: "18:00", To: "22:00", Premium: "0.25"}})
+	agr, err := s.CreatePayAgreement(ctx, PayAgreementInput{Code: "EVE", Name: "Evening", Active: true, Rules: rules}, "admin", idem("pe-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AssignWorkerSetup(ctx, w.ID, w.Version, nil, &agr.ID, "admin", idem("pe-2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRegistrations(ctx, []Registration{clock(w.ID, "clock-in", day(14, 0)), clock(w.ID, "clock-out", day(22, 0))}); err != nil {
+		t.Fatal(err)
+	}
+	setup, err := s.LoadPaySetup(ctx, w.ID)
+	if err != nil || setup.Rules == nil || len(setup.Rules.ShiftPremiums) != 1 {
+		t.Fatalf("setup = %+v, %v", setup, err)
+	}
+	d := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	punches, err := s.LoadPunches(ctx, w.ID, d, d.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pf := func(at time.Time) domain.Profile { return setup.Profiles.For(at, time.UTC) }
+	calc := domain.Calculation{ProfileFor: pf, Location: time.UTC, Rules: setup.EffectiveRules(), Rate: punches.Rate, Currency: punches.Currency}
+	days, err := calc.Run(domain.BuildDaysFor(punches.Punches, time.UTC, pf))
+	if err != nil || len(days) != 1 {
+		t.Fatalf("days = %+v, %v", days, err)
+	}
+	var premium *domain.PayLine
+	for i, l := range days[0].Lines {
+		if l.Type == domain.TypeShiftPremium {
+			premium = &days[0].Lines[i]
+		}
+	}
+	if premium == nil || premium.Hours.String() != "4" || premium.Multiplier.String() != "0.25" {
+		t.Fatalf("lines = %+v", days[0].Lines)
+	}
+
+	// The premium line is stored with the day, approved, and a later change of the
+	// premium rate is applied to the approved day by a revision: the old premium line is
+	// reversed and the new one added, while the unchanged base line stays.
+	calcDay := func() []domain.DayPay {
+		setup, err := s.LoadPaySetup(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calc := domain.Calculation{ProfileFor: pf, Location: time.UTC, Rules: setup.EffectiveRules(), Rate: punches.Rate, Currency: punches.Currency}
+		days, err := calc.Run(domain.BuildDaysFor(punches.Punches, time.UTC, pf))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return days
+	}
+	if err := s.SavePay(ctx, PayCalculation{WorkerID: w.ID, FromDate: "2026-10-20", ToDate: "2026-10-20", TimeZone: "UTC", Days: calcDay()}, Idem{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := s.ApprovePay(ctx, w.ID, "2026-10-20", "2026-10-20", "supervisor-1", Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := map[string]string{}
+	for _, d := range approved.Days {
+		for _, l := range d.PayLines {
+			stored[l.Type] = l.Hours.String() + "@" + l.Multiplier.String()
+		}
+	}
+	if stored[domain.TypeShiftPremium] != "4@0.25" || stored[domain.TypeBase] != "8@1" {
+		t.Fatalf("approved lines = %+v", approved)
+	}
+	rules.ShiftPremiums, _ = domain.ShiftPremiums([]domain.ShiftPremiumInput{{Name: "Evening", From: "18:00", To: "22:00", Premium: "0.3"}})
+	if _, err := s.UpdatePayAgreement(ctx, agr.ID, agr.Version, PayAgreementInput{Name: "Evening", Active: true, Rules: rules}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	rev, err := s.RevisePay(ctx, PayCalculation{WorkerID: w.ID, FromDate: "2026-10-20", ToDate: "2026-10-20", TimeZone: "UTC", Days: calcDay()}, "night rate raised", "supervisor-1", idem("pe-rev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rev.Days) != 1 || len(rev.Days[0].ReversedLines) != 1 || len(rev.Days[0].AddedLines) != 1 {
+		t.Fatalf("revision = %+v", rev)
+	}
+	r, a := rev.Days[0].ReversedLines[0], rev.Days[0].AddedLines[0]
+	if r.Type != domain.TypeShiftPremium || r.Hours.String() != "-4" || r.Multiplier.String() != "0.25" ||
+		a.Type != domain.TypeShiftPremium || a.Hours.String() != "4" || a.Multiplier.String() != "0.3" || !a.Amount.Equal(punches.Rate.Mul(decimal.RequireFromString("1.2")).Round(2)) {
+		t.Fatalf("reversed %+v added %+v", r, a)
 	}
 }

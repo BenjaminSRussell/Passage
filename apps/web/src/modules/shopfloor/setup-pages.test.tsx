@@ -1,5 +1,5 @@
 import { findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -82,6 +82,7 @@ const agreement: PayAgreement = {
   overtimeMultiplier: "1.5000",
   sundayMultiplier: "2.0000",
   weekStart: 1,
+  shiftPremiums: [{ name: "Night", from: "22:00", to: "06:00", premium: "0.1500" }],
   active: true,
   version: 1,
   createdBy: "admin",
@@ -115,6 +116,7 @@ describe("Pay agreements list", () => {
     expect(table).toHaveTextContent("8.00 h");
     expect(table).toHaveTextContent("1.5000x");
     expect(table).toHaveTextContent("Monday");
+    expect(table).toHaveTextContent("Night 22:00-06:00 +0.1500");
     expect(table).toHaveTextContent("Active");
     expect(screen.getByRole("link", { name: "New pay agreement" })).toHaveAttribute("href", "/shopfloor/pay-agreements/new");
     expect(pageViolations(container)).toEqual([]);
@@ -141,7 +143,7 @@ describe("New pay agreement", () => {
   const base = { code: "US", name: "US hourly", dailyThreshold: "8", weeklyThreshold: "40", overtimeMultiplier: "1.5", sundayMultiplier: "2", weekStart: "1" };
 
   it("validates like the service", () => {
-    expect(validateAgreement(base).input).toEqual({ code: "US", name: "US hourly", dailyThreshold: "8", weeklyThreshold: "40", overtimeMultiplier: "1.5", sundayMultiplier: "2", weekStart: 1 });
+    expect(validateAgreement(base).input).toEqual({ code: "US", name: "US hourly", dailyThreshold: "8", weeklyThreshold: "40", overtimeMultiplier: "1.5", sundayMultiplier: "2", weekStart: 1, shiftPremiums: [] });
     const { errors } = validateAgreement({ ...base, code: "", dailyThreshold: "25", weeklyThreshold: "169", overtimeMultiplier: "0.9", sundayMultiplier: "2.12345", weekStart: "9" });
     expect(Object.keys(errors).sort()).toEqual(["code", "dailyThreshold", "overtimeMultiplier", "sundayMultiplier", "weekStart", "weeklyThreshold"]);
   });
@@ -159,8 +161,60 @@ describe("New pay agreement", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create pay agreement" }));
     expect(await screen.findByRole("heading", { name: "Pay agreements" })).toBeInTheDocument();
     const [create] = posts("/pay-agreements");
-    expect(create.body).toEqual({ code: "US", name: "US hourly", dailyThreshold: "8", weeklyThreshold: "40", overtimeMultiplier: "1.5", sundayMultiplier: "2", weekStart: 1 });
+    expect(create.body).toEqual({ code: "US", name: "US hourly", dailyThreshold: "8", weeklyThreshold: "40", overtimeMultiplier: "1.5", sundayMultiplier: "2", weekStart: 1, shiftPremiums: [] });
     expect(header(create, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("validates premium windows like the service", () => {
+    const window = { name: "Night", from: "22:00", to: "06:00", premium: "0.15" };
+    expect(validateAgreement({ ...base, premiums: [window] }).input?.shiftPremiums).toEqual([window]);
+    const bad = validateAgreement({ ...base, premiums: [{ name: "", from: "25:00", to: "06:00", premium: "3" }] });
+    expect(Object.keys(bad.premiumErrors).sort()).toEqual(["0.from", "0.name", "0.premium"]);
+    expect(bad.input).toBeUndefined();
+    const same = validateAgreement({ ...base, premiums: [{ ...window, to: "22:00" }] });
+    expect(same.premiumErrors["0.to"]).toBe("The end must differ from the start.");
+    const overlap = validateAgreement({ ...base, premiums: [window, { name: "Early", from: "05:00", to: "07:00", premium: "0.1" }] });
+    expect(overlap.premiumErrors["1.from"]).toBe("Premium windows must not overlap.");
+    const adjacent = validateAgreement({ ...base, premiums: [window, { name: "Day", from: "06:00", to: "22:00", premium: "0.05" }] });
+    expect(adjacent.premiumErrors).toEqual({});
+  });
+
+  it("adds and removes premium windows and sends them with the agreement", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith("/pay-agreements")) return json(201, agreement);
+      if (url.pathname.endsWith("/pay-agreements")) return json(200, { items: [agreement] });
+      return undefined;
+    };
+    renderAt("/shopfloor/pay-agreements/new");
+    expect(screen.getByText("No premium windows.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add premium window" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add premium window" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove window 2" }));
+    fill("Code", "US");
+    fill("Name", "US night");
+    fill("Window name", "Night");
+    fill("From (HH:MM)", "22:00");
+    fill("To (HH:MM)", "06:00");
+    fill("Premium", "0.15");
+    fireEvent.click(screen.getByRole("button", { name: "Create pay agreement" }));
+    expect(await screen.findByRole("heading", { name: "Pay agreements" })).toBeInTheDocument();
+    const [create] = posts("/pay-agreements");
+    expect(create.body).toMatchObject({ shiftPremiums: [{ name: "Night", from: "22:00", to: "06:00", premium: "0.15" }] });
+  });
+
+  it("shows a premium window problem from the service on its row", async () => {
+    handler = () => json(400, { code: "COM-0400", detail: "invalid", errors: { "shiftPremiums[0].from": "premium windows must not overlap" } });
+    renderAt("/shopfloor/pay-agreements/new");
+    fireEvent.click(screen.getByRole("button", { name: "Add premium window" }));
+    fill("Code", "US");
+    fill("Name", "US hourly");
+    const row = screen.getByRole("group", { name: "Premium window 1" });
+    fireEvent.change(within(row).getByLabelText("Window name"), { target: { value: "N" } });
+    fireEvent.change(within(row).getByLabelText("From (HH:MM)"), { target: { value: "22:00" } });
+    fireEvent.change(within(row).getByLabelText("To (HH:MM)"), { target: { value: "06:00" } });
+    fireEvent.change(within(row).getByLabelText("Premium"), { target: { value: "0.1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create pay agreement" }));
+    expect(await screen.findByText("premium windows must not overlap")).toBeInTheDocument();
   });
 
   it("does not send an invalid form and names the fields", () => {

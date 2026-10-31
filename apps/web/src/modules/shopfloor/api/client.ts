@@ -860,6 +860,14 @@ export interface NewTimeProfile {
   days: ProfileDay[];
 }
 
+/** A premium window: hours between from and to (local HH:MM; to not after from crosses midnight) earn the premium (0.15 is 15% extra). */
+export interface ShiftPremium {
+  name: string;
+  from: string;
+  to: string;
+  premium: string;
+}
+
 /** Decimal fields are strings; weekStart is 0 (Sunday) to 6 (Saturday). */
 export interface PayAgreement {
   id: string;
@@ -870,6 +878,7 @@ export interface PayAgreement {
   overtimeMultiplier: string;
   sundayMultiplier: string;
   weekStart: number;
+  shiftPremiums: ShiftPremium[];
   active: boolean;
   version: number;
   createdBy: string;
@@ -886,6 +895,7 @@ export interface NewPayAgreement {
   overtimeMultiplier: string;
   sundayMultiplier: string;
   weekStart: number;
+  shiftPremiums?: ShiftPremium[];
 }
 
 export function listTimeProfiles(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<TimeProfile[]> {

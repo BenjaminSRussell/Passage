@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 )
@@ -183,6 +184,103 @@ type AgreementInput struct {
 	SundayMultiplier   string `json:"sundayMultiplier"`
 	// WeekStart is the first day of the pay week, 0 (Sunday) to 6 (Saturday).
 	WeekStart int `json:"weekStart"`
+	// ShiftPremiums are optional premium windows (at most 6).
+	ShiftPremiums []ShiftPremiumInput `json:"shiftPremiums"`
+}
+
+// MaxShiftPremiums is the most premium windows one agreement carries.
+const MaxShiftPremiums = 6
+
+// ShiftPremium is a premium window of the day: hours worked between From and To (offsets
+// from local midnight; To not after From means the window crosses midnight) earn the
+// premium rate on top of the pay type of the hour (0.15 is 15% of the worker's rate).
+type ShiftPremium struct {
+	Name    string
+	From    time.Duration
+	To      time.Duration
+	Premium decimal.Decimal
+}
+
+// ShiftPremiumInput is a premium window as the API receives and stores it.
+type ShiftPremiumInput struct {
+	Name    string `json:"name"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Premium string `json:"premium"`
+}
+
+// length is the window's duration, 24 h at most (From equal to To is refused).
+func (s ShiftPremium) length() time.Duration {
+	l := s.To - s.From
+	if l <= 0 {
+		l += 24 * time.Hour
+	}
+	return l
+}
+
+// ShiftPremiums validates the windows (name 1 to 60 characters, times HH:MM with From
+// different from To, premium above 0 up to 2 with up to 4 decimals, no two windows
+// overlapping) and returns them.
+func ShiftPremiums(in []ShiftPremiumInput) ([]ShiftPremium, map[string]string) {
+	fields := map[string]string{}
+	if len(in) > MaxShiftPremiums {
+		fields["shiftPremiums"] = fmt.Sprintf("at most %d premium windows", MaxShiftPremiums)
+		return nil, fields
+	}
+	out := make([]ShiftPremium, 0, len(in))
+	for i, w := range in {
+		key := fmt.Sprintf("shiftPremiums[%d].", i)
+		name := strings.TrimSpace(w.Name)
+		if n := utf8.RuneCountInString(name); n < 1 || n > 60 {
+			fields[key+"name"] = "must be 1 to 60 characters"
+		}
+		from, okF := ParseClock(w.From)
+		to, okT := ParseClock(w.To)
+		if !okF {
+			fields[key+"from"] = "must be HH:MM"
+		}
+		if !okT {
+			fields[key+"to"] = "must be HH:MM"
+		}
+		if okF && okT && from == to {
+			fields[key+"to"] = "must differ from from"
+		}
+		prem, err := decimal.NewFromString(strings.TrimSpace(w.Premium))
+		if err != nil || !prem.IsPositive() || prem.GreaterThan(decimal.NewFromInt(2)) || prem.Exponent() < -4 {
+			fields[key+"premium"] = "must be a decimal string above 0 and up to 2 with up to 4 decimals"
+		}
+		out = append(out, ShiftPremium{Name: name, From: from, To: to, Premium: prem})
+	}
+	if len(fields) > 0 {
+		return nil, fields
+	}
+	for i := range out {
+		for j := i + 1; j < len(out); j++ {
+			if premiumsOverlap(out[i], out[j]) {
+				fields[fmt.Sprintf("shiftPremiums[%d].from", j)] = "premium windows must not overlap"
+			}
+		}
+	}
+	if len(fields) > 0 {
+		return nil, fields
+	}
+	return out, nil
+}
+
+// premiumsOverlap reports whether two windows share time on the 24 h circle.
+func premiumsOverlap(a, b ShiftPremium) bool {
+	const day = 24 * time.Hour
+	in := func(x, from, length time.Duration) bool { return (x-from+day)%day < length }
+	return in(a.From, b.From, b.length()) || in(b.From, a.From, a.length())
+}
+
+// ShiftPremiumInputs renders windows for the API and the stored column.
+func ShiftPremiumInputs(in []ShiftPremium) []ShiftPremiumInput {
+	out := make([]ShiftPremiumInput, 0, len(in))
+	for _, w := range in {
+		out = append(out, ShiftPremiumInput{Name: w.Name, From: FormatClock(w.From), To: FormatClock(w.To), Premium: w.Premium.String()})
+	}
+	return out
 }
 
 // Rules validates the agreement (FR-25.7: daily threshold 0 to 24 h, weekly 0 to 168 h,
@@ -206,6 +304,11 @@ func (in AgreementInput) Rules() (Rules, map[string]string) {
 	if in.WeekStart < 0 || in.WeekStart > 6 {
 		fields["weekStart"] = "must be 0 (Sunday) to 6 (Saturday)"
 	}
+	prem, bad := ShiftPremiums(in.ShiftPremiums)
+	for k, v := range bad {
+		fields[k] = v
+	}
+	r.ShiftPremiums = prem
 	return r, fields
 }
 

@@ -3,6 +3,21 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 12: shift premiums on the pay agreement (FR-25.7, pay type `shift-premium`)
+
+A pay agreement carries up to six premium windows `{name, from, to, premium}` (migration
+`0011_shift_premium.sql`, column `pay_agreement.shift_premiums`). `pay:calculate` and `pay:revise`
+add one `shift-premium` pay line per window and day: its hours are the paid hours (unpaid breaks
+taken out) that fall inside the window, to 0.01 h, and its multiplier is the premium, so the amount
+is rate x hours x premium. The line supplements the base or overtime lines of the same hours; the
+day's hours are not counted twice. A window whose end is not after its start crosses midnight (the
+part of a night window before 06:00 counts for a shift that starts after midnight), and a shift that
+runs past midnight earns the windows of the next morning too (a 20:00-04:00 shift has four hours in
+a 00:00-06:00 window), all on the day the shift started. Window times are local wall-clock times.
+Windows of an agreement must not overlap. A `PUT` replaces the agreement, so it must send the
+windows it keeps. `payagreement.saved` carries `shiftPremiums`. On the web the pay
+agreement list shows the windows and the create form adds and removes them.
+
 ## Slice 11: time profiles, pay agreements and the worker link (FR-25.7, BR-25.2, BR-25.8)
 
 - `time-profiles` (`POST`, `GET`, `GET {id}`, `PUT {id}`): a profile holds one `days` entry per

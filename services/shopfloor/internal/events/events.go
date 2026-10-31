@@ -260,9 +260,11 @@ type PayAgreementSavedData struct {
 	OvertimeMultiplier string `json:"overtimeMultiplier"`
 	SundayMultiplier   string `json:"sundayMultiplier"`
 	WeekStart          int    `json:"weekStart"`
-	Active             bool   `json:"active"`
-	Version            int    `json:"version"`
-	SavedBy            string `json:"savedBy"`
+	// ShiftPremiums are the premium windows; empty when the agreement has none.
+	ShiftPremiums []domain.ShiftPremiumInput `json:"shiftPremiums"`
+	Active        bool                       `json:"active"`
+	Version       int                        `json:"version"`
+	SavedBy       string                     `json:"savedBy"`
 }
 
 // WorkerAssignedData is the payload of dev.passage.shopfloor.worker.assigned.v1,
