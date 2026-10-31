@@ -87,11 +87,14 @@ type Dependency struct {
 }
 
 // Activity is one WBS node to schedule. DurationDays counts working days; 0 is a milestone.
+// Calendar is the activity's assigned resource (role) calendar (FR-41.2); nil
+// schedules it on the project calendar passed to CPM.
 type Activity struct {
 	ID                 string
 	DurationDays       int
 	StartNoEarlierThan *time.Time
 	Deps               []Dependency
+	Calendar           *Calendar
 }
 
 // ScheduledActivity is the scheduler output for one activity (FR-41.2).
@@ -114,7 +117,11 @@ type Schedule struct {
 	CriticalPath []string
 }
 
-// CPM schedules a WBS with the critical path method over a working calendar.
+// CPM schedules a WBS with the critical path method over working calendars:
+// each activity runs on its own resource calendar when it has one, else on cal.
+// Its dates are working days of that calendar and its duration counts that
+// calendar's working days (FR-41.2: no task on a non-working day of its role
+// calendar). Dependency lags are calendar days.
 //
 // Forward pass: each dependency gives a lower bound on the successor's early
 // start, and every start lands on a working day. The FS bound is the day after
@@ -162,18 +169,19 @@ func CPM(cal Calendar, projectStart time.Time, acts []Activity) (Schedule, error
 	for ; done < len(queue); done++ {
 		i := queue[done]
 		a := acts[i]
-		start := cal.NextWorking(projectStart)
+		c := calendarOf(cal, a)
+		start := c.NextWorking(projectStart)
 		if a.StartNoEarlierThan != nil {
-			start = maxTime(start, cal.NextWorking(*a.StartNoEarlierThan))
+			start = maxTime(start, c.NextWorking(*a.StartNoEarlierThan))
 		}
 		for _, d := range a.Deps {
 			p := index[d.PredecessorID]
-			start = maxTime(start, lowerBound(cal, d, a.DurationDays, es[p], ef[p]))
+			start = maxTime(start, lowerBound(c, d, a.DurationDays, es[p], ef[p]))
 		}
 		es[i] = start
 		ef[i] = start
 		if a.DurationDays > 0 {
-			ef[i] = cal.Shift(start, a.DurationDays-1)
+			ef[i] = c.Shift(start, a.DurationDays-1)
 		}
 		for _, e := range succ[i] {
 			pending[e.to]--
@@ -193,20 +201,23 @@ func CPM(cal Calendar, projectStart time.Time, acts []Activity) (Schedule, error
 	lf := make([]time.Time, len(acts))
 	for k := len(queue) - 1; k >= 0; k-- {
 		i := queue[k]
+		c := calendarOf(cal, acts[i])
 		dur := acts[i].DurationDays
-		late := finish
+		// The project finish is a working day of the activity that ends last,
+		// not necessarily of this activity's calendar.
+		late := c.PrevWorking(finish)
 		for _, e := range succ[i] {
-			late = minTime(late, upperBound(cal, e.dep, dur, ls[e.to], lf[e.to]))
+			late = minTime(late, upperBound(c, e.dep, dur, ls[e.to], lf[e.to]))
 		}
 		lf[i] = late
 		ls[i] = late
 		if dur > 0 {
-			ls[i] = cal.Shift(late, -(dur - 1))
+			ls[i] = c.Shift(late, -(dur - 1))
 		}
 	}
 	out := Schedule{Activities: make([]ScheduledActivity, len(acts)), FinishDate: finish}
 	for i, a := range acts {
-		slack := cal.workingDaysAfter(es[i], ls[i])
+		slack := calendarOf(cal, a).workingDaysAfter(es[i], ls[i])
 		out.Activities[i] = ScheduledActivity{ID: a.ID, EarlyStart: es[i], EarlyFinish: ef[i], LateStart: ls[i], LateFinish: lf[i],
 			SlackDays: slack, Critical: slack == 0}
 	}
@@ -218,6 +229,14 @@ func CPM(cal Calendar, projectStart time.Time, acts []Activity) (Schedule, error
 	return out, nil
 }
 
+// calendarOf is the calendar an activity runs on: its resource calendar, else the project calendar.
+func calendarOf(project Calendar, a Activity) Calendar {
+	if a.Calendar != nil {
+		return *a.Calendar
+	}
+	return project
+}
+
 // edge is a dependency seen from its predecessor.
 type edge struct {
 	to  int
@@ -226,7 +245,7 @@ type edge struct {
 
 // upperBound is the latest working-day finish a dependency allows for a
 // predecessor with the given duration, given the successor's late start and
-// finish. It inverts lowerBound exactly: the predecessor finishing on the bound
+// finish; cal is the predecessor's calendar. It inverts lowerBound exactly: the predecessor finishing on the bound
 // still lets the successor keep its late dates, and finishing one working day
 // later does not.
 func upperBound(cal Calendar, d Dependency, dur int, succStart, succFinish time.Time) time.Time {
@@ -257,7 +276,8 @@ func minTime(a, b time.Time) time.Time {
 }
 
 // lowerBound is the earliest working-day start a dependency allows for a successor
-// with the given duration, given the predecessor's early start and finish.
+// with the given duration, given the predecessor's early start and finish; cal
+// is the successor's calendar.
 func lowerBound(cal Calendar, d Dependency, dur int, predStart, predFinish time.Time) time.Time {
 	lag := d.LagDays
 	finishToStart := func(target time.Time) time.Time {

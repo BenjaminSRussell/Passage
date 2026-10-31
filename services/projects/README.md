@@ -45,7 +45,9 @@ api/openapi.yaml         OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml     AsyncAPI 3 for every event published
 charts/projects/         Helm chart (deployment, service, optional ServiceMonitor)
 Dockerfile               distroless image, built from the repository root (`docker build -f services/projects/Dockerfile .`)
-testdata/                poc-worked-example.csv: BR-41.1/41.2 worked example (period 1 to 3)
+testdata/                poc-worked-example.csv: BR-41.1/41.2 worked example (period 1 to 3);
+                         proj-estimates-12x4.csv: 12 projects x 4 estimates from the independent
+                         reference gen_poc_estimates.py (run `python3 -I testdata/gen_poc_estimates.py`)
 ```
 
 Web module: `apps/web/src/modules/projects/`: projects overview (counts by stage), all-projects list
@@ -101,7 +103,9 @@ not form a loop; durations are whole working days (0 is a milestone); constraint
 MSO are refused until the scheduler applies them); dependencies (FS, SS, FF, SF, lag in calendar days) link
 tasks, each pair once, without cycles (PROJ-WBS-001). A node with children is a summary: the scheduler
 schedules the tasks and rolls their dates, slack and critical flag up to the summary. The scheduler uses the
-standard Monday-to-Friday calendar from the project start date (role calendars are wave 8).
+standard Monday-to-Friday calendar from the project start date. The domain scheduler can run each
+activity on its own resource calendar (`domain.Activity.Calendar`); the API passes none until wave-8
+role calendars exist.
 
 Change orders (FR-41.18, BR-41.13): a line has a cost and revenue impact (rounded half-even to the project
 currency, negative allowed) and, when it names a WBS node of any plan version of the project, an effort and
