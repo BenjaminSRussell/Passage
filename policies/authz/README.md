@@ -19,7 +19,7 @@ Each permission is a route template matched with `glob.match(pattern, ["/", ":"]
 
 ## Known collision: costing routes
 
-`productcost` (`CostingView`, `CostingMaintain`) and `costing` (`costing.read`, `costing.reconcile`, `costing.version.write`) both mount `/v1/costing/reconciliations` and `/v1/costing/versions`. Both duty sets are seeded for those templates, so either family reaches either service's route. Fixing it needs distinct route prefixes in the routers; the issue is tracked outside this file.
+`productcost` (`CostingView`, `CostingMaintain`) and `costing` (`costing.read`, `costing.reconcile`, `costing.version.write`) both mount `/v1/costing/reconciliations` and `/v1/costing/versions`. Both duty sets are seeded for those templates, so either family reaches either service's route. Fixing it needs distinct route prefixes in the routers; tracked in #342.
 
 ## Path input
 
