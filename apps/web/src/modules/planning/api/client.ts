@@ -24,6 +24,9 @@ export const PlannedOrder = z.object({
   /** The order's ETag: send it back as If-Match on PATCH and DELETE. */
   version: z.number().int().min(1),
   vendorId: z.string().nullish(),
+  /** The quota arrangement and source a plan run allocated the order to (FR-22.17). */
+  quotaArrangementId: z.string().nullish(),
+  quotaSourceId: z.string().nullish(),
   /** Set once the order is firmed: the purchase, production or transfer order it became (FR-22.10). */
   firmedTargetType: TargetType.nullish(),
   firmedTargetId: z.string().nullish(),

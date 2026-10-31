@@ -120,6 +120,11 @@ type PlannedOrderFirmedData struct {
 	Qty            string  `json:"qty"`
 	OrderDate      string  `json:"order_date"`
 	DeliveryDate   string  `json:"delivery_date"`
+	// QuotaArrangementID and QuotaSourceID are set when a quota arrangement
+	// allocated the order (FR-22.17); the owning context stores them on the
+	// target order so allocated quantity can be traced.
+	QuotaArrangementID *string `json:"quota_arrangement_id"`
+	QuotaSourceID      *string `json:"quota_source_id"`
 }
 
 // PlanCompletedData is the data member of plan.completed.v1.

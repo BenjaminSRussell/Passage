@@ -126,6 +126,9 @@ type PlannedOrder struct {
 	// AutoFirmed marks an order the firming time fence firms during the run
 	// (BR-22.4); the store firms it in the run's transaction.
 	AutoFirmed bool
+	// VendorID, QuotaArrangementID and QuotaSourceID are set by ApplyQuota when
+	// a quota arrangement allocated the order to a source (FR-22.17).
+	VendorID, QuotaArrangementID, QuotaSourceID string
 }
 
 // Peg links one unit of supply to the demand it covers (ReqTransCov).

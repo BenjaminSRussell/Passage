@@ -187,7 +187,9 @@ func (s *Postgres) CreateQuotaArrangement(ctx context.Context, req QuotaCreate) 
 // UpdateQuotaArrangement replaces arrangement id and all its sources under
 // If-Match: expectedVersion must be its current version (412 otherwise) and
 // the version is bumped. The overlap rule is checked as on create, ignoring
-// the arrangement itself. Replaced sources get new ids.
+// the arrangement itself. A source with the same type and reference as a
+// current one keeps that source's id, so planned orders a run allocated to it
+// still book on it when firmed (FR-22.17); other sources get new ids.
 func (s *Postgres) UpdateQuotaArrangement(ctx context.Context, id string, expectedVersion int, spec domain.QuotaArrangementSpec) (QuotaArrangement, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out QuotaArrangement
@@ -209,6 +211,10 @@ func (s *Postgres) UpdateQuotaArrangement(ctx context.Context, id string, expect
 		if _, err := tx.Exec(ctx, `update quota_arrangement set item_id = $3, site_id = $4, valid_from = $5, valid_to = $6,
 			split = $7, min_split_qty = $8::numeric, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
 			p.TenantID, id, spec.ItemID, spec.SiteID, spec.ValidFrom, spec.ValidTo, spec.Split, spec.MinSplitQty.String()); err != nil {
+			return err
+		}
+		spec.Sources, err = keepSourceIDs(ctx, tx, p.TenantID, id, spec.Sources)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `delete from quota_source where tenant_id = $1 and arrangement_id = $2`, p.TenantID, id); err != nil {
@@ -255,8 +261,47 @@ func lockQuotaScope(ctx context.Context, tx pgx.Tx, tenantID string, spec domain
 	return nil
 }
 
+// keepSourceIDs returns sources with the id of the current source of the
+// arrangement that has the same type and reference, and no id otherwise (an
+// id sent by the caller is never used).
+func keepSourceIDs(ctx context.Context, tx pgx.Tx, tenantID, arrangementID string, sources []domain.QuotaSourceSpec) ([]domain.QuotaSourceSpec, error) {
+	rows, err := tx.Query(ctx, `select id::text, source_type, coalesce(vendor_id, production_version_id, from_warehouse_id)::text
+		from quota_source where tenant_id = $1 and arrangement_id = $2`, tenantID, arrangementID)
+	if err != nil {
+		return nil, err
+	}
+	current := map[string]string{}
+	for rows.Next() {
+		var sid, typ, ref string
+		if err := rows.Scan(&sid, &typ, &ref); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		current[typ+":"+ref] = sid
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]domain.QuotaSourceSpec, len(sources))
+	for i, src := range sources {
+		src.ID = ""
+		if ref, ok := ids.Canonical(src.Ref()); ok {
+			src.ID = current[src.Type+":"+ref]
+		}
+		out[i] = src
+	}
+	return out, nil
+}
+
+// insertQuotaSources writes the sources of an arrangement in line order; a
+// source without an id gets a new one.
 func insertQuotaSources(ctx context.Context, tx pgx.Tx, tenantID, arrangementID string, sources []domain.QuotaSourceSpec) error {
 	for i, src := range sources {
+		sourceID := src.ID
+		if sourceID == "" {
+			sourceID = ids.New()
+		}
 		var maxQty *string
 		if src.MaxQtyPerPeriod != nil {
 			v := src.MaxQtyPerPeriod.String()
@@ -265,7 +310,7 @@ func insertQuotaSources(ctx context.Context, tx pgx.Tx, tenantID, arrangementID 
 		if _, err := tx.Exec(ctx, `insert into quota_source (tenant_id, id, arrangement_id, line, source_type, vendor_id,
 			production_version_id, from_warehouse_id, quota, base_qty, allocated_qty, max_qty_per_period, period_days, priority, blocked)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11::numeric, $12::numeric, $13, $14, $15)`,
-			tenantID, ids.New(), arrangementID, i+1, src.Type, optional(src.VendorID), optional(src.ProductionVersionID),
+			tenantID, sourceID, arrangementID, i+1, src.Type, optional(src.VendorID), optional(src.ProductionVersionID),
 			optional(src.FromWarehouseID), src.Quota.String(), src.BaseQty.String(), src.Allocated.String(), maxQty,
 			src.PeriodDays, src.Priority, src.Blocked); err != nil {
 			return err

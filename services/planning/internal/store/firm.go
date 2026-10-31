@@ -155,6 +155,10 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 			values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`, p.TenantID, batchID, req.IdempotencyKey, req.InputHash, req.Grouping, len(cands), body, entity); err != nil {
 			return err
 		}
+		quotaRefs, err := bookQuota(ctx, tx, p.TenantID, req.OrderIDs)
+		if err != nil {
+			return err
+		}
 		for _, g := range out.Groups {
 			for _, id := range g.PlannedOrderIDs {
 				if _, err := tx.Exec(ctx, `update planned_order set status = 'firmed', firmed_batch_id = $3, firmed_target_type = $4,
@@ -167,6 +171,7 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 					PlannedOrderID: id, PlanVersionID: o.versionID, BatchID: batchID, OrderType: g.OrderType,
 					TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, SiteID: o.cand.SiteID,
 					VendorID: optional(o.cand.VendorID), Qty: o.cand.Qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
+					QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 				})
 				if err != nil {
 					return err
@@ -251,14 +256,14 @@ func (a *autoFirm) groupOf(orderID string) (FirmedGroup, bool) {
 // autoFirmBatch groups the run's auto-firmed orders (orderIDs[i] is the id of
 // req.Result.Orders[i]) into target orders as a planner's firming would with
 // the default grouping vendor-date (4.22.13), and returns nil when the run
-// firms nothing. Planned orders of a run carry no vendor yet, so purchases of
-// the site merge per delivery date.
+// firms nothing. A planned order allocated by a quota arrangement carries its
+// source's vendor; purchases without one merge per delivery date.
 func autoFirmBatch(req RunRequest, versionID string, orderIDs []string) (*autoFirm, error) {
 	epoch := int(req.AsOf.Unix() / 86400)
 	var cands []domain.FirmCandidate
 	for i, o := range req.Result.Orders {
 		if o.AutoFirmed {
-			cands = append(cands, domain.FirmCandidate{ID: orderIDs[i], OrderType: o.OrderType, SiteID: req.SiteID,
+			cands = append(cands, domain.FirmCandidate{ID: orderIDs[i], OrderType: o.OrderType, SiteID: req.SiteID, VendorID: o.VendorID,
 				DeliveryDay: epoch + o.DeliveryDate, Qty: o.Qty})
 		}
 	}

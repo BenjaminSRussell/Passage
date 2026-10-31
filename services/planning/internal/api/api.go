@@ -503,6 +503,11 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, runProblem(err))
 		return
 	}
+	result, err = a.applyQuotaToRun(r.Context(), code, req, asOf, result)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
 		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,

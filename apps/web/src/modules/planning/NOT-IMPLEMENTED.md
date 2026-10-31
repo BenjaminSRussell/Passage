@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 13)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 19)
 
-Screens of slices 1 to 13, all registered in `module.ts` and built from the
+Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail), all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles

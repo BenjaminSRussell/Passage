@@ -26,7 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
-      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope.'
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source.'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -1535,6 +1535,7 @@ paths:
     put:
       operationId: updateQuotaArrangement
       summary: Replace an arrangement and all its sources under If-Match; the overlap rule applies as on create
+      description: A source naming the same type and reference as a current source keeps its id, so planned orders allocated to it still book on it when firmed; other sources get new ids. Firming an order allocated to one of its sources adds the quantity to the source's allocatedQty and bumps the arrangement's version, so an update sent with an older ETag is a 412.
       x-passage-duty: planning.setup.maintain
       parameters:
         - $ref: '#/components/parameters/EntityId'
@@ -1803,7 +1804,7 @@ components:
         fromWarehouseId: {type: string, format: uuid, description: 'Required for transfer, absent otherwise'}
         quota: {type: string, description: 'Share weight 0 to 99999.9999; 0 is a fallback used only when every other source is blocked'}
         baseQty: {type: string, default: '0'}
-        allocatedQty: {type: string, default: '0', description: Carried over from a legacy system (SAP EQUP)}
+        allocatedQty: {type: string, default: '0', description: Carried over from a legacy system (SAP EQUP); firming adds the quantity of the planned orders allocated to the source}
         maxQtyPerPeriod: {type: [string, 'null'], description: Positive; given together with periodDays}
         periodDays: {type: [integer, 'null'], minimum: 1, maximum: 366}
         priority: {type: integer, minimum: 0, maximum: 999, default: 0, description: 'Breaks rating ties, lower first'}
@@ -2026,13 +2027,13 @@ components:
         approvedFirmed: {type: integer, description: 'Planned orders approved in the previous version that this run firmed (FR-22.11), in one firming batch with one plannedorder.firmed.v1 each'}
         messages: {type: integer}
         durationMs: {type: integer, format: int64}
-        planHash: {type: string, description: 'sha256 hex over orders, pegging and messages'}
+        planHash: {type: string, description: 'sha256 hex over orders, pegging and messages, and the quota source of each allocated order'}
     PlannedOrder:
       type: object
       properties:
         id: {type: string, format: uuid}
         versionId: {type: string, format: uuid}
-        number: {type: string}
+        number: {type: string, description: 'PLN-nnnnnn; the parts of an order a split quota arrangement divided are numbered <number>-<n>'}
         itemId: {type: string, format: uuid}
         orderType: {type: string, enum: [purchase, production, transfer]}
         qty: {type: string}
@@ -2043,7 +2044,9 @@ components:
         lotRule: {type: string}
         status: {type: string, enum: [unprocessed, approved, firmed, deleted]}
         version: {type: integer, minimum: 1, description: Same as the ETag}
-        vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders}
+        vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders, or by a plan run from the vendor of the quota source the order was allocated to}
+        quotaArrangementId: {type: string, format: uuid, description: The quota arrangement a plan run applied to the order (FR-22.17); absent when none applied}
+        quotaSourceId: {type: string, format: uuid, description: The quota source the run allocated the order to; firming books its quantity on that source. A vendor change on the order moves it to that vendor's source of the arrangement, or out of the arrangement when the vendor is not one of its sources}
         firmedTargetType: {type: string, enum: [purchase-order, production-order, transfer-order], description: Set once the order is firmed}
         firmedTargetId: {type: string, format: uuid, description: Id of the order it became (FR-22.10); orders of one purchase group share it}
     FirmRequest:

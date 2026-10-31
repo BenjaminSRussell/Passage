@@ -89,6 +89,14 @@ func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEn
 		batch.Grouping, batch.Firmed, body, planEntity); err != nil {
 		return 0, err
 	}
+	approvedIDs := make([]string, len(orders))
+	for i, o := range orders {
+		approvedIDs[i] = o.id
+	}
+	quotaRefs, err := bookQuota(ctx, tx, tenantID, approvedIDs)
+	if err != nil {
+		return 0, err
+	}
 	for _, g := range batch.Groups {
 		for _, id := range g.PlannedOrderIDs {
 			if _, err := tx.Exec(ctx, `update planned_order set status = 'firmed', firmed_batch_id = $3, firmed_target_type = $4,
@@ -100,6 +108,7 @@ func firmApprovedOrders(ctx context.Context, tx pgx.Tx, tenantID, planID, planEn
 				PlannedOrderID: id, PlanVersionID: versionIDs[id], BatchID: batch.ID, OrderType: g.OrderType,
 				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.itemID, SiteID: o.siteID,
 				VendorID: optional(o.vendorID), Qty: o.qty.String(), OrderDate: o.orderDate, DeliveryDate: o.deliveryDate,
+				QuotaArrangementID: quotaRefs[id].arrangement(), QuotaSourceID: quotaRefs[id].source(),
 			})
 			if err != nil {
 				return 0, err

@@ -201,6 +201,8 @@ components:
         qty: {type: string, description: Decimal string in the inventory unit}
         order_date: {type: string, format: date}
         delivery_date: {type: string, format: date}
+        quota_arrangement_id: {type: [string, 'null'], format: uuid, description: Quota arrangement the plan run applied to the order (FR-22.17); null when none}
+        quota_source_id: {type: [string, 'null'], format: uuid, description: Quota source the order was allocated to; the owning context keeps it on the target order}
     ForecastPublishedData:
       type: object
       required: [model_id, model_code, version, items, horizon_periods, period_from, period_to, submitted_by, approved_by]

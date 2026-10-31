@@ -73,7 +73,10 @@ func lockEditableOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, expe
 // UpdatePlannedOrder changes quantity, dates or vendor of an open planned order
 // of the current version, or approves it, under If-Match (FR-22.11). The
 // order date may not fall after the delivery date, and a vendor is only set on
-// a planned purchase order.
+// a planned purchase order. A new vendor on an order a run allocated by quota
+// moves it to that vendor's source of the same arrangement, or out of the
+// arrangement when the vendor is not one of its sources, so firming books the
+// quantity on the vendor that gets the order (FR-22.17).
 func (s *Postgres) UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PlannedOrder
@@ -115,6 +118,12 @@ func (s *Postgres) UpdatePlannedOrder(ctx context.Context, id string, expectedVe
 			order_date = $4::date,
 			delivery_date = $5::date,
 			vendor_id = coalesce($6::uuid, vendor_id),
+			quota_source_id = case when $6::uuid is null or $6::uuid is not distinct from vendor_id then quota_source_id
+				else (select s.id from quota_source s where s.tenant_id = $1 and s.arrangement_id = planned_order.quota_arrangement_id
+					and s.source_type = 'vendor' and s.vendor_id = $6::uuid) end,
+			quota_arrangement_id = case when $6::uuid is null or $6::uuid is not distinct from vendor_id then quota_arrangement_id
+				else (select s.arrangement_id from quota_source s where s.tenant_id = $1 and s.arrangement_id = planned_order.quota_arrangement_id
+					and s.source_type = 'vendor' and s.vendor_id = $6::uuid) end,
 			status = case when $7::boolean and status = 'unprocessed' then 'approved' else status end,
 			version = version + 1
 			where tenant_id = $1 and id = $2`,

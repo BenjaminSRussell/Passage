@@ -72,6 +72,7 @@ type Store interface {
 	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
 	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
 	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
+	RunQuotas(ctx context.Context, siteID, planEntity string, itemIDs []string, from, to time.Time) ([]domain.RunQuota, error)
 	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
@@ -180,6 +181,10 @@ type PlannedOrder struct {
 	// Version is the order's ETag: every maintenance write bumps it.
 	Version  int     `json:"version"`
 	VendorID *string `json:"vendorId,omitempty"`
+	// QuotaArrangementID and QuotaSourceID name the quota arrangement and the
+	// source a run allocated the order to (FR-22.17).
+	QuotaArrangementID *string `json:"quotaArrangementId,omitempty"`
+	QuotaSourceID      *string `json:"quotaSourceId,omitempty"`
 	// FirmedTargetType and FirmedTargetID name the purchase, production or
 	// transfer order a firmed planned order became (FR-22.10).
 	FirmedTargetType *string `json:"firmedTargetType,omitempty"`
@@ -328,10 +333,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
 			}
 			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
-				status, firmed_batch_id, firmed_target_type, firmed_target_id)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16)`,
+				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16,
+				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid)`,
 				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				status, batchID, targetType, targetID)
+				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID)
 		}
 		for _, pg := range r.Pegging {
 			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
@@ -367,6 +373,18 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}
 		// One plannedorder.firmed.v1 per auto-firmed order, as a planner's
 		// firming writes, so the owning contexts create the target orders.
+		// The quantity of an order allocated by a quota arrangement is booked
+		// against its source as the order becomes firmed (FR-22.17).
+		var firmedIDs []string
+		for i := range r.Orders {
+			if _, ok := autoFirm.groupOf(orderIDs[i]); ok {
+				firmedIDs = append(firmedIDs, orderIDs[i])
+			}
+		}
+		quotaRefs, err := bookQuota(ctx, tx, p.TenantID, firmedIDs)
+		if err != nil {
+			return err
+		}
 		for i, o := range r.Orders {
 			g, ok := autoFirm.groupOf(orderIDs[i])
 			if !ok {
@@ -374,8 +392,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			}
 			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, orderIDs[i], p.TenantID, planevents.PlannedOrderFirmedData{
 				PlannedOrderID: orderIDs[i], PlanVersionID: versionID, BatchID: autoFirm.batch.ID, OrderType: g.OrderType,
-				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, Qty: o.Qty.String(),
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, VendorID: optional(o.VendorID), Qty: o.Qty.String(),
 				OrderDate: dayDate(req.AsOf, o.OrderDate), DeliveryDate: dayDate(req.AsOf, o.DeliveryDate),
+				QuotaArrangementID: quotaRefs[orderIDs[i]].arrangement(), QuotaSourceID: quotaRefs[orderIDs[i]].source(),
 			})
 			if err != nil {
 				return err
@@ -558,13 +577,13 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
-	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.firmed_target_type, o.firmed_target_id::text
+	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.quota_arrangement_id::text, o.quota_source_id::text, o.firmed_target_type, o.firmed_target_id::text
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
-	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID,
+	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID, &o.QuotaArrangementID, &o.QuotaSourceID,
 		&o.FirmedTargetType, &o.FirmedTargetID)
 	return o, err
 }

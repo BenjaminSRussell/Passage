@@ -479,6 +479,12 @@ export function PlannedOrderPage() {
               ["Delay", o.delayDays > 0 ? `${o.delayDays} days` : dash],
               ["Lot rule", o.lotRule],
               ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ?? dash, true]] as [string, ReactNode, boolean][]) : []),
+              ...(o.quotaArrangementId
+                ? ([
+                    ["Quota arrangement", <Link to={`/planning/quota-arrangements/${o.quotaArrangementId}`}>{o.quotaArrangementId}</Link>, true],
+                    ["Quota source", o.quotaSourceId ?? dash, true],
+                  ] as [string, ReactNode, boolean][])
+                : []),
               ...(o.firmedTargetType && o.firmedTargetId
                 ? ([
                     ["Became", targetLabel[o.firmedTargetType]],
