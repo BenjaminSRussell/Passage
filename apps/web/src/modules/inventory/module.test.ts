@@ -26,6 +26,10 @@ describe("inventory module", () => {
       "/inventory/abc-runs": "inventory.read",
       "/inventory/consignment-orders": "inventory.read",
       "/inventory/consignment/stock": "inventory.read",
+      "/inventory/reports/count-variance": "inventory.read",
+      "/inventory/reports/negative-onhand": "inventory.read",
+      "/inventory/reports/tracking-trace": "inventory.read",
+      "/inventory/reports/dimension-combinations": "inventory.read",
       "/inventory/reconciliations": "inventory.read",
     });
   });

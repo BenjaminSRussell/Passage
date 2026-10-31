@@ -8,6 +8,8 @@ import { ConsignmentOrdersPage } from "./ConsignmentOrdersPage";
 import { ConsignmentStockPage } from "./ConsignmentStockPage";
 import { CountPlansPage } from "./CountPlansPage";
 import { CountSheetPage } from "./CountSheetPage";
+import { CountVariancePage } from "./CountVariancePage";
+import { DimensionCombinationsPage } from "./DimensionCombinationsPage";
 import { CountSheetsPage } from "./CountSheetsPage";
 import { CountTagsPage } from "./CountTagsPage";
 import { InTransitPage } from "./InTransitPage";
@@ -21,11 +23,13 @@ import { NewAbcRunPage } from "./NewAbcRunPage";
 import { NewReservationPage } from "./NewReservationPage";
 import { NewTransferPage } from "./NewTransferPage";
 import { NewReconciliationPage } from "./NewReconciliationPage";
+import { NegativeOnHandPage } from "./NegativeOnHandPage";
 import { OnHandPage } from "./OnHandPage";
 import { ReconciliationPage } from "./ReconciliationPage";
 import { ReconciliationsPage } from "./ReconciliationsPage";
 import { ReservationsPage } from "./ReservationsPage";
 import { StatusChangesPage } from "./StatusChangesPage";
+import { TrackingTracePage } from "./TrackingTracePage";
 import { TransactionPage } from "./TransactionPage";
 import { TransactionsPage } from "./TransactionsPage";
 import { TransferLinesPage } from "./TransferLinesPage";
@@ -36,7 +40,7 @@ const inventory: PassageModule = {
   id: "inventory",
   title: "Inventory",
   description:
-    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification and the daily inventory-to-ledger reconciliation.",
+    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification, the count variance, negative on-hand, batch and serial trace and dimension combination reports, and the daily inventory-to-ledger reconciliation.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry", duty: "inventory.read" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
@@ -67,6 +71,10 @@ const inventory: PassageModule = {
     { path: "/inventory/consignment-orders/new", element: createElement(NewConsignmentPage) },
     { path: "/inventory/consignment-orders/:id", element: createElement(ConsignmentOrderPage), handle: { title: "Consignment order" } },
     { path: "/inventory/consignment/stock", element: createElement(ConsignmentStockPage) },
+    { path: "/inventory/reports/count-variance", element: createElement(CountVariancePage), handle: { title: "Count variance" } },
+    { path: "/inventory/reports/negative-onhand", element: createElement(NegativeOnHandPage), handle: { title: "Negative on-hand" } },
+    { path: "/inventory/reports/tracking-trace", element: createElement(TrackingTracePage), handle: { title: "Batch and serial trace" } },
+    { path: "/inventory/reports/dimension-combinations", element: createElement(DimensionCombinationsPage), handle: { title: "Dimension combinations" } },
     { path: "/inventory/reconciliations", element: createElement(ReconciliationsPage) },
     { path: "/inventory/reconciliations/new", element: createElement(NewReconciliationPage) },
     { path: "/inventory/reconciliations/:id", element: createElement(ReconciliationPage), handle: { title: "Reconciliation run" } },
@@ -87,6 +95,10 @@ const inventory: PassageModule = {
     { label: "ABC classification", to: "/inventory/abc-runs", duty: "inventory.read" },
     { label: "Consignment orders", to: "/inventory/consignment-orders", duty: "inventory.read" },
     { label: "Consignment stock", to: "/inventory/consignment/stock", duty: "inventory.read" },
+    { label: "Count variance", to: "/inventory/reports/count-variance", duty: "inventory.read" },
+    { label: "Negative on-hand", to: "/inventory/reports/negative-onhand", duty: "inventory.read" },
+    { label: "Batch and serial trace", to: "/inventory/reports/tracking-trace", duty: "inventory.read" },
+    { label: "Dimension combinations", to: "/inventory/reports/dimension-combinations", duty: "inventory.read" },
     { label: "Reconciliation", to: "/inventory/reconciliations", duty: "inventory.read" },
   ],
 };

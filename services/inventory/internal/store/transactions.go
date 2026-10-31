@@ -71,14 +71,7 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 	p, _ := tenant.FromContext(ctx)
 	out := []TransactionRow{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select t.id::text, t.legal_entity_id::text, t.origin_id::text, o.source_type, o.source_id::text,
-			coalesce(l.journal_id::text, ''), coalesce(o.reference_number, ''), t.product_id::text, d.dims, t.qty::text, t.entered_qty::text,
-			t.entered_unit, coalesce(t.issue_status, ''), coalesce(t.receipt_status, ''), to_char(t.physical_date, 'YYYY-MM-DD'),
-			coalesce(to_char(t.financial_date, 'YYYY-MM-DD'), ''), t.currency::text, t.cost_amount_physical::text, t.cost_amount_posted::text, t.created_at
-			from inventory_transaction t
-			join inventory_transaction_origin o on o.tenant_id = t.tenant_id and o.id = t.origin_id
-			join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
-			left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE', 'TRANSFER_IN') and l.tenant_id = o.tenant_id and l.id = o.source_id
+		rows, err := tx.Query(ctx, `select `+transactionColumns+transactionFrom+`
 			where t.tenant_id = $1
 			  and ($2 = '' or t.product_id::text = $2)
 			  and ($3 = '' or t.issue_status = $3 or t.receipt_status = $3)
@@ -94,26 +87,45 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var r TransactionRow
-			var raw []byte
-			var qty, entered, cost string
-			var posted *string
-			if err := rows.Scan(&r.ID, &r.LegalEntityID, &r.OriginID, &r.SourceType, &r.SourceID, &r.JournalID, &r.Reference, &r.ProductID, &raw,
-				&qty, &entered, &r.EnteredUnit, &r.IssueStatus, &r.ReceiptStatus, &r.PhysicalDate, &r.FinancialDate, &r.Currency,
-				&cost, &posted, &r.CreatedAt); err != nil {
+			r, err := scanTransaction(rows)
+			if err != nil {
 				return err
-			}
-			if err := json.Unmarshal(raw, &r.Dims); err != nil {
-				return err
-			}
-			r.Qty, r.EnteredQty, r.CostAmountPhysical = decimal.RequireFromString(qty), decimal.RequireFromString(entered), decimal.RequireFromString(cost)
-			if posted != nil {
-				v := decimal.RequireFromString(*posted)
-				r.CostAmountPosted = &v
 			}
 			out = append(out, r)
 		}
 		return rows.Err()
 	})
 	return out, err
+}
+
+const transactionColumns = `t.id::text, t.legal_entity_id::text, t.origin_id::text, o.source_type, o.source_id::text,
+			coalesce(l.journal_id::text, ''), coalesce(o.reference_number, ''), t.product_id::text, d.dims, t.qty::text, t.entered_qty::text,
+			t.entered_unit, coalesce(t.issue_status, ''), coalesce(t.receipt_status, ''), to_char(t.physical_date, 'YYYY-MM-DD'),
+			coalesce(to_char(t.financial_date, 'YYYY-MM-DD'), ''), t.currency::text, t.cost_amount_physical::text, t.cost_amount_posted::text, t.created_at`
+
+const transactionFrom = `
+			from inventory_transaction t
+			join inventory_transaction_origin o on o.tenant_id = t.tenant_id and o.id = t.origin_id
+			join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
+			left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE', 'TRANSFER_IN') and l.tenant_id = o.tenant_id and l.id = o.source_id`
+
+func scanTransaction(rows pgx.Rows) (TransactionRow, error) {
+	var r TransactionRow
+	var raw []byte
+	var qty, entered, cost string
+	var posted *string
+	if err := rows.Scan(&r.ID, &r.LegalEntityID, &r.OriginID, &r.SourceType, &r.SourceID, &r.JournalID, &r.Reference, &r.ProductID, &raw,
+		&qty, &entered, &r.EnteredUnit, &r.IssueStatus, &r.ReceiptStatus, &r.PhysicalDate, &r.FinancialDate, &r.Currency,
+		&cost, &posted, &r.CreatedAt); err != nil {
+		return r, err
+	}
+	if err := json.Unmarshal(raw, &r.Dims); err != nil {
+		return r, err
+	}
+	r.Qty, r.EnteredQty, r.CostAmountPhysical = decimal.RequireFromString(qty), decimal.RequireFromString(entered), decimal.RequireFromString(cost)
+	if posted != nil {
+		v := decimal.RequireFromString(*posted)
+		r.CostAmountPosted = &v
+	}
+	return r, nil
 }

@@ -102,6 +102,23 @@ due date; `late=true` returns only late lines. The list is capped at 1,000 lines
 (`truncated`). It is read only: no migration, table, grant, duty or event. Web: the transfer order lines page
 with every filter, a late summary and a notice when the list is capped. The OpenAPI and AsyncAPI documents have
 no FAIL lines on the documentation gates.
+Slice 11 adds four read-only inquiries of PRD 3.16.14, all under `inventory.read`, none with a migration, table,
+grant, duty or event: `GET /v1/inventory/reports/count-variance` (counted lines of count sheets filtered by
+legal entity, plan, sheet, warehouse, counter and counted-day range; variance quantity is the posted variance
+once the sheet is POSTED, otherwise counted minus expected; variance value is quantity times the cost of the
+posted COUNT journal line, `valueBasis` JOURNAL, or times today's running average for a sheet not yet posted,
+`valueBasis` ESTIMATE; CANCELLED sheets are left out; gain, loss and net value totalled per counter and currency),
+`GET /v1/inventory/reports/negative-onhand` (rows with physical stock below zero, largest shortfall first, with
+the first day of the current negative run, movements netted per day), `GET /v1/inventory/reports/tracking-trace`
+(every transaction of a batch or serial, oldest first, FORWARD = issues, BACKWARD = receipts, BOTH with a running
+physical balance per legal entity and product; `INV-TRC-001`, a service code outside the 3.16.18 catalog, when
+neither is given; the trace follows one batch or serial and does not cross into the batches a production order
+made from it, which needs the wave 21 consumption links) and `GET /v1/inventory/reports/dimension-combinations` (each
+product x dimension set with first and last use and transaction count). Each is capped at 1,000 rows and says
+when it was cut. Web: count variance (filters, estimate notice, totals per counter), negative on-hand, batch
+and serial trace, and dimension combinations pages with their nav items. The OpenAPI and AsyncAPI documents have
+no FAIL lines on the documentation gates.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -202,7 +219,8 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 3.16.10 feature flags `inv.fefo_policy`, `inv.count_pwa`, `inv.transfer_cost_diff` | handoff — platform flag service | No flag client in the kernel yet. |
 | 3.16.11 AX / SAP migration of opening balances and history | handoff — wave 10 | See FR-16.14. |
 | 3.16.13 parameters (`journal_names`, posting restriction, etc.) | later slice of PSG-16 | Slice 1 reads the line cap from `INV_JOURNAL_MAX_LINES`; journal names and the other setup tables are not built. |
-| 3.16.14 count variance report (variance value, by counter), negative list, customer consignment, batch / serial trace, dimension combinations | later slice of PSG-16 | The reservation, blocking and transaction inquiries are built (slice 2); the count sheet shows posted variances per line; the tag status / missing tags list is built (slice 4); the consignment stock report and the segment (sales-order / project stock) view of the on-hand inquiry are built (slice 5). |
+| 3.16.14 count variance report, negative list, batch / serial trace, dimension combinations | built (slice 11) | See the slice 11 paragraph. The variance report lists counted lines (a sheet line that was never counted has no variance); the value of an unposted sheet is an estimate at today's running average. Tests: `TestCountVarianceReportValuesPostedAndOpenSheets`, `TestNegativeOnHandListShowsShortfallAndFirstNegativeDate`, `TestTrackingTraceFollowsABatchAndASerial`, `TestDimensionCombinationsReportFirstAndLastUse`. |
+| 3.16.14 customer consignment stock, trace by document type and GS1 key data elements, count variance by counter across plans over time, export | later slice of PSG-16 / handoff — waves 8, 15, 27 | Customer consignment needs the warehouse type (wave 6) and customer documents (wave 27); batch key data elements live on the wave 8 batch; export is a wave 15 / shell grid feature. |
 | 3.16.15 printed documents (posting list, count sheets, transfer shipping / receiving, labels, blocking notice) | later slice of PSG-16 | Document layouts follow the wave 5/15 templates and are not built. |
 | 3.16.17 duties InventoryAdmin, InventorySetupMaintain | later slice of PSG-16 (per feature) | Built: `inventory.consignment.write` (ConsignmentMaintain, slice 5: replenishment orders, receipts and creating OWNERSHIP_CHANGE journals; approving and rejecting journals is the approval task of `inventory.journal.post`), `inventory.read`, `inventory.journal.write`, `inventory.journal.post`, `inventory.reservation.write` (InventoryReserve), `inventory.blocking.write` (InventoryBlock), `inventory.count.write` / `.post` / `.approve` (CycleCountMaintain / Post / Approve), `inventory.transfer.write` / `.post` (TransferOrderMaintain / TransferOrderPost, slice 3), `inventory.abc.write` (the ABC part of InventorySetupMaintain, slice 3), `inventory.admin` (the rebuild and reconciliation re-run parts of InventoryAdmin, slices 4 and 7), and `inventory.batch.write` for the interim batch-expiry input. Tag counting uses the cycle-count duties (marking open tags MISSING is `inventory.count.approve`); reversal uses the journal write / post duties. Segregation-of-duties pairs belong to the OPA policy bundle (platform). |
 | 3.16.19 performance budgets (k6 at 10k concurrent issues, p95 SLOs) | later slice of PSG-16 | The store test runs 300 concurrent issues against 100 units (AC1 at reduced scale). The 10k k6 run needs a load environment. |
@@ -239,6 +257,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | Journal workflow actions (Validate, Submit, Approve / Reject, Reopen, Cancel) on the journal detail; ownership-change lines (vendor, consignment price); segment on journal lines; consignment orders (list by status, new order, order with receive), consignment stock by vendor with a New ownership change link; segment fields on the reservation dialog; owner and segment filters and groupings on the on-hand inquiry | built (slice 5) | Same primitives and states; vitest tests in `slice5.test.tsx`. |
 | Transaction detail (status history, Unpick / Unregister / Cancel reservation with the date of the move, retried with the same Idempotency-Key), status-change inquiry (filter by transaction and command), transaction rows linked to their detail | built (slice 6) | Same primitives and states; vitest tests in `slice6.test.tsx`. `transactions:apply` is a service-to-service endpoint with no screen. |
 | Inventory-to-ledger reconciliation: runs (status filter), run reconciliation (legal entity, currency, optional ledger balance), run detail (difference alert, negative-stock warning, both sides and the ledger source) | built (slice 7) | Same primitives and states; vitest tests in `slice7.test.tsx`. The Run action is shown to every reader; the service answers 403 without `inventory.admin`, shown on the form (the shell has no duty hook for page actions). |
+| Count variance, negative on-hand, batch and serial trace and dimension combination reports (filters, totals per counter, estimate notice, empty / error states) | built (slice 11) | Same primitives and states; vitest tests in `slice11.test.tsx`. Nav items use `inventory.read`. |
 | Journals-awaiting-approval tile, approver inbox | later slice of PSG-16 | The journal list filters by status SUBMITTED; the workspace tiles are listed below. |
 | Printing tag strips | handoff — wave 15 (documents) | The tag list shows the numbers to print. |
 | Warehouse pickers on the transfer form, transfer documents (print), batch / serial selection at receipt | later slice of PSG-16 / handoff — wave 6 | The form takes warehouse and site codes; the receipt keeps the shipped dimensions. |

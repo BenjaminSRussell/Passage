@@ -1005,6 +1005,138 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/count-variance:
+    get:
+      operationId: getCountVarianceReport
+      summary: Count variance report by plan, sheet, warehouse, date and counter (3.16.14)
+      description: |
+        Counted lines of cycle count sheets that are not CANCELLED, newest count first, at most 1,000
+        (truncated is true when more matched). varianceQty is the posted variance once the sheet is POSTED
+        (measured against the book at posting, BR-16.8) and counted minus expected before that.
+        varianceValue is varianceQty times unitCost: for a posted sheet the cost of the COUNT journal line
+        (valueBasis JOURNAL), otherwise the running average of the on-hand row today rounded to 6 decimals
+        as posting rounds it (valueBasis ESTIMATE). totalsByCounter sums gain, loss and net value
+        per counter and currency over the returned lines. from and to bound the day the line was counted (UTC).
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity owning the sheet }
+        - { name: planId, in: query, schema: { type: string, format: uuid }, description: Count plan }
+        - { name: sheetId, in: query, schema: { type: string, format: uuid }, description: Count sheet }
+        - { name: warehouseId, in: query, schema: { type: string }, description: Warehouse of the plan or of the counted stock }
+        - { name: counter, in: query, schema: { type: string }, description: User who entered the count }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Earliest count day }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Latest count day; not before from }
+      responses:
+        '200':
+          description: Variance lines with totals per counter
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, totalsByCounter, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountVarianceLine' }
+                  totalsByCounter:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountVarianceTotals' }
+                  truncated: { type: boolean, description: More than 1,000 lines matched; narrow the filters to see the rest }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/negative-onhand:
+    get:
+      operationId: listNegativeOnHand
+      summary: Negative on-hand list with shortfall and first negative date (3.16.14)
+      description: |
+        Projection rows whose physical stock (posted + received + registered - deducted - picked) is below
+        zero, largest shortfall first, at most 1,000. firstNegativeDate is the first physical date of the
+        current negative run: the day after whose movements (netted per day) the physical quantity went
+        below zero and has stayed below zero since. It is absent when the transactions do not show it.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+        - { name: siteId, in: query, schema: { type: string }, description: Site dimension }
+        - { name: warehouseId, in: query, schema: { type: string }, description: Warehouse dimension }
+      responses:
+        '200':
+          description: Rows with negative physical stock
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/NegativeOnHandLine' }
+                  truncated: { type: boolean, description: More than 1,000 rows matched }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/tracking-trace:
+    get:
+      operationId: traceTrackingDimension
+      summary: Batch and serial trace through time (3.16.14)
+      description: |
+        Every inventory transaction that carries the batch or serial, oldest physical date first, at most
+        1,000, with its origin document. One of batchId and serialId is required (INV-TRC-001 with field
+        errors otherwise). direction FORWARD lists the issues (where the stock went), BACKWARD the receipts
+        (where it came from), BOTH (the default) every movement. With BOTH each movement that changes
+        physical stock carries running, the traced physical balance of its legal entity and product after it.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: batchId, in: query, schema: { type: string }, description: Batch to trace }
+        - { name: serialId, in: query, schema: { type: string }, description: Serial number to trace }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Restrict to one product }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: direction, in: query, schema: { type: string, enum: [BOTH, FORWARD, BACKWARD], default: BOTH }, description: Which movements to list (case-insensitive) }
+      responses:
+        '200':
+          description: Traced movements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, direction, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TraceLine' }
+                  direction: { type: string, enum: [BOTH, FORWARD, BACKWARD] }
+                  truncated: { type: boolean, description: More than 1,000 movements matched }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reports/dimension-combinations:
+    get:
+      operationId: listDimensionCombinations
+      summary: Dimension combinations a product has used, with first and last use (3.16.14)
+      description: |
+        One row per product and dimension set that has inventory transactions, ordered by product and first
+        use, at most 1,000. activeDimensions names the dimensions the set carries.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+      responses:
+        '200':
+          description: Dimension combinations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/DimensionCombination' }
+                  truncated: { type: boolean, description: More than 1,000 combinations matched }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/abc-runs:
     post:
       operationId: runAbcClassification
@@ -2480,6 +2612,72 @@ components:
         closed: { type: boolean, description: The line was closed short }
         late: { type: string, enum: [LATE_SHIPMENT, LATE_RECEIPT], description: Absent when the line is on time }
         daysLate: { type: integer, description: Days past the due date for a late line, otherwise 0 }
+    CountVarianceLine:
+      type: object
+      required: [sheetId, sheetNumber, sheetStatus, planId, planName, legalEntityId, lineId, lineNo, productId, dimensions, unit, currency, expectedQty, countedQty, varianceQty, unitCost, varianceValue, valueBasis, countedAt]
+      properties:
+        sheetId: { type: string, format: uuid }
+        sheetNumber: { type: string }
+        sheetStatus: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED] }
+        planId: { type: string, format: uuid }
+        planName: { type: string }
+        warehouseId: { type: string, description: Warehouse of the plan, when it has one }
+        legalEntityId: { type: string, format: uuid }
+        lineId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
+        currency: { type: string }
+        expectedQty: { $ref: '#/components/schemas/Decimal' }
+        countedQty: { $ref: '#/components/schemas/Decimal' }
+        varianceQty: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        varianceValue: { $ref: '#/components/schemas/Decimal' }
+        valueBasis: { type: string, enum: [JOURNAL, ESTIMATE], description: JOURNAL for a POSTED sheet (the cost of its COUNT journal line; a zero variance values at zero); ESTIMATE the running average today }
+        countedBy: { type: string }
+        countedAt: { type: string, format: date-time }
+    CountVarianceTotals:
+      type: object
+      required: [counter, currency, lines, absVarianceQty, gainValue, lossValue, netValue]
+      properties:
+        counter: { type: string, description: Empty for lines with no recorded counter }
+        currency: { type: string }
+        lines: { type: integer }
+        absVarianceQty: { $ref: '#/components/schemas/Decimal' }
+        gainValue: { $ref: '#/components/schemas/Decimal' }
+        lossValue: { $ref: '#/components/schemas/Decimal', description: Value of negative variances as a positive number }
+        netValue: { $ref: '#/components/schemas/Decimal' }
+    NegativeOnHandLine:
+      type: object
+      required: [legalEntityId, productId, dimensions, physicalInvent, shortfallQty, postedValue]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        physicalInvent: { $ref: '#/components/schemas/Decimal' }
+        shortfallQty: { $ref: '#/components/schemas/Decimal' }
+        postedValue: { $ref: '#/components/schemas/Decimal' }
+        currency: { type: string }
+        firstNegativeDate: { type: string, format: date }
+    TraceLine:
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          properties:
+            running: { $ref: '#/components/schemas/Decimal', description: Traced physical balance of the legal entity and product after this movement; BOTH direction and physical movements only }
+    DimensionCombination:
+      type: object
+      required: [legalEntityId, productId, dimensionSetHash, dimensions, activeDimensions, firstUse, lastUse, transactionCount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSetHash: { type: string, description: Hex of the dimension-set hash }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        activeDimensions: { type: array, items: { type: string } }
+        firstUse: { type: string, format: date }
+        lastUse: { type: string, format: date }
+        transactionCount: { type: integer }
     AbcRunRequest:
       type: object
       additionalProperties: false

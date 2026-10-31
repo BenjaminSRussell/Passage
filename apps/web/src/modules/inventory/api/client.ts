@@ -1017,6 +1017,147 @@ export async function listTransferLines(query: TransferLineQuery = {}, signal?: 
   return { items: body.items ?? [], truncated: body.truncated ?? false };
 }
 
+// ---- Inquiries and reports (PRD 3.16.14) ----
+
+function reportQuery(params: Record<string, string | undefined>): string {
+  const out = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    const v = value?.trim();
+    if (v) out.set(key, v);
+  }
+  const qs = out.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export type ValueBasis = "JOURNAL" | "ESTIMATE";
+
+export interface CountVarianceLine {
+  sheetId: string;
+  sheetNumber: string;
+  sheetStatus: string;
+  planId: string;
+  planName: string;
+  warehouseId?: string;
+  legalEntityId: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  currency: string;
+  expectedQty: string;
+  countedQty: string;
+  varianceQty: string;
+  unitCost: string;
+  varianceValue: string;
+  /** JOURNAL is the cost of the posted COUNT journal line; ESTIMATE is today's running average. */
+  valueBasis: ValueBasis;
+  countedBy?: string;
+  countedAt: string;
+}
+
+export interface CountVarianceTotals {
+  counter: string;
+  currency: string;
+  lines: number;
+  absVarianceQty: string;
+  gainValue: string;
+  lossValue: string;
+  netValue: string;
+}
+
+export interface CountVarianceQuery {
+  legalEntityId?: string;
+  planId?: string;
+  sheetId?: string;
+  warehouseId?: string;
+  counter?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface CountVarianceReport {
+  items: CountVarianceLine[];
+  totalsByCounter: CountVarianceTotals[];
+  truncated: boolean;
+}
+
+/** Count variance report: counted lines with variance quantity and value, and totals per counter. */
+export async function getCountVariance(query: CountVarianceQuery = {}, signal?: AbortSignal): Promise<CountVarianceReport> {
+  const { body } = await send<Partial<CountVarianceReport>>(`/reports/count-variance${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], totalsByCounter: body.totalsByCounter ?? [], truncated: body.truncated ?? false };
+}
+
+export interface NegativeOnHandLine {
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  physicalInvent: string;
+  shortfallQty: string;
+  postedValue: string;
+  currency?: string;
+  firstNegativeDate?: string;
+}
+
+export interface NegativeOnHandQuery {
+  legalEntityId?: string;
+  productId?: string;
+  siteId?: string;
+  warehouseId?: string;
+}
+
+export interface ReportPage<T> {
+  items: T[];
+  truncated: boolean;
+}
+
+export async function listNegativeOnHand(query: NegativeOnHandQuery = {}, signal?: AbortSignal): Promise<ReportPage<NegativeOnHandLine>> {
+  const { body } = await send<{ items?: NegativeOnHandLine[]; truncated?: boolean }>(`/reports/negative-onhand${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
+export const TRACE_DIRECTIONS = ["BOTH", "FORWARD", "BACKWARD"] as const;
+export type TraceDirection = (typeof TRACE_DIRECTIONS)[number];
+
+export interface TraceLine extends Transaction {
+  /** Traced physical balance of the product after this movement (BOTH direction, physical movements only). */
+  running?: string;
+}
+
+export interface TraceQuery {
+  batchId?: string;
+  serialId?: string;
+  productId?: string;
+  legalEntityId?: string;
+  direction?: TraceDirection;
+}
+
+export interface TraceResult extends ReportPage<TraceLine> {
+  direction: TraceDirection;
+}
+
+/** Batch or serial trace: the transactions that carry the batch or serial, oldest first. */
+export async function traceTracking(query: TraceQuery, signal?: AbortSignal): Promise<TraceResult> {
+  const { body } = await send<{ items?: TraceLine[]; truncated?: boolean; direction?: TraceDirection }>(`/reports/tracking-trace${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false, direction: body.direction ?? query.direction ?? "BOTH" };
+}
+
+export interface DimensionCombination {
+  legalEntityId: string;
+  productId: string;
+  dimensionSetHash: string;
+  dimensions: Partial<Record<string, string>>;
+  activeDimensions: string[];
+  firstUse: string;
+  lastUse: string;
+  transactionCount: number;
+}
+
+export async function listDimensionCombinations(query: { legalEntityId?: string; productId?: string } = {}, signal?: AbortSignal): Promise<ReportPage<DimensionCombination>> {
+  const { body } = await send<{ items?: DimensionCombination[]; truncated?: boolean }>(`/reports/dimension-combinations${reportQuery({ ...query })}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
 // ---- ABC classification (FR-16.19) ----
 
 export const ABC_CLASSES = ["A", "B", "C", "N"] as const;
