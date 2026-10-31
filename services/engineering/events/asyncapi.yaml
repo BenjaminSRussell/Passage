@@ -14,6 +14,10 @@ channels:
       submitted: { $ref: '#/components/messages/ecoSubmitted' }
       approved: { $ref: '#/components/messages/ecoApproved' }
       released: { $ref: '#/components/messages/ecoReleased' }
+  passage.engineering.routeversion:
+    address: passage.engineering.routeversion
+    messages:
+      activated: { $ref: '#/components/messages/routeVersionActivated' }
   passage.engineering.resource:
     address: passage.engineering.resource
     messages:
@@ -43,6 +47,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.engineering.eco' }
     messages: [{ $ref: '#/channels/passage.engineering.eco/messages/released' }]
+  onRouteVersionActivated:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.routeversion' }
+    messages: [{ $ref: '#/channels/passage.engineering.routeversion/messages/activated' }]
   onResourceChanged:
     action: send
     channel: { $ref: '#/channels/passage.engineering.resource' }
@@ -79,10 +87,10 @@ components:
           effectiveTo: { type: string, format: date }
           ecoId: { type: string }
       x-passage-type: dev.passage.engineering.bomversion.expired.v1
-    ecoSubmitted: &eco
+    ecoSubmitted:
       name: ecoSubmitted
       title: ECO submitted for approval
-      payload:
+      payload: &ecoPayload
         type: object
         required: [ecoId, ecoNumber, affectedVersions]
         properties:
@@ -93,15 +101,27 @@ components:
           approverId: { type: string }
       x-passage-type: dev.passage.engineering.eco.submitted.v1
     ecoApproved:
-      <<: *eco
       name: ecoApproved
       title: ECO approved
+      payload: *ecoPayload
       x-passage-type: dev.passage.engineering.eco.approved.v1
     ecoReleased:
-      <<: *eco
       name: ecoReleased
       title: ECO released to production
+      payload: *ecoPayload
       x-passage-type: dev.passage.engineering.eco.released.v1
+    routeVersionActivated:
+      name: routeVersionActivated
+      title: Route version became active
+      payload:
+        type: object
+        required: [routeVersionId, productId, siteId, effectiveFrom]
+        properties:
+          routeVersionId: { type: string }
+          productId: { type: string }
+          siteId: { type: string }
+          effectiveFrom: { type: string, format: date }
+      x-passage-type: dev.passage.engineering.routeversion.activated.v1
     resourceChanged:
       name: resourceChanged
       title: Resource created or changed

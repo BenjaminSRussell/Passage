@@ -13,6 +13,7 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import { ApiError, createEco, getEco, listEcos, releaseEco, type Eco, type EcoReplacement } from "./api/client";
+import { EcoImpactPanel } from "./impact";
 import styles from "./pages.module.css";
 
 const ecoStates = ["draft", "submitted", "approved", "scheduled", "released", "rejected", "cancelled"];
@@ -260,6 +261,7 @@ export function EcoPage({ id, onBack, onOpenBom }: { id: string; onBack?: () => 
               empty={{ title: "No replacements" }}
             />
           </div>
+          <EcoImpactPanel key={id} id={id} />
         </>
       ) : null}
     </>

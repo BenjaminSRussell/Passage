@@ -228,6 +228,29 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404': { $ref: '#/components/responses/NotFound' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecos/{id}/impact:
+    get:
+      operationId: getEcoImpact
+      summary: Get the impact report of an engineering change order
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: 'Date the where-used is evaluated. Defaults to the ECO release date when it is in the future, otherwise today.', schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Each replacement with its component line differences, and the distinct products affected as of the date, the replaced products and every product that uses them at any level, with sites and active version ids. Open production and planned order counts are 0 until waves 21 and 22 supply them.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EcoImpact' } } }
+        '400':
+          description: COM-0001, the id is not a UUID or asOf is not a YYYY-MM-DD date.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-BOM-CYCLE or ENG-BOM-TOOLARGE, the stored structure cannot be walked.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/ecos/{id}:release:
     post:
       operationId: releaseEco
@@ -610,6 +633,46 @@ components:
         releaseDate: { type: string, format: date }
         decidedBy: { type: string }
         replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
+    EcoImpact:
+      type: object
+      required: [asOf, replacements, products, siteIds, openProductionOrders, openPlannedOrders]
+      properties:
+        asOf: { type: string, format: date }
+        replacements:
+          type: array
+          items:
+            type: object
+            required: [oldVersionId, newVersionId, productId, changes]
+            properties:
+              oldVersionId: { type: string, format: uuid }
+              newVersionId: { type: string, format: uuid }
+              productId: { type: string }
+              changes:
+                type: array
+                items:
+                  type: object
+                  required: [componentProductId, change]
+                  properties:
+                    componentProductId: { type: string }
+                    change: { type: string, enum: [added, removed, changed] }
+                    oldQuantity: { type: string, description: Decimal, summed over the lines of the old version }
+                    newQuantity: { type: string, description: Decimal, summed over the lines of the new version }
+        products:
+          type: array
+          description: Distinct affected products, replaced products first, then parents by level and product id.
+          items:
+            type: object
+            required: [productId, reason, level, topLevel, siteIds, versionIds]
+            properties:
+              productId: { type: string }
+              reason: { type: string, enum: [replaced, parent] }
+              level: { type: integer, description: 0 for a replaced product, otherwise the shortest distance to it }
+              topLevel: { type: boolean, description: 'True when no active version uses this product as of the date: the distinct top-level products of the where-used (AC-9.6).' }
+              siteIds: { type: array, description: Sites of the affected versions; empty when they all apply to every site., items: { type: string } }
+              versionIds: { type: array, description: 'For a replaced product, the replaced version and the active versions at its site; for a parent, its active versions that use an affected product.', items: { type: string, format: uuid } }
+        siteIds: { type: array, items: { type: string } }
+        openProductionOrders: { type: integer }
+        openPlannedOrders: { type: integer }
     Shift:
       type: object
       additionalProperties: false

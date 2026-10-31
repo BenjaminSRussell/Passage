@@ -355,6 +355,35 @@ export function getEco(id: string): Promise<Eco> {
   return request(`/ecos/${encodeURIComponent(id)}`);
 }
 
+export interface EcoLineChange {
+  componentProductId: string;
+  change: "added" | "removed" | "changed";
+  oldQuantity?: string;
+  newQuantity?: string;
+}
+
+export interface EcoImpactProduct {
+  productId: string;
+  reason: "replaced" | "parent";
+  level: number;
+  topLevel: boolean;
+  siteIds: string[];
+  versionIds: string[];
+}
+
+export interface EcoImpact {
+  asOf: string;
+  replacements: { oldVersionId: string; newVersionId: string; productId: string; changes: EcoLineChange[] }[];
+  products: EcoImpactProduct[];
+  siteIds: string[];
+  openProductionOrders: number;
+  openPlannedOrders: number;
+}
+
+export function getEcoImpact(id: string, asOf?: string): Promise<EcoImpact> {
+  return request(`/ecos/${encodeURIComponent(id)}/impact${query({ asOf })}`);
+}
+
 export function createEco(body: EcoInput, idempotencyKey: string): Promise<Eco> {
   return request("/ecos", {
     method: "POST",
