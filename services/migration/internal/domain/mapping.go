@@ -57,6 +57,7 @@ type FieldRule struct {
 	Scale       *int              `json:"scale,omitempty"`
 	Default     *string           `json:"default,omitempty"`
 	Required    bool              `json:"required,omitempty"`
+	Format      string            `json:"format,omitempty"`
 }
 
 type Mapping struct {
@@ -143,6 +144,11 @@ func (m Mapping) applyTemplated(row map[string]any, template map[string]string) 
 		if present && isNullMarker(f.Fn, text) {
 			present = false
 		}
+		if present && f.Type == TypeDecimal && len(f.Enum) == 0 && isNumber(row[f.Source]) {
+			// A JSON number is already a machine number, not text in the column's locale: 1.234 stays 1.234
+			// under decimal_comma instead of being read as 1234. (A number under YYYYMMDD is still read as a date.)
+			f.Format = ""
+		}
 		if !present {
 			if tv, ok := template[f.Target]; ok {
 				text, present = tv, true
@@ -196,6 +202,9 @@ func (m Mapping) location() *time.Location {
 func (m Mapping) coerce(f FieldRule, text string, row map[string]any) (any, *Warning, *Reject) {
 	if f.Fn != "" {
 		return m.coerceFn(f, text, row)
+	}
+	if f.Format != "" {
+		return m.coerceFormatted(f, text)
 	}
 	switch f.Type {
 	case TypeString:
@@ -260,6 +269,14 @@ func coerceDecimal(f FieldRule, text string) (any, *Warning, *Reject) {
 		w = &Warning{f.Target, CodePrecisionLoss, fmt.Sprintf("%s rounded to scale %d, delta %s", f.origin(), places, d.Sub(r).Abs())}
 	}
 	return r.StringFixed(places), w, nil
+}
+
+func isNumber(v any) bool {
+	switch v.(type) {
+	case int, int64, float64, json.Number:
+		return true
+	}
+	return false
 }
 
 func sourceText(v any) (text string, present, scalar bool) {

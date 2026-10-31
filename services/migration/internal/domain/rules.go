@@ -75,6 +75,9 @@ func (f FieldRule) check() *Error {
 	default:
 		return unknownFn(f.Rule)
 	}
+	if e := f.checkFormat(); e != nil {
+		return e
+	}
 	if f.Fn != "" {
 		if e := f.checkFn(); e != nil {
 			return e
@@ -87,7 +90,7 @@ func (f FieldRule) check() *Error {
 }
 
 func (f FieldRule) checkFn() *Error {
-	want := map[string]string{FnAxDatetime: TypeTimestamp, FnAxNoYes: TypeBool, FnSapLeadZero: TypeString, FnSapDats: TypeDate}
+	want := map[string]string{FnAxDatetime: TypeTimestamp, FnAxNoYes: TypeBool, FnSapLeadZero: TypeString, FnSapDats: TypeDate, FnCodepageNormal: TypeString}
 	if f.Fn == FnSapDats && f.TimeSource != "" {
 		want[FnSapDats] = TypeTimestamp
 	}
@@ -251,6 +254,8 @@ func (m Mapping) coerceFn(f FieldRule, text string, row map[string]any) (any, *W
 		}
 		t := time.Date(d.Year(), d.Month(), d.Day(), tm.Hour(), tm.Minute(), tm.Second(), 0, m.location())
 		return t.UTC().Format(time.RFC3339), nil, nil
+	case FnCodepageNormal:
+		return codepageNormalize(text), nil, nil
 	case FnSapLeadZero:
 		if strings.Trim(text, "0123456789") != "" {
 			return text, nil, nil
