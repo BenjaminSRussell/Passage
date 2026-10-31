@@ -112,10 +112,11 @@ func TestRun_StoredMinMaxCoverage(t *testing.T) {
 	if len(req.Result.Orders) == 0 {
 		t.Fatal("min/max coverage planned nothing")
 	}
-	// On-hand 20 is below the minimum 50 on day 0: reorder up to 500.
+	// On-hand 20 less safety stock 10 (BR-22.1 step 4) is PAB 10 on day 0,
+	// below the minimum 50: reorder up to 500.
 	first := req.Result.Orders[0]
-	if first.OrderType != domain.OrderPurchase || first.DeliveryDate != 0 || !first.Qty.Equal(decimal.NewFromInt(480)) {
-		t.Fatalf("first planned order %+v; want a purchase of 480 on day 0", first)
+	if first.OrderType != domain.OrderPurchase || first.DeliveryDate != 0 || !first.Qty.Equal(decimal.NewFromInt(490)) {
+		t.Fatalf("first planned order %+v; want a purchase of 490 on day 0", first)
 	}
 }
 

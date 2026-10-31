@@ -1,0 +1,1587 @@
+{
+ "generatedBy": "reference_mrp.py",
+ "scenarios": {
+  "S01": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    }
+   ]
+  },
+  "S02": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S03": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 1,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "7",
+     "receiptPeriod": 3,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 1,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "7",
+     "receiptPeriod": 3,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S04": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 2,
+     "releasePeriod": -1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 2,
+     "releasePeriod": -1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S05": {
+   "prd": [],
+   "textbook": []
+  },
+  "S06": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 5,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 7,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 5,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 7,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S07": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  },
+  "S08": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "35",
+     "receiptPeriod": 6,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 8,
+     "releasePeriod": 6
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "35",
+     "receiptPeriod": 6,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 8,
+     "releasePeriod": 6
+    }
+   ]
+  },
+  "S09": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S10": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "120",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "120",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S11": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S12": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "60",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "60",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  },
+  "S13": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "35",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "35",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    }
+   ]
+  },
+  "S14": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "A",
+     "qty": "45",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "A",
+     "qty": "45",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S15": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 8,
+     "releasePeriod": 7
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 8,
+     "releasePeriod": 7
+    }
+   ]
+  },
+  "S16": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S17": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S18": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S19": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "50",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S20": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "80",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S21": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S22": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 1,
+     "releasePeriod": -1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S23": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S24": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "75",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "75",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "75",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "75",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S25": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S26": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S27": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "B",
+     "qty": "40",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "B",
+     "qty": "40",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S28": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "15",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "15",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S29": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "C",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "C",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S30": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "100",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    },
+    {
+     "item": "B",
+     "qty": "100",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "100",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    },
+    {
+     "item": "B",
+     "qty": "100",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S31": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "B",
+     "qty": "20",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    },
+    {
+     "item": "B",
+     "qty": "20",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ]
+  },
+  "S32": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 7,
+     "releasePeriod": 6
+    },
+    {
+     "item": "B",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "70",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "D",
+     "qty": "300",
+     "receiptPeriod": 1,
+     "releasePeriod": -1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 7,
+     "releasePeriod": 6
+    },
+    {
+     "item": "B",
+     "qty": "30",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "70",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "D",
+     "qty": "300",
+     "receiptPeriod": 1,
+     "releasePeriod": -1
+    }
+   ]
+  },
+  "S33": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "D",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "E",
+     "qty": "5",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "10",
+     "receiptPeriod": 6,
+     "releasePeriod": 5
+    },
+    {
+     "item": "B",
+     "qty": "10",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "C",
+     "qty": "10",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "D",
+     "qty": "10",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "E",
+     "qty": "5",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  },
+  "S34": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "C",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "C",
+     "qty": "19",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "C",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "A",
+     "qty": "5",
+     "receiptPeriod": 5,
+     "releasePeriod": 4
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "C",
+     "qty": "10",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    },
+    {
+     "item": "C",
+     "qty": "19",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "C",
+     "qty": "5",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    }
+   ]
+  },
+  "S35": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "120",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "120",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S36": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "175",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "175",
+     "receiptPeriod": 2,
+     "releasePeriod": 0
+    }
+   ]
+  },
+  "S37": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "310",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "310",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ]
+  },
+  "S38": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "250",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "250",
+     "receiptPeriod": 1,
+     "releasePeriod": 0
+    }
+   ]
+  },
+  "S39": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "100",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  },
+  "S40": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "140",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "15",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "25",
+     "receiptPeriod": 4,
+     "releasePeriod": 3
+    },
+    {
+     "item": "B",
+     "qty": "140",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    }
+   ]
+  },
+  "S41": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "30",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  },
+  "S42": {
+   "prd": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "170",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ],
+   "textbook": [
+    {
+     "item": "A",
+     "qty": "20",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "A",
+     "qty": "40",
+     "receiptPeriod": 3,
+     "releasePeriod": 2
+    },
+    {
+     "item": "B",
+     "qty": "170",
+     "receiptPeriod": 2,
+     "releasePeriod": 1
+    }
+   ]
+  }
+ }
+}

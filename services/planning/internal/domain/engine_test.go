@@ -201,6 +201,58 @@ func TestRun_MinMaxOrdersUpToMax(t *testing.T) {
 	}
 }
 
+// Regression (mrp-textbook S38): BR-22.1 step 5 checks PAB_t after day t's
+// requirements. On-hand 80 below min 100 with 30 due today is PAB 50, so one
+// order of 300 - 50 = 250; checking before today's demand ordered 220.
+func TestRun_MinMaxChecksTodayAfterTodaysDemand(t *testing.T) {
+	items := []Item{{ID: "MM-2", Coverage: CoverageMinMax, OrderType: OrderPurchase, LeadTimeDays: 7,
+		OnHand: d("80"), ReorderMin: d("100"), ReorderMax: d("300"),
+		Demand: []Requirement{{Ref: "S-1", RefType: RefSales, Date: 0, Qty: d("30"), Priority: PrioritySales}}}}
+	r, err := Run(0, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Orders) != 1 || !r.Orders[0].Qty.Equal(d("250")) || r.Orders[0].DeliveryDate != 0 {
+		t.Fatalf("orders = %+v; want one order of 250 due today", r.Orders)
+	}
+}
+
+// Regression: an overdue receipt is part of today's stock level, so min 100
+// with on-hand 50 and 100 overdue is PAB 150 and orders nothing.
+func TestRun_MinMaxCountsOverdueReceiptToday(t *testing.T) {
+	items := []Item{{ID: "MM-3", Coverage: CoverageMinMax, OrderType: OrderPurchase, LeadTimeDays: 7,
+		OnHand: d("50"), ReorderMin: d("100"), ReorderMax: d("400"),
+		Receipts: []Requirement{{Ref: "PO-LATE", RefType: "purchase-line", Date: -3, Qty: d("100")}}}}
+	r, err := Run(0, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Orders) != 0 {
+		t.Fatalf("orders = %+v; want none (PAB 150 is above min 100)", r.Orders)
+	}
+}
+
+// Regression (mrp-textbook S41): a period order covers the sum of the window's
+// net requirements. Short 10 on day 7 and 20 on day 14, with 50 arriving on day
+// 21 inside the 21-day window, is one order of 30; netting the late receipt
+// against the whole window ordered 10 and then 20 a week later.
+func TestRun_PeriodCoverageIgnoresSupplyAfterTheShortfall(t *testing.T) {
+	items := []Item{{ID: "P-2", Coverage: CoveragePeriod, PeriodDays: 21, OrderType: OrderPurchase, LeadTimeDays: 7,
+		Demand: []Requirement{
+			{Ref: "S-1", RefType: RefSales, Date: 7, Qty: d("10"), Priority: PrioritySales},
+			{Ref: "S-2", RefType: RefSales, Date: 14, Qty: d("20"), Priority: PrioritySales},
+			{Ref: "S-3", RefType: RefSales, Date: 28, Qty: d("15"), Priority: PrioritySales},
+		},
+		Receipts: []Requirement{{Ref: "PO-1", RefType: "purchase-line", Date: 21, Qty: d("50")}}}}
+	r, err := Run(0, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Orders) != 1 || !r.Orders[0].Qty.Equal(d("30")) || r.Orders[0].DeliveryDate != 7 {
+		t.Fatalf("orders = %+v; want one order of 30 due day 7", r.Orders)
+	}
+}
+
 func TestRun_PeriodCoverageGroupsDemandInWindow(t *testing.T) {
 	items := []Item{{ID: "P-1", Coverage: CoveragePeriod, PeriodDays: 7, OrderType: OrderPurchase, LeadTimeDays: 0,
 		Demand: []Requirement{

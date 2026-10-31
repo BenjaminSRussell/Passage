@@ -365,12 +365,17 @@ func (rs *runState) plan(item *Item) error {
 	if item.OnHand.IsPositive() {
 		L.addSupply(layer{ref: RefOnHand + ":" + item.ID, refType: RefOnHand, date: rs.today, qty: item.OnHand})
 	}
+	start := rs.demandDate(rs.today)
 	if item.Coverage == CoverageMinMax {
 		// BR-22.1 step 5: a min/max item is checked at today even with no events,
 		// so a stock level below minimum always reorders. Orders created here are
-		// counted as supply by the walk below.
-		if err := L.check(rs.demandDate(rs.today), nil, nil); err != nil {
-			return err
+		// counted as supply by the walk below. When something happens on or
+		// before today, the walk checks today itself after netting it, so the
+		// stock level is PAB after today's receipts and requirements.
+		if t0, ok := nextTime(demands, 0, receipts, 0, nil); !ok || t0 > start {
+			if err := L.check(start, nil, nil); err != nil {
+				return err
+			}
 		}
 	}
 	di, ri := 0, 0
@@ -378,6 +383,11 @@ func (rs *runState) plan(item *Item) error {
 		t, ok := nextTime(demands, di, receipts, ri, L.pending)
 		if !ok {
 			break
+		}
+		if item.Coverage == CoverageMinMax && t < start {
+			// An overdue receipt is part of today's stock level, not a check of
+			// its own before today's requirements are seen.
+			t = start
 		}
 		for ri < len(receipts) && receipts[ri].Date <= t {
 			r := receipts[ri]
@@ -524,26 +534,11 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 			// FR-22.2 / BR-22.1 step 6: one order covers the net requirement of
 			// the whole period, so demand later in the window is added and supply
 			// already scheduled inside the window is netted against it. The
+			// order is the sum of the window's net requirements: the deepest
+			// cumulative shortfall on any day of the window, so supply that
+			// arrives after a requirement in the window does not cover it. The
 			// order never covers less than what is short today.
-			limit := t + it.PeriodDays - 1
-			window := need
-			for _, r := range rest {
-				if r.Date > limit {
-					break
-				}
-				window = window.Add(r.Qty)
-			}
-			for _, r := range receipts {
-				if r.Date <= limit {
-					window = window.Sub(r.Qty)
-				}
-			}
-			for _, p := range L.pending {
-				if p.date <= limit {
-					window = window.Sub(p.qty)
-				}
-			}
-			need = decimal.Max(need, window)
+			need = decimal.Max(need, L.windowShortfall(need, t+it.PeriodDays-1, rest, receipts))
 		}
 		return L.order(t, need)
 	case CoverageMinMax:
@@ -557,6 +552,42 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 		return L.order(t, target.Sub(pab))
 	}
 	return nil
+}
+
+// windowShortfall walks the days up to limit from a shortfall of need and
+// returns the largest cumulative shortfall: requirements in rest add to it,
+// receipts and pending planned supply reduce it from their own day on.
+func (L *ledger) windowShortfall(need decimal.Decimal, limit int, rest, receipts []Requirement) decimal.Decimal {
+	type move struct {
+		day int
+		qty decimal.Decimal
+	}
+	var moves []move
+	for _, r := range rest {
+		if r.Date <= limit {
+			moves = append(moves, move{r.Date, r.Qty})
+		}
+	}
+	for _, r := range receipts {
+		if r.Date <= limit {
+			moves = append(moves, move{r.Date, r.Qty.Neg()})
+		}
+	}
+	for _, p := range L.pending {
+		if p.date <= limit {
+			moves = append(moves, move{p.date, p.qty.Neg()})
+		}
+	}
+	sort.SliceStable(moves, func(a, b int) bool { return moves[a].day < moves[b].day })
+	short, deepest := need, need
+	for i := 0; i < len(moves); {
+		day := moves[i].day
+		for ; i < len(moves) && moves[i].day == day; i++ {
+			short = short.Add(moves[i].qty)
+		}
+		deepest = decimal.Max(deepest, short)
+	}
+	return deepest
 }
 
 // increase raises Increase (FR-22.7) for a shortage at day t inside the
