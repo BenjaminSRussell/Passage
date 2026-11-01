@@ -22,21 +22,23 @@ import (
 )
 
 type fakeStore struct {
-	products    map[string]domain.Product
-	released    map[string]domain.ReleasedProduct
-	idents      map[string]domain.Identifier
-	groups      map[string]domain.DimensionGroup
-	created     []domain.Product
-	pingErr     error
-	lastExplode domain.ExplosionResult
+	products       map[string]domain.Product
+	released       map[string]domain.ReleasedProduct
+	idents         map[string]domain.Identifier
+	groups         map[string]domain.DimensionGroup
+	created        []domain.Product
+	pingErr        error
+	lastExplode    domain.ExplosionResult
+	configurations map[string]domain.ConfigurationRef
 }
 
 func newFake() *fakeStore {
 	return &fakeStore{
-		products: map[string]domain.Product{},
-		released: map[string]domain.ReleasedProduct{},
-		idents:   map[string]domain.Identifier{},
-		groups:   map[string]domain.DimensionGroup{},
+		products:       map[string]domain.Product{},
+		released:       map[string]domain.ReleasedProduct{},
+		idents:         map[string]domain.Identifier{},
+		groups:         map[string]domain.DimensionGroup{},
+		configurations: map[string]domain.ConfigurationRef{},
 	}
 }
 
@@ -72,6 +74,14 @@ func (f *fakeStore) GetProduct(_ context.Context, id string) (domain.Product, er
 		return p, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
 	}
 	return p, nil
+}
+func (f *fakeStore) GetSavedConfiguration(_ context.Context, id, productID string) (domain.ConfigurationRef, error) {
+	c, ok := f.configurations[id]
+	if !ok {
+		return c, httpx.NewProblem(http.StatusNotFound, "PRD-CONFIGURATION-NOT-FOUND", "saved configuration not found")
+	}
+	c.BelongsToProduct = c.MasterID == productID
+	return c, nil
 }
 func (f *fakeStore) ListProducts(context.Context, int) ([]domain.Product, error) {
 	return f.created, nil
@@ -478,5 +488,31 @@ func TestListReleasedPagesByKeyset(t *testing.T) {
 	}
 	if denied := do(r, http.MethodGet, "/v1/product/released-products", "", "product.write"); denied.Code != http.StatusForbidden {
 		t.Fatalf("missing read duty %d", denied.Code)
+	}
+}
+
+func TestGetSavedConfigurationReportsWhetherItBelongsToTheProduct(t *testing.T) {
+	f := newFake()
+	master, other, config := testkit.TenantID(1), testkit.TenantID(2), testkit.TenantID(3)
+	f.configurations[config] = domain.ConfigurationRef{ID: config, ModelID: testkit.TenantID(4), MasterID: master, Status: "valid"}
+	r := newRouter(f)
+	var got domain.ConfigurationRef
+	rec := do(r, http.MethodGet, "/v1/product/saved-configurations/"+config+"?productId="+master, "", "product.configuration.read")
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK || !got.BelongsToProduct || got.MasterID != master {
+		t.Fatalf("own product %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, http.MethodGet, "/v1/product/saved-configurations/"+config+"?productId="+other, "", "product.configuration.read")
+	got = domain.ConfigurationRef{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK || got.BelongsToProduct {
+		t.Fatalf("other product %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/saved-configurations/"+testkit.TenantID(9)+"?productId="+master, "", "product.configuration.read"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown configuration %d", rec.Code)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/saved-configurations/"+config+"?productId=x", "", "product.configuration.read"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad product id %d", rec.Code)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/saved-configurations/"+config+"?productId="+master, "", "product.read"); rec.Code != http.StatusForbidden {
+		t.Fatalf("missing duty %d", rec.Code)
 	}
 }

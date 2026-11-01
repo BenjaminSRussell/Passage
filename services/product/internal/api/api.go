@@ -38,6 +38,8 @@ const (
 	dutyExplode       = "product.variants.explode"
 	dutyReleasedRead  = "product.released.read"
 
+	dutyConfigurationRead = "product.configuration.read"
+
 	codeOrgUnavailable = "PRD-ORG-UNAVAILABLE"
 )
 
@@ -101,6 +103,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/gtins/{gtin}", a.getGTIN)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/uom/convert", a.convert)
 	r.With(authz.RequireDuty(dutyConfigure)).Post("/v1/product/configuration-models/{id}:solve", a.solve)
+	r.With(authz.RequireDuty(dutyConfigurationRead)).Get("/v1/product/saved-configurations/{id}", a.getSavedConfiguration)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/barcodes/{gtin}", a.barcode)
 	r.With(authz.RequireDuty(dutyJobs)).Post("/v1/product/jobs/group-change", a.groupChange)
 	r.With(authz.RequireAnyDuty(dutyView, dutyReleasedRead)).Get("/v1/product/released-products", a.listReleased)
@@ -136,6 +139,29 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func (a *API) getSavedConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, productID := chi.URLParam(r, "id"), r.URL.Query().Get("productId")
+	if !ids.Valid(productID) {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+		p.Errors = map[string]string{"productId": "must be a UUID"}
+		httpx.Fail(w, r, p)
+		return
+	}
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "PRD-CONFIGURATION-NOT-FOUND", "saved configuration not found"))
+		return
+	}
+	c, err := a.store.GetSavedConfiguration(r.Context(), id, productID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, c)
 }
 
 type dimensionGroupRequest struct {

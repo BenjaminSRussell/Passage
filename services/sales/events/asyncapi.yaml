@@ -608,6 +608,7 @@ components:
               site_id: {type: string, format: uuid}
               warehouse_id: {type: string, format: uuid}
               confirmed_ship_date: {type: string, format: date}
+              configuration_id: {type: string, format: uuid, description: the saved configuration of a configured line; production builds the line to it (absent on ordinary lines)}
         net_total: {type: string}
         version: {type: integer}
     OrderChangedData:

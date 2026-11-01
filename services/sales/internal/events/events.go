@@ -204,6 +204,8 @@ type ConfirmedLine struct {
 	SiteID            string `json:"site_id"`
 	WarehouseID       string `json:"warehouse_id"`
 	ConfirmedShipDate string `json:"confirmed_ship_date"`
+	// ConfigurationID is the saved configuration of a configured line; absent otherwise.
+	ConfigurationID *string `json:"configuration_id,omitempty"`
 }
 
 // OrderConfirmedData is the data member of order.confirmed.v1.

@@ -888,6 +888,46 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:plan-production:
+    post:
+      summary: >-
+        Create, for every configured line of a CONFIRMED order, the production order built to the
+        line's saved configuration (origin SalesOrderLine) and link it to the line. Idempotent per
+        line: a line that is linked is reported as it is, and production answers the same order for
+        a line it already built, so a retry after a partial failure plans each line once.
+        The call to production carries a service token that holds only production.order.create-from-sales.
+      operationId: planProduction
+      x-passage-duty: sales.order.plan-production
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the configured lines with their production orders (created is false for a line planned before)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, lines]
+                properties:
+                  orderId: {type: string, format: uuid}
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      required: [lineId, lineNo, configurationId, productionOrderId, created]
+                      properties:
+                        lineId: {type: string, format: uuid}
+                        lineNo: {type: integer}
+                        configurationId: {type: string, format: uuid}
+                        productionOrderId: {type: string, format: uuid}
+                        created: {type: boolean}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {description: SLS-0100 the order does not exist or is in another legal entity, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {description: SLS-0051 production already has an order for the line made for another product or configuration, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "422": {description: SLS-0049 the order is not CONFIRMED, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "502": {description: SLS-0050 production could not plan a line; the lines planned before it are kept, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "503": {description: SLS-0050 the production service is not configured, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
   /v1/sales/orders/{id}:cancel:
     post:
       summary: >-
@@ -2165,6 +2205,7 @@ components:
         unitPrice: {$ref: "#/components/schemas/Money"}
         discPct: {$ref: "#/components/schemas/Money"}
         requestedShipDate: {type: string, format: date}
+        configurationId: {type: string, format: uuid, description: "saved configuration of a configured product; it must exist in the product service and belong to productId (SLS-0047, SLS-0048)"}
     Order:
       type: object
       required: [id, legalEntityId, orderNumber, customerId, invoiceAccountId, orderType, status, currency, version, lines, holds]
@@ -2228,6 +2269,8 @@ components:
         supplementaryOf: {type: string, format: uuid, description: "id of the parent line a MANDATORY supplementary line was added for (FR-27.14); absent on ordinary lines"}
         parentLineNo: {type: integer, description: line number of the parent line; set with supplementaryOf}
         supplementaryRuleId: {type: string, format: uuid, description: the supplementary item rule that added the line}
+        configurationId: {type: string, format: uuid, description: saved configuration the line is sold to}
+        productionOrderId: {type: string, format: uuid, description: production order planned for the line by :plan-production}
     Hold:
       type: object
       properties:

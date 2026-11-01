@@ -42,3 +42,11 @@ securityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
+
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+
+upstream:
+  productUrl: "http://product:8080"
+  productionUrl: "http://production:8080"
