@@ -104,6 +104,10 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/pay-agreements get":                                         DutyView,
 		"/v1/shopfloor/pay-agreements/{id} get":                                    DutyView,
 		"/v1/shopfloor/pay-agreements/{id} put":                                    DutySetup,
+		"/v1/shopfloor/absence-codes post":                                         DutySetup,
+		"/v1/shopfloor/absence-codes get":                                          DutyView,
+		"/v1/shopfloor/absence-codes/{id} get":                                     DutyView,
+		"/v1/shopfloor/absence-codes/{id} put":                                     DutySetup,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             DutySetup,
 	}
 	keyed := map[string]bool{
@@ -120,6 +124,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/pay:revise post":                                            true,
 		"/v1/shopfloor/time-profiles post":                                         true,
 		"/v1/shopfloor/pay-agreements post":                                        true,
+		"/v1/shopfloor/absence-codes post":                                         true,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             true,
 	}
 	for op := range served {

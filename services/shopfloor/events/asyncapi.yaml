@@ -56,6 +56,12 @@ channels:
     messages:
       workerAssigned:
         $ref: "#/components/messages/WorkerAssigned"
+  absenceCodeSaved:
+    address: passage.shopfloor.absencecode
+    description: An absence code was created or changed (FR-25.2). Not in the PRD event table.
+    messages:
+      absenceCodeSaved:
+        $ref: "#/components/messages/AbsenceCodeSaved"
   paydayExported:
     address: passage.shopfloor.pay-export
     messages:
@@ -210,6 +216,14 @@ operations:
       $ref: "#/channels/workerAssigned"
     messages:
       - $ref: "#/channels/workerAssigned/messages/workerAssigned"
+  publishAbsenceCodeSaved:
+    action: send
+    summary: Absence code saved
+    description: Sends the absence code saved event through the outbox.
+    channel:
+      $ref: "#/channels/absenceCodeSaved"
+    messages:
+      - $ref: "#/channels/absenceCodeSaved/messages/absenceCodeSaved"
 components:
   messages:
     JobReported:
@@ -258,6 +272,13 @@ components:
       description: Published in the transaction that creates or replaces a pay agreement; decimals are strings.
       payload:
         $ref: "#/components/schemas/PayAgreementSavedData"
+    AbsenceCodeSaved:
+      name: dev.passage.shopfloor.absencecode.saved.v1
+      contentType: application/cloudevents+json
+      summary: Absence code created or changed
+      description: Published in the transaction that creates or replaces an absence code; payMultiplier is a decimal string.
+      payload:
+        $ref: "#/components/schemas/AbsenceCodeSavedData"
     WorkerAssigned:
       name: dev.passage.shopfloor.worker.assigned.v1
       contentType: application/cloudevents+json
@@ -594,6 +615,10 @@ components:
           type: [string, "null"]
           format: uuid
           description: Set when the job was worked in a bundle; its hours are then the job's share (BR-25.1).
+        absenceCodeId:
+          type: [string, "null"]
+          format: uuid
+          description: The absence code of an absence registration (FR-25.2); null for every other kind.
         hours:
           type: [string, "null"]
           description: |
@@ -719,6 +744,30 @@ components:
               premium:
                 type: string
                 description: Decimal string, the extra share of the worker's rate.
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    AbsenceCodeSavedData:
+      type: object
+      required: [absenceCodeId, code, name, paid, payMultiplier, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        absenceCodeId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        paid:
+          type: boolean
+        payMultiplier:
+          type: string
+          description: Decimal string, the share of the worker's rate paid per absence hour; 0 for an unpaid code. Fixed once an absence names the code.
         active:
           type: boolean
         version:

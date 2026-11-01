@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AbsenceCodesPage } from "./AbsenceCodesPage";
 import { AndonPage } from "./AndonPage";
 import { AutoClockOutsPage } from "./AutoClockOutsPage";
 import { BundleDetailPage } from "./BundleDetailPage";
@@ -11,6 +12,7 @@ import { JobDetailPage } from "./JobDetailPage";
 import { JobsPage } from "./JobsPage";
 import { KioskPage } from "./KioskPage";
 import { MachinesPage } from "./MachinesPage";
+import { NewAbsenceCodePage } from "./NewAbsenceCodePage";
 import { NewMachinePage } from "./NewMachinePage";
 import { NewProcessMessagePage } from "./NewProcessMessagePage";
 import { NewWorkerPage } from "./NewWorkerPage";
@@ -22,6 +24,7 @@ import { PayExportDetailPage } from "./PayExportDetailPage";
 import { PayExportsPage } from "./PayExportsPage";
 import { ProcessMessageDetailPage } from "./ProcessMessageDetailPage";
 import { ProcessMessagesPage } from "./ProcessMessagesPage";
+import { RecordAbsencePage } from "./RecordAbsencePage";
 import { RevisePayPage } from "./RevisePayPage";
 import { TimeApprovalPage } from "./TimeApprovalPage";
 import { TimeProfilesPage } from "./TimeProfilesPage";
@@ -32,7 +35,7 @@ const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
   description:
-    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles and pay agreements, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
+    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
@@ -46,6 +49,9 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/time-profiles/new", element: createElement(NewTimeProfilePage), handle: { title: "New time profile", duty: "shopfloor.setup.maintain" } },
     { path: "/shopfloor/pay-agreements", element: createElement(PayAgreementsPage), handle: { title: "Pay agreements", duty: "shopfloor.view" } },
     { path: "/shopfloor/pay-agreements/new", element: createElement(NewPayAgreementPage), handle: { title: "New pay agreement", duty: "shopfloor.setup.maintain" } },
+    { path: "/shopfloor/absence-codes", element: createElement(AbsenceCodesPage), handle: { title: "Absence codes", duty: "shopfloor.view" } },
+    { path: "/shopfloor/absence-codes/new", element: createElement(NewAbsenceCodePage), handle: { title: "New absence code", duty: "shopfloor.setup.maintain" } },
+    { path: "/shopfloor/absences/new", element: createElement(RecordAbsencePage), handle: { title: "Record absence", duty: "shopfloor.time.register" } },
     { path: "/shopfloor/kiosk", element: createElement(KioskPage), handle: { title: "Kiosk" } },
     { path: "/shopfloor/jobs", element: createElement(JobsPage), handle: { title: "Dispatch list" } },
     { path: "/shopfloor/jobs/:id", element: createElement(JobDetailPage), handle: { title: "Job" } },
@@ -68,6 +74,7 @@ const shopfloor: PassageModule = {
     { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
     { label: "Time profiles", to: "/shopfloor/time-profiles", duty: "shopfloor.view" },
     { label: "Pay agreements", to: "/shopfloor/pay-agreements", duty: "shopfloor.view" },
+    { label: "Absence codes", to: "/shopfloor/absence-codes", duty: "shopfloor.view" },
     { label: "Who is clocked in", to: "/shopfloor/clocked-in", duty: "shopfloor.view" },
     { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },
     { label: "Time corrections", to: "/shopfloor/corrections", duty: "shopfloor.view" },

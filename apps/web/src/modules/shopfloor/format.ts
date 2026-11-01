@@ -113,6 +113,7 @@ export const REGISTRATION_FLAG_LABELS: Record<string, string> = {
 export const FLAG_LABELS: Record<string, string> = {
   "missing-clock-out": "Missing clock-out",
   "orphan-clock-out": "Clock-out without clock-in",
+  "absence-overlap": "Absence overlaps other time",
 };
 
 /** A decimal ratio string as a percentage, e.g. "0.8750" -> "87.5 %", without floats. */

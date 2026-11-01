@@ -90,6 +90,10 @@ type Store interface {
 	UpdatePayAgreement(ctx context.Context, id string, version int, in store.PayAgreementInput, updatedBy string) (store.PayAgreement, error)
 	GetPayAgreement(ctx context.Context, id string) (store.PayAgreement, error)
 	ListPayAgreements(ctx context.Context, activeOnly bool, limit int) ([]store.PayAgreement, error)
+	CreateAbsenceCode(ctx context.Context, in store.AbsenceCodeInput, createdBy string, idem store.Idem) (store.AbsenceCode, error)
+	UpdateAbsenceCode(ctx context.Context, id string, version int, in store.AbsenceCodeInput, updatedBy string) (store.AbsenceCode, error)
+	GetAbsenceCode(ctx context.Context, id string) (store.AbsenceCode, error)
+	ListAbsenceCodes(ctx context.Context, activeOnly bool, limit int) ([]store.AbsenceCode, error)
 	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
@@ -174,6 +178,7 @@ type registrationItem struct {
 	Kind          string           `json:"kind"`
 	JobID         *string          `json:"jobId"`
 	BundleID      *string          `json:"bundleId"`
+	AbsenceCodeID *string          `json:"absenceCodeId"`
 	QtyGood       *decimal.Decimal `json:"qtyGood"`
 	QtyScrap      *decimal.Decimal `json:"qtyScrap"`
 	ScrapReasonID *string          `json:"scrapReasonId"`
@@ -246,6 +251,7 @@ type itemsResponse[T any] struct {
 // this overrides it with the store-backed check.
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
+	a.registerAbsence(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers/{id}", a.getWorker)
@@ -503,9 +509,21 @@ func validateRegistration(it registrationItem) map[string]string {
 			fields["stoppedAt"] = "a registration cannot exceed 24 hours"
 		}
 	}
-	for name, v := range map[string]*string{"jobId": it.JobID, "bundleId": it.BundleID} {
+	for name, v := range map[string]*string{"jobId": it.JobID, "bundleId": it.BundleID, "absenceCodeId": it.AbsenceCodeID} {
 		if v != nil && !ids.Valid(*v) {
 			fields[name] = "must be a UUID"
+		}
+	}
+	// FR-25.2: an absence names its code and covers a closed interval, so its hours are known.
+	switch {
+	case it.Kind == domain.KindAbsence && it.AbsenceCodeID == nil:
+		fields["absenceCodeId"] = "is required for absence registrations"
+	case it.Kind != domain.KindAbsence && it.AbsenceCodeID != nil:
+		fields["absenceCodeId"] = "only absence registrations carry an absence code"
+	}
+	if it.Kind == domain.KindAbsence && (it.StoppedAt == nil || !it.StoppedAt.After(it.StartedAt)) {
+		if _, bad := fields["stoppedAt"]; !bad {
+			fields["stoppedAt"] = "is required for absence registrations and must be after startedAt"
 		}
 	}
 	if jobKind(it.Kind) && it.JobID == nil {
@@ -591,7 +609,7 @@ func splitBundles(items []registrationItem, regs []store.Registration, fields ma
 }
 
 func (it registrationItem) toStore() store.Registration {
-	r := store.Registration{ID: it.ID, WorkerID: it.WorkerID, Kind: it.Kind, JobID: it.JobID, BundleID: it.BundleID,
+	r := store.Registration{ID: it.ID, WorkerID: it.WorkerID, Kind: it.Kind, JobID: it.JobID, BundleID: it.BundleID, AbsenceCodeID: it.AbsenceCodeID,
 		ScrapReasonID: it.ScrapReasonID, StartedAt: it.StartedAt, StoppedAt: it.StoppedAt, DeviceID: it.DeviceID,
 		Offline: it.Offline, Note: it.Note}
 	if it.QtyGood != nil {
@@ -875,7 +893,7 @@ func (a *API) recalculate(ctx context.Context, win rangeWindow) ([]domain.DayPay
 	}
 	profileFor := func(t time.Time) domain.Profile { return setup.Profiles.For(t, win.loc) }
 	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
-	all, err := calc.Run(domain.BuildDaysFor(in.Punches, win.loc, profileFor))
+	all, err := calc.Run(domain.AddAbsences(domain.BuildDaysFor(in.Punches, win.loc, profileFor), in.Absences, win.loc))
 	if err != nil {
 		var de *domain.Error
 		if errors.As(err, &de) {

@@ -64,6 +64,8 @@ type Day struct {
 	Date     time.Time
 	Segments []Segment
 	Flags    []string
+	// Absences are the absence registrations that start on this day (FR-25.2).
+	Absences []Absence
 }
 
 // DateString formats the day as the local calendar date (YYYY-MM-DD).

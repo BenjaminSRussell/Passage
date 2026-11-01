@@ -113,6 +113,7 @@ type RegistrationView struct {
 	Kind             string           `json:"kind"`
 	JobID            *string          `json:"jobId"`
 	BundleID         *string          `json:"bundleId"`
+	AbsenceCodeID    *string          `json:"absenceCodeId"`
 	QtyGood          decimal.Decimal  `json:"qtyGood"`
 	QtyScrap         decimal.Decimal  `json:"qtyScrap"`
 	ScrapReasonID    *string          `json:"scrapReasonId"`
@@ -147,7 +148,7 @@ func (s *Postgres) ListBundleRegistrations(ctx context.Context, bundleID string,
 func (s *Postgres) listRegistrations(ctx context.Context, where string, limit int, args ...any) ([]RegistrationView, error) {
 	out := []RegistrationView{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, fmt.Sprintf(`select id::text, worker_id::text, kind, job_id::text, bundle_id::text, qty_good::text, qty_scrap::text,
+		rows, err := tx.Query(ctx, fmt.Sprintf(`select id::text, worker_id::text, kind, job_id::text, bundle_id::text, absence_code_id::text, qty_good::text, qty_scrap::text,
 				scrap_reason_id, started_at, stopped_at, hours::text, server_received_at, device_id, offline, note, clock_offset_s, flags
 			from time_registration where %s
 			order by started_at, id limit $%d`, where, len(args)+1), append(args, limit)...)
@@ -159,7 +160,7 @@ func (s *Postgres) listRegistrations(ctx context.Context, where string, limit in
 			var r RegistrationView
 			var good, scrap string
 			var hours *string
-			if err := rows.Scan(&r.ID, &r.WorkerID, &r.Kind, &r.JobID, &r.BundleID, &good, &scrap, &r.ScrapReasonID,
+			if err := rows.Scan(&r.ID, &r.WorkerID, &r.Kind, &r.JobID, &r.BundleID, &r.AbsenceCodeID, &good, &scrap, &r.ScrapReasonID,
 				&r.StartedAt, &r.StoppedAt, &hours, &r.ServerReceivedAt, &r.DeviceID, &r.Offline, &r.Note, &r.ClockOffsetSeconds, &r.Flags); err != nil {
 				return err
 			}

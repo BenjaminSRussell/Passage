@@ -37,12 +37,15 @@ var (
 	TimeProfileSaved  = events.Type(Context, "timeprofile", "saved", 1)
 	PayAgreementSaved = events.Type(Context, "payagreement", "saved", 1)
 	WorkerAssigned    = events.Type(Context, "worker", "assigned", 1)
+	// AbsenceCodeSaved is not in the PRD event table: payroll (w43) needs the pay terms
+	// behind the absence lines of a worker-day.
+	AbsenceCodeSaved = events.Type(Context, "absencecode", "saved", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -173,15 +176,17 @@ type AndonRaisedData struct {
 
 // RegistrationPostedData is the payload of dev.passage.shopfloor.registration.posted.v1.
 type RegistrationPostedData struct {
-	RegistrationID string           `json:"registrationId"`
-	WorkerID       string           `json:"workerId"`
-	Kind           string           `json:"kind"`
-	JobID          *string          `json:"jobId"`
-	BundleID       *string          `json:"bundleId"`
-	Hours          *decimal.Decimal `json:"hours"`
-	QtyGood        decimal.Decimal  `json:"qtyGood"`
-	QtyScrap       decimal.Decimal  `json:"qtyScrap"`
-	Offline        bool             `json:"offline"`
+	RegistrationID string  `json:"registrationId"`
+	WorkerID       string  `json:"workerId"`
+	Kind           string  `json:"kind"`
+	JobID          *string `json:"jobId"`
+	BundleID       *string `json:"bundleId"`
+	// AbsenceCodeID is the absence code of an absence registration, otherwise null.
+	AbsenceCodeID *string          `json:"absenceCodeId"`
+	Hours         *decimal.Decimal `json:"hours"`
+	QtyGood       decimal.Decimal  `json:"qtyGood"`
+	QtyScrap      decimal.Decimal  `json:"qtyScrap"`
+	Offline       bool             `json:"offline"`
 	// Flags are the registration's review flags: job-finished-conflict on a
 	// job-start (BR-25.7), auto-stopped and auto-stop-capped on a job-stop the
 	// server wrote when the worker started another job (FR-25.3), auto-clock-out on
@@ -276,4 +281,17 @@ type WorkerAssignedData struct {
 	ProfileID      *string `json:"profileId"`
 	PayAgreementID *string `json:"payAgreementId"`
 	AssignedBy     string  `json:"assignedBy"`
+}
+
+// AbsenceCodeSavedData is the payload of dev.passage.shopfloor.absencecode.saved.v1,
+// published when an absence code is created or changed. PayMultiplier is a decimal string.
+type AbsenceCodeSavedData struct {
+	AbsenceCodeID string `json:"absenceCodeId"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Paid          bool   `json:"paid"`
+	PayMultiplier string `json:"payMultiplier"`
+	Active        bool   `json:"active"`
+	Version       int    `json:"version"`
+	SavedBy       string `json:"savedBy"`
 }

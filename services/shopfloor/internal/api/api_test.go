@@ -51,6 +51,8 @@ type fakeStore struct {
 	agreementIn   *store.PayAgreementInput
 	updateVersion int
 	assigned      *assignRequest
+	absenceIn     *store.AbsenceCodeInput
+	absences      []domain.Absence
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
@@ -101,7 +103,7 @@ func (f *fakeStore) LoadPunches(_ context.Context, _ string, start, end time.Tim
 	if f.punchErr != nil {
 		return store.PunchInput{}, f.punchErr
 	}
-	return store.PunchInput{Punches: f.punches, Rate: decimal.NewFromInt(20), Currency: "USD"}, nil
+	return store.PunchInput{Punches: f.punches, Absences: f.absences, Rate: decimal.NewFromInt(20), Currency: "USD"}, nil
 }
 
 func (f *fakeStore) SavePay(_ context.Context, calc store.PayCalculation, _ store.Idem, resp any) error {

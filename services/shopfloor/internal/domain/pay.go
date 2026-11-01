@@ -96,7 +96,8 @@ type Calculation struct {
 // twice. Sunday hours are overtime-2.0 and do not count toward the weekly
 // threshold. The base and overtime lines of a day always sum to the day's hours;
 // shift-premium lines are supplements on hours those lines already pay, so they are
-// not added to the day's hours.
+// not added to the day's hours. Absence lines are paid or unpaid time off: they come after
+// the worked lines, count toward no overtime threshold and are not part of the day's hours.
 func (c Calculation) Run(days []Day) ([]DayPay, error) {
 	ordered := append([]Day(nil), days...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Date.Before(ordered[j].Date) })
@@ -115,6 +116,9 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 		}
 		if hours.GreaterThan(decimal.NewFromInt(MaxDailyHours)) {
 			return nil, &Error{Code: CodeHoursExceed, Detail: fmt.Sprintf("hours exceed 24.00 on %s", d.DateString())}
+		}
+		if hours.Add(d.absenceHours()).GreaterThan(decimal.NewFromInt(MaxDailyHours)) {
+			return nil, &Error{Code: CodeHoursExceed, Detail: fmt.Sprintf("hours and absence hours exceed 24.00 on %s", d.DateString())}
 		}
 		dp := DayPay{Date: d.Date, Hours: hours, Flags: d.Flags, Sources: sources}
 		switch {
@@ -135,6 +139,7 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 			}
 		}
 		dp.Lines = append(dp.Lines, c.premiumLines(d, sources)...)
+		dp.Lines = append(dp.Lines, c.absenceLines(d)...)
 		out = append(out, dp)
 	}
 	return out, nil

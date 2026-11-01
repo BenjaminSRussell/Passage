@@ -50,11 +50,13 @@ const (
 
 // Registration is one clock or job registration. ID is the client UUID.
 type Registration struct {
-	ID            string
-	WorkerID      string
-	Kind          string
-	JobID         *string
-	BundleID      *string
+	ID       string
+	WorkerID string
+	Kind     string
+	JobID    *string
+	BundleID *string
+	// AbsenceCodeID names the absence code of an absence registration (FR-25.2).
+	AbsenceCodeID *string
 	QtyGood       decimal.Decimal
 	QtyScrap      decimal.Decimal
 	ScrapReasonID *string
@@ -86,6 +88,7 @@ type RegistrationResult struct {
 // PunchInput is what a pay calculation reads for one worker and window.
 type PunchInput struct {
 	Punches  []domain.Punch
+	Absences []domain.Absence
 	Rate     decimal.Decimal
 	Currency string
 }
@@ -175,6 +178,9 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		if err := lockJobWorkers(ctx, tx, p.TenantID, items); err != nil {
 			return err
 		}
+		if err := checkAbsenceCodes(ctx, tx, p.TenantID, items); err != nil {
+			return err
+		}
 		for _, i := range order {
 			in := items[i]
 			jobStatus, flags, err := jobStartFlags(ctx, tx, p.TenantID, in)
@@ -187,12 +193,12 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 				hours = &h
 			}
 			var id string
-			err = tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note, clock_offset_s, flags)
-				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+			err = tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note, clock_offset_s, flags, absence_code_id)
+				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 				where exists (select 1 from worker where tenant_id = $1 and id = $3 and active)
 				on conflict (tenant_id, id) do nothing returning id::text`,
 				p.TenantID, in.ID, in.WorkerID, in.Kind, in.JobID, in.BundleID, in.QtyGood.String(), in.QtyScrap.String(), in.ScrapReasonID,
-				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note, in.ClockOffsetSeconds, flags).Scan(&id)
+				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note, in.ClockOffsetSeconds, flags, in.AbsenceCodeID).Scan(&id)
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Either a replayed client UUID or an unknown/inactive worker.
 				var exists bool
@@ -210,7 +216,7 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 			}
 			res := newResult(in.ID, StatusAccepted, flags)
 			if err := enqueue(ctx, tx, "registration", in.ID, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
-				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, Hours: in.Hours,
+				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, AbsenceCodeID: in.AbsenceCodeID, Hours: in.Hours,
 				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline, Flags: flags,
 			}); err != nil {
 				return err
@@ -329,7 +335,12 @@ func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end 
 			}
 			in.Punches = append(in.Punches, pu)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		in.Absences, err = loadAbsences(ctx, tx, p.TenantID, workerID, start, end)
+		return err
 	})
 	if err != nil {
 		return PunchInput{}, err
@@ -438,14 +449,14 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 		rows, err := tx.Query(ctx, `select d.work_date::text, d.hours::text, d.flags, d.status,
 				d.status = 'calculated' and exists (
 					select 1 from time_registration r
-					where r.tenant_id = d.tenant_id and r.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out')
+					where r.tenant_id = d.tenant_id and r.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out', 'absence')
 					  and r.started_at >= (d.work_date::timestamp at time zone d.time_zone)
 					  and r.started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)
 					  and (r.server_received_at > d.calculated_at
 					       or exists (select 1 from registration_correction c where c.tenant_id = r.tenant_id and c.registration_id = r.id and c.corrected_at > d.calculated_at)))
 					or (d.status = 'calculated' and exists (
 					select 1 from registration_correction c join time_registration r on r.tenant_id = c.tenant_id and r.id = c.registration_id
-					where c.tenant_id = d.tenant_id and c.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out') and c.corrected_at > d.calculated_at
+					where c.tenant_id = d.tenant_id and c.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out', 'absence') and c.corrected_at > d.calculated_at
 					  and ((c.old_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.old_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone))
 					    or (c.new_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.new_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)))))
 			from worker_day d

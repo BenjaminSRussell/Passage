@@ -45,6 +45,8 @@ export interface RegistrationInput {
   kind: RegistrationKind;
   jobId?: string | null;
   bundleId?: string | null;
+  /** Required for kind absence (an active absence code); an absence also needs stoppedAt (FR-25.2). */
+  absenceCodeId?: string | null;
   qtyGood?: string | null;
   qtyScrap?: string | null;
   scrapReasonId?: string | null;
@@ -91,6 +93,8 @@ export interface Registration {
   kind: RegistrationKind;
   jobId: string | null;
   bundleId: string | null;
+  /** The absence code of an absence registration; null for other kinds. */
+  absenceCodeId?: string | null;
   qtyGood: string;
   qtyScrap: string;
   scrapReasonId: string | null;
@@ -127,7 +131,7 @@ export interface PayLine {
   reversal?: boolean;
 }
 
-export type DayFlag = "missing-clock-out" | "orphan-clock-out";
+export type DayFlag = "missing-clock-out" | "orphan-clock-out" | "absence-overlap";
 
 export interface PayDay {
   workDate: string;
@@ -913,6 +917,39 @@ export function listPayAgreements(filter: { active?: boolean } = {}, signal?: Ab
 
 export function createPayAgreement(input: NewPayAgreement, key: string = newKey()): Promise<PayAgreement> {
   return post<PayAgreement>("/pay-agreements", input, key);
+}
+
+/** An absence code: whether absence time is paid and at what share of the worker's rate (FR-25.2). */
+export interface AbsenceCode {
+  id: string;
+  code: string;
+  name: string;
+  paid: boolean;
+  /** Decimal string: the share of the worker's rate for a paid code, "0" for an unpaid one. Fixed once an absence names the code. */
+  payMultiplier: string;
+  active: boolean;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewAbsenceCode {
+  code: string;
+  name: string;
+  paid: boolean;
+  /** Paid codes only (defaults to 1); an unpaid code has none. */
+  payMultiplier?: string;
+  active?: boolean;
+}
+
+export function listAbsenceCodes(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<AbsenceCode[]> {
+  return items<AbsenceCode>(`/absence-codes${query({ active: filter.active })}`, signal);
+}
+
+/** Creates an absence code; reuse one key per form so a retried submit cannot create two. */
+export function createAbsenceCode(input: NewAbsenceCode, key: string = newKey()): Promise<AbsenceCode> {
+  return post<AbsenceCode>("/absence-codes", input, key);
 }
 
 /**

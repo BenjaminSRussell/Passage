@@ -1791,6 +1791,155 @@ paths:
           $ref: "#/components/responses/Problem"
         "412":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/absence-codes:
+    post:
+      operationId: createAbsenceCode
+      summary: Create an absence code
+      description: |
+        An absence code says whether absence time is paid and at what share of the worker's rate
+        (FR-25.2). An unpaid code has multiplier 0 and its pay lines carry the hours with
+        multiplier 0 and amount 0. Publishes `dev.passage.shopfloor.absencecode.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewAbsenceCode"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceCode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listAbsenceCodes
+      summary: List absence codes by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Absence codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AbsenceCode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/absence-codes/{id}:
+    get:
+      operationId: getAbsenceCode
+      summary: Get one absence code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The absence code with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceCode"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateAbsenceCode
+      summary: Replace the editable fields of an absence code
+      description: |
+        Replaces the name, pay terms and status (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        The pay terms (`paid`, `payMultiplier`) cannot change once an absence registration names
+        the code (SF-0147, 409), so recalculating or revising a past day pays its absences as they
+        were registered; create a new code and deactivate this one instead. The name and status
+        can always change. An inactive code refuses new absence registrations (SF-0146) but stays
+        on stored ones.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAbsenceCode"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceCode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/workers/{id}:assign-setup:
     post:
       operationId: assignWorkerSetup
@@ -2175,6 +2324,70 @@ components:
         updatedAt:
           type: string
           format: date-time
+    NewAbsenceCode:
+      type: object
+      required: [code, name, paid]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        paid:
+          type: boolean
+        payMultiplier:
+          type: string
+          description: Share of the worker's rate paid per absence hour, above 0 and at most 5 with up to 4 decimals; default 1. An unpaid code has none (omit it or send 0; another value is a validation error) and is stored with 0.
+        active:
+          type: boolean
+          default: true
+    UpdateAbsenceCode:
+      type: object
+      required: [name, paid]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        paid:
+          type: boolean
+        payMultiplier:
+          type: string
+          description: Above 0 and at most 5 with up to 4 decimals; default 1. An unpaid code has none (omit it or send 0). Changing paid or payMultiplier of a code that an absence names is SF-0147.
+        active:
+          type: boolean
+          default: true
+    AbsenceCode:
+      type: object
+      required: [id, code, name, paid, payMultiplier, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        paid:
+          type: boolean
+        payMultiplier:
+          type: string
+          description: Decimal string; the share of the worker's rate for a paid code, 0 for an unpaid one.
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ShiftPremium:
       type: object
       description: >-
@@ -2209,7 +2422,7 @@ components:
           format: uuid
     StoredRegistration:
       type: object
-      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds, flags]
+      required: [id, workerId, kind, jobId, bundleId, absenceCodeId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds, flags]
       properties:
         id:
           type: string
@@ -2224,6 +2437,9 @@ components:
           type: [string, "null"]
         bundleId:
           type: [string, "null"]
+        absenceCodeId:
+          type: [string, "null"]
+          description: The absence code of an absence registration (FR-25.2); null for every other kind.
         qtyGood:
           type: string
         qtyScrap:
@@ -2275,7 +2491,7 @@ components:
           type: array
           items:
             type: string
-            enum: [missing-clock-out, orphan-clock-out]
+            enum: [missing-clock-out, orphan-clock-out, absence-overlap]
         status:
           type: string
           enum: [calculated, approved]
@@ -2342,6 +2558,10 @@ components:
         bundleId:
           type: [string, "null"]
           format: uuid
+        absenceCodeId:
+          type: [string, "null"]
+          format: uuid
+          description: Required for kind absence (an active absence code, SF-0145, SF-0146), refused for other kinds. An absence also needs stoppedAt after startedAt; its hours become an absence-paid or absence-unpaid pay line on the local day it starts.
         qtyGood:
           type: [string, "null"]
           description: Decimal string, not negative.
@@ -2430,7 +2650,7 @@ components:
           type: array
           items:
             type: string
-            enum: [missing-clock-out, orphan-clock-out]
+            enum: [missing-clock-out, orphan-clock-out, absence-overlap]
         payLines:
           type: array
           items:

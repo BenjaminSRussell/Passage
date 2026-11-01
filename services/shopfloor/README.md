@@ -3,6 +3,32 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 13: absence codes and absence pay lines (FR-25.2, pay types `absence-paid` and `absence-unpaid`)
+
+An absence code (migration `0012_absence.sql`, table `absence_code`; `POST/GET/PUT /absence-codes`,
+`If-Match` on the update, duty `shopfloor.setup.maintain` to write and `shopfloor.view` to read) says
+whether absence time is paid and at what share of the worker's rate (`payMultiplier`, above 0 up to 5
+with up to 4 decimals, default 1). An unpaid code has no rate effect: its multiplier is 0 (sending
+another value is a validation error). Codes are tenant-wide, like time profiles and pay agreements.
+A registration of kind `absence` names an active code (`absenceCodeId`, SF-0145 unknown, SF-0146
+inactive) and must be closed (`stoppedAt` after `startedAt`, at most 24 hours like every
+registration, so a multi-day leave is one absence per day). `pay:calculate` and `pay:revise` turn
+each absence into one pay line on the local day it starts, the same rule as a worked segment that
+crosses midnight (a sick night shift 22:00 to 06:00 stays on the shift's day): `absence-paid` with
+hours x rate x multiplier rounded once to the currency's minor unit through `platform/money`, or
+`absence-unpaid` with the hours, multiplier 0 and amount 0. Absence hours are not worked hours: they
+do not count toward the daily or weekly overtime thresholds and are not in the worker-day's `hours`,
+but worked plus absence hours cannot pass 24.00 in a day (SF-0007). An absence that overlaps clocked
+time (also a night shift from the day before) or another absence flags its day `absence-overlap`, so
+the day cannot be approved (SF-0006) until a supervisor corrects the times and recalculates. A day
+with only an absence is created. An absence registered or corrected after a day was calculated makes
+the day stale at approval (SF-0104), like a clock registration. The pay terms of a code (`paid`,
+`payMultiplier`) are fixed once an absence names it (SF-0147, 409): a recalculated or revised past
+day pays the absence as it was registered; to change the terms, create a new code and deactivate the
+old one. Name and status can always change. `absencecode.saved` is published with every create and
+update, `registration.posted` carries `absenceCodeId`. On the web: the absence code list, the create
+form and a *Record absence* form (worker, code, day, start time, hours).
+
 ## Slice 12: shift premiums on the pay agreement (FR-25.7, pay type `shift-premium`)
 
 A pay agreement carries up to six premium windows `{name, from, to, premium}` (migration
@@ -400,8 +426,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
-| POST and PUT `/time-profiles`, `/pay-agreements`; POST `/workers/{id}:assign-setup` | `shopfloor.setup.maintain` |
-| GET `/time-profiles`, `/pay-agreements` and their `{id}` | `shopfloor.view` |
+| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; POST `/workers/{id}:assign-setup` | `shopfloor.setup.maintain` |
+| GET `/time-profiles`, `/pay-agreements`, `/absence-codes` and their `{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
 | POST `/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
@@ -475,6 +501,9 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0142` | 409 | The profile or agreement code is already used |
 | `SF-0143` | 412 | `If-Match` is not the stored version of the profile, agreement or worker |
 | `SF-0144` | 422 | The profile or agreement newly chosen by an assignment is inactive |
+| `SF-0145` | 404 or 422 | Absence code not found (422 when named by an absence registration) |
+| `SF-0146` | 422 | The absence code named by a new absence registration is inactive |
+| `SF-0147` | 409 | The paid flag or pay multiplier of an absence code that an absence already names cannot change |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):
