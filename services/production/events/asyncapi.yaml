@@ -239,11 +239,21 @@ components:
         Estimated or Created, a cancel, or a merge into another order withdraws the schedule: that
         statuschanged event carries null dates (a merged order announces nothing more).
 
-        Wave 23 hand-off: these dates are the infinite-capacity baseline that BR-21.1 asks of wave 21.
-        Finite-capacity scheduling (services/scheduling) is meant to take the order from this event and
-        book it on resource calendars; its dev.passage.scheduling.orderdates.changed.v1 and
-        job.scheduled.v1 then replace these dates (FR-23.10). Neither consumer is built yet (see
-        NOT-IMPLEMENTED of both services), so today these are the only dates an order has.
+        Wave 23 hand-off: the dates of reason schedule and redate are the infinite-capacity baseline that
+        BR-21.1 asks of wave 21. Finite-capacity scheduling (services/scheduling) books the order on
+        resource calendars and its windows replace them (FR-23.10): POST …/orders/{id}:apply-finite-dates
+        takes them, moves the operations' windows and the jobs inside them (a job keeps its id and its
+        planned hours, only its dates change), and emits this event with reason finite and the whole job
+        set. Any later schedule, redate, split or merge goes back to the infinite baseline (reason
+        schedule or redate) and scheduling should plan the order again.
+
+        Consumers by reason: services/scheduling's importer (the wave 23 side, reviewed there) MUST
+        ignore reason finite. It is scheduling's own answer coming back (or a planner's hand-entered
+        windows); importing it as a new demand would re-plan the order from its own result and loop.
+        finiteRunId names the run when the caller gave one. Shop-floor and other consumers that only
+        hold the dates replace what they held for the order on every reason, finite included.
+        compressedOperations (reason finite) names operations whose window is shorter than their
+        jobs' planned hours.
       payload:
         type: object
         required: [orderId, orderNumber, legalEntityId, siteId, status, reason, schedulingMethod, direction, start, end, startDate, endDate, deliveryDate, jobs, orderVersion, actor, occurredAt]
@@ -253,9 +263,9 @@ components:
           legalEntityId: { type: string, format: uuid }
           siteId: { type: string, format: uuid }
           status: { type: string, description: The order's status when the jobs were written. }
-          reason: { type: string, enum: [schedule, redate], description: 'schedule: the :schedule command; redate: a route or quantity change re-dated a dated order.' }
+          reason: { type: string, enum: [schedule, redate, finite], description: 'schedule: the :schedule command; redate: a route or quantity change re-dated a dated order; finite: scheduling''s windows were applied (:apply-finite-dates). The scheduling importer must ignore finite (its own result coming back); schedule and redate are the infinite baseline it plans from.' }
           schedulingMethod: { type: string, enum: [operations, jobs] }
-          direction: { type: string, enum: [forward, backward], description: 'The direction of :schedule; a re-date is always forward.' }
+          direction: { type: string, enum: [forward, backward], description: 'The direction of :schedule; a re-date and finite dates are always forward.' }
           start: { type: string, format: date-time, description: The first job's start. }
           end: { type: string, format: date-time, description: The last job's end. }
           startDate: { type: string, format: date, description: 'The UTC date of start (not the site''s local date; production has no site time zone).' }
@@ -265,6 +275,8 @@ components:
           orderVersion: { type: integer }
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
+          finiteRunId: { type: string, description: 'Reason finite only, when the caller named the scheduling run the windows come from; absent otherwise.' }
+          compressedOperations: { type: array, items: { type: integer }, description: 'Reason finite only: operations whose window is shorter than their jobs'' planned hours; absent when none.' }
       x-passage-type: dev.passage.production.order.scheduled.v1
     orderSettled:
       name: settled

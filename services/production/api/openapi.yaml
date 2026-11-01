@@ -366,6 +366,10 @@ components:
         startDate: { type: string, format: date, description: 'UTC date of the first start, set by :schedule; absent while the order is unscheduled.' }
         endDate: { type: string, format: date, description: 'UTC date of the last finish, set by :schedule.' }
         schedulingMethod: { type: string, enum: [operations, jobs], description: 'The method of the last :schedule; operations before one runs.' }
+        scheduleBasis: { type: string, enum: [infinite, finite], description: 'infinite: the dates come from :schedule or a re-date (one operation after the other, no calendar); finite: scheduling''s windows were applied (:apply-finite-dates).' }
+        finiteRunId: { type: string, description: 'The scheduling run the finite dates come from; present only when scheduleBasis is finite and the caller named one.' }
+        finiteScheduledAt: { type: string, format: date-time, description: 'When the finite dates were applied; present only when scheduleBasis is finite.' }
+        finiteCompressedOperations: { type: array, items: { type: integer }, description: 'Operations whose finite window is shorter than their jobs'' planned hours (applied, flagged); absent when none or when scheduleBasis is infinite.' }
         originType: { type: string }
         originId: { type: string, format: uuid }
         configurationId: { type: string, format: uuid }
@@ -665,6 +669,23 @@ components:
             version: { type: integer }
             updatedBy: { type: string }
             updatedAt: { type: string, format: date-time }
+    FiniteDates:
+      type: object
+      required: [operations]
+      properties:
+        runId: { type: string, maxLength: 64, description: The scheduling run the windows come from, kept on the order. }
+        operations:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: One window per operation to move; an operation appears once.
+          items:
+            type: object
+            required: [operNumber, start, end]
+            properties:
+              operNumber: { type: integer, minimum: 1 }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time, description: Not before start. }
     SplitOrder:
       type: object
       required: [splitQty]
@@ -1705,6 +1726,70 @@ paths:
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders/{id}:apply-finite-dates:
+    post:
+      operationId: applyProductionOrderFiniteDates
+      summary: Replace a scheduled order's dates with the windows finite-capacity scheduling found (FR-23.10)
+      description: |
+        Wave 23 (services/scheduling) books each operation on resource calendars and finds a window
+        for it; this command takes those windows. The order must be Scheduled, Released or Started
+        (409 PRODUCTION_FINITE_STATE otherwise, also while it has no schedule). Each listed
+        operation takes its window; the operation's jobs keep their order and share the window in
+        proportion to their planned hours (equally when the operation has none), to the second, so
+        queue and transit time stretch over the calendar gaps; the last job ends with the window.
+        Planned hours are the work content and do not change. Operations not listed keep their dates.
+
+        The windows, listed or kept, must follow the route: an operation may overlap the one before it
+        (BR-23.5) but may not start or end before it (422 PRODUCTION_FINITE_INPUT, which also covers an
+        operation the order does not have). A window shorter than its jobs' planned hours is applied
+        (a resource efficiency above 100% explains it) and named in finiteCompressedOperations until
+        the next infinite re-date. A last end after the delivery date is accepted (BR-23.2 lets
+        scheduling place an order late); the order page flags it as for :schedule.
+
+        The order's startDate and endDate become the first start and last end, scheduleBasis becomes
+        `finite`, finiteRunId and finiteScheduledAt record the plan, the version moves and
+        dev.passage.production.order.scheduled.v1 (reason finite) carries the whole job set with the
+        ids the jobs keep. An operation that already has feedback (a route or job card) cannot move
+        (409 PRODUCTION_FINITE_LOCKED).
+
+        Concurrency and retries: a person must send If-Match with the order version (428 without it,
+        412 when the order changed since), so a form filled against an older order cannot overwrite
+        newer dates. A service caller (a verified service token, the scheduling consumer handoff) may
+        omit If-Match and is checked when it sends one. Applying the dates the order already has
+        changes nothing whatever the If-Match: 200 with Idempotent-Replayed true, no new version and no
+        event, so a retry or a redelivered plan is safe and no Idempotency-Key is used. A later
+        :schedule, order edit, split or merge re-dates the order with infinite capacity and sets
+        scheduleBasis back to `infinite`; scheduling then plans it again. The service consumer of
+        scheduling's events is a handoff (NOT-IMPLEMENTED).
+      x-passage-duty: production.order.write
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - name: If-Match
+          in: header
+          required: false
+          description: 'The order version from the ETag of the last read, quoted, for example "3". Required for a person (428 without it); optional for a service caller.'
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FiniteDates' }
+      responses:
+        '200':
+          description: The order with its finite dates; Idempotent-Replayed is true when nothing changed.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { description: 'COM-0001 with the invalid fields (no windows, a window ending before it starts, a repeated operation) or a malformed If-Match', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003: missing production.order.write', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_FINITE_STATE: the order is not Scheduled to Started or has no schedule; PRODUCTION_FINITE_LOCKED: an operation in the request has feedback', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: 'conflict_version (PROD-0003): If-Match does not match the order version and the windows would change the order', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_FINITE_INPUT: an operation the order does not have, or windows out of route order', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: 'precondition_required: a person sent no If-Match', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}/journals:
     get:
       operationId: listProductionJournals

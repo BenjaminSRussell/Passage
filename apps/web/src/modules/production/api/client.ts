@@ -148,6 +148,12 @@ export interface ProductionOrder {
   startDate?: string;
   endDate?: string;
   schedulingMethod?: SchedulingMethod;
+  /** How the dates were found: infinite (:schedule, a re-date) or finite (scheduling's windows applied, FR-23.10). */
+  scheduleBasis?: ScheduleBasis;
+  finiteRunId?: string;
+  finiteScheduledAt?: string;
+  /** Operations whose finite window is shorter than their jobs' planned hours (applied, flagged). */
+  finiteCompressedOperations?: number[];
   originType: string;
   originId?: string;
   reworkReference?: ReworkReference;
@@ -522,6 +528,7 @@ export interface CommandBody {
 }
 
 export type SchedulingMethod = "operations" | "jobs";
+export type ScheduleBasis = "infinite" | "finite";
 export type ScheduleDirection = "forward" | "backward";
 export const SCHEDULING_METHODS: SchedulingMethod[] = ["operations", "jobs"];
 
@@ -1138,6 +1145,36 @@ export function runCommand(
   return request<ProductionOrder>(`/${encodeURIComponent(id)}:${command}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}
+
+/** One operation's window from finite-capacity scheduling, as RFC 3339 instants. */
+export interface FiniteWindow {
+  operNumber: number;
+  start: string;
+  end: string;
+}
+
+/** Statuses whose schedule finite dates can replace. */
+export function canApplyFiniteDates(status: ProductionStatus): boolean {
+  return status === "Scheduled" || status === "Released" || status === "Started";
+}
+
+/**
+ * Replaces the dates of the listed operations (and the jobs inside them) with finite-capacity windows
+ * (FR-23.10). version is the ETag of the last read (If-Match, required for a person): a form filled
+ * against an older order is refused (412) instead of overwriting newer dates. Applying the dates the
+ * order already has changes nothing, so a retry needs no Idempotency-Key.
+ */
+export function applyFiniteDates(id: string, version: number, windows: FiniteWindow[], runId?: string): Promise<ProductionOrder> {
+  const body: { operations: FiniteWindow[]; runId?: string } = { operations: windows };
+  if (runId) {
+    body.runId = runId;
+  }
+  return request<ProductionOrder>(`/${encodeURIComponent(id)}:apply-finite-dates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": `"${version}"` },
     body: JSON.stringify(body),
   });
 }

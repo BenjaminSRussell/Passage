@@ -515,10 +515,16 @@ func (a *API) transition(w http.ResponseWriter, r *http.Request) {
 		})).ServeHTTP(w, r)
 		return
 	}
+	if found && ids.Valid(raw) && name == actionApplyFiniteDates {
+		authz.RequireDuty(DutyWrite)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.applyFiniteDates(w, r, raw)
+		})).ServeHTTP(w, r)
+		return
+	}
 	cmd, known := commands[name]
 	if !found || !ids.Valid(raw) || !known {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, unknownActionCode,
-			"use :estimate, :schedule, :release, :start, :report-finished, :end, :cancel, :reset-status or :split on an order"))
+			"use :estimate, :schedule, :release, :start, :report-finished, :end, :cancel, :reset-status, :split or :apply-finite-dates on an order"))
 		return
 	}
 	authz.RequireDuty(commandDuty[cmd])(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

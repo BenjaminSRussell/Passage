@@ -274,3 +274,104 @@ describe("Queue and transit hours on the create form", () => {
     expect(errors["operations.0.queueAfterH"]).toMatch(/up to 6 decimals/);
   });
 });
+
+describe("Finite-capacity dates panel", () => {
+  const scheduledOrder = (overrides: Partial<ReturnType<typeof order>> = {}) =>
+    order({
+      status: "Scheduled",
+      version: 3,
+      startDate: "2026-11-02",
+      endDate: "2026-11-02",
+      schedulingMethod: "operations",
+      operations: [{ ...order().operations[0], plannedStart: "2026-11-02T08:00:00Z", plannedEnd: "2026-11-02T18:00:00Z" }],
+      ...overrides,
+    });
+
+  it("sends only the windows that changed, read as UTC, and shows the new basis", async () => {
+    const fetchMock = detailFetch(scheduledOrder(), [], () =>
+      json(
+        scheduledOrder({
+          version: 4,
+          endDate: "2026-11-04",
+          scheduleBasis: "finite",
+          finiteRunId: "run-7",
+          operations: [{ ...order().operations[0], plannedStart: "2026-11-02T08:00:00Z", plannedEnd: "2026-11-04T10:00:00Z" }],
+        }),
+      ),
+    );
+    const { container } = renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Apply finite dates" });
+    expect(within(form).getByLabelText("Operation 10 start")).toHaveValue("2026-11-02T08:00");
+    fireEvent.change(within(form).getByLabelText("Operation 10 end"), { target: { value: "2026-11-04T10:00" } });
+    await userEvent.type(within(form).getByLabelText(/Scheduling run/), "run-7");
+    await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
+
+    expect(await screen.findByText("Finite dates applied.")).toBeInTheDocument();
+    const post = calls(fetchMock).find(([, init]) => init?.method === "POST");
+    expect(post?.[0]).toBe(`/api/v1/production/orders/${orderId}:apply-finite-dates`);
+    expect(new Headers(post?.[1]?.headers).get("If-Match")).toBe('"3"');
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      operations: [{ operNumber: 10, start: "2026-11-02T08:00:00.000Z", end: "2026-11-04T10:00:00.000Z" }],
+      runId: "run-7",
+    });
+    expect(await screen.findByText("Finite capacity (from scheduling) (run run-7)")).toBeInTheDocument();
+    expect(checkAxeAA(container)).toEqual([]);
+  });
+
+  it("refuses an unchanged form and a window that ends before it starts without calling the service", async () => {
+    const fetchMock = detailFetch(scheduledOrder(), []);
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Apply finite dates" });
+    await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
+    expect(within(form).getByText("Change at least one operation window.")).toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText("Operation 10 end"), { target: { value: "2026-11-01T10:00" } });
+    await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
+    expect(within(form).getByText("Operation 10 ends before it starts.")).toBeInTheDocument();
+    expect(calls(fetchMock).some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("refuses windows out of route order without calling the service", async () => {
+    const twoOps = scheduledOrder({
+      operations: [
+        { ...order().operations[0], plannedStart: "2026-11-02T08:00:00Z", plannedEnd: "2026-11-02T18:00:00Z" },
+        { ...order().operations[0], operNumber: 20, plannedStart: "2026-11-02T18:00:00Z", plannedEnd: "2026-11-02T20:00:00Z" },
+      ],
+    });
+    const fetchMock = detailFetch(twoOps, []);
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Apply finite dates" });
+    fireEvent.change(within(form).getByLabelText("Operation 10 start"), { target: { value: "2026-11-03T08:00" } });
+    fireEvent.change(within(form).getByLabelText("Operation 10 end"), { target: { value: "2026-11-03T18:00" } });
+    await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
+    expect(within(form).getByText(/Operation 20 cannot start or end before operation 10/)).toBeInTheDocument();
+    expect(calls(fetchMock).some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("warns about operations whose window is shorter than their hours", async () => {
+    detailFetch(scheduledOrder({ scheduleBasis: "finite", finiteCompressedOperations: [10] }), []);
+    renderAt(`/production/${orderId}`);
+    expect(await screen.findByText("Some windows are shorter than the planned hours")).toBeInTheDocument();
+    expect(screen.getByText(/Operation 10: the finite window is shorter/)).toBeInTheDocument();
+  });
+
+  it("shows the service's refusal", async () => {
+    detailFetch(scheduledOrder(), [], () => problem(409, "PRODUCTION_FINITE_LOCKED", "operation 10 has feedback and cannot move"));
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Apply finite dates" });
+    fireEvent.change(within(form).getByLabelText("Operation 10 end"), { target: { value: "2026-11-04T10:00" } });
+    await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
+    expect(await screen.findByText("operation 10 has feedback and cannot move (PRODUCTION_FINITE_LOCKED)")).toBeInTheDocument();
+  });
+
+  it("locks an operation with feedback and is absent before the order is scheduled", async () => {
+    detailFetch(scheduledOrder({ status: "Started", operations: [{ ...order().operations[0], status: "started", plannedStart: "2026-11-02T08:00:00Z", plannedEnd: "2026-11-02T18:00:00Z" }] }), []);
+    const first = renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "Apply finite dates" });
+    expect(within(form).getByLabelText("Operation 10 start")).toBeDisabled();
+    first.unmount();
+    detailFetch(order({ status: "Estimated", version: 2 }), []);
+    renderAt(`/production/${orderId}`);
+    await screen.findByRole("form", { name: "Schedule the order" });
+    expect(screen.queryByRole("form", { name: "Apply finite dates" })).not.toBeInTheDocument();
+  });
+});

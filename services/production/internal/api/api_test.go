@@ -78,6 +78,10 @@ type fakeStore struct {
 	// order change management (FR-21.16)
 	ocm    ocmFake
 	params paramsFake
+
+	finite        []store.FiniteDates
+	finiteErr     error
+	finiteChanged bool
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

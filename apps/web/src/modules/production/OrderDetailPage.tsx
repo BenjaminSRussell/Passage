@@ -45,6 +45,7 @@ import {
   type Variance,
 } from "./api/client";
 import { AsBuiltPanel } from "./AsBuiltPanel";
+import { FiniteDatesPanel } from "./FiniteDatesPanel";
 import { JournalsPanel } from "./JournalsPanel";
 import { OrderEditPanel } from "./OrderEditPanel";
 import { SchedulePanel } from "./SchedulePanel";
@@ -600,6 +601,17 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       </Card>
 
       <SchedulePanel order={current} busy={busy === "schedule"} onSchedule={(body) => void run("schedule", body)} />
+
+      <FiniteDatesPanel
+        key={`${current.id}@${current.version}`}
+        order={current}
+        onApplied={(updated) => {
+          setOrder({ value: updated, loading: false, error: null });
+          setNotice("Finite dates applied.");
+          setCommandError(null);
+          loadSide();
+        }}
+      />
 
       {canEditBOM(current.status) ? (
         <OrderEditPanel

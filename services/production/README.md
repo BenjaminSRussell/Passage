@@ -323,7 +323,7 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 |---|---|---|
 | View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, the operations overview and journal inquiry across orders, as-built and where-used, trigger points |
 | View production costs | `production.cost.read` | `GET …/{id}/costs`, `GET /v1/production/wip-balances`, `GET /v1/production/variances` |
-| Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `PATCH …/{id}/bom` |
+| Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `:apply-finite-dates`, `PATCH …/{id}/bom` |
 | Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
 | Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`); defining a `create-rework-order` trigger point (with `production.setup.write`) |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status`, `:split`, `orders:merge`, `orders:bulk-status` (with the command's duty) |
@@ -397,6 +397,9 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_TRIGGER_POINT_FIRED` | 409 | Deleting a trigger point that fired |
 | `PRODUCTION_TRIGGER_FUNCTION_FAILED` | firing | Not a response: the reason a due trigger did nothing, on the firing and its event (PROD-0019) |
 | `PRODUCTION_BULK_PARTIAL` | 200 body | Some orders of a bulk status update failed; see `results` (PROD-0022) |
+| `PRODUCTION_FINITE_INPUT` | 422 | `:apply-finite-dates` names an operation the order does not have, or windows that do not follow the route |
+| `PRODUCTION_FINITE_STATE` | 409 | `:apply-finite-dates` on an order that is not Scheduled, Released or Started, or has no schedule |
+| `PRODUCTION_FINITE_LOCKED` | 409 | `:apply-finite-dates` on an operation that already has route or job card feedback |
 | `PRODUCTION_SCHEDULE_INPUT` | 422 | `:schedule` cannot date the order: a backward schedule without `at` or a delivery date, or a route of more than 100000 hours |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
 | `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
@@ -502,6 +505,20 @@ Slice 18:
   `:schedule` replaces a schedule rather than adding to it. A bulk `schedule` uses the defaults.
   An order without operations (a sales line order before its route is resolved) is scheduled with
   no jobs at the instant; a route of more than 100000 hours is refused (`PRODUCTION_SCHEDULE_INPUT`).
+- Finite dates (slice 20, FR-23.10, migration `0019_finite_dates.sql`):
+  `POST /v1/production/orders/{id}:apply-finite-dates` with `{runId?, operations: [{operNumber, start, end}]}`
+  (duty `production.order.write`) replaces the dates of the listed operations with the windows
+  finite-capacity scheduling found, on a Scheduled, Released or Started order. The operation's jobs
+  keep their ids, order and planned hours and share the window in proportion to their hours; the
+  order is dated from its first start and last end, `scheduleBasis` becomes `finite` (`finiteRunId`
+  and `finiteScheduledAt` name the plan), and `order.scheduled.v1` carries reason `finite`. An
+  operation with feedback (409 `PRODUCTION_FINITE_LOCKED`) cannot move; windows out of route order
+  (an operation starting or ending before the one before it; overlap is fine) are 422
+  `PRODUCTION_FINITE_INPUT`; a window shorter than its jobs' planned hours is applied and listed in
+  `finiteCompressedOperations`; a finish after the delivery date is accepted and flagged as late. A
+  person must send If-Match (428/412); a service caller may omit it. Applying the same dates again
+  changes nothing (200, `Idempotent-Replayed`) whatever the If-Match. A later `:schedule` or re-date
+  goes back to `scheduleBasis` `infinite`.
 - Re-dating: a dated order whose route or quantities change is re-dated forward from its schedule
   start (`schedule_start`) with its method, so the jobs always match the route: an order edit or an
   applied order change (FR-21.18, FR-21.16; queue and transit hours are editable and part of the

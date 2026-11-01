@@ -214,7 +214,7 @@ type ScheduledJob struct {
 // the jobs it now has, in route order. Start and End are instants, StartDate and EndDate the
 // UTC dates of them. It is written by :schedule and again by each re-date of a dated order
 // (route edit, applied change, split, merge, trigger-inserted operation); Reason tells them apart
-// (`schedule` or `redate`) and Status is the order's status then.
+// (`schedule`, `redate` or `finite`, scheduling's windows applied) and Status is the order's status then.
 type OrderScheduledData struct {
 	OrderID          string         `json:"orderId"`
 	OrderNumber      string         `json:"orderNumber"`
@@ -233,6 +233,10 @@ type OrderScheduledData struct {
 	OrderVersion     int            `json:"orderVersion"`
 	Actor            string         `json:"actor"`
 	OccurredAt       string         `json:"occurredAt"`
+	// FiniteRunID (reason finite) is the scheduling run the windows came from, when the caller named
+	// one; CompressedOperations the operations whose window is shorter than their jobs' hours.
+	FiniteRunID          *string `json:"finiteRunId,omitempty"`
+	CompressedOperations []int   `json:"compressedOperations,omitempty"`
 }
 
 // JournalLine is one posted line of journal.posted.v1: an issue of a BOM line,

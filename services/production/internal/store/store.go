@@ -56,8 +56,16 @@ type Order struct {
 	StartDate        *string                 `json:"startDate,omitempty"`
 	EndDate          *string                 `json:"endDate,omitempty"`
 	SchedulingMethod domain.SchedulingMethod `json:"schedulingMethod"`
-	OriginType       string                  `json:"originType"`
-	OriginID         *string                 `json:"originId,omitempty"`
+	// ScheduleBasis says how the dates were found: infinite (:schedule, a re-date) or finite
+	// (scheduling's windows applied, FR-23.10); FiniteRunID and FiniteScheduledAt name that plan.
+	// FiniteCompressedOperations are the operations whose finite window is shorter than their
+	// jobs' planned hours (a warning, not a refusal).
+	ScheduleBasis              string     `json:"scheduleBasis"`
+	FiniteRunID                *string    `json:"finiteRunId,omitempty"`
+	FiniteScheduledAt          *time.Time `json:"finiteScheduledAt,omitempty"`
+	FiniteCompressedOperations []int      `json:"finiteCompressedOperations,omitempty"`
+	OriginType                 string     `json:"originType"`
+	OriginID                   *string    `json:"originId,omitempty"`
 	// ConfigurationID is the saved configuration of a SalesOrderLine order.
 	ConfigurationID *string `json:"configurationId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
@@ -219,6 +227,7 @@ type Store interface {
 	MergeOrders(ctx context.Context, in Merge) (MergeResult, error)
 	BulkTransition(ctx context.Context, in Bulk) []BulkItem
 	EditOrder(ctx context.Context, in OrderEdit) (Order, error)
+	ApplyFiniteDates(ctx context.Context, in FiniteDates) (Order, bool, error)
 	OrderEdits(ctx context.Context, orderID string) ([]OrderEditEntry, error)
 	WIPReport(ctx context.Context, f WIPFilter) (WIPReport, error)
 	VarianceReport(ctx context.Context, f VarianceFilter) (VarianceReport, error)
@@ -968,7 +977,7 @@ func domainProblem(err error) error {
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
 		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState, domain.CodeChangeNotEligible,
-		domain.CodeChangeSuperseded, domain.CodeSplitRefused:
+		domain.CodeChangeSuperseded, domain.CodeSplitRefused, domain.CodeFiniteState, domain.CodeFiniteLocked:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
@@ -981,11 +990,11 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
 		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified,
-		configuration_id::text, start_date::text, end_date::text, scheduling_method
+		configuration_id::text, start_date::text, end_date::text, scheduling_method, schedule_basis, finite_run_id, finite_scheduled_at, finite_compressed_opers
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
 		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID,
-		&o.StartDate, &o.EndDate, &o.SchedulingMethod)
+		&o.StartDate, &o.EndDate, &o.SchedulingMethod, &o.ScheduleBasis, &o.FiniteRunID, &o.FiniteScheduledAt, &o.FiniteCompressedOperations)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

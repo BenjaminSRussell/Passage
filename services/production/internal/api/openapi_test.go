@@ -53,6 +53,7 @@ func servedOperations(t *testing.T) map[string]bool {
 		}
 		if route == "/v1/production/orders/{id}" && method == http.MethodPost {
 			served["/v1/production/orders/{id}:split post"] = true
+			served["/v1/production/orders/{id}:apply-finite-dates post"] = true
 			route = "/v1/production/orders/{id}:{command}"
 		}
 		if route == "/v1/production/journals/{id}" && method == http.MethodPost {
@@ -80,7 +81,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 48 {
+	if len(served) != 49 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -124,7 +125,7 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse", domain.CodeAsBuiltRequired, domain.CodeOrderQuantity, domain.CodeOperationState,
 		store.CodeOperationNotFound, DutyApplyChange, store.CodeChangeNotFound, domain.CodeChangeNoDelta, domain.CodeChangeResolved,
-		domain.CodeChangeNotEligible, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE", CodeGLUnavailable, store.CodeGLFailed} {
+		domain.CodeChangeNotEligible, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE", domain.CodeFiniteInput, domain.CodeFiniteState, domain.CodeFiniteLocked, actionApplyFiniteDates, CodeGLUnavailable, store.CodeGLFailed} {
 		if !strings.Contains(spec, name) {
 			t.Errorf("openapi.yaml does not mention %s", name)
 		}

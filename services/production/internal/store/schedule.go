@@ -93,7 +93,8 @@ func writeSchedule(ctx context.Context, tx pgx.Tx, tenantID, orderID, legalEntit
 			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `update production_order set start_date = $3::date, end_date = $4::date, scheduling_method = $5, schedule_start = $6
+	if _, err := tx.Exec(ctx, `update production_order set start_date = $3::date, end_date = $4::date, scheduling_method = $5, schedule_start = $6,
+		schedule_basis = 'infinite', finite_run_id = null, finite_scheduled_at = null, finite_compressed_opers = '{}'
 		where tenant_id = $1 and id = $2`, tenantID, orderID, plan.StartDate(), plan.EndDate(), string(method), plan.Start); err != nil {
 		return nil, err
 	}
@@ -140,7 +141,8 @@ func clearSchedule(ctx context.Context, tx pgx.Tx, tenantID, orderID string) err
 		where tenant_id = $1 and order_id = $2 and (planned_start is not null or planned_end is not null)`, tenantID, orderID); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `update production_order set start_date = null, end_date = null, schedule_start = null where tenant_id = $1 and id = $2`, tenantID, orderID)
+	_, err := tx.Exec(ctx, `update production_order set start_date = null, end_date = null, schedule_start = null,
+		schedule_basis = 'infinite', finite_run_id = null, finite_scheduled_at = null, finite_compressed_opers = '{}' where tenant_id = $1 and id = $2`, tenantID, orderID)
 	return err
 }
 
@@ -157,6 +159,7 @@ func enqueueScheduled(ctx context.Context, tx pgx.Tx, tenantID string, o Order, 
 		SchedulingMethod: string(o.SchedulingMethod), Direction: string(dir), Start: plan.Start.UTC().Format(time.RFC3339),
 		End: plan.End.UTC().Format(time.RFC3339), StartDate: plan.StartDate(), EndDate: plan.EndDate(), DeliveryDate: o.DeliveryDate,
 		Jobs: jobs, OrderVersion: o.Version, Actor: actor, OccurredAt: o.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		FiniteRunID: o.FiniteRunID, CompressedOperations: o.FiniteCompressedOperations,
 	})
 }
 

@@ -17,6 +17,7 @@ import type {
   Proposal,
   ReworkReference,
   ReworkRefType,
+  ScheduleBasis,
   ScheduleDirection,
   SchedulingMethod,
   Tracking,
@@ -290,6 +291,11 @@ export const jobTypeLabel: Record<JobType, string> = {
 export const schedulingMethodLabel: Record<SchedulingMethod, string> = {
   operations: "By operation (setup and run together)",
   jobs: "By job (setup and run apart)",
+};
+
+export const scheduleBasisLabel: Record<ScheduleBasis, string> = {
+  infinite: "Infinite capacity (one operation after the other)",
+  finite: "Finite capacity (from scheduling)",
 };
 
 export const directionLabel: Record<ScheduleDirection, string> = {

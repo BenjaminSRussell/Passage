@@ -11,7 +11,7 @@ import {
   type ScheduleDirection,
   type SchedulingMethod,
 } from "./api/client";
-import { dash, directionLabel, instant, jobTypeLabel, schedulingMethodLabel } from "./labels";
+import { dash, directionLabel, instant, jobTypeLabel, scheduleBasisLabel, schedulingMethodLabel } from "./labels";
 import styles from "./pages.module.css";
 
 export interface SchedulePanelProps {
@@ -103,6 +103,13 @@ export function SchedulePanel({ order, onSchedule, busy = false }: SchedulePanel
               <dt className={styles.term}>Method</dt>
               <dd className={styles.value}>{order.schedulingMethod ? schedulingMethodLabel[order.schedulingMethod] : dash}</dd>
             </div>
+            <div className={styles.entry}>
+              <dt className={styles.term}>Dates from</dt>
+              <dd className={styles.value}>
+                {scheduleBasisLabel[order.scheduleBasis ?? "infinite"]}
+                {order.scheduleBasis === "finite" && order.finiteRunId ? ` (run ${order.finiteRunId})` : ""}
+              </dd>
+            </div>
           </dl>
         ) : (
           <p className={styles.hint}>
@@ -112,6 +119,11 @@ export function SchedulePanel({ order, onSchedule, busy = false }: SchedulePanel
         {late ? (
           <Alert tone="warning" title="The schedule ends after the delivery date">
             {`The last job ends on ${order.endDate}; the order is due ${order.deliveryDate}.`}
+          </Alert>
+        ) : null}
+        {order.scheduleBasis === "finite" && order.finiteCompressedOperations?.length ? (
+          <Alert tone="warning" title="Some windows are shorter than the planned hours">
+            {`Operation ${order.finiteCompressedOperations.join(", ")}: the finite window is shorter than the hours its jobs plan. The hours are kept; check the resource efficiency or the window.`}
           </Alert>
         ) : null}
         {order.status === "Estimated" ? (
@@ -161,7 +173,7 @@ export function SchedulePanel({ order, onSchedule, busy = false }: SchedulePanel
           />
         )}
         <p className={`${styles.hint} ${styles.tableNote}`}>
-          Jobs are dated with infinite capacity, one operation after the other; resource calendars and finite capacity come with capacity planning.
+          Until scheduling's windows are applied, jobs are dated with infinite capacity, one operation after the other, with no calendar.
         </p>
       </div>
     </Card>
