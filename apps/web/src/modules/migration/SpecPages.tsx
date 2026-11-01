@@ -3,11 +3,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getSpec, listSpecs, newKey, publishSpec, type MappingSpec, type Problem } from "./api/client";
+import { describeProblem, getSpec, listSpecsPage, newKey, publishSpec, type MappingSpec, type Problem } from "./api/client";
 import { formatDateTime, parseMappingText } from "./domain";
 import styles from "./pages.module.css";
 import { DUTY_RUN } from "./RunPages";
+import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 export const DUTY_SPEC_WRITE = "migration.spec.write";
 
@@ -50,7 +52,8 @@ const rejectColumns: DataTableColumn<RejectCondition>[] = [
 export function SpecsPage() {
   const navigate = useNavigate();
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_SPEC_WRITE);
-  const state = useLoad((signal) => listSpecs(undefined, signal), "specs");
+  const state = useLoad((signal) => listSpecsPage({}, signal), "specs");
+  const paged = usePaged(state, "specs", (cursor) => listSpecsPage({ cursor }));
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -77,13 +80,14 @@ export function SpecsPage() {
         <DataTable
           label="Mapping specs"
           columns={columns}
-          rows={state.data ?? []}
+          rows={paged.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{ title: "No mapping specs yet", description: "Publish a mapping to start a migration run." }}
           onRowOpen={(row) => navigate(`/migration/specs/${row.id}`)}
         />
       )}
+      <LoadMore paged={paged} noun="mapping specs" />
     </div>
   );
 }

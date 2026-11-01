@@ -332,11 +332,11 @@ func TestPostgres_MappingSpecVersionsAreImmutableAndIdempotent(t *testing.T) {
 	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.ListMappingSpecs(ctx, "customer", 10)
+	list, err := s.ListMappingSpecs(ctx, "customer", nil, 10)
 	if err != nil || len(list) != 2 || list[0].Version != 2 {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
-	if none, _ := s.ListMappingSpecs(ctx, "vendor", 10); len(none) != 0 {
+	if none, _ := s.ListMappingSpecs(ctx, "vendor", nil, 10); len(none) != 0 {
 		t.Fatalf("entity filter leaked %v", none)
 	}
 	got, err := s.GetMappingSpec(ctx, first.ID)
@@ -409,10 +409,10 @@ func TestMem_SpecContract(t *testing.T) {
 	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
 		t.Fatal(err)
 	}
-	if l, _ := m.ListMappingSpecs(ctx, "customer", 0); len(l) != 2 || l[0].Version != 2 {
+	if l, _ := m.ListMappingSpecs(ctx, "customer", nil, 0); len(l) != 2 || l[0].Version != 2 {
 		t.Fatalf("list must put the newest version first like Postgres: %+v", l)
 	}
-	if l, _ := m.ListMappingSpecs(ctx, "customer", 1); len(l) != 1 {
+	if l, _ := m.ListMappingSpecs(ctx, "customer", nil, 1); len(l) != 1 {
 		t.Fatalf("limit = %d", len(l))
 	}
 }

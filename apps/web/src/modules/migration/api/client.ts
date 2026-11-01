@@ -130,6 +130,17 @@ async function items<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   return body.items;
 }
 
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+async function page<T>(path: string, signal?: AbortSignal): Promise<Page<T>> {
+  const body = await send<Page<T>>(path, {}, signal);
+  if (!Array.isArray(body.items)) throw new MigrationApiError(0, "COM-0001", "The response has no items");
+  return body;
+}
+
 function query(params: Record<string, string | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
@@ -137,8 +148,8 @@ function query(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-export const listRuns = (filter: { entity?: string; status?: string; projectId?: string }, signal?: AbortSignal) =>
-  items<MigrationRun>(`/migration-runs${query(filter)}`, signal);
+export const listRunsPage = (filter: { entity?: string; status?: string; projectId?: string; cursor?: string }, signal?: AbortSignal) =>
+  page<MigrationRun>(`/migration-runs${query(filter)}`, signal);
 
 export const getRun = (id: string, signal?: AbortSignal) => send<MigrationRun>(`/migration-runs/${encodeURIComponent(id)}`, {}, signal);
 
@@ -152,14 +163,25 @@ export async function rerunRun(id: string, key: string = newKey()): Promise<Migr
   return body.run;
 }
 
-export const listSpecs = (entity: string | undefined, signal?: AbortSignal) => items<MappingSpec>(`/mapping-specs${query({ entity })}`, signal);
+/** The largest page the service serves; pickers ask for it and say when more exist. */
+export const PICKER_LIMIT = 200;
+
+export interface ListFilter {
+  entity?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+const listQuery = ({ limit, ...rest }: ListFilter) => query({ ...rest, limit: limit ? String(limit) : undefined });
+
+export const listSpecsPage = (filter: ListFilter, signal?: AbortSignal) => page<MappingSpec>(`/mapping-specs${listQuery(filter)}`, signal);
 
 export const getSpec = (id: string, signal?: AbortSignal) => send<MappingSpec>(`/mapping-specs/${encodeURIComponent(id)}`, {}, signal);
 
 export const publishSpec = (mapping: unknown, key: string = newKey()) =>
   send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ mapping }) });
 
-export const listTemplates = (entity: string | undefined, signal?: AbortSignal) => items<DataTemplate>(`/data-templates${query({ entity })}`, signal);
+export const listTemplatesPage = (filter: ListFilter, signal?: AbortSignal) => page<DataTemplate>(`/data-templates${listQuery(filter)}`, signal);
 
 export const getTemplate = (id: string, signal?: AbortSignal) => send<DataTemplate>(`/data-templates/${encodeURIComponent(id)}`, {}, signal);
 
@@ -167,8 +189,8 @@ export const publishTemplate = (input: PublishTemplateInput, key: string = newKe
   send<DataTemplate>("/data-templates", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
 
 /** Lineage rows of a run; templatedOnly keeps the rows that took a data template default. */
-export const listLedger = (runId: string, templatedOnly: boolean, signal?: AbortSignal) =>
-  items<LedgerRow>(`/migration-runs/${encodeURIComponent(runId)}/ledger${query({ templated: templatedOnly ? "true" : undefined, limit: "200" })}`, signal);
+export const listLedgerPage = (runId: string, templatedOnly: boolean, cursor?: string, signal?: AbortSignal) =>
+  page<LedgerRow>(`/migration-runs/${encodeURIComponent(runId)}/ledger${query({ templated: templatedOnly ? "true" : undefined, limit: "200", cursor })}`, signal);
 
 export interface PackageCounts {
   create: number;
@@ -311,8 +333,9 @@ export interface ProjectPage {
   nextCursor?: string;
 }
 
-export async function listProjects(filter: { projectType?: string; status?: string; cursor?: string }, signal?: AbortSignal): Promise<ProjectPage> {
-  const body = await send<ProjectPage>(`/projects${query({ ...filter, limit: "50" })}`, {}, signal);
+export async function listProjects(filter: { projectType?: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<ProjectPage> {
+  const { limit = 50, ...rest } = filter;
+  const body = await send<ProjectPage>(`/projects${query({ ...rest, limit: String(limit) })}`, {}, signal);
   if (!Array.isArray(body.items)) throw new MigrationApiError(0, "COM-0001", "The response has no items");
   return body;
 }

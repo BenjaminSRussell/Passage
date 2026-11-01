@@ -424,9 +424,16 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	limit, ok := parseLimit(w, r)
+	limit, ok := pageLimit(w, r)
 	if !ok {
 		return
+	}
+	var after *store.RunCursor
+	if v := q.Get("cursor"); v != "" {
+		if after, ok = runCursor(v); !ok {
+			fail(w, r, cursorProblem())
+			return
+		}
 	}
 	if st := q.Get("status"); st != "" && !slices.Contains([]string{domain.StatusSucceeded, domain.StatusPartial, domain.StatusFailed}, st) {
 		fail(w, r, validation(map[string]string{"status": "must be one of succeeded, partial, failed"}))
@@ -436,17 +443,22 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(map[string]string{"projectId": "must be a UUID"}))
 		return
 	}
-	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), ProjectID: q.Get("projectId"), Limit: limit})
+	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), ProjectID: q.Get("projectId"), After: after, Limit: limit + 1})
 	if err != nil {
 		a.logFailure(r, "list migration runs failed", err)
 		fail(w, r, err)
 		return
 	}
+	runs, more := trimPage(runs, limit)
 	items := make([]runView, 0, len(runs))
 	for _, run := range runs {
 		items = append(items, view(run))
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	body := map[string]any{"items": items}
+	if more {
+		body["nextCursor"] = encodePageCursor(store.RunCursor{CreatedAt: runs[limit-1].CreatedAt, ID: runs[limit-1].ID})
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) publishSpec(w http.ResponseWriter, r *http.Request) {
@@ -506,21 +518,33 @@ func (a *API) listSpecs(w http.ResponseWriter, r *http.Request) {
 	if !tenantWide(w, r) {
 		return
 	}
-	limit, ok := parseLimit(w, r)
+	limit, ok := pageLimit(w, r)
 	if !ok {
 		return
 	}
-	specs, err := a.store.ListMappingSpecs(r.Context(), r.URL.Query().Get("entity"), limit)
+	var after *store.SpecCursor
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		if after, ok = specCursor(v); !ok {
+			fail(w, r, cursorProblem())
+			return
+		}
+	}
+	specs, err := a.store.ListMappingSpecs(r.Context(), r.URL.Query().Get("entity"), after, limit+1)
 	if err != nil {
 		a.logFailure(r, "list mapping specs failed", err)
 		fail(w, r, err)
 		return
 	}
+	specs, more := trimPage(specs, limit)
 	items := make([]specView, 0, len(specs))
 	for _, s := range specs {
 		items = append(items, specToView(s, false))
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	body := map[string]any{"items": items}
+	if more {
+		body["nextCursor"] = encodePageCursor(store.SpecCursor{Entity: specs[limit-1].Entity, Version: specs[limit-1].Version})
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) getSpec(w http.ResponseWriter, r *http.Request) {

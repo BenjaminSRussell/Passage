@@ -132,13 +132,18 @@ func (s *Postgres) GetDataTemplate(ctx context.Context, id string) (DataTemplate
 	return t, err
 }
 
-func (s *Postgres) ListDataTemplates(ctx context.Context, entity string, limit int) ([]DataTemplate, error) {
+func (s *Postgres) ListDataTemplates(ctx context.Context, entity string, after *TemplateCursor, limit int) ([]DataTemplate, error) {
 	p, _ := tenant.FromContext(ctx)
+	cur := TemplateCursor{}
+	if after != nil {
+		cur = *after
+	}
 	var out []DataTemplate
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+templateColumns+` from migration.data_template
 			where tenant_id = $1 and ($2 = '' or entity = $2)
-			order by entity, name, version desc limit $3`, p.TenantID, entity, clampLimit(limit))
+			and ($3::boolean is false or (entity, name) > ($4, $5) or ((entity, name) = ($4, $5) and version < $6))
+			order by entity, name, version desc limit $7`, p.TenantID, entity, after != nil, cur.Entity, cur.Name, cur.Version, clampLimit(limit))
 		if err != nil {
 			return err
 		}
@@ -155,7 +160,7 @@ func (s *Postgres) ListDataTemplates(ctx context.Context, entity string, limit i
 	return out, err
 }
 
-func (s *Postgres) RunLedger(ctx context.Context, runID string, templatedOnly bool, limit int) ([]LedgerRow, error) {
+func (s *Postgres) RunLedger(ctx context.Context, runID string, templatedOnly bool, afterKey string, limit int) ([]LedgerRow, error) {
 	p, _ := tenant.FromContext(ctx)
 	if !ids.Valid(runID) {
 		return nil, notFound()
@@ -171,7 +176,8 @@ func (s *Postgres) RunLedger(ctx context.Context, runID string, templatedOnly bo
 		}
 		rows, err := tx.Query(ctx, `select source_key, coalesce(target_id::text, ''), action, template_fields from migration.run_ledger
 			where tenant_id = $1 and run_id = $2 and (not $3 or cardinality(template_fields) > 0)
-			order by source_key limit $4`, p.TenantID, runID, templatedOnly, clampLimit(limit))
+			and ($4 = '' or source_key > $4)
+			order by source_key limit $5`, p.TenantID, runID, templatedOnly, afterKey, clampLimit(limit))
 		if err != nil {
 			return err
 		}
@@ -231,12 +237,12 @@ func (m *Mem) GetDataTemplate(_ context.Context, id string) (DataTemplate, error
 	return DataTemplate{}, templateNotFound()
 }
 
-func (m *Mem) ListDataTemplates(_ context.Context, entity string, limit int) ([]DataTemplate, error) {
+func (m *Mem) ListDataTemplates(_ context.Context, entity string, after *TemplateCursor, limit int) ([]DataTemplate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []DataTemplate
 	for _, t := range m.templates {
-		if entity == "" || t.Entity == entity {
+		if (entity == "" || t.Entity == entity) && (after == nil || cmp.Or(strings.Compare(t.Entity, after.Entity), strings.Compare(t.Name, after.Name), after.Version-t.Version) > 0) {
 			out = append(out, t)
 		}
 	}
@@ -246,7 +252,7 @@ func (m *Mem) ListDataTemplates(_ context.Context, entity string, limit int) ([]
 	return out[:min(len(out), clampLimit(limit))], nil
 }
 
-func (m *Mem) RunLedger(_ context.Context, runID string, templatedOnly bool, limit int) ([]LedgerRow, error) {
+func (m *Mem) RunLedger(_ context.Context, runID string, templatedOnly bool, afterKey string, limit int) ([]LedgerRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	run := m.find(runID)
@@ -255,7 +261,7 @@ func (m *Mem) RunLedger(_ context.Context, runID string, templatedOnly bool, lim
 	}
 	out := []LedgerRow{}
 	for _, e := range run.Report.Ledger {
-		if templatedOnly && len(e.TemplateFields) == 0 {
+		if (templatedOnly && len(e.TemplateFields) == 0) || (afterKey != "" && e.SourceKey <= afterKey) {
 			continue
 		}
 		fields := e.TemplateFields

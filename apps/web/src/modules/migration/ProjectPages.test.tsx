@@ -288,6 +288,21 @@ describe("project runs", () => {
     expect(screen.getByRole("link", { name: "Start run" })).toHaveAttribute("href", `/migration/runs/new?project=${axProject.id}`);
   });
 
+  it("pages the project's runs with Load more and keeps the project filter on the next page", async () => {
+    const older = { ...projectRun, id: "0195f0a0-0000-7000-8000-0000000000a9", entity: "vendor" };
+    handler = (url) => {
+      if (!url.pathname.endsWith("/migration-runs")) return json(200, axProject);
+      return url.searchParams.get("cursor") === "p1" ? json(200, { items: [older] }) : json(200, { items: [projectRun], nextCursor: "p1" });
+    };
+    renderAt(`/migration/projects/${axProject.id}`);
+    await findTable({ name: "Project runs" });
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(screen.getByRole("table", { name: "Project runs" })).toHaveTextContent("vendor"));
+    const next = calls.find((c) => c.url.searchParams.get("cursor") === "p1");
+    expect(next?.url.searchParams.get("projectId")).toBe(axProject.id);
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
   it("shows the empty and error states, and hides Start run for an archived project or without the duty", async () => {
     handler = (url) => (url.pathname.endsWith("/migration-runs") ? json(200, { items: [] }) : json(200, { ...axProject, status: "archived" }));
     renderAt(`/migration/projects/${axProject.id}`);

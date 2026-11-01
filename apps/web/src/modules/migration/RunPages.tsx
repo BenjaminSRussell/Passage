@@ -3,10 +3,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { createRun, describeProblem, getRun, listLedger, listProjects, listRuns, listSpecs, listTemplates, newKey, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
+import { createRun, describeProblem, getRun, getSpec, listLedgerPage, listProjects, listRunsPage, listSpecsPage, listTemplatesPage, newKey, PICKER_LIMIT, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
 import { formatDateTime, MODE_LABELS, MODES, RUN_STATUSES, SOURCE_LABELS, SOURCE_SYSTEMS } from "./domain";
 import styles from "./pages.module.css";
+import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 export const DUTY_RUN = "migration.run";
 
@@ -27,7 +29,9 @@ export function RunsPage() {
   const canRun = holdsDuty(usePrincipalDuties(), DUTY_RUN);
   const [status, setStatus] = useState("");
   const [entity, setEntity] = useState("");
-  const state = useLoad((signal) => listRuns({ status, entity: entity.trim() }, signal), `${status}|${entity.trim()}`);
+  const key = `${status}|${entity.trim()}`;
+  const state = useLoad((signal) => listRunsPage({ status, entity: entity.trim() }, signal), key);
+  const paged = usePaged(state, key, (cursor) => listRunsPage({ status, entity: entity.trim(), cursor }));
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -71,13 +75,14 @@ export function RunsPage() {
         <DataTable
           label="Migration runs"
           columns={columns}
-          rows={state.data ?? []}
+          rows={paged.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{ title: "No migration runs yet", description: "Publish a mapping spec, then start a run to see counts and rejects." }}
           onRowOpen={(row) => navigate(`/migration/runs/${row.id}`)}
         />
       )}
+      <LoadMore paged={paged} noun="runs" />
     </div>
   );
 }
@@ -86,28 +91,37 @@ export function RunsPage() {
 export function NewRunPage() {
   const navigate = useNavigate();
   const [search] = useSearchParams();
-  const specs = useLoad((signal) => listSpecs(undefined, signal), "specs");
+  const specs = useLoad((signal) => listSpecsPage({ limit: PICKER_LIMIT }, signal), "specs");
+  // A spec linked from its detail page may be past the picker's page, so it is fetched on its own.
+  const linkedSpecId = search.get("spec") ?? "";
+  const linkedSpec = useLoad((signal) => (linkedSpecId ? getSpec(linkedSpecId, signal) : Promise.resolve(null)), `linked|${linkedSpecId}`);
   const [sourceSystem, setSourceSystem] = useState<MigrationRun["sourceSystem"]>("ax2012");
   const [mode, setMode] = useState<MigrationRun["mode"]>("rehearsal");
   const [dryRun, setDryRun] = useState(true);
   const [specId, setSpecId] = useState(search.get("spec") ?? "");
   const [templateId, setTemplateId] = useState("");
-  const templates = useLoad((signal) => listTemplates(undefined, signal), "templates");
   const [projectId, setProjectId] = useState(search.get("project") ?? "");
-  const projects = useLoad((signal) => listProjects({ projectType: "migrate", status: "active" }, signal), "run-projects");
+  const projects = useLoad((signal) => listProjects({ projectType: "migrate", status: "active", limit: PICKER_LIMIT }, signal), "run-projects");
   const [error, setError] = useState("");
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
 
-  const options: MappingSpec[] = specs.data ?? [];
+  const listed: MappingSpec[] = specs.data?.items ?? [];
+  const extra = linkedSpec.data && !listed.some((s) => s.id === linkedSpec.data?.id) ? [linkedSpec.data] : [];
+  const options = [...extra, ...listed];
+  const moreSpecs = Boolean(specs.data?.nextCursor);
   const chosenEntity = options.find((s) => s.id === specId)?.entity;
-  // Templates are optional, so a failed template load never blocks starting a run.
-  const templateOptions = (Array.isArray(templates.data) ? templates.data : []).filter((t) => !chosenEntity || t.entity === chosenEntity);
+  // Templates are asked for by the chosen spec's entity, so a matching template is never cut off by other entities' ones.
+  // They are optional, so a failed template load never blocks starting a run.
+  const templates = useLoad((signal) => listTemplatesPage({ entity: chosenEntity, limit: PICKER_LIMIT }, signal), `templates|${chosenEntity ?? ""}`);
+  const templateOptions = (templates.data?.items ?? []).filter((t) => !chosenEntity || t.entity === chosenEntity);
+  const moreTemplates = Boolean(templates.data?.nextCursor);
   // A template chosen before the spec changed to another entity no longer applies, so it is dropped, not sent.
   const chosenTemplate = templateOptions.some((t) => t.id === templateId) ? templateId : "";
   // Projects are optional, so a failed project load never blocks starting a run. A project fixes the source system.
   const projectOptions = projects.data?.items ?? [];
+  const moreProjects = Boolean(projects.data?.nextCursor);
   const chosenProject = projectOptions.find((p) => p.id === projectId);
   // A project named by the link but missing from the loaded list (the list failed, or it is past the first page) is
   // still sent: dropping it would start the run outside the project the user came from. The service checks it.
@@ -144,7 +158,13 @@ export function NewRunPage() {
       ) : (
         <Card>
           <form className={styles.form} onSubmit={submit} noValidate>
-            <FormField id="run-spec" label="Mapping spec" error={error} hint={!specs.loading && options.length === 0 ? "No specs are published yet." : undefined}>
+            <FormField id="run-spec" label="Mapping spec" error={error} hint={
+                !specs.loading && options.length === 0
+                  ? "No specs are published yet."
+                  : moreSpecs
+                    ? `Only the first ${PICKER_LIMIT} specs are listed. To run another, open it under Mapping specs and choose Start run.`
+                    : undefined
+              }>
               {(control) => (
                 <Select {...control} value={specId} invalid={error !== ""} disabled={specs.loading} onChange={(event) => setSpecId(event.target.value)}>
                   <option value="">{specs.loading ? "Loading..." : "Choose a spec"}</option>
@@ -159,7 +179,13 @@ export function NewRunPage() {
             <FormField
               id="run-template"
               label="Data template (optional)"
-              hint={templates.error ? "Data templates could not be loaded; the run starts without one." : "Fills fields the source leaves empty before mapping."}
+              hint={
+                templates.error
+                  ? "Data templates could not be loaded; the run starts without one."
+                  : moreTemplates
+                    ? `Fills fields the source leaves empty before mapping. Only the first ${PICKER_LIMIT} templates${chosenEntity ? ` for ${chosenEntity}` : ""} are listed.`
+                    : "Fills fields the source leaves empty before mapping."
+              }
             >
               {(control) => (
                 <Select {...control} value={chosenTemplate} disabled={templates.loading || Boolean(templates.error)} onChange={(event) => setTemplateId(event.target.value)}>
@@ -180,7 +206,9 @@ export function NewRunPage() {
                   ? linkedOnly
                     ? "Projects could not be loaded; the run starts under the project from the link."
                     : "Projects could not be loaded; the run starts without one."
-                  : "Only one run can be active per project at a time."
+                  : moreProjects
+                    ? `Only one run can be active per project at a time. Only the first ${PICKER_LIMIT} active projects are listed; to use another, start the run from its project page.`
+                    : "Only one run can be active per project at a time."
               }
             >
               {(control) => (
@@ -268,7 +296,8 @@ const lineageColumns: DataTableColumn<LedgerRow>[] = [
 
 /** The rows of a templated run that took a template default (default_from_template lineage). */
 function TemplateLineage({ runId, templateId }: { runId: string; templateId: string }) {
-  const state = useLoad((signal) => listLedger(runId, true, signal), runId);
+  const state = useLoad((signal) => listLedgerPage(runId, true, undefined, signal), runId);
+  const paged = usePaged(state, runId, (cursor) => listLedgerPage(runId, true, cursor));
   return (
     <Card title="Data template defaults">
       <p>
@@ -282,12 +311,13 @@ function TemplateLineage({ runId, templateId }: { runId: string; templateId: str
         <DataTable
           label="Rows that took template defaults"
           columns={lineageColumns}
-          rows={state.data ?? []}
+          rows={paged.rows}
           getRowKey={(r) => r.sourceKey}
           loading={state.loading}
           empty={{ title: "No rows used a template default", description: "Every row had its own source values." }}
         />
       )}
+      <LoadMore paged={paged} noun="lineage rows" />
     </Card>
   );
 }

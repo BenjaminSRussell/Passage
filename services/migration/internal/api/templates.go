@@ -94,21 +94,34 @@ func (a *API) listTemplates(w http.ResponseWriter, r *http.Request) {
 	if !tenantWide(w, r) {
 		return
 	}
-	limit, ok := parseLimit(w, r)
+	limit, ok := pageLimit(w, r)
 	if !ok {
 		return
 	}
-	templates, err := a.store.ListDataTemplates(r.Context(), r.URL.Query().Get("entity"), limit)
+	var after *store.TemplateCursor
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		if after, ok = templateCursor(v); !ok {
+			fail(w, r, cursorProblem())
+			return
+		}
+	}
+	templates, err := a.store.ListDataTemplates(r.Context(), r.URL.Query().Get("entity"), after, limit+1)
 	if err != nil {
 		a.logFailure(r, "list data templates failed", err)
 		fail(w, r, err)
 		return
 	}
+	templates, more := trimPage(templates, limit)
 	items := make([]templateView, 0, len(templates))
 	for _, t := range templates {
 		items = append(items, templateToView(t, false))
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	body := map[string]any{"items": items}
+	if more {
+		last := templates[limit-1]
+		body["nextCursor"] = encodePageCursor(store.TemplateCursor{Entity: last.Entity, Name: last.Name, Version: last.Version})
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) getTemplate(w http.ResponseWriter, r *http.Request) {
@@ -136,20 +149,32 @@ func (a *API) runLedger(w http.ResponseWriter, r *http.Request) {
 	if !tenantWide(w, r) {
 		return
 	}
-	limit, ok := parseLimit(w, r)
+	limit, ok := pageLimit(w, r)
 	if !ok {
 		return
+	}
+	afterKey := ""
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		if afterKey, ok = ledgerCursor(v); !ok {
+			fail(w, r, cursorProblem())
+			return
+		}
 	}
 	templated := r.URL.Query().Get("templated")
 	if templated != "" && templated != "true" && templated != "false" {
 		fail(w, r, validation(map[string]string{"templated": "must be true or false"}))
 		return
 	}
-	rows, err := a.store.RunLedger(r.Context(), chi.URLParam(r, "id"), templated == "true", limit)
+	rows, err := a.store.RunLedger(r.Context(), chi.URLParam(r, "id"), templated == "true", afterKey, limit+1)
 	if err != nil {
 		a.logFailure(r, "list run ledger failed", err)
 		fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": rows})
+	rows, more := trimPage(rows, limit)
+	body := map[string]any{"items": rows}
+	if more {
+		body["nextCursor"] = encodePageCursor(map[string]string{"k": rows[limit-1].SourceKey})
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }

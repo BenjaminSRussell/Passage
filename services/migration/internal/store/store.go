@@ -41,10 +41,30 @@ type MappingSpec struct {
 	CreatedAt  time.Time       `json:"createdAt"`
 }
 
+// RunCursor is the keyset position after the last run of a page (newest first).
+type RunCursor struct {
+	CreatedAt time.Time `json:"c"`
+	ID        string    `json:"i"`
+}
+
+// SpecCursor is the keyset position after the last mapping spec of a page (entity, then newest version first).
+type SpecCursor struct {
+	Entity  string `json:"e"`
+	Version int    `json:"v"`
+}
+
+// TemplateCursor is the keyset position after the last data template of a page (entity, name, newest version first).
+type TemplateCursor struct {
+	Entity  string `json:"e"`
+	Name    string `json:"n"`
+	Version int    `json:"v"`
+}
+
 type RunFilter struct {
 	Entity    string
 	Status    string
 	ProjectID string
+	After     *RunCursor
 	Limit     int
 }
 
@@ -52,7 +72,8 @@ func clampLimit(n int) int {
 	if n <= 0 {
 		return defaultListLimit
 	}
-	return min(n, maxListLimit)
+	// One more than the largest page, so a handler can fetch limit+1 rows to learn whether another page follows.
+	return min(n, maxListLimit+1)
 }
 
 type Run struct {
@@ -89,10 +110,10 @@ type Store interface {
 	// (entity, name, version) already holds the same checksum; a different checksum is a conflict.
 	SaveDataTemplate(ctx context.Context, tmpl DataTemplate, idempotencyKey string) (saved DataTemplate, created bool, err error)
 	GetDataTemplate(ctx context.Context, id string) (DataTemplate, error)
-	ListDataTemplates(ctx context.Context, entity string, limit int) ([]DataTemplate, error)
+	ListDataTemplates(ctx context.Context, entity string, after *TemplateCursor, limit int) ([]DataTemplate, error)
 	// RunLedger lists a run's per-row lineage in source key order; templatedOnly keeps rows that took a template default.
-	RunLedger(ctx context.Context, runID string, templatedOnly bool, limit int) ([]LedgerRow, error)
-	ListMappingSpecs(ctx context.Context, entity string, limit int) ([]MappingSpec, error)
+	RunLedger(ctx context.Context, runID string, templatedOnly bool, afterKey string, limit int) ([]LedgerRow, error)
+	ListMappingSpecs(ctx context.Context, entity string, after *SpecCursor, limit int) ([]MappingSpec, error)
 	// SaveConfigPackage records an applied package once; a repeated Idempotency-Key returns the stored row
 	// (created false) or a 422 when the stored package differs.
 	SaveConfigPackage(ctx context.Context, pkg ConfigPackage, idempotencyKey string) (saved ConfigPackage, created bool, err error)
@@ -246,12 +267,17 @@ func (s *Postgres) GetRun(ctx context.Context, id string) (Run, error) {
 
 func (s *Postgres) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 	p, _ := tenant.FromContext(ctx)
+	afterAt, afterID := time.Time{}, "00000000-0000-0000-0000-000000000000"
+	if f.After != nil {
+		afterAt, afterID = f.After.CreatedAt, f.After.ID
+	}
 	var runs []Run
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+runColumns+` from migration.run
 			where tenant_id = $1 and ($2 = '' or entity = $2) and ($3 = '' or status = $3)
 			and ($4 = '' or project_id = nullif($4, '')::uuid)
-			order by created_at desc, id desc limit $5`, p.TenantID, f.Entity, f.Status, f.ProjectID, clampLimit(f.Limit))
+			and ($5::boolean is false or (created_at, id) < ($6::timestamptz, $7::uuid))
+			order by created_at desc, id desc limit $8`, p.TenantID, f.Entity, f.Status, f.ProjectID, f.After != nil, afterAt, afterID, clampLimit(f.Limit))
 		if err != nil {
 			return err
 		}
@@ -346,13 +372,18 @@ func (s *Postgres) GetMappingSpec(ctx context.Context, id string) (MappingSpec, 
 	return m, err
 }
 
-func (s *Postgres) ListMappingSpecs(ctx context.Context, entity string, limit int) ([]MappingSpec, error) {
+func (s *Postgres) ListMappingSpecs(ctx context.Context, entity string, after *SpecCursor, limit int) ([]MappingSpec, error) {
 	p, _ := tenant.FromContext(ctx)
+	cur := SpecCursor{}
+	if after != nil {
+		cur = *after
+	}
 	var out []MappingSpec
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+specColumns+` from migration.mapping_spec
 			where tenant_id = $1 and ($2 = '' or entity = $2)
-			order by entity, version desc limit $3`, p.TenantID, entity, clampLimit(limit))
+			and ($3::boolean is false or entity > $4 or (entity = $4 and version < $5))
+			order by entity, version desc limit $6`, p.TenantID, entity, after != nil, cur.Entity, cur.Version, clampLimit(limit))
 		if err != nil {
 			return err
 		}
@@ -576,14 +607,19 @@ func (m *Mem) find(id string) Run {
 func (m *Mem) ListRuns(_ context.Context, f RunFilter) ([]Run, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Same order as Postgres: newest first, id breaking a created_at tie.
+	newestFirst := func(a, b Run) int { return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID)) }
 	var out []Run
-	for i := len(m.runs) - 1; i >= 0 && len(out) < clampLimit(f.Limit); i-- {
-		r := m.runs[i]
+	for _, r := range m.runs {
+		if f.After != nil && newestFirst(r, Run{CreatedAt: f.After.CreatedAt, ID: f.After.ID}) <= 0 {
+			continue
+		}
 		if (f.Entity == "" || r.Entity == f.Entity) && (f.Status == "" || r.Report.Status == f.Status) && (f.ProjectID == "" || r.ProjectID == f.ProjectID) {
 			out = append(out, r)
 		}
 	}
-	return out, nil
+	slices.SortFunc(out, newestFirst)
+	return out[:min(len(out), clampLimit(f.Limit))], nil
 }
 
 func (m *Mem) SaveMappingSpec(_ context.Context, spec MappingSpec, idempotencyKey string) (MappingSpec, bool, error) {
@@ -629,12 +665,12 @@ func (m *Mem) GetMappingSpec(_ context.Context, id string) (MappingSpec, error) 
 	return MappingSpec{}, specNotFound()
 }
 
-func (m *Mem) ListMappingSpecs(_ context.Context, entity string, limit int) ([]MappingSpec, error) {
+func (m *Mem) ListMappingSpecs(_ context.Context, entity string, after *SpecCursor, limit int) ([]MappingSpec, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []MappingSpec
 	for _, s := range m.specs {
-		if entity == "" || s.Entity == entity {
+		if (entity == "" || s.Entity == entity) && (after == nil || s.Entity > after.Entity || (s.Entity == after.Entity && s.Version < after.Version)) {
 			out = append(out, s)
 		}
 	}

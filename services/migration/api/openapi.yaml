@@ -16,11 +16,12 @@ paths:
         - { name: entity, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string, enum: [succeeded, partial, failed] } }
         - { name: projectId, in: query, description: Only runs started under this migration project., schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
-          description: Runs with counts, rejects and reconciliation.
-          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MigrationRun' } } } } } }
+          description: Runs with counts, rejects and reconciliation. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MigrationRun' } }, nextCursor: { type: string } } } } }
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createMigrationRun
@@ -88,11 +89,12 @@ paths:
       x-passage-duty: migration.run
       parameters:
         - { name: entity, in: query, schema: { type: string } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
-          description: Specs without their mapping body.
-          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MappingSpec' } } } } } }
+          description: Specs without their mapping body. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MappingSpec' } }, nextCursor: { type: string } } } } }
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: publishMappingSpec
@@ -142,11 +144,12 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: templated, in: query, description: When true only rows that took at least one template default are returned., schema: { type: boolean } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
-          description: Lineage rows of the run.
-          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LedgerRow' } } } } } }
+          description: Lineage rows of the run. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LedgerRow' } }, nextCursor: { type: string } } } } }
         '404':
           description: AUTH-0404, the run does not exist for this tenant.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
@@ -159,11 +162,12 @@ paths:
       x-passage-duty: migration.run
       parameters:
         - { name: entity, in: query, schema: { type: string } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
-          description: Templates without their defaults.
-          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DataTemplate' } } } } } }
+          description: Templates without their defaults. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DataTemplate' } }, nextCursor: { type: string } } } } }
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: publishDataTemplate

@@ -3,11 +3,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getTemplate, listTemplates, newKey, publishTemplate, type DataTemplate, type Problem } from "./api/client";
+import { describeProblem, getTemplate, listTemplatesPage, newKey, publishTemplate, type DataTemplate, type Problem } from "./api/client";
 import { formatDateTime, parseTemplateForm } from "./domain";
 import styles from "./pages.module.css";
 import { DUTY_SPEC_WRITE } from "./SpecPages";
+import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 const columns: DataTableColumn<DataTemplate>[] = [
   { key: "entity", header: "Entity", mono: true },
@@ -27,7 +29,8 @@ export function TemplatesPage() {
   const navigate = useNavigate();
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_SPEC_WRITE);
   const [entity, setEntity] = useState("");
-  const state = useLoad((signal) => listTemplates(entity.trim() || undefined, signal), entity.trim());
+  const state = useLoad((signal) => listTemplatesPage({ entity: entity.trim() || undefined }, signal), entity.trim());
+  const paged = usePaged(state, entity.trim(), (cursor) => listTemplatesPage({ entity: entity.trim() || undefined, cursor }));
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -59,13 +62,14 @@ export function TemplatesPage() {
         <DataTable
           label="Data templates"
           columns={columns}
-          rows={state.data ?? []}
+          rows={paged.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{ title: "No data templates yet", description: "Publish a template to give a migration run project defaults." }}
           onRowOpen={(row) => navigate(`/migration/templates/${row.id}`)}
         />
       )}
+      <LoadMore paged={paged} noun="data templates" />
     </div>
   );
 }

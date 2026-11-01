@@ -90,7 +90,7 @@ func (s *Postgres) ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error
 	sql := `select source_system, source_entity, source_key, target_id::text, content_hash,
 			coalesce(merged_into_target_id::text, ''), updated_at
 		from migration.xref where ` + strings.Join(where, " and ") + `
-		order by source_system, source_entity, source_key limit ` + arg(xrefLimit(f.Limit))
+		order by source_system, source_entity, source_key limit ` + arg(clampLimit(f.Limit))
 	out := []XrefRow{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sql, args...)
@@ -154,7 +154,7 @@ func (m *Mem) ListXref(_ context.Context, f XrefFilter) ([]XrefRow, error) {
 	slices.SortFunc(out, func(a, b XrefRow) int {
 		return compareXref(a.SourceSystem, a.Entity, a.SourceKey, XrefCursor{b.SourceSystem, b.Entity, b.SourceKey})
 	})
-	return out[:min(len(out), xrefLimit(f.Limit))], nil
+	return out[:min(len(out), clampLimit(f.Limit))], nil
 }
 
 func compareXref(system, entity, key string, c XrefCursor) int {
@@ -182,11 +182,4 @@ func (m *Mem) XrefSummary(context.Context) ([]XrefCount, error) {
 		return strings.Compare(a.SourceSystem+"\x00"+a.Entity, b.SourceSystem+"\x00"+b.Entity)
 	})
 	return out, nil
-}
-
-func xrefLimit(n int) int {
-	if n <= 0 {
-		return defaultListLimit
-	}
-	return min(n, maxListLimit+1)
 }

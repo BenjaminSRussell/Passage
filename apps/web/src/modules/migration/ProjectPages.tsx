@@ -9,7 +9,7 @@ import {
   getKeyRewriteRules,
   getProject,
   listProjects,
-  listRuns,
+  listRunsPage,
   newKey,
   previewKeyRewrite,
   replaceKeyRewriteRules,
@@ -33,9 +33,11 @@ import {
   type ProjectEditForm,
   type ProjectForm,
 } from "./domain";
+import { LoadMore } from "./LoadMore";
 import { DUTY_RUN } from "./RunPages";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 export const DUTY_PROJECT_WRITE = "migration.project.write";
 
@@ -363,7 +365,8 @@ const runColumns: DataTableColumn<MigrationRun>[] = [
 function ProjectRunsCard({ project }: { project: MigrationProject }) {
   const navigate = useNavigate();
   const canRun = holdsDuty(usePrincipalDuties(), DUTY_RUN);
-  const state = useLoad((signal) => listRuns({ projectId: project.id }, signal), project.id);
+  const state = useLoad((signal) => listRunsPage({ projectId: project.id }, signal), project.id);
+  const paged = usePaged(state, project.id, (cursor) => listRunsPage({ projectId: project.id, cursor }));
   return (
     <Card
       title="Runs"
@@ -383,13 +386,14 @@ function ProjectRunsCard({ project }: { project: MigrationProject }) {
         <DataTable
           label="Project runs"
           columns={runColumns}
-          rows={state.data ?? []}
+          rows={paged.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{ title: "No runs under this project yet", description: "Start a run from a published mapping spec to see counts and rejects here." }}
           onRowOpen={(row) => navigate(`/migration/runs/${row.id}`)}
         />
       )}
+      <LoadMore paged={paged} noun="runs" />
     </Card>
   );
 }
