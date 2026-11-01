@@ -94,6 +94,9 @@ func newStore(pool *pgxpool.Pool, getenv func(string) string) (*store.Postgres, 
 		slog.Warn("INVENTORY_URL is empty: failed inspections and nonconformances do not hold stock in inventory")
 		return st, nil
 	}
+	if len(splitList(getenv("QUALITY_HOLD_TENANTS"))) == 0 {
+		return nil, errors.New("INVENTORY_URL needs QUALITY_HOLD_TENANTS, the comma-separated tenant UUIDs whose queued hold calls the sweeper sends (tenants cannot be listed under row-level security)")
+	}
 	signer, err := tenant.ServiceSignerFromEnv(getenv)
 	if err != nil {
 		return nil, fmt.Errorf("service signer: %w", err)

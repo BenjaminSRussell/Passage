@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,7 +30,6 @@ const (
 	holdBatchSize   = 20
 	holdMaxAttempts = 10
 	holdCallTimeout = 5 * time.Second
-	holdKickBuffer  = 64
 	holdSweeper     = "system:quality-holds"
 )
 
@@ -44,7 +44,7 @@ type HoldPort interface {
 func (s *Postgres) WithHolds(h HoldPort) *Postgres {
 	linked := *s
 	linked.holds = h
-	linked.kick = make(chan string, holdKickBuffer)
+	linked.kicks = &kickSet{set: map[string]bool{}, wake: make(chan struct{}, 1)}
 	return &linked
 }
 
@@ -91,14 +91,15 @@ func (s *Postgres) holdForNCR(ctx context.Context, tx pgx.Tx, n domain.Nonconfor
 	if s.holds == nil {
 		return nil
 	}
-	if n.QualityOrderID == "" {
-		return s.queueHold(ctx, tx, ncrHoldLink(n))
+	l := ncrHoldLink(n)
+	if n.QualityOrderID != "" {
+		o, err := readOrder(ctx, tx, n.QualityOrderID, false)
+		if err != nil {
+			return err
+		}
+		l.dims = inventoryDims(o.Dims, map[string]string{"site": o.SiteID, "warehouse": o.WarehouseID}, n.Dims)
 	}
-	o, err := readOrder(ctx, tx, n.QualityOrderID, false)
-	if err != nil {
-		return err
-	}
-	return s.queueHold(ctx, tx, orderHoldLink(o))
+	return s.queueHold(ctx, tx, l)
 }
 
 func (s *Postgres) holdForNCRDisposition(ctx context.Context, tx pgx.Tx, n domain.Nonconformance, status string) error {
@@ -264,10 +265,34 @@ func (s *Postgres) kickFlush(ctx context.Context) {
 		return
 	}
 	p, _ := tenant.FromContext(ctx)
+	s.kicks.add(p.TenantID)
+}
+
+type kickSet struct {
+	mu   sync.Mutex
+	set  map[string]bool
+	wake chan struct{}
+}
+
+func (k *kickSet) add(tenantID string) {
+	k.mu.Lock()
+	k.set[tenantID] = true
+	k.mu.Unlock()
 	select {
-	case s.kick <- p.TenantID:
+	case k.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (k *kickSet) take() []string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	out := make([]string, 0, len(k.set))
+	for t := range k.set {
+		out = append(out, t)
+	}
+	clear(k.set)
+	return out
 }
 
 func sweepContext(parent context.Context, tenantID string) context.Context {
@@ -303,9 +328,11 @@ func (s *Postgres) RunHoldSweeper(ctx context.Context, tenants []string, interva
 			return
 		case <-ticker.C:
 			sweep()
-		case t := <-s.kick:
-			known[t] = true
-			s.FlushHolds(sweepContext(ctx, t))
+		case <-s.kicks.wake:
+			for _, t := range s.kicks.take() {
+				known[t] = true
+				s.FlushHolds(sweepContext(ctx, t))
+			}
 		}
 	}
 }

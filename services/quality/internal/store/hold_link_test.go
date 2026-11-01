@@ -105,6 +105,10 @@ func TestHoldLink_FailedInspectionPlacesTheLotAndTheDecisionReleasesTheAcceptedQ
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.FlushHolds(ctx)
+	if len(port.calls) != 2 || port.calls[1] != "place NONCONFORMANCE:"+manualNCR.ID {
+		t.Fatalf("a manual nonconformance on an order holds under its own source: %v", port.calls)
+	}
 	if _, _, err := s.PostUsageDecision(ctx, order.ID, 3, domain.Decision{Lines: lines, Split: split, DecidedBy: "u1"}, "d-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +122,12 @@ func TestHoldLink_FailedInspectionPlacesTheLotAndTheDecisionReleasesTheAcceptedQ
 		decisionNCR = ncrs[1]
 	}
 	last := port.got[len(port.got)-1]
-	if len(port.calls) != 2 || port.calls[1] != "release QUALITY_ORDER:"+order.ID || !last.KeepQty.Equal(decimal.NewFromInt(10)) ||
+	if len(port.calls) != 3 || port.calls[2] != "release QUALITY_ORDER:"+order.ID || !last.KeepQty.Equal(decimal.NewFromInt(10)) ||
 		last.MoveToType != "NONCONFORMANCE" || last.MoveToRef != decisionNCR.ID {
 		t.Fatalf("calls %v call %+v, want the lot released down to the 10 rejected and handed to the decision's NCR", port.calls, last)
 	}
-	if pendingLinks(t, s, ctx, holdDone) != 2 || pendingLinks(t, s, ctx, holdPending) != 0 {
-		t.Fatal("both links should be DONE")
+	if pendingLinks(t, s, ctx, holdDone) != 3 || pendingLinks(t, s, ctx, holdPending) != 0 {
+		t.Fatal("all three links should be DONE")
 	}
 	refuse := func(n domain.Nonconformance) (domain.Nonconformance, error) {
 		return n.Refuse("not a defect", time.Now())
@@ -132,8 +136,8 @@ func TestHoldLink_FailedInspectionPlacesTheLotAndTheDecisionReleasesTheAcceptedQ
 		t.Fatal(err)
 	}
 	s.FlushHolds(ctx)
-	if len(port.calls) != 2 {
-		t.Fatalf("refusing a nonconformance that placed nothing must not release the order's hold: %v", port.calls)
+	if len(port.calls) != 4 || port.calls[3] != "release NONCONFORMANCE:"+manualNCR.ID || !port.got[3].KeepQty.IsZero() {
+		t.Fatalf("refusing the manual nonconformance releases its own hold and not the order's: %v", port.calls)
 	}
 	tenantWide := withoutLegalEntity(ctx, tenant.DutyAllScope)
 	if _, _, err := s.UpdateNonconformance(tenantWide, decisionNCR.ID, decisionNCR.Version, "", refuse); err != nil {
@@ -141,7 +145,7 @@ func TestHoldLink_FailedInspectionPlacesTheLotAndTheDecisionReleasesTheAcceptedQ
 	}
 	s.FlushHolds(tenantWide)
 	last = port.got[len(port.got)-1]
-	if len(port.calls) != 3 || port.calls[2] != "release NONCONFORMANCE:"+decisionNCR.ID || !last.KeepQty.IsZero() || last.LegalEntityID != "00000000-0000-0000-0000-0000000000e1" {
+	if len(port.calls) != 5 || port.calls[4] != "release NONCONFORMANCE:"+decisionNCR.ID || !last.KeepQty.IsZero() || last.LegalEntityID != "00000000-0000-0000-0000-0000000000e1" {
 		t.Fatalf("the decision's NCR releases only what it holds, in the legal entity that placed it: %v %+v", port.calls, last)
 	}
 }
@@ -287,4 +291,55 @@ func (h *holdCalls) snapshot() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]string(nil), h.calls...)
+}
+
+func TestHoldLink_AManualNonconformanceHoldsAgainAfterTheDecisionAndReleasesOnlyItself(t *testing.T) {
+	base, _, ctx := setup(t)
+	port := &holdCalls{}
+	s := base.WithHolds(port)
+	order, group := holdOrder(t, s, ctx)
+	failing := []domain.Result{{TestID: group.Tests[0].TestID, SampleNo: 1, OutcomeID: ids.New(), Passed: false, RecordedBy: "u1"}}
+	if _, _, err := s.RecordResults(ctx, order.ID, 1, domain.StatusPending, failing, "r-1"); err != nil {
+		t.Fatal(err)
+	}
+	lines := []domain.DecisionLine{{Decision: domain.DecisionAccept, Quantity: order.LotQty}}
+	split, err := domain.SplitDecision(lines, order.LotQty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PostUsageDecision(ctx, order.ID, 2, domain.Decision{Lines: lines, Split: split, DecidedBy: "u1"}, "d-1"); err != nil {
+		t.Fatal(err)
+	}
+	s.FlushHolds(ctx)
+	if len(port.calls) != 2 || port.calls[1] != "release QUALITY_ORDER:"+order.ID || !port.got[1].KeepQty.IsZero() {
+		t.Fatalf("the decision releases the whole lot: %v", port.calls)
+	}
+
+	n := newNCR(t)
+	n.QualityOrderID = order.ID
+	n.Qty = decimal.NewFromInt(7)
+	manual, _, err := s.CreateNonconformance(ctx, n, "m-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.FlushHolds(ctx)
+	if len(port.calls) != 3 || port.calls[2] != "place NONCONFORMANCE:"+manual.ID {
+		t.Fatalf("a manual nonconformance holds again after the decision released the stock: %v", port.calls)
+	}
+	place := port.got[2]
+	// The order has a batch, so the hold is a whole-lot hold: everything available in the
+	// lot, with the site and warehouse taken from the order. Qty (7) is the nonconformance's own.
+	if !place.WholeLot || !place.Qty.Equal(decimal.NewFromInt(7)) || place.Dims["batch"] != "B1" || place.Dims["site"] != order.SiteID ||
+		place.Dims["warehouse"] != order.WarehouseID || place.Key != "nonconformance:"+manual.ID+":place" || place.Key == "quality-order:"+order.ID+":place" {
+		t.Fatalf("place call %+v", place)
+	}
+
+	refuse := func(n domain.Nonconformance) (domain.Nonconformance, error) { return n.Refuse("x", time.Now()) }
+	if _, _, err := s.UpdateNonconformance(ctx, manual.ID, manual.Version, "", refuse); err != nil {
+		t.Fatal(err)
+	}
+	s.FlushHolds(ctx)
+	if len(port.calls) != 4 || port.calls[3] != "release NONCONFORMANCE:"+manual.ID || !port.got[3].KeepQty.IsZero() {
+		t.Fatalf("refusing releases exactly that nonconformance's hold: %v", port.calls)
+	}
 }

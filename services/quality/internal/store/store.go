@@ -88,7 +88,7 @@ type Store interface {
 type Postgres struct {
 	pool  *pgxpool.Pool
 	holds HoldPort
-	kick  chan string
+	kicks *kickSet
 }
 
 // New returns a Postgres store over pool.
