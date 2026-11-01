@@ -128,6 +128,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCreateFromSales)).Post("/v1/production/sales-line-orders", a.createFromSalesLine)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:bulk-status", a.bulkStatus)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:merge", a.merge)
+	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:cancel-stale", a.cancelStaleOrders)
+	r.With(authz.RequireDuty(DutyEnd)).Post("/v1/production/orders:auto-end", a.autoEndOrders)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}", a.getOrder)
 	r.With(authz.RequireDuty(DutyWrite)).Patch("/v1/production/orders/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/status-log", a.getStatusLog)

@@ -427,6 +427,9 @@ type Bulk struct {
 	TraceID        string
 	IdempotencyKey string
 	RequestHash    string
+	// Versions, when it holds an order, is the version that order must still have (the one a
+	// housekeeping scan saw), so an order changed since the scan is refused, not moved.
+	Versions map[string]int
 }
 
 // BulkItem is the result for one order of a bulk status update.
@@ -442,16 +445,22 @@ type BulkItem struct {
 
 // BulkTransition applies the command to each order in its own transaction
 // (continue on error), in request order, and reports every order's outcome.
-// Each order runs at its current version under the key IdempotencyKey:orderId,
+// Each order runs at its current version (or its pinned one in Versions) under the key IdempotencyKey:orderId,
 // so retrying a batch replays the orders already moved and retries the rest.
 func (s *Postgres) BulkTransition(ctx context.Context, in Bulk) []BulkItem {
 	items := make([]BulkItem, 0, len(in.OrderIDs))
 	for _, id := range in.OrderIDs {
 		item := BulkItem{OrderID: id}
-		current, err := s.GetOrder(ctx, id)
+		version, pinned := in.Versions[id]
+		var err error
+		if !pinned {
+			var current Order
+			current, err = s.GetOrder(ctx, id)
+			version = current.Version
+		}
 		if err == nil {
 			var moved Order
-			moved, item.Replayed, err = s.Transition(ctx, Transition{OrderID: id, IfMatch: current.Version, Command: in.Command,
+			moved, item.Replayed, err = s.Transition(ctx, Transition{OrderID: id, IfMatch: version, Command: in.Command,
 				ZeroOutputDuty: in.ZeroOutputDuty, Actor: in.Actor, TraceID: in.TraceID,
 				IdempotencyKey: in.IdempotencyKey + ":" + id, RequestHash: in.RequestHash})
 			if err == nil {

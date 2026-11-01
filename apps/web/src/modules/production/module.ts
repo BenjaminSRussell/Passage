@@ -4,6 +4,7 @@ import type { PassageModule } from "../registry";
 import type { ProductionOrder } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
+import { HousekeepingPage } from "./HousekeepingPage";
 import { JournalInquiryPage } from "./JournalInquiryPage";
 import { KpiPage } from "./KpiPage";
 import { OcmProfilesPage } from "./OcmProfilesPage";
@@ -116,10 +117,11 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders); order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy, production parameters and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders); order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
+    { path: `${list}/housekeeping`, element: createElement(HousekeepingPage), handle: { title: "Order housekeeping" } },
     { path: `${list}/parameters`, element: createElement(ParametersPage), handle: { title: "Production parameters" } },
     { path: `${list}/posting-profiles`, element: createElement(PostingProfilesPage), handle: { title: "Posting profiles" } },
     { path: `${list}/as-built`, element: createElement(AsBuiltRoute), handle: { title: "As-built and where-used" } },
@@ -145,6 +147,7 @@ const production: PassageModule = {
     { label: "Production journals", to: `${list}/journals`, duty: "production.order.read" },
     { label: "Production KPIs", to: `${list}/kpi`, duty: "production.order.read" },
     { label: "Order changes", to: `${list}/order-changes`, duty: "production.order.read" },
+    { label: "Order housekeeping", to: `${list}/housekeeping`, duty: "production.order.read" },
     { label: "Order change profiles", to: `${list}/ocm-profiles`, duty: "production.setup.read" },
     { label: "Production parameters", to: `${list}/parameters`, duty: "production.setup.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },

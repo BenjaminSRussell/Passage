@@ -1487,7 +1487,21 @@ export interface ProductionParametersInput {
   splitAllocation: SplitAllocation;
   triggerPointsEnabled: boolean;
   asBuiltRequired: boolean;
+  /** The proposal of a picking-list journal that names none. */
+  pickingListProposal: Proposal;
+  /** The hours basis of a route-card journal that names none. */
+  routeCardProposal: RouteCardProposal;
+  /** Days after which a Created order that was never estimated is cancelled by the stale-order job; 0 never. */
+  staleOrderDays: number;
+  /** Opts the site in to the auto-end job. */
+  autoEndEnabled: boolean;
 }
+
+export type RouteCardProposal = "remaining" | "proportional";
+
+export const PICKING_PROPOSALS: Proposal[] = ["remaining", "proportional", "none"];
+export const ROUTE_CARD_PROPOSALS: RouteCardProposal[] = ["remaining", "proportional"];
+export const MAX_STALE_ORDER_DAYS = 3650;
 
 export interface ProductionParameters extends ProductionParametersInput {
   version: number;
@@ -1513,4 +1527,66 @@ export function saveProductionParameters(input: ProductionParametersInput, versi
     headers["If-Match"] = `"${version}"`;
   }
   return requestAt<ProductionParameters>(`${root}/parameters`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+// ---- Order housekeeping jobs (PRD 4.21.16) ----
+
+/** cancel-stale-created-orders and auto-end-fully-reported. */
+export type HousekeepingJob = "cancel-stale" | "auto-end";
+
+/** An order a housekeeping job selects. */
+export interface HousekeepingOrder {
+  orderId: string;
+  orderNumber: string;
+  siteId: string;
+  productId: string;
+  status: ProductionStatus;
+  quantity: string;
+  qtyReportedFinished: string;
+  version: number;
+  createdAt: string;
+  ageDays: number;
+}
+
+/** What a job selected and, unless it was a dry run, the result per order. */
+export interface HousekeepingResult {
+  job: string;
+  dryRun: boolean;
+  /** The Idempotency-Key was used before: the earlier run's orders are replayed, nothing is scanned again. */
+  replayed: boolean;
+  total: number;
+  /** More orders qualify than one call takes (500): run it again. */
+  truncated: boolean;
+  candidates: HousekeepingOrder[];
+  succeeded: number;
+  failed: number;
+  code?: string;
+  detail?: string;
+  results: BulkItem[];
+}
+
+/**
+ * Lists what a job would do (dryRun), or does it; a run needs an Idempotency-Key. orderIds limits a run to the orders a
+ * dry run showed, so it acts on no order the user did not review.
+ */
+export async function runHousekeeping(job: HousekeepingJob, dryRun: boolean, idempotencyKey: string, orderIds?: string[]): Promise<HousekeepingResult> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (!dryRun) {
+    headers["Idempotency-Key"] = idempotencyKey;
+  }
+  const payload = orderIds && orderIds.length > 0 ? { dryRun, orderIds } : { dryRun };
+  const body = await requestAt<Partial<HousekeepingResult>>(`${base}:${job}`, { method: "POST", headers, body: JSON.stringify(payload) });
+  return {
+    job: body.job ?? job,
+    dryRun: body.dryRun ?? dryRun,
+    replayed: body.replayed ?? false,
+    total: body.total ?? 0,
+    truncated: body.truncated ?? false,
+    candidates: Array.isArray(body.candidates) ? body.candidates : [],
+    succeeded: body.succeeded ?? 0,
+    failed: body.failed ?? 0,
+    code: body.code,
+    detail: body.detail,
+    results: Array.isArray(body.results) ? body.results : [],
+  };
 }

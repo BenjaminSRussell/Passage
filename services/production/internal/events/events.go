@@ -350,6 +350,10 @@ type ParametersSavedData struct {
 	SplitAllocation      string `json:"splitAllocation"`
 	TriggerPointsEnabled bool   `json:"triggerPointsEnabled"`
 	AsBuiltRequired      bool   `json:"asBuiltRequired"`
+	PickingListProposal  string `json:"pickingListProposal"`
+	RouteCardProposal    string `json:"routeCardProposal"`
+	StaleOrderDays       int    `json:"staleOrderDays"`
+	AutoEndEnabled       bool   `json:"autoEndEnabled"`
 	Version              int    `json:"version"`
 	Actor                string `json:"actor"`
 	OccurredAt           string `json:"occurredAt"`

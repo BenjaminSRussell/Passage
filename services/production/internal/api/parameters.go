@@ -16,7 +16,8 @@ import (
 func (a *API) defaultParameters() domain.Parameters {
 	return domain.Parameters{RAFTolerancePct: a.cfg.RAFTolerancePct, OverConsumptionPct: a.cfg.OverConsumptionPct,
 		AutoStartOnFeedback: a.cfg.AutoStartOnFeedback, EstimateOnCreate: a.cfg.EstimateOnCreate,
-		SplitAllocation: domain.AllocProportional, TriggerPointsEnabled: true}
+		SplitAllocation: domain.AllocProportional, TriggerPointsEnabled: true, PickingListProposal: domain.ProposeRemaining,
+		RouteCardProposal: domain.ProposeRemaining, StaleOrderDays: domain.DefaultStaleOrderDays}
 }
 
 type parametersList struct {
@@ -85,6 +86,13 @@ type parametersRequest struct {
 	SplitAllocation      string           `json:"splitAllocation"`
 	TriggerPointsEnabled *bool            `json:"triggerPointsEnabled"`
 	AsBuiltRequired      *bool            `json:"asBuiltRequired"`
+	// The settings added in slice 17 are optional so earlier clients keep working: an
+	// omitted one keeps its stored value on a replace, and takes the default (remaining,
+	// remaining, 90 days, auto-end off) on a create.
+	PickingListProposal domain.Proposal `json:"pickingListProposal"`
+	RouteCardProposal   domain.Proposal `json:"routeCardProposal"`
+	StaleOrderDays      *int            `json:"staleOrderDays"`
+	AutoEndEnabled      *bool           `json:"autoEndEnabled"`
 }
 
 func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +129,14 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 	if req.SiteID != domain.AllKey && !ids.Valid(req.SiteID) {
 		fields["siteId"] = "must be a UUID or All"
 	}
-	prm := domain.Parameters{SiteID: req.SiteID, SplitAllocation: domain.Allocation(req.SplitAllocation)}
+	prm := domain.Parameters{SiteID: req.SiteID, SplitAllocation: domain.Allocation(req.SplitAllocation),
+		PickingListProposal: req.PickingListProposal, RouteCardProposal: req.RouteCardProposal, StaleOrderDays: domain.DefaultStaleOrderDays}
+	if req.StaleOrderDays != nil {
+		prm.StaleOrderDays = *req.StaleOrderDays
+	}
+	if req.AutoEndEnabled != nil {
+		prm.AutoEndEnabled = *req.AutoEndEnabled
+	}
 	missing := "is required"
 	if req.RAFTolerancePct == nil {
 		fields["rafTolerancePct"] = missing
@@ -142,6 +157,12 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 	if len(fields) == 0 {
 		prm.AutoStartOnFeedback, prm.EstimateOnCreate = *req.AutoStartOnFeedback, *req.EstimateOnCreate
 		prm.TriggerPointsEnabled, prm.AsBuiltRequired = *req.TriggerPointsEnabled, *req.AsBuiltRequired
+		if prm.PickingListProposal == "" {
+			prm.PickingListProposal = domain.ProposeRemaining
+		}
+		if prm.RouteCardProposal == "" {
+			prm.RouteCardProposal = domain.ProposeRemaining
+		}
 		for k, v := range prm.Validate() {
 			fields[k] = v
 		}
@@ -150,7 +171,10 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	saved, created, err := a.store.SaveParameters(r.Context(), store.ParametersSave{LegalEntityID: req.LegalEntityID, Parameters: prm, IfMatch: ifMatch, Actor: p.UserID})
+	keep := store.KeepParameters{PickingListProposal: req.PickingListProposal == "", RouteCardProposal: req.RouteCardProposal == "",
+		StaleOrderDays: req.StaleOrderDays == nil, AutoEndEnabled: req.AutoEndEnabled == nil}
+	saved, created, err := a.store.SaveParameters(r.Context(), store.ParametersSave{LegalEntityID: req.LegalEntityID, Parameters: prm, IfMatch: ifMatch,
+		Actor: p.UserID, Keep: keep})
 	if err != nil {
 		a.fail(w, r, "save production parameters", err)
 		return

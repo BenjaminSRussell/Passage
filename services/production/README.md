@@ -6,7 +6,7 @@ as-built genealogy; slice 4 adds the bulk status update, and split and merge (sl
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
 order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds
-order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters.
+order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters; slice 17 adds the order housekeeping jobs and the journal proposal defaults.
 
 Slice 1:
 
@@ -454,3 +454,27 @@ Slice 16:
   for a site with no row) on creating and posting journals, report as finished, create, split and
   trigger evaluation. With as-built required, `:end` of an order that reported output without an
   attached as-built record is refused with 422 `PRODUCTION_AS_BUILT_REQUIRED`.
+
+Slice 17:
+
+- Journal proposal defaults (PRD 4.21.13): the parameters gain `pickingListProposal` (remaining,
+  proportional, none) and `routeCardProposal` (remaining, proportional), migration
+  `0016_housekeeping_parameters.sql`. A picking-list or route-card journal created without a
+  `proposal` takes its site's default (the store resolves it inside the create transaction); a
+  report as finished stays proportional and a request that names a proposal wins. On `PUT`, an
+  omitted new setting keeps its stored value (a create takes the default).
+- Order housekeeping (PRD 4.21.16): `POST /v1/production/orders:cancel-stale` and
+  `POST /v1/production/orders:auto-end`, the `cancel-stale-created-orders` and
+  `auto-end-fully-reported` jobs as on-demand commands (the Temporal schedule is wave 4). Each
+  selects the legal entity's candidates (oldest first, at most 500, `total` and `truncated` report
+  the rest), and `dryRun` lists them and changes nothing. A run applies the ordinary `:cancel` or
+  `:end` command to each order in its own transaction through the bulk path, so status log,
+  events, settlement and every End rule apply and a refusal is listed per order
+  (`PRODUCTION_BULK_PARTIAL`). Each order runs at the version the scan saw, `orderIds` limits a
+  run to the orders a dry run showed, and a retry under the same Idempotency-Key replays that
+  run's orders (`replayed`) rather than scanning again. End's settlement goes to the WIP
+  subledger and `gl-postings:run` books it in the GL, as for any `:end`.
+  Stale: status Created and never estimated (no status-log move to Estimated), origin not `PlannedOrder`, older than the
+  site's `staleOrderDays` (site row, else All row, else 90; 0 never). Auto-end: ReportedAsFinished
+  with the whole quantity reported, no draft journal, at a site with `autoEndEnabled` (default
+  off). Duties: `production.order.release` and `production.order.end`, the commands' own.

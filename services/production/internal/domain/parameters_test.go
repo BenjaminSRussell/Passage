@@ -27,10 +27,13 @@ func TestParametersValidate(t *testing.T) {
 		t.Fatalf("boundaries are valid: %v", f)
 	}
 	for name, mut := range map[string]func(*Parameters){
-		"siteId":             func(p *Parameters) { p.SiteID = "" },
-		"rafTolerancePct":    func(p *Parameters) { p.RAFTolerancePct = decimal.RequireFromString("100.01") },
-		"overConsumptionPct": func(p *Parameters) { p.OverConsumptionPct = decimal.RequireFromString("1000.01") },
-		"splitAllocation":    func(p *Parameters) { p.SplitAllocation = "" },
+		"siteId":              func(p *Parameters) { p.SiteID = "" },
+		"rafTolerancePct":     func(p *Parameters) { p.RAFTolerancePct = decimal.RequireFromString("100.01") },
+		"overConsumptionPct":  func(p *Parameters) { p.OverConsumptionPct = decimal.RequireFromString("1000.01") },
+		"splitAllocation":     func(p *Parameters) { p.SplitAllocation = "" },
+		"pickingListProposal": func(p *Parameters) { p.PickingListProposal = "most" },
+		"routeCardProposal":   func(p *Parameters) { p.RouteCardProposal = ProposeNone },
+		"staleOrderDays":      func(p *Parameters) { p.StaleOrderDays = 3651 },
 	} {
 		p := ok
 		mut(&p)
@@ -71,5 +74,38 @@ func TestCheckAsBuiltRequired(t *testing.T) {
 		if err != nil && err.(*Error).Code != CodeAsBuiltRequired {
 			t.Errorf("code %v", err)
 		}
+	}
+}
+
+func TestParametersValidate_StaleDaysBoundsAndProposals(t *testing.T) {
+	ok := Parameters{SiteID: AllKey, SplitAllocation: AllocProportional, PickingListProposal: ProposeNone, RouteCardProposal: ProposeProportional, StaleOrderDays: 0}
+	if f := ok.Validate(); len(f) != 0 {
+		t.Fatalf("none, proportional and 0 days are valid: %v", f)
+	}
+	ok.StaleOrderDays = MaxStaleOrderDays
+	if f := ok.Validate(); len(f) != 0 {
+		t.Fatalf("3650 days is valid: %v", f)
+	}
+	ok.StaleOrderDays = -1
+	if ok.Validate()["staleOrderDays"] == "" {
+		t.Error("negative days must be refused")
+	}
+}
+
+func TestJournalProposal_SiteDefaults(t *testing.T) {
+	p := Parameters{PickingListProposal: ProposeNone, RouteCardProposal: ProposeProportional}
+	for typ, want := range map[JournalType]Proposal{JournalPickingList: ProposeNone, JournalRouteCard: ProposeProportional, JournalReportFinished: ProposeProportional} {
+		if got := p.JournalProposal(typ); got != want {
+			t.Errorf("%s: %s, want %s", typ, got, want)
+		}
+	}
+	if got := (Parameters{}).JournalProposal(JournalPickingList); got != ProposeRemaining {
+		t.Errorf("unset picking list: %s", got)
+	}
+	if got := (Parameters{}).JournalProposal(JournalRouteCard); got != ProposeRemaining {
+		t.Errorf("unset route card: %s", got)
+	}
+	if p, _ := ResolveParameters(nil, "S", Parameters{}); p.PickingListProposal != ProposeRemaining || p.RouteCardProposal != ProposeRemaining {
+		t.Errorf("defaults: %+v", p)
 	}
 }

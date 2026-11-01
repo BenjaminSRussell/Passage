@@ -71,6 +71,7 @@ type fakeStore struct {
 	operCommands []store.OperationCommand
 	operOutcome  store.OperationOutcome
 	operErr      error
+	hk           housekeepingFake
 	// order change management (FR-21.16)
 	ocm    ocmFake
 	params paramsFake

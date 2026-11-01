@@ -112,7 +112,7 @@ func validateJournal(req journalRequest, in *store.NewJournal, fields map[string
 	case req.Proposal == "" && req.Type == domain.JournalReportFinished:
 		in.Proposal = domain.ProposeProportional
 	case req.Proposal == "":
-		in.Proposal = domain.ProposeRemaining
+		// Left empty: the store applies the site's picking-list or route-card default (PRD 4.21.13).
 	case !req.Proposal.Valid():
 		fields["proposal"] = "must be remaining, proportional or none"
 	}

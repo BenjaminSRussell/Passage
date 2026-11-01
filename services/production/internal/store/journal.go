@@ -190,6 +190,10 @@ func (s *Postgres) CreateJournal(ctx context.Context, in NewJournal) (Journal, b
 		if in.PostingDate == "" {
 			in.PostingDate = today()
 		}
+		if in.Proposal == "" {
+			// The site's default (PRD 4.21.13): the picking-list proposal or route-card basis.
+			in.Proposal = prm.JournalProposal(in.Type)
+		}
 		out, err = createJournal(ctx, tx, p.TenantID, &h, in)
 		created = err == nil
 		return err

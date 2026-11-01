@@ -49,6 +49,15 @@ describe("production parameters (PRD 4.21.13)", () => {
     expect(validateParameters({ ...blankParameters(), rafTolerancePct: "1.234" }).rafTolerancePct).toBeDefined();
   });
 
+  it("validates the proposal defaults and the stale-order days", () => {
+    expect(validateParameters({ ...blankParameters(), pickingListProposal: "none", routeCardProposal: "proportional", staleOrderDays: 0 })).toEqual({});
+    const errors = validateParameters({ ...blankParameters(), pickingListProposal: "most" as never, routeCardProposal: "none" as never, staleOrderDays: 3651 });
+    expect(Object.keys(errors).sort()).toEqual(["pickingListProposal", "routeCardProposal", "staleOrderDays"]);
+    expect(validateParameters({ ...blankParameters(), staleOrderDays: 1.5 }).staleOrderDays).toBeDefined();
+    expect(validateParameters({ ...blankParameters(), staleOrderDays: Number.NaN }).staleOrderDays).toBeDefined();
+    expect(validateParameters({ ...blankParameters(), staleOrderDays: -1 }).staleOrderDays).toBeDefined();
+  });
+
   it("lists the stored rows with the defaults and replaces under If-Match", async () => {
     const fetchMock = stubFetch((_url, init) => (init?.method === "PUT" ? json({ ...stored, version: 3, siteId: "All" }) : json({ items: [stored], defaults })));
     expect(await listProductionParameters()).toEqual({ items: [stored], defaults });
@@ -72,11 +81,17 @@ describe("production parameters (PRD 4.21.13)", () => {
     await userEvent.type(within(form).getByLabelText(/RAF tolerance/), "4");
     await userEvent.selectOptions(within(form).getByLabelText("Estimate on create"), "yes");
     await userEvent.selectOptions(within(form).getByLabelText(/Split allocation default/), "keep-on-original");
+    await userEvent.selectOptions(within(form).getByLabelText("Picking-list proposal"), "none");
+    await userEvent.selectOptions(within(form).getByLabelText("Route-card hours basis"), "proportional");
+    await userEvent.clear(within(form).getByLabelText(/Cancel stale orders after/));
+    await userEvent.type(within(form).getByLabelText(/Cancel stale orders after/), "45");
+    await userEvent.selectOptions(within(form).getByLabelText("Auto-end fully reported orders"), "yes");
     await userEvent.click(within(form).getByRole("button", { name: "Save parameters" }));
     expect(await screen.findByText("Production parameters for All saved (version 3).")).toBeInTheDocument();
     const [, put] = calls(fetchMock).find(([, init]) => init?.method === "PUT")!;
     expect((put?.headers as Record<string, string>)["If-Match"]).toBe('"2"');
-    expect(JSON.parse(String(put?.body))).toMatchObject({ siteId: "All", rafTolerancePct: "4", estimateOnCreate: true, splitAllocation: "keep-on-original", asBuiltRequired: true });
+    expect(JSON.parse(String(put?.body))).toMatchObject({ siteId: "All", rafTolerancePct: "4", estimateOnCreate: true, splitAllocation: "keep-on-original", asBuiltRequired: true,
+      pickingListProposal: "none", routeCardProposal: "proportional", staleOrderDays: 45, autoEndEnabled: true });
   });
 
   it("starts a new row from the service defaults", async () => {

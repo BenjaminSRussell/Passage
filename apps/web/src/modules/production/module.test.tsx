@@ -27,6 +27,7 @@ describe("production module", () => {
     expect(production.routes.map((r) => r.path)).toEqual([
       "/production",
       "/production/new",
+      "/production/housekeeping",
       "/production/parameters",
       "/production/posting-profiles",
       "/production/as-built",
@@ -52,6 +53,7 @@ describe("production module", () => {
       { label: "Production journals", to: "/production/journals", duty: "production.order.read" },
       { label: "Production KPIs", to: "/production/kpi", duty: "production.order.read" },
       { label: "Order changes", to: "/production/order-changes", duty: "production.order.read" },
+      { label: "Order housekeeping", to: "/production/housekeeping", duty: "production.order.read" },
       { label: "Order change profiles", to: "/production/ocm-profiles", duty: "production.setup.read" },
       { label: "Production parameters", to: "/production/parameters", duty: "production.setup.read" },
       { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
+  MAX_STALE_ORDER_DAYS,
+  PICKING_PROPOSALS,
+  ROUTE_CARD_PROPOSALS,
   SPLIT_ALLOCATIONS,
   describeProblem,
   listProductionParameters,
@@ -8,9 +11,11 @@ import {
   type Problem,
   type ProductionParameters,
   type ProductionParametersInput,
+  type Proposal,
+  type RouteCardProposal,
   type SplitAllocation,
 } from "./api/client";
-import { splitAllocationLabel, yesNo } from "./labels";
+import { proposalLabel, splitAllocationLabel, yesNo } from "./labels";
 import styles from "./pages.module.css";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,6 +34,10 @@ export const blankParameters = (): ProductionParametersInput => ({
   splitAllocation: "proportional",
   triggerPointsEnabled: true,
   asBuiltRequired: false,
+  pickingListProposal: "remaining",
+  routeCardProposal: "remaining",
+  staleOrderDays: 90,
+  autoEndEnabled: false,
 });
 
 /** Validates the parameters like the service: the site (UUID or All) and the two percentage ranges. */
@@ -46,6 +55,15 @@ export function validateParameters(p: ProductionParametersInput): Record<string,
   if (!SPLIT_ALLOCATIONS.includes(p.splitAllocation)) {
     errors.splitAllocation = "Choose proportional or keep on the original.";
   }
+  if (!PICKING_PROPOSALS.includes(p.pickingListProposal)) {
+    errors.pickingListProposal = "Choose remaining, proportional or enter the lines.";
+  }
+  if (!ROUTE_CARD_PROPOSALS.includes(p.routeCardProposal)) {
+    errors.routeCardProposal = "Choose remaining or proportional.";
+  }
+  if (!Number.isInteger(p.staleOrderDays) || p.staleOrderDays < 0 || p.staleOrderDays > MAX_STALE_ORDER_DAYS) {
+    errors.staleOrderDays = `Enter whole days from 0 to ${MAX_STALE_ORDER_DAYS}; 0 never cancels.`;
+  }
   return errors;
 }
 
@@ -58,15 +76,19 @@ const columns: DataTableColumn<ProductionParameters>[] = [
   { key: "splitAllocation", header: "Split allocation", render: (row) => (row.splitAllocation === "keep-on-original" ? "Keep on original" : "Proportional") },
   { key: "triggerPointsEnabled", header: "Trigger points", render: (row) => yesNo(row.triggerPointsEnabled) },
   { key: "asBuiltRequired", header: "As-built required", render: (row) => yesNo(row.asBuiltRequired) },
+  { key: "pickingListProposal", header: "Picking proposal", render: (row) => proposalLabel[row.pickingListProposal] ?? row.pickingListProposal },
+  { key: "routeCardProposal", header: "Route-card basis", render: (row) => proposalLabel[row.routeCardProposal] ?? row.routeCardProposal },
+  { key: "staleOrderDays", header: "Stale after (days)", align: "end", render: (row) => (row.staleOrderDays === 0 ? "Never" : String(row.staleOrderDays)) },
+  { key: "autoEndEnabled", header: "Auto-end", render: (row) => yesNo(row.autoEndEnabled) },
   { key: "version", header: "Version", align: "end" },
 ];
 
-type Flag = "autoStartOnFeedback" | "estimateOnCreate" | "triggerPointsEnabled" | "asBuiltRequired";
+type Flag = "autoStartOnFeedback" | "estimateOnCreate" | "triggerPointsEnabled" | "asBuiltRequired" | "autoEndEnabled";
 
 /**
  * Production parameters (PRD 4.21.13): per site, or for All sites, the tolerances on report as finished and picking,
- * auto-start on feedback, estimate on create, the split allocation default, trigger-point evaluation and the as-built
- * requirement at End. A site without parameters runs on the service defaults.
+ * auto-start on feedback, estimate on create, the split allocation default, trigger-point evaluation, the as-built
+ * requirement at End, the journal proposal defaults and the two housekeeping jobs' settings. A site without parameters runs on the service defaults.
  */
 export function ParametersPage() {
   const [state, setState] = useState<{ rows: ProductionParameters[]; defaults: ProductionParametersInput | null; loading: boolean; error: Problem | null }>({
@@ -106,6 +128,10 @@ export function ParametersPage() {
       splitAllocation: row.splitAllocation,
       triggerPointsEnabled: row.triggerPointsEnabled,
       asBuiltRequired: row.asBuiltRequired,
+      pickingListProposal: row.pickingListProposal ?? "remaining",
+      routeCardProposal: row.routeCardProposal ?? "remaining",
+      staleOrderDays: row.staleOrderDays ?? 90,
+      autoEndEnabled: row.autoEndEnabled ?? false,
     });
     setErrors({});
     setFailure(null);
@@ -221,6 +247,39 @@ export function ParametersPage() {
             </FormField>
             {flag("triggerPointsEnabled", "Trigger points enabled", "Route-card feedback evaluates the order's trigger points.")}
             {flag("asBuiltRequired", "As-built required", "End is refused for an order that reported output without an as-built record.")}
+            <FormField id="prm-pickingListProposal" label="Picking-list proposal" hint="Used when a picking list is created without a proposal." error={errors.pickingListProposal}>
+              {(control) => (
+                <Select {...control} value={form.pickingListProposal} onChange={(e) => setForm({ ...form, pickingListProposal: e.target.value as Proposal })}>
+                  {PICKING_PROPOSALS.map((m) => (
+                    <option key={m} value={m}>
+                      {proposalLabel[m]}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField id="prm-routeCardProposal" label="Route-card hours basis" hint="Used when a route card is created without a proposal." error={errors.routeCardProposal}>
+              {(control) => (
+                <Select {...control} value={form.routeCardProposal} onChange={(e) => setForm({ ...form, routeCardProposal: e.target.value as RouteCardProposal })}>
+                  {ROUTE_CARD_PROPOSALS.map((m) => (
+                    <option key={m} value={m}>
+                      {proposalLabel[m]}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField id="prm-staleOrderDays" label="Cancel stale orders after (days)" hint="Orders still Created, never estimated, older than this are cancelled by the housekeeping job. 0 never cancels." error={errors.staleOrderDays}>
+              {(control) => (
+                <Input
+                  {...control}
+                  inputMode="numeric"
+                  value={Number.isNaN(form.staleOrderDays) ? "" : String(form.staleOrderDays)}
+                  onChange={(e) => setForm({ ...form, staleOrderDays: e.target.value.trim() === "" ? Number.NaN : Number(e.target.value) })}
+                />
+              )}
+            </FormField>
+            {flag("autoEndEnabled", "Auto-end fully reported orders", "The housekeeping job ends orders that are fully reported as finished at this site.")}
           </div>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={saving}>

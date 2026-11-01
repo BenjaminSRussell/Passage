@@ -34,17 +34,28 @@ type ParametersSave struct {
 	Parameters    domain.Parameters
 	IfMatch       int
 	Actor         string
+	// Keep names the settings of slice 17 the request left out: a replace keeps their stored
+	// value (a client that does not know them must not reset a site's stale-order age or
+	// auto-end opt-in), a create takes the value in Parameters (the default).
+	Keep KeepParameters
+}
+
+// KeepParameters flags the optional settings a save leaves as they are.
+type KeepParameters struct {
+	PickingListProposal, RouteCardProposal, StaleOrderDays, AutoEndEnabled bool
 }
 
 const parameterColumns = `legal_entity_id::text, site_key, raf_tolerance_pct::text, over_consumption_pct::text, auto_start_on_feedback,
-	estimate_on_create, split_allocation, trigger_points_enabled, as_built_required, version, updated_by, updated_at`
+	estimate_on_create, split_allocation, trigger_points_enabled, as_built_required, picking_list_proposal, route_card_proposal,
+	stale_order_days, auto_end_enabled, version, updated_by, updated_at`
 
 func scanParameters(row pgx.Row) (StoredParameters, error) {
 	var p StoredParameters
-	var raf, over, alloc string
+	var raf, over, alloc, pick, card string
 	err := row.Scan(&p.LegalEntityID, &p.SiteID, &raf, &over, &p.AutoStartOnFeedback, &p.EstimateOnCreate, &alloc,
-		&p.TriggerPointsEnabled, &p.AsBuiltRequired, &p.Version, &p.UpdatedBy, &p.UpdatedAt)
+		&p.TriggerPointsEnabled, &p.AsBuiltRequired, &pick, &card, &p.StaleOrderDays, &p.AutoEndEnabled, &p.Version, &p.UpdatedBy, &p.UpdatedAt)
 	p.RAFTolerancePct, p.OverConsumptionPct, p.SplitAllocation = dec(raf), dec(over), domain.Allocation(alloc)
+	p.PickingListProposal, p.RouteCardProposal = domain.Proposal(pick), domain.Proposal(card)
 	return p, err
 }
 
@@ -110,9 +121,31 @@ func (s *Postgres) SaveParameters(ctx context.Context, in ParametersSave) (Store
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		pr := in.Parameters
-		var version int
-		err := tx.QueryRow(ctx, `select version from production_parameters
-			where tenant_id = $1 and legal_entity_id = $2 and site_key = $3 for update`, p.TenantID, in.LegalEntityID, pr.SiteID).Scan(&version)
+		if pr.PickingListProposal == "" {
+			pr.PickingListProposal = domain.ProposeRemaining
+		}
+		if pr.RouteCardProposal == "" {
+			pr.RouteCardProposal = domain.ProposeRemaining
+		}
+		var version, staleDays int
+		var pick, card string
+		var autoEnd bool
+		err := tx.QueryRow(ctx, `select version, picking_list_proposal, route_card_proposal, stale_order_days, auto_end_enabled from production_parameters
+			where tenant_id = $1 and legal_entity_id = $2 and site_key = $3 for update`, p.TenantID, in.LegalEntityID, pr.SiteID).Scan(&version, &pick, &card, &staleDays, &autoEnd)
+		if err == nil {
+			if in.Keep.PickingListProposal {
+				pr.PickingListProposal = domain.Proposal(pick)
+			}
+			if in.Keep.RouteCardProposal {
+				pr.RouteCardProposal = domain.Proposal(card)
+			}
+			if in.Keep.StaleOrderDays {
+				pr.StaleOrderDays = staleDays
+			}
+			if in.Keep.AutoEndEnabled {
+				pr.AutoEndEnabled = autoEnd
+			}
+		}
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			if in.IfMatch != 0 {
@@ -122,10 +155,11 @@ func (s *Postgres) SaveParameters(ctx context.Context, in ParametersSave) (Store
 			// A concurrent create of the same site wins the insert; this one is a stale write.
 			var tag pgconn.CommandTag
 			tag, err = tx.Exec(ctx, `insert into production_parameters (tenant_id, legal_entity_id, site_key, raf_tolerance_pct, over_consumption_pct,
-					auto_start_on_feedback, estimate_on_create, split_allocation, trigger_points_enabled, as_built_required, updated_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) on conflict do nothing`, p.TenantID, in.LegalEntityID, pr.SiteID, pr.RAFTolerancePct.String(),
+					auto_start_on_feedback, estimate_on_create, split_allocation, trigger_points_enabled, as_built_required, updated_by,
+					picking_list_proposal, route_card_proposal, stale_order_days, auto_end_enabled)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) on conflict do nothing`, p.TenantID, in.LegalEntityID, pr.SiteID, pr.RAFTolerancePct.String(),
 				pr.OverConsumptionPct.String(), pr.AutoStartOnFeedback, pr.EstimateOnCreate, string(pr.SplitAllocation), pr.TriggerPointsEnabled,
-				pr.AsBuiltRequired, in.Actor)
+				pr.AsBuiltRequired, in.Actor, string(pr.PickingListProposal), string(pr.RouteCardProposal), pr.StaleOrderDays, pr.AutoEndEnabled)
 			if err == nil && tag.RowsAffected() == 0 {
 				return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "the parameters were created by another user; reload them and save with If-Match")
 			}
@@ -138,10 +172,10 @@ func (s *Postgres) SaveParameters(ctx context.Context, in ParametersSave) (Store
 		default:
 			_, err = tx.Exec(ctx, `update production_parameters set raf_tolerance_pct = $4, over_consumption_pct = $5, auto_start_on_feedback = $6,
 					estimate_on_create = $7, split_allocation = $8, trigger_points_enabled = $9, as_built_required = $10, updated_by = $11,
-					updated_at = now(), version = version + 1
+					picking_list_proposal = $12, route_card_proposal = $13, stale_order_days = $14, auto_end_enabled = $15, updated_at = now(), version = version + 1
 				where tenant_id = $1 and legal_entity_id = $2 and site_key = $3`, p.TenantID, in.LegalEntityID, pr.SiteID, pr.RAFTolerancePct.String(),
 				pr.OverConsumptionPct.String(), pr.AutoStartOnFeedback, pr.EstimateOnCreate, string(pr.SplitAllocation), pr.TriggerPointsEnabled,
-				pr.AsBuiltRequired, in.Actor)
+				pr.AsBuiltRequired, in.Actor, string(pr.PickingListProposal), string(pr.RouteCardProposal), pr.StaleOrderDays, pr.AutoEndEnabled)
 		}
 		if err != nil {
 			return err
@@ -154,7 +188,9 @@ func (s *Postgres) SaveParameters(ctx context.Context, in ParametersSave) (Store
 		return enqueue(ctx, tx, in.LegalEntityID, prodevents.ParametersSaved, p.TenantID, in.Actor, prodevents.ParametersSavedData{
 			LegalEntityID: out.LegalEntityID, SiteID: out.SiteID, RAFTolerancePct: out.RAFTolerancePct.String(), OverConsumptionPct: out.OverConsumptionPct.String(),
 			AutoStartOnFeedback: out.AutoStartOnFeedback, EstimateOnCreate: out.EstimateOnCreate, SplitAllocation: string(out.SplitAllocation),
-			TriggerPointsEnabled: out.TriggerPointsEnabled, AsBuiltRequired: out.AsBuiltRequired, Version: out.Version, Actor: in.Actor,
+			TriggerPointsEnabled: out.TriggerPointsEnabled, AsBuiltRequired: out.AsBuiltRequired,
+			PickingListProposal: string(out.PickingListProposal), RouteCardProposal: string(out.RouteCardProposal), StaleOrderDays: out.StaleOrderDays,
+			AutoEndEnabled: out.AutoEndEnabled, Version: out.Version, Actor: in.Actor,
 			OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano)})
 	})
 	return out, created, err

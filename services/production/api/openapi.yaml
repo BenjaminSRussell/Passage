@@ -712,6 +712,48 @@ components:
         code: { type: string, description: 'PRODUCTION_BULK_PARTIAL (PROD-0022) when some orders failed.' }
         detail: { type: string }
         results: { type: array, items: { $ref: '#/components/schemas/BulkItem' } }
+    HousekeepingRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        dryRun: { type: boolean, description: List the candidates and change nothing. }
+        orderIds:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: { type: string, format: uuid }
+          description: 'Optional: only these orders (the candidates a dry run showed), so a run acts on no order the caller did not review; listed orders that no longer qualify are left out.'
+    HousekeepingOrder:
+      type: object
+      required: [orderId, orderNumber, siteId, productId, status, quantity, qtyReportedFinished, version, createdAt, ageDays]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        siteId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/Status' }
+        quantity: { $ref: '#/components/schemas/Decimal' }
+        qtyReportedFinished: { $ref: '#/components/schemas/Decimal' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        ageDays: { type: integer, description: Whole days since the order was created. }
+    HousekeepingResult:
+      type: object
+      required: [job, legalEntityId, dryRun, replayed, total, truncated, candidates, succeeded, failed, results]
+      properties:
+        job: { type: string, enum: [cancel-stale-created-orders, auto-end-fully-reported] }
+        legalEntityId: { type: string, format: uuid }
+        dryRun: { type: boolean }
+        replayed: { type: boolean, description: 'The Idempotency-Key was used before: the response replays the orders that run moved, and nothing is scanned again.' }
+        total: { type: integer, description: Every order that qualifies, including the ones beyond this call's 500. }
+        truncated: { type: boolean, description: More orders qualify than this call took; call again. }
+        candidates: { type: array, items: { $ref: '#/components/schemas/HousekeepingOrder' } }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        code: { type: string, description: 'PRODUCTION_BULK_PARTIAL (PROD-0022) when some orders failed.' }
+        detail: { type: string }
+        results: { type: array, items: { $ref: '#/components/schemas/BulkItem' } }
     EditOp:
       type: string
       enum: [add, remove, change]
@@ -989,6 +1031,10 @@ components:
         splitAllocation: { type: string, enum: [proportional, keep-on-original], description: Allocation of a split of a Started order that names none. }
         triggerPointsEnabled: { type: boolean, description: Route-card feedback evaluates the order's trigger points. }
         asBuiltRequired: { type: boolean, description: ':end is refused for an order that reported output without an as-built record.' }
+        pickingListProposal: { type: string, enum: [remaining, proportional, none], description: The proposal of a picking-list journal that names none. }
+        routeCardProposal: { type: string, enum: [remaining, proportional], description: The hours basis of a route-card journal that names none. }
+        staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Age in days after which cancel-stale-created-orders cancels an order still Created; 0 never cancels.' }
+        autoEndEnabled: { type: boolean, description: 'Opts the site in to auto-end-fully-reported.' }
     ProductionParametersInput:
       type: object
       required: [rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired]
@@ -1003,6 +1049,10 @@ components:
         splitAllocation: { type: string, enum: [proportional, keep-on-original] }
         triggerPointsEnabled: { type: boolean }
         asBuiltRequired: { type: boolean }
+        pickingListProposal: { type: string, enum: [remaining, proportional, none], description: 'Optional: omitted, a replace keeps the stored value and a create takes remaining.' }
+        routeCardProposal: { type: string, enum: [remaining, proportional], description: 'Optional: omitted, a replace keeps the stored value and a create takes remaining.' }
+        staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Optional: omitted, a replace keeps the stored value and a create takes 90.' }
+        autoEndEnabled: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes off.' }
     ProductionParameters:
       allOf:
         - $ref: '#/components/schemas/ParameterValues'
@@ -1257,6 +1307,83 @@ paths:
         '400': { description: 'No, too many, duplicate or malformed ids, a command not allowed in bulk, or Idempotency-Key missing (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { description: 'AUTH-0003: the route duty or the command''s duty is missing', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders:cancel-stale:
+    post:
+      operationId: cancelStaleProductionOrders
+      summary: Cancel the orders left Created beyond their site's stale age (cancel-stale-created-orders)
+      description: |
+        Selects the legal entity's orders that are still Created (never estimated), older than the
+        staleOrderDays of their site's parameters (the site's row, else the All row, else 90; 0 never
+        cancels) and whose origin is not a planned order, oldest first, at most 500 per call, and
+        cancels each through the ordinary `:cancel` command (status log, events, withdrawal of any
+        subcontract request), each in its own transaction. `total` counts every qualifying order and
+        `truncated` says a further call is needed. With `dryRun` the call lists the candidates and
+        changes nothing; it then needs no Idempotency-Key. `orderIds` limits a run to the orders a
+        dry run showed. Each order is cancelled at the version the scan saw, so one changed since
+        (estimated, edited) is refused with conflict_version. The Idempotency-Key of order X is
+        `<key>:<X>`; a retry with the same key replays the orders that run cancelled
+        (`replayed`, Idempotent-Replayed) instead of scanning again, and a key used for another job,
+        command or legal entity is refused. When some cancels fail, `code` is PRODUCTION_BULK_PARTIAL (PROD-0022). Needs
+        production.order.release, the duty of `:cancel`.
+      x-passage-duty: production.order.release
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Required unless dryRun; order X uses <key>:<X>.', schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HousekeepingRequest' }
+      responses:
+        '200':
+          description: The candidates and, unless dry run, the result per order. A replay carries Idempotent-Replayed.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HousekeepingResult' }
+        '400': { description: 'Malformed or foreign legal entity, malformed or repeated orderIds, or Idempotency-Key missing on a run that is not a dry run (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'idempotency_key_reuse: the key was used for another job, command or legal entity', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003: production.order.release is missing', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders:auto-end:
+    post:
+      operationId: autoEndProductionOrders
+      summary: End the fully reported orders of the sites that opted in (auto-end-fully-reported)
+      description: |
+        Selects the legal entity's orders that are ReportedAsFinished with the whole order quantity
+        reported, hold no draft journal and belong to a site whose autoEndEnabled parameter is on
+        (the site's row, else the All row, else off), at most 500 per call, and ends each through
+        the ordinary `:end` command (settlement, variances, `order.settled`), each in its own
+        transaction, so the as-built requirement and every other End rule apply and a refusal is
+        listed in the results. The zero-output duty is never used. `total` counts every qualifying
+        order and `truncated` says a further call is needed. With `dryRun` the call lists the
+        candidates and changes nothing; it then needs no Idempotency-Key. `orderIds` limits a run to
+        the orders a dry run showed. Each order is ended at the version the scan saw, so one changed
+        since is refused with conflict_version. The settlement postings go to the WIP subledger
+        like any `:end`, and `gl-postings:run` books them in the general ledger. The
+        Idempotency-Key of order X is `<key>:<X>`; a retry with the same key replays the orders
+        that run ended (`replayed`, Idempotent-Replayed) instead of scanning again, and a key used
+        for another job, command or legal entity is refused. When some ends fail, `code` is PRODUCTION_BULK_PARTIAL (PROD-0022).
+      x-passage-duty: production.order.end
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Required unless dryRun; order X uses <key>:<X>.', schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HousekeepingRequest' }
+      responses:
+        '200':
+          description: The candidates and, unless dry run, the result per order. A replay carries Idempotent-Replayed.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HousekeepingResult' }
+        '400': { description: 'Malformed or foreign legal entity, malformed or repeated orderIds, or Idempotency-Key missing on a run that is not a dry run (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'idempotency_key_reuse: the key was used for another job, command or legal entity', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003: production.order.end is missing', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders:merge:
     post:
       operationId: mergeProductionOrders
@@ -2281,8 +2408,12 @@ paths:
       operationId: saveProductionParameters
       summary: Create or replace the production parameters of a legal entity × site
       description: |
-        Creating takes no If-Match; replacing needs If-Match with the row version. Every setting
-        is required, so a missing one is refused rather than switching a flag off. The tolerances
+        Creating takes no If-Match; replacing needs If-Match with the row version. The settings
+        before slice 17 are required, so a missing one is refused rather than switching a flag off;
+        pickingListProposal, routeCardProposal, staleOrderDays and autoEndEnabled are optional: an
+        omitted one keeps its stored value on a replace (so an older client cannot reset a site's
+        stale-order age or auto-end opt-in) and takes remaining, remaining, 90 and off on a create (they set the journal proposal that a
+        create request naming none uses, and the two housekeeping jobs). The tolerances
         apply to report as finished and picking (FR-21.5, FR-21.7), auto-start to route cards
         (FR-21.6), estimate on create to new orders, the split allocation to a split that names
         none (FR-21.15), trigger points enabled to route-card trigger evaluation (FR-21.17) and

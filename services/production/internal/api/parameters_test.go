@@ -74,6 +74,9 @@ func TestParameters_SaveValidatesAndDefaultsToAll(t *testing.T) {
 		"autoStartOnFeedback":  mutate("autoStartOnFeedback", nil),
 		"triggerPointsEnabled": mutate("triggerPointsEnabled", nil),
 		"estimateOnCreate":     mutate("estimateOnCreate", nil),
+		"pickingListProposal":  mutate("pickingListProposal", "most"),
+		"routeCardProposal":    mutate("routeCardProposal", "none"),
+		"staleOrderDays":       mutate("staleOrderDays", -5),
 	} {
 		rec := do(h, call{method: http.MethodPut, path: "/v1/production/parameters", duties: []string{DutySetupWrite}, body: body})
 		if p := expectProblem(t, rec, http.StatusBadRequest, validationCode); p.Errors[name] == "" {
@@ -123,4 +126,43 @@ func TestParameters_ListResolvesForASite(t *testing.T) {
 		t.Fatalf("no site: %d %+v", code, body)
 	}
 	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/parameters?siteId=x", duties: []string{DutySetupRead}}), http.StatusBadRequest, validationCode)
+}
+
+func TestParameters_HousekeepingSettingsDefaultAndSave(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	put := func(body string) int {
+		return do(h, call{method: http.MethodPut, path: "/v1/production/parameters", duties: []string{DutySetupWrite}, body: body}).Code
+	}
+	// the slice 17 settings are optional: omitted they take 90 days, auto-end off, remaining proposals
+	if code := put(fullParameters); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	got := f.params.saved[0].Parameters
+	if got.StaleOrderDays != 90 || got.AutoEndEnabled || got.PickingListProposal != domain.ProposeRemaining || got.RouteCardProposal != domain.ProposeRemaining {
+		t.Fatalf("defaults: %+v", got)
+	}
+	body := fullParameters[:len(fullParameters)-1] + `,"pickingListProposal":"none","routeCardProposal":"proportional","staleOrderDays":0,"autoEndEnabled":true}`
+	if code := put(body); code != http.StatusCreated {
+		t.Fatalf("create with settings: %d", code)
+	}
+	if keep := f.params.saved[0].Keep; !keep.PickingListProposal || !keep.RouteCardProposal || !keep.StaleOrderDays || !keep.AutoEndEnabled {
+		t.Fatalf("omitted settings are kept on a replace: %+v", keep)
+	}
+	got = f.params.saved[1].Parameters
+	if got.StaleOrderDays != 0 || !got.AutoEndEnabled || got.PickingListProposal != domain.ProposeNone || got.RouteCardProposal != domain.ProposeProportional {
+		t.Fatalf("settings: %+v", got)
+	}
+	if keep := f.params.saved[1].Keep; keep.PickingListProposal || keep.RouteCardProposal || keep.StaleOrderDays || keep.AutoEndEnabled {
+		t.Fatalf("named settings are written: %+v", keep)
+	}
+	// the defaults the list reports carry them too
+	rec := do(h, call{method: http.MethodGet, path: "/v1/production/parameters", duties: []string{DutySetupRead}})
+	var list struct {
+		Defaults domain.Parameters `json:"defaults"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if list.Defaults.StaleOrderDays != 90 || list.Defaults.PickingListProposal != domain.ProposeRemaining || list.Defaults.AutoEndEnabled {
+		t.Fatalf("list defaults: %+v", list.Defaults)
+	}
 }

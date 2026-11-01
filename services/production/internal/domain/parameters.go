@@ -35,7 +35,25 @@ type Parameters struct {
 	// AsBuiltRequired makes `:end` refuse an order that reported output without any
 	// as-built record (FR-21.19).
 	AsBuiltRequired bool `json:"asBuiltRequired"`
+	// PickingListProposal is the proposal of a picking-list journal that names none
+	// (PRD 4.21.13): remaining, proportional or none.
+	PickingListProposal Proposal `json:"pickingListProposal"`
+	// RouteCardProposal is the hours basis of a route-card journal that names none:
+	// remaining or proportional.
+	RouteCardProposal Proposal `json:"routeCardProposal"`
+	// StaleOrderDays is the age in days after which an order still Created (never
+	// estimated) is cancelled by the cancel-stale job; 0 never cancels (PRD 4.21.16).
+	StaleOrderDays int `json:"staleOrderDays"`
+	// AutoEndEnabled opts the site in to the auto-end job, which ends orders that are
+	// fully reported as finished (PRD 4.21.16).
+	AutoEndEnabled bool `json:"autoEndEnabled"`
 }
+
+// DefaultStaleOrderDays is the PRD's age for cancel-stale-created-orders.
+const DefaultStaleOrderDays = 90
+
+// MaxStaleOrderDays bounds the stale-order age (ten years).
+const MaxStaleOrderDays = 3650
 
 var (
 	hundredPct   = decimal.NewFromInt(100)
@@ -59,6 +77,15 @@ func (p Parameters) Validate() map[string]string {
 	} else if !p.OverConsumptionPct.Equal(p.OverConsumptionPct.Round(maxParamPlac)) {
 		fields["overConsumptionPct"] = "at most 2 decimal places"
 	}
+	if p.PickingListProposal != "" && !p.PickingListProposal.Valid() {
+		fields["pickingListProposal"] = "must be remaining, proportional or none"
+	}
+	if p.RouteCardProposal != "" && p.RouteCardProposal != ProposeRemaining && p.RouteCardProposal != ProposeProportional {
+		fields["routeCardProposal"] = "must be remaining or proportional"
+	}
+	if p.StaleOrderDays < 0 || p.StaleOrderDays > MaxStaleOrderDays {
+		fields["staleOrderDays"] = "must be between 0 and 3650 (0 never cancels)"
+	}
 	if !p.SplitAllocation.Valid() {
 		fields["splitAllocation"] = "must be proportional or keep-on-original"
 	}
@@ -76,10 +103,41 @@ func ResolveParameters(rows []Parameters, siteID string, defaults Parameters) (p
 		}
 	}
 	defaults.SiteID = siteID
-	if defaults.SplitAllocation == "" {
-		defaults.SplitAllocation = AllocProportional
+	return WithProposalDefaults(defaults), false
+}
+
+// WithProposalDefaults fills the settings a caller that does not know them leaves empty:
+// proportional split allocation, remaining proposals (PRD 4.21.13).
+func WithProposalDefaults(p Parameters) Parameters {
+	if p.SplitAllocation == "" {
+		p.SplitAllocation = AllocProportional
 	}
-	return defaults, false
+	if p.PickingListProposal == "" {
+		p.PickingListProposal = ProposeRemaining
+	}
+	if p.RouteCardProposal == "" {
+		p.RouteCardProposal = ProposeRemaining
+	}
+	return p
+}
+
+// JournalProposal is the proposal a journal create request that names none uses: the
+// site's picking-list default or route-card basis, and proportional for a report as
+// finished (its lines follow the quantity reported).
+func (p Parameters) JournalProposal(t JournalType) Proposal {
+	switch t {
+	case JournalReportFinished:
+		return ProposeProportional
+	case JournalRouteCard:
+		if p.RouteCardProposal != "" {
+			return p.RouteCardProposal
+		}
+	default:
+		if p.PickingListProposal != "" {
+			return p.PickingListProposal
+		}
+	}
+	return ProposeRemaining
 }
 
 // CheckAsBuiltRequired enforces "As-built required" at End: an order that reported

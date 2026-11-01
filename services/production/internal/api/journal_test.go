@@ -79,7 +79,7 @@ func TestJournal_CreateDefaultsAndLines(t *testing.T) {
 		t.Fatalf("route card: %d %s", rec.Code, rec.Body.String())
 	}
 	route := f.journals[1]
-	if route.Proposal != domain.ProposeRemaining || route.PostingDate != "2026-10-26" || len(route.Hours) != 2 ||
+	if route.Proposal != "" || route.PostingDate != "2026-10-26" || len(route.Hours) != 2 ||
 		!route.Hours[0].Hours.Equal(decimal.NewFromInt(46)) || !route.Hours[0].Finished || !route.Hours[1].QtyError.Equal(decimal.NewFromInt(3)) {
 		t.Fatalf("route-card input: %+v", route)
 	}
