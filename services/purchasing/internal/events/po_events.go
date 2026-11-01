@@ -30,6 +30,17 @@ type POLineData struct {
 	LineAmount   string `json:"line_amount"`
 	DeliveryDate string `json:"delivery_date"`
 	Status       string `json:"status"`
+	// Schedule is the delivery schedule of the line (FR-17.10), one entry per
+	// ORDERED inventory transaction; absent when the line has none.
+	Schedule []POScheduleRow `json:"schedule,omitempty"`
+}
+
+// POScheduleRow is one delivery schedule row on a po.confirmed.v1 line.
+type POScheduleRow struct {
+	Seq           int    `json:"seq"`
+	Qty           string `json:"qty"`
+	DeliveryDate  string `json:"delivery_date"`
+	ConfirmedDate string `json:"confirmed_date,omitempty"`
 }
 
 // POConfirmedData is the data member of po.confirmed.v1. Lines include

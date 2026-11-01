@@ -111,6 +111,9 @@ type API struct {
 	planRowConflicts    atomic.Int64
 	repricesApplied     atomic.Int64
 
+	deliverySchedulesSaved atomic.Int64
+	deliveryDatesConfirmed atomic.Int64
+
 	schedulingAgreementsCreated atomic.Int64
 	saReleasesCreated           atomic.Int64
 
@@ -172,6 +175,13 @@ func (a *API) Register(r chi.Router) {
 		inquire.Get("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.getInvoicingPlan)
 		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.putInvoicingPlan)
 		maintain.Delete("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.deleteInvoicingPlan)
+		// Delivery schedules per PO line (FR-17.10); the vendor's confirmed date of a row is set on a
+		// CONFIRMED PO, the rows themselves only on a DRAFT or REJECTED one.
+		inquire.Get("/purchase-orders/{id}/delivery-schedules", a.listDeliverySchedules)
+		inquire.Get("/purchase-orders/{id}/lines/{lineNo}/delivery-schedule", a.getDeliverySchedule)
+		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/delivery-schedule", a.putDeliverySchedule)
+		maintain.Delete("/purchase-orders/{id}/lines/{lineNo}/delivery-schedule", a.deleteDeliverySchedule)
+		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/delivery-schedule/rows/{seq}/confirmation", a.confirmDeliveryDate)
 		// Receiving reports a settled plan row (#289); only receiving's service grant holds this duty.
 		r.With(authz.RequireDuty(dutyPlanRowSettle)).Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement", a.settlePlanRow)
 		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Get("/pricing/lookup", a.lookupPrice)
@@ -272,6 +282,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_rfqs_awarded_total", "RFQ awards accepted.", a.rfqsAwarded.Load()},
 			{"purchasing_rfq_vendors_scored_total", "RFQ vendor scorings recorded.", a.rfqVendorsScored.Load()},
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
+			{"purchasing_delivery_schedules_saved_total", "Delivery schedules written by PUT.", a.deliverySchedulesSaved.Load()},
+			{"purchasing_delivery_dates_confirmed_total", "Vendor confirmed dates recorded on delivery schedule rows (replays are counted).", a.deliveryDatesConfirmed.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
 			{"purchasing_invoicing_plan_rows_invoiced_total", "Plan rows flipped to INVOICED for a settlement from receiving; replays are not counted.", a.planRowsInvoiced.Load()},
 			{"purchasing_invoicing_plan_row_settlement_conflicts_total", "Plan row settlements from receiving refused with PRC-IP-004 (a person must resolve them).", a.planRowConflicts.Load()},

@@ -880,6 +880,71 @@ export async function deleteInvoicingPlan(poId: string, lineNo: number, rowVersi
   return etag === null ? rowVersion + 1 : Number(etag.replace(/"/g, ""));
 }
 
+// --- Delivery schedules on PO lines (FR-17.10) ---
+
+export interface DeliveryScheduleRow {
+  seq: number;
+  qty: string;
+  /** The date the PO asks for. */
+  deliveryDate: string;
+  /** The date the vendor confirmed, when it has. */
+  confirmedDate?: string;
+  confirmedBy?: string;
+  confirmedAt?: string;
+}
+
+export interface DeliverySchedule {
+  purchaseOrderId: string;
+  lineNo: number;
+  unit: string;
+  /** The line quantity the rows add up to. */
+  lineQty: string;
+  rows: DeliveryScheduleRow[];
+}
+
+/** A schedule with the PO row version after the call: schedule writes bump it. */
+export interface DeliveryScheduleResult extends DeliverySchedule {
+  poRowVersion: number;
+}
+
+export interface DeliveryScheduleInput {
+  rows: { qty: string; deliveryDate: string }[];
+}
+
+function schedulePath(poId: string, lineNo: number) {
+  return `/purchase-orders/${encodeURIComponent(poId)}/lines/${lineNo}/delivery-schedule`;
+}
+
+/** Every delivery schedule of a PO, in line order. */
+export async function listDeliverySchedules(poId: string, signal?: AbortSignal) {
+  const { body } = await send<{ items: DeliverySchedule[] }>("GET", `/purchase-orders/${encodeURIComponent(poId)}/delivery-schedules`, { signal });
+  return body.items;
+}
+
+/** One line's schedule; 404 PRC-DS-NOT-FOUND when the line has none. */
+export function getDeliverySchedule(poId: string, lineNo: number, signal?: AbortSignal) {
+  return send<DeliveryScheduleResult>("GET", schedulePath(poId, lineNo), { signal });
+}
+
+/** Replaces the line's schedule on a DRAFT or REJECTED PO; rowVersion is the PO ETag (412 PRC-PO-009 when stale). */
+export function putDeliverySchedule(poId: string, lineNo: number, rowVersion: number, input: DeliveryScheduleInput) {
+  return send<DeliveryScheduleResult>("PUT", schedulePath(poId, lineNo), { body: input, headers: { "If-Match": `"${rowVersion}"` } });
+}
+
+/** Removes the line's schedule; resolves to the new PO row version. */
+export async function deleteDeliverySchedule(poId: string, lineNo: number, rowVersion: number) {
+  const { etag } = await send<undefined>("DELETE", schedulePath(poId, lineNo), { headers: { "If-Match": `"${rowVersion}"` } });
+  return etag === null ? rowVersion + 1 : Number(etag.replace(/"/g, ""));
+}
+
+/** Records the date the vendor confirmed for one row of a CONFIRMED PO. */
+export function confirmDeliveryDate(poId: string, lineNo: number, seq: number, rowVersion: number, confirmedDate: string) {
+  return send<DeliveryScheduleResult>("PUT", `${schedulePath(poId, lineNo)}/rows/${seq}/confirmation`, {
+    body: { confirmedDate },
+    headers: { "If-Match": `"${rowVersion}"` },
+  });
+}
+
 // --- Subsequent price change (FR-17.22, BR-17.18). Wire shapes follow services/purchasing/api/openapi.yaml. ---
 
 /** One line at its current and at the winning trade agreement price; amounts are for qty. */

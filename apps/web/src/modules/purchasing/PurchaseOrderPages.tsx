@@ -20,12 +20,14 @@ import {
   describeProblem,
   editPurchaseOrder,
   getPurchaseOrder,
+  listDeliverySchedules,
   listInvoicingPlans,
   listPurchaseOrderVersions,
   listPurchaseOrders,
   newIdempotencyKey,
   type ApprovalStatus,
   type ChargeCalc,
+  type DeliverySchedule,
   type InvoicingPlan,
   type PatchOp,
   type PurchaseOrder,
@@ -662,9 +664,27 @@ function PlanCell({ poId, line, plan, closed }: { poId: string; line: PurchaseOr
   );
 }
 
+/** The delivery schedule cell of a line: its deliveries, or a link to split the line (FR-17.10). */
+function ScheduleCell({ poId, line, schedule }: { poId: string; line: PurchaseOrderLine; schedule?: DeliverySchedule }) {
+  const to = `/purchasing/purchase-orders/${poId}/lines/${line.lineNo}/delivery-schedule`;
+  if (schedule) {
+    return (
+      <Link className={styles.link} to={to} aria-label={`Delivery schedule of line ${line.lineNo}`}>
+        {schedule.rows.length} deliver{schedule.rows.length === 1 ? "y" : "ies"}
+      </Link>
+    );
+  }
+  if (line.status === "CANCELLED") return <>—</>;
+  return (
+    <Link className={styles.link} to={to} aria-label={`Split line ${line.lineNo} into deliveries`}>
+      Split
+    </Link>
+  );
+}
+
 const lineColumns = (
   currency: string,
-  plan?: { poId: string; byLine: Map<number, InvoicingPlan>; closed: boolean },
+  plan?: { poId: string; byLine: Map<number, InvoicingPlan>; schedules: Map<number, DeliverySchedule>; closed: boolean },
 ): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
@@ -684,6 +704,11 @@ const lineColumns = (
           key: "invoicingPlan",
           header: "Invoicing plan",
           render: (l: PurchaseOrderLine) => <PlanCell poId={plan.poId} line={l} plan={plan.byLine.get(l.lineNo)} closed={plan.closed} />,
+        },
+        {
+          key: "deliverySchedule",
+          header: "Deliveries",
+          render: (l: PurchaseOrderLine) => <ScheduleCell poId={plan.poId} line={l} schedule={plan.schedules.get(l.lineNo)} />,
         },
       ]
     : []),
@@ -808,6 +833,7 @@ export function PurchaseOrderDetailPage() {
   const actionKey = useMemo(() => newIdempotencyKey(), [po?.rowVersion]);
   const versions = useResource((signal) => listPurchaseOrderVersions(id, signal), [id, po?.rowVersion]);
   const plans = useResource((signal) => listInvoicingPlans(id, signal), [id, po?.rowVersion]);
+  const schedules = useResource((signal) => listDeliverySchedules(id, signal), [id, po?.rowVersion]);
 
   async function run(action: PurchaseOrderAction) {
     if (!po) return;
@@ -961,11 +987,13 @@ export function PurchaseOrderDetailPage() {
         </dl>
       </Card>
       {plans.error ? <LoadError what="the invoicing plans" error={plans.error} onRetry={plans.reload} /> : null}
+      {schedules.error ? <LoadError what="the delivery schedules" error={schedules.error} onRetry={schedules.reload} /> : null}
       <DataTable
         label="Purchase order lines"
         columns={lineColumns(po.currency, {
           poId: po.id,
           byLine: new Map((plans.data ?? []).map((p) => [p.lineNo, p])),
+          schedules: new Map((schedules.data ?? []).map((d) => [d.lineNo, d])),
           closed: po.approvalStatus === "CANCELLED" || po.approvalStatus === "FINALIZED",
         })}
         rows={po.lines}

@@ -34,6 +34,7 @@ migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotenc
                        0006_invoicing_plan.sql (invoicing plans and their rows per PO line)
                        0007_reprice.sql (invoiced-line reprice hand-over mark, trade-priced line index)
                        0008_scheduling_agreement.sql (scheduling agreements, schedule lines, releases and release lines)
+                       0018_delivery_schedule.sql (delivery schedule rows per PO line)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -90,6 +91,11 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderInquire | One line's plan; ETag = PO row version |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the plan, bumps the row version (new ETag) |
 | DELETE `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
+| GET `/purchase-orders/{id}/delivery-schedules` | PurchaseOrderInquire | Every delivery schedule of the PO in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderInquire | One line's schedule; ETag = PO row version |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the rows on a DRAFT or REJECTED PO; Σ qty = line qty (PRC-DS-001) |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule/rows/{seq}/confirmation` | PurchaseOrderMaintain | If-Match required; the vendor's confirmed date on a CONFIRMED PO; writes `deliveryschedule.confirmed.v1`; the same date again is a no-op |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
@@ -263,6 +269,23 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   (PRC-IP-001). Cancelling the line or the PO removes its plan, unless a row is
   invoiced (PRC-IP-002), which also blocks replacing or deleting the plan. Plan
   writes take If-Match on the PO row version and bump it.
+- **Delivery schedules (FR-17.10).** A PO line may carry 1 to 100 schedule rows (quantity,
+  delivery date, the date the vendor confirmed) whose quantities add up to the line quantity
+  exactly (PRC-DS-001), and all lines of one PO hold at most 1,000 rows together (PRC-DS-003;
+  `po.confirmed.v1` carries every row and the broker takes 512 KiB messages). Rows are
+  numbered in delivery date order. The rows are replaced or removed only while the PO is DRAFT
+  or REJECTED (PRC-DS-002); a replacement row that repeats an existing one (same date and
+  quantity) keeps the vendor's confirmed date. After that quantities change through the PO
+  edit (change management). A PO edit that changes the line quantity adds the difference to
+  the last row or takes it from the last rows backwards (a row that reaches zero is dropped; a
+  reduction larger than the last row continues into the rows before it), and a row whose
+  quantity changes loses the vendor's confirmed date. Cancelling the line or the PO removes the
+  schedule. `:confirm`
+  refuses a schedule that does not add up (PRC-DS-001) and `po.confirmed.v1` carries each
+  line's rows, one per ORDERED inventory transaction the wave 16 contract will create. The
+  vendor's confirmed date of a row is set on a CONFIRMED PO and writes
+  `deliveryschedule.confirmed.v1` once per change; the same date again is answered 200 even
+  with an older If-Match. Writes take If-Match on the PO row version and bump it.
 - **Subsequent price change (FR-17.22, BR-17.18, AC-17.16).** Only a CONFIRMED PO
   is repriced (PRC-PO-STATE otherwise). Each live line priced from a trade agreement
   (`TRADE_AGREEMENT:<id>`) is looked up again with the PO creation rules (FR-17.6) on
@@ -474,6 +497,10 @@ store codes are returned as the `code` field.
 | PRC-CAT-011 | 409 | The vendor already has an assignment for the category (change that one) |
 | PRC-CAT-012 | 409 | The worker already manages the category |
 | PRC-CAT-013 | 412 | If-Match is not the category vendor assignment's version |
+| PRC-DS-001 | 422 | The delivery schedule rows do not add up to the line quantity |
+| PRC-DS-002 | 422 | The PO is not DRAFT or REJECTED (replace, delete) or not CONFIRMED (confirmed date), or the line is cancelled |
+| PRC-DS-003 | 422 | The PO's delivery schedules would hold more than 1,000 rows together |
+| PRC-DS-NOT-FOUND | 404 | The line has no delivery schedule, or the schedule has no such row |
 | PRC-SL-001 | 403 / warning | The signing limit is past its recertification date: an approver cannot approve; a requester's document gets one more approval level (warning on submit) |
 | PRC-SL-002 | 403 | The amount is above the approver's approval limit, or the approver has no limit in the document currency |
 | PRC-SL-003 | 403 | A worker cannot decide a signing limit request they made or that is for them, or recertify their own limit |

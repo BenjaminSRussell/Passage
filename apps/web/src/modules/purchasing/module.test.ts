@@ -25,6 +25,10 @@ describe("purchasing module", () => {
     }
   });
 
+  it("routes the delivery schedule of a PO line", () => {
+    expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/purchase-orders/:id/lines/:lineNo/delivery-schedule");
+  });
+
   it("routes the release documentation of a scheduling agreement", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/scheduling-agreements/:id/releases/:releaseNo");
   });

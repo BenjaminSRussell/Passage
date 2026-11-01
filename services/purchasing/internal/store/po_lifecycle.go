@@ -315,6 +315,9 @@ func checkVisible(ctx context.Context, tx pgx.Tx, poID string) error {
 // confirmPending confirms version 1 from the live PO, or the pending change
 // version written by an edit that needed re-approval.
 func confirmPending(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
+	if err := checkSchedulesBalanced(ctx, tx, cur); err != nil {
+		return err
+	}
 	no := cur.VersionNo + 1
 	if cur.VersionNo == 0 {
 		if err := writeVersion(ctx, tx, cur.ID, no, snapshotOf(cur, cur.Lines), nil, false); err != nil {
@@ -360,6 +363,9 @@ func cancelOrder(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 		return err
 	}
 	if err := syncInvoicingPlans(ctx, tx, cur.ID); err != nil {
+		return err
+	}
+	if err := syncDeliverySchedules(ctx, tx, cur.ID); err != nil {
 		return err
 	}
 	return enqueue(ctx, tx, "purchase_order", cur.ID, purchasingevents.POCancelled, data)
@@ -593,7 +599,10 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 			return err
 		}
 	}
-	return syncInvoicingPlans(ctx, tx, next.ID)
+	if err := syncInvoicingPlans(ctx, tx, next.ID); err != nil {
+		return err
+	}
+	return syncDeliverySchedules(ctx, tx, next.ID)
 }
 
 // updateHeader writes approval status, confirmed version number, site,
@@ -690,10 +699,14 @@ func emitConfirmed(ctx context.Context, tx pgx.Tx, po PurchaseOrder) error {
 		VendorID: po.VendorID, SiteID: po.SiteID, WarehouseID: po.WarehouseID, Currency: po.Currency,
 		Subtotal: po.Subtotal.String(), DiscountTotal: po.DiscountTotal.String(), ChargesTotal: po.ChargesTotal.String(),
 		TaxTotal: po.TaxTotal.String(), Total: po.Total.String(), Lines: []purchasingevents.POLineData{}}
+	schedules, err := scheduleEventRows(ctx, tx, po.ID)
+	if err != nil {
+		return err
+	}
 	for _, l := range po.Lines {
 		data.Lines = append(data.Lines, purchasingevents.POLineData{LineNo: l.LineNo, ProductID: l.ProductID, Description: l.Description,
 			Qty: l.Qty.String(), Unit: l.Unit, UnitPrice: l.UnitPrice.String(), PriceUnit: l.PriceUnit.String(),
-			LineAmount: l.LineAmount.String(), DeliveryDate: l.DeliveryDate.String(), Status: l.Status})
+			LineAmount: l.LineAmount.String(), DeliveryDate: l.DeliveryDate.String(), Status: l.Status, Schedule: schedules[l.LineNo]})
 	}
 	return enqueue(ctx, tx, "purchase_order", po.ID, purchasingevents.POConfirmed, data)
 }

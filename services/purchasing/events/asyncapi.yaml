@@ -89,6 +89,12 @@ channels:
     messages:
       catalogImportCommitted:
         $ref: '#/components/messages/CatalogImportCommitted'
+  deliveryschedule:
+    address: passage.procurement.deliveryschedule
+    description: Vendor-confirmed dates of PO delivery schedule rows (FR-17.10); the Kafka key is the PO id.
+    messages:
+      deliveryScheduleConfirmed:
+        $ref: '#/components/messages/DeliveryScheduleConfirmed'
   sarelease:
     address: passage.procurement.sarelease
     description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
@@ -96,6 +102,12 @@ channels:
       saReleaseCreated:
         $ref: '#/components/messages/SAReleaseCreated'
 operations:
+  publishDeliveryScheduleConfirmed:
+    action: send
+    channel:
+      $ref: '#/channels/deliveryschedule'
+    messages:
+      - $ref: '#/channels/deliveryschedule/messages/deliveryScheduleConfirmed'
   publishRequisitionSubmitted:
     action: send
     channel:
@@ -212,6 +224,20 @@ operations:
       - $ref: '#/channels/catalogimport/messages/catalogImportCommitted'
 components:
   messages:
+    DeliveryScheduleConfirmed:
+      name: DeliveryScheduleConfirmed
+      title: deliveryschedule.confirmed.v1
+      x-passage-type: dev.passage.procurement.deliveryschedule.confirmed.v1
+      summary: The vendor's confirmed delivery date of one PO delivery schedule row was set or changed (FR-17.10). Setting the same date again writes no event.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.deliveryschedule.confirmed.v1 }
+              subject: { type: string, format: uuid, description: PO id }
+              data: { $ref: '#/components/schemas/DeliveryScheduleConfirmedData' }
     CatalogImportCommitted:
       name: CatalogImportCommitted
       title: catalogimport.committed.v1
@@ -571,6 +597,18 @@ components:
               line_amount: { type: string, description: decimal string }
               delivery_date: { type: string, format: date }
               status: { type: string, enum: [OPEN, RECEIVED, INVOICED, CANCELLED] }
+              schedule:
+                type: array
+                description: The line's delivery schedule (FR-17.10), one entry per ORDERED inventory transaction; absent when the line has none. The quantities add up to qty.
+                items:
+                  type: object
+                  required: [seq, qty, delivery_date]
+                  additionalProperties: false
+                  properties:
+                    seq: { type: integer, minimum: 1 }
+                    qty: { type: string, description: decimal string }
+                    delivery_date: { type: string, format: date }
+                    confirmed_date: { type: string, format: date, description: The date the vendor confirmed, when it has. }
     POVersionCreatedData:
       type: object
       required: [po_id, number, version_no, patch, reapproval_required]
@@ -798,6 +836,22 @@ components:
         category: { type: string }
         worker_id: { type: string, format: uuid }
         changed_by: { type: string, format: uuid }
+    DeliveryScheduleConfirmedData:
+      type: object
+      required: [po_id, number, line_no, seq, qty, unit, delivery_date, confirmed_date]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        line_no: { type: integer, minimum: 1 }
+        seq: { type: integer, minimum: 1 }
+        product_id: { type: string, format: uuid }
+        qty: { type: string, description: Decimal string. }
+        unit: { type: string }
+        delivery_date: { type: string, format: date, description: The date the PO asks for. }
+        confirmed_date: { type: string, format: date, description: The date the vendor confirmed. }
+        previous_confirmed_date: { type: string, format: date, description: The date confirmed before, when one was. }
+        confirmed_by: { type: string, format: uuid }
     SigningLimitData:
       type: object
       required: [limit_id, legal_entity_id, worker_id, document_type, currency, spending_limit, approval_limit, recertify_by, reason, version]

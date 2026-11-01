@@ -5,6 +5,7 @@ import { CatalogImportCreatePage, CatalogImportDetailPage, CatalogImportsPage } 
 import { CatalogCreatePage, CatalogDetailPage, CatalogsPage } from "./CatalogPages";
 import { CategoryManagersPage, CategoryVendorCreatePage, CategoryVendorDetailPage, CategoryVendorsPage } from "./CategoryPages";
 import { ConsolidationPage } from "./ConsolidationPage";
+import { DeliverySchedulePage } from "./DeliverySchedulePage";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
@@ -32,7 +33,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -50,6 +51,11 @@ const purchasing: PassageModule = {
       path: "/purchasing/purchase-orders/:id/lines/:lineNo/invoicing-plan",
       element: createElement(InvoicingPlanPage),
       handle: { title: "Invoicing plan" },
+    },
+    {
+      path: "/purchasing/purchase-orders/:id/lines/:lineNo/delivery-schedule",
+      element: createElement(DeliverySchedulePage),
+      handle: { title: "Delivery schedule" },
     },
     { path: "/purchasing/purchase-orders/:id/reprice", element: createElement(RepricePage), handle: { title: "Price change" } },
     { path: "/purchasing/reprice", element: createElement(RepriceRunPage), handle: { title: "Price changes" } },

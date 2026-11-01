@@ -5,6 +5,8 @@ import {
   awardRFQ,
   changeRFQ,
   compareRFQ,
+  confirmDeliveryDate,
+  deleteDeliverySchedule,
   changePurchaseAgreement,
   consolidateRequisitions,
   deleteInvoicingPlan,
@@ -15,6 +17,7 @@ import {
   listPurchaseOrders,
   listRFQs,
   lookupPrice,
+  putDeliverySchedule,
   putInvoicingPlan,
   scoreRFQVendor,
   submitRequisition,
@@ -194,6 +197,25 @@ describe("purchasing API client", () => {
     expect(closeUrl).toBe("/api/v1/procurement/rfqs/q1:close");
     expect(closeInit.body).toBeUndefined();
     expect(closeInit.headers).toMatchObject({ "If-Match": '"5"', "Idempotency-Key": "key-c" });
+  });
+
+  it("writes delivery schedules and confirmed dates with If-Match and reads the row version from a 204 delete", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) =>
+      init.method === "DELETE" ? new Response(null, { status: 204, headers: { ETag: '"9"' } }) : jsonResponse({ poRowVersion: 8 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { rows: [{ qty: "10", deliveryDate: "2027-02-01" }] };
+    expect((await putDeliverySchedule("p1", 2, 7, input)).body.poRowVersion).toBe(8);
+    expect((await confirmDeliveryDate("p1", 2, 3, 8, "2027-02-05")).body.poRowVersion).toBe(8);
+    expect(await deleteDeliverySchedule("p1", 2, 8)).toBe(9);
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url} ${(init.headers as Record<string, string>)["If-Match"]}`)).toEqual([
+      'PUT /api/v1/procurement/purchase-orders/p1/lines/2/delivery-schedule "7"',
+      'PUT /api/v1/procurement/purchase-orders/p1/lines/2/delivery-schedule/rows/3/confirmation "8"',
+      'DELETE /api/v1/procurement/purchase-orders/p1/lines/2/delivery-schedule "8"',
+    ]);
+    expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
+    expect(JSON.parse(String(calls[1][1].body))).toEqual({ confirmedDate: "2027-02-05" });
   });
 
   it("puts plans and scores with If-Match and reads the new row version from a 204 delete", async () => {
