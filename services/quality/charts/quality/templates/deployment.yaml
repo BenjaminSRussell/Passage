@@ -61,6 +61,9 @@ spec:
               value: {{ .Values.serviceIdentity.keyId | quote }}
 {{- end }}
 {{- end }}
+{{- if .Values.serviceIdentity.publicKeys }}
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
+{{- end }}
           {{- if .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }

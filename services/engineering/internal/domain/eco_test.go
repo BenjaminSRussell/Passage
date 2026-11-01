@@ -21,7 +21,7 @@ func (f fakeApprover) Decide(context.Context, string) (domain.Decision, error) {
 }
 
 func ecoIn(state domain.EcoState, releaseDate string) *domain.Eco {
-	e := &domain.Eco{ID: "eco-1", Number: "ECO-0001", State: state, Replaces: []domain.Replacement{{OldVersionID: "V1", NewVersionID: "V2"}}}
+	e := &domain.Eco{ID: "eco-1", Number: "ECO-0001", State: state, CreatedBy: "creator", Replaces: []domain.Replacement{{OldVersionID: "V1", NewVersionID: "V2"}}}
 	if releaseDate != "" {
 		e.ReleaseDate = date(releaseDate)
 	}
@@ -207,5 +207,13 @@ func TestEcoScheduledReleasesOnALaterDay(t *testing.T) {
 	plan, err := e.Release(releaseFixture(), date("2026-07-01"))
 	if err != nil || e.State != domain.EcoReleased || plan.Activate[0].EffectiveFrom != date("2026-07-01") {
 		t.Fatalf("err %v state %s plan %+v, want released with the late day as effective date", err, e.State, plan)
+	}
+}
+
+func TestEcoDecisionsNeedAKnownCreator(t *testing.T) {
+	e := &domain.Eco{ID: "e", Number: "ECO-9", State: domain.EcoSubmitted}
+	var de *domain.Error
+	if err := e.Decide(domain.EcoApproved, "alice", ""); !errors.As(err, &de) || de.Code != domain.CodeEcoCreatorUnknown || e.State != domain.EcoSubmitted || e.DecidedBy != "" {
+		t.Fatalf("decide with no creator = %v, state %s", err, e.State)
 	}
 }

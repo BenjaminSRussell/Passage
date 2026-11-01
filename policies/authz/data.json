@@ -1096,6 +1096,12 @@
       {"resource": "/v1/quality/nonconformances/*:check-effectiveness", "methods": ["POST"]},
       {"resource": "/v1/quality/nonconformances/*:complete-step", "methods": ["POST"]}
     ]},
+    "quality.capa.execute": {"service_only": true, "permissions": [
+      {"resource": "/v1/quality/nonconformances/*", "methods": ["GET"]},
+      {"resource": "/v1/quality/nonconformances/*/corrections", "methods": ["POST"]},
+      {"resource": "/v1/quality/nonconformances/*:complete-step", "methods": ["POST"]},
+      {"resource": "/v1/quality/nonconformances/*:check-effectiveness", "methods": ["POST"]}
+    ]},
     "QM_COA": {"permissions": [{"resource": "/v1/quality/coa:generate", "methods": ["POST"]}]},
     "QM_COMPLIANCE_MAINTAIN": {"permissions": [
       {"resource": "/v1/quality/compliance-lists", "methods": ["POST"]},
@@ -1488,6 +1494,12 @@
       {"resource": "/v1/engineering/ecos", "methods": ["POST"]}
     ]},
     "engineering.eco.approve": {"permissions": [{"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]}]},
+    "engineering.eco.workflow": {"service_only": true, "permissions": [
+      {"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:cancel", "methods": ["POST"]}
+    ]},
     "engineering.read": {"permissions": [
       {"resource": "/v1/engineering/bom-versions", "methods": ["GET"]},
       {"resource": "/v1/engineering/bom-versions/*", "methods": ["GET"]},
@@ -2359,7 +2371,9 @@
       "party": ["party.vendor_bank.reveal"]
     },
     "workflow-ts": {
-      "payables": ["payment-run.execute"]
+      "payables": ["payment-run.execute"],
+      "engineering": ["engineering.eco.workflow"],
+      "quality": ["quality.capa.execute"]
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]
