@@ -79,7 +79,11 @@ type ForecastLine struct {
 type ForecastDemandLine struct {
 	ItemID      string
 	PeriodStart time.Time
-	ReducedQty  decimal.Decimal
+	PeriodEnd   time.Time
+	// Qty is the forecast as entered and ReducedQty the quantity after the
+	// model's reduction (BR-22.3); a planning strategy picks one (FR-22.19).
+	Qty        decimal.Decimal
+	ReducedQty decimal.Decimal
 }
 
 const modelSelect = `select id::text, code, version, reduction_principle, reduction_percent::text, status, submitted_by, decided_by,
@@ -307,7 +311,8 @@ func (s *Postgres) ListForecastLines(ctx context.Context, modelCode, itemID, sit
 
 // ForecastDemand returns the reduced forecast of a model at one site for the
 // periods that have not ended before from (FR-22.8): the forecast demand a
-// plan run nets. Cells reduced to zero are left out.
+// plan run nets. Cells with neither a forecast nor a reduced quantity are left
+// out.
 func (s *Postgres) ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out []ForecastDemandLine
@@ -319,8 +324,8 @@ func (s *Postgres) ForecastDemand(ctx context.Context, modelCode, siteID string,
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select item_id::text, period_start, reduced_qty::text from forecast_line
-			where tenant_id = $1 and model_id = $2::uuid and site_id = $3::uuid and period_end >= $4::date and reduced_qty > 0
+		rows, err := tx.Query(ctx, `select item_id::text, period_start, period_end, qty::text, reduced_qty::text from forecast_line
+			where tenant_id = $1 and model_id = $2::uuid and site_id = $3::uuid and period_end >= $4::date and (reduced_qty > 0 or qty > 0)
 			order by item_id, period_start`, p.TenantID, m.id, siteID, from.Format(dateLayout))
 		if err != nil {
 			return err
@@ -328,11 +333,14 @@ func (s *Postgres) ForecastDemand(ctx context.Context, modelCode, siteID string,
 		defer rows.Close()
 		for rows.Next() {
 			var l ForecastDemandLine
-			var qty string
-			if err := rows.Scan(&l.ItemID, &l.PeriodStart, &qty); err != nil {
+			var qty, reduced string
+			if err := rows.Scan(&l.ItemID, &l.PeriodStart, &l.PeriodEnd, &qty, &reduced); err != nil {
 				return err
 			}
-			if l.ReducedQty, err = decimal.NewFromString(qty); err != nil {
+			if l.Qty, err = decimal.NewFromString(qty); err != nil {
+				return err
+			}
+			if l.ReducedQty, err = decimal.NewFromString(reduced); err != nil {
 				return err
 			}
 			out = append(out, l)

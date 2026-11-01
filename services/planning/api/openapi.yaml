@@ -988,6 +988,127 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/strategies:
+    get:
+      operationId: listStrategies
+      summary: The six planning strategies with their setup (FR-22.19)
+      description: |
+        Always six entries in setup order (mts-net, mts-gross, mto,
+        assemble-to-order-final, plan-without-final-assembly, subassembly).
+        A strategy without stored setup is shown with the PRD defaults and
+        configured false, without id or version.
+      x-passage-duty: planning.read
+      responses:
+        '200':
+          description: The six strategies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PlanningStrategy'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategy
+      summary: Store the setup of a planning strategy (FR-22.19, BR-22.13)
+      description: |
+        Omitted fields take the defaults of the strategy: consumption mode
+        backward, backward window 30 days, forward window 0, marking on for
+        mto and plan-without-final-assembly, no segregated stock. A strategy
+        that already has setup is 409 PLAN-STRATEGY-EXISTS. With an
+        Idempotency-Key, a retry of the same body returns the stored setup
+        with 200 and Idempotent-Replayed: true; another body under the key is
+        422. A plan run reads the setup of the strategy on an item's
+        site-scope item coverage when it nets the forecast model: mto plans no
+        forecast, mts-gross the forecast as entered, assemble-to-order-final
+        the forecast left after the item's sales lines consumed it inside the
+        window, and the other strategies the reduced forecast.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [code]
+                  properties:
+                    code: {$ref: '#/components/schemas/StrategyCode'}
+                - $ref: '#/components/schemas/StrategySettings'
+      responses:
+        '201':
+          description: The stored setup; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanningStrategy'}
+        '200':
+          description: 'Idempotent replay of an earlier create (Idempotent-Replayed: true)'
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanningStrategy'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/strategies/{code}:
+    get:
+      operationId: getStrategy
+      summary: One planning strategy with its stored setup or its defaults
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/StrategyCodePath'
+      responses:
+        '200':
+          description: The strategy; a stored one carries its ETag, an unconfigured one the defaults with configured false
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanningStrategy'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateStrategy
+      summary: Replace the setup of a stored planning strategy under If-Match; omitted fields take its defaults
+      description: A strategy with no stored setup is 404 PLAN-STRATEGY-NOT-FOUND (create it first). A code in the body must equal the path.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/StrategyCodePath'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StrategySettings'}
+      responses:
+        '200':
+          description: The changed setup with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanningStrategy'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
   /v1/planning/scenarios:
     get:
       operationId: listScenarios
@@ -1582,6 +1703,11 @@ components:
       required: true
       description: 'ETag of the version the change is based on, e.g. "3" (a new forecast model is "0")'
       schema: {type: string}
+    StrategyCodePath:
+      name: code
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/StrategyCode'}
     CoverageCode:
       name: code
       in: path
@@ -1678,6 +1804,28 @@ components:
         generateActions: {type: boolean, default: true}
         generateFutures: {type: boolean, default: true}
         safetyStockPolicy: {type: string, enum: [today, first-issue], default: today, description: 'BR-22.5. today nets the safety stock as a demand at today; first-issue as a demand on the item first issue date (today when the item has no demand).'}
+    StrategyCode:
+      type: string
+      enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly]
+    StrategySettings:
+      type: object
+      description: Omitted fields (and explicit nulls) take the defaults of the strategy.
+      properties:
+        consumptionMode: {type: string, enum: [backward, forward, backward-forward], default: backward, description: 'BR-22.13, used by assemble-to-order-final: backward uses only the backward window, forward only the forward window, backward-forward both'}
+        backwardDays: {type: integer, minimum: 0, maximum: 365, default: 30, description: 'A sales line on day d consumes forecast in [d - backwardDays, d], latest first'}
+        forwardDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 'Then forecast in (d, d + forwardDays], earliest first'}
+        usesMarking: {type: boolean, description: 'Pegging is marked so later runs cannot re-peg the supply; default true for mto and plan-without-final-assembly. Stored; not yet applied by the run.'}
+        segregatedStock: {type: boolean, default: false, description: Order-specific stock segregation (needs the inventory sales-order stock dimension). Stored; not yet applied.}
+    PlanningStrategy:
+      allOf:
+        - type: object
+          required: [code, configured]
+          properties:
+            code: {$ref: '#/components/schemas/StrategyCode'}
+            configured: {type: boolean, description: False when no setup is stored and the defaults are shown}
+            id: {type: string, format: uuid}
+            version: {type: integer, minimum: 1, description: Same as the ETag}
+        - $ref: '#/components/schemas/StrategySettings'
     CoverageGroup:
       allOf:
         - type: object

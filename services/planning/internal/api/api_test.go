@@ -85,9 +85,14 @@ type fakeStore struct {
 	scenarios   []store.Scenario
 	scenarioKey map[string]string
 	// runBuffers is what RunBuffers returns (run_buffer_test.go).
-	runBuffers  []domain.RunBuffer
-	lastSim     store.SimulationRequest
-	simulations int
+	runBuffers []domain.RunBuffer
+	// Planning strategy setup, the strategies runs read by item and the input
+	// hash stored per Idempotency-Key (strategy_test.go).
+	strategies    []store.Strategy
+	strategyKeys  map[string]string
+	runStrategies map[string]domain.StrategySpec
+	lastSim       store.SimulationRequest
+	simulations   int
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

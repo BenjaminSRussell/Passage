@@ -11,12 +11,13 @@ import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRu
 import { NewQuotaArrangementPage, QuotaArrangementPage, QuotaArrangementsPage } from "./QuotaPages";
 import { RunPlanPage } from "./RunPlanPage";
 import { NewScenarioPage, ScenarioPage, ScenariosPage } from "./ScenarioPages";
+import { StrategiesPage, StrategyPage } from "./StrategyPages";
 
 const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, and simulate what-if scenarios beside the operational plan.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, set up how each item is planned per site, warehouse or subcontractor, maintain DDMRP buffer profiles and see buffer status by zone and priority, split requirements across sources with quota arrangements, set how each planning strategy treats forecast against sales, and simulate what-if scenarios beside the operational plan.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },
@@ -41,6 +42,8 @@ const planning: PassageModule = {
     { path: "/planning/quota-arrangements", element: createElement(QuotaArrangementsPage) },
     { path: "/planning/quota-arrangements/new", element: createElement(NewQuotaArrangementPage) },
     { path: "/planning/quota-arrangements/:id", element: createElement(QuotaArrangementPage) },
+    { path: "/planning/strategies", element: createElement(StrategiesPage) },
+    { path: "/planning/strategies/:code", element: createElement(StrategyPage) },
     { path: "/planning/scenarios", element: createElement(ScenariosPage) },
     { path: "/planning/scenarios/new", element: createElement(NewScenarioPage) },
     { path: "/planning/scenarios/:code", element: createElement(ScenarioPage) },
@@ -60,6 +63,7 @@ const planning: PassageModule = {
     { label: "Buffer profiles", to: "/planning/buffer-profiles", duty: "planning.read" },
     { label: "DDMRP buffers", to: "/planning/ddmrp-buffers", duty: "planning.read" },
     { label: "Quota arrangements", to: "/planning/quota-arrangements", duty: "planning.read" },
+    { label: "Planning strategies", to: "/planning/strategies", duty: "planning.read" },
     { label: "Scenarios", to: "/planning/scenarios", duty: "planning.read" },
   ],
 };

@@ -569,6 +569,60 @@ export async function updateCoverageGroup(code: string, version: number, setting
   });
 }
 
+/** How a strategy's items treat the forecast against sales (BR-22.13), used by assemble-to-order-final. */
+export const ConsumptionMode = z.enum(["backward", "forward", "backward-forward"]);
+export type ConsumptionMode = z.infer<typeof ConsumptionMode>;
+
+const StrategyCode = z.enum(["mts-net", "mts-gross", "mto", "assemble-to-order-final", "plan-without-final-assembly", "subassembly"]);
+
+/** The setup of one planning strategy, as a create or update sends it (StrategySettings in the OpenAPI). */
+export const StrategySettings = z.object({
+  consumptionMode: ConsumptionMode,
+  backwardDays: z.number().int(),
+  forwardDays: z.number().int(),
+  usesMarking: z.boolean(),
+  segregatedStock: z.boolean(),
+});
+export type StrategySettings = z.infer<typeof StrategySettings>;
+
+/** A strategy with its setup. `configured` false means the defaults are shown and nothing is stored (no id, no version). */
+export const StrategySetup = StrategySettings.extend({
+  code: StrategyCode,
+  configured: z.boolean(),
+  id: z.string().optional(),
+  /** The setup's ETag: send it back as If-Match on PUT. */
+  version: z.number().int().min(1).optional(),
+});
+export type StrategySetup = z.infer<typeof StrategySetup>;
+
+/** Always the six strategies of FR-22.19 in setup order. */
+export async function listStrategies(init?: RequestInit): Promise<StrategySetup[]> {
+  const out = await request(`/strategies`, z.object({ items: z.array(StrategySetup) }), init);
+  return out.items;
+}
+
+export async function getStrategy(code: string, init?: RequestInit): Promise<StrategySetup> {
+  return request(`/strategies/${encodeURIComponent(code)}`, StrategySetup, init);
+}
+
+/** Stores the setup of a strategy (Maintain planning setup); 409 `PLAN-STRATEGY-EXISTS` means it already has one. */
+export async function createStrategy(code: string, settings: StrategySettings, idempotencyKey: string): Promise<StrategySetup> {
+  return request(`/strategies`, StrategySetup, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ code, ...settings }),
+  });
+}
+
+/** Replaces the setup of a stored strategy under If-Match; 412 means someone else changed it. */
+export async function updateStrategy(code: string, version: number, settings: StrategySettings): Promise<StrategySetup> {
+  return request(`/strategies/${encodeURIComponent(code)}`, StrategySetup, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(settings),
+  });
+}
+
 /** The order a planned order becomes when firmed (FR-22.3). */
 export type OrderType = z.infer<typeof OrderType>;
 

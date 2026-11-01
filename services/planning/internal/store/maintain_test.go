@@ -188,6 +188,10 @@ func TestForecastLines(t *testing.T) {
 	if len(demand) != 1 || demand[0].ItemID != itemA || demand[0].PeriodStart.Format("2006-01-02") != "2026-11-09" || !demand[0].ReducedQty.Equal(decimal.NewFromInt(40)) {
 		t.Fatalf("forecast demand = %+v; want item A 40 from 2026-11-09", demand)
 	}
+	// Strategies read the forecast as entered and the period end (FR-22.19).
+	if !demand[0].Qty.Equal(decimal.NewFromInt(50)) || demand[0].PeriodEnd.Format("2006-01-02") != "2026-11-15" {
+		t.Fatalf("forecast demand qty %s end %s; want the entered 50 and the period end", demand[0].Qty, demand[0].PeriodEnd)
+	}
 	if _, err := st.ForecastDemand(ctx, "NOPE", site, time.Now()); problemCode(err) != store.CodeForecastNotFound {
 		t.Fatalf("unknown model demand: %v", err)
 	}

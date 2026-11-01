@@ -57,6 +57,8 @@ describe("planning module", () => {
       "/planning/quota-arrangements",
       "/planning/quota-arrangements/new",
       "/planning/quota-arrangements/:id",
+      "/planning/strategies",
+      "/planning/strategies/:code",
       "/planning/scenarios",
       "/planning/scenarios/new",
       "/planning/scenarios/:code",

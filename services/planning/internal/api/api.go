@@ -104,6 +104,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/item-coverages/{id}", a.updateItemCoverage)
 	a.registerScenarios(r)
 	a.registerBuffers(r)
+	a.registerStrategies(r)
 	a.registerQuotaArrangements(r)
 	a.registerCalculators(r)
 }
@@ -452,7 +453,15 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 			httpx.Fail(w, r, err)
 			return time.Time{}, nil, nil, false
 		}
-		addForecastDemand(items, req.ForecastModel, asOf, lines)
+		strategies, err := a.store.RunStrategies(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, nil, false
+		}
+		if err := addForecastDemand(items, req.ForecastModel, asOf, lines, strategies); err != nil {
+			httpx.Fail(w, r, runProblem(err))
+			return time.Time{}, nil, nil, false
+		}
 	}
 	if req.CarryForward {
 		firmed, err := a.store.FirmedSupply(r.Context(), code, req.SiteID, asOf)
@@ -541,25 +550,52 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, v)
 }
 
-// addForecastDemand appends each reduced forecast cell to the demand of its
-// item as a forecast requirement at the period start (FR-22.8, BR-22.3). Cells
-// of items outside the snapshot are not planned. A period that started before
-// asOf is due at asOf, like any past demand.
-func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines []store.ForecastDemandLine) {
+// addForecastDemand appends the forecast cells of the model to the demand of
+// their items as forecast requirements at the period start (FR-22.8, BR-22.3).
+// The planning strategy on the item's coverage (FR-22.19) decides the quantity:
+// the reduced forecast (mts-net, the default), the forecast as entered
+// (mts-gross), none (mto) or the forecast left after the item's sales lines
+// consumed it (assemble-to-order-final, BR-22.13); see domain.PlanForecast.
+// Cells of items outside the snapshot are not planned.
+func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines []store.ForecastDemandLine, strategies map[string]domain.StrategySpec) error {
 	index := make(map[string]*domain.Item, len(items))
 	for i := range items {
 		index[items[i].ID] = &items[i]
 	}
+	var order []string
+	cells := map[string][]domain.ForecastCellDemand{}
 	for _, l := range lines {
-		it := index[l.ItemID]
-		if it == nil {
+		if index[l.ItemID] == nil {
 			continue
 		}
+		if _, seen := cells[l.ItemID]; !seen {
+			order = append(order, l.ItemID)
+		}
 		start := l.PeriodStart.Format(dateLayout)
-		day := int(l.PeriodStart.Sub(asOf) / (24 * time.Hour))
-		it.Demand = append(it.Demand, domain.Requirement{Ref: "FC:" + model + ":" + start, RefType: domain.RefForecast,
-			Date: day, Qty: l.ReducedQty, Priority: domain.PriorityForecast})
+		cells[l.ItemID] = append(cells[l.ItemID], domain.ForecastCellDemand{
+			Ref: "FC:" + model + ":" + start, StartDay: int(l.PeriodStart.Sub(asOf) / (24 * time.Hour)),
+			EndDay: int(l.PeriodEnd.Sub(asOf) / (24 * time.Hour)), Qty: l.Qty, ReducedQty: l.ReducedQty,
+		})
 	}
+	for _, id := range order {
+		it := index[id]
+		st, ok := strategies[id]
+		if !ok {
+			st = domain.DefaultStrategy(domain.StrategyMTSNet)
+		}
+		var sales []domain.Requirement
+		for _, d := range it.Demand {
+			if d.RefType == domain.RefSales {
+				sales = append(sales, d)
+			}
+		}
+		demand, err := domain.PlanForecast(st, cells[id], sales)
+		if err != nil {
+			return err
+		}
+		it.Demand = append(it.Demand, demand...)
+	}
+	return nil
 }
 
 // addFirmedSupply appends each firmed planned order that is still to be
@@ -586,7 +622,7 @@ func runProblem(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0004", "BOM cycle detected; low-level codes not updated")
 	case errors.Is(err, domain.ErrTooManySplits):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0005", "a requirement splits into more orders than the limit of 1000")
-	case errors.Is(err, domain.ErrInvalidItem), errors.Is(err, domain.ErrInvalidCalendar):
+	case errors.Is(err, domain.ErrInvalidItem), errors.Is(err, domain.ErrInvalidCalendar), errors.Is(err, domain.ErrInvalidStrategy):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, err.Error())
 	}
 	return err

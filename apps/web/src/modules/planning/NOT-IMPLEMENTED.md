@@ -1,8 +1,12 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 21)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 22)
 
 Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail; slice 20 adds the DDMRP buffer priority and zone as a Priority column on the planned orders list and on the planned-order detail, and the red-zone message action; slice 21 adds a Sort by selector on the planned orders and messages screens, whose default puts the buffer orders of priority-based items first by planning priority and whose "Planning priority" option does so for every buffer order, and a Priority column on messages), all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
+- `/planning/strategies` and `/planning/strategies/:code` (slice 22): the six planning strategies of FR-22.19 with their stored
+  setup or defaults, and a form for the consumption mode, backward and forward windows, marking and segregated stock (create on
+  the first save with an Idempotency-Key, then update under If-Match, with a reload offer on 412 and on a 409 `PLAN-STRATEGY-EXISTS` create). Nav item "Planning
+  strategies" on `planning.read`; the writes need `planning.setup.maintain`, which the service enforces.
 - `/planning`: master planning workspace with plan picker, summary tiles
   (planned orders by type, delayed orders, messages) and the last run.
 - `/planning/planned-orders`: planned orders of the current version with a
