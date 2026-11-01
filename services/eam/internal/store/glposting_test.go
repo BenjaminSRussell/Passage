@@ -385,8 +385,14 @@ func TestGLPosting_TheSchedulerSkipsAnEntitylessAssetAndKeepsGoing(t *testing.T)
 		t.Fatal(err)
 	}
 	res, err := f.s.SchedulePlans(f.ctx)
-	if err != nil || res.NoEntity != 1 || res.Generated != 1 || res.Skipped < 1 {
+	if err != nil || res.NoEntity != 1 || res.Evaluated != 2 {
 		t.Fatalf("sweep: %+v %v", res, err)
+	}
+	var generated int
+	if err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(f.ctx, `select count(*) from work_order where plan_line_id is not null`).Scan(&generated)
+	}); err != nil || generated != 1 {
+		t.Fatalf("creating the plan generated the healthy line's order and none for the entity-less asset: %d %v", generated, err)
 	}
 	rec, err := f.s.ReconcileGL(f.ctx, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
 	if err != nil || rec.AssetsNoEntity.Count != 1 {
