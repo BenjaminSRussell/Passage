@@ -1021,7 +1021,7 @@ paths:
     get:
       tags: [nonconformance]
       operationId: getNonconformance
-      x-passage-duty: QM_VIEW
+      x-passage-duty: QM_VIEW or quality.capa.execute
       summary: One nonconformance with its 8D correction
       parameters:
         - $ref: "#/components/parameters/NcrId"
@@ -1095,7 +1095,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: startCorrection
-      x-passage-duty: QM_CAPA_MAINTAIN
+      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
       summary: Start the 8D correction of an APPROVED nonconformance (FR-33.8)
       description: |
         Moves the NCR to IN_CORRECTION and opens D1. D3 containment is due two business days
@@ -1135,7 +1135,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: completeCorrectionStep
-      x-passage-duty: QM_CAPA_MAINTAIN
+      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
       summary: Complete the current 8D step, D1 to D7
       description: Steps complete in order (QM-0173 otherwise). Completing D7 starts the effectiveness timer.
       parameters:
@@ -1166,7 +1166,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: checkEffectiveness
-      x-passage-duty: QM_CAPA_MAINTAIN
+      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
       summary: Record the effectiveness check once it is due
       description: |
         Allowed once effectivenessDueAt has passed (QM-0174), by a user other than the one who

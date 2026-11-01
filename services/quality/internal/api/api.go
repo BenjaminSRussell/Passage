@@ -98,12 +98,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/spc", a.spcChart)
 	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances", a.createNonconformance)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/nonconformances", a.listNonconformances)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/nonconformances/{id}", a.getNonconformance)
+	r.With(authz.RequireAnyDuty(dutyView, dutyCAPAExecute)).Get("/v1/quality/nonconformances/{id}", a.getNonconformance)
 	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances/{id}:approve", a.approveNonconformance)
 	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances/{id}:refuse", a.refuseNonconformance)
-	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}/corrections", a.startCorrection)
-	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}:complete-step", a.completeStep)
-	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}:check-effectiveness", a.checkEffectiveness)
+	r.With(authz.RequireAnyDuty(dutyCAPA, dutyCAPAExecute)).Post("/v1/quality/nonconformances/{id}/corrections", a.startCorrection)
+	r.With(authz.RequireAnyDuty(dutyCAPA, dutyCAPAExecute)).Post("/v1/quality/nonconformances/{id}:complete-step", a.completeStep)
+	r.With(authz.RequireAnyDuty(dutyCAPA, dutyCAPAExecute)).Post("/v1/quality/nonconformances/{id}:check-effectiveness", a.checkEffectiveness)
 }
 
 // Metrics serves the admin port's Prometheus text output.

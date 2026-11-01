@@ -19,6 +19,8 @@ import (
 const (
 	dutyNCR  = "QM_NCR_MAINTAIN"
 	dutyCAPA = "QM_CAPA_MAINTAIN"
+
+	dutyCAPAExecute = "quality.capa.execute"
 )
 
 // ncrRequest is the create body. Links are optional UUIDs; an NCR that names a

@@ -25,7 +25,8 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `GET /v1/engineering/bom-versions/{id}`, `GET /v1/engineering/route-versions`, `GET /v1/engineering/route-versions:active`, `GET /v1/engineering/route-versions/{id}` | `engineering.read` |
 | `POST /v1/engineering/boms:explode`, `GET /v1/engineering/boms:where-used`, `POST /v1/engineering/routes:lead-time` | `engineering.read` |
 | `POST /v1/engineering/ecos` | `engineering.bom.write` |
-| `POST /v1/engineering/ecos/{id}:release` | `engineering.eco.approve` |
+| `POST /v1/engineering/ecos/{id}:release` | `engineering.eco.approve`, or the service-only `engineering.eco.workflow`. An approved ECO is released without calling the approver seam. |
+| `POST /v1/engineering/ecos/{id}:approve`, `:reject`, `:cancel` | the service-only `engineering.eco.workflow` that `workflow-ts` signs, never a person. They decide a submitted ECO as the token's acting user: 403 `ENG-ECO-SELF-APPROVAL` when that user created the ECO (`created_by`, migration 0005, backfilled from the `eco.submitted` outbox actor; an ECO with no recorded creator is refused with 403 `ENG-ECO-CREATOR-UNKNOWN`, and creating an ECO needs the acting user), `ENG-ECO-ACTOR-REQUIRED` without a user, 409 `ENG-ECO-STATE` from any other state, 200 unchanged on a repeat. `:reject` and `:cancel` take an optional `{reason}` kept as `decisionReason`. |
 | `POST /v1/engineering/calendars`, `POST /v1/engineering/calendars/{id}:generate`, `POST /v1/engineering/resource-groups`, `POST /v1/engineering/capabilities`, `POST /v1/engineering/resources` | `engineering.resource.write` |
 | `GET /v1/engineering/calendars/{id}/days`, `GET /v1/engineering/resources/{id}`, `GET /v1/engineering/resources`, `GET /v1/engineering/resource-groups`, `GET /v1/engineering/capabilities` | `engineering.read` |
 | `POST /v1/engineering/route-versions/{id}:activate` | `engineering.route.write` |

@@ -145,8 +145,8 @@ function json(run: Run, status = 200): Response {
   return new Response(JSON.stringify({ ...run }), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function problem(status: number, detail: string): Response {
-  return new Response(JSON.stringify({ status, detail }), { status, headers: { "Content-Type": "application/problem+json" } });
+export function problem(status: number, detail: string, code?: string): Response {
+  return new Response(JSON.stringify({ status, detail, ...(code ? { code } : {}) }), { status, headers: { "Content-Type": "application/problem+json" } });
 }
 
 export interface ServiceClaims {
@@ -161,7 +161,7 @@ export interface ServiceClaims {
   jti: string;
 }
 
-function decodeClaims(token: string | null): ServiceClaims | undefined {
+export function decodeClaims(token: string | null): ServiceClaims | undefined {
   const body = token?.split(".")[0];
   if (!body) return undefined;
   return JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as ServiceClaims;

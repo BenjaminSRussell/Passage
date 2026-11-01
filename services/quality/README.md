@@ -205,12 +205,12 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/quality/spc?itemId=&testId=&orders=` | QM_VIEW |
 | GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | QM_VIEW |
 | POST | `/v1/quality/nonconformances` | QM_NCR_MAINTAIN |
-| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW |
+| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW, or `quality.capa.execute` |
 | POST | `/v1/quality/nonconformances/{id}:approve` | QM_NCR_MAINTAIN |
 | POST | `/v1/quality/nonconformances/{id}:refuse` | QM_NCR_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
 
 The PRD writes paths as `/quality/v1/...`; the service follows the repository
 convention `/v1/<context>/...`. Lists answer `{"items": [...]}` with `limit` 1 to 500
