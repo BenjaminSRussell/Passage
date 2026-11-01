@@ -891,6 +891,130 @@ paths:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/BacklogRow" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/posting-profiles:
+    get:
+      operationId: listPostingProfiles
+      x-passage-duty: EamInquire
+      description: |
+        The posting profiles of a legal entity (default the caller's) and the built-in placeholder profile that applies when a legal
+        entity has none (accounts 6500, 6510, 1400 and 6590, to be replaced by the accountant).
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: profiles and the placeholder
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, placeholder]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/PostingProfile" } }
+                  placeholder: { $ref: "#/components/schemas/PostingProfile" }
+        "400": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: savePostingProfile
+      x-passage-duty: EamSetupAdmin
+      description: |
+        Creates (no If-Match) or replaces (If-Match with the version) the profile of a legal entity and work order type; ALL is the
+        wildcard. Work order cost is booked as parts expense / parts offset and labor expense / labor offset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostingProfileInput" }
+      responses:
+        "200": { description: replaced, content: { application/json: { schema: { $ref: "#/components/schemas/PostingProfile" } } } }
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/PostingProfile" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/eam/gl-postings:
+    post:
+      operationId: postWorkOrderCostsToGL
+      x-passage-duty: EamPlanner
+      description: |
+        Books the parts and labor cost of completed and closed work orders of one currency (optionally one site or one work order) in the
+        general ledger: one balanced entry per order for the cost not yet booked, keyed by order and booking number so a retry returns the same
+        entry. A cost that changed after booking is booked as a delta. An order the ledger refuses (a closed period, for one) is listed under
+        failed with the ledger's problem code and is retried by the next run. At most 200 orders per run (more is true when others wait).
+        Work orders carry no legal entity yet, so the caller names the entity the cost is booked under. Signs only ledger.entry.post.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId, currency]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                ledgerId: { type: string, format: uuid }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+                siteId: { type: string, format: uuid }
+                workOrderId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: what was booked and what the ledger refused
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        workOrder: { type: string }
+                        entryId: { type: string, format: uuid }
+                        lines: { type: integer }
+                        placeholderProfile: { type: boolean, description: True when the entry used the built-in placeholder accounts. }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        workOrder: { type: string }
+                        code: { type: string, description: "The ledger's problem code, or EAM-GL-001." }
+                  more: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/eam/gl-reconciliation:
+    get:
+      operationId: getGLReconciliation
+      x-passage-duty: EamInquire
+      description: |
+        Per account the service booked on (up to periodTo, YYYY-MM): the net of its GL subledger, the general ledger's balance of the
+        account and the difference (GL minus subledger). reconciled is true when every difference is zero.
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: periodTo, in: query, schema: { type: string, pattern: "^\\d{4}-(0[1-9]|1[0-2])$" } }
+      responses:
+        "200":
+          description: the reconciliation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, reconciled, accounts]
+                properties:
+                  currency: { type: string }
+                  reconciled: { type: boolean }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        account: { type: string }
+                        subledger: { type: string }
+                        gl: { type: string }
+                        difference: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "502": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -930,6 +1054,29 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    PostingProfileInput:
+      type: object
+      required: [partsExpenseAccount, laborExpenseAccount, partsOffsetAccount, laborOffsetAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workOrderType: { type: string, default: ALL }
+        partsExpenseAccount: { type: string, maxLength: 40 }
+        laborExpenseAccount: { type: string, maxLength: 40 }
+        partsOffsetAccount: { type: string, maxLength: 40 }
+        laborOffsetAccount: { type: string, maxLength: 40 }
+    PostingProfile:
+      type: object
+      properties:
+        legalEntityId: { type: string }
+        workOrderType: { type: string }
+        partsExpenseAccount: { type: string }
+        laborExpenseAccount: { type: string }
+        partsOffsetAccount: { type: string }
+        laborOffsetAccount: { type: string }
+        version: { type: integer }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        placeholder: { type: boolean }
     RoundStop:
       type: object
       required: [sequence, assetId, jobType]

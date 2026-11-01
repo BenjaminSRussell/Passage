@@ -2320,6 +2320,15 @@
     "close": {
       "ledger": ["ledger.ledger.lookup"]
     },
+    "production": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "eam": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "assets": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],

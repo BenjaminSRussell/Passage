@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/store"
@@ -54,8 +55,9 @@ var (
 
 // Handler serves the EAM API.
 type Handler struct {
-	store *store.Postgres
-	ready func(context.Context) error
+	store  *store.Postgres
+	ready  func(context.Context) error
+	ledger ledgerclient.Ledger
 }
 
 // New returns the API handler. ready backs /readyz.
@@ -142,6 +144,11 @@ func (h *Handler) router() chi.Router {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/plan-reviews", h.planReviews)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/kpis/cost", h.costByAsset)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/kpis/backlog", h.backlog)
+		// Work order costs in the general ledger (FR-44.11).
+		r.With(authz.RequireDuty(DutyInquire)).Get("/posting-profiles", h.listPostingProfiles)
+		r.With(authz.RequireDuty(DutySetupAdmin)).Put("/posting-profiles", h.savePostingProfile)
+		r.With(authz.RequireDuty(DutyPlanner)).Post("/gl-postings", h.postGL)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/gl-reconciliation", h.glReconciliation)
 	})
 	return r
 }

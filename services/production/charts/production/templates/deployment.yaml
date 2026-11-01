@@ -20,6 +20,13 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+{{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: production
           image: {{ include "production.image" . | quote }}
@@ -45,6 +52,23 @@ spec:
               value: {{ .Values.config.autoStartOnFeedback | quote }}
             - name: PRODUCTION_ESTIMATE_ON_CREATE
               value: {{ .Values.config.estimateOnCreate | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: production
+{{- if .Values.ledgerUrl }}
+            - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

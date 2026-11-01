@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/api"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/store"
 	"github.com/BenjaminSRussell/passage/services/eam/migrations"
@@ -48,6 +49,13 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	s := store.New(pool)
 	h := api.New(s, s.Ready)
+	ledger, err := ledgerclient.FromEnv(getenv, "eam")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		h.WithLedger(ledger)
+	}
 	logger.Info("listening", "addr", addr)
 	return httpx.Serve(ctx, addr, h.Routes())
 }

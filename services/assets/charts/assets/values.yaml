@@ -42,3 +42,8 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
+
+ledgerUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
