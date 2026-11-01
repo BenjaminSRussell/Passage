@@ -91,7 +91,7 @@ export function NewCompensationPlanPage() {
             ]}
           />
           <TextField id="plan-currency" label="Currency" hint="For example USD." maxLength={3} value={values.currency} error={form.errors.currency} onChange={(v) => set({ currency: v })} />
-          <FormActions busy={form.busy} submit="Add plan" cancelTo="/hr/compensation/plans" failure={form.failure} failureTitle="Could not add the plan" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Add plan" cancelTo="/hr/compensation/plans" failure={form.failure} failureTitle="Could not add the plan" />
         </form>
       </Card>
     </div>

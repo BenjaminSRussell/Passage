@@ -214,7 +214,7 @@ export function NewIncidentPage() {
           {area("treatments", "Treatments", true, "One per line.")}
           {area("rootCause", "Root cause", true)}
           {area("correctiveAction", "Corrective action", true)}
-          <FormActions busy={form.busy} submit="Report incident" cancelTo="/hr/incidents" failure={form.failure} failureTitle="Could not report the incident" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Report incident" cancelTo="/hr/incidents" failure={form.failure} failureTitle="Could not report the incident" />
         </form>
       </Card>
     </div>

@@ -104,7 +104,7 @@ describe("hr module", () => {
       expect(paths).toContain(path);
     }
     expect(hr.routes.every((r) => r.element !== null)).toBe(true);
-    expect(hr.nav).toEqual(expect.arrayContaining([
+    expect(hr.nav).toEqual([
       { label: "Workers", to: "/hr/workers", duty: "HcmWorkerInquire" },
       { label: "Positions", to: "/hr/positions", duty: "HcmOrgInquire" },
       { label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" },
@@ -114,9 +114,21 @@ describe("hr module", () => {
       { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
       { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
       { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
+      { label: "Personnel actions", to: "/hr/actions", duty: "HcmActionMaintain" },
+      { label: "Jobs", to: "/hr/jobs", duty: "HcmOrgInquire" },
+      { label: "Compensation plans", to: "/hr/compensation/plans", duty: "HcmCompAdmin" },
+      { label: "Compensation cycles", to: "/hr/compensation/cycles", duty: "HcmCompAdmin" },
+      { label: "Requisitions", to: "/hr/requisitions", duty: "HcmRecruitMaintain" },
+      { label: "Incidents", to: "/hr/incidents", duty: "HcmIncidentAdmin" },
+      { label: "Report an incident", to: "/hr/incidents/new", duty: "HcmIncidentReport" },
+      { label: "Outstanding loans", to: "/hr/loaned-items", duty: "HcmWorkerInquire" },
+      { label: "Checklist templates", to: "/hr/checklist-templates", duty: "HcmSetupAdmin" },
+      { label: "Tasks", to: "/hr/tasks", duty: "HcmWorkerInquire" },
+      { label: "Questionnaires", to: "/hr/questionnaires", duty: "HcmQuestionnaireAdmin" },
+      { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "EssQuestionnaire" },
       { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
       { label: "My team", to: "/hr/my/team", duty: "MssBase" },
-    ]));
+    ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });
 });

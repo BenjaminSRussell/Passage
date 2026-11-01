@@ -44,6 +44,7 @@ export function validateCycle(v: CycleValues): { errors: Errors; input?: NewComp
     const rating = Number(row.rating);
     const bad = (message: string) => {
       errors.guidelineMatrix ??= `Row ${i + 1}: ${message}`;
+      errors[`matrix[${i}]`] = `Row ${i + 1}: ${message}`;
     };
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) bad("the rating is 1 to 5.");
     else if (!RATIO.test(row.compaMin.trim())) bad("the compa-ratio start is not a number.");
@@ -59,9 +60,13 @@ export function validateCycle(v: CycleValues): { errors: Errors; input?: NewComp
   if (v.budgets.length === 0) errors.budgets = "Add at least one department budget.";
   v.budgets.forEach((b, i) => {
     const department = b.departmentId.trim().toLowerCase();
-    if (!UUID.test(department)) errors.budgets ??= `Budget ${i + 1}: enter the department's id.`;
-    else if (seen.has(department)) errors.budgets ??= `Budget ${i + 1}: this department is already listed.`;
-    else if (/^[A-Z]{3}$/.test(currency) && !validRate(b.budgetAmount, currency)) errors.budgets ??= `Budget ${i + 1}: enter an amount within the currency's decimals.`;
+    const bad = (message: string) => {
+      errors.budgets ??= `Budget ${i + 1}: ${message}`;
+      errors[`budgets[${i}]`] = `Budget ${i + 1}: ${message}`;
+    };
+    if (!UUID.test(department)) bad("enter the department's id.");
+    else if (seen.has(department)) bad("this department is already listed.");
+    else if (/^[A-Z]{3}$/.test(currency) && !validRate(b.budgetAmount, currency)) bad("enter an amount within the currency's decimals.");
     seen.add(department);
   });
   if (Object.keys(errors).length > 0) return { errors };
@@ -127,6 +132,7 @@ export function NewCompCyclePage() {
                     id={`cycle-matrix-${i}-${field}`}
                     label={label}
                     value={String(row[field])}
+                    error={field === "rating" ? form.errors[`matrix[${i}]`] : undefined}
                     onChange={(v) => set({ matrix: values.matrix.map((r, j) => (j === i ? { ...r, [field]: field === "rating" ? Number(v) || 0 : v } : r)) })}
                   />
                 ))}
@@ -139,7 +145,7 @@ export function NewCompCyclePage() {
                 ) : null}
               </div>
             ))}
-            {form.errors.guidelineMatrix ? <p role="alert">{form.errors.guidelineMatrix}</p> : null}
+            {form.errors.guidelineMatrix && !values.matrix.some((_, i) => form.errors[`matrix[${i}]`]) ? <p role="alert">{form.errors.guidelineMatrix}</p> : null}
             {values.matrix.length < MAX_ROWS ? (
               <div>
                 <Button size="sm" onClick={() => set({ matrix: [...values.matrix, blankRow()] })}>
@@ -155,6 +161,7 @@ export function NewCompCyclePage() {
                 <TextField
                   id={`cycle-budget-${i}-department`}
                   label="Department id"
+                  error={form.errors[`budgets[${i}]`]}
                   value={b.departmentId}
                   onChange={(v) => set({ budgets: values.budgets.map((x, j) => (j === i ? { ...x, departmentId: v } : x)) })}
                 />
@@ -173,7 +180,7 @@ export function NewCompCyclePage() {
                 ) : null}
               </div>
             ))}
-            {form.errors.budgets ? <p role="alert">{form.errors.budgets}</p> : null}
+            {form.errors.budgets && !values.budgets.some((_, i) => form.errors[`budgets[${i}]`]) ? <p role="alert">{form.errors.budgets}</p> : null}
             {values.budgets.length < MAX_BUDGETS ? (
               <div>
                 <Button size="sm" onClick={() => set({ budgets: [...values.budgets, { departmentId: "", budgetAmount: "" }] })}>
@@ -182,7 +189,7 @@ export function NewCompCyclePage() {
               </div>
             ) : null}
           </fieldset>
-          <FormActions busy={form.busy} submit="Create cycle" cancelTo="/hr/compensation/cycles" failure={form.failure} failureTitle="Could not create the cycle" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Create cycle" cancelTo="/hr/compensation/cycles" failure={form.failure} failureTitle="Could not create the cycle" />
         </form>
       </Card>
     </div>

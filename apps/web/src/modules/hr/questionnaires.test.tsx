@@ -257,6 +257,46 @@ describe("questionnaires", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
+  it("lets a worker answer when their sign-in cannot read the worker record", async () => {
+    api.handler = routes({
+      [`GET /api/v1/hr/questionnaires/schedules/${SCHEDULE}`]: json(200, view()),
+      "GET /api/v1/hr/me": problem(403, "AUTH-0003", "missing duty EssBase"),
+      [`POST /api/v1/hr/questionnaires/schedules/${SCHEDULE}/answers`]: json(201, { status: "recorded" }),
+    });
+    renderAt(`/hr/my/questionnaires/${SCHEDULE}`);
+    fireEvent.change(await screen.findByLabelText("How satisfied are you? (required)"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    expect(await screen.findByText("Enter your worker id.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Your worker id"), { target: { value: WORKER } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    expect(await screen.findByText("Thank you, your answers were recorded")).toBeTruthy();
+    expect(api.posts("/answers")[0]?.body).toEqual({ workerId: WORKER, answers: { Q1: 4 } });
+  });
+
+  it("shows server field errors that no input displays in the form alert", async () => {
+    api.handler = routes({ "POST /api/v1/hr/compensation/plans": problem(400, "COM-0001", "validation failed", { mystery: "something odd" }) });
+    renderAt("/hr/compensation/plans/new");
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "A" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "n" } });
+    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add plan" }));
+    expect(await screen.findByText("mystery: something odd")).toBeTruthy();
+  });
+
+  it("flags the multi-choice answers invalid when the service rejects them", async () => {
+    api.handler = routes({
+      [`GET /api/v1/hr/questionnaires/schedules/${SCHEDULE}`]: json(200, view()),
+      "GET /api/v1/hr/me": json(200, me),
+      [`POST /api/v1/hr/questionnaires/schedules/${SCHEDULE}/answers`]: problem(400, "COM-0001", "validation failed", { "answers.Q3": "must list distinct option values of the question" }),
+    });
+    renderAt(`/hr/my/questionnaires/${SCHEDULE}`);
+    fireEvent.change(await screen.findByLabelText("How satisfied are you? (required)"), { target: { value: "4" } });
+    fireEvent.click(screen.getByLabelText("Ex"));
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    expect(await screen.findByText("must list distinct option values of the question")).toBeTruthy();
+    expect(screen.getByLabelText("Ex").getAttribute("aria-invalid")).toBe("true");
+  });
+
   it("tells a worker who already answered that answers can't change", async () => {
     api.handler = routes({
       [`GET /api/v1/hr/questionnaires/schedules/${SCHEDULE}`]: json(200, view()),

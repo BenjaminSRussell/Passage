@@ -18,24 +18,32 @@ interface Line {
 const toLine = (row: WorksheetRow): Line => ({ workerId: row.workerId, rating: String(row.rating), proposedPct: row.proposedPct, justification: row.justification ?? "" });
 const MAX_ROWS = 200;
 
-export function validateWorksheet(lines: Line[]): { errors: Record<number, string>; rows?: WorksheetInput[] } {
+type LineField = keyof Line;
+
+export function validateWorksheet(lines: Line[]): { errors: Record<number, string>; where: Record<number, LineField>; rows?: WorksheetInput[] } {
   const errors: Record<number, string> = {};
+  const where: Record<number, LineField> = {};
   const seen = new Set<string>();
   lines.forEach((line, i) => {
     const worker = line.workerId.trim().toLowerCase();
     const rating = Number(line.rating);
-    if (!UUID.test(worker)) errors[i] = "Enter the worker's id.";
-    else if (seen.has(worker)) errors[i] = "This worker is already on the worksheet.";
-    else if (!Number.isInteger(rating) || rating < 1 || rating > 5) errors[i] = "The rating is 1 to 5.";
+    const fail = (field: LineField, message: string) => {
+      errors[i] = message;
+      where[i] = field;
+    };
+    if (!UUID.test(worker)) fail("workerId", "Enter the worker's id.");
+    else if (seen.has(worker)) fail("workerId", "This worker is already on the worksheet.");
+    else if (!Number.isInteger(rating) || rating < 1 || rating > 5) fail("rating", "The rating is 1 to 5.");
     else if (!validSigned(line.proposedPct, 3) || compareDecimal(line.proposedPct, "-100") < 0 || compareDecimal(line.proposedPct, "100") > 0)
-      errors[i] = "The raise is a number from -100 to 100 with up to three decimals.";
-    else if (line.justification.trim().length > 1000) errors[i] = "Use up to 1000 characters for the justification.";
+      fail("proposedPct", "The raise is a number from -100 to 100 with up to three decimals.");
+    else if (line.justification.trim().length > 1000) fail("justification", "Use up to 1000 characters for the justification.");
     seen.add(worker);
   });
   if (lines.length === 0) errors[-1] = "Add at least one worker.";
-  if (Object.keys(errors).length > 0) return { errors };
+  if (Object.keys(errors).length > 0) return { errors, where };
   return {
     errors,
+    where,
     rows: lines.map((l) => ({
       workerId: l.workerId.trim().toLowerCase(),
       rating: Number(l.rating),
@@ -62,6 +70,7 @@ export function WorksheetPage() {
   const [rows, setRows] = useState<WorksheetRow[] | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [errors, setErrors] = useState<Record<number, string>>({});
+  const [where, setWhere] = useState<Record<number, LineField>>({});
   const [busy, setBusy] = useState<"save" | "submit" | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -73,6 +82,7 @@ export function WorksheetPage() {
     }
   }, [state.data]);
 
+  const dirty = rows !== null && JSON.stringify(lines) !== JSON.stringify(rows.map(toLine));
   const locked = rows !== null && rows.length > 0 && rows.every((r) => r.status === "SUBMITTED");
   const back = `/hr/compensation/cycles/${id}`;
 
@@ -96,6 +106,7 @@ export function WorksheetPage() {
     event.preventDefault();
     const result = validateWorksheet(lines);
     setErrors(result.errors);
+    setWhere(result.where);
     if (!result.rows) return;
     const input = result.rows;
     await call("save", () => saveWorksheet(id, managerId, input), "The worksheet was saved as a draft.");
@@ -125,10 +136,10 @@ export function WorksheetPage() {
                 {errors[-1] ? <p role="alert">{errors[-1]}</p> : null}
                 {lines.map((line, i) => (
                   <div key={i} className={styles.optionRow} role="group" aria-label={`Proposal ${i + 1}`}>
-                    <TextField id={`ws-${i}-worker`} label="Worker id" value={line.workerId} error={errors[i]} onChange={(v) => update(i, { workerId: v })} />
-                    <TextField id={`ws-${i}-rating`} label="Rating (1 to 5)" value={line.rating} onChange={(v) => update(i, { rating: v })} />
-                    <TextField id={`ws-${i}-pct`} label="Raise (%)" value={line.proposedPct} onChange={(v) => update(i, { proposedPct: v })} />
-                    <TextField id={`ws-${i}-why`} label="Justification" optional value={line.justification} onChange={(v) => update(i, { justification: v })} />
+                    <TextField id={`ws-${i}-worker`} label="Worker id" value={line.workerId} error={where[i] === "workerId" ? errors[i] : undefined} onChange={(v) => update(i, { workerId: v })} />
+                    <TextField id={`ws-${i}-rating`} label="Rating (1 to 5)" value={line.rating} error={where[i] === "rating" ? errors[i] : undefined} onChange={(v) => update(i, { rating: v })} />
+                    <TextField id={`ws-${i}-pct`} label="Raise (%)" value={line.proposedPct} error={where[i] === "proposedPct" ? errors[i] : undefined} onChange={(v) => update(i, { proposedPct: v })} />
+                    <TextField id={`ws-${i}-why`} label="Justification" optional value={line.justification} error={where[i] === "justification" ? errors[i] : undefined} onChange={(v) => update(i, { justification: v })} />
                     <div className={styles.optionRemove}>
                       <Button variant="ghost" size="sm" aria-label={`Remove proposal ${i + 1}`} onClick={() => setLines(lines.filter((_, j) => j !== i))}>
                         Remove
@@ -151,10 +162,12 @@ export function WorksheetPage() {
                       description="Submitted proposals go to approval and can't be edited."
                       confirmLabel="Submit"
                       busy={busy === "submit"}
+                      disabled={dirty}
                       onConfirm={() => void call("submit", () => submitWorksheet(id, managerId), "The worksheet was submitted.")}
                     />
                   ) : null}
                 </div>
+                {dirty ? <p className={styles.note}>Save changes first: submitting sends only the saved draft.</p> : null}
               </form>
             </Card>
           )}

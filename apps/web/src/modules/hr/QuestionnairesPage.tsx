@@ -124,7 +124,7 @@ function ScheduleForm({ questionnaire }: { questionnaire: Questionnaire }) {
           onChange={(v) => set({ population: v })}
         />
       </div>
-      <FormActions busy={form.busy} submit="Schedule" failure={form.failure} failureTitle="Could not schedule the questionnaire" />
+      <FormActions errors={form.errors} busy={form.busy} submit="Schedule" failure={form.failure} failureTitle="Could not schedule the questionnaire" />
     </form>
   );
 }

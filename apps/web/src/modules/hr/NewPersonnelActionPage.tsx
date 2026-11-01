@@ -184,7 +184,7 @@ export function NewPersonnelActionPage() {
           <div className={styles.wide}>
             <TextAreaField id="action-reason" label="Reason" optional value={values.reason} error={form.errors.reason} maxLength={500} onChange={(v) => update({ reason: v })} />
           </div>
-          <FormActions busy={form.busy} submit="Submit action" cancelTo="/hr/actions" failure={form.failure} failureTitle="Could not submit the action" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Submit action" cancelTo="/hr/actions" failure={form.failure} failureTitle="Could not submit the action" />
         </form>
       </Card>
     </div>

@@ -152,7 +152,7 @@ function IssueForm({ workerId, onIssued }: { workerId: string; onIssued(item: Lo
         {field("dueOn", "Due on", { optional: true, type: "date" })}
         {field("conditionOut", "Condition", { optional: true })}
         {field("legalEntityId", "Legal entity id", { optional: true, hint: "Needed when the worker is employed in several legal entities." })}
-        <FormActions busy={form.busy} submit="Lend item" failure={form.failure} failureTitle="Could not lend the item" />
+        <FormActions errors={form.errors} busy={form.busy} submit="Lend item" failure={form.failure} failureTitle="Could not lend the item" />
       </form>
     </Card>
   );

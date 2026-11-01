@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Alert,
@@ -369,9 +369,40 @@ export function useSubmit(codeField: Record<string, string> = {}) {
   return { busy, failure, errors, setErrors, setFailure, touch, run };
 }
 
-export function FormActions({ busy, submit, cancelTo, failure, failureTitle }: { busy: boolean; submit: string; cancelTo?: string; failure: Problem | null; failureTitle: string }) {
+export function FormActions({
+  busy,
+  submit,
+  cancelTo,
+  failure,
+  failureTitle,
+  errors = {},
+}: {
+  busy: boolean;
+  submit: string;
+  cancelTo?: string;
+  failure: Problem | null;
+  failureTitle: string;
+  errors?: Record<string, string>;
+}) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const [orphans, setOrphans] = useState<Array<[string, string]>>([]);
+  useEffect(() => {
+    const text = anchor.current?.closest("form")?.textContent ?? "";
+    setOrphans(Object.entries(errors).filter(([, message]) => !text.includes(message)));
+  }, [errors]);
   return (
     <>
+      <div ref={anchor} className={styles.formActions}>
+        {orphans.length > 0 ? (
+          <Alert tone="danger" title={failureTitle} live="alert">
+            <ul className={styles.warnings}>
+              {orphans.map(([field, message]) => (
+                <li key={field}>{`${field}: ${message}`}</li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+      </div>
       {failure ? (
         <div className={styles.formActions}>
           <ProblemAlert problem={failure} title={failureTitle} />
@@ -447,11 +478,33 @@ export function SelectField({
   );
 }
 
-export function CheckField({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange(checked: boolean): void }) {
+export function CheckField({
+  id,
+  label,
+  checked,
+  onChange,
+  error,
+  describedBy,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange(checked: boolean): void;
+  error?: string;
+  describedBy?: string;
+}) {
+  const errorId = error ? `${id}-error` : describedBy;
   return (
-    <div className={styles.check}>
-      <Input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <label htmlFor={id}>{label}</label>
+    <div>
+      <div className={styles.check}>
+        <Input id={id} type="checkbox" checked={checked} invalid={Boolean(error ?? describedBy)} aria-describedby={errorId} onChange={(event) => onChange(event.target.checked)} />
+        <label htmlFor={id}>{label}</label>
+      </div>
+      {error ? (
+        <p id={errorId} role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

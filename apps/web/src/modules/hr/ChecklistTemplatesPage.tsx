@@ -169,7 +169,7 @@ export function NewChecklistTemplatePage() {
               </div>
             ) : null}
           </fieldset>
-          <FormActions busy={form.busy} submit="Add template" cancelTo="/hr/checklist-templates" failure={form.failure} failureTitle="Could not add the template" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Add template" cancelTo="/hr/checklist-templates" failure={form.failure} failureTitle="Could not add the template" />
         </form>
       </Card>
     </div>

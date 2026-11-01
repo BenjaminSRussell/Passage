@@ -123,7 +123,7 @@ export function NewRequisitionPage() {
           {text("headcount", "Headcount", { inputMode: "numeric" })}
           {text("plannedStartDate", "Planned start date", { type: "date" })}
           <CheckField id="requisition-allowOverfill" label="Allow more people than the position has room for" checked={values.allowOverfill} onChange={(allowOverfill) => set({ allowOverfill })} />
-          <FormActions busy={form.busy} submit="Create requisition" cancelTo="/hr/requisitions" failure={form.failure} failureTitle="Could not create the requisition" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Create requisition" cancelTo="/hr/requisitions" failure={form.failure} failureTitle="Could not create the requisition" />
         </form>
       </Card>
     </div>

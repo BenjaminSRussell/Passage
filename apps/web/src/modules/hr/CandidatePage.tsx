@@ -44,7 +44,7 @@ function OfferForm({ candidateId }: { candidateId: string }) {
       <TextField id="offer-amount" label="Amount" value={values.amount} error={form.errors.amount} onChange={(v) => set({ amount: v })} />
       <TextField id="offer-currency" label="Currency" maxLength={3} value={values.currency} error={form.errors.currency} onChange={(v) => set({ currency: v })} />
       <TextField id="offer-startDate" label="Start date" type="date" value={values.startDate} error={form.errors.startDate} onChange={(v) => set({ startDate: v })} />
-      <FormActions busy={form.busy} submit="Create offer" failure={form.failure} failureTitle="Could not create the offer" />
+      <FormActions errors={form.errors} busy={form.busy} submit="Create offer" failure={form.failure} failureTitle="Could not create the offer" />
     </form>
   );
 }

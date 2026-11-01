@@ -78,10 +78,15 @@ function AddCandidate({ requisitionId, onAdded, onCancel }: { requisitionId: str
       <TextField id="candidate-phone" label="Phone" optional value={values.phone} error={form.errors.phone} onChange={(v) => set({ phone: v })} />
       <TextField id="candidate-source" label="Source" optional value={values.source} error={form.errors.source} onChange={(v) => set({ source: v })} />
       <div className={styles.wide}>
-        <CheckField id="candidate-consentGranted" label="The candidate consented to us keeping their personal data for this recruitment" checked={values.consentGranted} onChange={(consentGranted) => set({ consentGranted })} />
-        {form.errors.consentGranted ? <p role="alert">{form.errors.consentGranted}</p> : null}
+        <CheckField
+          id="candidate-consentGranted"
+          label="The candidate consented to us keeping their personal data for this recruitment"
+          checked={values.consentGranted}
+          error={form.errors.consentGranted}
+          onChange={(consentGranted) => set({ consentGranted })}
+        />
       </div>
-      <FormActions busy={form.busy} submit="Add candidate" failure={form.failure} failureTitle="Could not add the candidate" />
+      <FormActions errors={form.errors} busy={form.busy} submit="Add candidate" failure={form.failure} failureTitle="Could not add the candidate" />
       <div className={styles.formActions}>
         <Button onClick={onCancel}>Close form</Button>
       </div>

@@ -141,7 +141,7 @@ function StartForm({ workerId, onStarted }: { workerId: string; onStarted(checkl
           error={form.errors.legalEntityId}
           onChange={(v) => set({ legalEntityId: v })}
         />
-        <FormActions busy={form.busy} submit="Start checklist" failure={form.failure} failureTitle="Could not start the checklist" />
+        <FormActions errors={form.errors} busy={form.busy} submit="Start checklist" failure={form.failure} failureTitle="Could not start the checklist" />
       </form>
     </Card>
   );

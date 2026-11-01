@@ -85,7 +85,7 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
       />
       {text("fteShare", "FTE share", true)}
       {text("compPlanId", "Compensation plan id", true, "Setting pay needs the compensation administrator duty.")}
-      <FormActions busy={form.busy} submit="Hire from offer" failure={form.failure} failureTitle="Could not hire from the offer" />
+      <FormActions errors={form.errors} busy={form.busy} submit="Hire from offer" failure={form.failure} failureTitle="Could not hire from the offer" />
     </form>
   );
 }

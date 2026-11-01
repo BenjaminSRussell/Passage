@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Card, EmptyState, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { getSchedule, openSchedules, submitAnswers, type AnswerValue, type Question, type Schedule, type ScheduleView } from "./api/questionnaires";
-import { DATE, formatUtc } from "./format";
+import { DATE, UUID, formatUtc } from "./format";
 import styles from "./pages.module.css";
 import { getMyProfile } from "./api/selfService";
 import { BackLink, CheckField, FormActions, ListPage, Loaded, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
@@ -83,7 +83,7 @@ function QuestionField({ question, draft, error, onChange }: { question: Questio
   if (question.type === "MULTI") {
     const chosen = Array.isArray(value) ? value : [];
     return (
-      <fieldset className={styles.fieldset}>
+      <fieldset className={styles.fieldset} aria-describedby={error ? `${id}-error` : undefined}>
         <legend className={styles.legend}>{label}</legend>
         {(question.options ?? []).map((option) => (
           <CheckField
@@ -91,10 +91,15 @@ function QuestionField({ question, draft, error, onChange }: { question: Questio
             id={`${id}-${option.value}`}
             label={option.label}
             checked={chosen.includes(option.value)}
+            describedBy={error ? `${id}-error` : undefined}
             onChange={(on) => onChange(on ? [...chosen, option.value] : chosen.filter((v) => v !== option.value))}
           />
         ))}
-        {error ? <p role="alert">{error}</p> : null}
+        {error ? (
+          <p id={`${id}-error`} role="alert">
+            {error}
+          </p>
+        ) : null}
       </fieldset>
     );
   }
@@ -110,18 +115,21 @@ function QuestionField({ question, draft, error, onChange }: { question: Questio
   return <TextField id={id} label={label} type={question.type === "DATE" ? "date" : "text"} inputMode={question.type === "NUMERIC" ? "decimal" : undefined} value={text} error={error} onChange={onChange} />;
 }
 
-function AnswerForm({ view, workerId }: { view: ScheduleView; workerId: string }) {
+function AnswerForm({ view, workerId }: { view: ScheduleView; workerId?: string }) {
   const [draft, setDraft] = useState<Draft>({});
+  const [manualWorker, setManualWorker] = useState("");
   const [done, setDone] = useState(false);
   const form = useSubmit({ "HCM-QST-ANSWERED": "form" });
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const { errors, answers } = validateAnswers(view.questionnaire.questions, draft);
+    const worker = workerId ?? manualWorker.trim().toLowerCase();
+    if (!UUID.test(worker)) errors.worker = "Enter your worker id.";
     form.setErrors(errors);
     form.setFailure(null);
-    if (!answers) return;
-    await form.run(() => submitAnswers(view.id, workerId, answers), () => setDone(true));
+    if (!answers || errors.worker) return;
+    await form.run(() => submitAnswers(view.id, worker, answers), () => setDone(true));
   }
 
   if (done) {
@@ -141,6 +149,16 @@ function AnswerForm({ view, workerId }: { view: ScheduleView; workerId: string }
 
   return (
     <form className={styles.stack} onSubmit={submit} noValidate aria-label={`Answer ${view.questionnaire.name}`}>
+      {workerId === undefined ? (
+        <TextField
+          id="answer-worker"
+          label="Your worker id"
+          hint="Your sign-in can't look up your worker record, so enter your own worker id."
+          value={manualWorker}
+          error={form.errors.worker}
+          onChange={setManualWorker}
+        />
+      ) : null}
       {view.questionnaire.questions.map((q) => (
         <QuestionField
           key={q.code}
@@ -153,7 +171,7 @@ function AnswerForm({ view, workerId }: { view: ScheduleView; workerId: string }
           }}
         />
       ))}
-      <FormActions busy={form.busy} submit="Submit answers" failure={form.failure} failureTitle="Could not submit your answers" />
+      <FormActions errors={form.errors} busy={form.busy} submit="Submit answers" failure={form.failure} failureTitle="Could not submit your answers" />
     </form>
   );
 }
@@ -178,7 +196,7 @@ export function AnswerQuestionnairePage() {
             <Alert tone="info" title={view.status === "CLOSED" ? "This questionnaire has closed" : "This questionnaire is not open yet"}>
               Answers are accepted only while it is open.
             </Alert>
-          ) : me.error ? (
+          ) : me.error && me.error.status !== 403 ? (
             me.error.code === "HCM-ESS-001" ? (
               <Card>
                 <EmptyState headingLevel={3} title="No worker record is linked to your sign-in" description="Ask HR to link your sign-in to your worker record." />
@@ -188,9 +206,9 @@ export function AnswerQuestionnairePage() {
                 {me.error.message} ({me.error.code})
               </Alert>
             )
-          ) : me.data ? (
+          ) : me.data || me.error ? (
             <Card>
-              <AnswerForm view={view} workerId={me.data.id} />
+              <AnswerForm view={view} workerId={me.data?.id} />
             </Card>
           ) : (
             <Alert tone="info" live="status">

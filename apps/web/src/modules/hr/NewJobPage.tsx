@@ -93,7 +93,7 @@ export function NewJobPage() {
               }}
             />
           ))}
-          <FormActions busy={form.busy} submit="Add job" cancelTo="/hr/jobs" failure={form.failure} failureTitle="Could not add the job" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Add job" cancelTo="/hr/jobs" failure={form.failure} failureTitle="Could not add the job" />
         </form>
       </Card>
     </div>

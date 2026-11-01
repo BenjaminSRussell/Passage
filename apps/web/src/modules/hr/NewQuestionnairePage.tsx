@@ -154,7 +154,7 @@ export function NewQuestionnairePage() {
               </div>
             ) : null}
           </fieldset>
-          <FormActions busy={form.busy} submit="Create questionnaire" cancelTo="/hr/questionnaires" failure={form.failure} failureTitle="Could not create the questionnaire" />
+          <FormActions errors={form.errors} busy={form.busy} submit="Create questionnaire" cancelTo="/hr/questionnaires" failure={form.failure} failureTitle="Could not create the questionnaire" />
         </form>
       </Card>
     </div>

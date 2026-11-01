@@ -135,7 +135,11 @@ export function CompCycleDetailPage() {
                   navigate(`/hr/compensation/cycles/${cycle.id}/worksheets/${manager.trim()}`);
                 }}
               >
-                <TextField id="cycle-manager" label="Manager's worker id" value={manager} error={managerError} onChange={setManager} />
+                <TextField id="cycle-manager" label="Manager's worker id" value={manager} error={managerError} onChange={(v) => {
+                    setManager(v);
+                    if (UUID.test(v.trim())) setManagerError(undefined);
+                  }}
+                />
                 <Button type="submit">Open worksheet</Button>
               </form>
             </Card>

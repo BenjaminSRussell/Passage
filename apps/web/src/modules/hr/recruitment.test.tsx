@@ -376,6 +376,47 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
   });
 
+  it("blocks submit while the screen differs from the saved draft", async () => {
+    api.handler = routes({
+      [`GET ${worksheetUrl}`]: json(200, { items: [sheetRow()] }),
+      [`POST ${worksheetUrl}/submit`]: json(200, { items: [sheetRow({ status: "SUBMITTED" })] }),
+    });
+    renderAt(`/hr/compensation/cycles/${CYCLE}/worksheets/${MANAGER}`);
+    const submit = await screen.findByRole("button", { name: "Submit worksheet" });
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Raise (%)"), { target: { value: "4" } });
+    expect((screen.getByRole("button", { name: "Submit worksheet" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Save changes first/)).toBeTruthy();
+    expect(api.posts("/submit")).toHaveLength(0);
+  });
+
+  it("marks the rating and raise inputs invalid, and clears the cycle manager error once valid", async () => {
+    api.handler = routes({ [`GET ${worksheetUrl}`]: json(200, { items: [sheetRow()] }) });
+    const first = renderAt(`/hr/compensation/cycles/${CYCLE}/worksheets/${MANAGER}`);
+    fireEvent.change(await screen.findByLabelText("Raise (%)"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(screen.getByLabelText("Raise (%)").getAttribute("aria-invalid")).toBe("true"));
+    expect(screen.getByLabelText("Raise (%)").getAttribute("aria-describedby")).toBeTruthy();
+    first.unmount();
+
+    api.handler = routes({ [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle({ status: "MANAGER_INPUT" })) });
+    renderAt(`/hr/compensation/cycles/${CYCLE}`);
+    fireEvent.change(await screen.findByLabelText("Manager's worker id"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open worksheet" }));
+    expect(await screen.findByText("Enter the manager's worker id.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Manager's worker id"), { target: { value: MANAGER } });
+    expect(screen.queryByText("Enter the manager's worker id.")).toBeNull();
+  });
+
+  it("flags matrix and budget inputs and the consent checkbox as invalid", async () => {
+    renderAt("/hr/compensation/cycles/new");
+    fireEvent.change(screen.getByLabelText("Compa-ratio below"), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create cycle" }));
+    await screen.findByText(/Budget 1: enter the department's id\./);
+    expect(screen.getByLabelText("Department id").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Rating").getAttribute("aria-invalid")).toBe("true");
+  });
+
   it("shows the guideline refusal when saving a worksheet", async () => {
     api.handler = routes({
       [`GET ${worksheetUrl}`]: json(200, { items: [sheetRow()] }),
