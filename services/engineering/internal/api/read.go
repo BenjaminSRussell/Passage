@@ -49,6 +49,7 @@ type routeVersionHeaderBody struct {
 	EffectiveTo    string `json:"effectiveTo,omitempty"`
 	Status         string `json:"status"`
 	OperationCount int    `json:"operationCount"`
+	CopiedFrom     string `json:"copiedFromVersionId,omitempty"`
 }
 
 type routeVersionBody struct {
@@ -59,7 +60,7 @@ type routeVersionBody struct {
 func headerBody(v domain.RouteVersion, operations int) routeVersionHeaderBody {
 	return routeVersionHeaderBody{
 		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, RouteCode: v.RouteCode, VersionNo: v.VersionNo,
-		EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo), Status: v.Status, OperationCount: operations,
+		EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo), Status: v.Status, OperationCount: operations, CopiedFrom: v.CopiedFrom,
 	}
 }
 
@@ -114,9 +115,9 @@ func (a *API) listRouteVersions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch f.Status {
-	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired:
+	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusCancelled:
 	default:
-		fields["status"] = "must be draft, active or expired"
+		fields["status"] = "must be draft, active, expired or cancelled"
 	}
 	f.AsOf = optionalDate("asOf", q.Get("asOf"), fields)
 	if len(fields) > 0 {

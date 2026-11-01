@@ -70,6 +70,9 @@ func (a *API) Metrics() http.Handler {
 		{"engineering_resource_requests_failed_total", "Resource and calendar requests that failed in the store or domain with an unexpected error.", &a.resourceFailed},
 		{"engineering_route_requests_failed_total", "Route version read and activate requests that failed in the store with an unexpected error.", &a.routeFailed},
 		{"engineering_route_versions_activated_total", "Route version activate requests that succeeded, including idempotent repeats.", &a.routeActivated},
+		{"engineering_route_versions_cancelled_total", "Route version cancel requests that succeeded, including idempotent repeats.", &a.routeCancelled},
+		{"engineering_bom_versions_copied_total", "BOM versions copied into a new draft.", &a.bomCopied},
+		{"engineering_route_versions_copied_total", "Route versions copied into a new draft.", &a.routeCopied},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

@@ -37,6 +37,7 @@ function BomVersionRoute() {
     id,
     onBack: () => navigate("/engineering/boms"),
     onWhereUsed: (component: string) => navigate(`/engineering/where-used?component=${encodeURIComponent(component)}`),
+    onOpenCopy: (copyId: string) => navigate(`/engineering/boms/${encodeURIComponent(copyId)}`),
   });
 }
 
@@ -99,7 +100,11 @@ function RouteVersionCreateRoute() {
 function RouteVersionRoute() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
-  return createElement(RouteVersionPage, { id, onBack: () => navigate("/engineering/routes") });
+  return createElement(RouteVersionPage, {
+    id,
+    onBack: () => navigate("/engineering/routes"),
+    onOpenCopy: (copyId: string) => navigate(`/engineering/routes/${encodeURIComponent(copyId)}`),
+  });
 }
 
 function ResourcesRoute() {

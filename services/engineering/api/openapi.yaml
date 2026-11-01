@@ -89,6 +89,33 @@ paths:
           description: ENG-BOM-STATE, the version is not a draft; or ENG-BOM-IN-ECO, an ECO that is not yet released, rejected or cancelled replaces an old version with this draft.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/bom-versions/{id}:copy:
+    post:
+      operationId: copyBomVersion
+      summary: Copy a BOM version into a new draft
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BomCopyRequest' } } }
+      responses:
+        '201':
+          description: A new draft BOM version with the source's quantity range, the chosen lines (every line when lineNos is omitted), the source's product and site unless the request names others, the requested effectivity, and copiedFromVersionId set to the source (FR-9.12). The source may be in any status, including cancelled or expired, and is not changed. The copy goes through the create-time cycle check and emits no event, as creating a draft emits none; activating it or releasing it through an ECO is a separate call. An Idempotency-Key replay returns the draft created the first time.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
+        '400':
+          description: COM-0001 with per-field errors, for a missing or malformed effectiveFrom or an effectiveTo before it, an empty lineNos or a line number the source does not have, a siteId over 64 characters, an unknown field, or an id that is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The Idempotency-Key is in flight.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-BOM-CYCLE, the copied lines would close a cycle as of the new date; or idempotency_key_reuse, the key was used for a different source or dates.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions:
     get:
       operationId: listRouteVersions
@@ -99,7 +126,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
         - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
         - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
-        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired] } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, cancelled] } }
         - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
       responses:
         '200':
@@ -178,6 +205,53 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: ENG-ROUTE-UNSATISFIED, an operation requirement cannot be met by the resources of the site.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions/{id}:cancel:
+    post:
+      operationId: cancelRouteVersion
+      summary: Cancel a draft route version
+      x-passage-duty: engineering.route.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The route version with its operations, now cancelled (BR-9.1 draft to cancelled). The row, operations and requirements are kept and no event is emitted, as creating a draft emits none. Cancelling an already cancelled version returns it unchanged.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '400':
+          description: COM-0001, the id is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-ROUTE-STATE, the version is not a draft.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions/{id}:copy:
+    post:
+      operationId: copyRouteVersion
+      summary: Copy a route version into a new draft
+      x-passage-duty: engineering.route.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RouteCopyRequest' } } }
+      responses:
+        '201':
+          description: A new draft route version with the source's route code, operations and requirements, the source's product and site unless the request names others, the next version number for that product, site and route code, the requested effectivity, and copiedFromVersionId set to the source (FR-9.12). The source may be in any status, including cancelled or expired, and is not changed. No event is emitted; activation, which checks the requirements against the target site's resources, is a separate call. An Idempotency-Key replay returns the draft created the first time.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '400':
+          description: COM-0001 with per-field errors, for a missing or malformed effectiveFrom or an effectiveTo before it, a productId or siteId over 64 characters, an unknown field, or an id that is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-DUPLICATE, another copy took the version number first, or the Idempotency-Key is in flight.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: A route rule failed on the copied operations, or idempotency_key_reuse, the key was used for a different source or dates.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/boms:explode:
@@ -623,6 +697,7 @@ components:
         toQty: { type: string }
         status: { type: string, enum: [draft, active, expired, superseded, cancelled], default: draft }
         lines: { type: array, minItems: 1, maxItems: 5000, items: { $ref: '#/components/schemas/BomLine' } }
+        copiedFromVersionId: { type: string, format: uuid, readOnly: true, description: The version this one was copied from (FR-9.12 lineage); ignored on create. }
     OperationRequirement:
       type: object
       properties: { kind: { type: string, enum: [resource, group, capability, type] }, refId: { type: string }, level: { type: integer, minimum: 0 }, quantity: { type: integer, minimum: 1 } }
@@ -638,8 +713,27 @@ components:
       required: [id, productId, siteId, routeCode, versionNo, effectiveFrom, status, operationCount]
       properties:
         { id: { type: string, format: uuid }, productId: { type: string }, siteId: { type: string }, routeCode: { type: string }, versionNo: { type: integer },
-          effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [draft, active, expired] },
-          operationCount: { type: integer } }
+          effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [draft, active, expired, cancelled] },
+          operationCount: { type: integer }, copiedFromVersionId: { type: string, format: uuid, description: The version this one was copied from (FR-9.12 lineage). } }
+    BomCopyRequest:
+      type: object
+      additionalProperties: false
+      required: [effectiveFrom]
+      properties:
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        productId: { type: string, maxLength: 64, description: The product of the copy; omitted keeps the source's. }
+        siteId: { type: string, maxLength: 64, description: The site of the copy; omitted keeps the source's, an empty string makes it valid for every site. }
+        lineNos: { type: array, minItems: 1, items: { type: integer }, description: The source line numbers to copy; omitted copies every line. }
+    RouteCopyRequest:
+      type: object
+      additionalProperties: false
+      required: [effectiveFrom]
+      properties:
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        productId: { type: string, maxLength: 64, description: The product of the copy; omitted keeps the source's. }
+        siteId: { type: string, maxLength: 64, description: The site of the copy; omitted keeps the source's. }
     RouteVersionCreate:
       type: object
       additionalProperties: false

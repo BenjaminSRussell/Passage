@@ -175,7 +175,7 @@ describe("RouteVersionPage activation", () => {
     stubActivation(() => problem(403, "AUTH-0003", "Forbidden"));
     render(<RouteVersionPage id="a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
-    expect(await findAlert()).toHaveTextContent("You do not have permission to activate routes");
+    expect(await findAlert()).toHaveTextContent("You do not have permission to change routes");
     expect(screen.getByRole("button", { name: "Activate" })).toBeEnabled();
   });
 

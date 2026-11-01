@@ -163,6 +163,7 @@ func TestPostgres_RouteVersions_RLSHidesOtherTenant(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"get":      func() error { _, err := s.GetRouteVersion(principalContext(2), v.ID); return err },
 		"activate": func() error { _, err := s.ActivateRouteVersion(principalContext(2), v.ID); return err },
+		"cancel":   func() error { _, err := s.CancelRouteVersion(principalContext(2), v.ID); return err },
 	} {
 		if err := call(); problemCode(err) != store.CodeRouteNotFound {
 			t.Fatalf("tenant 2 %s = %v; want %s", name, err, store.CodeRouteNotFound)
@@ -209,5 +210,85 @@ func TestPostgres_CreateRouteVersion_ConcurrentCreatesTakeDistinctNumbers(t *tes
 	slices.Sort(got)
 	if !slices.Equal(got, []int{1, 2, 3, 4, 5, 6}) {
 		t.Fatalf("version numbers = %v; want 1 to %d once each", got, drafts)
+	}
+}
+
+func TestPostgres_CancelRouteVersion_DraftOnlyKeepsTheRowAndIsIdempotent(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	req := domain.OperationRequirement{Kind: domain.ReqType, RefID: domain.TypeMachine, Quantity: 1}
+	_, _ = seedCapableMachine(t, s, ctx, "S1", releaseDay.AddDate(0, -1, 0))
+	live := newRoute("BIKE", "S1", 1, releaseDay.AddDate(-1, 0, 0), routeOp(10, 0, req))
+	draft := newRoute("BIKE", "S1", 2, releaseDay, routeOp(10, 20, req), routeOp(20, 0))
+	for _, v := range []domain.RouteVersion{live, draft} {
+		if _, err := s.CreateRouteVersion(ctx, v, store.Idem{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.ActivateRouteVersion(ctx, live.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelRouteVersion(ctx, live.ID); !domain.HasCode(err, domain.CodeRouteState) {
+		t.Fatalf("cancel active = %v; want %s", err, domain.CodeRouteState)
+	}
+	for range 2 {
+		got, err := s.CancelRouteVersion(ctx, draft.ID)
+		if err != nil || got.Status != domain.StatusCancelled || len(got.Operations) != 2 || got.Operations[0].Requirements[0] != req {
+			t.Fatalf("cancel = %+v, %v; want cancelled with operations and requirements, also on a repeat", got, err)
+		}
+	}
+	if types := outboxTypes(t, pool, ctx, draft.ID); len(types) != 0 {
+		t.Fatalf("cancelling a draft emitted %v", types)
+	}
+	if _, err := s.ActivateRouteVersion(ctx, draft.ID); !domain.HasCode(err, domain.CodeRouteState) {
+		t.Fatalf("activate a cancelled version = %v; want %s", err, domain.CodeRouteState)
+	}
+	page, err := s.ListRouteVersions(ctx, store.RouteVersionFilter{Status: domain.StatusCancelled}, "", 10)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Version.ID != draft.ID {
+		t.Fatalf("list cancelled = %+v, %v", page, err)
+	}
+	if _, err := s.CancelRouteVersion(ctx, ids.New()); problemCode(err) != store.CodeRouteNotFound {
+		t.Fatalf("unknown id = %v; want %s", err, store.CodeRouteNotFound)
+	}
+}
+
+func TestPostgres_CopyLineage_RoundTripsAndStaysInTheTenant(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s, own, other := store.New(app), principalContext(1), principalContext(2)
+	bom := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+	route := newRoute("BIKE", "S1", 1, releaseDay, routeOp(10, 0))
+	if _, err := s.CreateBomVersion(own, bom, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRouteVersion(own, route, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	bomCopy := version("EBIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	bomCopy.CopiedFrom = bom.ID
+	if got, err := s.CreateBomVersion(own, bomCopy, store.Idem{}, noCheck); err != nil || got.CopiedFrom != bom.ID {
+		t.Fatalf("bom copy = %+v, %v; want copied from %s", got, err, bom.ID)
+	}
+	if got, err := s.GetBomVersion(own, bomCopy.ID); err != nil || got.CopiedFrom != bom.ID {
+		t.Fatalf("bom copy read = %+v, %v; want copied from %s", got, err, bom.ID)
+	}
+	if got, err := s.GetBomVersion(own, bom.ID); err != nil || got.CopiedFrom != "" {
+		t.Fatalf("source = %+v, %v; want no lineage", got, err)
+	}
+	routeCopy := newRoute("BIKE", "S2", 0, releaseDay, routeOp(10, 0))
+	routeCopy.CopiedFrom = route.ID
+	if got, err := s.CreateRouteVersion(own, routeCopy, store.Idem{}); err != nil || got.CopiedFrom != route.ID || got.VersionNo != 1 {
+		t.Fatalf("route copy = %+v, %v; want version 1 at S2 copied from %s", got, err, route.ID)
+	}
+	foreignBom := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	foreignBom.CopiedFrom = bom.ID
+	if _, err := s.CreateBomVersion(other, foreignBom, store.Idem{}, noCheck); err == nil {
+		t.Fatal("tenant 2 recorded a copy of tenant 1's BOM version")
+	}
+	foreignRoute := newRoute("BIKE", "S1", 0, releaseDay, routeOp(10, 0))
+	foreignRoute.CopiedFrom = route.ID
+	if _, err := s.CreateRouteVersion(other, foreignRoute, store.Idem{}); err == nil {
+		t.Fatal("tenant 2 recorded a copy of tenant 1's route version")
 	}
 }

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	routeVersionColumns   = `id::text, product_id, site_id, route_code, version_no, effective_from, effective_to, status`
+	routeVersionColumns   = `id::text, product_id, site_id, route_code, version_no, effective_from, effective_to, status, coalesce(copied_from_version_id::text, '')`
 	routeOperationColumns = `operation_no, operation_id, next_no, link_type, priority, setup_h::text, run_h::text, process_qty::text,
 		queue_before_h::text, queue_after_h::text, transit_h::text, efficiency_pct::text, overlap_qty::text, scrap_percent::text`
 	insertRouteOperation = `insert into route_operation (tenant_id, route_version_id, operation_no, operation_id, next_no, link_type, priority, setup_h, run_h, process_qty,
@@ -37,7 +37,7 @@ type RouteVersionHeader struct {
 
 func scanRouteVersion(row pgx.Row, extra ...any) (v domain.RouteVersion, err error) {
 	var to *time.Time
-	if err = row.Scan(append([]any{&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status}, extra...)...); err == nil {
+	if err = row.Scan(append([]any{&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status, &v.CopiedFrom}, extra...)...); err == nil {
 		v.EffectiveTo = valueOrZero(to)
 	}
 	return v, err
@@ -105,9 +105,9 @@ func insertRouteVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domai
 	if err := domain.ValidateRouteVersion(v); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into route_version (tenant_id, id, product_id, site_id, route_code, version_no, effective_from, effective_to, status)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')`,
-		tenantID, v.ID, v.ProductID, v.SiteID, v.RouteCode, v.VersionNo, v.EffectiveFrom, zeroToNil(v.EffectiveTo)); err != nil {
+	if _, err := tx.Exec(ctx, `insert into route_version (tenant_id, id, product_id, site_id, route_code, version_no, effective_from, effective_to, status, copied_from_version_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', nullif($9, '')::uuid)`,
+		tenantID, v.ID, v.ProductID, v.SiteID, v.RouteCode, v.VersionNo, v.EffectiveFrom, zeroToNil(v.EffectiveTo), v.CopiedFrom); err != nil {
 		return err
 	}
 	batch := &pgx.Batch{}
@@ -286,6 +286,33 @@ func (s *Postgres) ActivateRouteVersion(ctx context.Context, id string) (v domai
 		}
 		v.Status = domain.StatusActive
 		return emit(ctx, tx, p, id, engevents.RouteVersionActivated, aggregateRouteVersion, id, v.ActivatedEvent())
+	})
+	return v, err
+}
+
+// CancelRouteVersion moves a draft route version to cancelled (BR-9.1). The row, operations and
+// requirements are kept, an already cancelled version is returned unchanged, and any other status is
+// refused with ENG-ROUTE-STATE. Creating a draft emits no event, so cancelling one emits none either.
+func (s *Postgres) CancelRouteVersion(ctx context.Context, id string) (v domain.RouteVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if v, err = getRouteVersion(ctx, tx, p.TenantID, id); err != nil || v.Status == domain.StatusCancelled {
+			return err
+		}
+		if err = lockProducts(ctx, tx, p.TenantID, v.ProductID); err != nil {
+			return err
+		}
+		if v, err = getRouteVersion(ctx, tx, p.TenantID, id); err != nil || v.Status == domain.StatusCancelled {
+			return err
+		}
+		if err = v.EnsureDraft(); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `update route_version set status = 'cancelled' where tenant_id = $1 and id = $2::uuid and status = 'draft'`, p.TenantID, id); err != nil {
+			return err
+		}
+		v.Status = domain.StatusCancelled
+		return nil
 	})
 	return v, err
 }

@@ -31,6 +31,8 @@ export interface BomVersion {
   toQty?: string;
   status: string;
   lines?: BomLine[];
+  /** The version this one was copied from (FR-9.12 lineage). */
+  copiedFromVersionId?: string;
 }
 
 export interface BomVersionInput {
@@ -59,6 +61,8 @@ export interface RouteVersionHeader {
   effectiveTo?: string;
   status: string;
   operationCount: number;
+  /** The version this one was copied from (FR-9.12 lineage). */
+  copiedFromVersionId?: string;
 }
 
 export interface OperationRequirement {
@@ -334,6 +338,42 @@ export function activateBomVersion(id: string): Promise<BomVersion> {
 /** Cancels a draft BOM version (BR-9.1). The version is kept with status cancelled. */
 export function cancelBomVersion(id: string): Promise<BomVersion> {
   return request(`/bom-versions/${encodeURIComponent(id)}:cancel`, { method: "POST" });
+}
+
+/** A copy's effectivity and, optionally, another product or site; omitted fields keep the source's. */
+export interface CopyRequest {
+  effectiveFrom: string;
+  effectiveTo?: string;
+  productId?: string;
+  siteId?: string;
+}
+
+/** A BOM copy can also keep only some source lines; omitted lineNos copies every line. */
+export interface BomCopyRequest extends CopyRequest {
+  lineNos?: number[];
+}
+
+/** Copies a BOM version into a new draft, optionally for another product or site and with chosen lines (FR-9.12). */
+export function copyBomVersion(id: string, body: BomCopyRequest, idempotencyKey: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}:copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Cancels a draft route version (BR-9.1). The version is kept with status cancelled. */
+export function cancelRouteVersion(id: string): Promise<RouteVersion> {
+  return request(`/route-versions/${encodeURIComponent(id)}:cancel`, { method: "POST" });
+}
+
+/** Copies a route version into a new draft, optionally for another product or site, with the next version number there. */
+export function copyRouteVersion(id: string, body: CopyRequest, idempotencyKey: string): Promise<RouteVersion> {
+  return request(`/route-versions/${encodeURIComponent(id)}:copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
 }
 
 export interface EcoReplacement {

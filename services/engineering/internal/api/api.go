@@ -70,6 +70,9 @@ type API struct {
 	resourceFailed   atomic.Int64
 	routeFailed      atomic.Int64
 	routeActivated   atomic.Int64
+	routeCancelled   atomic.Int64
+	bomCopied        atomic.Int64
+	routeCopied      atomic.Int64
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
@@ -85,10 +88,13 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:activate", a.activateBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:cancel", a.cancelBomVersion)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:copy", a.copyBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:cancel", a.cancelRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:copy", a.copyRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions", a.createRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
@@ -153,6 +159,8 @@ type bomVersionBody struct {
 	ToQty         *decimal.Decimal `json:"toQty,omitempty"`
 	Status        string           `json:"status,omitempty"`
 	Lines         []bomLineBody    `json:"lines,omitempty"`
+	// CopiedFrom is read-only (FR-9.12 lineage): create ignores it, only :copy sets it.
+	CopiedFrom string `json:"copiedFromVersionId,omitempty"`
 }
 
 type page[T any] struct {
@@ -278,7 +286,7 @@ func (lb bomLineBody) toDomain(index int) (domain.BomLine, string) {
 func bodyFromVersion(v domain.BomVersion) bomVersionBody {
 	body := bomVersionBody{
 		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo),
-		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status,
+		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status, CopiedFrom: v.CopiedFrom,
 	}
 	for _, l := range v.Lines {
 		series := l.Series

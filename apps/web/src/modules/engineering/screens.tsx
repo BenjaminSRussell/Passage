@@ -15,7 +15,9 @@ import {
 import {
   activateRouteVersion,
   ApiError,
+  cancelRouteVersion,
   computeLeadTime,
+  copyRouteVersion,
   getRouteVersion,
   listRouteVersions,
   type LeadTime,
@@ -25,9 +27,10 @@ import {
   type RouteVersionHeader,
   type RouteVersionOperation,
 } from "./api/client";
+import { CopyVersionCard } from "./copyVersion";
 import styles from "./pages.module.css";
 
-const routeStatuses = ["draft", "active", "expired"];
+const routeStatuses = ["draft", "active", "expired", "cancelled"];
 
 const routeColumns: DataTableColumn<RouteVersionHeader>[] = [
   { key: "routeCode", header: "Route code", mono: true },
@@ -214,9 +217,9 @@ const operationColumns: DataTableColumn<RouteVersionOperation>[] = [
 
 const notFoundCode = "ENG-ROUTE-NOTFOUND";
 const forbiddenStatus = 403;
-const activateForbiddenText = "You do not have permission to activate routes";
+const activateForbiddenText = "You do not have permission to change routes";
 
-export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => void }) {
+export function RouteVersionPage({ id, onBack, onOpenCopy }: { id: string; onBack?: () => void; onOpenCopy?: (id: string) => void }) {
   const [version, setVersion] = useState<RouteVersion | null>(null);
   const [loadError, setLoadError] = useState<ApiError | Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -226,6 +229,7 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
   const [leadTime, setLeadTime] = useState<LeadTime | null>(null);
   const [leadError, setLeadError] = useState("");
   const [activating, setActivating] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [activateError, setActivateError] = useState("");
   const [announcement, setAnnouncement] = useState("");
 
@@ -234,6 +238,7 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
     setVersion(null);
     setActivateError("");
     setAnnouncement("");
+    setConfirmCancel(false);
     setLoadError(null);
     getRouteVersion(id)
       .then((loaded) => current && setVersion(loaded))
@@ -255,6 +260,7 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
         ["Version", version.versionNo],
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
         ["Status", <StatusPill status={version.status} />],
+        ...(version.copiedFromVersionId ? ([["Copied from", <code>{version.copiedFromVersionId}</code>]] as [string, ReactNode][]) : []),
       ]
     : [];
   const operations = version ? [...version.operations].sort((a, b) => a.no - b.no) : [];
@@ -269,6 +275,22 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
       const activated = await activateRouteVersion(id);
       setVersion(activated);
       setAnnouncement(`Route ${activated.routeCode} version ${activated.versionNo} is now active`);
+    } catch (e) {
+      setActivateError(e instanceof ApiError && e.status === forbiddenStatus ? activateForbiddenText : errorText(e));
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  async function cancel() {
+    setActivateError("");
+    setAnnouncement("");
+    setActivating(true);
+    try {
+      const cancelled = await cancelRouteVersion(id);
+      setConfirmCancel(false);
+      setVersion(cancelled);
+      setAnnouncement(`Route ${cancelled.routeCode} version ${cancelled.versionNo} draft is cancelled`);
     } catch (e) {
       setActivateError(e instanceof ApiError && e.status === forbiddenStatus ? activateForbiddenText : errorText(e));
     } finally {
@@ -314,9 +336,25 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
         {onBack ? <Button size="sm" onClick={onBack}>Back to routings</Button> : null}
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
         {version?.status === "draft" ? (
-          <Button size="sm" onClick={activate} disabled={activating}>
-            Activate
-          </Button>
+          <>
+            <Button size="sm" onClick={activate} disabled={activating}>
+              Activate
+            </Button>
+            {confirmCancel ? (
+              <>
+                <Button size="sm" onClick={cancel} disabled={activating}>
+                  Confirm cancel
+                </Button>
+                <Button size="sm" onClick={() => setConfirmCancel(false)} disabled={activating}>
+                  Keep draft
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => setConfirmCancel(true)} disabled={activating}>
+                Cancel draft
+              </Button>
+            )}
+          </>
         ) : null}
       </div>
       <p className="visually-hidden" aria-live="polite">
@@ -335,6 +373,15 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
       ) : null}
       {version ? (
         <>
+          <CopyVersionCard
+            key={id}
+            noun="route version"
+            forbiddenText={activateForbiddenText}
+            source={version}
+            siteRequired
+            copy={(input, key) => copyRouteVersion(id, input, key)}
+            onCopied={onOpenCopy}
+          />
           <Card title="Version">
             <dl className={styles.facts}>
               {facts.map(([term, value]) => (

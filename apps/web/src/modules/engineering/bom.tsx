@@ -16,6 +16,7 @@ import {
   activateBomVersion,
   ApiError,
   cancelBomVersion,
+  copyBomVersion,
   createBomVersion,
   getBomVersion,
   listBomVersions,
@@ -23,6 +24,7 @@ import {
   type BomVersion,
   type BomVersionFilters,
 } from "./api/client";
+import { CopyVersionCard } from "./copyVersion";
 import styles from "./pages.module.css";
 
 const bomStatuses = ["draft", "active", "expired", "superseded", "cancelled"];
@@ -189,10 +191,12 @@ export function BomVersionPage({
   id,
   onBack,
   onWhereUsed,
+  onOpenCopy,
 }: {
   id: string;
   onBack?: () => void;
   onWhereUsed?: (component: string) => void;
+  onOpenCopy?: (id: string) => void;
 }) {
   const [version, setVersion] = useState<BomVersion | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -252,6 +256,7 @@ export function BomVersionPage({
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
         ["Quantity range", qtyRange(version)],
         ["Status", <StatusPill status={version.status} />],
+        ...(version.copiedFromVersionId ? ([["Copied from", <code>{version.copiedFromVersionId}</code>]] as [string, ReactNode][]) : []),
       ]
     : [];
   const lineColumns: DataTableColumn<BomLine>[] = [
@@ -320,6 +325,15 @@ export function BomVersionPage({
       ) : null}
       {version ? (
         <>
+          <CopyVersionCard
+            key={id}
+            noun="BOM version"
+            forbiddenText={forbiddenText}
+            source={version}
+            lines={(version.lines ?? []).map((line) => line.lineNo).filter((n): n is number => n !== undefined).sort((a, b) => a - b)}
+            copy={(input, key) => copyBomVersion(id, input, key)}
+            onCopied={onOpenCopy}
+          />
           <Card title="Version">
             <dl className={styles.facts}>
               {facts.map(([term, value]) => (

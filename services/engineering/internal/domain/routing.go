@@ -241,6 +241,8 @@ type RouteVersion struct {
 	EffectiveTo   time.Time
 	Status        string
 	Operations    []VersionOperation
+	// CopiedFrom is the version this one was copied from (FR-9.12 lineage), empty for a plain create.
+	CopiedFrom string
 }
 
 func (v RouteVersion) ActivatedEvent() events.RouteVersionActivatedData {
@@ -251,7 +253,7 @@ func (v RouteVersion) ActivatedEvent() events.RouteVersionActivatedData {
 
 func (v RouteVersion) EnsureDraft() error {
 	if v.Status != StatusDraft {
-		return errf(CodeRouteState, "route version %s is %s, only a draft can be activated", v.ID, v.Status)
+		return errf(CodeRouteState, "route version %s is %s, only a draft can be activated or cancelled", v.ID, v.Status)
 	}
 	return nil
 }

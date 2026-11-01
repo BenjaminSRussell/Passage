@@ -53,6 +53,8 @@ type BomVersion struct {
 	ToQty         *decimal.Decimal
 	Status        string
 	Lines         []BomLine
+	// CopiedFrom is the version this one was copied from (FR-9.12 lineage), empty for a plain create.
+	CopiedFrom string
 }
 
 type Catalog interface {

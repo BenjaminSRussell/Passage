@@ -112,6 +112,7 @@ type Store interface {
 	CreateRouteVersion(ctx context.Context, v domain.RouteVersion, idem Idem) (domain.RouteVersion, error)
 	GetRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	ActivateRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
+	CancelRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	ListRouteVersions(ctx context.Context, f RouteVersionFilter, afterID string, limit int) (Page[RouteVersionHeader], error)
 	ActiveRouteVersion(ctx context.Context, productID, siteID string, asOf time.Time) (domain.RouteVersion, error)
 	Ping(ctx context.Context) error
@@ -124,7 +125,7 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const (
-	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status`
+	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status, coalesce(copied_from_version_id::text, '')`
 	lineColumns    = `bom_version_id::text, line_no, component_product_id, quantity::text, series::text, line_type, scrap_const::text, scrap_var_pct::text, round_up, effective_from, effective_to`
 	activeStatuses = `v.status in ('active', 'expired')`
 	reachDown      = `with recursive reach(product_id) as (
@@ -191,7 +192,7 @@ func queryVersions(ctx context.Context, tx pgx.Tx, query string, args ...any) ([
 		var v domain.BomVersion
 		var to *time.Time
 		var fromQty, toQty *string
-		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status); err != nil {
+		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status, &v.CopiedFrom); err != nil {
 			return nil, err
 		}
 		var failure error
@@ -328,9 +329,9 @@ func versionRoots(v domain.BomVersion) []string {
 }
 
 func insertVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.BomVersion) error {
-	if _, err := tx.Exec(ctx, `insert into bom_version (tenant_id, id, product_id, site_id, effective_from, effective_to, from_qty, to_qty, status)
-		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9)`,
-		tenantID, v.ID, v.ProductID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), v.Status); err != nil {
+	if _, err := tx.Exec(ctx, `insert into bom_version (tenant_id, id, product_id, site_id, effective_from, effective_to, from_qty, to_qty, status, copied_from_version_id)
+		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, nullif($10, '')::uuid)`,
+		tenantID, v.ID, v.ProductID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), v.Status, v.CopiedFrom); err != nil {
 		return err
 	}
 	batch := &pgx.Batch{}
