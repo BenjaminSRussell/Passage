@@ -274,6 +274,10 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, fromSalesLine bool)
 	if fromSalesLine && len(req.Operations) == 0 {
 		delete(fields, "operations")
 	}
+	if !fromSalesLine && (req.OriginType == domain.OriginSalesLine || req.ConfigurationID != nil) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "originType SalesOrderLine and configurationId are created only through /v1/production/sales-line-orders with "+DutyCreateFromSales))
+		return
+	}
 	if fromSalesLine && req.ConfigurationID == nil {
 		fields["configurationId"] = "is required"
 	}

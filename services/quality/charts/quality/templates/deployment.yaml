@@ -16,8 +16,18 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+      {{- end }}
       containers:
         - name: quality
           image: {{ include "quality.image" . | quote }}
@@ -35,6 +45,29 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: quality
+{{- if .Values.serviceUrls.inventory }}
+            - name: INVENTORY_URL
+              value: {{ .Values.serviceUrls.inventory | quote }}
+            - name: QUALITY_HOLD_TENANTS
+              value: {{ required "holdTenants (comma-separated tenant UUIDs) is required with serviceUrls.inventory" .Values.holdTenants | quote }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+{{- if .Values.serviceIdentity.publicKeys }}
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
+{{- end }}
+          {{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

@@ -279,6 +279,10 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 	var out Order
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if existing, found, err := existingSalesLineOrder(ctx, tx, p.TenantID, in); err != nil || found {
+			out = existing
+			return err
+		}
 		var replayID, replayHash string
 		err := tx.QueryRow(ctx, `select id::text, request_hash from production_order where tenant_id = $1 and idempotency_key = $2`,
 			p.TenantID, in.IdempotencyKey).Scan(&replayID, &replayHash)
@@ -290,10 +294,6 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			return err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if existing, found, err := existingSalesLineOrder(ctx, tx, p.TenantID, in); err != nil || found {
-			out = existing
 			return err
 		}
 		if ref := in.ReworkReference; ref != nil {
@@ -319,8 +319,20 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		return err
 	})
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" && in.OriginType == domain.OriginSalesLine {
-		return Order{}, false, httpx.NewProblem(http.StatusConflict, CodeOriginConflict, "an order for this sales order line already exists; retry to receive it")
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "production_order_sales_line_origin" {
+		var raced Order
+		var found bool
+		rerr := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (e error) {
+			raced, found, e = existingSalesLineOrder(ctx, tx, p.TenantID, in)
+			return e
+		})
+		if rerr != nil {
+			return Order{}, false, rerr
+		}
+		if found {
+			return raced, false, nil
+		}
+		return Order{}, false, httpx.NewProblem(http.StatusConflict, CodeOriginConflict, "the sales order line already has an order that this legal entity cannot read")
 	}
 	return out, created, err
 }

@@ -49,12 +49,12 @@ func TestSalesLineOrder_Refusals(t *testing.T) {
 		{"missing configuration", salesLineCall(salesLineBody(line, nil), DutyCreateFromSales), http.StatusBadRequest, validationCode},
 		{"malformed configuration", salesLineCall(salesLineBody(line, "x"), DutyCreateFromSales), http.StatusBadRequest, validationCode},
 		{"missing line", salesLineCall(salesLineBody(nil, configuration), DutyCreateFromSales), http.StatusBadRequest, validationCode},
-		{"configuration on a manual order", call{method: http.MethodPost, path: "/v1/production/orders", duties: []string{DutyWrite},
+		{"configuration on the general route", call{method: http.MethodPost, path: "/v1/production/orders", duties: []string{DutyWrite},
 			body: createBody(func(m map[string]any) { m["configurationId"] = configuration }), headers: map[string]string{idempotencyName: "manual-1"}},
-			http.StatusBadRequest, validationCode},
-		{"sales line origin without a line on the general route", call{method: http.MethodPost, path: "/v1/production/orders", duties: []string{DutyWrite},
-			body: createBody(func(m map[string]any) { m["originType"] = "SalesOrderLine" }), headers: map[string]string{idempotencyName: "manual-2"}},
-			http.StatusBadRequest, validationCode},
+			http.StatusForbidden, "AUTH-0003"},
+		{"sales line origin on the general route", call{method: http.MethodPost, path: "/v1/production/orders", duties: []string{DutyWrite},
+			body: createBody(func(m map[string]any) { m["originType"] = "SalesOrderLine"; m["originId"] = line }), headers: map[string]string{idempotencyName: "manual-2"}},
+			http.StatusForbidden, "AUTH-0003"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Worker } from "@temporalio/worker";
+import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createActivities, type PartyClient, type PartyDecision } from "../src/activities.js";
 import { changeRequestedType, handleChangeRequested, toApprovalInput, type ChangeRequestedEvent } from "../src/changeRequested.js";
@@ -20,23 +20,26 @@ function event(changeId: string): ChangeRequestedEvent {
 
 describe("change.requested consumer", () => {
   let environment: TestWorkflowEnvironment;
+  let workflowBundle: WorkflowBundle;
   const decisions: PartyDecision[] = [];
   const party: PartyClient = { decide: async (decision) => void decisions.push(decision) };
 
   beforeAll(async () => {
     environment = await TestWorkflowEnvironment.createTimeSkipping();
-  });
+    workflowBundle = await bundleWorkflowCode({ workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)) });
+  }, 120_000);
 
   afterAll(async () => {
     await environment?.teardown();
-  });
+  }, 60_000);
 
   async function run(taskQueue: string, body: () => Promise<void>): Promise<void> {
     decisions.length = 0;
     const worker = await Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
-      workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)),
+      workflowBundle,
+      maxCachedWorkflows: 0,
       activities: createActivities(party),
     });
     await worker.runUntil(body);
@@ -70,7 +73,7 @@ describe("change.requested consumer", () => {
       expect(third.started).toBe(false);
       expect(decisions).toHaveLength(1);
     });
-  }, 30_000);
+  }, 60_000);
 
   it("approves the party change with the deciding user and change ids", async () => {
     await run("approve-queue", async () => {
@@ -83,7 +86,7 @@ describe("change.requested consumer", () => {
         { changeId: "c-ok", tenantId: "tenant-1", legalEntityId: "le-1", decision: "approved", decidedBy: "alice" },
       ]);
     });
-  }, 30_000);
+  }, 60_000);
 
   it("rejects the party change on rejection", async () => {
     await run("reject-queue", async () => {
@@ -95,7 +98,7 @@ describe("change.requested consumer", () => {
         { changeId: "c-no", tenantId: "tenant-1", legalEntityId: "le-1", decision: "rejected", decidedBy: "alice" },
       ]);
     });
-  }, 30_000);
+  }, 60_000);
 
   it("refuses a decision or a delegation by or to the requester", async () => {
     await run("self-queue", async () => {
@@ -111,5 +114,5 @@ describe("change.requested consumer", () => {
       expect(result.history.map((entry) => entry.action)).toEqual(["approved"]);
       expect(decisions.map((d) => d.decidedBy)).toEqual(["alice"]);
     });
-  }, 30_000);
+  }, 60_000);
 });

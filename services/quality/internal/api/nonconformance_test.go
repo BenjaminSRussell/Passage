@@ -300,3 +300,74 @@ func TestListAndGetNonconformance(t *testing.T) {
 		}
 	}
 }
+
+func TestCorrection_ServiceDutyReachesOnlyTheCAPARoutes(t *testing.T) {
+	h := newHandler(newFake())
+	id := createNCR(t, h).ID
+	base := "/v1/quality/nonconformances/" + id
+	call(h, reqSpec{method: http.MethodPost, path: base + ":approve", duties: ncrDuties, ifMatch: `"1"`})
+	const service = "quality.capa.execute"
+
+	if rec := call(h, reqSpec{method: http.MethodGet, path: base, duties: service}); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
+		t.Fatalf("read with the service duty: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := call(h, reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{"effectivenessCheckDays":30}`, duties: service, key: "capa:" + id, ifMatch: `"2"`})
+	if rec.Code != http.StatusCreated || decodeNCR(t, rec.Body.String()).Status != domain.NCRInCorrection {
+		t.Fatalf("start with the service duty: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = call(h, reqSpec{method: http.MethodPost, path: base + ":complete-step", body: `{"step":1,"notes":"team named"}`, duties: service, user: "engineer", ifMatch: `"3"`})
+	if rec.Code != http.StatusOK || decodeNCR(t, rec.Body.String()).Correction.CurrentStep != 2 {
+		t.Fatalf("step with the service duty: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(h, reqSpec{method: http.MethodPost, path: base + ":check-effectiveness", body: `{"result":"EFFECTIVE","note":"n"}`, duties: service, user: "reviewer", ifMatch: `"4"`}); rec.Code != http.StatusConflict {
+		t.Fatalf("check with the service duty reaches the domain rules: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for name, spec := range map[string]reqSpec{
+		"create":  {method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncrBody, key: ids.New()},
+		"approve": {method: http.MethodPost, path: base + ":approve", ifMatch: `"4"`},
+		"refuse":  {method: http.MethodPost, path: base + ":refuse", body: `{"reason":"x"}`, ifMatch: `"4"`},
+		"list":    {method: http.MethodGet, path: "/v1/quality/nonconformances"},
+	} {
+		spec.duties = service
+		if rec := call(h, spec); rec.Code != http.StatusForbidden {
+			t.Errorf("%s with the service duty: %d, want 403", name, rec.Code)
+		}
+	}
+}
+
+func TestCorrection_ServiceDutyStillEnforcesTheD7Separation(t *testing.T) {
+	f := newFake()
+	h := newHandler(f)
+	id := createNCR(t, h).ID
+	base := "/v1/quality/nonconformances/" + id
+	call(h, reqSpec{method: http.MethodPost, path: base + ":approve", duties: ncrDuties, ifMatch: `"1"`})
+	call(h, reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{"effectivenessCheckDays":30}`, duties: "quality.capa.execute", key: "capa:" + id, ifMatch: `"2"`})
+	version := 3
+	for no := 1; no <= 7; no++ {
+		rec := call(h, reqSpec{method: http.MethodPost, path: base + ":complete-step", duties: "quality.capa.execute", user: "engineer",
+			body: `{"step":` + strconv.Itoa(no) + `,"notes":"done"}`, ifMatch: `"` + strconv.Itoa(version) + `"`})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("D%d: %d %s", no, rec.Code, rec.Body.String())
+		}
+		version++
+	}
+	n := f.ncrs[id]
+	due := time.Now().Add(-time.Hour)
+	n.Correction.EffectivenessDueAt = &due
+	f.ncrs[id] = n
+	check := reqSpec{method: http.MethodPost, path: base + ":check-effectiveness", body: `{"result":"EFFECTIVE","note":"ok"}`,
+		duties: "quality.capa.execute", ifMatch: `"` + strconv.Itoa(version) + `"`}
+	check.user = "engineer"
+	if rec := call(h, check); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeEffectivenessSoD) {
+		t.Fatalf("service duty with the D7 user: %d %s", rec.Code, rec.Body.String())
+	}
+	check.user = ""
+	if rec := call(h, check); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeEffectivenessSoD) {
+		t.Fatalf("service duty without a user: %d %s", rec.Code, rec.Body.String())
+	}
+	check.user = "reviewer"
+	if rec := call(h, check); rec.Code != http.StatusOK {
+		t.Fatalf("service duty with another user: %d %s", rec.Code, rec.Body.String())
+	}
+}

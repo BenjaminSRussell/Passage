@@ -69,7 +69,7 @@ func TestPostgres_ListLines_KeysetPagingWalksPostingOrder(t *testing.T) {
 		}
 	}
 	first := seen[0]
-	if first.Account != "6010" || first.DebitCredit != "D" || first.Amount != "100.00" || first.Currency != "USD" ||
+	if first.Account != "6010" || first.DebitCredit != "D" || first.Amount != "100.00" || first.AmountAcct != "100.00" || first.Currency != "USD" ||
 		first.PostingDate != "2026-03-01" || first.Dimensions["DEPT"] != "D100" || first.TraceID != testTrace ||
 		first.SourceSystem != "ap" || first.SourceType != "vendor_invoice" || first.SourceID != "LQ-1" ||
 		first.SourceURI != "passage://ap/invoices/LQ-1" || first.NegativePosting {

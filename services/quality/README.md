@@ -148,6 +148,12 @@ PASSAGE_ENV=dev SERVICE_NAME=quality DATABASE_URL=postgres://... \
 Config is read from the environment; `DATABASE_URL` is required. Health: `/healthz`,
 `/readyz`; metrics on the admin port (`/metrics`).
 
+`INVENTORY_URL` (optional) is the base URL of `services/inventory`. With it, a failing result or a
+nonconformance holds the lot in inventory and the usage decision or a refused / closed nonconformance
+releases it, through a signed service token that holds only `inventory.hold.apply`; it needs
+`PASSAGE_SERVICE_NAME=quality` and `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`) and stops the service at
+start when the key is missing. Without it quality does not touch inventory. Queued calls are sent by an in-process sweeper (not on the request path): at start, every `QUALITY_HOLD_SWEEP_INTERVAL` (default 1m) for the tenants in `QUALITY_HOLD_TENANTS` (comma-separated UUIDs; required when `INVENTORY_URL` is set, the service stops without it because tenants cannot be listed under row-level security; chart value `holdTenants`), and at once for a tenant that queued one; it logs an error for calls inventory refused and calls pending over 5 minutes.
+
 ## Test
 
 ```
@@ -199,12 +205,12 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/quality/spc?itemId=&testId=&orders=` | QM_VIEW |
 | GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | QM_VIEW |
 | POST | `/v1/quality/nonconformances` | QM_NCR_MAINTAIN |
-| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW |
+| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW, or `quality.capa.execute` |
 | POST | `/v1/quality/nonconformances/{id}:approve` | QM_NCR_MAINTAIN |
 | POST | `/v1/quality/nonconformances/{id}:refuse` | QM_NCR_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
 
 The PRD writes paths as `/quality/v1/...`; the service follows the repository
 convention `/v1/<context>/...`. Lists answer `{"items": [...]}` with `limit` 1 to 500

@@ -36,6 +36,22 @@ resources:
     cpu: "4"
     memory: 8Gi
 
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: scheduling-downtime
+    username: scheduling-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
 serviceMonitor:
   enabled: false
   interval: 30s

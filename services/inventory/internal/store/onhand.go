@@ -84,7 +84,7 @@ const asOfSource = `(select t.tenant_id, t.legal_entity_id, t.product_id, t.dime
   sum(case when s.status in ('SOLD', 'PURCHASED') and coalesce(t.financial_date, t.physical_date) <= $8::date
            then coalesce(t.cost_amount_posted, 0) else 0 end) as posted_value,
   0::numeric as received, 0::numeric as registered, 0::numeric as arrived, 0::numeric as ordered, 0::numeric as deducted,
-  0::numeric as picked, 0::numeric as reserved_physical, 0::numeric as reserved_ordered, 0::numeric as on_order
+  0::numeric as picked, 0::numeric as reserved_physical, 0::numeric as held_physical, 0::numeric as reserved_ordered, 0::numeric as on_order
   from inventory_transaction t
   join on_hand oh on oh.tenant_id = t.tenant_id and oh.legal_entity_id = t.legal_entity_id
     and oh.product_id = t.product_id and oh.dimension_set_hash = t.dimension_set_hash
@@ -110,6 +110,7 @@ type OnHandRow struct {
 	AvailOrdered     decimal.Decimal
 	PostedValue      decimal.Decimal
 	ReservedPhysical decimal.Decimal
+	HeldPhysical     decimal.Decimal
 	// Blocked is the physical quantity held with inventory status BLOCKED or
 	// QUARANTINE; it is part of PhysicalInvent and left out of the avail sums.
 	Blocked decimal.Decimal
@@ -157,10 +158,11 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 	const restricted = "coalesce(d.dims->>'inventory_status', '') in ('BLOCKED', 'QUARANTINE')"
 	selects = append(selects,
 		"sum("+phys+")::text",
-		"coalesce(sum("+phys+" - o.reserved_physical) filter (where not "+restricted+"), 0)::text",
-		"coalesce(sum("+phys+" - o.reserved_physical + o.ordered + o.arrived - o.on_order - o.reserved_ordered) filter (where not "+restricted+"), 0)::text",
+		"coalesce(sum("+phys+" - o.reserved_physical - o.held_physical) filter (where not "+restricted+"), 0)::text",
+		"coalesce(sum("+phys+" - o.reserved_physical - o.held_physical + o.ordered + o.arrived - o.on_order - o.reserved_ordered) filter (where not "+restricted+"), 0)::text",
 		"sum(o.posted_value)::text",
 		"sum(o.reserved_physical)::text",
+		"sum(o.held_physical)::text",
 		"coalesce(sum("+phys+") filter (where "+restricted+"), 0)::text",
 		"bool_or(("+phys+") < 0)",
 	)
@@ -189,22 +191,22 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		defer rows.Close()
 		for rows.Next() {
 			g := make([]string, len(groups))
-			var currency, phys, avail, ordered, value, reserved, blocked string
+			var currency, phys, avail, ordered, value, reserved, held, blocked string
 			var negative bool
-			dest := make([]any, 0, len(groups)+8)
+			dest := make([]any, 0, len(groups)+9)
 			for i := range g {
 				dest = append(dest, &g[i])
 			}
-			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &blocked, &negative)
+			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &held, &blocked, &negative)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
 			r := OnHandRow{Group: map[string]string{}, PhysicalInvent: decimal.RequireFromString(phys),
 				AvailPhysical: decimal.RequireFromString(avail), AvailOrdered: decimal.RequireFromString(ordered),
-				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), Blocked: decimal.RequireFromString(blocked),
+				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), HeldPhysical: decimal.RequireFromString(held), Blocked: decimal.RequireFromString(blocked),
 				Currency: currency, Negative: negative}
 			if asOf != "" {
-				r.AvailPhysical, r.AvailOrdered, r.ReservedPhysical = decimal.Zero, decimal.Zero, decimal.Zero
+				r.AvailPhysical, r.AvailOrdered, r.ReservedPhysical, r.HeldPhysical = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 			}
 			for i, name := range groups {
 				r.Group[name] = g[i]

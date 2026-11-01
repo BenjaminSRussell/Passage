@@ -572,6 +572,148 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/holds:
+    post:
+      operationId: placeInventoryHold
+      summary: Place a hold on stock (reason, source reference, quantity or whole lot)
+      description: |
+        Takes quantity out of availability without moving it. Held stock stays in physical stock
+        and is left out of availPhysical, availOrdered and every issue check until it is released.
+        A quantity hold (qty) names one exact dimension set with a site and holds qty of its
+        available physical stock, or with allowPartial whatever is available (shortfall says how
+        much was not held); more than the available quantity is INV-HLD-001. A whole-lot hold
+        (wholeLot, dimensions with the batch, no qty) holds everything available in every
+        unrestricted row of the product that matches the dimensions, one hold per row. The source
+        (sourceType in A-Z, 0-9 and _, sourceRef) names the document that asked for the hold.
+        Reserved quantity, blocked and quarantined stock and vendor-owned stock cannot be held.
+        The service duty inventory.hold.apply may call this operation and the release-source
+        operation, and no other.
+      x-passage-duty: inventory.hold.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HoldRequest' }
+      responses:
+        '201':
+          description: Held
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldResult' }
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryHolds
+      summary: Hold inquiry, newest first
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [ACTIVE, RELEASED] } }
+        - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: sourceType, in: query, schema: { type: string } }
+        - { name: sourceRef, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        '200':
+          description: Holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/holds/{id}:release:
+    post:
+      operationId: releaseInventoryHold
+      summary: Release all or part of one hold
+      description: |
+        Returns qty (the whole remaining hold when omitted) to availability. A release above the
+        held quantity is INV-HLD-004. Requires If-Match. A released hold is returned unchanged.
+      x-passage-duty: inventory.hold.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                qty: { $ref: '#/components/schemas/Decimal' }
+      responses:
+        '200':
+          description: Released
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/holds:release-source:
+    post:
+      operationId: releaseInventoryHoldsBySource
+      summary: Release the holds of one source down to a level
+      description: |
+        Releases active holds of the source (sourceType, sourceRef), oldest first, until at most
+        keepQty (default 0) remains held for it. The call states the end level, not a delta, so
+        repeating it releases nothing more and a source with no active hold answers an empty list.
+      x-passage-duty: inventory.hold.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceType, sourceRef]
+              properties:
+                sourceType: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+                sourceRef: { type: string, minLength: 1, maxLength: 60 }
+                keepQty: { $ref: '#/components/schemas/Decimal' }
+                moveKeptTo:
+                  type: object
+                  description: Re-sources the holds that stay held, in the same transaction, so a later release of the new source touches only them
+                  required: [sourceType, sourceRef]
+                  properties:
+                    sourceType: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+                    sourceRef: { type: string, minLength: 1, maxLength: 60 }
+      responses:
+        '200':
+          description: The holds this call released from
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, known]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Hold' }
+                  known: { type: boolean, description: 'False when no hold, active or released, ever had this source; a caller that placed one treats that as a failure' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/count-plans:
     post:
       operationId: createInventoryCountPlan
@@ -2425,6 +2567,7 @@ components:
         availOrdered: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         postedValue: { $ref: '#/components/schemas/Decimal' }
         reservedPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
+        heldPhysical: { $ref: '#/components/schemas/Decimal', description: 'Quantity under an active hold (physical stock that availPhysical and availOrdered leave out); present for the live projection, absent in an asOf replay' }
         blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
         currency: { type: string }
         negative: { type: boolean, description: True when any row in the group has negative physical stock }
@@ -2592,6 +2735,47 @@ components:
         disposition: { type: string, enum: [RELEASE, SCRAP, RETURN] }
         physicalDate: { type: string, format: date }
         version: { type: integer }
+    HoldRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, productId, dimensions, reason, sourceType, sourceRef]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions', description: Unrestricted dimensions (no inventory_status, no owner); a quantity hold needs a site, a whole-lot hold the batch }
+        qty: { $ref: '#/components/schemas/Decimal', description: Required for a quantity hold, omitted for a whole-lot hold }
+        wholeLot: { type: boolean, default: false }
+        allowPartial: { type: boolean, default: false, description: Hold what is available when less than qty is, and answer the shortfall }
+        reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
+        sourceType: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+        sourceRef: { type: string, minLength: 1, maxLength: 60 }
+        note: { type: string, maxLength: 500 }
+    Hold:
+      type: object
+      required: [id, legalEntityId, productId, dimensions, qty, releasedQty, heldQty, wholeLot, reason, sourceType, sourceRef, state, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal', description: Quantity placed }
+        releasedQty: { $ref: '#/components/schemas/Decimal' }
+        heldQty: { $ref: '#/components/schemas/Decimal', description: qty minus releasedQty; this is what availability leaves out }
+        wholeLot: { type: boolean }
+        reason: { type: string }
+        sourceType: { type: string }
+        sourceRef: { type: string }
+        note: { type: string }
+        state: { type: string, enum: [ACTIVE, RELEASED] }
+        version: { type: integer }
+    HoldResult:
+      type: object
+      required: [items, shortfall]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Hold' }
+        shortfall: { $ref: '#/components/schemas/Decimal', description: Quantity not held because less was available (allowPartial only) }
     CountPlanRequest:
       type: object
       additionalProperties: false

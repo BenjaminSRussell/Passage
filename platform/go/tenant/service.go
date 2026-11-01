@@ -78,11 +78,22 @@ var serviceGrants = map[string]map[string][]string{
 		"product":    {"product.configuration.read"},
 		"production": {"production.order.create-from-sales"},
 	},
+	"ledger": {
+		"close": {"period.check"},
+	},
+	"analytics": {
+		"ledger": {"ledger.entry.lookup", "ledger.ledger.lookup"},
+	},
 	"workflow-ts": {
-		"payables": {"payment-run.execute"},
+		"payables":    {"payment-run.execute"},
+		"engineering": {"engineering.eco.workflow"},
+		"quality":     {"quality.capa.execute"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
+	},
+	"quality": {
+		"inventory": {"inventory.hold.apply"},
 	},
 	"hr": {
 		"numbering": {"numbering.sequence.allocate"},

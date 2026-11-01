@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -500,6 +500,23 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
 }
 
+test_inventory_hold_duties_open_only_their_routes if {
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds")
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds/h1:release")
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds:release-source")
+	not allowed("inventory.hold.write", "GET", "/v1/inventory/holds")
+	allowed("inventory.read", "GET", "/v1/inventory/holds")
+	not allowed("inventory.read", "POST", "/v1/inventory/holds")
+	data.duties["inventory.hold.apply"].service_only
+	data.service_grants.quality.inventory == ["inventory.hold.apply"]
+	allowed("inventory.hold.apply", "POST", "/v1/inventory/holds")
+	allowed("inventory.hold.apply", "POST", "/v1/inventory/holds:release-source")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/holds/h1:release")
+	not allowed("inventory.hold.apply", "GET", "/v1/inventory/holds")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/blockings")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/journals")
+}
+
 granted_duty_known(duty) if data.duties[duty]
 
 test_service_principals_hold_only_known_unprivileged_duties if {
@@ -712,4 +729,29 @@ test_batch_service_grant_reaches_only_the_product_job_routes if {
 	not allowed("product.released.read", "POST", "/v1/product/jobs/group-change")
 	not allowed("product.variants.explode", "GET", "/v1/product/released-products")
 	not allowed("product.jobs.write", "GET", "/v1/product/released-products")
+}
+
+test_workflow_ts_eco_and_capa_service_duties if {
+	data.service_grants["workflow-ts"].engineering == ["engineering.eco.workflow"]
+	data.service_grants["workflow-ts"].quality == ["quality.capa.execute"]
+	data.duties["engineering.eco.workflow"].service_only
+	data.duties["quality.capa.execute"].service_only
+	every action in ["approve", "reject", "cancel", "release"] {
+		allowed("engineering.eco.workflow", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
+	}
+	allowed("engineering.eco.approve", "POST", "/v1/engineering/ecos/e1:release")
+	every action in ["approve", "reject", "cancel"] {
+		not allowed("engineering.eco.approve", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
+	}
+	not allowed("engineering.eco.workflow", "POST", "/v1/engineering/ecos")
+	not allowed("engineering.eco.workflow", "GET", "/v1/engineering/ecos/e1")
+	not allowed("engineering.eco.workflow", "POST", "/v1/engineering/bom-versions")
+	allowed("quality.capa.execute", "GET", "/v1/quality/nonconformances/n1")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1/corrections")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:complete-step")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:check-effectiveness")
+	not allowed("quality.capa.execute", "GET", "/v1/quality/nonconformances")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
 }
