@@ -19,17 +19,20 @@ type Policy struct {
 	POFourEyes bool `json:"poFourEyes"`
 	// AllowInvoiceBeforeReceipt lets a PO line quantity drop below the invoiced
 	// quantity, never below the received quantity (BR-17.7).
-	AllowInvoiceBeforeReceipt bool       `json:"allowInvoiceBeforeReceipt"`
-	Version                   int        `json:"version"`
-	UpdatedBy                 string     `json:"updatedBy,omitempty"`
-	UpdatedAt                 *time.Time `json:"updatedAt,omitempty"`
+	AllowInvoiceBeforeReceipt bool `json:"allowInvoiceBeforeReceipt"`
+	// CategoryAccessMode is HARD, SOFT or OFF: whether a vendor with no valid assignment on a
+	// restricted procurement category is refused, warned about or not checked (FR-17.20).
+	CategoryAccessMode string     `json:"categoryAccessMode"`
+	Version            int        `json:"version"`
+	UpdatedBy          string     `json:"updatedBy,omitempty"`
+	UpdatedAt          *time.Time `json:"updatedAt,omitempty"`
 }
 
 // DefaultPolicy is what applies to a legal entity with no saved policy: change
-// management on, no segregation, invoicing only against receipts. Version 0
+// management on, no segregation, invoicing only against receipts, category access SOFT. Version 0
 // means "not saved yet"; the first save is If-Match 0.
 func DefaultPolicy(legalEntityID string) Policy {
-	return Policy{LegalEntityID: legalEntityID, ChangeManagementDefault: true}
+	return Policy{LegalEntityID: legalEntityID, ChangeManagementDefault: true, CategoryAccessMode: AccessSoft}
 }
 
 // CheckFourEyes refuses an approve or confirm by a user who created, submitted

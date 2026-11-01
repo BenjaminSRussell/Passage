@@ -213,6 +213,34 @@ describe("change a purchase order", () => {
     expect(await screen.findByText("Change saved as version 2. It needs re-approval before the vendor sees it.")).toBeInTheDocument();
   });
 
+  it("keeps an existing line's category, sends a new line's category and shows category warnings", async () => {
+    const withCategory = { ...confirmed, lines: confirmed.lines.map((l) => (l.lineNo === 1 ? { ...l, category: "IT hardware" } : l)) };
+    const saved = {
+      ...withCategory,
+      rowVersion: 5,
+      warnings: [{ code: "PRC-CAT-010", lineNo: 4, detail: "vendor is only provisionally assigned to category Docks" }],
+    };
+    const fetchMock = serve(withCategory, [v1], () => json(saved));
+    const { router } = renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);
+    const line1 = await screen.findByRole("group", { name: "Line 1" });
+    const kept = within(line1).getByLabelText("Procurement category");
+    expect(kept).toHaveValue("IT hardware");
+    expect(kept).toHaveAttribute("readonly");
+    fireEvent.click(screen.getByRole("button", { name: "Add line" }));
+    const added = screen.getByRole("group", { name: "New line 1" });
+    fireEvent.change(within(added).getByLabelText("Description"), { target: { value: "Dock" } });
+    fireEvent.change(within(added).getByLabelText("Procurement category"), { target: { value: " Docks " } });
+    fireEvent.change(within(added).getByLabelText("Unit price"), { target: { value: "80" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save change" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/purchase-orders/${PO_ID}`));
+    const patch = fetchMock.mock.calls.find(([, init]) => (init as Init).method === "PATCH") as [string, Init];
+    const body = JSON.parse(String(patch[1].body));
+    expect(body.lines[0].category).toBeUndefined();
+    expect(body.lines[2]).toMatchObject({ description: "Dock", category: "Docks" });
+    expect(await screen.findByText(/Line 4: vendor is only provisionally assigned to category Docks \(PRC-CAT-010\)/)).toBeInTheDocument();
+  });
+
   it("does not offer an edit of an approved order", async () => {
     const fetchMock = serve({ ...draft, approvalStatus: "APPROVED" }, []);
     renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);

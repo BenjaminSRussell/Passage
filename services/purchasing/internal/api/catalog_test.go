@@ -250,6 +250,8 @@ func TestRequisition_CatalogLineRefusals(t *testing.T) {
 		{"other currency", func(_ *domain.Catalog, e *domain.CatalogEntry) { e.Currency = "EUR" }, "", domain.CodeCatalogCurrency, 422},
 		{"other unit of measure", nil, `,"unit":"BOX"`, codeInvalid, 422},
 		{"other product", nil, `,"productId":"00000000-0000-7000-8000-0000000000b7"`, codeInvalid, 422},
+		// FR-17.20: moving a catalog line to another category would sidestep the category access rule.
+		{"other category", nil, `,"category":"Office"`, codeInvalid, 422},
 	} {
 		h := newHarness(t)
 		h.fake.cat.catalog, h.fake.cat.entry = pickedEntry()

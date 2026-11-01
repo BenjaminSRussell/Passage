@@ -12,5 +12,6 @@ type PolicyChangedData struct {
 	ChangeManagementDefault   bool   `json:"change_management_default"`
 	POFourEyes                bool   `json:"po_four_eyes"`
 	AllowInvoiceBeforeReceipt bool   `json:"allow_invoice_before_receipt"`
+	CategoryAccessMode        string `json:"category_access_mode"`
 	UpdatedBy                 string `json:"updated_by,omitempty"`
 }

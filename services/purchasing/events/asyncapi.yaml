@@ -61,6 +61,22 @@ channels:
         $ref: '#/components/messages/CatalogPublished'
       catalogRetired:
         $ref: '#/components/messages/CatalogRetired'
+  categoryvendor:
+    address: passage.procurement.categoryvendor
+    description: Vendor assignments to procurement categories (FR-17.20); the Kafka key is the assignment id.
+    messages:
+      categoryVendorAssigned:
+        $ref: '#/components/messages/CategoryVendorAssigned'
+      categoryVendorChanged:
+        $ref: '#/components/messages/CategoryVendorChanged'
+  categorymanager:
+    address: passage.procurement.categorymanager
+    description: Category manager assignments (FR-17.20); the Kafka key is the manager row id.
+    messages:
+      categoryManagerAssigned:
+        $ref: '#/components/messages/CategoryManagerAssigned'
+      categoryManagerRemoved:
+        $ref: '#/components/messages/CategoryManagerRemoved'
   catalogimport:
     address: passage.procurement.catalogimport
     description: Vendor catalog imports committed to a catalog (FR-17.18); the Kafka key is the import id.
@@ -140,6 +156,30 @@ operations:
       $ref: '#/channels/policy'
     messages:
       - $ref: '#/channels/policy/messages/policyChanged'
+  publishCategoryVendorAssigned:
+    action: send
+    channel:
+      $ref: '#/channels/categoryvendor'
+    messages:
+      - $ref: '#/channels/categoryvendor/messages/categoryVendorAssigned'
+  publishCategoryVendorChanged:
+    action: send
+    channel:
+      $ref: '#/channels/categoryvendor'
+    messages:
+      - $ref: '#/channels/categoryvendor/messages/categoryVendorChanged'
+  publishCategoryManagerAssigned:
+    action: send
+    channel:
+      $ref: '#/channels/categorymanager'
+    messages:
+      - $ref: '#/channels/categorymanager/messages/categoryManagerAssigned'
+  publishCategoryManagerRemoved:
+    action: send
+    channel:
+      $ref: '#/channels/categorymanager'
+    messages:
+      - $ref: '#/channels/categorymanager/messages/categoryManagerRemoved'
   publishCatalogPublished:
     action: send
     channel:
@@ -202,6 +242,62 @@ components:
               type: { type: string, const: dev.passage.procurement.catalog.retired.v1 }
               subject: { type: string, format: uuid, description: catalog id }
               data: { $ref: '#/components/schemas/CatalogData' }
+    CategoryVendorAssigned:
+      name: CategoryVendorAssigned
+      title: categoryvendor.assigned.v1
+      x-passage-type: dev.passage.procurement.categoryvendor.assigned.v1
+      summary: A vendor was assigned to a procurement category with a status and validity window (FR-17.20). Requisition and PO checks read the assignments.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.categoryvendor.assigned.v1 }
+              subject: { type: string, format: uuid, description: assignment id }
+              data: { $ref: '#/components/schemas/CategoryVendorData' }
+    CategoryVendorChanged:
+      name: CategoryVendorChanged
+      title: categoryvendor.changed.v1
+      x-passage-type: dev.passage.procurement.categoryvendor.changed.v1
+      summary: The status or validity window of a category vendor assignment changed (FR-17.20); carries the assignment at its new version.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.categoryvendor.changed.v1 }
+              subject: { type: string, format: uuid, description: assignment id }
+              data: { $ref: '#/components/schemas/CategoryVendorData' }
+    CategoryManagerAssigned:
+      name: CategoryManagerAssigned
+      title: categorymanager.assigned.v1
+      x-passage-type: dev.passage.procurement.categorymanager.assigned.v1
+      summary: A worker became manager of a procurement category (FR-17.20).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.categorymanager.assigned.v1 }
+              subject: { type: string, format: uuid, description: manager row id }
+              data: { $ref: '#/components/schemas/CategoryManagerData' }
+    CategoryManagerRemoved:
+      name: CategoryManagerRemoved
+      title: categorymanager.removed.v1
+      x-passage-type: dev.passage.procurement.categorymanager.removed.v1
+      summary: A worker stopped managing a procurement category (FR-17.20).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.categorymanager.removed.v1 }
+              subject: { type: string, format: uuid, description: manager row id }
+              data: { $ref: '#/components/schemas/CategoryManagerData' }
     PolicyChanged:
       name: PolicyChanged
       title: policy.changed.v1
@@ -652,9 +748,33 @@ components:
         error_rows: { type: integer, minimum: 0 }
         skipped_rows: { type: integer, minimum: 0, description: "Rows still undecided (ACCEPTABLE) at the commit; they stay out of the catalog." }
         catalog_version: { type: integer, minimum: 2 }
+    CategoryVendorData:
+      type: object
+      required: [assignment_id, legal_entity_id, category, vendor_id, status, valid_from, version]
+      additionalProperties: false
+      properties:
+        assignment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        category: { type: string }
+        vendor_id: { type: string, format: uuid }
+        status: { type: string, enum: [APPROVED, PROVISIONAL, BLOCKED] }
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date }
+        version: { type: integer, minimum: 1 }
+        changed_by: { type: string, format: uuid }
+    CategoryManagerData:
+      type: object
+      required: [manager_id, legal_entity_id, category, worker_id]
+      additionalProperties: false
+      properties:
+        manager_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        category: { type: string }
+        worker_id: { type: string, format: uuid }
+        changed_by: { type: string, format: uuid }
     PolicyChangedData:
       type: object
-      required: [legal_entity_id, version, change_management_default, po_four_eyes, allow_invoice_before_receipt]
+      required: [legal_entity_id, version, change_management_default, po_four_eyes, allow_invoice_before_receipt, category_access_mode]
       additionalProperties: false
       properties:
         legal_entity_id: { type: string, format: uuid }
@@ -662,4 +782,5 @@ components:
         change_management_default: { type: boolean }
         po_four_eyes: { type: boolean }
         allow_invoice_before_receipt: { type: boolean }
+        category_access_mode: { type: string, enum: [HARD, SOFT, OFF] }
         updated_by: { type: string, format: uuid }

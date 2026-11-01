@@ -145,6 +145,8 @@ interface LineDraft {
   lineNo?: number;
   productId: string;
   description: string;
+  /** Procurement category (FR-17.20); read-only on a line already on the order. */
+  category: string;
   qty: string;
   unit: string;
   unitPrice: string;
@@ -169,6 +171,7 @@ function emptyLine(): LineDraft {
     key: newIdempotencyKey(),
     productId: "",
     description: "",
+    category: "",
     qty: "1",
     unit: "EA",
     unitPrice: "",
@@ -187,6 +190,7 @@ function draftOf(l: PurchaseOrderLine): LineDraft {
     lineNo: l.lineNo,
     productId: l.productId ?? "",
     description: l.description ?? "",
+    category: l.category ?? "",
     qty: l.qty,
     unit: l.unit,
     unitPrice: "",
@@ -211,6 +215,7 @@ export function validateOrder(legalEntityId: string, vendorId: string, currency:
     const f = (name: string) => `lines[${i}].${name}`;
     if (l.productId !== "" && !uuidPattern.test(l.productId)) errors[f("productId")] = "Product id must be a UUID.";
     if (l.productId === "" && l.description.trim() === "") errors[f("description")] = "Enter a product id or a description.";
+    if (l.category.trim().length > 200) errors[f("category")] = "Use at most 200 characters.";
     if (l.lineNo === undefined && l.productId === "" && l.unitPrice === "") errors[f("unitPrice")] = "A line without a product needs a unit price.";
     if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
     if (l.unit.trim() === "") errors[f("unit")] = "Enter a unit.";
@@ -241,6 +246,8 @@ function toInput(
       lineNo: l.lineNo,
       productId: opt(l.productId),
       description: opt(l.description),
+      // An existing line keeps its category; the service refuses a changed one (FR-17.20).
+      category: l.lineNo === undefined ? opt(l.category) : undefined,
       qty: l.qty.trim(),
       unit: l.unit.trim(),
       unitPrice: opt(l.unitPrice),
@@ -299,6 +306,15 @@ function LinesCard({
               </FormField>
               <FormField id={id("description")} label="Description" optional error={err("description")}>
                 {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
+              </FormField>
+              <FormField
+                id={id("category")}
+                label="Procurement category"
+                optional
+                hint={existing ? "Fixed once the line is on the order" : "Checked against the vendor's category assignments"}
+                error={err("category")}
+              >
+                {(c) => <Input {...c} value={line.category} readOnly={existing} onChange={(e) => update(i, { category: e.target.value })} />}
               </FormField>
               <FormField
                 id={id("qty")}
@@ -503,7 +519,7 @@ function EditForm({ po }: { po: PurchaseOrder }) {
     try {
       const header = { legalEntityId: po.legalEntityId, vendorId: po.vendorId, currency: po.currency, siteId: po.siteId, warehouseId: po.warehouseId };
       const { body } = await editPurchaseOrder(po.id, toInput(header, lines, charges), po.rowVersion);
-      navigate(`/purchasing/purchase-orders/${po.id}`, { state: { notice: editOutcome(po, body) } });
+      navigate(`/purchasing/purchase-orders/${po.id}`, { state: { notice: editOutcome(po, body), warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
       setFailure(problem);
@@ -652,6 +668,7 @@ const lineColumns = (
 ): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+  { key: "category", header: "Category", render: (l) => l.category || "—" },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "receivedQty", header: "Received", align: "end", render: (l) => l.receivedQty ?? "0" },
   { key: "unitPrice", header: "Unit price", align: "end", render: (l) => `${l.unitPrice} / ${l.priceUnit}` },
@@ -907,7 +924,7 @@ export function PurchaseOrderDetailPage() {
         {done}
       </Alert>
       {warnings.length > 0 ? (
-        <Alert tone="warning" title="Agreement limits">
+        <Alert tone="warning" title="Warnings">
           <ul className={styles.cardLinks}>
             {warnings.map((w) => (
               <li key={`${w.code}-${w.lineNo}`}>

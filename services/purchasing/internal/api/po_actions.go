@@ -77,17 +77,29 @@ func (a *API) editOrder(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if err := a.orderCategories(r.Context(), &body); err != nil {
+		fail(w, r, err)
+		return
+	}
 	next, err := a.buildOrder(r.Context(), body)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
 	numberLines(cur, body.Lines, next.Lines)
+	// FR-17.20: the vendor of a PO never changes and an existing line keeps its category,
+	// so only the lines this edit adds are checked.
+	warnings, err := a.checkOrderCategoryAccess(r.Context(), next, func(i int) bool { return body.Lines[i].keep == nil })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	out, err := a.store.EditPurchaseOrder(r.Context(), id, want, next)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
+	out.Warnings = append(out.Warnings, warnings...)
 	a.orderEdits.Add(1)
 	if out.ApprovalStatus == domain.POStatusConfirmed && out.VersionNo > cur.VersionNo {
 		a.ordersConfirmed.Add(1)

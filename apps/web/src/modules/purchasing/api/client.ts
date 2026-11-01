@@ -132,6 +132,8 @@ export interface PurchaseOrderLine {
   lineNo: number;
   productId?: string;
   description?: string;
+  /** Procurement category the category access rule checks (FR-17.20); fixed once the line is written. */
+  category?: string;
   qty: string;
   unit: string;
   unitPrice: string;
@@ -182,7 +184,7 @@ export interface PurchaseOrder {
   charges: PurchaseOrderCharge[];
   createdAt: string;
   updatedAt: string;
-  /** Returned on create only: PRC-AGR-004 when a release reaches an agreement threshold. */
+  /** Returned on create and edit: PRC-AGR-004 when a release reaches an agreement threshold; PRC-CAT-002 / PRC-CAT-010 category access (FR-17.20). */
   warnings?: Warning[];
 }
 
@@ -207,6 +209,8 @@ export interface PurchaseOrderLineInput {
   lineNo?: number;
   productId?: string;
   description?: string;
+  /** Required under HARD category access when there is no product; a requisition line's category wins. */
+  category?: string;
   qty: string;
   unit: string;
   unitPrice?: string;
@@ -591,7 +595,7 @@ export function listOpenRequisitionLines(filters: { sourcing?: SourcingFilter | 
 
 /** Creates one DRAFT purchase order per vendor, currency, site and delivery window. */
 export function consolidateRequisitions(input: ConsolidationInput, idempotencyKey = newIdempotencyKey()) {
-  return send<{ purchaseOrders: PurchaseOrder[] }>("POST", "/requisitions:consolidate", {
+  return send<{ purchaseOrders: PurchaseOrder[]; warnings?: Warning[] }>("POST", "/requisitions:consolidate", {
     body: input,
     headers: { "Idempotency-Key": idempotencyKey },
   });
@@ -1152,12 +1156,19 @@ export interface PurchasingPolicy {
   changeManagementDefault: boolean;
   poFourEyes: boolean;
   allowInvoiceBeforeReceipt: boolean;
+  /** HARD refuses a vendor with no valid assignment on a restricted category, SOFT warns, OFF does not check (FR-17.20). */
+  categoryAccessMode: CategoryAccessMode;
   version: number;
   updatedBy?: string;
   updatedAt?: string;
 }
 
-export type PurchasingPolicyInput = Pick<PurchasingPolicy, "changeManagementDefault" | "poFourEyes" | "allowInvoiceBeforeReceipt">;
+export type CategoryAccessMode = "HARD" | "SOFT" | "OFF";
+
+export type PurchasingPolicyInput = Pick<
+  PurchasingPolicy,
+  "changeManagementDefault" | "poFourEyes" | "allowInvoiceBeforeReceipt" | "categoryAccessMode"
+>;
 
 export async function listPolicies(signal?: AbortSignal) {
   const { body } = await send<{ items: PurchasingPolicy[] }>("GET", "/purchasing-policies", { signal });
@@ -1372,4 +1383,92 @@ export function actOnCatalogImport(id: string, action: CatalogImportAction, vers
   return send<CatalogImport>("POST", `/catalog-imports/${encodeURIComponent(id)}:${action}`, {
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
   });
+}
+
+// --- Category vendor assignment and managers (FR-17.20) ---
+
+export type AssignmentStatus = "APPROVED" | "PROVISIONAL" | "BLOCKED";
+
+export interface CategoryVendorAssignment {
+  id: string;
+  legalEntityId: string;
+  category: string;
+  vendorId: string;
+  status: AssignmentStatus;
+  validFrom: string;
+  validTo?: string;
+  notes?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CategoryVendorAssignmentInput {
+  legalEntityId: string;
+  category: string;
+  vendorId: string;
+  status: AssignmentStatus;
+  validFrom?: string;
+  validTo?: string;
+  notes?: string;
+}
+
+export interface CategoryVendorAssignmentChange {
+  status: AssignmentStatus;
+  validFrom?: string;
+  validTo?: string;
+  notes?: string;
+}
+
+export interface CategoryManager {
+  id: string;
+  legalEntityId: string;
+  category: string;
+  workerId: string;
+  createdAt: string;
+}
+
+export interface CategoryManagerInput {
+  legalEntityId: string;
+  category: string;
+  workerId: string;
+}
+
+export function listCategoryVendors(
+  filters: { status?: AssignmentStatus | ""; category?: string; legalEntityId?: string; vendorId?: string } = {},
+  options: ListOptions = {},
+) {
+  return list<CategoryVendorAssignment>(
+    "/category-vendors",
+    { status: filters.status || undefined, category: filters.category, legalEntityId: filters.legalEntityId, vendorId: filters.vendorId },
+    options,
+  );
+}
+
+export function getCategoryVendor(id: string, signal?: AbortSignal) {
+  return send<CategoryVendorAssignment>("GET", `/category-vendors/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createCategoryVendor(input: CategoryVendorAssignmentInput, idempotencyKey = newIdempotencyKey()) {
+  return send<CategoryVendorAssignment>("POST", "/category-vendors", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Changes status, window and notes under the version read. PUT is idempotent, so no key is sent. */
+export function changeCategoryVendor(id: string, input: CategoryVendorAssignmentChange, version: number) {
+  return send<CategoryVendorAssignment>("PUT", `/category-vendors/${encodeURIComponent(id)}`, {
+    body: input,
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
+export function listCategoryManagers(filters: { category?: string; legalEntityId?: string } = {}, options: ListOptions = {}) {
+  return list<CategoryManager>("/category-managers", { category: filters.category, legalEntityId: filters.legalEntityId }, options);
+}
+
+export function createCategoryManager(input: CategoryManagerInput, idempotencyKey = newIdempotencyKey()) {
+  return send<CategoryManager>("POST", "/category-managers", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+export function removeCategoryManager(id: string) {
+  return send<void>("DELETE", `/category-managers/${encodeURIComponent(id)}`);
 }

@@ -290,6 +290,14 @@ func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeNotRequester, "only the requester can submit this requisition"))
 		return
 	}
+	// FR-17.20: a DRAFT is checked against the category access mode before it is routed.
+	var warnings []store.Warning
+	if cur.Status == store.RequisitionDraft {
+		if warnings, err = a.checkCategoryAccess(r.Context(), cur.LegalEntityID, requisitionUses(cur)); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
 	// The chain is computed from the version read here; the store refuses the
 	// submit if the requisition moved past that version in between.
 	idem := store.Idem{Key: key, Hash: hashBody("requisition.submit", map[string]any{"id": id, "version": version})}
@@ -299,6 +307,7 @@ func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.requisitionsSubmitted.Add(1)
+	out.Warnings = warnings
 	w.Header().Set("ETag", etag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)
 }

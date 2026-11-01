@@ -51,9 +51,12 @@ type PurchaseOrder struct {
 // "TRADE_AGREEMENT:<id>", "AGREEMENT:<agreement line id>" or
 // "REQUISITION_ESTIMATE" so the price can be explained later.
 type PurchaseOrderLine struct {
-	LineNo            int             `json:"lineNo"`
-	ProductID         string          `json:"productId,omitempty"`
-	Description       string          `json:"description,omitempty"`
+	LineNo      int    `json:"lineNo"`
+	ProductID   string `json:"productId,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Category is the procurement category the category access rule checks (FR-17.20):
+	// the requisition line's on a requisition-backed line, else the one given; fixed once written.
+	Category          string          `json:"category,omitempty"`
 	Qty               decimal.Decimal `json:"qty"`
 	Unit              string          `json:"unit"`
 	UnitPrice         decimal.Decimal `json:"unitPrice"`
@@ -135,11 +138,11 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 	for _, l := range in.Lines {
 		if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
 			qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
-			price_source, requisition_line_id, agreement_line_id, status)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'OPEN')`,
+			price_source, requisition_line_id, agreement_line_id, category, status)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'OPEN')`,
 			p.TenantID, in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
 			l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource,
-			nullable(l.RequisitionLineID), nullable(l.AgreementLineID)); err != nil {
+			nullable(l.RequisitionLineID), nullable(l.AgreementLineID), l.Category); err != nil {
 			return PurchaseOrder{}, err
 		}
 	}
@@ -184,7 +187,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
 		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status,
-		coalesce(invoiced_reprice_source, '')
+		coalesce(invoiced_reprice_source, ''), category
 		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -196,7 +199,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		var due time.Time
 		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
 			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
-			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource); err != nil {
+			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource, &l.Category); err != nil {
 			return PurchaseOrder{}, err
 		}
 		l.DeliveryDate = day(due)

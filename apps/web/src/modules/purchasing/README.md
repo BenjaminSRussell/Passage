@@ -38,8 +38,12 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/catalogs/:id/import` | Vendor id and a CSV file (at most 25 MB, refused in the browser above it) or pasted rows; stages the file | `POST /catalogs/{id}/vendor-import` |
 | `/purchasing/catalog-imports/:id` | Row counts, staged rows with their problems and a status filter; accept or reject a row, accept all rows without errors, add the accepted rows to the catalog, cancel | `GET /catalog-imports/{id}`, `GET /catalog-imports/{id}/rows`, `POST /catalog-imports/{id}/decisions`, `POST /catalog-imports/{id}:commit`, `:cancel` (If-Match) |
 | `/purchasing/requisitions/new` (picker) | Search published catalogs for the legal entity and operating unit, with item images and prices; Add puts a catalog line on the requisition, which sends only `catalogEntryId`, quantity, unit and date; the requisition detail marks each line Catalog or Non-catalog | `GET /catalog-entries` |
-| `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt), open any legal entity by id | `GET /purchasing-policies` |
-| `/purchasing/policies/:legalEntityId` | The three settings with their meaning; Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
+| `/purchasing/category-vendors` | Category vendor assignments with status and category filters and load-more paging (nav item gated on PurchaseOrderInquire; writes need CategoryMaintain in the service) | `GET /category-vendors` |
+| `/purchasing/category-vendors/new` | Legal entity, category, vendor, status and validity window | `POST /category-vendors` |
+| `/purchasing/category-vendors/:id` | The assignment and a change form for status, window and notes; stale version shown with PRC-CAT-013 | `GET /category-vendors/{id}`, `PUT /category-vendors/{id}` (If-Match) |
+| `/purchasing/category-managers` | Category managers with a category filter, an add form and Remove | `GET /category-managers`, `POST /category-managers`, `DELETE /category-managers/{id}` |
+| `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt, category access), open any legal entity by id | `GET /purchasing-policies` |
+| `/purchasing/policies/:legalEntityId` | The settings with their meaning, including the category access mode (hard, soft, off); Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 
 Pages use the shell primitives from `src/shell/ui` and `pages.module.css` tokens only.
 Every data page has loading, empty and error states; errors show the service's stable

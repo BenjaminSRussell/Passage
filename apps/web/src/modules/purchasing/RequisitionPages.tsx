@@ -487,6 +487,17 @@ export function RequisitionDetailPage() {
             : `Submitted for approval to ${chain.map((r) => roleLabels[r] ?? r).join(", then ")}.`
           : null}
       </Alert>
+      {submitted?.warnings && submitted.warnings.length > 0 ? (
+        <Alert tone="warning" title="Check the vendors against their categories">
+          <ul className={styles.cardLinks}>
+            {submitted.warnings.map((w) => (
+              <li key={`${w.code}-${w.lineNo}`}>
+                {w.detail} ({w.code})
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
       {initialWarnings.length > 0 ? (
         <Alert tone="warning" title="Check these estimates">
           <ul className={styles.cardLinks}>

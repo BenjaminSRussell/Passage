@@ -7,7 +7,7 @@ const BASE = "/api/v1/procurement/purchasing-policies";
 
 afterEach(() => vi.unstubAllGlobals());
 
-const saved = { legalEntityId: LE, changeManagementDefault: true, poFourEyes: false, allowInvoiceBeforeReceipt: false, version: 2 };
+const saved = { legalEntityId: LE, changeManagementDefault: true, poFourEyes: false, allowInvoiceBeforeReceipt: false, categoryAccessMode: "SOFT", version: 2 };
 const defaults = { ...saved, version: 0 };
 
 describe("purchasing policy list", () => {
@@ -71,7 +71,24 @@ describe("purchasing policy detail", () => {
       changeManagementDefault: true,
       poFourEyes: true,
       allowInvoiceBeforeReceipt: false,
+      categoryAccessMode: "SOFT",
     });
+  });
+
+  it("saves the category access mode chosen in the select", async () => {
+    const mock = stubFetch((_url, init) => {
+      if (init.method === "PUT") return json({ ...saved, categoryAccessMode: "HARD", version: 3 }, 200, { ETag: '"3"' });
+      return json(saved, 200, { ETag: '"2"' });
+    });
+    renderAt(`/purchasing/policies/${LE}`);
+    const select = await screen.findByLabelText("Category access");
+    expect(select).toHaveValue("SOFT");
+    fireEvent.change(select, { target: { value: "HARD" } });
+    expect(screen.getByText(/refused/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Update policy" }));
+    expect(await screen.findByText("Policy saved as version 3.")).toBeInTheDocument();
+    const put = mock.mock.calls.find(([, init]) => (init as RequestInit).method === "PUT")!;
+    expect(JSON.parse((put[1] as RequestInit).body as string).categoryAccessMode).toBe("HARD");
   });
 
   it("explains a stale version, keeps the form and reloads the saved policy on request", async () => {

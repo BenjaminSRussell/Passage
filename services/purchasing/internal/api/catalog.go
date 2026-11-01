@@ -420,7 +420,7 @@ func (a *API) searchCatalogEntries(w http.ResponseWriter, r *http.Request) {
 // entry (FR-17.18): the entry must be orderable from a PUBLISHED catalog for the
 // requisition's legal entity, unit and currency today, and fills the blanks of the
 // line (product, description, category, unit, estimated price, preferred vendor). A
-// unit or product that differs from the entry's is refused, and an entry the caller
+// unit, product or category that differs from the entry's is refused, and an entry the caller
 // cannot see is a field error on the line. It returns a copy of body.
 func (a *API) applyCatalogEntries(r *http.Request, body requisitionBody) (requisitionBody, error) {
 	out := body
@@ -460,6 +460,11 @@ func (a *API) applyCatalogEntries(r *http.Request, body requisitionBody) (requis
 		}
 		if strings.TrimSpace(l.Description) == "" {
 			l.Description = e.Name
+		}
+		// The entry's category is the one the category access rule checks (FR-17.20), so a
+		// catalog line cannot be moved to another category.
+		if c := strings.TrimSpace(l.Category); c != "" && e.Category != "" && c != e.Category {
+			return out, invalid(line("category"), "must be the catalog entry's category "+e.Category+" or blank")
 		}
 		if strings.TrimSpace(l.Category) == "" {
 			l.Category = e.Category

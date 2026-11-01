@@ -106,6 +106,14 @@ type Store interface {
 	ListImportRows(ctx context.Context, importID, status string, afterRow, limit int) (ImportRowPage, error)
 	DecideImportRows(ctx context.Context, id string, ifMatch int, d ImportDecisions, idem Idem) (domain.CatalogImport, error)
 	ActOnCatalogImport(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.CatalogImport, error)
+	CreateCategoryVendor(ctx context.Context, in domain.CategoryVendor, idem Idem) (domain.CategoryVendor, error)
+	GetCategoryVendor(ctx context.Context, id string) (domain.CategoryVendor, error)
+	ListCategoryVendors(ctx context.Context, f CategoryVendorFilter, after string, limit int) (Page[domain.CategoryVendor], error)
+	UpdateCategoryVendor(ctx context.Context, id string, ifMatch int, status string, from domain.Day, to *domain.Day, notes string) (domain.CategoryVendor, error)
+	CategoryAssignments(ctx context.Context, legalEntityID string, categories []string) ([]domain.CategoryVendor, error)
+	CreateCategoryManager(ctx context.Context, in domain.CategoryManager, idem Idem) (domain.CategoryManager, error)
+	ListCategoryManagers(ctx context.Context, f CategoryManagerFilter, after string, limit int) (Page[domain.CategoryManager], error)
+	DeleteCategoryManager(ctx context.Context, id string) error
 	Ping(ctx context.Context) error
 }
 

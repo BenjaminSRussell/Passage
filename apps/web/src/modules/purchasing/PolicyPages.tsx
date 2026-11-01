@@ -1,17 +1,32 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getPolicy, listPolicies, savePolicy, type PurchasingPolicy, type PurchasingPolicyInput } from "./api/client";
+import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  describeProblem,
+  getPolicy,
+  listPolicies,
+  savePolicy,
+  type CategoryAccessMode,
+  type PurchasingPolicy,
+  type PurchasingPolicyInput,
+} from "./api/client";
 import { Details, LoadError, ShortId, uuidPattern, useResource, type Failure } from "./parts";
 import styles from "./pages.module.css";
 
 const yesNo = (v: boolean) => (v ? "On" : "Off");
+
+const accessModes: Record<CategoryAccessMode, { label: string; hint: string }> = {
+  HARD: { label: "Hard", hint: "A requisition or order whose vendor is not assigned to a restricted category is refused." },
+  SOFT: { label: "Soft", hint: "The same vendor is allowed, with a warning on the requisition or consolidation." },
+  OFF: { label: "Off", hint: "Category vendor assignments are not checked." },
+};
 
 const columns: DataTableColumn<PurchasingPolicy>[] = [
   { key: "legalEntityId", header: "Legal entity", render: (p) => <ShortId id={p.legalEntityId} /> },
   { key: "changeManagementDefault", header: "Change management by default", render: (p) => yesNo(p.changeManagementDefault) },
   { key: "poFourEyes", header: "Purchase order four-eyes", render: (p) => yesNo(p.poFourEyes) },
   { key: "allowInvoiceBeforeReceipt", header: "Invoice before receipt", render: (p) => yesNo(p.allowInvoiceBeforeReceipt) },
+  { key: "categoryAccessMode", header: "Category access", render: (p) => accessModes[p.categoryAccessMode]?.label ?? p.categoryAccessMode },
   { key: "version", header: "Version", align: "end" },
 ];
 
@@ -64,7 +79,7 @@ export function PolicyListPage() {
   );
 }
 
-const flags: { name: keyof PurchasingPolicyInput; label: string; hint: string }[] = [
+const flags: { name: "changeManagementDefault" | "poFourEyes" | "allowInvoiceBeforeReceipt"; label: string; hint: string }[] = [
   { name: "changeManagementDefault", label: "Change management on new purchase orders", hint: "A confirmed order that changes beyond the reapproval rules goes back for approval as the next version." },
   { name: "poFourEyes", label: "Four-eyes on purchase orders", hint: "The user who created or submitted an order cannot approve or confirm it." },
   { name: "allowInvoiceBeforeReceipt", label: "Allow invoicing before receipt", hint: "A line quantity may drop below what is invoiced, never below what is received." },
@@ -87,6 +102,7 @@ export function PolicyDetailPage() {
         changeManagementDefault: policy.data.changeManagementDefault,
         poFourEyes: policy.data.poFourEyes,
         allowInvoiceBeforeReceipt: policy.data.allowInvoiceBeforeReceipt,
+        categoryAccessMode: policy.data.categoryAccessMode ?? "SOFT",
       });
     }
   }, [policy.data]);
@@ -156,6 +172,23 @@ export function PolicyDetailPage() {
                   </p>
                 </div>
               ))}
+            </div>
+            <div className={styles.grid}>
+              <FormField id="policy-categoryAccessMode" label="Category access" hint={accessModes[draft.categoryAccessMode].hint}>
+                {(control) => (
+                  <Select
+                    {...control}
+                    value={draft.categoryAccessMode}
+                    onChange={(e) => setDraft({ ...draft, categoryAccessMode: e.target.value as CategoryAccessMode })}
+                  >
+                    {(Object.keys(accessModes) as CategoryAccessMode[]).map((m) => (
+                      <option key={m} value={m}>
+                        {accessModes[m].label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
             </div>
           </Card>
           <Alert

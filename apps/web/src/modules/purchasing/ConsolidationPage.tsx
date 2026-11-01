@@ -10,6 +10,7 @@ import {
   type PurchaseOrder,
   type SourcingFilter,
   type SourcingLine,
+  type Warning,
 } from "./api/client";
 import { LoadError, ShortId, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
@@ -61,6 +62,7 @@ export function ConsolidationPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
   const [created, setCreated] = useState<PurchaseOrder[]>([]);
+  const [warnings, setWarnings] = useState<Warning[]>([]);
   const [busy, setBusy] = useState(false);
   const page = useResource(
     async (signal) => {
@@ -85,6 +87,7 @@ export function ConsolidationPage() {
     setErrors(found);
     setFailure(null);
     setCreated([]);
+    setWarnings([]);
     if (Object.keys(found).length > 0) return;
     const input: ConsolidationInput = {
       windowDays: Number(windowDays),
@@ -96,6 +99,7 @@ export function ConsolidationPage() {
     try {
       const { body } = await consolidateRequisitions(input, key);
       setCreated(body.purchaseOrders);
+      setWarnings(body.warnings ?? []);
       setSelected(new Set());
       setVendors({});
       setCursor(undefined);
@@ -221,6 +225,17 @@ export function ConsolidationPage() {
         </Button>
         <p className={styles.muted}>{selected.size === 1 ? "1 line selected" : `${selected.size} lines selected`}</p>
       </div>
+      {warnings.length > 0 ? (
+        <Alert tone="warning" title="Check the vendors against their categories">
+          <ul className={styles.cardLinks}>
+            {warnings.map((w, i) => (
+              <li key={`${w.code}-${i}`}>
+                {w.detail} ({w.code})
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
       {created.length > 0 ? (
         <Card title={created.length === 1 ? "1 purchase order created" : `${created.length} purchase orders created`}>
           <ul className={styles.cardLinks} aria-label="Purchase orders created">

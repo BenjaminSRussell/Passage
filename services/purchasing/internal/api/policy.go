@@ -20,6 +20,8 @@ type policyBody struct {
 	ChangeManagementDefault   *bool `json:"changeManagementDefault"`
 	POFourEyes                *bool `json:"poFourEyes"`
 	AllowInvoiceBeforeReceipt *bool `json:"allowInvoiceBeforeReceipt"`
+	// CategoryAccessMode is optional: left out, the saved mode (SOFT for a new policy) stays.
+	CategoryAccessMode *string `json:"categoryAccessMode"`
 }
 
 // policyEntity reads and checks the {legalEntityId} path parameter against the
@@ -92,9 +94,24 @@ func (a *API) putPolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	mode := ""
+	if body.CategoryAccessMode != nil {
+		mode = *body.CategoryAccessMode
+		if !domain.ValidAccessMode(mode) {
+			fail(w, r, invalid("categoryAccessMode", "must be HARD, SOFT or OFF"))
+			return
+		}
+	} else {
+		cur, err := a.store.GetPolicy(r.Context(), id)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		mode = cur.CategoryAccessMode
+	}
 	out, err := a.store.PutPolicy(r.Context(), domain.Policy{LegalEntityID: id,
 		ChangeManagementDefault: *body.ChangeManagementDefault, POFourEyes: *body.POFourEyes,
-		AllowInvoiceBeforeReceipt: *body.AllowInvoiceBeforeReceipt}, want)
+		AllowInvoiceBeforeReceipt: *body.AllowInvoiceBeforeReceipt, CategoryAccessMode: mode}, want)
 	if err != nil {
 		fail(w, r, err)
 		return

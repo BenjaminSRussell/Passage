@@ -29,9 +29,12 @@ type orderBody struct {
 type orderLineBody struct {
 	// LineNo names the existing line a PATCH changes; omitted for a new line
 	// and ignored on create, where lines are numbered in request order.
-	LineNo            int        `json:"lineNo,omitempty"`
-	ProductID         string     `json:"productId,omitempty"`
-	Description       string     `json:"description,omitempty"`
+	LineNo      int    `json:"lineNo,omitempty"`
+	ProductID   string `json:"productId,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Category is the procurement category of the line (FR-17.20); a requisition-backed
+	// line takes its requisition line's, and an existing line of a PATCH keeps its own.
+	Category          string     `json:"category,omitempty"`
 	Qty               string     `json:"qty"`
 	Unit              string     `json:"unit"`
 	UnitPrice         string     `json:"unitPrice,omitempty"`
@@ -76,16 +79,28 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	hash := hashBody("purchase-order.create", body)
+	if err := a.orderCategories(r.Context(), &body); err != nil {
+		fail(w, r, err)
+		return
+	}
 	po, err := a.buildOrder(r.Context(), body)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	out, err := a.store.CreatePurchaseOrder(r.Context(), po, store.Idem{Key: key, Hash: hashBody("purchase-order.create", body)})
+	// FR-17.20: every line with a category, against the PO vendor.
+	warnings, err := a.checkOrderCategoryAccess(r.Context(), po, func(int) bool { return true })
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
+	out, err := a.store.CreatePurchaseOrder(r.Context(), po, store.Idem{Key: key, Hash: hash})
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	out.Warnings = append(out.Warnings, warnings...)
 	a.ordersCreated.Add(1)
 	w.Header().Set("ETag", etag(out.RowVersion))
 	httpx.JSON(w, http.StatusCreated, out)
@@ -260,6 +275,7 @@ func (a *API) buildOrderLine(ctx context.Context, idx int, l orderLineBody, vend
 		LineNo:            idx + 1,
 		ProductID:         l.ProductID,
 		Description:       l.Description,
+		Category:          strings.TrimSpace(l.Category),
 		Qty:               qty,
 		Unit:              strings.TrimSpace(l.Unit),
 		UnitPrice:         price,

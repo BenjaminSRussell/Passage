@@ -75,12 +75,13 @@ components:
   schemas:
     PurchasingPolicy:
       type: object
-      required: [legalEntityId, changeManagementDefault, poFourEyes, allowInvoiceBeforeReceipt, version]
+      required: [legalEntityId, changeManagementDefault, poFourEyes, allowInvoiceBeforeReceipt, categoryAccessMode, version]
       properties:
         legalEntityId: { type: string, format: uuid }
         changeManagementDefault: { type: boolean, description: "changeManagement of a new PO that does not say (default true)" }
         poFourEyes: { type: boolean, description: "a user who created, submitted or last changed a PO cannot approve or confirm it (PRC-POL-002, 403)" }
         allowInvoiceBeforeReceipt: { type: boolean, description: "a PO line quantity may drop below invoiced, never below received (BR-17.7)" }
+        categoryAccessMode: { type: string, enum: [HARD, SOFT, OFF], description: "what a vendor with no valid assignment on a restricted procurement category meets: HARD refuses the requisition or PO (PRC-CAT-002), SOFT warns, OFF does not check (FR-17.20; default SOFT)" }
         version: { type: integer, minimum: 0, description: "0 when no policy is saved yet" }
         updatedBy: { type: string, format: uuid }
         updatedAt: { type: string, format: date-time }
@@ -92,6 +93,76 @@ components:
         changeManagementDefault: { type: boolean }
         poFourEyes: { type: boolean }
         allowInvoiceBeforeReceipt: { type: boolean }
+        categoryAccessMode: { type: string, enum: [HARD, SOFT, OFF], description: "Optional: left out, the saved mode (SOFT for a new policy) stays." }
+    CategoryVendorAssignment:
+      type: object
+      required: [id, legalEntityId, category, vendorId, status, validFrom, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        category: { type: string, maxLength: 200, description: "The procurement category as written on requisition lines and catalog entries" }
+        vendorId: { type: string, format: uuid }
+        status: { type: string, enum: [APPROVED, PROVISIONAL, BLOCKED] }
+        validFrom: { $ref: '#/components/schemas/Day' }
+        validTo: { $ref: '#/components/schemas/Day' }
+        notes: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    CategoryVendorAssignmentInput:
+      type: object
+      required: [legalEntityId, category, vendorId, status]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        category: { type: string, maxLength: 200 }
+        vendorId: { type: string, format: uuid }
+        status: { type: string, enum: [APPROVED, PROVISIONAL, BLOCKED] }
+        validFrom: { $ref: '#/components/schemas/Day' }
+        validTo: { $ref: '#/components/schemas/Day' }
+        notes: { type: string }
+    CategoryVendorAssignmentChange:
+      type: object
+      required: [status]
+      additionalProperties: false
+      description: Replaces status, window and notes; a left-out validFrom keeps the stored start, a left-out validTo makes the window open.
+      properties:
+        status: { type: string, enum: [APPROVED, PROVISIONAL, BLOCKED] }
+        validFrom: { $ref: '#/components/schemas/Day' }
+        validTo: { $ref: '#/components/schemas/Day' }
+        notes: { type: string }
+    CategoryVendorAssignmentPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CategoryVendorAssignment' } }
+        nextCursor: { type: string, format: uuid }
+    CategoryManager:
+      type: object
+      required: [id, legalEntityId, category, workerId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        category: { type: string, maxLength: 200 }
+        workerId: { type: string, format: uuid }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    CategoryManagerInput:
+      type: object
+      required: [legalEntityId, category, workerId]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        category: { type: string, maxLength: 200 }
+        workerId: { type: string, format: uuid }
+    CategoryManagerPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CategoryManager' } }
+        nextCursor: { type: string, format: uuid }
     Money:
       type: string
       description: Decimal string, never a float.
@@ -126,7 +197,7 @@ components:
         requestedDate: { $ref: '#/components/schemas/Day' }
         siteId: { type: string, format: uuid }
         preferredVendorId: { type: string, format: uuid, description: "With productId and no estimate, the estimate defaults from this vendor's trade agreement." }
-        catalogEntryId: { type: string, format: uuid, description: "Pick the line from a PUBLISHED catalog entry (FR-17.18): blank product, description, category, unit, estimate and preferred vendor take the entry's values; a different unit or product is refused (COM-0001). 422 PRC-CAT-004 when the catalog is not published to the legal entity and unit today, PRC-CAT-006 when its currency differs." }
+        catalogEntryId: { type: string, format: uuid, description: "Pick the line from a PUBLISHED catalog entry (FR-17.18): blank product, description, category, unit, estimate and preferred vendor take the entry's values; a different unit, product or category is refused (COM-0001). 422 PRC-CAT-004 when the catalog is not published to the legal entity and unit today, PRC-CAT-006 when its currency differs." }
     RequisitionInput:
       type: object
       required: [legalEntityId, currency, lines]
@@ -182,7 +253,7 @@ components:
         updatedAt: { type: string, format: date-time }
         warnings:
           type: array
-          description: Returned on create only; PRC-REQ-003 when a line's estimate stayed 0.
+          description: PRC-REQ-003 on create when a line's estimate stayed 0; on submit, PRC-CAT-002 (SOFT category access) and PRC-CAT-010 (PROVISIONAL vendor assignment) per line.
           items:
             type: object
             properties:
@@ -221,6 +292,7 @@ components:
         lineNo: { type: integer, minimum: 1, description: "PATCH only: the existing line this entry changes; omit for a new line. Ignored on create." }
         productId: { type: string, format: uuid }
         description: { type: string }
+        category: { type: string, maxLength: 200, description: "Procurement category the category access rule checks against the PO vendor (FR-17.20, PRC-CAT-002). A line that orders a requisition line takes that line's category (another value is refused); on PATCH an existing line keeps its category (another value is refused) and only added lines are checked. Under HARD a line with neither productId nor category is refused (COM-0001); a product line without a category is not checked." }
         qty: { $ref: '#/components/schemas/Money' }
         unit: { type: string }
         unitPrice: { $ref: '#/components/schemas/Money', description: "Omit to take the trade agreement price (on PATCH, an existing line with the same product and unit keeps its price)." }
@@ -254,6 +326,7 @@ components:
         lineNo: { type: integer }
         productId: { type: string, format: uuid }
         description: { type: string }
+        category: { type: string, description: "Procurement category of the line (FR-17.20); absent when none." }
         qty: { $ref: '#/components/schemas/Money' }
         unit: { type: string }
         unitPrice: { $ref: '#/components/schemas/Money' }
@@ -361,7 +434,7 @@ components:
         updatedAt: { type: string, format: date-time }
         warnings:
           type: array
-          description: Returned on create only; PRC-AGR-004 when a release takes an agreement line to the threshold or over a SOFT limit.
+          description: "Returned on create and PATCH only: PRC-AGR-004 (create) when a release takes an agreement line to the threshold or over a SOFT limit; PRC-CAT-002 under SOFT category access and PRC-CAT-010 for a PROVISIONAL vendor (FR-17.20) for the lines checked."
           items: { $ref: '#/components/schemas/Warning' }
     Warning:
       type: object
@@ -430,6 +503,10 @@ components:
         purchaseOrders:
           type: array
           items: { $ref: '#/components/schemas/PurchaseOrder' }
+        warnings:
+          type: array
+          description: SOFT category access findings (PRC-CAT-002) and PROVISIONAL vendor assignments (PRC-CAT-010); lineNo is the position in the request.
+          items: { $ref: '#/components/schemas/Warning' }
     PurchaseAgreementLineInput:
       type: object
       required: [commitmentType]
@@ -1339,6 +1416,7 @@ paths:
               schema: { $ref: '#/components/schemas/Requisition' }
         '403': { description: Caller is not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or not DRAFT, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A line's preferred vendor is not assigned to its restricted category and the legal entity's category access mode is HARD (PRC-CAT-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/requisition-lines:
     get:
@@ -1378,7 +1456,7 @@ paths:
         '403': { description: Missing duty or a line's legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND) or agreement line not found (PRC-AGR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: A line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: "Validation, no vendor for a line (PRC-CONS-002), window outside 1-60 (PRC-CONS-001), agreement rules (PRC-AGR-003/005/006/007/008) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, no vendor for a line (PRC-CONS-002), window outside 1-60 (PRC-CONS-001), agreement rules (PRC-AGR-003/005/006/007/008), a vendor not assigned to a restricted category under HARD (PRC-CAT-002) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders:reprice:
     post:
       operationId: repricePurchaseOrders
@@ -1435,7 +1513,7 @@ paths:
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition line (PRC-REQ-LINE-NOT-FOUND) or agreement line (PRC-AGR-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: A requisition line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit), vendor not assigned to (or BLOCKED for) the category of a line under HARD category access (PRC-CAT-002), a category that differs from the requisition line's (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseOrders
       x-passage-duty: PurchaseOrderInquire
@@ -1484,6 +1562,8 @@ paths:
         than 5 %, or a new line) the PO goes to IN_REVIEW with the version pending; otherwise the version
         is confirmed at once and po.confirmed and poversion.created are written. Editing a pending change
         back to the confirmed content drops it. APPROVED, FINALIZED and CANCELLED orders cannot be edited.
+        Category access (FR-17.20): an existing line keeps its category, and the lines the edit adds are
+        checked against the vendor (HARD refuses with PRC-CAT-002, SOFT and PROVISIONAL warn in warnings).
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -1504,7 +1584,7 @@ paths:
         '403': { description: Legal entity outside the caller's scope, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Not found (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: Validation (COM-0001), PRC-PO-STATE (status does not allow edits or the line is cancelled), PRC-PO-007 (below received or invoiced), PRC-PO-010 (requisition or agreement link changed, or an agreement line's quantity or amount changed), PRC-AGR-005, PRC-PRICE-001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), PRC-PO-STATE (status does not allow edits or the line is cancelled), PRC-PO-007 (below received or invoiced), PRC-PO-010 (requisition or agreement link changed, or an agreement line's quantity or amount changed), PRC-AGR-005, PRC-PRICE-001, PRC-CAT-002 (an added line's category does not admit the vendor under HARD), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders/{id}:submit:
     post:
@@ -2837,3 +2917,154 @@ paths:
         '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or the import is not staged (PRC-CAT-IMPORT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/category-vendors:
+    post:
+      operationId: createCategoryVendorAssignment
+      x-passage-duty: CategoryMaintain
+      summary: Assign a vendor to a procurement category with a status and validity window (FR-17.20; duty CategoryMaintain)
+      description: >-
+        A category with at least one APPROVED or PROVISIONAL assignment (any window) is restricted: under the legal entity's HARD category
+        access mode a requisition or PO line in it needs a vendor with an APPROVED or PROVISIONAL assignment valid on the day (PRC-CAT-002).
+        A BLOCKED assignment refuses its vendor in any category while its window holds the day, without restricting the category for
+        other vendors; before or after its window the vendor counts as unassigned. One assignment exists per vendor and
+        category; change it with PUT. validFrom defaults to today. Writes categoryvendor.assigned.v1. A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryVendorAssignmentInput' }
+      responses:
+        '201':
+          description: The assignment at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryVendorAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty CategoryMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The vendor already has an assignment for the category (PRC-CAT-011), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - status, window, category or ids (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listCategoryVendorAssignments
+      x-passage-duty: CategoryMaintain or PurchaseOrderInquire
+      summary: List category vendor assignments, newest first (FR-17.20)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: category, in: query, required: false, description: Exact category, schema: { type: string } }
+        - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [APPROVED, PROVISIONAL, BLOCKED] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryVendorAssignmentPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/category-vendors/{id}:
+    get:
+      operationId: getCategoryVendorAssignment
+      x-passage-duty: CategoryMaintain or PurchaseOrderInquire
+      summary: Read one category vendor assignment (FR-17.20)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The assignment
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryVendorAssignment' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Assignment not found (PRC-CAT-VENDOR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: changeCategoryVendorAssignment
+      x-passage-duty: CategoryMaintain
+      summary: Change the status, validity window and notes of an assignment under If-Match (FR-17.20; duty CategoryMaintain)
+      description: PUT is idempotent, so no Idempotency-Key is taken. The vendor and category of an assignment do not change. Writes categoryvendor.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryVendorAssignmentChange' }
+      responses:
+        '200':
+          description: The assignment at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryVendorAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty CategoryMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Assignment not found (PRC-CAT-VENDOR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-CAT-013), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - status or window (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/category-managers:
+    post:
+      operationId: createCategoryManager
+      x-passage-duty: CategoryMaintain
+      summary: Make a worker a manager of a procurement category (FR-17.20; duty CategoryMaintain)
+      description: Writes categorymanager.assigned.v1. A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryManagerInput' }
+      responses:
+        '201':
+          description: The manager row
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryManager' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty CategoryMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The worker already manages the category (PRC-CAT-012), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listCategoryManagers
+      x-passage-duty: CategoryMaintain or PurchaseOrderInquire
+      summary: List category managers, newest first (FR-17.20)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: category, in: query, required: false, description: Exact category, schema: { type: string } }
+        - { name: workerId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryManagerPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/category-managers/{id}:
+    delete:
+      operationId: deleteCategoryManager
+      x-passage-duty: CategoryMaintain
+      summary: Remove a category manager (FR-17.20; duty CategoryMaintain)
+      description: Writes categorymanager.removed.v1.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Removed }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty CategoryMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Manager not found (PRC-CAT-MANAGER-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

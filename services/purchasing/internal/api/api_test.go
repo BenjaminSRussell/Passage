@@ -74,6 +74,9 @@ type fakeStore struct {
 	// Purchasing policy: what the policy methods received.
 	pol policyLog
 
+	// Category vendor assignments and managers (FR-17.20).
+	categories categoryLog
+
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
 	imp importLog

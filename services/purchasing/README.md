@@ -129,6 +129,8 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/catalog-imports/{id}/decisions` | CatalogMaintain | Idempotency-Key and If-Match required; `acceptAll`, `accept` and `reject` by row number while STAGED |
 | POST `/catalog-imports/{id}:commit`, `:cancel` | CatalogMaintain | Idempotency-Key and If-Match required; commit adds the ACCEPTED rows to the catalog and writes `catalogimport.committed.v1` |
 | GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
+| POST `/category-vendors`, GET `/category-vendors`, GET `/category-vendors/{id}`, PUT `/category-vendors/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Vendor assignments to a procurement category (FR-17.20): status APPROVED, PROVISIONAL or BLOCKED and a validity window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CAT-013) and keeps the stored `validFrom` when left out; one assignment per vendor and category (409 PRC-CAT-011); writes `categoryvendor.assigned.v1` and `categoryvendor.changed.v1` |
+| POST `/category-managers`, GET `/category-managers`, DELETE `/category-managers/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Workers who manage a category (FR-17.20); POST needs an Idempotency-Key (409 PRC-CAT-012 for the same worker twice); writes `categorymanager.assigned.v1` and `categorymanager.removed.v1` |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -309,6 +311,36 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   refused while the policy is on; an actor not recorded on an older PO blocks no
   one. The routes live under `/purchasing-policies` so `/policies` stays free for
   the FR-17.16 policy framework.
+- **Category access (FR-17.20).** A procurement category is the free-text
+  `category` of requisition lines, PO lines and catalog entries (trimmed, matched
+  exactly). Assignments belong to a legal entity and the rule reads those of the
+  document's legal entity: a vendor approved in one entity is not approved in another,
+  and a category restricted in one entity can be open in another. A category with at
+  least one APPROVED or PROVISIONAL assignment (whatever its window) is restricted; a
+  category with none, or with only BLOCKED rows, is open to every vendor. In a
+  restricted category a vendor needs an APPROVED assignment whose window holds the day
+  (UTC today); PROVISIONAL passes with warning PRC-CAT-010, and expired, not yet valid
+  or missing is a violation. A BLOCKED assignment whose window holds the day is a
+  violation in any category; it blocks that vendor only. Before or after its window a
+  BLOCKED row is not in force and the vendor counts as unassigned (passes in an open
+  category, a violation in a restricted one). The policy's `categoryAccessMode`
+  (default SOFT, PRD 3.17.10) decides what a violation does: HARD refuses with 422
+  PRC-CAT-002 naming the first line and how many more, SOFT returns it as a
+  PRC-CAT-002 warning, OFF checks nothing. The rule runs at
+  `requisitions/{id}:submit` (each line's preferred vendor against its category; the
+  warnings come back on the requisition), at `requisitions:consolidate` (the vendor
+  each line is bought from, including a buyer override; warnings come back beside the
+  POs), at `POST /purchase-orders` (the PO vendor against every line's category) and at
+  `PATCH /purchase-orders/{id}` for the lines the edit adds (the vendor of a PO cannot
+  change and an existing line keeps its category); the PO answer carries the warnings.
+  A PO line that orders a requisition line takes that line's category (another one is
+  refused), a direct line takes the category it is given, and a catalog requisition
+  line keeps its entry's category. Under HARD a PO line with neither a product nor a
+  category is refused (COM-0001 on `lines[i].category`), so a description-only line
+  cannot step around the rule. A line with a product and no category is not checked,
+  because a product's procurement category lives in the wave 8 product master. The check reads the assignments in its own transaction before the document
+  is written, so a change made in between is not seen; a replayed submit of a
+  requisition that is no longer a DRAFT is not checked again.
 - **Procurement catalogs (FR-17.18).** A catalog belongs to a legal entity, has a
   validity window and the operating units it is published to (none means every
   unit), and moves DRAFT → PUBLISHED → RETIRED. Entries (vendor, optional product,
@@ -410,6 +442,13 @@ store codes are returned as the `code` field.
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
 | PRC-POL-002 | 403 | Four-eyes policy: a user who created, submitted or last changed the PO (or a caller with no user id) cannot approve or confirm it |
 | PRC-POL-003 | 412 | If-Match is not the saved purchasing policy version (0 when none is saved) |
+| PRC-CAT-002 | 422 | Category access is HARD and a line's vendor has no valid APPROVED or PROVISIONAL assignment in a restricted category, or a BLOCKED assignment in force (SOFT returns it as a warning) |
+| PRC-CAT-010 | warning | The vendor's assignment to the category is PROVISIONAL |
+| PRC-CAT-011 | 409 | The vendor already has an assignment for the category (change that one) |
+| PRC-CAT-012 | 409 | The worker already manages the category |
+| PRC-CAT-013 | 412 | If-Match is not the category vendor assignment's version |
+| PRC-CAT-VENDOR-NOT-FOUND | 404 | Category vendor assignment not found (or outside the caller's legal entity scope) |
+| PRC-CAT-MANAGER-NOT-FOUND | 404 | Category manager not found (or outside the caller's legal entity scope) |
 | PRC-CAT-001 | 422 | A catalog with no entries cannot be published |
 | PRC-CAT-004 | 422 | The requisition line's catalog is not published to the legal entity and unit on the date |
 | PRC-CAT-006 | 422 | The catalog entry's currency differs from the requisition's |

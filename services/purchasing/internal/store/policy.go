@@ -24,9 +24,9 @@ func loadPolicy(ctx context.Context, tx pgx.Tx, legalEntityID string) (domain.Po
 	p, _ := tenant.FromContext(ctx)
 	out := domain.DefaultPolicy(legalEntityID)
 	var updatedBy *string
-	err := tx.QueryRow(ctx, `select change_management_default, po_four_eyes, allow_invoice_before_receipt, row_version,
+	err := tx.QueryRow(ctx, `select change_management_default, po_four_eyes, allow_invoice_before_receipt, category_access_mode, row_version,
 		updated_by::text, updated_at from purchasing_policy where tenant_id = $1 and legal_entity_id = $2`, p.TenantID, legalEntityID).
-		Scan(&out.ChangeManagementDefault, &out.POFourEyes, &out.AllowInvoiceBeforeReceipt, &out.Version, &updatedBy, &out.UpdatedAt)
+		Scan(&out.ChangeManagementDefault, &out.POFourEyes, &out.AllowInvoiceBeforeReceipt, &out.CategoryAccessMode, &out.Version, &updatedBy, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.DefaultPolicy(legalEntityID), nil
 	}
@@ -52,7 +52,7 @@ func (s *Postgres) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
 	out := []domain.Policy{}
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select legal_entity_id::text, change_management_default, po_four_eyes,
-			allow_invoice_before_receipt, row_version, coalesce(updated_by::text, ''), updated_at
+			allow_invoice_before_receipt, category_access_mode, row_version, coalesce(updated_by::text, ''), updated_at
 			from purchasing_policy where tenant_id = $1 order by legal_entity_id`, p.TenantID)
 		if err != nil {
 			return err
@@ -61,7 +61,7 @@ func (s *Postgres) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
 		for rows.Next() {
 			var pol domain.Policy
 			if err := rows.Scan(&pol.LegalEntityID, &pol.ChangeManagementDefault, &pol.POFourEyes, &pol.AllowInvoiceBeforeReceipt,
-				&pol.Version, &pol.UpdatedBy, &pol.UpdatedAt); err != nil {
+				&pol.CategoryAccessMode, &pol.Version, &pol.UpdatedBy, &pol.UpdatedAt); err != nil {
 				return err
 			}
 			out = append(out, pol)
@@ -75,6 +75,9 @@ func (s *Postgres) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
 // n replaces version n. It writes policy.changed.v1 in the same transaction.
 func (s *Postgres) PutPolicy(ctx context.Context, in domain.Policy, ifMatch int) (domain.Policy, error) {
 	p, _ := tenant.FromContext(ctx)
+	if in.CategoryAccessMode == "" {
+		in.CategoryAccessMode = domain.AccessSoft
+	}
 	var out domain.Policy
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		stale := func(cur int) error {
@@ -83,9 +86,9 @@ func (s *Postgres) PutPolicy(ctx context.Context, in domain.Policy, ifMatch int)
 		}
 		if ifMatch == 0 {
 			tag, err := tx.Exec(ctx, `insert into purchasing_policy (tenant_id, legal_entity_id, change_management_default,
-				po_four_eyes, allow_invoice_before_receipt, updated_by) values ($1, $2, $3, $4, $5, $6)
+				po_four_eyes, allow_invoice_before_receipt, category_access_mode, updated_by) values ($1, $2, $3, $4, $5, $6, $7)
 				on conflict (tenant_id, legal_entity_id) do nothing`,
-				p.TenantID, in.LegalEntityID, in.ChangeManagementDefault, in.POFourEyes, in.AllowInvoiceBeforeReceipt, userOrNil(p.UserID))
+				p.TenantID, in.LegalEntityID, in.ChangeManagementDefault, in.POFourEyes, in.AllowInvoiceBeforeReceipt, in.CategoryAccessMode, userOrNil(p.UserID))
 			if err != nil {
 				return err
 			}
@@ -98,9 +101,9 @@ func (s *Postgres) PutPolicy(ctx context.Context, in domain.Policy, ifMatch int)
 			}
 		} else {
 			tag, err := tx.Exec(ctx, `update purchasing_policy set change_management_default = $3, po_four_eyes = $4,
-				allow_invoice_before_receipt = $5, updated_by = $6, updated_at = now(), row_version = row_version + 1
-				where tenant_id = $1 and legal_entity_id = $2 and row_version = $7`,
-				p.TenantID, in.LegalEntityID, in.ChangeManagementDefault, in.POFourEyes, in.AllowInvoiceBeforeReceipt, userOrNil(p.UserID), ifMatch)
+				allow_invoice_before_receipt = $5, category_access_mode = $6, updated_by = $7, updated_at = now(), row_version = row_version + 1
+				where tenant_id = $1 and legal_entity_id = $2 and row_version = $8`,
+				p.TenantID, in.LegalEntityID, in.ChangeManagementDefault, in.POFourEyes, in.AllowInvoiceBeforeReceipt, in.CategoryAccessMode, userOrNil(p.UserID), ifMatch)
 			if err != nil {
 				return err
 			}
@@ -118,7 +121,7 @@ func (s *Postgres) PutPolicy(ctx context.Context, in domain.Policy, ifMatch int)
 		}
 		return enqueue(ctx, tx, "policy", out.LegalEntityID, purchasingevents.PolicyChanged, purchasingevents.PolicyChangedData{
 			LegalEntityID: out.LegalEntityID, Version: out.Version, ChangeManagementDefault: out.ChangeManagementDefault,
-			POFourEyes: out.POFourEyes, AllowInvoiceBeforeReceipt: out.AllowInvoiceBeforeReceipt, UpdatedBy: out.UpdatedBy,
+			POFourEyes: out.POFourEyes, AllowInvoiceBeforeReceipt: out.AllowInvoiceBeforeReceipt, CategoryAccessMode: out.CategoryAccessMode, UpdatedBy: out.UpdatedBy,
 		})
 	})
 	return out, err

@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
 import { CatalogImportCreatePage, CatalogImportDetailPage, CatalogImportsPage } from "./CatalogImportPages";
 import { CatalogCreatePage, CatalogDetailPage, CatalogsPage } from "./CatalogPages";
+import { CategoryManagersPage, CategoryVendorCreatePage, CategoryVendorDetailPage, CategoryVendorsPage } from "./CategoryPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
@@ -24,7 +25,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -70,6 +71,10 @@ const purchasing: PassageModule = {
     { path: "/purchasing/catalogs/:id/import", element: createElement(CatalogImportCreatePage), handle: { title: "Import vendor file" } },
     { path: "/purchasing/catalog-imports", element: createElement(CatalogImportsPage) },
     { path: "/purchasing/catalog-imports/:id", element: createElement(CatalogImportDetailPage), handle: { title: "Vendor catalog import" } },
+    { path: "/purchasing/category-vendors", element: createElement(CategoryVendorsPage) },
+    { path: "/purchasing/category-vendors/new", element: createElement(CategoryVendorCreatePage), handle: { title: "New category vendor assignment" } },
+    { path: "/purchasing/category-vendors/:id", element: createElement(CategoryVendorDetailPage), handle: { title: "Category vendor assignment" } },
+    { path: "/purchasing/category-managers", element: createElement(CategoryManagersPage) },
     { path: "/purchasing/policies", element: createElement(PolicyListPage) },
     { path: "/purchasing/policies/:legalEntityId", element: createElement(PolicyDetailPage), handle: { title: "Purchasing policy" } },
   ],
@@ -85,6 +90,7 @@ const purchasing: PassageModule = {
     { label: "Trade agreements", to: "/purchasing/trade-agreements", duty: "TradeAgreementMaintain" },
     { label: "Price lookup", to: "/purchasing/pricing", duty: "PurchaseOrderMaintain" },
     { label: "Catalogs", to: "/purchasing/catalogs", duty: "PurchaseOrderInquire" },
+    { label: "Category vendors", to: "/purchasing/category-vendors", duty: "PurchaseOrderInquire" },
     { label: "Policies", to: "/purchasing/policies", duty: "PurchaseOrderInquire" },
   ],
 };
