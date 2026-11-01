@@ -6,14 +6,15 @@ import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-const tone: Record<ChangeStatus, BadgeTone> = { PENDING: "warning", APPROVED: "success", REJECTED: "danger" };
+const tone: Record<ChangeStatus, BadgeTone> = { PENDING: "warning", APPROVED: "success", REJECTED: "danger", WITHDRAWN: "neutral" };
 
 export function ChangeStatusBadge({ status }: { status: ChangeStatus }) {
   return <Badge tone={tone[status]}>{sentence(status)}</Badge>;
 }
 
 /** A short summary of what a change touches: "2 fields on line 1". */
-export function diffSummary(request: Pick<ChangeRequest, "diff">): string {
+export function diffSummary(request: Pick<ChangeRequest, "diff"> & { kind?: ChangeRequest["kind"] }): string {
+  if (request.kind === "CANCEL") return "Cancel the order";
   const n = request.diff.length;
   const lines = new Set(request.diff.filter((d) => d.lineNo > 0).map((d) => d.lineNo));
   const where = lines.size > 0 ? ` on ${lines.size === 1 ? `line ${[...lines][0]}` : `${lines.size} lines`}` : "";

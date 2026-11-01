@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -246,5 +249,205 @@ func TestPostgres_ChangeRequestLegalEntityScope(t *testing.T) {
 	var decided salesevents.OrderChangeDecidedData
 	if err := json.Unmarshal(outboxData(t, pool, req.ID, salesevents.OrderChangeApproved), &decided); err != nil || decided.LegalEntityID != le || decided.AppliedVersion == nil {
 		t.Fatalf("orderchange.approved data %+v %v", decided, err)
+	}
+}
+
+// TestPostgres_CancelNeedsApprovalAndWithdraw covers FR-27.9 for a
+// cancellation and for withdrawal: a rep's :cancel of a confirmed order of an
+// approval customer is stored (kind CANCEL), not applied; only the requester
+// can withdraw it; a manager's approval cancels the order in the same
+// transaction as the requester's cancellation; an approver cancels directly.
+func TestPostgres_CancelNeedsApprovalAndWithdraw(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le, customer := ids.New(), ids.New()
+	limits := domain.CreditProfile{Limit: d(100000), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(0), ToleranceAmount: d(0), OldestItemDaysMax: 30, MaxDunningLevel: 3}
+	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: limits}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutChangePolicy(ctx, ChangePolicy{LegalEntityID: le, CustomerID: customer, ApprovalRequired: true}, 0, "manager"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2027, 3, 1, 9, 0, 0, 0, time.UTC)
+	confirmed := func() Order {
+		o := changeOrderFixture(t, s, ctx, le, customer, 10)
+		conf, err := s.ConfirmOrder(ctx, o.ID, o.Version, "sales-rep", now)
+		if err != nil || !conf.Confirmed {
+			t.Fatalf("confirm: %v", err)
+		}
+		return conf.Order
+	}
+
+	order := confirmed()
+	pending, err := s.CancelOrderAs(ctx, order.ID, order.Version, "duplicate", "sales-rep", false, now)
+	if err != nil || pending.PendingChange == nil || pending.Status != domain.OrderConfirmed || pending.Version != order.Version {
+		t.Fatalf("a rep's cancel must be stored, not applied: %+v %v", pending.PendingChange, err)
+	}
+	req := pending.PendingChange
+	if req.Kind != KindCancel || req.Status != ChangePending || req.Reason != "duplicate" || len(req.Diff) != 1 || req.Diff[0].Field != "status" || req.Diff[0].New != "CANCELLED" {
+		t.Fatalf("stored request: %+v", req)
+	}
+	if _, err := s.ChangeOrder(ctx, order.ID, order.Version, ChangeRequest{Lines: []LineChange{{LineNo: 1, Quantity: dp("4")}}}, "sales-rep", now); problemCode(t, err) != CodeChangePending {
+		t.Fatalf("a change while a cancel waits: %v", err)
+	}
+	if _, err := s.CancelOrderAs(ctx, order.ID, order.Version, "again", "sales-rep", false, now); problemCode(t, err) != CodeChangePending {
+		t.Fatalf("a second cancel: %v", err)
+	}
+
+	if _, err := s.WithdrawChangeRequest(ctx, req.ID, req.Version, "", "manager", now); problemCode(t, err) != CodeChangeNotRequester {
+		t.Fatalf("someone else withdrawing: %v", err)
+	}
+	if _, err := s.WithdrawChangeRequest(ctx, req.ID, 9, "", "sales-rep", now); problemCode(t, err) != CodeVersionConflict {
+		t.Fatalf("stale version: %v", err)
+	}
+	w, err := s.WithdrawChangeRequest(ctx, req.ID, req.Version, "kept the order", "sales-rep", now)
+	if err != nil || w.Status != ChangeWithdrawn || w.DecidedBy == nil || *w.DecidedBy != "sales-rep" || w.DecisionComment != "kept the order" || w.AppliedVersion != nil {
+		t.Fatalf("withdraw: %+v %v", w, err)
+	}
+	if _, err := s.WithdrawChangeRequest(ctx, req.ID, w.Version, "", "sales-rep", now); problemCode(t, err) != CodeChangeDecided {
+		t.Fatalf("withdraw twice: %v", err)
+	}
+	if _, err := s.ApproveChangeRequest(ctx, req.ID, w.Version, "", "manager", now); problemCode(t, err) != CodeChangeDecided {
+		t.Fatalf("approve a withdrawn request: %v", err)
+	}
+	if got, _ := s.GetOrder(ctx, order.ID); got.Status != domain.OrderConfirmed || got.Version != order.Version {
+		t.Fatalf("a withdrawal must leave the order: %s v%d", got.Status, got.Version)
+	}
+	if n := countWhere(t, pool, `select count(*) from outbox where aggregate_id = $1 and type = $2`, req.ID, salesevents.OrderChangeWithdrawn); n != 1 {
+		t.Fatalf("orderchange.withdrawn rows %d", n)
+	}
+
+	again, err := s.CancelOrderAs(ctx, order.ID, order.Version, "really", "sales-rep", false, now)
+	if err != nil || again.PendingChange == nil {
+		t.Fatalf("a new cancel after a withdrawal: %v", err)
+	}
+	if _, err := s.ApproveChangeRequest(ctx, again.PendingChange.ID, again.PendingChange.Version, "", "sales-rep", now); problemCode(t, err) != CodeChangeSelfApproval {
+		t.Fatalf("self approval: %v", err)
+	}
+	res, err := s.ApproveChangeRequest(ctx, again.PendingChange.ID, again.PendingChange.Version, "ok", "manager", now)
+	if err != nil || res.Order.Status != "CANCELLED" || res.Order.Version != order.Version+1 || res.Request.Status != ChangeApproved ||
+		res.Request.AppliedVersion == nil || *res.Request.AppliedVersion != order.Version+1 {
+		t.Fatalf("approve: %+v %v", res.Request, err)
+	}
+	versions, err := s.ListOrderVersions(ctx, order.ID)
+	if err != nil || versions[0].Actor != "sales-rep" || versions[0].Reason != "really" {
+		t.Fatalf("history: %+v %v", versions, err)
+	}
+	for _, l := range res.Order.Lines {
+		if l.LineStatus != domain.LineCancelled {
+			t.Fatalf("line %d is %s", l.LineNo, l.LineStatus)
+		}
+	}
+	if n := countWhere(t, pool, `select count(*) from outbox where aggregate_id = $1 and type = $2`, order.ID, salesevents.OrderCancelled); n != 1 {
+		t.Fatalf("order.cancelled rows %d", n)
+	}
+
+	direct := confirmed()
+	got, err := s.CancelOrderAs(ctx, direct.ID, direct.Version, "boss", "manager", true, now)
+	if err != nil || got.PendingChange != nil || got.Status != "CANCELLED" {
+		t.Fatalf("an approver cancels directly: %v", err)
+	}
+	if _, err := s.PutChangePolicy(ctx, ChangePolicy{LegalEntityID: le, CustomerID: customer, ApprovalRequired: false}, 1, "manager"); err != nil {
+		t.Fatal(err)
+	}
+	free := confirmed()
+	if got, err := s.CancelOrderAs(ctx, free.ID, free.Version, "", "sales-rep", false, now); err != nil || got.PendingChange != nil || got.Status != "CANCELLED" {
+		t.Fatalf("approval switched off: %v", err)
+	}
+}
+
+// TestPostgres_ApprovedCancelRechecksAndReturnsAgreement covers the approval of
+// a CANCEL request against an order that moved on: a line past RESERVED since
+// the request (SLS-0025) and an order an approver cancelled directly (SLS-0046)
+// are refused and leave the request PENDING so its requester can withdraw it.
+// An approved cancellation of an order released from a sales agreement gives
+// the quantity back, as a direct cancel does (BR-27.9).
+func TestPostgres_ApprovedCancelRechecksAndReturnsAgreement(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le := ids.New()
+	now := time.Date(2027, 3, 10, 9, 0, 0, 0, time.UTC)
+	limits := domain.CreditProfile{Limit: d(100000), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(0), ToleranceAmount: d(0), OldestItemDaysMax: 30, MaxDunningLevel: 3}
+	needsApproval := func(customer string) {
+		t.Helper()
+		if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: limits}, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.PutChangePolicy(ctx, ChangePolicy{LegalEntityID: le, CustomerID: customer, ApprovalRequired: true}, 0, "manager"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	confirm := func(o Order) Order {
+		t.Helper()
+		conf, err := s.ConfirmOrder(ctx, o.ID, o.Version, "sales-rep", now)
+		if err != nil || !conf.Confirmed {
+			t.Fatalf("confirm: %+v %v", conf.Order.Holds, err)
+		}
+		return conf.Order
+	}
+	requestCancel := func(o Order) *OrderChangeRequest {
+		t.Helper()
+		got, err := s.CancelOrderAs(ctx, o.ID, o.Version, "customer called", "sales-rep", false, now)
+		if err != nil || got.PendingChange == nil {
+			t.Fatalf("cancel request: %v", err)
+		}
+		return got.PendingChange
+	}
+	stillPending := func(id string) {
+		t.Helper()
+		if r, err := s.GetChangeRequest(ctx, id); err != nil || r.Status != ChangePending || r.DecidedBy != nil {
+			t.Fatalf("the request must stay PENDING: %+v %v", r, err)
+		}
+	}
+
+	customer := ids.New()
+	needsApproval(customer)
+	picked := confirm(changeOrderFixture(t, s, ctx, le, customer, 10))
+	req := requestCancel(picked)
+	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update sales_order_line set line_status = 'PICKED' where tenant_id = $1 and order_id = $2`, testkit.TenantID(1), picked.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveChangeRequest(ctx, req.ID, req.Version, "", "manager", now); problemCode(t, err) != CodeNotCancellable {
+		t.Fatalf("approve after a line was picked: %v", err)
+	}
+	stillPending(req.ID)
+	if got, _ := s.GetOrder(ctx, picked.ID); got.Status != domain.OrderConfirmed || got.Version != picked.Version {
+		t.Fatalf("a refused approval must leave the order: %s v%d", got.Status, got.Version)
+	}
+
+	direct := confirm(changeOrderFixture(t, s, ctx, le, customer, 10))
+	req = requestCancel(direct)
+	if _, err := s.CancelOrderAs(ctx, direct.ID, direct.Version, "manager cancels", "manager", true, now); err != nil {
+		t.Fatalf("an approver cancels while a request waits: %v", err)
+	}
+	if _, err := s.ApproveChangeRequest(ctx, req.ID, req.Version, "", "manager", now); problemCode(t, err) != CodeChangeStale {
+		t.Fatalf("approve after the order was cancelled: %v", err)
+	}
+	stillPending(req.ID)
+	if _, err := s.WithdrawChangeRequest(ctx, req.ID, req.Version, "", "sales-rep", now); err != nil {
+		t.Fatalf("the requester withdraws the stale request: %v", err)
+	}
+
+	a := agreementFixture(t, s, ctx, le, 100, nil, nil)
+	needsApproval(a.CustomerID)
+	r1, _, err := s.ReleaseAgreement(ctx, a.ID, release(100, "r1"), now)
+	if err != nil || r1.Agreement.Status != domain.AgreementExhausted {
+		t.Fatalf("release: %+v %v", r1.Agreement, err)
+	}
+	released := confirm(r1.Order)
+	req = requestCancel(released)
+	if got, _ := s.GetAgreement(ctx, a.ID); !got.Released.Equal(d(100)) {
+		t.Fatalf("a pending cancel must not return the quantity: %+v", got)
+	}
+	if _, err := s.ApproveChangeRequest(ctx, req.ID, req.Version, "ok", "manager", now); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	got, _ := s.GetAgreement(ctx, a.ID)
+	if got.Status != domain.AgreementActive || !got.Released.Equal(d(0)) || !got.Remaining.Equal(d(100)) {
+		t.Fatalf("the approved cancel must return the quantity: %+v", got)
+	}
+	if n := countWhere(t, pool, `select count(*) from agreement_return where agreement_id = $1`, a.ID); n != 1 {
+		t.Fatalf("agreement_return rows %d", n)
 	}
 }

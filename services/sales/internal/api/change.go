@@ -144,9 +144,15 @@ func (a *API) cancelOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p, _ := tenant.FromContext(r.Context())
-		order, err := a.store.CancelOrder(r.Context(), id, version, req.Reason, p.UserID, a.now())
+		order, err := a.store.CancelOrderAs(r.Context(), id, version, req.Reason, p.UserID, p.HasDuty(dutyOrderApprove), a.now())
 		if err != nil {
 			a.fail(w, r, "cancel order", err)
+			return
+		}
+		if order.PendingChange != nil {
+			// The customer's changes need approval: nothing was cancelled.
+			setETag(w, order.Version)
+			httpx.JSON(w, http.StatusAccepted, order)
 			return
 		}
 		a.canceled.Add(1)

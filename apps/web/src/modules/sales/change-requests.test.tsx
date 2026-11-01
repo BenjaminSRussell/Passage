@@ -57,6 +57,7 @@ function request(overrides: Partial<ChangeRequest> = {}): ChangeRequest {
     orderId: ORDER_ID,
     orderNumber: "SO-0000042",
     customerId: CUSTOMER,
+    kind: "CHANGE",
     status: "PENDING",
     baseVersion: 3,
     reason: "customer call",
@@ -71,6 +72,10 @@ function request(overrides: Partial<ChangeRequest> = {}): ChangeRequest {
 }
 
 describe("diffSummary", () => {
+  it("names a cancellation", () => {
+    expect(diffSummary({ kind: "CANCEL", diff: [{ lineNo: 0, field: "status", old: "CONFIRMED", new: "CANCELLED" }] })).toBe("Cancel the order");
+  });
+
   it("names the fields and lines a change touches", () => {
     expect(diffSummary(request())).toBe("1 field on line 1");
     expect(diffSummary({ diff: [{ lineNo: 0, field: "requestedShipDate", old: "a", new: "b" }] })).toBe("1 field");
@@ -163,6 +168,40 @@ describe("Change request detail", () => {
     renderAt(`/sales/change-requests/${REQUEST_ID}`);
     await screen.findByText("Applied as version");
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+  });
+
+  it("withdraws a pending request at its ETag and shows the refusal for someone else's", async () => {
+    handler = (_u, init) => (init.method === "POST" ? { status: 200, body: request({ status: "WITHDRAWN", version: 2 }), etag: '"2"' } : { status: 200, body: request(), etag: '"1"' });
+    const { container } = renderAt(`/sales/change-requests/${REQUEST_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Change request for SO-0000042");
+    expect(screen.queryByRole("button", { name: "Approve and apply" })).not.toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw request" }));
+    expect(await screen.findByText(/Withdrawn\. The order stays as it was/)).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe(`/api/v1/sales/change-requests/${REQUEST_ID}:withdraw`);
+    expect(post?.headers.get("If-Match")).toBe('"1"');
+    expect(post?.body).toEqual({ comment: "" });
+  });
+
+  it("explains that only the requester can withdraw", async () => {
+    handler = (_u, init) =>
+      init.method === "POST" ? { status: 403, body: { code: "SLS-0114", detail: "only the user who requested a change can withdraw it" } } : { status: 200, body: request(), etag: '"1"' };
+    renderAt(`/sales/change-requests/${REQUEST_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Change request for SO-0000042");
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw request" }));
+    expect(await screen.findByText("Only the user who made the request can withdraw it")).toBeInTheDocument();
+  });
+
+  it("shows a cancellation request as such and offers no withdrawal once decided", async () => {
+    handler = () => ({ status: 200, body: request({ kind: "CANCEL", change: {}, reason: "duplicate", diff: [{ lineNo: 0, field: "status", old: "CONFIRMED", new: "CANCELLED" }] }), etag: '"1"' });
+    const { unmount } = renderAt(`/sales/change-requests/${REQUEST_ID}`);
+    expect(await screen.findByText("Cancellation of the order")).toBeInTheDocument();
+    unmount();
+    handler = () => ({ status: 200, body: request({ status: "WITHDRAWN", decidedBy: "rep-1", decidedAt: "2027-03-02T09:00:00Z" }), etag: '"2"' });
+    renderAt(`/sales/change-requests/${REQUEST_ID}`, ["sales.order.read", "sales.order.write"]);
+    await screen.findByText("Withdrawn");
+    expect(screen.queryByRole("button", { name: "Withdraw request" })).not.toBeInTheDocument();
   });
 
   it("shows a load error", async () => {

@@ -20,12 +20,14 @@ import (
 // changeStore records the change, cancel and history calls.
 type changeStore struct {
 	fakeStore
-	changeVersion int
-	change        *store.ChangeRequest
-	cancelReason  *string
-	cancelVersion int
-	actor         string
-	historyFor    string
+	changeVersion  int
+	change         *store.ChangeRequest
+	cancelReason   *string
+	cancelVersion  int
+	cancelApprover bool
+	cancelPending  bool
+	actor          string
+	historyFor     string
 }
 
 func (c *changeStore) ChangeOrder(_ context.Context, _ string, version int, req store.ChangeRequest, actor string, _ time.Time) (store.Order, error) {
@@ -33,8 +35,11 @@ func (c *changeStore) ChangeOrder(_ context.Context, _ string, version int, req 
 	return store.Order{Version: version + 1, Lines: []store.Line{}, Holds: []store.Hold{}}, nil
 }
 
-func (c *changeStore) CancelOrder(_ context.Context, _ string, version int, reason, actor string, _ time.Time) (store.Order, error) {
-	c.cancelVersion, c.cancelReason, c.actor = version, &reason, actor
+func (c *changeStore) CancelOrderAs(_ context.Context, _ string, version int, reason, actor string, approver bool, _ time.Time) (store.Order, error) {
+	c.cancelVersion, c.cancelReason, c.actor, c.cancelApprover = version, &reason, actor, approver
+	if c.cancelPending {
+		return store.Order{Version: version, Status: "CONFIRMED", Lines: []store.Line{}, Holds: []store.Hold{}, PendingChange: &store.OrderChangeRequest{Kind: store.KindCancel, Status: store.ChangePending, Version: 1}}, nil
+	}
 	return store.Order{Version: version + 1, Status: "CANCELLED", Lines: []store.Line{}, Holds: []store.Hold{}}, nil
 }
 

@@ -172,6 +172,18 @@ describe("Change sales order page", () => {
     expect(within(screen.getByRole("group", { name: "Line 1" })).getByLabelText("Quantity")).toHaveValue("5");
   });
 
+  it("says a cancellation was sent for approval when the customer needs it", async () => {
+    const pending = { id: "r1", kind: "CANCEL", status: "PENDING", version: 1 };
+    handler = (_url, init) =>
+      init.method === "POST" ? { status: 202, body: { ...order(), pendingChange: pending }, etag: '"3"' } : { status: 200, body: order(), etag: '"3"' };
+    renderAt(`/sales/orders/${ORDER_ID}/change`);
+    const cancel = await screen.findByRole("button", { name: "Cancel order" });
+    fireEvent.click(screen.getByLabelText("Cancel every open line of this order and clear its holds"));
+    fireEvent.click(cancel);
+    expect(await screen.findByText(/the cancellation was sent to a sales manager for approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/is cancelled/)).not.toBeInTheDocument();
+  });
+
   it("warns when the higher total placed a credit hold", async () => {
     const hold = { id: "h1", holdType: "CREDIT", reasonCode: "CR-1", status: "ACTIVE", orderAmount: "3000", appliedBy: "u1", appliedAt: "2027-03-01T09:00:00Z" };
     handler = (_url, init) =>

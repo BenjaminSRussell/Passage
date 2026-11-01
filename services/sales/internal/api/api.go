@@ -154,6 +154,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(changeRequests+"/{id}", a.getChangeRequest)
 	r.With(authz.RequireDuty(dutyOrderApprove)).Post(changeRequests+"/{id}:approve", a.approveChangeRequest)
 	r.With(authz.RequireDuty(dutyOrderApprove)).Post(changeRequests+"/{id}:reject", a.rejectChangeRequest)
+	r.With(authz.RequireDuty(dutyWrite)).Post(changeRequests+"/{id}:withdraw", a.withdrawChangeRequest)
 	r.With(authz.RequireDuty(dutyRead)).Get(changePolicy, a.getChangePolicy)
 	r.With(authz.RequireDuty(dutyOrderApprove)).Put(changePolicy, a.putChangePolicy)
 	r.With(authz.RequireDuty(dutyRead)).Get(parameters, a.getParameters)

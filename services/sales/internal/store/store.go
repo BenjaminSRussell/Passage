@@ -242,7 +242,7 @@ type Store interface {
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
-	CancelOrder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
+	CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error)
 	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
@@ -299,6 +299,7 @@ type Store interface {
 	GetChangeRequest(ctx context.Context, id string) (OrderChangeRequest, error)
 	ApproveChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (ChangeDecision, error)
 	RejectChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
+	WithdrawChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
 	RecordLineProduction(ctx context.Context, in LineProduction) error
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)

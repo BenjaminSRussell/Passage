@@ -370,6 +370,15 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 // line is refused. ACTIVE holds are CLEARED so the order leaves the release
 // queue. The order gets a new version, and order.cancelled.v1 is queued.
 func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error) {
+	return s.CancelOrderAs(ctx, id, version, reason, actor, true, now)
+}
+
+// CancelOrderAs is CancelOrder for a caller who may or may not hold
+// SalesOrderApprove. When the customer's changes need approval (FR-27.9), the
+// order is CONFIRMED and the caller is not an approver, nothing is cancelled:
+// the cancellation is stored as a PENDING request (kind CANCEL) and returned
+// as the order's PendingChange.
+func (s *Postgres) CancelOrderAs(ctx context.Context, id string, version int, reason, actor string, approver bool, now time.Time) (Order, error) {
 	p, _ := tenant.FromContext(ctx)
 	if len(reason) > changeReasonMaxSize {
 		return Order{}, problem(http.StatusUnprocessableEntity, CodeInvalidChange, "reason is too long")
@@ -386,50 +395,85 @@ func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reas
 		if !domain.CanCancel(o.Status) {
 			return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("order is %s and cannot be cancelled", o.Status))
 		}
-		lineIDs := []string{}
-		for _, l := range o.Lines {
-			switch {
-			case l.LineStatus == domain.LineCancelled:
-			case domain.LineChangeable(l.LineStatus):
-				lineIDs = append(lineIDs, l.ID)
-			default:
-				return problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("line %d is %s; cancel it through a return", l.LineNo, l.LineStatus))
+		if o.Status == domain.OrderConfirmed && !approver {
+			required, err := changeApprovalRequired(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+			if err != nil {
+				return err
+			}
+			if required {
+				if _, err := cancelLineIDs(o); err != nil {
+					return err
+				}
+				pending, err := submitCancelRequestTx(ctx, tx, p.TenantID, o, reason, actor, now)
+				if err != nil {
+					return err
+				}
+				out = o
+				out.PendingChange = pending
+				return nil
 			}
 		}
-		if _, err := tx.Exec(ctx, `update sales_order_line set line_status = 'CANCELLED'
-			where tenant_id = $1 and order_id = $2 and line_status in ('OPEN', 'RESERVED')`, p.TenantID, id); err != nil {
-			return err
-		}
-		if err := returnAllocationTx(ctx, tx, p.TenantID, o, nil, now); err != nil {
-			return err
-		}
-		if err := syncScheduleTx(ctx, tx, p.TenantID, id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, p.TenantID, id); err != nil {
-			return err
-		}
-		if err := returnAgreementTx(ctx, tx, p.TenantID, o, actor, now); err != nil {
-			return err
-		}
-		next := o.Version + 1
-		if _, err := tx.Exec(ctx, `update sales_order set status = 'CANCELLED', version = $3, updated_at = $4 where tenant_id = $1 and id = $2`,
-			p.TenantID, id, next, now); err != nil {
-			return err
-		}
-		diff := domain.DiffHeader("status", o.Status, "CANCELLED")
-		if err := insertVersion(ctx, tx, p.TenantID, o.LegalEntityID, id, next, actor, reason, diff, now); err != nil {
-			return err
-		}
-		if err := enqueue(ctx, tx, "order", id, salesevents.OrderCancelled, p.TenantID, salesevents.OrderCancelledData{
-			OrderID: id, Version: next, LineIDs: lineIDs, Reason: reason, Actor: actor,
-		}); err != nil {
-			return err
-		}
-		out, err = loadOrder(ctx, tx, p.TenantID, id, false)
+		out, err = cancelOrderTx(ctx, tx, p.TenantID, o, reason, actor, now)
 		return err
 	})
 	return out, err
+}
+
+// cancelLineIDs returns the ids of the lines a cancellation would cancel, or
+// the problem for a line that is past RESERVED.
+func cancelLineIDs(o Order) ([]string, error) {
+	lineIDs := []string{}
+	for _, l := range o.Lines {
+		switch {
+		case l.LineStatus == domain.LineCancelled:
+		case domain.LineChangeable(l.LineStatus):
+			lineIDs = append(lineIDs, l.ID)
+		default:
+			return nil, problem(http.StatusUnprocessableEntity, CodeNotCancellable, fmt.Sprintf("line %d is %s; cancel it through a return", l.LineNo, l.LineStatus))
+		}
+	}
+	return lineIDs, nil
+}
+
+// cancelOrderTx cancels the locked order o in tx: lines, allocation,
+// schedule, holds, agreement draw, version and order.cancelled.
+func cancelOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, reason, actor string, now time.Time) (Order, error) {
+	id := o.ID
+	lineIDs, err := cancelLineIDs(o)
+	if err != nil {
+		return Order{}, err
+	}
+	if _, err := tx.Exec(ctx, `update sales_order_line set line_status = 'CANCELLED'
+		where tenant_id = $1 and order_id = $2 and line_status in ('OPEN', 'RESERVED')`, tenantID, id); err != nil {
+		return Order{}, err
+	}
+	if err := returnAllocationTx(ctx, tx, tenantID, o, nil, now); err != nil {
+		return Order{}, err
+	}
+	if err := syncScheduleTx(ctx, tx, tenantID, id); err != nil {
+		return Order{}, err
+	}
+	if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, tenantID, id); err != nil {
+		return Order{}, err
+	}
+	if err := returnAgreementTx(ctx, tx, tenantID, o, actor, now); err != nil {
+		return Order{}, err
+	}
+	next := o.Version + 1
+	if _, err := tx.Exec(ctx, `update sales_order set status = 'CANCELLED', version = $3, updated_at = $4 where tenant_id = $1 and id = $2`,
+		tenantID, id, next, now); err != nil {
+		return Order{}, err
+	}
+	diff := domain.DiffHeader("status", o.Status, "CANCELLED")
+	if err := insertVersion(ctx, tx, tenantID, o.LegalEntityID, id, next, actor, reason, diff, now); err != nil {
+		return Order{}, err
+	}
+	if err := enqueue(ctx, tx, "order", id, salesevents.OrderCancelled, tenantID, salesevents.OrderCancelledData{
+		OrderID: id, Version: next, LineIDs: lineIDs, Reason: reason, Actor: actor,
+	}); err != nil {
+		return Order{}, err
+	}
+	return loadOrder(ctx, tx, tenantID, id, false)
 }
 
 func insertVersion(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, orderID string, version int, actor, reason string, diff []domain.FieldChange, now time.Time) error {

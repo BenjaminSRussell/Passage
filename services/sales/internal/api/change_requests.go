@@ -17,7 +17,7 @@ const (
 	changePolicy   = "/v1/sales/customers/{customerId}/change-policy"
 )
 
-var changeStatuses = map[string]bool{store.ChangePending: true, store.ChangeApproved: true, store.ChangeRejected: true}
+var changeStatuses = map[string]bool{store.ChangePending: true, store.ChangeApproved: true, store.ChangeRejected: true, store.ChangeWithdrawn: true}
 
 // decisionRequest is the body of :approve (comment optional) and :reject
 // (comment required).
@@ -57,7 +57,7 @@ func (a *API) listChangeRequests(w http.ResponseWriter, r *http.Request) {
 	f := store.ChangeRequestFilter{LegalEntityID: legalEntity, Status: q.Get("status"), OrderID: q.Get("orderId")}
 	fields := map[string]string{}
 	if f.Status != "" && !changeStatuses[f.Status] {
-		fields["status"] = "must be PENDING, APPROVED or REJECTED"
+		fields["status"] = "must be PENDING, APPROVED, REJECTED or WITHDRAWN"
 	}
 	if f.OrderID != "" && !ids.Valid(f.OrderID) {
 		fields["orderId"] = "must be a UUID"
@@ -130,7 +130,11 @@ func (a *API) approveChangeRequest(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, "approve change request", err)
 			return
 		}
-		a.changed.Add(1)
+		if res.Request.Kind == store.KindCancel {
+			a.canceled.Add(1)
+		} else {
+			a.changed.Add(1)
+		}
 		setETag(w, res.Request.Version)
 		httpx.JSON(w, http.StatusOK, res)
 	})(w, r)
@@ -146,6 +150,25 @@ func (a *API) rejectChangeRequest(w http.ResponseWriter, r *http.Request) {
 		cr, err := a.store.RejectChangeRequest(r.Context(), id, version, comment, p.UserID, a.now())
 		if err != nil {
 			a.fail(w, r, "reject change request", err)
+			return
+		}
+		setETag(w, cr.Version)
+		httpx.JSON(w, http.StatusOK, cr)
+	})(w, r)
+}
+
+// withdrawChangeRequest lets the requester take back a PENDING request. The
+// comment is optional.
+func (a *API) withdrawChangeRequest(w http.ResponseWriter, r *http.Request) {
+	changeRequestRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, comment, ok := decide(w, r, false)
+		if !ok {
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		cr, err := a.store.WithdrawChangeRequest(r.Context(), id, version, comment, p.UserID, a.now())
+		if err != nil {
+			a.fail(w, r, "withdraw change request", err)
 			return
 		}
 		setETag(w, cr.Version)

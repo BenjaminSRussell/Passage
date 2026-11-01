@@ -1492,7 +1492,7 @@ export function getSalesSummary(filter: SalesSummaryFilter = {}, signal?: AbortS
 
 // ---- Change approval (FR-27.9) ----
 
-export const CHANGE_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+export const CHANGE_STATUSES = ["PENDING", "APPROVED", "REJECTED", "WITHDRAWN"] as const;
 export type ChangeStatus = (typeof CHANGE_STATUSES)[number];
 
 /** A change of a confirmed order that waits for, or has had, a decision. */
@@ -1502,6 +1502,8 @@ export interface ChangeRequest {
   orderId: string;
   orderNumber: string;
   customerId: string;
+  /** CANCEL is the cancellation of the whole order (its change is empty); CHANGE a PATCH. */
+  kind: "CHANGE" | "CANCEL";
   status: ChangeStatus;
   /** The order version the change was made against; approval needs the order still at it. */
   baseVersion: number;
@@ -1543,6 +1545,11 @@ export function approveChangeRequest(id: string, etag: string, comment: string):
 
 export function rejectChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<ChangeRequest>> {
   return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}:reject`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
+}
+
+/** The requester takes their own PENDING request back; anyone else is refused with SLS-0114. */
+export function withdrawChangeRequest(id: string, etag: string, comment: string): Promise<Versioned<ChangeRequest>> {
+  return versioned<ChangeRequest>(`/change-requests/${encodeURIComponent(id)}:withdraw`, { method: "POST", body: JSON.stringify({ comment }), headers: { "If-Match": etag } });
 }
 
 export interface ChangePolicy {

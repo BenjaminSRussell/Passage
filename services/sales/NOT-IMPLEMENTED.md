@@ -278,6 +278,35 @@ remove with confirmation), the new rule form and the check card, under
 `/sales/alternative-items`. The OpenAPI document passes the doc gates with no
 FAIL lines; the slice emits no event.
 
+Slice 17 completes the change approval of FR-27.9: `:cancel` of a CONFIRMED
+order of a customer whose changes need approval, by a caller without
+`sales.order.approve`, is stored as a PENDING change request of kind `CANCEL`
+(202 with `pendingChange`, `SLS-0043` when a request already waits) instead of
+cancelling; approving it cancels the order in the same transaction as the
+requester's cancellation (`order.cancelled`, then `orderchange.approved`),
+through the same path as a direct cancel, so the allocation, the schedule and
+any sales agreement quantity are returned. Cancellability is checked again at
+approval: an order that moved since the request (a new version, a status past
+CONFIRMED, or a direct cancel by an approver) is `SLS-0046` and a line no
+longer OPEN/RESERVED is `SLS-0025`; both leave the request PENDING so it can be
+rejected or withdrawn. A request of either kind blocks the other (`SLS-0043`);
+a caller with `sales.order.approve` still bypasses approval for both. The
+requester can withdraw their own PENDING request with
+`POST /change-requests/{id}:withdraw` (`If-Match`, duty `sales.order.write`,
+`SLS-0114` for anyone else, `SLS-0044` once decided): the request ends as
+WITHDRAWN and `orderchange.withdrawn.v1` is written in the same transaction.
+Migration 0021 adds `order_change_request.kind` and the WITHDRAWN status (no new
+table, so no new grant). `orderchange.requested`, `.approved` and `.rejected`
+carry `kind`. The web change request list and detail show the type and a
+Withdraw action, and the order change screen reports a cancellation sent for
+approval. The OpenAPI and AsyncAPI documents pass the doc gates with no FAIL
+lines.
+
+Route row handoff for #313 (outside this wave's paths): add
+`POST /v1/sales/change-requests/{id}:withdraw` to the route rows of
+`policies/authz/data.json` with the existing duty `sales.order.write`. No new
+duty was added.
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -328,9 +357,10 @@ FAIL lines; the slice emits no event.
 |---|---|---|
 | FR-27.11 configured products and make-to-order production link (AC-27.4) | implemented in part | Built: `configurationId` on an order line (migration 0017), checked on order create against the product service (`GET /v1/product/saved-configurations/{id}?productId=`, service token holding only `product.configuration.read`): unknown, not valid or another product's configuration is `SLS-0047`, an unreachable product service `SLS-0048` (fail closed, nothing stored); carried in `order.confirmed` as `configuration_id`; `POST /orders/{id}:plan-production` (duty `sales.order.plan-production`) creates, per configured line of a CONFIRMED order, the production order with origin `SalesOrderLine` through `POST /v1/production/sales-line-orders` (service token holding only `production.order.create-from-sales`, `Idempotency-Key` `sales-line-<lineId>`) and links it in `order_line_production` (RLS tenant + restrictive legal entity); idempotent per line on both sides. Integration style: synchronous HTTP with a service grant, the repo's pattern between services; the Kafka consumer of #405 is not used because sales events reach Kafka only through the outbox relay and no production consumer deployment exists. Not built: planning on confirm (the call is explicit, so a confirm never depends on production being up; a scheduler or an `order.confirmed` consumer in production can call the same route), the BOM and route of the configured product (production creates the order with none, to be resolved from the configuration with w9), re-planning after a PATCH of the line quantity or a cancel (the production order keeps the quantity it was planned with), and the production-side status on the order line. |
 | FR-27.13 alternative items | implemented in part | See deliverable 2 and slice 16. |
-| FR-27.9 change approval: withdrawal by the requester, notification of the manager, approval by amount threshold or by a named approver group | later slice of PSG-27 | Slice 13 built the per customer switch, the stored request and approve/reject. A requester can only be answered by a rejection (anyone with `sales.order.approve` may reject, the requester included, but a requester without the duty cannot withdraw); the queue is polled, nothing notifies a manager; every approver holding `sales.order.approve` can decide any request. |
+| FR-27.9 change approval: notification of the manager, approval by amount threshold or by a named approver group | later slice of PSG-27 | Slice 13 built the per customer switch, the stored request and approve/reject; slice 17 added withdrawal by the requester and cancellations. The queue is polled, nothing notifies a manager; every approver holding `sales.order.approve` can decide any request. |
 | Duties `sales.order.approve` for change requests and the customer change policy | done (seeded in `policies/authz/data.json`) | `sales.order.approve` is seeded with the change request decisions and the customer change policy PUT. |
-| Change requests of other types of change (cancel, hold) | later slice of PSG-27 | Only a PATCH is routed to approval. `:cancel` (duty `sales.order.confirm`) and holds apply at once. |
+| Change requests of other types of change (hold) | later slice of PSG-27 | A PATCH and `:cancel` (slice 17) are routed to approval; holds apply at once. |
+| Duty for withdrawing a change request | decision to confirm | PRD §5.27.17 names no duty for a withdrawal. `:withdraw` requires `sales.order.write` (the PATCH duty) and that the caller is the requester; a user holding only `sales.order.confirm` who asked for a cancellation needs `sales.order.write` to withdraw it. |
 | Duty for supplementary item rules | decision to confirm | PRD §5.27.17 names no duty for maintaining supplementary item rules. Create and remove require `sales.listing.maintain`, the product master duty this service already has; the evaluation requires `sales.order.read`. |
 | Duty for product proposal rules and responses | decision to confirm | PRD §5.27.17 names no duty for FR-27.21. Create and remove require `sales.listing.maintain`, like supplementary item rules; the evaluation requires `sales.order.read`; recording a response requires `sales.order.write` or `sales.channel.intake`, the duties of order entry. |
 | Duty for listing maintenance | decision to confirm | PRD §5.27.17 names no duty for maintaining `product_listing`. Create and remove require `sales.listing.maintain`; the override requires `sales.order.approve` (SalesOrderApprove). Neither has a role mapping yet (edge-identity). |

@@ -102,7 +102,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3); when allocation quota cannot cover that confirmation the hold is still released and the order stays unconfirmed with an `SLS-0013` warning |
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:plan-production` | `sales.order.plan-production` | creates, for each configured line of a CONFIRMED order, the production order built to the line's saved configuration (origin `SalesOrderLine`) through the production service and links it to the line in `order_line_production`; idempotent per line; a line's `configurationId` is checked against the product service on order create |
-| POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled` |
+| POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled`. For a customer whose changes need approval, a caller without `sales.order.approve` gets 202 and a stored request of kind `CANCEL` instead (`SLS-0043` if one already waits) |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
 | POST | `/v1/sales/orders/{id}/holds` | `sales.order.hold` | `If-Match`; MANUAL, FRAUD or PRICE_REVIEW with a reason code; emits `orderhold.applied` |
 | GET / POST | `/v1/sales/product-listings` | `sales.order.read` / `sales.listing.maintain` | Listing inquiry (`legalEntityId`, `productId`, `scopeKey`, `limit`); add an ALLOW or DENY entry per customer or group |
@@ -128,7 +128,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
 | GET | `/v1/sales/change-requests` | `sales.order.read` | Optional `legalEntityId`, `status`, `orderId`, `limit`; PENDING oldest first (the approval queue), otherwise newest first |
 | GET | `/v1/sales/change-requests/{id}` | `sales.order.read` | The stored change, its field-level diff and the order version it was made against; the ETag is the request version |
-| POST | `/v1/sales/change-requests/{id}:approve` | `sales.order.approve` | `If-Match`; applies the stored change to the order and records the approval in one transaction (`order.changed`, then `orderchange.approved`); the requester cannot approve (`SLS-0045`), a decided request is `SLS-0044`, an order that moved since is `SLS-0046` |
+| POST | `/v1/sales/change-requests/{id}:withdraw` | `sales.order.write` | `If-Match`; the requester takes a PENDING request back (WITHDRAWN, comment optional); anyone else is `SLS-0114`, a decided request `SLS-0044` |
+| POST | `/v1/sales/change-requests/{id}:approve` | `sales.order.approve` | `If-Match`; applies the stored change to the order and records the approval in one transaction (`order.changed`, then `orderchange.approved`; for a `CANCEL` request the order is cancelled as by `:cancel`, `order.cancelled` then `orderchange.approved`, and a line no longer OPEN/RESERVED is `SLS-0025`); the requester cannot approve (`SLS-0045`), a decided request is `SLS-0044`, an order that moved since is `SLS-0046` |
 | POST | `/v1/sales/change-requests/{id}:reject` | `sales.order.approve` | `If-Match`; a `comment` is required; the order stays as it was |
 | GET / PUT | `/v1/sales/customers/{customerId}/change-policy` | `sales.order.read` / `sales.order.approve` | `legalEntityId` required; `approvalRequired` switch, off at version 0; PUT takes `If-Match` (`"0"` to create); `changepolicy.changed` |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
@@ -350,6 +351,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0111` | 404 | Backorder run not found |
 | `SLS-0112` | 404 | Change request not found |
 | `SLS-0113` | 404 | Alternative item rule not found |
+| `SLS-0114` | 403 | Only the user who requested a change can withdraw it |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

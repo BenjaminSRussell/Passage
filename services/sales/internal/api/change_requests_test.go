@@ -20,6 +20,7 @@ type requestStore struct {
 	comment     string
 	actor       string
 	rejected    bool
+	withdrawn   bool
 	listed      store.ChangeRequestFilter
 	policy      store.ChangePolicy
 	policyVer   int
@@ -44,6 +45,11 @@ func (s *requestStore) ApproveChangeRequest(_ context.Context, id string, versio
 func (s *requestStore) RejectChangeRequest(_ context.Context, id string, version int, comment, actor string, _ time.Time) (store.OrderChangeRequest, error) {
 	s.rejected, s.decidedVer, s.comment, s.actor = true, version, comment, actor
 	return store.OrderChangeRequest{ID: id, Status: store.ChangeRejected, Version: version + 1}, nil
+}
+
+func (s *requestStore) WithdrawChangeRequest(_ context.Context, id string, version int, comment, actor string, _ time.Time) (store.OrderChangeRequest, error) {
+	s.withdrawn, s.decidedVer, s.comment, s.actor = true, version, comment, actor
+	return store.OrderChangeRequest{ID: id, Kind: store.KindChange, Status: store.ChangeWithdrawn, Version: version + 1}, nil
 }
 
 func (s *requestStore) ListChangeRequests(_ context.Context, f store.ChangeRequestFilter) ([]store.OrderChangeRequest, error) {
@@ -140,5 +146,40 @@ func TestChangePolicy_GetAndPut(t *testing.T) {
 	}
 	if rec := serve(t, s, http.MethodGet, "/v1/sales/customers/x/change-policy?legalEntityId="+testLE, principal(dutyRead), nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad customer: %d", rec.Code)
+	}
+}
+
+func TestWithdrawChangeRequest_DutyVersionAndOptionalComment(t *testing.T) {
+	id := ids.New()
+	path := changeRequests + "/" + id + ":withdraw"
+	h := map[string]string{"If-Match": `"2"`}
+	s := &requestStore{}
+	if rec := serveBody(t, s, http.MethodPost, path, "", principal(dutyRead), h); rec.Code != http.StatusForbidden || s.withdrawn {
+		t.Fatalf("withdraw without the write duty: %d", rec.Code)
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, "", principal(dutyWrite), nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("withdraw without If-Match: %d", rec.Code)
+	}
+	rec := serveBody(t, s, http.MethodPost, path, `{"comment":"typo"}`, principal(dutyWrite), h)
+	if rec.Code != http.StatusOK || !s.withdrawn || s.decidedVer != 2 || s.comment != "typo" || s.actor != "u1" || rec.Header().Get("ETag") != `"3"` || !strings.Contains(rec.Body.String(), `"status":"WITHDRAWN"`) {
+		t.Fatalf("withdraw: %d ver=%d comment=%q: %s", rec.Code, s.decidedVer, s.comment, rec.Body.String())
+	}
+	s = &requestStore{}
+	if rec := serveBody(t, s, http.MethodPost, path, "", principal(dutyWrite), h); rec.Code != http.StatusOK || !s.withdrawn {
+		t.Fatalf("withdraw without a body: %d", rec.Code)
+	}
+}
+
+func TestCancelOrder_PendingCancelIs202AndApproverIsPassed(t *testing.T) {
+	id := ids.New()
+	h := map[string]string{"If-Match": `"5"`}
+	c := &changeStore{cancelPending: true}
+	rec := serveBody(t, c, http.MethodPost, orders+"/"+id+":cancel", `{"reason":"duplicate"}`, principal(dutyConfirm), h)
+	if rec.Code != http.StatusAccepted || c.cancelApprover || !strings.Contains(rec.Body.String(), `"kind":"CANCEL"`) || rec.Header().Get("ETag") != `"5"` {
+		t.Fatalf("status %d approver=%v etag=%s: %s", rec.Code, c.cancelApprover, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	c = &changeStore{}
+	if rec := serveBody(t, c, http.MethodPost, orders+"/"+id+":cancel", "", principal(dutyConfirm, dutyOrderApprove), h); rec.Code != http.StatusOK || !c.cancelApprover {
+		t.Fatalf("an approver: %d approver=%v", rec.Code, c.cancelApprover)
 	}
 }

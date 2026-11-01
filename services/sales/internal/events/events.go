@@ -37,6 +37,7 @@ var (
 	OrderChangeRequested = events.Type(Context, "orderchange", "requested", 1)
 	OrderChangeApproved  = events.Type(Context, "orderchange", "approved", 1)
 	OrderChangeRejected  = events.Type(Context, "orderchange", "rejected", 1)
+	OrderChangeWithdrawn = events.Type(Context, "orderchange", "withdrawn", 1)
 	ChangePolicyChanged  = events.Type(Context, "changepolicy", "changed", 1)
 )
 
@@ -46,7 +47,7 @@ func All() []string {
 		AgreementChanged, AgreementClosed, AgreementReturned,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged,
-		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, ChangePolicyChanged}
+		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -357,19 +358,22 @@ type OrderChangeRequestedData struct {
 	LegalEntityID string        `json:"legal_entity_id"`
 	OrderID       string        `json:"order_id"`
 	CustomerID    string        `json:"customer_id"`
+	Kind          string        `json:"kind"`
 	BaseVersion   int           `json:"base_version"`
 	Reason        string        `json:"reason"`
 	Actor         string        `json:"actor"`
 	Diff          []FieldChange `json:"diff"`
 }
 
-// OrderChangeDecidedData is the data member of orderchange.approved.v1 and
-// orderchange.rejected.v1. applied_version is the order version an approval
-// produced and is absent on a rejection.
+// OrderChangeDecidedData is the data member of orderchange.approved.v1,
+// orderchange.rejected.v1 and orderchange.withdrawn.v1. applied_version is
+// the order version an approval produced and is absent on a rejection or a
+// withdrawal; on a withdrawal actor is the requester.
 type OrderChangeDecidedData struct {
 	RequestID      string `json:"request_id"`
 	LegalEntityID  string `json:"legal_entity_id"`
 	OrderID        string `json:"order_id"`
+	Kind           string `json:"kind"`
 	RequestedBy    string `json:"requested_by"`
 	Actor          string `json:"actor"`
 	Comment        string `json:"comment"`

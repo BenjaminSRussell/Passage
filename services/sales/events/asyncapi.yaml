@@ -102,6 +102,11 @@ channels:
     messages:
       orderChangeRejected:
         $ref: "#/components/messages/OrderChangeRejected"
+  orderChangeWithdrawn:
+    address: passage.sales.orderchange
+    messages:
+      orderChangeWithdrawn:
+        $ref: "#/components/messages/OrderChangeWithdrawn"
   changePolicyChanged:
     address: passage.sales.changepolicy
     messages:
@@ -167,6 +172,12 @@ operations:
     summary: A stored change was rejected with a comment and the order stays as it was (FR-27.9).
     messages:
       - {$ref: "#/channels/orderChangeRejected/messages/orderChangeRejected"}
+  publishOrderChangeWithdrawn:
+    action: send
+    channel: {$ref: "#/channels/orderChangeWithdrawn"}
+    summary: The requester took a stored change or cancellation back before a decision and the order stays as it was (FR-27.9).
+    messages:
+      - {$ref: "#/channels/orderChangeWithdrawn/messages/orderChangeWithdrawn"}
   publishChangePolicyChanged:
     action: send
     channel: {$ref: "#/channels/changePolicyChanged"}
@@ -471,6 +482,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderChangeDecidedData"
+    OrderChangeWithdrawn:
+      name: dev.passage.sales.orderchange.withdrawn.v1
+      title: Order change withdrawn
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangeDecidedData"
     ChangePolicyChanged:
       name: dev.passage.sales.changepolicy.changed.v1
       title: Customer change policy changed
@@ -550,12 +569,13 @@ components:
         version: {type: integer, description: order version after the promise}
     OrderChangeRequestedData:
       type: object
-      required: [request_id, legal_entity_id, order_id, customer_id, base_version, reason, actor, diff]
+      required: [request_id, legal_entity_id, order_id, customer_id, kind, base_version, reason, actor, diff]
       properties:
         request_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         order_id: {type: string, format: uuid}
         customer_id: {type: string, format: uuid}
+        kind: {type: string, enum: [CHANGE, CANCEL], description: CHANGE is a PATCH waiting for approval; CANCEL is a cancellation}
         base_version: {type: integer, description: order version the change was made against}
         reason: {type: string}
         actor: {type: string, description: who asked for the change}
@@ -571,15 +591,16 @@ components:
               new: {type: string}
     OrderChangeDecidedData:
       type: object
-      required: [request_id, legal_entity_id, order_id, requested_by, actor, comment]
+      required: [request_id, legal_entity_id, order_id, kind, requested_by, actor, comment]
       properties:
         request_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         order_id: {type: string, format: uuid}
+        kind: {type: string, enum: [CHANGE, CANCEL]}
         requested_by: {type: string}
-        actor: {type: string, description: who decided}
+        actor: {type: string, description: who decided; on a withdrawal, the requester}
         comment: {type: string}
-        applied_version: {type: integer, description: order version the approval produced; absent on a rejection}
+        applied_version: {type: integer, description: order version the approval produced; absent on a rejection or a withdrawal}
     ChangePolicyChangedData:
       type: object
       required: [legal_entity_id, customer_id, approval_required, actor, version]

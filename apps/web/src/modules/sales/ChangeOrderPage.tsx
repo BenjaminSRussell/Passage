@@ -234,7 +234,11 @@ export function ChangeOrderPage() {
       setLatest(res);
       setValues(null);
       setCancelSure(false);
-      setOutcome({ tone: "success", text: `Order ${res.value.orderNumber} is cancelled.` });
+      if (res.value.pendingChange) {
+        setOutcome({ tone: "warning", text: "This customer's changes need approval, so the order is not cancelled yet: the cancellation was sent to a sales manager for approval." });
+      } else {
+        setOutcome({ tone: "success", text: `Order ${res.value.orderNumber} is cancelled.` });
+      }
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {

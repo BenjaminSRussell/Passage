@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Skeleton, Textarea } from "../../shell/ui";
-import { approveChangeRequest, describeProblem, getChangeRequest, rejectChangeRequest, type Problem } from "./api/client";
+import { approveChangeRequest, describeProblem, getChangeRequest, rejectChangeRequest, withdrawChangeRequest, type Problem } from "./api/client";
 import { diffColumns } from "./ChangeOrderPage";
 import { ChangeStatusBadge } from "./ChangeRequestsPage";
 import { formatDateTime } from "./format";
@@ -12,6 +12,8 @@ import { useLoad } from "./useLoad";
 
 /** Approving or rejecting a change needs this duty (SalesOrderApprove); the service enforces it. */
 export const DUTY_ORDER_APPROVE = "sales.order.approve";
+/** Withdrawing a request needs this duty (SalesOrderMaintain); the service also requires the caller to be the requester. */
+export const DUTY_ORDER_WRITE = "sales.order.write";
 const COMMENT_MAX = 500;
 
 /** Titles for the service's change approval problems (README catalogue). */
@@ -22,6 +24,7 @@ const problemTitle: Record<string, string> = {
   "SLS-0044": "The request was already decided",
   "SLS-0045": "You cannot approve your own change",
   "SLS-0046": "The order changed since the request was made",
+  "SLS-0114": "Only the user who made the request can withdraw it",
 };
 
 type Outcome = { tone: "success"; text: ReactNode } | { tone: "danger"; problem: Problem };
@@ -29,12 +32,14 @@ type Outcome = { tone: "success"; text: ReactNode } | { tone: "danger"; problem:
 /** One change request: the diff against the order, then approve (applies it) or reject with a comment. */
 export function ChangeRequestDetailPage() {
   const { id = "" } = useParams();
-  const canDecide = holdsDuty(usePrincipalDuties(), DUTY_ORDER_APPROVE);
+  const duties = usePrincipalDuties();
+  const canDecide = holdsDuty(duties, DUTY_ORDER_APPROVE);
+  const canWithdraw = holdsDuty(duties, DUTY_ORDER_WRITE);
   const state = useLoad((signal) => getChangeRequest(id, signal), id);
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "reject" | "withdraw" | null>(null);
 
   if (state.error && !state.data) {
     return (
@@ -57,7 +62,7 @@ export function ChangeRequestDetailPage() {
   }
   const { value: request, etag } = state.data;
 
-  async function decide(action: "approve" | "reject", event?: FormEvent) {
+  async function decide(action: "approve" | "reject" | "withdraw", event?: FormEvent) {
     event?.preventDefault();
     const text = comment.trim();
     if (text.length > COMMENT_MAX || (action === "reject" && text.length === 0)) {
@@ -74,10 +79,14 @@ export function ChangeRequestDetailPage() {
           tone: "success",
           text: (
             <>
-              Approved and applied: <Link to={`/sales/orders/${res.value.order.id}`}>{res.value.order.orderNumber}</Link> is now at version {res.value.order.version}.
+              {request.kind === "CANCEL" ? "Approved and cancelled: " : "Approved and applied: "}
+              <Link to={`/sales/orders/${res.value.order.id}`}>{res.value.order.orderNumber}</Link> is now at version {res.value.order.version}.
             </>
           ),
         });
+      } else if (action === "withdraw") {
+        await withdrawChangeRequest(request.id, etag, text);
+        setOutcome({ tone: "success", text: "Withdrawn. The order stays as it was." });
       } else {
         await rejectChangeRequest(request.id, etag, text);
         setOutcome({ tone: "success", text: "Rejected. The order stays as it was." });
@@ -92,6 +101,7 @@ export function ChangeRequestDetailPage() {
   }
 
   const facts: [string, ReactNode][] = [
+    ["Type", request.kind === "CANCEL" ? "Cancellation of the order" : "Change of lines or dates"],
     ["Order", <Link key="o" to={`/sales/orders/${request.orderId}`}>{request.orderNumber}</Link>],
     ["Made against version", String(request.baseVersion)],
     ["Reason", request.reason || "—"],
@@ -161,6 +171,16 @@ export function ChangeRequestDetailPage() {
           ) : (
             <p className={styles.muted}>Deciding a change request needs the {DUTY_ORDER_APPROVE} duty.</p>
           )}
+        </Card>
+      ) : null}
+      {request.status === "PENDING" && canWithdraw ? (
+        <Card title="Withdraw">
+          <p className={styles.muted}>Made this request yourself and no longer want it? Take it back; the order stays as it is.</p>
+          <div className={styles.formActions}>
+            <Button type="button" loading={busy === "withdraw"} disabled={busy !== null && busy !== "withdraw"} onClick={() => void decide("withdraw")}>
+              Withdraw request
+            </Button>
+          </div>
         </Card>
       ) : null}
     </div>

@@ -23,10 +23,17 @@ const (
 	CodeChangeSelfApproval = "SLS-0045"
 	CodeChangeStale        = "SLS-0046"
 	CodeChangeNotFound     = "SLS-0112"
+	CodeChangeNotRequester = "SLS-0114"
 
 	ChangePending  = "PENDING"
 	ChangeApproved = "APPROVED"
 	ChangeRejected = "REJECTED"
+	// ChangeWithdrawn is a request its requester took back before a decision.
+	ChangeWithdrawn = "WITHDRAWN"
+
+	// KindChange is a PATCH waiting for approval; KindCancel a cancellation.
+	KindChange = "CHANGE"
+	KindCancel = "CANCEL"
 
 	maxChangeRequestsListed = 200
 )
@@ -53,6 +60,7 @@ type OrderChangeRequest struct {
 	OrderID         string               `json:"orderId"`
 	OrderNumber     string               `json:"orderNumber"`
 	CustomerID      string               `json:"customerId"`
+	Kind            string               `json:"kind"`
 	Status          string               `json:"status"`
 	BaseVersion     int                  `json:"baseVersion"`
 	Reason          string               `json:"reason"`
@@ -137,7 +145,7 @@ func submitChangeRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Or
 		return nil, err
 	}
 	if err := enqueue(ctx, tx, "orderchange", id, salesevents.OrderChangeRequested, tenantID, salesevents.OrderChangeRequestedData{
-		RequestID: id, LegalEntityID: o.LegalEntityID, OrderID: o.ID, CustomerID: o.CustomerID, BaseVersion: o.Version, Reason: req.Reason, Actor: actor, Diff: salesevents.DiffOf(diff),
+		RequestID: id, LegalEntityID: o.LegalEntityID, OrderID: o.ID, CustomerID: o.CustomerID, Kind: KindChange, BaseVersion: o.Version, Reason: req.Reason, Actor: actor, Diff: salesevents.DiffOf(diff),
 	}); err != nil {
 		return nil, err
 	}
@@ -145,14 +153,14 @@ func submitChangeRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Or
 	return &r, err
 }
 
-const changeRequestSelect = `select r.id::text, r.legal_entity_id::text, r.order_id::text, o.order_number, o.customer_id::text, r.status, r.base_version,
+const changeRequestSelect = `select r.id::text, r.legal_entity_id::text, r.order_id::text, o.order_number, o.customer_id::text, r.kind, r.status, r.base_version,
 		r.reason, r.change::text, r.diff::text, r.requested_by, r.requested_at, r.decided_by, r.decided_at, r.decision_comment, r.applied_version, r.version
 	from order_change_request r join sales_order o on o.tenant_id = r.tenant_id and o.id = r.order_id`
 
 func scanChangeRequest(row pgx.Row) (OrderChangeRequest, error) {
 	var r OrderChangeRequest
 	var change, diff string
-	if err := row.Scan(&r.ID, &r.LegalEntityID, &r.OrderID, &r.OrderNumber, &r.CustomerID, &r.Status, &r.BaseVersion, &r.Reason, &change, &diff,
+	if err := row.Scan(&r.ID, &r.LegalEntityID, &r.OrderID, &r.OrderNumber, &r.CustomerID, &r.Kind, &r.Status, &r.BaseVersion, &r.Reason, &change, &diff,
 		&r.RequestedBy, &r.RequestedAt, &r.DecidedBy, &r.DecidedAt, &r.DecisionComment, &r.AppliedVersion, &r.Version); err != nil {
 		return r, err
 	}
@@ -258,7 +266,12 @@ func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version 
 		if o.Version != r.BaseVersion || o.Status != domain.OrderConfirmed {
 			return problem(http.StatusConflict, CodeChangeStale, "the order changed since the request was made; reject it and ask for a new change")
 		}
-		applied, err := applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, r.Change, r.RequestedBy, now)
+		var applied Order
+		if r.Kind == KindCancel {
+			applied, err = cancelOrderTx(ctx, tx, p.TenantID, o, r.Reason, r.RequestedBy, now)
+		} else {
+			applied, err = applyChangeTx(ctx, tx, p.TenantID, o, r.OrderID, r.Change, r.RequestedBy, now)
+		}
 		if err != nil {
 			return err
 		}
@@ -268,12 +281,81 @@ func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version 
 			return err
 		}
 		if err := enqueue(ctx, tx, "orderchange", id, salesevents.OrderChangeApproved, p.TenantID, salesevents.OrderChangeDecidedData{
-			RequestID: id, LegalEntityID: r.LegalEntityID, OrderID: r.OrderID, RequestedBy: r.RequestedBy, Actor: actor, Comment: comment, AppliedVersion: &applied.Version,
+			RequestID: id, LegalEntityID: r.LegalEntityID, OrderID: r.OrderID, Kind: r.Kind, RequestedBy: r.RequestedBy, Actor: actor, Comment: comment, AppliedVersion: &applied.Version,
 		}); err != nil {
 			return err
 		}
 		out.Order = applied
 		out.Request, err = loadChangeRequest(ctx, tx, p.TenantID, id, false)
+		return err
+	})
+	return out, err
+}
+
+// submitCancelRequestTx stores the cancellation of the locked CONFIRMED order o
+// as a PENDING request of kind CANCEL and writes orderchange.requested with a
+// status diff. An order has at most one PENDING request (SLS-0043).
+func submitCancelRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, reason, actor string, now time.Time) (*OrderChangeRequest, error) {
+	var pending bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from order_change_request where tenant_id = $1 and order_id = $2 and status = 'PENDING')`,
+		tenantID, o.ID).Scan(&pending); err != nil {
+		return nil, err
+	}
+	if pending {
+		return nil, problem(http.StatusConflict, CodeChangePending, "the order already has a change waiting for approval; decide it first")
+	}
+	diff := domain.DiffHeader("status", o.Status, "CANCELLED")
+	diffJSON, err := json.Marshal(diff)
+	if err != nil {
+		return nil, err
+	}
+	id := ids.New()
+	if _, err := tx.Exec(ctx, `insert into order_change_request (tenant_id, legal_entity_id, id, order_id, kind, base_version, reason, change, diff, requested_by, requested_at)
+		values ($1, $2, $3, $4, 'CANCEL', $5, $6, '{}'::jsonb, $7::jsonb, $8, $9)`,
+		tenantID, o.LegalEntityID, id, o.ID, o.Version, reason, string(diffJSON), actor, now); err != nil {
+		return nil, err
+	}
+	if err := enqueue(ctx, tx, "orderchange", id, salesevents.OrderChangeRequested, tenantID, salesevents.OrderChangeRequestedData{
+		RequestID: id, LegalEntityID: o.LegalEntityID, OrderID: o.ID, CustomerID: o.CustomerID, Kind: KindCancel, BaseVersion: o.Version, Reason: reason, Actor: actor, Diff: salesevents.DiffOf(diff),
+	}); err != nil {
+		return nil, err
+	}
+	r, err := loadChangeRequest(ctx, tx, tenantID, id, false)
+	return &r, err
+}
+
+// WithdrawChangeRequest lets the requester take back their own PENDING
+// request (FR-27.9): it ends as WITHDRAWN, the order stays as it is and
+// orderchange.withdrawn is written in the same transaction. Anyone else is
+// refused with SLS-0114 (an approver rejects instead); a request already
+// decided is SLS-0044.
+func (s *Postgres) WithdrawChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out OrderChangeRequest
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		r, err := loadChangeRequest(ctx, tx, p.TenantID, id, true)
+		if err != nil {
+			return err
+		}
+		if r.RequestedBy != actor {
+			return problem(http.StatusForbidden, CodeChangeNotRequester, "only the user who requested a change can withdraw it; an approver rejects it instead")
+		}
+		if r.Version != version {
+			return versionConflict()
+		}
+		if r.Status != ChangePending {
+			return problem(http.StatusConflict, CodeChangeDecided, "the change request was already "+r.Status)
+		}
+		if _, err := tx.Exec(ctx, `update order_change_request set status = 'WITHDRAWN', decided_by = $3, decided_at = $4, decision_comment = $5,
+				version = version + 1 where tenant_id = $1 and id = $2`, p.TenantID, id, actor, now, comment); err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "orderchange", id, salesevents.OrderChangeWithdrawn, p.TenantID, salesevents.OrderChangeDecidedData{
+			RequestID: id, LegalEntityID: r.LegalEntityID, OrderID: r.OrderID, Kind: r.Kind, RequestedBy: r.RequestedBy, Actor: actor, Comment: comment,
+		}); err != nil {
+			return err
+		}
+		out, err = loadChangeRequest(ctx, tx, p.TenantID, id, false)
 		return err
 	})
 	return out, err
@@ -301,7 +383,7 @@ func (s *Postgres) RejectChangeRequest(ctx context.Context, id string, version i
 			return err
 		}
 		if err := enqueue(ctx, tx, "orderchange", id, salesevents.OrderChangeRejected, p.TenantID, salesevents.OrderChangeDecidedData{
-			RequestID: id, LegalEntityID: r.LegalEntityID, OrderID: r.OrderID, RequestedBy: r.RequestedBy, Actor: actor, Comment: comment,
+			RequestID: id, LegalEntityID: r.LegalEntityID, OrderID: r.OrderID, Kind: r.Kind, RequestedBy: r.RequestedBy, Actor: actor, Comment: comment,
 		}); err != nil {
 			return err
 		}
