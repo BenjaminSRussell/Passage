@@ -125,9 +125,11 @@ func (s *Postgres) RunSimulation(ctx context.Context, req SimulationRequest) (Ve
 			case domain.OrderTransfer:
 				counts.Transfer++
 			}
-			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12)`,
-				p.TenantID, ids.New(), versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule)
+			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
+				planning_priority, buffer_zone)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13::numeric, nullif($14, ''))`,
+				p.TenantID, ids.New(), versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
+				priorityText(o.PlanningPriority), o.BufferZone)
 		}
 		for _, pg := range r.Pegging {
 			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)

@@ -54,7 +54,7 @@ export const itemTypeLabel: Record<BufferItemType, string> = {
 };
 
 export const zoneTone: Record<BufferZone, BadgeTone> = { red: "danger", yellow: "warning", green: "success" };
-const zoneLabel: Record<BufferZone, string> = { red: "Red", yellow: "Yellow", green: "Green" };
+export const zoneLabel: Record<BufferZone, string> = { red: "Red", yellow: "Yellow", green: "Green" };
 
 /**
  * Moves the decimal point of a decimal string by `places` (2 turns 0.5306 into

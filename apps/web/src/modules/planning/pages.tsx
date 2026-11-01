@@ -30,6 +30,7 @@ import {
   type PlannedOrder,
   type PlanVersion,
 } from "./api/client";
+import { priorityPercent, zoneLabel, zoneTone } from "./BufferPages";
 import { FirmCard, isFirmable, rangeIds, useShiftHeld } from "./Firming";
 import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
 import { MaintainOrderCard } from "./MaintainOrder";
@@ -43,7 +44,7 @@ export const PAGE_LIMIT = 500;
 const dash = "—";
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase"] as const;
+const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -59,7 +60,15 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   cancel: "warning",
   decrease: "warning",
   increase: "warning",
+  "red-zone": "danger",
 };
+
+/** The DDMRP buffer priority and zone of an order that replenishes a buffer (FR-22.16). */
+function bufferPriority(o: PlannedOrder) {
+  if (!o.planningPriority) return dash;
+  const pct = priorityPercent(o.planningPriority);
+  return o.bufferZone ? <Badge tone={zoneTone[o.bufferZone]}>{`${pct} ${zoneLabel[o.bufferZone]}`}</Badge> : pct;
+}
 
 const targetLabel: Record<NonNullable<PlannedOrder["firmedTargetType"]>, string> = {
   "purchase-order": "Purchase order",
@@ -277,6 +286,7 @@ export function PlannedOrdersPage() {
       render: (o) => (o.delayDays > 0 ? <Badge tone="warning">{`${o.delayDays} days`}</Badge> : dash),
     },
     { key: "lotRule", header: "Lot rule" },
+    { key: "planningPriority", header: "Priority", align: "end", render: bufferPriority },
     { key: "status", header: "Status", render: (o) => <StatusPill status={o.status} /> },
     {
       key: "select",
@@ -478,6 +488,7 @@ export function PlannedOrderPage() {
               ["Expected", o.futuresDate ?? dash],
               ["Delay", o.delayDays > 0 ? `${o.delayDays} days` : dash],
               ["Lot rule", o.lotRule],
+              ...(o.planningPriority ? ([["Buffer priority", bufferPriority(o)]] as [string, ReactNode][]) : []),
               ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ?? dash, true]] as [string, ReactNode, boolean][]) : []),
               ...(o.quotaArrangementId
                 ? ([

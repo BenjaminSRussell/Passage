@@ -150,3 +150,18 @@ describe("Increase messages (FR-22.7)", () => {
     await waitFor(() => expect(within(screen.getByRole("table", { name: "Messages" })).queryByText("Shortage")).not.toBeInTheDocument());
   });
 });
+
+describe("Red-zone messages (PLAN-0010, FR-22.16)", () => {
+  it("lists them and filters by red zone", async () => {
+    const red: Message = { action: "red-zone", itemId: cell.itemId, supplyRef: "PO-7", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "115" };
+    const delay: Message = { ...red, action: "delay", supplyRef: "PO-8" };
+    const fetchMock = vi.fn(async (url: string) => json({ items: url.includes("action=red-zone") ? [red] : [red, delay] }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("Red zone")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "red-zone" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=red-zone"))).toBe(true));
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "Messages" })).queryByText("Delay")).not.toBeInTheDocument());
+  });
+});

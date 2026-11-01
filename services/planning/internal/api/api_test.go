@@ -84,6 +84,8 @@ type fakeStore struct {
 	// Scenarios and simulation runs (scenario_test.go).
 	scenarios   []store.Scenario
 	scenarioKey map[string]string
+	// runBuffers is what RunBuffers returns (run_buffer_test.go).
+	runBuffers  []domain.RunBuffer
 	lastSim     store.SimulationRequest
 	simulations int
 }

@@ -73,6 +73,7 @@ type Store interface {
 	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
 	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
 	RunQuotas(ctx context.Context, siteID, planEntity string, itemIDs []string, from, to time.Time) ([]domain.RunQuota, error)
+	RunBuffers(ctx context.Context, siteID, planEntity string, itemIDs []string) ([]domain.RunBuffer, error)
 	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
@@ -189,6 +190,21 @@ type PlannedOrder struct {
 	// transfer order a firmed planned order became (FR-22.10).
 	FirmedTargetType *string `json:"firmedTargetType,omitempty"`
 	FirmedTargetID   *string `json:"firmedTargetId,omitempty"`
+	// PlanningPriority and BufferZone are set on an order that replenishes a
+	// DDMRP buffer (FR-22.16, BR-22.11): net-flow position / top of green, and
+	// the buffer's zone.
+	PlanningPriority *string `json:"planningPriority,omitempty"`
+	BufferZone       *string `json:"bufferZone,omitempty"`
+}
+
+// priorityText is the planning priority as a numeric parameter, nil when the
+// order replenishes no buffer.
+func priorityText(p *decimal.Decimal) *string {
+	if p == nil {
+		return nil
+	}
+	s := p.String()
+	return &s
 }
 
 // Message is one action or delay message of the current version.
@@ -333,11 +349,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
 			}
 			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
-				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id)
+				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id, planning_priority, buffer_zone)
 				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16,
-				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid)`,
+				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid, $20::numeric, nullif($21, ''))`,
 				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID)
+				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID, priorityText(o.PlanningPriority), o.BufferZone)
 		}
 		for _, pg := range r.Pegging {
 			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
@@ -577,14 +593,15 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
-	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.quota_arrangement_id::text, o.quota_source_id::text, o.firmed_target_type, o.firmed_target_id::text
+	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.quota_arrangement_id::text, o.quota_source_id::text, o.firmed_target_type, o.firmed_target_id::text,
+	o.planning_priority::text, o.buffer_zone
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
 	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID, &o.QuotaArrangementID, &o.QuotaSourceID,
-		&o.FirmedTargetType, &o.FirmedTargetID)
+		&o.FirmedTargetType, &o.FirmedTargetID, &o.PlanningPriority, &o.BufferZone)
 	return o, err
 }
 

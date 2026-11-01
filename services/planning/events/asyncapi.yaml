@@ -159,7 +159,7 @@ components:
         plan_code: {type: string}
         version_id: {type: string, format: uuid}
         site_id: {type: string, format: uuid}
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
         item_id: {type: string, format: uuid}
         supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}

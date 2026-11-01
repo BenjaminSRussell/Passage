@@ -252,7 +252,7 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		Scenario scenarioDTO `json:"scenario"`
 		Request  runRequest  `json:"request"`
 	}{scenarioDTOOf(sc), req})
-	asOf, items, ok := a.buildSnapshot(w, r, sc.Spec.PlanCode, req)
+	asOf, items, buffers, ok := a.buildSnapshot(w, r, sc.Spec.PlanCode, req)
 	if !ok {
 		return
 	}
@@ -262,12 +262,15 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := a.now()
-	result, planned, err := a.plan(req, asOf, items)
+	// Buffers apply after the scenario: a lead-time override moves the buffer's
+	// due day, and demand added to a buffered item is absorbed by its buffer.
+	result, planned, err := a.plan(req, asOf, domain.ApplyBuffers(items, buffers))
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
 		return
 	}
+	result = domain.AddBufferResults(result, buffers)
 	v, replayed, err := a.store.RunSimulation(r.Context(), store.SimulationRequest{
 		ScenarioCode: code, LegalEntityID: req.LegalEntityID, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: planned,
 		DurationMs: a.now().Sub(started).Milliseconds(), InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,

@@ -33,6 +33,7 @@ const (
 	RefBOM      = "bom-line"
 	RefSurplus  = "surplus"
 	RefPlanned  = "planned-order"
+	RefBuffer   = "buffer"
 
 	ActionDelay    = "delay"
 	ActionPostpone = "postpone"
@@ -41,6 +42,8 @@ const (
 	ActionCancel   = "cancel"
 	ActionDecrease = "decrease"
 	ActionIncrease = "increase"
+	// ActionRedZone is the PLAN-0010 message: a DDMRP buffer is in its red zone (FR-22.16).
+	ActionRedZone = "red-zone"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -129,6 +132,11 @@ type PlannedOrder struct {
 	// VendorID, QuotaArrangementID and QuotaSourceID are set by ApplyQuota when
 	// a quota arrangement allocated the order to a source (FR-22.17).
 	VendorID, QuotaArrangementID, QuotaSourceID string
+	// PlanningPriority and BufferZone are set by AddBufferResults on an order
+	// that replenishes a DDMRP buffer (FR-22.16, BR-22.11): the buffer's
+	// net-flow position over its top of green, and the zone it is in.
+	PlanningPriority *decimal.Decimal
+	BufferZone       string
 }
 
 // Peg links one unit of supply to the demand it covers (ReqTransCov).

@@ -306,8 +306,19 @@ from-warehouse), at most once per arrangement, with quota, base, allocated
 length, priority and a blocked flag; the quotas must add up to more than 0.
 Validity periods (inclusive) of arrangements for the same item and site must
 not overlap: 409 `PLAN-QUOTA-OVERLAP`, checked under a transaction advisory
-lock on the item and site. Responses carry each source's BR-22.12 rating. A run
-does not use buffers or arrangements yet (NOT-IMPLEMENTED.md).
+lock on the item and site. Responses carry each source's BR-22.12 rating. A plan
+run allocates its planned orders to the arrangement's sources (slice 19).
+
+A plan run (and a simulation) replenishes a decoupling point by its stored
+buffer (slice 20, FR-22.16, BR-22.11): an item whose site-scope item coverage
+has `decouplingPoint` and that has a site-scope buffer at the run's site (of the
+plan's legal entity) gets one demand of the buffer's planned quantity, due after
+the DLT and no earlier than its lead time, instead of being netted; its own
+demand, receipts, on-hand, safety stock and min/max are not used, it is removed
+from its parents' components, and its own BOM still explodes. Its planned orders
+carry `planningPriority` (NFP / TOG) and `bufferZone`; a red buffer raises the
+`red-zone` action message (PLAN-0010) on each order. The buffer is as fresh as
+its last recalculation (NOT-IMPLEMENTED.md row 7).
 
 ## Planning calculators (slice 3)
 

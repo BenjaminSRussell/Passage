@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 19)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 20)
 
-Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail), all registered in `module.ts` and built from the
+Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail; slice 20 adds the DDMRP buffer priority and zone as a Priority column on the planned orders list and on the planned-order detail, and the red-zone message action), all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -19,7 +19,7 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   outside a text field firms the selection (`aria-keyshortcuts` on the button;
   tests in `keys.test.tsx`).
 - `/planning/messages`: action and delay messages with an action filter
-  (slice 4 adds cancel and decrease, slice 6 increase).
+  (slice 4 adds cancel and decrease, slice 6 increase, slice 20 red zone).
 - `/planning/net-requirements` (slice 5): the MD04-style view of one item
   (`?plan=` and `?item=`) in the current version: date, gross requirements,
   scheduled and planned receipts, projected balance (negative shown as a

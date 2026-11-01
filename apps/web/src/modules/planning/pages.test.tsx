@@ -188,6 +188,27 @@ describe("Planned orders page", () => {
   });
 });
 
+describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
+  const buffered: PlannedOrder = { ...purchase, id: "00000000-0000-0000-0000-0000000000a3", number: "PLN-000007", qty: "115", planningPriority: "0.5306", bufferZone: "yellow" };
+
+  it("shows the buffer priority and zone in the list, a dash on other orders", async () => {
+    stubApi(["/planned-orders", () => json({ items: [order, buffered] })]);
+    renderAt("/planning/planned-orders");
+    const table = await findTable({ name: "Planned orders" });
+    await waitFor(() => expect(within(table).getByText("53.06% Yellow")).toBeInTheDocument());
+    const plain = within(table).getByRole("button", { name: "PLN-000001" }).closest("tr")!;
+    expect(within(plain).queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it("shows the buffer priority on the order page", async () => {
+    stubApi(["/pegging", () => json({ ...pegging, orderId: buffered.id, number: buffered.number })], ["/planned-orders/", () => json(buffered)]);
+    renderAt(`/planning/planned-orders/${buffered.id}`);
+    expect(await screen.findByRole("heading", { level: 2, name: "Planned order PLN-000007" })).toBeInTheDocument();
+    expect(screen.getByText("Buffer priority")).toBeInTheDocument();
+    expect(screen.getByText("53.06% Yellow")).toBeInTheDocument();
+  });
+});
+
 describe("Planned order page", () => {
   it("shows the order and explains it down to the sales line", async () => {
     const fetchMock = stubApi(["/pegging", () => json(pegging)], ["/planned-orders/", () => json(order)]);

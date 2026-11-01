@@ -5,8 +5,10 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
+export const BufferZone = z.enum(["red", "yellow", "green"]);
+export type BufferZone = z.infer<typeof BufferZone>;
 
 export const PlannedOrder = z.object({
   id: z.string(),
@@ -30,6 +32,9 @@ export const PlannedOrder = z.object({
   /** Set once the order is firmed: the purchase, production or transfer order it became (FR-22.10). */
   firmedTargetType: TargetType.nullish(),
   firmedTargetId: z.string().nullish(),
+  /** Set on an order that replenishes a DDMRP buffer (FR-22.16): its planning priority (NFP / TOG) and zone. */
+  planningPriority: z.string().nullish(),
+  bufferZone: BufferZone.nullish(),
 });
 export type PlannedOrder = z.infer<typeof PlannedOrder>;
 
@@ -711,9 +716,6 @@ export async function updateBufferProfile(id: string, version: number, input: Bu
     body: JSON.stringify(input),
   });
 }
-
-export const BufferZone = z.enum(["red", "yellow", "green"]);
-export type BufferZone = z.infer<typeof BufferZone>;
 
 /** The stored result of one buffer recalculation (data model DdmrpBuffer, BR-22.11). */
 export const DdmrpBuffer = z.object({

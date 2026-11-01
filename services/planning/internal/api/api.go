@@ -416,28 +416,31 @@ func toRequirements(in []requirementDTO, asOf time.Time) ([]domain.Requirement, 
 // buildSnapshot turns a validated run request into the engine's items: stored
 // site-scope item coverage fills what the request leaves out (FR-22.2,
 // FR-22.5) and the forecast model's reduced cells are added as demand
-// (FR-22.8). On failure it has written the problem response and returns false.
-// An operational run and a simulation (FR-22.15) take the same snapshot.
-func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest) (time.Time, []domain.Item, bool) {
+// (FR-22.8). It also returns the stored DDMRP buffers of the items (FR-22.16),
+// which the caller applies with domain.ApplyBuffers as the last change to the
+// items (after a scenario's overrides) and with domain.AddBufferResults on the
+// final result. On failure it has written the problem response and returns
+// false. An operational run and a simulation (FR-22.15) take the same snapshot.
+func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest) (time.Time, []domain.Item, []domain.RunBuffer, bool) {
 	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
 	if err != nil {
 		httpx.Fail(w, r, err)
-		return time.Time{}, nil, false
+		return time.Time{}, nil, nil, false
 	}
 	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
 	if err != nil {
 		httpx.Fail(w, r, err)
-		return time.Time{}, nil, false
+		return time.Time{}, nil, nil, false
 	}
 	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return time.Time{}, nil, false
+		return time.Time{}, nil, nil, false
 	}
 	asOf, _ := time.Parse(dateLayout, req.AsOf)
 	items, err := req.toDomain(asOf)
 	if err != nil {
 		validationFailed(w, r, map[string]string{"items": err.Error()})
-		return time.Time{}, nil, false
+		return time.Time{}, nil, nil, false
 	}
 	if req.ForecastModel != "" {
 		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
@@ -447,7 +450,7 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
 			}
 			httpx.Fail(w, r, err)
-			return time.Time{}, nil, false
+			return time.Time{}, nil, nil, false
 		}
 		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
@@ -455,11 +458,16 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 		firmed, err := a.store.FirmedSupply(r.Context(), code, req.SiteID, asOf)
 		if err != nil {
 			httpx.Fail(w, r, err)
-			return time.Time{}, nil, false
+			return time.Time{}, nil, nil, false
 		}
 		addFirmedSupply(items, asOf, firmed)
 	}
-	return asOf, items, true
+	buffers, err := a.store.RunBuffers(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return time.Time{}, nil, nil, false
+	}
+	return asOf, items, buffers, true
 }
 
 func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
@@ -492,12 +500,12 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		PlanCode string     `json:"planCode"`
 		Request  runRequest `json:"request"`
 	}{code, req})
-	asOf, items, ok := a.buildSnapshot(w, r, code, req)
+	asOf, items, buffers, ok := a.buildSnapshot(w, r, code, req)
 	if !ok {
 		return
 	}
 	started := a.now()
-	result, planned, err := a.plan(req, asOf, items)
+	result, planned, err := a.plan(req, asOf, domain.ApplyBuffers(items, buffers))
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
@@ -508,6 +516,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	result = domain.AddBufferResults(result, buffers)
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
 		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,
@@ -770,9 +779,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease or increase"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase or red-zone"})
 		return
 	}
 	limit, ok := limitParam(w, r)

@@ -26,7 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
-      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source.'
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source. DDMRP (FR-22.16, BR-22.11): an item whose site-scope item coverage is a decouplingPoint and that has a stored site-scope buffer at siteId (of the plan''s legal entity) is replenished by the buffer''s planned quantity (the last recalculation), due after the decoupled lead time and no earlier than the item''s lead time, instead of being netted: its own demand, receipts, on-hand, safety stock and min/max are not used, and it is removed from the components of other items (the decoupling point absorbs the demand above it) while its own components still explode. Its planned orders carry the buffer''s planningPriority and bufferZone. A green buffer plans nothing; a buffer in the red zone raises a red-zone action message (PLAN-0010) on each of its orders (on each part of a quota split).'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -340,7 +340,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -1122,7 +1122,10 @@ paths:
         with the operational version through the version diff. The plan must
         already have an operational run (404 PLAN-NOT-FOUND); an inactive
         scenario is 409 PLAN-SCENARIO-INACTIVE. The Idempotency-Key
-        fingerprint covers the stored scenario and the request.
+        fingerprint covers the stored scenario and the request. DDMRP buffers
+        (FR-22.16) apply after the scenario: a lead-time override of a
+        buffered item moves its buffer order, and demand the scenario adds to
+        a buffered item is absorbed by its buffer, as in an operational run.
       x-passage-duty: planning.simulate
       parameters:
         - $ref: '#/components/parameters/CoverageCode'
@@ -2049,6 +2052,8 @@ components:
         quotaSourceId: {type: string, format: uuid, description: The quota source the run allocated the order to; firming books its quantity on that source. A vendor change on the order moves it to that vendor's source of the arrangement, or out of the arrangement when the vendor is not one of its sources}
         firmedTargetType: {type: string, enum: [purchase-order, production-order, transfer-order], description: Set once the order is firmed}
         firmedTargetId: {type: string, format: uuid, description: Id of the order it became (FR-22.10); orders of one purchase group share it}
+        planningPriority: {type: string, description: 'Set on an order that replenishes a DDMRP buffer (FR-22.16, BR-22.11): the buffer''s planning priority, net-flow position / top of green to 4 places (0.5306 in the AC-22.12 example); the lower, the more urgent. Absent on other orders'}
+        bufferZone: {type: string, enum: [red, yellow, green], description: 'Zone of the buffer the order replenishes, from its last recalculation; absent on other orders'}
     FirmRequest:
       type: object
       required: [plannedOrderIds]
@@ -2192,11 +2197,11 @@ components:
     Message:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
         itemId: {type: string, format: uuid}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order'}
         delayDays: {type: integer}
         qty: {type: string}
     Problem:
