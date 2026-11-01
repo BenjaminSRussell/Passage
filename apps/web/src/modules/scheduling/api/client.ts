@@ -409,6 +409,67 @@ export async function fetchLoadJobs(resourceId: string, from: string, to: string
   return { items: body.items, truncated: body.truncated === true };
 }
 
+/** Utilization of one resource by a run, over the span of the run's current jobs (PRD 4.23.14). */
+export interface RunResourceKpi {
+  resourceId: string;
+  resourceCode: string;
+  jobs: number;
+  bookedMinutes: number;
+  openMinutes: number;
+  utilizationPct: number;
+}
+
+/** Measures of the jobs a run still holds; a later run or move replaces jobs. */
+export interface RunKpis {
+  runId: string;
+  placedJobs: number;
+  orders: number;
+  lateJobs: number;
+  lateOrders: number;
+  maxLateMinutes: number;
+  changeoverMinutes: number;
+  bookedMinutes: number;
+  spanStart: string | null;
+  spanEnd: string | null;
+  resources: RunResourceKpi[];
+}
+
+export async function getRunKpis(id: string, signal?: AbortSignal): Promise<RunKpis> {
+  const body = await send<Partial<RunKpis>>(`/runs/${encodeURIComponent(id)}/kpis`, {}, signal);
+  if (!Array.isArray(body.resources)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no resources");
+  }
+  return body as RunKpis;
+}
+
+/** An order planned past its due date or holding an unplaced operation (the Late orders inquiry). */
+export interface LateOrder {
+  orderId: string;
+  dueAt: string | null;
+  plannedStart: string | null;
+  plannedEnd: string | null;
+  lateMinutes: number;
+  lateOperations: number;
+  unplacedOperations: number;
+  operations: number;
+  firmed: boolean;
+  /** Pegged demand: orders pegged to consume this order's output. */
+  dependentOrders: number;
+}
+
+export interface LateOrders {
+  items: LateOrder[];
+  truncated: boolean;
+}
+
+export async function fetchLateOrders(minLateMinutes: number, signal?: AbortSignal): Promise<LateOrders> {
+  const body = await send<Partial<LateOrders>>(`/late-orders${query({ minLateMinutes: String(minLateMinutes), limit: "200" })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return { items: body.items, truncated: body.truncated === true };
+}
+
 // Slice 2: resource networks, setup matrices, cleanout rules, capacity blocks
 // and campaigns (FR-23.13 to FR-23.17). Decimals travel as strings.
 

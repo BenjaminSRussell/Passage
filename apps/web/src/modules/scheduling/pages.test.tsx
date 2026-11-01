@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { GanttBar, Network, Operation, Resource, Run } from "./api/client";
+import type { GanttBar, Network, Operation, Resource, Run, RunKpis } from "./api/client";
 import { dayStart, today } from "./format";
 import scheduling from "./module";
 import { parseIds, validateRun } from "./NewRunPage";
@@ -98,6 +98,10 @@ const run: Run = {
   warnings: [],
   createdAt: "2026-10-26T06:00:00Z",
 };
+
+// The run detail also asks for the run's plan measures (runkpis.test.tsx covers them).
+const noKpis: RunKpis = { runId: RUN, placedJobs: 0, orders: 0, lateJobs: 0, lateOrders: 0, maxLateMinutes: 0, changeoverMinutes: 0, bookedMinutes: 0, spanStart: null, spanEnd: null, resources: [] };
+const kpisOr = (url: URL, reply: () => Reply): Reply => (url.pathname.endsWith("/kpis") ? json(200, noKpis) : reply());
 
 const operation: Operation = {
   id: JOB1,
@@ -304,7 +308,7 @@ describe("Capacity load", () => {
 
 describe("Schedule runs", () => {
   it("lists runs and opens one", async () => {
-    handler = (url) => (url.pathname.endsWith(`/runs/${RUN}`) ? json(200, { ...run, messages: [`${JOB1}: no candidate resource has open capacity in the horizon`] }) : json(200, { items: [run, { ...run, id: RUN2, direction: "backward" }] }));
+    handler = (url) => kpisOr(url, () => (url.pathname.endsWith(`/runs/${RUN}`) ? json(200, { ...run, messages: [`${JOB1}: no candidate resource has open capacity in the horizon`] }) : json(200, { items: [run, { ...run, id: RUN2, direction: "backward" }] })));
     const { container } = renderAt("/scheduling/runs");
     const table = await findTable({ name: "Schedule runs" });
     await waitFor(() => expect(table).toHaveTextContent("2 h 30 min"));
@@ -324,7 +328,7 @@ describe("Schedule runs", () => {
       { code: "SCHED-0012", operationId: JOB1, detail: "setup matrix has no entry A -> D; route setup time 15 min used" },
       { code: "SCHED-0014", operationId: JOB2, detail: "job does not match any block on PAINT-1; placed in unblocked capacity" },
     ];
-    handler = () => json(200, { ...run, warnings, messages: [`${JOB1}: SCHED-0009 NETWORK_INFEASIBLE: no allowed successor resource in network MIX-FILL`] });
+    handler = (url) => kpisOr(url, () => json(200, { ...run, warnings, messages: [`${JOB1}: SCHED-0009 NETWORK_INFEASIBLE: no allowed successor resource in network MIX-FILL`] }));
     const { container } = renderAt(`/scheduling/runs/${RUN}`);
     const list = await screen.findByRole("list", { name: "Run warnings" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
@@ -332,6 +336,7 @@ describe("Schedule runs", () => {
     expect(list).toHaveTextContent("route setup time 15 min used");
     expect(list).toHaveTextContent("SCHED-0014 No matching capacity block");
     expect(screen.getByText(/NETWORK_INFEASIBLE/)).toBeInTheDocument();
+    expect(await screen.findByText("No jobs carry this run")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 
@@ -356,7 +361,7 @@ describe("Schedule runs", () => {
   });
 
   it("starts an infinite site run and opens it", async () => {
-    handler = (_url, init) => (init.method === "POST" ? json(201, { ...run, finite: false }) : json(200, { ...run, finite: false }));
+    handler = (url, init) => kpisOr(url, () => (init.method === "POST" ? json(201, { ...run, finite: false }) : json(200, { ...run, finite: false })));
     const { container } = renderAt("/scheduling/runs/new");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByLabelText("Finite capacity"));
@@ -371,7 +376,7 @@ describe("Schedule runs", () => {
 
   it("starts a backward run and shows the late-fallback warning on the run", async () => {
     const warning = { code: "SCHED-0003", operationId: JOB1, detail: "order a is late by 90 min (backward scheduling fell back to forward)" };
-    handler = (_url, init) => json(init.method === "POST" ? 201 : 200, { ...run, direction: "backward", warnings: [warning] });
+    handler = (url, init) => kpisOr(url, () => json(init.method === "POST" ? 201 : 200, { ...run, direction: "backward", warnings: [warning] }));
     renderAt("/scheduling/runs/new");
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "backward" } });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));

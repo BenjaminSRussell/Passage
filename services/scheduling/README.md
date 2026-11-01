@@ -214,6 +214,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
+| GET | `/v1/scheduling/runs/{id}/kpis` | `scheduling.read` |
+| GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, EmptyState, PageHeader, Skeleton, StatusPill } from "../../shell/ui";
-import { getRun, RUN_WARNING_LABELS } from "./api/client";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { getRun, getRunKpis, RUN_WARNING_LABELS, type RunResourceKpi } from "./api/client";
 import { dash, formatDateTime, formatMinutes, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
@@ -18,6 +18,7 @@ export function RunDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getRun(id, signal), id);
   const run = state.data;
+  const kpis = useLoad((signal) => getRunKpis(id, signal), id);
 
   if (state.error) {
     return (
@@ -53,6 +54,26 @@ export function RunDetailPage() {
     ["Started", formatDateTime(run.createdAt)],
   ];
 
+  const k = kpis.data;
+  const kpiFacts: [string, string][] = k
+    ? [
+        ["Jobs still holding this run", `${k.placedJobs} of ${run.operationsCount} operations`],
+        ["Orders", String(k.orders)],
+        ["Late orders", `${k.lateOrders} (${k.lateJobs} late jobs)`],
+        ["Latest job late by", k.maxLateMinutes > 0 ? formatMinutes(k.maxLateMinutes) : dash],
+        ["Changeover time", formatMinutes(k.changeoverMinutes)],
+        ["Booked time", formatMinutes(k.bookedMinutes)],
+        ["Span", k.spanStart && k.spanEnd ? `${formatDateTime(k.spanStart)} to ${formatDateTime(k.spanEnd)}` : dash],
+      ]
+    : [];
+  const kpiColumns: DataTableColumn<RunResourceKpi>[] = [
+    { key: "resourceCode", header: "Resource", mono: true },
+    { key: "jobs", header: "Jobs", align: "end" },
+    { key: "bookedMinutes", header: "Booked", align: "end", render: (row) => formatMinutes(row.bookedMinutes) },
+    { key: "openMinutes", header: "Open", align: "end", render: (row) => formatMinutes(row.openMinutes) },
+    { key: "utilizationPct", header: "Utilization %", align: "end", render: (row) => row.utilizationPct.toFixed(1) },
+  ];
+
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -73,6 +94,37 @@ export function RunDetailPage() {
             </div>
           ))}
         </dl>
+      </Card>
+      <Card title="Plan measures">
+        {kpis.error ? (
+          <Alert tone="danger" title="Could not load the plan measures" live="alert" action={<Button size="sm" onClick={kpis.reload}>Try again</Button>}>
+            {kpis.error.message} ({kpis.error.code})
+          </Alert>
+        ) : kpis.loading || !k ? (
+          <div aria-busy="true">
+            <span className="visually-hidden">Loading the plan measures…</span>
+            <Skeleton height="tile" />
+          </div>
+        ) : k.placedJobs === 0 ? (
+          <EmptyState
+            compact
+            headingLevel={3}
+            title="No jobs carry this run"
+            description="A later run or a move replaced its jobs, or it placed nothing. Measures describe the jobs a run still holds."
+          />
+        ) : (
+          <div className={styles.stack}>
+            <dl className={styles.details} aria-label="Plan measures">
+              {kpiFacts.map(([term, value]) => (
+                <div key={term} className={styles.entry}>
+                  <dt className={styles.term}>{term}</dt>
+                  <dd className={styles.value}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <DataTable label="Resource utilization" columns={kpiColumns} rows={k.resources} getRowKey={(row) => row.resourceId} />
+          </div>
+        )}
       </Card>
       <Card title="Warnings">
         {(run.warnings ?? []).length === 0 ? (

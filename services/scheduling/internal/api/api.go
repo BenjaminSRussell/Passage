@@ -177,6 +177,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load/jobs", a.capacityLoadJobs)
+	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
 
 	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)

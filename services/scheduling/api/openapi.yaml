@@ -576,6 +576,64 @@ paths:
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/runs/{id}/kpis:
+    get:
+      operationId: getRunKpis
+      summary: Lateness, changeover and per-resource utilization of the jobs a run holds
+      description: >
+        Measures the jobs that still carry the run's id (a later run or a move
+        replaces jobs, so `placedJobs` against the run's `operationsCount` shows
+        how much of the run is current). `resources` lists each resource the run
+        booked (primary or secondary) with its booked minutes and the open
+        minutes of its calendar, read in the resource's time zone with capacity
+        overrides applied, between the first start and last end of the run's
+        jobs, most used first.
+        A run with no current jobs answers zeros and an empty list.
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The run's measures
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunKpis' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/late-orders:
+    get:
+      operationId: listLateOrders
+      summary: Orders planned past their due date or holding an unplaced operation
+      description: >
+        Orders whose latest job is at least `minLateMinutes` late, plus every
+        order with an operation the scheduler could not place, the most late
+        first and unplaced-only orders after them. A job is late when it ends
+        after its operation's due date (an instant); lateness is that of the
+        jobs now in the plan. At most `limit` orders; `truncated` is true when more exist.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: minLateMinutes
+          in: query
+          required: false
+          description: Smallest lateness to list, in minutes.
+          schema: { type: integer, minimum: 1, maximum: 525600, default: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Late and unplaced orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LateOrder' }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/networks:
     post:
       operationId: createNetwork
@@ -1524,6 +1582,47 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         firmed: { type: boolean }
+    RunKpis:
+      type: object
+      required: [runId, placedJobs, orders, lateJobs, lateOrders, maxLateMinutes, changeoverMinutes, bookedMinutes, spanStart, spanEnd, resources]
+      properties:
+        runId: { type: string, format: uuid }
+        placedJobs: { type: integer, description: Operations whose jobs still carry this run. }
+        orders: { type: integer }
+        lateJobs: { type: integer }
+        lateOrders: { type: integer }
+        maxLateMinutes: { type: integer }
+        changeoverMinutes: { type: integer }
+        bookedMinutes: { type: integer, description: "Minutes of the run's job segments on their primary resources." }
+        spanStart: { type: string, format: date-time, nullable: true, description: First start of the run's current jobs. }
+        spanEnd: { type: string, format: date-time, nullable: true, description: Last end of the run's current jobs. }
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/RunResourceKpi' }
+    RunResourceKpi:
+      type: object
+      required: [resourceId, resourceCode, jobs, bookedMinutes, openMinutes, utilizationPct]
+      properties:
+        resourceId: { type: string, format: uuid }
+        resourceCode: { type: string }
+        jobs: { type: integer }
+        bookedMinutes: { type: integer, description: Minutes the run booked on the resource, as primary or as a secondary resource held with a job. }
+        openMinutes: { type: integer, description: "Open minutes of the resource's calendar, in its own time zone with overrides applied, inside the span." }
+        utilizationPct: { type: number }
+    LateOrder:
+      type: object
+      required: [orderId, dueAt, plannedStart, plannedEnd, lateMinutes, lateOperations, unplacedOperations, operations, firmed, dependentOrders]
+      properties:
+        orderId: { type: string, format: uuid }
+        dueAt: { type: string, format: date-time, nullable: true, description: "The order's delivery date: the latest due date of its operations." }
+        plannedStart: { type: string, format: date-time, nullable: true }
+        plannedEnd: { type: string, format: date-time, nullable: true }
+        lateMinutes: { type: integer, description: Lateness of the most late job. }
+        lateOperations: { type: integer }
+        unplacedOperations: { type: integer }
+        operations: { type: integer }
+        firmed: { type: boolean, description: True when any job of the order is firmed. }
+        dependentOrders: { type: integer, description: "Pegged demand: orders pegged to consume this order's output, which its lateness delays in turn." }
     LoadJob:
       type: object
       required: [jobId, orderId, operNumber, segment, role, start, end, minutesInRange, finite, firmed, lateMinutes]

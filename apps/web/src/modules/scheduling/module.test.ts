@@ -14,6 +14,7 @@ describe("scheduling module", () => {
       expect.arrayContaining([
         "/scheduling",
         "/scheduling/load",
+        "/scheduling/late-orders",
         "/scheduling/runs",
         "/scheduling/runs/new",
         "/scheduling/runs/:id",

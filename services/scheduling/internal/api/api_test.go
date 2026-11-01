@@ -36,6 +36,7 @@ type fakeStore struct {
 	lastIdem  store.Idem
 	lastLoad  store.LoadFilter
 	lastDaily store.DailyLoadFilter
+	lastLate  store.LateOrderFilter
 	lastOps   store.OperationFilter
 	lastOp    store.Operation
 

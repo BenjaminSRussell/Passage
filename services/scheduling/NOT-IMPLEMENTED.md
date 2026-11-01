@@ -331,14 +331,45 @@ error states; each Jobs link passes the bucket's `start` and `end`. Weeks stay
 Monday 00:00 UTC weeks as built in slice 3, so for a resource outside UTC the
 seven days of a week do not add up exactly to that week.
 
+Slice 17 builds the plan measures of a run and the Late orders inquiry (PRD
+4.23.14). `GET /runs/{id}/kpis` measures the jobs that still carry the run's id:
+placed jobs, orders, late jobs and orders, the latest job's lateness, changeover
+minutes, booked minutes, the span of those jobs, and per resource (primary, and
+secondary resources held with a job) the booked minutes against the open
+minutes of its calendar in that span, read in the resource's own time zone with
+capacity overrides applied as in slice 16 (utilization %, most used first). A
+later run or a move replaces jobs, so the figures describe what the run still
+holds and `placedJobs` against the run's `operationsCount` shows how much is
+current; a superseded run answers zeros.
+`GET /late-orders?minLateMinutes&limit` lists orders with a job at least that
+late (default 1 minute, at most 500 orders) and every order with an operation
+stored as unplaced, most late first, with the delivery date (the latest due
+date of the order's operations), planned start and end, late and unplaced
+operation counts, the firmed flag and the pegged demand (orders pegged to
+consume this one). A job is late when it ends after its operation's `dueAt`,
+an instant, so no time zone enters the comparison; `late_minutes` is the one
+the scheduler stores and the Gantt shows. Both are reads under
+`scheduling.read`; no event, no new duty. Migration `0012_run_kpi_indexes.sql`
+adds the `(tenant_id, run_id)` index of PRD 4.23.19 on jobs and secondary
+bookings and partial indexes on late jobs and unplaced operations, so the
+inquiry reads the late part of the plan rather than all of it. Web: the run
+detail gains a Plan measures card with its own loading, empty and error states,
+and a new Late orders page with a threshold selector. Not built: comparing two
+runs side by side (replaced jobs are not kept per run, so a comparison needs
+stored run snapshots), run-scoped late orders (an unplaced operation is not
+linked to a run), the site filter (resources carry no site yet, see the sites
+handoff below) and sales lines as pegged demand (pegs link orders to orders,
+see the AC-23.3 handoff).
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
-No file outside the wave 23 ownership entry was changed. One handoff from
-slice 16 lies outside it:
+No file outside the wave 23 ownership entry was changed. Two handoffs
+from slices 16 and 17 lie outside it:
 
 | Item | Status | Reason |
 |---|---|---|
 | `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | handoff | The policy bundle is outside this wave's paths, and the existing row `/v1/scheduling/capacity-load` does not match the sub-path, so the gateway's OPA check denies the drill-down until the row is added. The service enforces `scheduling.read` itself; no new duty (issue #313 needs nothing for this slice). |
+| `policies/authz/data.json`: resource rows `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` (GET) under `scheduling.read` | handoff | Neither is in the policy bundle (outside this wave's paths); the existing `/v1/scheduling/runs/*` row may not match the two-segment sub-path, and `/late-orders` has no row, so the gateway's OPA check can deny both until they are added. The service enforces `scheduling.read` itself; no new duty. |
 
 ## Ticket deliverables
 
@@ -403,9 +434,11 @@ slice 16 lies outside it:
 | PRD 4.23.17 limit of 100 orders in the propagation preview | later slice of PSG-23 | The preview walks the same 500 orders / 5 levels as the commit, so what is previewed is what is saved. |
 | FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30; per-order `:schedule` (scope `order`) | later slice of PSG-23 | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |
-| Order header data on bars (item, quantity) and the Late orders inquiry | handoff — wave 21 | Bars carry order id, operation number and late minutes only. |
+| Late orders inquiry (4.23.14) | built (slice 17) | `GET /late-orders` and the Late orders page: late and unplaced orders with due, planned end, lateness. Item and quantity per order are not shown. |
+| Order header data on bars and late orders (item, quantity) | handoff — wave 21 | Bars and late orders carry the order id, operation counts and dates only. |
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
-| Run comparison, resource utilization KPI, changeover analysis and network feasibility reports (4.23.14) | later slice of PSG-23 | Runs list makespan and lateness; comparison screens are not built. |
+| Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
+| Run comparison and network feasibility reports (4.23.14) | later slice of PSG-23 | Comparison needs per-run snapshots of the jobs, which a run replaces; not stored. |
 | Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |

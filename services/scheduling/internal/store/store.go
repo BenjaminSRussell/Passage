@@ -244,6 +244,7 @@ type Store interface {
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	LoadStore
+	RunKPIStore
 	SetupStore
 	PegStore
 	OverrideStore
