@@ -443,8 +443,8 @@ func (s *Postgres) GetBomVersion(ctx context.Context, id string) (v domain.BomVe
 func getEco(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.Eco, error) {
 	var e domain.Eco
 	var releaseDate *time.Time
-	err := tx.QueryRow(ctx, `select id::text, number, state, release_date, decided_by from eco where tenant_id = $1 and id = $2::uuid`, tenantID, id).
-		Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy)
+	err := tx.QueryRow(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason from eco where tenant_id = $1 and id = $2::uuid`, tenantID, id).
+		Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return e, httpx.NewProblem(http.StatusNotFound, CodeEcoNotFound, "ECO not found")
 	}
@@ -505,8 +505,8 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 		if known != len(versionIDs) {
 			return httpx.NewProblem(http.StatusNotFound, CodeVersionNotFound, "a replaced or replacing BOM version does not exist")
 		}
-		if _, err := tx.Exec(ctx, `insert into eco (tenant_id, id, number, state, release_date) values ($1, $2, $3, $4, $5)`,
-			p.TenantID, e.ID, e.Number, string(e.State), zeroToNil(e.ReleaseDate)); err != nil {
+		if _, err := tx.Exec(ctx, `insert into eco (tenant_id, id, number, state, release_date, created_by) values ($1, $2, $3, $4, $5, $6)`,
+			p.TenantID, e.ID, e.Number, string(e.State), zeroToNil(e.ReleaseDate), e.CreatedBy); err != nil {
 			return err
 		}
 		for _, r := range e.Replaces {
@@ -549,7 +549,7 @@ func (s *Postgres) ListEcos(ctx context.Context, state, afterID string, limit in
 	}
 	var items []domain.Eco
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, number, state, release_date, decided_by from eco
+		rows, err := tx.Query(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason from eco
 			where tenant_id = $1 and id > $2::uuid and ($3 = '' or state = $3) order by id limit $4`, p.TenantID, afterID, state, limit+1)
 		if err != nil {
 			return err
@@ -560,7 +560,7 @@ func (s *Postgres) ListEcos(ctx context.Context, state, afterID string, limit in
 		for rows.Next() {
 			var e domain.Eco
 			var releaseDate *time.Time
-			if err := rows.Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy); err != nil {
+			if err := rows.Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason); err != nil {
 				return err
 			}
 			e.ReleaseDate = valueOrZero(releaseDate)
@@ -613,8 +613,8 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 		if err := lockProducts(ctx, tx, p.TenantID, activatedProducts...); err != nil {
 			return err
 		}
-		if err := transition(ctx, tx, `update eco set state = $3, decided_by = $4, version = version + 1 where tenant_id = $1 and id = $2::uuid and state = $5`,
-			p.TenantID, e.ID, string(e.State), e.DecidedBy, string(prev)); err != nil {
+		if err := transition(ctx, tx, `update eco set state = $3, decided_by = $4, decision_reason = $6, version = version + 1 where tenant_id = $1 and id = $2::uuid and state = $5`,
+			p.TenantID, e.ID, string(e.State), e.DecidedBy, string(prev), e.DecisionReason); err != nil {
 			return err
 		}
 		for _, v := range plan.Expire {
@@ -634,7 +634,7 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 				return err
 			}
 		}
-		if prev == domain.EcoSubmitted && e.State != domain.EcoRejected {
+		if prev == domain.EcoSubmitted && e.State != domain.EcoRejected && e.State != domain.EcoCancelled {
 			if err := emit(ctx, tx, p, e.ID, engevents.EcoApproved, aggregateEco, e.ID, e.EventData()); err != nil {
 				return err
 			}

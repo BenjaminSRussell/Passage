@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-decision-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: workflow
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.gatewayNamespace | quote }}
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: passage-api
+      ports:
+        - { protocol: TCP, port: 8080 }

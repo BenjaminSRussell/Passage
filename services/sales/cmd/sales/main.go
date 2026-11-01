@@ -12,8 +12,10 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/api"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
+	"github.com/BenjaminSRussell/passage/services/sales/internal/upstream"
 	"github.com/BenjaminSRussell/passage/services/sales/migrations"
 )
 
@@ -58,7 +60,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	if signer == nil || getenv("PRODUCT_URL") == "" || getenv("PRODUCTION_URL") == "" {
+		slog.Warn("PRODUCT_URL, PRODUCTION_URL or the service signing key is unset: configured order lines are refused (SLS-0048) and production cannot be planned (SLS-0050)")
+	}
+	up := upstream.New(getenv("PRODUCT_URL"), getenv("PRODUCTION_URL"), signer)
+	a := api.New(store.New(pool)).WithConfigurations(up).WithProduction(up)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

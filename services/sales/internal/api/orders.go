@@ -30,6 +30,7 @@ type orderLineRequest struct {
 	UnitPrice         string  `json:"unitPrice"`
 	DiscPct           *string `json:"discPct"`
 	RequestedShipDate string  `json:"requestedShipDate"`
+	ConfigurationID   *string `json:"configurationId,omitempty"`
 }
 
 // createOrderRequest is the body of POST /v1/sales/orders. customerGroup
@@ -133,6 +134,10 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 		f[path("requestedShipDate")] = "must be a date such as 2027-03-04"
 		valid = false
 	}
+	if l.ConfigurationID != nil && !ids.Valid(*l.ConfigurationID) {
+		f[path("configurationId")] = "must be a UUID"
+		valid = false
+	}
 	qty, errQty := decimal.NewFromString(l.Quantity)
 	price, errPrice := decimal.NewFromString(l.UnitPrice)
 	disc := decimal.Zero
@@ -161,7 +166,7 @@ func buildLine(i int, l orderLineRequest, f map[string]string, path func(string)
 		return store.Line{}, false
 	}
 	return store.Line{LineNo: i + 1, ProductID: l.ProductID, Quantity: qty, Unit: l.Unit, SiteID: l.SiteID, WarehouseID: l.WarehouseID,
-		UnitPrice: price, DiscPct: disc, LineNet: net, RequestedShipDate: l.RequestedShipDate}, true
+		UnitPrice: price, DiscPct: disc, LineNet: net, RequestedShipDate: l.RequestedShipDate, ConfigurationID: l.ConfigurationID}, true
 }
 
 // createOrder stores an intake order. A repeat of Idempotency-Key or of
@@ -187,6 +192,10 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the order's legal entity is outside the caller's scope"))
+		return
+	}
+	if err := a.checkConfigurations(r.Context(), in.LegalEntityID, in.Lines); err != nil {
+		a.fail(w, r, "check configurations", err)
 		return
 	}
 	hash, err := domain.RequestHash(req)

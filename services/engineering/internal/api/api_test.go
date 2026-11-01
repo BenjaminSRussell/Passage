@@ -522,7 +522,7 @@ func TestCreateEco(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := newRouter(tc.store, approves)
-			rec := do(r, http.MethodPost, ecos, tc.body, tc.duties, true)
+			rec := do(r, http.MethodPost, ecos, tc.body, tc.duties, true, "X-Passage-User", "rita")
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
@@ -534,7 +534,7 @@ func releasableRecord(state domain.EcoState, releaseDate time.Time) store.EcoRec
 	draft := activeVersion(newVersion, "BIKE", "2026-07-01", "", oneLine(1, "WHEEL", 1))
 	draft.Status = domain.StatusDraft
 	return store.EcoRecord{
-		Eco:      domain.Eco{ID: ecoID, Number: "ECO-1", State: state, ReleaseDate: releaseDate, Replaces: []domain.Replacement{{OldVersionID: oldVersion, NewVersionID: newVersion}}},
+		Eco:      domain.Eco{ID: ecoID, Number: "ECO-1", State: state, CreatedBy: "rita", ReleaseDate: releaseDate, Replaces: []domain.Replacement{{OldVersionID: oldVersion, NewVersionID: newVersion}}},
 		Versions: []domain.BomVersion{activeVersion(oldVersion, "BIKE", "2025-01-01", "", oneLine(1, "WHEEL", 1)), draft},
 	}
 }

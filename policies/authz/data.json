@@ -1100,6 +1100,12 @@
       {"resource": "/v1/quality/nonconformances/*:check-effectiveness", "methods": ["POST"]},
       {"resource": "/v1/quality/nonconformances/*:complete-step", "methods": ["POST"]}
     ]},
+    "quality.capa.execute": {"service_only": true, "permissions": [
+      {"resource": "/v1/quality/nonconformances/*", "methods": ["GET"]},
+      {"resource": "/v1/quality/nonconformances/*/corrections", "methods": ["POST"]},
+      {"resource": "/v1/quality/nonconformances/*:complete-step", "methods": ["POST"]},
+      {"resource": "/v1/quality/nonconformances/*:check-effectiveness", "methods": ["POST"]}
+    ]},
     "QM_COA": {"permissions": [{"resource": "/v1/quality/coa:generate", "methods": ["POST"]}]},
     "QM_COMPLIANCE_MAINTAIN": {"permissions": [
       {"resource": "/v1/quality/compliance-lists", "methods": ["POST"]},
@@ -1492,6 +1498,12 @@
       {"resource": "/v1/engineering/ecos", "methods": ["POST"]}
     ]},
     "engineering.eco.approve": {"permissions": [{"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]}]},
+    "engineering.eco.workflow": {"service_only": true, "permissions": [
+      {"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecos/*:cancel", "methods": ["POST"]}
+    ]},
     "engineering.read": {"permissions": [
       {"resource": "/v1/engineering/bom-versions", "methods": ["GET"]},
       {"resource": "/v1/engineering/bom-versions/*", "methods": ["GET"]},
@@ -1893,6 +1905,7 @@
       {"resource": "/v1/pricing/simulate", "methods": ["POST"]},
       {"resource": "/v1/pricing/workspace", "methods": ["GET"]}
     ]},
+    "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
     "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
     "product.gtin.allocate": {"permissions": [{"resource": "/v1/product/gtins", "methods": ["POST"]}]},
     "product.read": {"permissions": [
@@ -1980,6 +1993,7 @@
       {"resource": "/v1/production/order-changes/*:preview", "methods": ["POST"]}
     ]},
     "production.order.bom-after-release": {"flag": true, "permissions": []},
+    "production.order.create-from-sales": {"service_only": true, "permissions": [{"resource": "/v1/production/sales-line-orders", "methods": ["POST"]}]},
     "production.order.end": {"permissions": [{"resource": "/v1/production/orders/*:end", "methods": ["POST"]}]},
     "production.order.read": {"permissions": [
       {"resource": "/v1/production/as-built", "methods": ["GET"]},
@@ -2062,6 +2076,7 @@
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
       {"resource": "/v1/sales/product-proposals:respond", "methods": ["POST"]}
     ]},
+    "sales.order.plan-production": {"permissions": [{"resource": "/v1/sales/orders/*:plan-production", "methods": ["POST"]}]},
     "sales.credit.maintain": {"permissions": [{"resource": "/v1/sales/credit-profiles/*", "methods": ["PUT"]}]},
     "sales.credit.release": {"permissions": [
       {"resource": "/v1/sales/holds", "methods": ["GET"]},
@@ -2341,6 +2356,10 @@
     "close": {
       "ledger": ["ledger.ledger.lookup"]
     },
+    "sales": {
+      "product": ["product.configuration.read"],
+      "production": ["production.order.create-from-sales"]
+    },
     "ledger": {
       "close": ["period.check"]
     },
@@ -2354,7 +2373,9 @@
       "party": ["party.vendor_bank.reveal"]
     },
     "workflow-ts": {
-      "payables": ["payment-run.execute"]
+      "payables": ["payment-run.execute"],
+      "engineering": ["engineering.eco.workflow"],
+      "quality": ["quality.capa.execute"]
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]

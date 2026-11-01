@@ -33,6 +33,7 @@ type Store interface {
 	CreateItemModelGroup(ctx context.Context, in domain.ItemModelGroup) (domain.ItemModelGroup, error)
 	CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error)
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error)
 	ListProducts(ctx context.Context, limit int) ([]domain.Product, error)
 	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error)
 	ListReleasedIDs(ctx context.Context, after string, limit int) ([]string, error)
@@ -272,6 +273,26 @@ func (s *Postgres) GetProduct(ctx context.Context, id string) (domain.Product, e
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
+	}
+	return out, err
+}
+
+func (s *Postgres) GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return domain.ConfigurationRef{}, err
+	}
+	var out domain.ConfigurationRef
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select c.id::text, c.model_id::text, m.master_id::text, c.status,
+				exists (select 1 from product x where x.tenant_id = c.tenant_id and x.id = $3::uuid and (x.id = m.master_id or x.master_id = m.master_id))
+			from saved_configuration c
+			join configuration_model m on m.tenant_id = c.tenant_id and m.id = c.model_id
+			where c.tenant_id = $1 and c.id = $2`, p.TenantID, id, productID).
+			Scan(&out.ID, &out.ModelID, &out.MasterID, &out.Status, &out.BelongsToProduct)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, httpx.NewProblem(http.StatusNotFound, "PRD-CONFIGURATION-NOT-FOUND", "saved configuration not found")
 	}
 	return out, err
 }

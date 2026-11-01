@@ -12,3 +12,4 @@ holdTenants: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""

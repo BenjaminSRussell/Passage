@@ -66,7 +66,7 @@ func TestPostgres_ReleaseEco_ExpiresOldActivatesNew(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	eco := domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoSubmitted, ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}}
+	eco := domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoSubmitted, CreatedBy: "rita", ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}}
 	if _, err := s.CreateEco(ctx, eco, store.Idem{Key: "eco-key", Hash: "h1"}); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import {
 import type { PartyDecisionActivities } from "./activities.js";
 
 export * from "./paymentRunWorkflow.js";
+export * from "./ecoApprovalWorkflow.js";
+export * from "./capaWorkflow.js";
 
 const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
   startToCloseTimeout: "30 seconds",

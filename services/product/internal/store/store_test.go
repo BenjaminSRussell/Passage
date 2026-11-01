@@ -222,3 +222,49 @@ func TestExplodeLimitPagesAndListReleasedIDsKeyset(t *testing.T) {
 		t.Fatalf("tenant 2 must see no released products: %v %v", foreign, err)
 	}
 }
+
+func TestGetSavedConfigurationBelongsToItsMasterAndItsVariants(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := tenant.With(context.Background(), principal(1))
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(pool)
+	create := func(number, subtype string) domain.Product {
+		p, err := s.CreateProduct(ctx, domain.Product{ProductNumber: number, Subtype: subtype, ProductType: domain.TypeItem, Name: number, BaseUOM: "EA"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	master, other := create("BIKE", domain.SubtypeMaster), create("TRIKE", domain.SubtypeProduct)
+	variant := testkit.TenantID(70)
+	model, config := testkit.TenantID(71), testkit.TenantID(72)
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`insert into product (tenant_id, id, product_number, subtype, product_type, name, base_uom, master_id, variant_hash) values ($1, $2, 'BIKE-V1', 'variant', 'item', 'v', 'EA', $3, 'h1')`, []any{testkit.TenantID(1), variant, master.ID}},
+		{`insert into configuration_model (tenant_id, id, master_id, version, status, model) values ($1, $2, $3, 1, 'active', '{}')`, []any{testkit.TenantID(1), model, master.ID}},
+		{`insert into saved_configuration (tenant_id, id, model_id, model_version, name, selections, status) values ($1, $2, $3, 1, 'red', '{}', 'valid')`, []any{testkit.TenantID(1), config, model}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		productID string
+		want      bool
+	}{"master": {master.ID, true}, "variant of the master": {variant, true}, "another product": {other.ID, false}} {
+		got, err := s.GetSavedConfiguration(ctx, config, tc.productID)
+		if err != nil || got.BelongsToProduct != tc.want || got.MasterID != master.ID || got.Status != "valid" || got.ModelID != model {
+			t.Fatalf("%s: %+v %v", name, got, err)
+		}
+	}
+	if _, err := s.GetSavedConfiguration(ctx, testkit.TenantID(99), master.ID); err == nil {
+		t.Fatal("an unknown configuration must be refused")
+	}
+	if _, err := s.GetSavedConfiguration(tenant.With(context.Background(), principal(2)), config, master.ID); err == nil {
+		t.Fatal("another tenant must not read the configuration")
+	}
+}
