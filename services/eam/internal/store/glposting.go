@@ -20,7 +20,6 @@ import (
 const (
 	MaxGLOrdersPerRun = 200
 	CodeGLFailed      = "EAM-GL-001"
-	CodeProfileState  = "EAM-GL-002"
 	allTypes          = "ALL"
 	glSourceType      = "work-order"
 )
@@ -169,9 +168,9 @@ func (s *Postgres) unpostedOrders(ctx context.Context, tx pgx.Tx, t string, in G
 	rows, err := tx.Query(ctx, `select w.id::text, w.number, w.work_order_type, w.actual_end, w.parts_cost::text, w.labor_cost::text,
 			w.gl_parts_basis::text, w.gl_labor_basis::text, w.gl_post_count
 		from work_order w join asset a on a.tenant_id = w.tenant_id and a.id = w.asset_id
-		where w.tenant_id = $1 and w.status in ('COMPLETED', 'CLOSED') and w.currency = $2 and ($3 = '' or a.site_id = $3::uuid)
+		where w.tenant_id = $1 and w.legal_entity_id = $6::uuid and w.status in ('COMPLETED', 'CLOSED') and w.currency = $2 and ($3 = '' or a.site_id = $3::uuid)
 			and ($4 = '' or w.id = $4::uuid) and (w.parts_cost <> w.gl_parts_basis or w.labor_cost <> w.gl_labor_basis)
-		order by w.actual_end, w.id limit $5`, t, in.Currency, in.SiteID, in.WorkOrderID, MaxGLOrdersPerRun+1)
+		order by w.actual_end, w.id limit $5`, t, in.Currency, in.SiteID, in.WorkOrderID, MaxGLOrdersPerRun+1, in.LegalEntityID)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +241,7 @@ func (s *Postgres) markPosted(ctx context.Context, o glOrder, in GLPostRequest, 
 
 // PostWorkOrderCosts books the parts and labor cost of completed and closed work orders (FR-44.11): per order one balanced entry for the cost
 // not yet booked, keyed by order and booking number so a retry returns the same entry. A cost that changes after booking is booked as a delta.
-// An order the ledger refuses is reported and the rest go on.
+// Only orders created under the legal entity are booked into its ledger. An order the ledger refuses is reported and the rest go on.
 func (s *Postgres) PostWorkOrderCosts(ctx context.Context, ledger ledgerclient.Ledger, in GLPostRequest) (GLPostResult, error) {
 	var orders []glOrder
 	var profiles []PostingProfile

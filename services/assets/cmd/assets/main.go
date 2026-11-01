@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/assets/internal/api"
 	"github.com/BenjaminSRussell/passage/services/assets/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/assets/internal/store"
@@ -67,6 +68,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		st = st.WithMaxBooks(n)
 	}
 	a := api.New(st)
+	ledger, err := ledgerclient.FromEnv(getenv, "assets")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		a.WithGL(st, ledger)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

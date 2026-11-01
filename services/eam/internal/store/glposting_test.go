@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/eam/migrations"
@@ -280,5 +281,30 @@ func TestGLPosting_AppRoleBooksWithoutBypassingRLSOrRewritingTheSubledger(t *tes
 	rec, err := f.s.ReconcileGL(other, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
 	if err != nil || len(rec.Accounts) != 0 {
 		t.Fatalf("another tenant must see no subledger rows: %+v %v", rec, err)
+	}
+}
+
+func TestGLPosting_OnlyOrdersOfTheLegalEntityAreBooked(t *testing.T) {
+	f := newGLFixture(t, 7109)
+	f.order(domain.TypeInspection, "20.00", "", "")
+	other := "00000000-0000-0000-0000-0000000000e2"
+	otherCtx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7109), LegalEntityID: other, UserID: "u2", Duties: map[string]struct{}{"EamPlanner": {}}})
+	wo, err := f.s.CreateWorkOrder(otherCtx, WorkOrder{AssetID: f.asset, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-other-le")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.setParts(wo.ID, "999.00")
+	if err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(f.ctx, `update work_order set status = 'COMPLETED', actual_start = now(), actual_end = now() where id = $1`, wo.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res := f.post(); len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("20")) {
+		t.Fatalf("entity e1 must book only its own order: %+v", res)
+	}
+	res, err := f.s.PostWorkOrderCosts(f.ctx, f.fake, GLPostRequest{LegalEntityID: other, LedgerID: f.ledger, Currency: "USD"})
+	if err != nil || len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("1019")) {
+		t.Fatalf("entity e2 books its own order: %+v %v", res, err)
 	}
 }

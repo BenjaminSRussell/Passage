@@ -938,7 +938,7 @@ paths:
         general ledger: one balanced entry per order for the cost not yet booked, keyed by order and booking number so a retry returns the same
         entry. A cost that changed after booking is booked as a delta. An order the ledger refuses (a closed period, for one) is listed under
         failed with the ledger's problem code and is retried by the next run. At most 200 orders per run (more is true when others wait).
-        Work orders carry no legal entity yet, so the caller names the entity the cost is booked under. Signs only ledger.entry.post.
+        Work orders carry no legal entity yet, so the caller names the entity the cost is booked under (it must be in the caller's scope). Only work orders created under that legal entity (recorded from the creating caller's single entity scope; older orders have none and are not booked) are booked. Signs only ledger.entry.post.
       requestBody:
         required: true
         content:

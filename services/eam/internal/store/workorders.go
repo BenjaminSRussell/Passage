@@ -10,6 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 	eamevents "github.com/BenjaminSRussell/passage/services/eam/internal/events"
 )
@@ -82,11 +83,17 @@ func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key
 		}
 	}
 	id := ids.New()
+	var legalEntity *string
+	if p, ok := tenant.FromContext(ctx); ok {
+		if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
+			legalEntity = &scopes[0]
+		}
+	}
 	_, err := tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
-	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key)
-	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key, legal_entity_id)
+	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		t, id, in.AssetID, in.Type, in.Priority, in.PlanLineID, in.RequestID, optStr(in.JobType), in.Currency,
-		in.DueAt, warrantyID, warrantyID != nil, optStr(key))
+		in.DueAt, warrantyID, warrantyID != nil, optStr(key), legalEntity)
 	return id, err
 }
 

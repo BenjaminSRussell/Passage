@@ -122,7 +122,7 @@ func TestGL_HTTPFlowProfileBookingAndReconciliation(t *testing.T) {
 		t.Fatalf("profiles %+v", list)
 	}
 
-	body := `{"ledgerId":"` + ledgerID + `","currency":"USD"}`
+	body := `{"legalEntityId":"` + apiEntity + `","ledgerId":"` + ledgerID + `","currency":"USD"}`
 	var posted store.GLPostResult
 	decodeInto(t, send(http.MethodPost, "/v1/eam/gl-postings", body, "g1", nil), http.StatusOK, &posted)
 	if len(posted.Booked) != 1 || posted.Booked[0].Lines != 4 {

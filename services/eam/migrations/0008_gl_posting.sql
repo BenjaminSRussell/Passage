@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS eam_posting_profile (
 );
 
 -- The basis is the exact cost the booked entries stand for (rounded to the currency's minor unit when booked).
+-- legal_entity_id is the single entity scope of the creating caller; NULL (older or unscoped) orders are never booked.
 ALTER TABLE work_order
+  ADD COLUMN IF NOT EXISTS legal_entity_id uuid,
   ADD COLUMN IF NOT EXISTS gl_parts_basis numeric(20,6) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS gl_labor_basis numeric(20,6) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS gl_post_count integer NOT NULL DEFAULT 0;
