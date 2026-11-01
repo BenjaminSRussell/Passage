@@ -32,6 +32,7 @@ type fakeStore struct {
 	oi       openItemFake
 	auto     autoFake
 	deriv    derivationFake
+	vrules   validationFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error

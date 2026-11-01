@@ -359,7 +359,7 @@ export function JournalBatchPage() {
   const [confirmPost, setConfirmPost] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [done, setDone] = useState<{ text: string; entryId?: string } | null>(null);
+  const [done, setDone] = useState<{ text: string; entryId?: string; notices?: { code: string; message: string }[] } | null>(null);
   // One Idempotency-Key per batch version: a retry of the same post replays.
   const postKey = useRef<{ version: number; key: string } | null>(null);
 
@@ -383,10 +383,10 @@ export function JournalBatchPage() {
   }
   const batch = result.data;
 
-  function settle(updated: JournalBatch, text: string, entryId?: string) {
+  function settle(updated: JournalBatch, text: string, entryId?: string, notices?: { code: string; message: string }[]) {
     queryClient.setQueryData(queryKey, updated);
     void queryClient.invalidateQueries({ queryKey: ["ledger", "journal-batches"] });
-    setDone({ text, entryId });
+    setDone({ text, entryId, notices });
   }
 
   async function fail(title: string, error: unknown) {
@@ -421,7 +421,7 @@ export function JournalBatchPage() {
       const res = await postJournalBatch(batch.id, batch.version, postKey.current.key);
       const refreshed = await fetchJournalBatch(batch.id);
       const entry = res.entries[0];
-      settle(refreshed, `Posted as voucher ${entry.voucher}`, entry.id);
+      settle(refreshed, `Posted as voucher ${entry.voucher}`, entry.id, res.notices);
       setConfirmPost(false);
     } catch (error) {
       setConfirmPost(false);
@@ -454,6 +454,15 @@ export function JournalBatchPage() {
       {done ? (
         <Alert tone="success" title={done.text} live="status">
           {done.entryId ? <Link to={`/ledger/entries/${done.entryId}`}>Open the journal entry</Link> : null}
+        </Alert>
+      ) : null}
+      {done?.notices && done.notices.length > 0 ? (
+        <Alert tone="warning" title="Posted with warnings">
+          <ul>
+            {done.notices.map((n, i) => (
+              <li key={i}>{n.message}</li>
+            ))}
+          </ul>
         </Alert>
       ) : null}
       {failure ? <FailureAlert failure={failure} /> : null}

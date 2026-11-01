@@ -142,6 +142,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerOpenItems(r)
 		a.registerAutoClearing(r)
 		a.registerDerivation(r)
+		a.registerValidationRules(r)
 	})
 }
 
@@ -702,10 +703,12 @@ type validatedLine struct {
 type validateResponse struct {
 	Valid      bool               `json:"valid"`
 	Violations []domain.Violation `json:"violations"`
-	Lines      []validatedLine    `json:"lines"`
-	Currency   string             `json:"currency"`
-	Debit      string             `json:"debit"`
-	Credit     string             `json:"credit"`
+	// Warnings are failures of validation rules with severity warning (FR-11.21); they do not make the entry invalid.
+	Warnings []domain.Violation `json:"warnings"`
+	Lines    []validatedLine    `json:"lines"`
+	Currency string             `json:"currency"`
+	Debit    string             `json:"debit"`
+	Credit   string             `json:"credit"`
 }
 
 // validateEntry is the dry run: every violation in one response, no writes.
@@ -730,10 +733,13 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	out := validateResponse{Valid: res.Valid(), Violations: res.Violations, Lines: []validatedLine{},
+	out := validateResponse{Valid: res.Valid(), Violations: res.Violations, Warnings: res.Warnings, Lines: []validatedLine{},
 		Currency: res.Currency, Debit: res.Debit.StringFixed(money.MinorUnits(res.Currency)), Credit: res.Credit.StringFixed(money.MinorUnits(res.Currency))}
 	if out.Violations == nil {
 		out.Violations = []domain.Violation{}
+	}
+	if out.Warnings == nil {
+		out.Warnings = []domain.Violation{}
 	}
 	for _, l := range res.Lines {
 		out.Lines = append(out.Lines, validatedLine{Index: l.Index, Account: l.Account.Number, DisplayName: l.DisplayName,

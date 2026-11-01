@@ -100,6 +100,9 @@ type Store interface {
 	GetDerivationStrategy(ctx context.Context, ledgerID string, version int) (domain.DerivationStrategy, error)
 	PutDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int, in domain.DerivationStrategy) (domain.DerivationStrategy, bool, error)
 	ActivateDerivationStrategy(ctx context.Context, ledgerID string, version, lockVersion int) (domain.DerivationStrategy, error)
+	ListValidationRules(ctx context.Context, ledgerID string) ([]domain.ValidationRule, error)
+	GetValidationRule(ctx context.Context, ledgerID, id string) (domain.ValidationRule, error)
+	PutValidationRule(ctx context.Context, ledgerID, id string, lockVersion int, in domain.ValidationRule) (domain.ValidationRule, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -227,8 +230,9 @@ type EntryResult struct {
 	Notices     []Notice    `json:"notices,omitempty"`
 }
 
-// Notice is an info-severity message on an accepted posting, such as
-// LEDGER_DESCRIPTION_TRUNCATED (LEDGER-0031).
+// Notice is an info or warning message on an accepted posting, such as
+// LEDGER_DESCRIPTION_TRUNCATED (LEDGER-0031) or a warning validation rule's
+// LEDGER_VALIDATION_RULE_FAILED (FR-11.21).
 type Notice struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

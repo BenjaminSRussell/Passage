@@ -316,7 +316,9 @@ describe("journal batch detail", () => {
           return json(422, { code: "LEDGER_ACCOUNT_SUSPENDED", detail: "account 6010 is suspended", violations: [{ code: "LEDGER_ACCOUNT_SUSPENDED", lineIndex: 0, message: "account 6010 is suspended from 2026-01-01" }] });
         }
         current = batch({ status: "posted", version: 3, postedEntryId: ENTRY, postedBy: "clerk" });
-        return json(201, { entries: [{ id: ENTRY, voucher: "GL-000042" }], idempotency: { key: "k", replayed: false } });
+        // A validation rule with severity warning (FR-11.21) comes back as a notice.
+        const notices = [{ code: "LEDGER_VALIDATION_RULE_FAILED", message: "Department is advised above 1,000 (rule r1, line 1)" }];
+        return json(201, { entries: [{ id: ENTRY, voucher: "GL-000042" }], idempotency: { key: "k", replayed: false }, notices });
       }
       return undefined;
     };
@@ -342,6 +344,8 @@ describe("journal batch detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm post" }));
     expect(await screen.findByText("Posted as voucher GL-000042")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the journal entry" })).toHaveAttribute("href", `/ledger/entries/${ENTRY}`);
+    expect(screen.getByText("Posted with warnings")).toBeInTheDocument();
+    expect(screen.getByText("Department is advised above 1,000 (rule r1, line 1)")).toBeInTheDocument();
     const posts = server.calls.filter((c) => c.url.pathname.endsWith("/post"));
     expect(posts).toHaveLength(2);
     // The retry of the same version reuses the key, so a lost response cannot post twice.

@@ -494,7 +494,11 @@ func (s *Postgres) SubmitBatch(ctx context.Context, id string, version int, toda
 			return err
 		}
 		res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, lines)
-		if err := rejectWithPeriod(ctx, ledger, in.PostingDate, in.Source.System, res.Violations); err != nil {
+		outcome, err := applyValidationRules(ctx, tx, p.TenantID, ledger, in, accounts, lines)
+		if err != nil {
+			return err
+		}
+		if err := rejectWithPeriod(ctx, ledger, in.PostingDate, in.Source.System, append(res.Violations, outcome.Errors...)); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update journal_batch set submitted_by = $3, decided_by = null, last_error = null

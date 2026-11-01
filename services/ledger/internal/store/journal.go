@@ -116,12 +116,19 @@ func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger
 		return Entry{}, nil, err
 	}
 	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, derived)
-	if err := rejectWithPeriod(ctx, ledger, in.PostingDate, in.Source.System, res.Violations); err != nil {
+	outcome, err := applyValidationRules(ctx, tx, tenantID, ledger, in, accounts, derived)
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	if err := rejectWithPeriod(ctx, ledger, in.PostingDate, in.Source.System, append(res.Violations, outcome.Errors...)); err != nil {
 		return Entry{}, nil, err
 	}
 	description, notices, err := applyDefaultDescriptions(ctx, tx, tenantID, ledger, in, res.Lines)
 	if err != nil {
 		return Entry{}, nil, err
+	}
+	for _, w := range outcome.Warnings {
+		notices = append(notices, Notice{Code: w.Code, Message: w.Message})
 	}
 	lines := make([]writeLine, 0, len(res.Lines))
 	for _, v := range res.Lines {
@@ -571,6 +578,13 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 			return err
 		}
 		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, lines)
+		res.Derivation = traces
+		outcome, err := applyValidationRules(ctx, tx, p.TenantID, ledger, in, accounts, lines)
+		if err != nil {
+			return err
+		}
+		res.Violations = append(res.Violations, outcome.Errors...)
+		res.Warnings = outcome.Warnings
 		if res.Valid() {
 			closed, err := periodViolations(ctx, ledger, in.PostingDate, in.Source.System)
 			if err != nil {
@@ -578,7 +592,6 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 			}
 			res.Violations = closed
 		}
-		res.Derivation = traces
 		return nil
 	})
 	return res, err

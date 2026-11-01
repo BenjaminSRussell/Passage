@@ -134,6 +134,8 @@ type Result struct {
 	Violations []Violation
 	// Derivation is the derivation trace per line index (FR-11.22); filled by the store.
 	Derivation map[int][]DerivationTrace
+	// Warnings are the failures of validation rules with severity warning (FR-11.21); they never refuse the entry.
+	Warnings []Violation
 }
 
 // Valid reports whether the entry may be posted.

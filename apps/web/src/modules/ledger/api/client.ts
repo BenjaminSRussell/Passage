@@ -1281,3 +1281,57 @@ export function putDerivationStrategy(
 export function activateDerivationStrategy(ledgerId: string, version: number, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<DerivationStrategy> {
   return sendJSON("POST", `${strategyUrl(ledgerId, version)}/activate`, derivationStrategySchema, fetchImpl, undefined, lockVersion ? ifMatch(lockVersion) : {});
 }
+
+export const RULE_OPS = ["eq", "ne", "in", "gt", "gte", "lt", "lte", "between", "blank", "notblank"] as const;
+export type RuleOp = (typeof RULE_OPS)[number];
+
+/** One condition of a validation rule (FR-11.21): a field, an operator and its values. */
+export const ruleConditionSchema = z.object({
+  field: z.string(),
+  op: z.enum(RULE_OPS),
+  values: z.array(z.string()).optional(),
+});
+export type RuleCondition = z.infer<typeof ruleConditionSchema>;
+
+export const validationRuleSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  sequence: z.number(),
+  name: z.string(),
+  level: z.enum(["line", "header"]),
+  severity: z.enum(["error", "warning"]),
+  prerequisite: z.array(ruleConditionSchema),
+  checks: z.array(ruleConditionSchema),
+  message: z.string(),
+  active: z.boolean(),
+  lockVersion: z.number(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type ValidationRule = z.infer<typeof validationRuleSchema>;
+
+export type ValidationRuleInput = Pick<ValidationRule, "sequence" | "name" | "level" | "severity" | "prerequisite" | "checks" | "message" | "active">;
+
+const validationRuleListSchema = z.object({ items: z.array(validationRuleSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/validation-rules, in evaluation order. */
+export async function fetchValidationRules(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<ValidationRule[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/validation-rules`, validationRuleListSchema, fetchImpl)).items;
+}
+
+/** GET .../validation-rules/{id}. */
+export function fetchValidationRule(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<ValidationRule> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/validation-rules/${encodeURIComponent(id)}`, validationRuleSchema, fetchImpl);
+}
+
+/** PUT .../validation-rules/{id}: creates, or replaces the rule at `lockVersion` (If-Match) when given. */
+export function putValidationRule(ledgerId: string, id: string, input: ValidationRuleInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<ValidationRule> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/validation-rules/${encodeURIComponent(id)}`,
+    validationRuleSchema,
+    fetchImpl,
+    input,
+    lockVersion ? ifMatch(lockVersion) : {},
+  );
+}

@@ -21,14 +21,15 @@ const (
 	// (PRD name open-item.cleared; the naming rule allows only letters and digits
 	// in the entity, so it is written openitem).
 	OpenItemCleared = "dev.passage.ledger.openitem.cleared.v1"
-	// RulesChanged is announced when a derivation strategy is activated or a lookup
-	// table it may use is replaced (PRD rules.changed; posting caches invalidate on it).
+	// RulesChanged is announced when a derivation strategy is activated, a lookup
+	// table it may use is replaced or a validation rule is saved (PRD rules.changed; posting caches invalidate on it).
 	RulesChanged = "dev.passage.ledger.rules.changed.v1"
 )
 
 // RulesChangedData is the payload of dev.passage.ledger.rules.changed.v1. Kind is
 // derivation_strategy (ID is the strategy row, Version its version number) or
-// lookup_table (ID is the table, Version its replacement counter).
+// lookup_table (ID is the table, Version its replacement counter) or
+// validation_rule (ID is the rule, Version its lockVersion).
 type RulesChangedData struct {
 	LedgerID string `json:"ledgerId"`
 	Kind     string `json:"kind"`
