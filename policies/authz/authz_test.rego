@@ -500,6 +500,23 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
 }
 
+test_inventory_hold_duties_open_only_their_routes if {
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds")
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds/h1:release")
+	allowed("inventory.hold.write", "POST", "/v1/inventory/holds:release-source")
+	not allowed("inventory.hold.write", "GET", "/v1/inventory/holds")
+	allowed("inventory.read", "GET", "/v1/inventory/holds")
+	not allowed("inventory.read", "POST", "/v1/inventory/holds")
+	data.duties["inventory.hold.apply"].service_only
+	data.service_grants.quality.inventory == ["inventory.hold.apply"]
+	allowed("inventory.hold.apply", "POST", "/v1/inventory/holds")
+	allowed("inventory.hold.apply", "POST", "/v1/inventory/holds:release-source")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/holds/h1:release")
+	not allowed("inventory.hold.apply", "GET", "/v1/inventory/holds")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/blockings")
+	not allowed("inventory.hold.apply", "POST", "/v1/inventory/journals")
+}
+
 granted_duty_known(duty) if data.duties[duty]
 
 test_service_principals_hold_only_known_unprivileged_duties if {

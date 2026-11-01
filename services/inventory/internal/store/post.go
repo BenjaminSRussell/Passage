@@ -456,7 +456,7 @@ func checkSerials(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string
 
 // onHandColumns are the projection columns read under lock, in onHandFrom order.
 const onHandColumns = `posted_qty::text, posted_value::text, received::text, registered::text, arrived::text, ordered::text,
-	deducted::text, picked::text, reserved_physical::text, reserved_ordered::text, on_order::text`
+	deducted::text, picked::text, reserved_physical::text, held_physical::text, reserved_ordered::text, on_order::text`
 
 // lockRow makes sure the projection row exists, then reads it under FOR UPDATE
 // into r.before and r.oh (BR-16.4). A row valued in a currency other than
@@ -470,9 +470,9 @@ func lockRow(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, currency s
 		on conflict do nothing`, tenantID, legalEntityID, r.product, r.hash); err != nil {
 		return scopeProblem(err)
 	}
-	var b [11]string
+	var b [12]string
 	var cur *string
-	dest := make([]any, 0, 13)
+	dest := make([]any, 0, 14)
 	for i := range b {
 		dest = append(dest, &b[i])
 	}
@@ -519,11 +519,11 @@ func saveRow(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, r *
 		currency = &r.currency
 	}
 	_, err := tx.Exec(ctx, `update on_hand set posted_qty = $5, posted_value = $6, received = $7, registered = $8, arrived = $9, ordered = $10,
-		deducted = $11, picked = $12, reserved_physical = $13, reserved_ordered = $14, on_order = $15, currency = coalesce($16, currency),
-		last_txn_seq = $17, updated_at = now()
+		deducted = $11, picked = $12, reserved_physical = $13, held_physical = $14, reserved_ordered = $15, on_order = $16, currency = coalesce($17, currency),
+		last_txn_seq = $18, updated_at = now()
 		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and dimension_set_hash = $4`,
 		tenantID, legalEntityID, r.product, r.hash, r.oh.PostedQty.String(), r.oh.PostedValue.String(), r.oh.Received.String(), r.oh.Registered.String(),
-		r.oh.Arrived.String(), r.oh.Ordered.String(), r.oh.Deducted.String(), r.oh.Picked.String(), r.oh.ReservedPhysical.String(),
+		r.oh.Arrived.String(), r.oh.Ordered.String(), r.oh.Deducted.String(), r.oh.Picked.String(), r.oh.ReservedPhysical.String(), r.oh.HeldPhysical.String(),
 		r.oh.ReservedOrdered.String(), r.oh.OnOrder.String(), currency, r.seq+int64(txns))
 	return err
 }
@@ -612,10 +612,10 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 	return txnID, enqueue(ctx, tx, "transaction", txnID, invevents.TransactionPosted, tenantID, data)
 }
 
-func onHandFrom(b [11]string) domain.OnHand {
+func onHandFrom(b [12]string) domain.OnHand {
 	d := func(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 	return domain.OnHand{PostedQty: d(b[0]), PostedValue: d(b[1]), Received: d(b[2]), Registered: d(b[3]), Arrived: d(b[4]),
-		Ordered: d(b[5]), Deducted: d(b[6]), Picked: d(b[7]), ReservedPhysical: d(b[8]), ReservedOrdered: d(b[9]), OnOrder: d(b[10])}
+		Ordered: d(b[5]), Deducted: d(b[6]), Picked: d(b[7]), ReservedPhysical: d(b[8]), HeldPhysical: d(b[9]), ReservedOrdered: d(b[10]), OnOrder: d(b[11])}
 }
 
 func journalPosted(j domain.Journal, entry domain.JournalEntry) invevents.JournalPostedData {

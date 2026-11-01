@@ -1,0 +1,355 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/quality/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/quality/internal/inventory"
+)
+
+const (
+	holdSourceOrder = "QUALITY_ORDER"
+	holdSourceNCR   = "NONCONFORMANCE"
+	holdPlace       = "PLACE"
+	holdRelease     = "RELEASE"
+	holdPending     = "PENDING"
+	holdDone        = "DONE"
+	holdFailed      = "FAILED"
+	holdBatchSize   = 20
+	holdMaxAttempts = 10
+	holdCallTimeout = 5 * time.Second
+	holdSweeper     = "system:quality-holds"
+)
+
+var inventoryDimensions = map[string]bool{"site": true, "warehouse": true, "location": true, "batch": true, "serial": true,
+	"config": true, "size": true, "color": true, "style": true}
+
+type HoldPort interface {
+	Place(ctx context.Context, call inventory.Call) error
+	Release(ctx context.Context, call inventory.Call) error
+}
+
+func (s *Postgres) WithHolds(h HoldPort) *Postgres {
+	linked := *s
+	linked.holds = h
+	linked.kicks = &kickSet{set: map[string]bool{}, wake: make(chan struct{}, 1)}
+	return &linked
+}
+
+type holdLink struct {
+	id          string
+	key         string
+	action      string
+	sourceType  string
+	sourceRef   string
+	legalEntity string
+	user        string
+	item        string
+	dims        map[string]string
+	qty         decimal.Decimal
+	keep        decimal.Decimal
+	moveType    string
+	moveRef     string
+	attempts    int
+}
+
+func inventoryDims(sets ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, set := range sets {
+		for k, v := range set {
+			if inventoryDimensions[k] && v != "" {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+func orderHoldLink(o domain.Order) holdLink {
+	return holdLink{key: "quality-order:" + o.ID + ":place", action: holdPlace, sourceType: holdSourceOrder, sourceRef: o.ID, item: o.ItemID, qty: o.LotQty,
+		dims: inventoryDims(o.Dims, map[string]string{"site": o.SiteID, "warehouse": o.WarehouseID})}
+}
+
+func ncrHoldLink(n domain.Nonconformance) holdLink {
+	return holdLink{key: "nonconformance:" + n.ID + ":place", action: holdPlace, sourceType: holdSourceNCR, sourceRef: n.ID, item: n.ItemID, qty: n.Qty,
+		dims: inventoryDims(n.Dims)}
+}
+
+func (s *Postgres) holdForNCR(ctx context.Context, tx pgx.Tx, n domain.Nonconformance) error {
+	if s.holds == nil {
+		return nil
+	}
+	l := ncrHoldLink(n)
+	if n.QualityOrderID != "" {
+		o, err := readOrder(ctx, tx, n.QualityOrderID, false)
+		if err != nil {
+			return err
+		}
+		l.dims = inventoryDims(o.Dims, map[string]string{"site": o.SiteID, "warehouse": o.WarehouseID}, n.Dims)
+	}
+	return s.queueHold(ctx, tx, l)
+}
+
+func (s *Postgres) holdForNCRDisposition(ctx context.Context, tx pgx.Tx, n domain.Nonconformance, status string) error {
+	return s.queueRelease(ctx, tx, holdLink{key: "nonconformance:" + n.ID + ":" + status + ":release", action: holdRelease, sourceType: holdSourceNCR,
+		sourceRef: n.ID, item: n.ItemID})
+}
+
+func (s *Postgres) holdForDecision(ctx context.Context, tx pgx.Tx, o domain.Order, d domain.Decision) error {
+	if s.holds == nil {
+		return nil
+	}
+	if d.Split.Reject.IsPositive() {
+		if err := s.queueHold(ctx, tx, orderHoldLink(o)); err != nil {
+			return err
+		}
+	}
+	release := holdLink{key: "decision:" + d.ID + ":release", action: holdRelease, sourceType: holdSourceOrder, sourceRef: o.ID, item: o.ItemID, keep: d.Split.Reject}
+	if d.Split.Reject.IsPositive() && d.NonconformanceID != "" {
+		release.moveType, release.moveRef = holdSourceNCR, d.NonconformanceID
+	}
+	return s.queueRelease(ctx, tx, release)
+}
+
+// queueRelease sends a release with the legal entity of the link that placed
+// the source's hold, so it is never lost to the releasing caller's scope. A
+// source nothing was placed for (a nonconformance that relies on its order's
+// hold) has nothing to release.
+func (s *Postgres) queueRelease(ctx context.Context, tx pgx.Tx, l holdLink) error {
+	if s.holds == nil {
+		return nil
+	}
+	var entity string
+	err := tx.QueryRow(ctx, `select legal_entity_id::text from quality_hold_link where `+ownTenant+` and ((action = 'PLACE' and source_type = $1 and source_ref = $2)
+		or (move_to_type = $1 and move_to_ref = $2)) order by created_at, id limit 1`, l.sourceType, l.sourceRef).Scan(&entity)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	l.legalEntity = entity
+	return s.queueHold(ctx, tx, l)
+}
+
+func (s *Postgres) queueHold(ctx context.Context, tx pgx.Tx, l holdLink) error {
+	if s.holds == nil {
+		return nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	if l.legalEntity == "" {
+		l.legalEntity = p.LegalEntityID
+	}
+	if l.legalEntity == "" {
+		slog.WarnContext(ctx, "inventory hold not queued: the caller has no single legal entity", "source", l.sourceType, "ref", l.sourceRef,
+			"correlationId", middleware.GetReqID(ctx))
+		return nil
+	}
+	if l.dims == nil {
+		l.dims = map[string]string{}
+	}
+	dims, err := json.Marshal(l.dims)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `insert into quality_hold_link (tenant_id, id, idempotency_key, action, source_type, source_ref, legal_entity_id, acting_user,
+		item_id, dims, qty, keep_qty, move_to_type, move_to_ref) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric, $12::numeric, $13, $14)
+		on conflict (tenant_id, idempotency_key) do nothing`,
+		p.TenantID, ids.New(), l.key, l.action, l.sourceType, l.sourceRef, l.legalEntity, p.UserID, l.item, string(dims), l.qty.String(), l.keep.String(),
+		nullable(l.moveType), nullable(l.moveRef))
+	return err
+}
+
+// FlushHolds sends the queued hold calls to inventory in the order they were
+// queued. A call inventory refuses is FAILED and not retried; a transport
+// failure or a 5xx stays PENDING and stops the batch, so a release never
+// overtakes its placement. Pending links are retried by the next flush.
+func (s *Postgres) FlushHolds(ctx context.Context) {
+	if s.holds == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), holdCallTimeout*holdBatchSize)
+	defer cancel()
+	var links []holdLink
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text, idempotency_key, action, source_type, source_ref, legal_entity_id::text, acting_user, item_id::text,
+			dims, qty::text, keep_qty::text, coalesce(move_to_type, ''), coalesce(move_to_ref, ''), attempts from quality_hold_link where `+ownTenant+` and state = 'PENDING' order by created_at, id limit $1`, holdBatchSize)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var l holdLink
+			var raw []byte
+			var qty, keep string
+			if err := rows.Scan(&l.id, &l.key, &l.action, &l.sourceType, &l.sourceRef, &l.legalEntity, &l.user, &l.item, &raw, &qty, &keep, &l.moveType, &l.moveRef, &l.attempts); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &l.dims); err != nil {
+				return err
+			}
+			l.qty, l.keep = decimal.RequireFromString(qty), decimal.RequireFromString(keep)
+			links = append(links, l)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "reading queued inventory holds failed", "err", err, "correlationId", middleware.GetReqID(ctx))
+		return
+	}
+	p, _ := tenant.FromContext(ctx)
+	for _, l := range links {
+		callCtx, stop := context.WithTimeout(ctx, holdCallTimeout)
+		call := inventory.Call{TenantID: p.TenantID, LegalEntityID: l.legalEntity, UserID: l.user, Key: l.key, SourceType: l.sourceType,
+			SourceRef: l.sourceRef, ProductID: l.item, Dims: l.dims, Qty: l.qty, KeepQty: l.keep,
+			WholeLot: l.dims["batch"] != "", MoveToType: l.moveType, MoveToRef: l.moveRef}
+		if l.action == holdPlace {
+			err = s.holds.Place(callCtx, call)
+		} else {
+			err = s.holds.Release(callCtx, call)
+		}
+		stop()
+		state := holdDone
+		switch {
+		case err == nil:
+		case errors.Is(err, inventory.ErrRejected) || l.attempts+1 >= holdMaxAttempts:
+			state = holdFailed
+		default:
+			state = holdPending
+		}
+		if err != nil {
+			slog.ErrorContext(ctx, "inventory hold call failed", "err", err, "action", l.action, "source", l.sourceType, "ref", l.sourceRef,
+				"state", state, "correlationId", middleware.GetReqID(ctx))
+		}
+		if markErr := s.markHold(ctx, l.id, state, err); markErr != nil {
+			slog.ErrorContext(ctx, "recording an inventory hold outcome failed", "err", markErr, "link", l.id, "correlationId", middleware.GetReqID(ctx))
+			return
+		}
+		if state == holdPending {
+			return
+		}
+	}
+}
+
+func (s *Postgres) markHold(ctx context.Context, id, state string, callErr error) error {
+	detail := ""
+	if callErr != nil {
+		detail = callErr.Error()
+		if len(detail) > 500 {
+			detail = detail[:500]
+		}
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update quality_hold_link set state = $2, attempts = attempts + 1, last_error = $3,
+			done_at = case when $2 = 'PENDING' then null else now() end where `+ownTenant+` and id = $1 and state = 'PENDING'`, id, state, detail)
+		return err
+	})
+}
+
+// kickFlush asks the sweeper to send the tenant's queued calls now, without
+// waiting for them and without blocking the request that queued them.
+func (s *Postgres) kickFlush(ctx context.Context) {
+	if s.holds == nil {
+		return
+	}
+	p, _ := tenant.FromContext(ctx)
+	s.kicks.add(p.TenantID)
+}
+
+type kickSet struct {
+	mu   sync.Mutex
+	set  map[string]bool
+	wake chan struct{}
+}
+
+func (k *kickSet) add(tenantID string) {
+	k.mu.Lock()
+	k.set[tenantID] = true
+	k.mu.Unlock()
+	select {
+	case k.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (k *kickSet) take() []string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	out := make([]string, 0, len(k.set))
+	for t := range k.set {
+		out = append(out, t)
+	}
+	clear(k.set)
+	return out
+}
+
+func sweepContext(parent context.Context, tenantID string) context.Context {
+	return tenant.With(parent, tenant.Principal{TenantID: tenantID, UserID: holdSweeper, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
+}
+
+// RunHoldSweeper sends queued hold calls for the given tenants at start and on
+// every tick, and for any tenant that queued one since start as soon as it does.
+// The context carries no legal entity and the all-entity duty, so row-level
+// security shows every entity of the tenant without a bypass role. It reports
+// calls inventory refused and calls pending longer than staleAfter.
+func (s *Postgres) RunHoldSweeper(ctx context.Context, tenants []string, interval, staleAfter time.Duration) {
+	if s.holds == nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, t := range tenants {
+		known[t] = true
+	}
+	sweep := func() {
+		for t := range known {
+			c := sweepContext(ctx, t)
+			s.FlushHolds(c)
+			s.reportHoldBacklog(c, staleAfter)
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweep()
+		case <-s.kicks.wake:
+			for _, t := range s.kicks.take() {
+				known[t] = true
+				s.FlushHolds(sweepContext(ctx, t))
+			}
+		}
+	}
+}
+
+func (s *Postgres) reportHoldBacklog(ctx context.Context, staleAfter time.Duration) {
+	var failed, stale int
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) filter (where state = 'FAILED' and done_at > now() - interval '1 day'),
+			count(*) filter (where state = 'PENDING' and created_at < now() - $1::interval) from quality_hold_link where `+ownTenant,
+			staleAfter.String()).Scan(&failed, &stale)
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "reading the inventory hold backlog failed", "err", err)
+		return
+	}
+	if failed > 0 || stale > 0 {
+		slog.ErrorContext(ctx, "inventory holds need attention: stock may be sellable that quality holds or held that quality released",
+			"failedLastDay", failed, "pendingOlderThan", staleAfter.String(), "pendingStale", stale)
+	}
+}
