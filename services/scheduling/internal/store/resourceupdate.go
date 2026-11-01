@@ -169,10 +169,17 @@ func uncoveredJobs(ctx context.Context, tx pgx.Tx, res Resource, from time.Time)
 			jobIDs = append(jobIDs, sp.job)
 		}
 	}
+	return affectedByID(ctx, tx, jobIDs)
+}
+
+// affectedByID describes the listed jobs with start and end spanning every
+// segment, by start (at most 500).
+func affectedByID(ctx context.Context, tx pgx.Tx, jobIDs []string) ([]AffectedJob, error) {
+	out := []AffectedJob{}
 	if len(jobIDs) == 0 {
 		return out, nil
 	}
-	rows, err = tx.Query(ctx, `select job_id::text, order_id::text, oper_number, min(start_at), max(end_at), bool_or(firmed)
+	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, min(start_at), max(end_at), bool_or(firmed)
 		from scheduled_job where job_id = any($1::uuid[])
 		group by job_id, order_id, oper_number order by min(start_at), oper_number limit $2`, jobIDs, maxAffectedJobs)
 	if err != nil {

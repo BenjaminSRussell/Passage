@@ -22,11 +22,14 @@ var (
 	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
 
 	ResourceUpdated = events.Type(Context, "resource", "updated", 1)
+
+	CapacityBlockUpdated = events.Type(Context, "capacityblock", "updated", 1)
+	NetworkUpdated       = events.Type(Context, "network", "updated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated}
 }
 
 type RunCompletedData struct {
@@ -146,4 +149,31 @@ type ResourceUpdatedData struct {
 	Shifts       []domain.Shift `json:"shifts"`
 	Version      int            `json:"version"`
 	AffectedJobs []string       `json:"affectedJobs"`
+}
+
+// CapacityBlockUpdatedData announces a changed capacity block (FR-23.17).
+// Schedule runs and moves after the event read the new priority, condition
+// and active flag.
+type CapacityBlockUpdatedData struct {
+	BlockID    string             `json:"blockId"`
+	ResourceID string             `json:"resourceId"`
+	Code       string             `json:"code"`
+	Priority   int                `json:"priority"`
+	Active     bool               `json:"active"`
+	Condition  []domain.Predicate `json:"condition"`
+	Version    int                `json:"version"`
+	// AffectedJobs are the booked jobs the resource's active blocks now keep
+	// out of the time they hold; they stay where they are until moved or
+	// rescheduled.
+	AffectedJobs []string `json:"affectedJobs"`
+}
+
+// NetworkUpdatedData announces a renamed or ended resource network (FR-23.13).
+type NetworkUpdatedData struct {
+	NetworkID  string  `json:"networkId"`
+	Code       string  `json:"code"`
+	Name       string  `json:"name"`
+	ActiveFrom string  `json:"activeFrom"`
+	ActiveTo   *string `json:"activeTo"`
+	Version    int     `json:"version"`
 }

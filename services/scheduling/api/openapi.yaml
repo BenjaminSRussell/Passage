@@ -579,6 +579,42 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Network' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateNetwork
+      summary: Rename a resource network or end it on a date (FR-23.13)
+      description: >
+        Send name, activeTo or both. activeTo is the last day the network
+        applies and cannot be before its start date (422 SCHED-0129); it can be
+        moved but not cleared (an explicit null gets 400), and the code, start date and transitions never
+        change. Schedule runs and moves read the networks active on the run
+        date, so an ended network stops constraining the next run; jobs already
+        placed stay where they are. Needs the network version in If-Match.
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The network version from its ETag, for example "3". A stale version gets 412 SCHED-0128.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NetworkPatch' }
+      responses:
+        '200':
+          description: 'The updated network with ETag "<version>". A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Network' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/setup-matrices:
     post:
       operationId: createSetupMatrix
@@ -713,6 +749,57 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/CapacityBlock' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/capacity-blocks/{id}:
+    get:
+      operationId: getCapacityBlock
+      summary: One capacity block
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 'The block, with ETag "<version>" for the If-Match of an update'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityBlock' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateCapacityBlock
+      summary: Change a capacity block's priority, condition or active flag (FR-23.17)
+      description: >
+        Send at least one of priority, active or condition; a condition
+        replaces the whole list. Set active to false to retire a block. The
+        resource, code and window never change. Schedule runs and moves read
+        the active blocks when they start, so the change applies to the next
+        run or move. Jobs already placed stay where they are; the answer lists
+        in affectedJobs those booked from now on the block's resource that the
+        active blocks now keep out (BR-23.15), for the planner to move or
+        reschedule. Needs the block version in If-Match.
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: The block version from its ETag, for example "3". A stale version gets 412 SCHED-0127.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CapacityBlockPatch' }
+      responses:
+        '200':
+          description: 'The updated block with ETag "<version>" and the jobs it affects. A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityBlockUpdate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/resources/{id}/block-utilization:
     get:
       operationId: getBlockUtilization
@@ -1113,6 +1200,16 @@ components:
           minItems: 1
           maxItems: 14
           items: { $ref: '#/components/schemas/Shift' }
+    CapacityBlockUpdate:
+      allOf:
+        - $ref: '#/components/schemas/CapacityBlock'
+        - type: object
+          required: [affectedJobs]
+          properties:
+            affectedJobs:
+              type: array
+              description: Booked jobs from now on the block's resource that lie in open capacity but outside the capacity the active blocks leave them, by start (at most 500), each with the span of all its segments.
+              items: { $ref: '#/components/schemas/AffectedJob' }
     ResourceUpdate:
       allOf:
         - $ref: '#/components/schemas/Resource'
@@ -1479,6 +1576,22 @@ components:
         attribute: { type: string, minLength: 1, maxLength: 64 }
         op: { type: string, enum: ['=', '!=', '>=', '<=', '>', '<'] }
         value: { type: string, maxLength: 64, description: Ordering operators need a decimal value }
+    NetworkPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        activeTo: { type: string, format: date, description: Last day the network applies; on or after its start date. }
+    CapacityBlockPatch:
+      type: object
+      minProperties: 1
+      properties:
+        priority: { type: integer, minimum: 0, maximum: 1000 }
+        active: { type: boolean }
+        condition:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/Predicate' }
     CapacityBlockRequest:
       type: object
       required: [resourceId, code]

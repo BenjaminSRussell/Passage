@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignProposalsPage } from "./CampaignProposalsPage";
 import { CampaignsPage } from "./CampaignsPage";
+import { CapacityBlockDetailPage } from "./CapacityBlockDetailPage";
 import { CapacityBlocksPage } from "./CapacityBlocksPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
 import { CapacityOverridesPage } from "./CapacityOverridesPage";
@@ -65,6 +66,7 @@ const scheduling: PassageModule = {
     { path: "/scheduling/capacity-overrides/new", element: createElement(NewCapacityOverridePage), handle: { title: "New capacity override" } },
     { path: "/scheduling/capacity-blocks", element: createElement(CapacityBlocksPage), handle: { title: "Capacity blocks" } },
     { path: "/scheduling/capacity-blocks/new", element: createElement(NewCapacityBlockPage), handle: { title: "New capacity block" } },
+    { path: "/scheduling/capacity-blocks/:id", element: createElement(CapacityBlockDetailPage), handle: { title: "Capacity block" } },
   ],
   nav: [
     { label: "Gantt", to: "/scheduling", duty: "scheduling.read" },

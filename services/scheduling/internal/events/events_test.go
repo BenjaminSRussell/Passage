@@ -20,6 +20,8 @@ func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 		"dev.passage.scheduling.capacityoverride.created.v1": true,
 		"dev.passage.scheduling.capacityoverride.deleted.v1": true,
 		"dev.passage.scheduling.resource.updated.v1":         true,
+		"dev.passage.scheduling.capacityblock.updated.v1":    true,
+		"dev.passage.scheduling.network.updated.v1":          true,
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {

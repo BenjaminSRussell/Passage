@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listCapacityBlocks, listResources, type CapacityBlock, type Predicate, type Resource } from "./api/client";
 import { describeShifts, formatDateTime, shortId } from "./format";
@@ -25,6 +25,7 @@ interface View {
 
 /** Capacity reserved for jobs whose attributes match a condition (FR-23.17). */
 export function CapacityBlocksPage() {
+  const navigate = useNavigate();
   const [resourceId, setResourceId] = useState("");
   const state = useLoad<View>(async (signal) => {
     const [rows, resources] = await Promise.all([listCapacityBlocks(resourceId, signal), listResources(signal)]);
@@ -77,6 +78,7 @@ export function CapacityBlocksPage() {
           rows={state.data?.rows ?? []}
           getRowKey={(b) => b.id}
           loading={state.loading}
+          onRowOpen={(b) => navigate(`/scheduling/capacity-blocks/${b.id}`)}
           empty={{ title: "No capacity blocks yet", description: "Without blocks every job may use all open capacity." }}
         />
       )}

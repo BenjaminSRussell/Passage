@@ -289,6 +289,31 @@ after saving), linked from the resource detail screen and the navigation. The
 OpenAPI document and the AsyncAPI messages (title and summary on every message)
 pass the doc gates with no FAIL lines.
 
+Slice 15 builds capacity block and network maintenance (FR-23.13, FR-23.17).
+`GET /capacity-blocks/{id}` and `PATCH /capacity-blocks/{id}` (priority 0-1000,
+`active`, `condition`; duty `scheduling.capacity.write`) and
+`PATCH /networks/{id}` (`name`, `activeTo` not before the start date, SCHED-0129;
+duty `scheduling.setup.write`), each with Idempotency-Key and If-Match with the
+record version (stale: 412 SCHED-0127 for a block, SCHED-0128 for a network;
+unknown block: SCHED-0126; an explicit `activeTo: null` is refused with 400).
+Runs and moves read active blocks and the networks active on the run date when
+they start, so a retired block or ended network stops constraining the next
+run; jobs already placed are not moved. A block change answers with
+`affectedJobs`: the jobs booked from now on the block's resource that sit in
+open capacity the active blocks no longer leave them (BR-23.15; for example a
+job inside a block whose condition it no longer meets), as a calendar change
+lists the jobs it no longer covers (AC-23.7); `capacityblock.updated` carries
+their IDs. Retiring a block or ending a network only removes a constraint, so
+it leaves no job in breach. Events
+`capacityblock.updated` and `network.updated` go through the outbox in the
+same transaction (AsyncAPI documents both). No migration: the tables, their
+version column and their UPDATE grant exist since 0002. Web: the capacity block
+list opens a detail screen with priority, condition and active (stale version
+offers the latest; the saved change lists the jobs it keeps out), and the
+network detail gains a rename and end-date form. No
+new duty. A network end date cannot be cleared and block windows cannot be
+edited (see the tables below).
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -323,7 +348,7 @@ moved-out handoff rows.
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |
 | 6 | Capacity block windows and changeovers in the CP-SAT model | later slice of PSG-23 | The job-shop model has no calendars, blocks or setup times; the heuristic applies them. |
 | 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; operation secondaries (BR-23.4) are built in slice 12, the edge's transfer line is still not booked for the transfer window. |
-| 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks are create-and-read; update and deactivation are a later slice of PSG-23. |
+| 6 | Network per site and assigned to a route operation chain; network edge editing | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks can be renamed and ended on a date since slice 15 (`PATCH /networks/{id}`); their transitions are fixed at creation, so changing an edge means creating a new network, and an end date can be moved but not cleared. |
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
@@ -340,7 +365,9 @@ moved-out handoff rows.
 | 8 | Blocks applied in schedule runs and moves (job placed inside a matching block, otherwise unblocked capacity or late; SCHED-0014 warning; AC-23.13 end to end) | built | Active blocks are expanded over the run horizon in the resource's time zone; attributes are entered on the operation. |
 | 8 | Operation attributes fed from product variant dimensions (w8) and order or batch attributes (w21, w24) | handoff — waves 8, 21 and 24 | Attributes are set on `POST /operations` until those waves publish them. |
 | 8 | RRULE recurrence on capacity blocks | built | `recurrence {rule, startDate, startMinute, endMinute}` on `POST /capacity-blocks`; the subset is FREQ=DAILY or WEEKLY with INTERVAL, BYDAY (plain weekday codes) and COUNT or UNTIL. Other RRULE parts (BYMONTHDAY, BYSETPOS, ordinal weekdays, MONTHLY) are refused rather than guessed. |
-| 8 | Block update and deactivation | later slice of PSG-23 | `active` is set at creation only. |
+| 8 | Block update and deactivation | built (slice 15) for priority, condition and the active flag | `PATCH /capacity-blocks/{id}` and `GET /capacity-blocks/{id}`, duty `scheduling.capacity.write`, Idempotency-Key and If-Match. The resource, code and window (weekly, dated or recurrence) are fixed at creation: to change them, deactivate the block and create another. Jobs already placed stay where they are until the next run or move; the answer and the event list those the blocks now keep out. |
+| 8 | Showing block breaches on the Gantt (a booked job inside a block it may not use) | later slice of PSG-23 | Listed once, in the block update answer and `capacityblock.updated`; the Gantt does not mark them. |
+| 6 | Jobs whose transitions break a network after its end date is moved later | later slice of PSG-23 | Ending a network earlier only relaxes the schedule. Moving the end date later re-applies the network to days that runs may have planned without it; those jobs are not listed in `network.updated` and keep their placement until the next run or move. |
 
 ## PRD items (section 4.23) not built yet
 

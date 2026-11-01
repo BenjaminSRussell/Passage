@@ -223,7 +223,9 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/networks`, `/setup-matrices`, `/cleanout-rules` (Idempotency-Key) | `scheduling.setup.write` |
 | GET | `/v1/scheduling/networks[/{id}]`, `/setup-matrices[/{id}]?resourceId`, `/cleanout-rules` | `scheduling.read` |
 | POST | `/v1/scheduling/capacity-blocks` (Idempotency-Key) | `scheduling.capacity.write` |
-| GET | `/v1/scheduling/capacity-blocks?resourceId` | `scheduling.read` |
+| GET | `/v1/scheduling/capacity-blocks?resourceId`, `/capacity-blocks/{id}` | `scheduling.read` |
+| PATCH | `/v1/scheduling/capacity-blocks/{id}` (Idempotency-Key, If-Match) | `scheduling.capacity.write` |
+| PATCH | `/v1/scheduling/networks/{id}` (Idempotency-Key, If-Match) | `scheduling.setup.write` |
 | GET | `/v1/scheduling/resources/{id}/block-utilization?from&to` | `scheduling.read` |
 | POST | `/v1/scheduling/campaigns` (Idempotency-Key) | `scheduling.campaign.write` |
 | GET | `/v1/scheduling/campaigns?status&resourceId&limit`, `/v1/scheduling/campaigns/{id}` (ETag) | `scheduling.read` |

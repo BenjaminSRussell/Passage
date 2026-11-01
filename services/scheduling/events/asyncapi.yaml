@@ -46,6 +46,16 @@ channels:
         $ref: '#/components/messages/CapacityOverrideCreated'
       capacityOverrideDeleted:
         $ref: '#/components/messages/CapacityOverrideDeleted'
+  capacityBlock:
+    address: passage.scheduling.capacityblock
+    messages:
+      capacityBlockUpdated:
+        $ref: '#/components/messages/CapacityBlockUpdated'
+  network:
+    address: passage.scheduling.network
+    messages:
+      networkUpdated:
+        $ref: '#/components/messages/NetworkUpdated'
 operations:
   publishRunCompleted:
     action: send
@@ -101,8 +111,34 @@ operations:
     messages:
       - $ref: '#/channels/resource/messages/resourceUpdated'
     summary: A resource name, time zone or weekly calendar changed, with the booked jobs it no longer covers
+  publishCapacityBlockUpdated:
+    action: send
+    channel: { $ref: '#/channels/capacityBlock' }
+    messages:
+      - $ref: '#/channels/capacityBlock/messages/capacityBlockUpdated'
+    summary: A capacity block's priority, condition or active flag changed
+  publishNetworkUpdated:
+    action: send
+    channel: { $ref: '#/channels/network' }
+    messages:
+      - $ref: '#/channels/network/messages/networkUpdated'
+    summary: A resource network was renamed or ended
 components:
   messages:
+    CapacityBlockUpdated:
+      title: Capacity block updated
+      summary: A capacity block's priority, condition or active flag changed; runs and moves after the event use the new values, and it lists the booked jobs the resource's blocks now keep out.
+      name: dev.passage.scheduling.capacityblock.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CapacityBlockUpdatedData'
+    NetworkUpdated:
+      title: Resource network updated
+      summary: A resource network was renamed or ended on a date.
+      name: dev.passage.scheduling.network.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/NetworkUpdatedData'
     ResourceUpdated:
       title: Resource updated
       summary: A resource name, time zone or weekly calendar changed; lists the booked jobs the new calendar no longer covers.
@@ -236,6 +272,39 @@ components:
               setupGroup: { type: string }
               minutes: { type: integer }
               reason: { type: string, enum: [batches, run-time, campaign-end] }
+        version: { type: integer }
+    CapacityBlockUpdatedData:
+      type: object
+      required: [blockId, resourceId, code, priority, active, condition, version, affectedJobs]
+      properties:
+        blockId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        code: { type: string }
+        priority: { type: integer, minimum: 0, maximum: 1000 }
+        active: { type: boolean }
+        condition:
+          type: array
+          items:
+            type: object
+            required: [attribute, op, value]
+            properties:
+              attribute: { type: string }
+              op: { type: string }
+              value: { type: string }
+        version: { type: integer }
+        affectedJobs:
+          type: array
+          description: Booked jobs from the change on that lie inside a block they may not use; they stay where they are until moved or rescheduled.
+          items: { type: string, format: uuid }
+    NetworkUpdatedData:
+      type: object
+      required: [networkId, code, name, activeFrom, activeTo, version]
+      properties:
+        networkId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        activeFrom: { type: string, format: date }
+        activeTo: { type: [string, 'null'], format: date }
         version: { type: integer }
     ResourceUpdatedData:
       type: object

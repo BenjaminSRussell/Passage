@@ -165,6 +165,7 @@ func (a *API) getNetwork(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", etag(n.Version))
 	httpx.JSON(w, http.StatusOK, n)
 }
 

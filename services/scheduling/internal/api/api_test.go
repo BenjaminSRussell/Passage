@@ -66,6 +66,9 @@ type fakeStore struct {
 	// slice 13
 	lastPatch        store.ResourcePatch
 	lastPatchVersion int
+	// slice 15
+	lastBlockPatch store.BlockPatch
+	lastNetPatch   store.NetworkPatch
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {

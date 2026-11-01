@@ -700,6 +700,44 @@ export function listCapacityBlocks(resourceId = "", signal?: AbortSignal): Promi
   return items<CapacityBlock>(`/capacity-blocks${query({ resourceId })}`, signal);
 }
 
+export function getCapacityBlock(id: string, signal?: AbortSignal): Promise<CapacityBlock> {
+  return send<CapacityBlock>(`/capacity-blocks/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export interface CapacityBlockPatch {
+  priority?: number;
+  active?: boolean;
+  condition?: Predicate[];
+}
+
+/** The updated block with the booked jobs the resource's active blocks now keep out (BR-23.15). */
+export interface CapacityBlockUpdate extends CapacityBlock {
+  affectedJobs: AffectedJob[];
+}
+
+/** Changes a block under the version the planner saw (If-Match); runs and moves after it use the new values. */
+export function updateCapacityBlock(id: string, version: number, patch: CapacityBlockPatch, key: string = newKey()): Promise<CapacityBlockUpdate> {
+  return send<CapacityBlockUpdate>(`/capacity-blocks/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
+export interface NetworkPatch {
+  name?: string;
+  activeTo?: string;
+}
+
+/** Renames a network or ends it on a date, under the version the planner saw (If-Match). */
+export function updateNetwork(id: string, version: number, patch: NetworkPatch, key: string = newKey()): Promise<Network> {
+  return send<Network>(`/networks/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(patch),
+  });
+}
+
 export function getBlockUtilization(resourceId: string, from: string, to: string, signal?: AbortSignal): Promise<BlockWindow[]> {
   return items<BlockWindow>(`/resources/${encodeURIComponent(resourceId)}/block-utilization${query({ from, to })}`, signal);
 }
