@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 import unittest.mock
+import urllib.parse
 from pathlib import Path
 
 import stage_release
@@ -636,6 +637,62 @@ class StageReleaseTests(unittest.TestCase):
 
         self.assertEqual(received[0]["body"]["previousDigest"], INITIAL_DIGEST)
         self.assertEqual(received[0]["body"]["action"], "promote")
+
+    def test_record_exits_3_when_since_is_not_a_readable_commit(self):
+        received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST)
+
+        result, errors = self.record(since="f" * 40)
+
+        self.assertEqual(result, 3)
+        self.assertIn("not a readable commit", errors)
+        self.assertEqual(received, [])
+
+    def test_record_exits_3_when_the_manifest_at_since_is_unreadable(self):
+        broken, _ = self.publish_unreadable_stage_then(PROMOTED_DIGEST)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=broken)
+
+        self.assertEqual(result, 3)
+        self.assertIn("unreadable", errors)
+        self.assertEqual(received, [])
+
+    def test_record_reads_every_page_of_the_registry_listing(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third, INITIAL_DIGEST)
+        pages = {
+            None: ([{"gitSha": shas[0], "action": "promote", "imageDigest": PROMOTED_DIGEST, "previousDigest": INITIAL_DIGEST}], "cur-1"),
+            "cur-1": ([{"gitSha": cursor, "action": "promote", "imageDigest": third, "previousDigest": PROMOTED_DIGEST}], None),
+        }
+        requested = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(handler):
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
+                requested.append(query.get("cursor", [None])[0])
+                rows, nxt = pages[requested[-1]]
+                handler.send_response(200)
+                handler.send_header("Content-Type", "application/json")
+                if nxt:
+                    handler.send_header("X-Next-Cursor", nxt)
+                handler.end_headers()
+                handler.wfile.write(json.dumps(rows).encode())
+
+            def log_message(handler, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        releases = stage_release._list_releases(f"http://127.0.0.1:{server.server_port}", "stage")
+
+        self.assertEqual(requested, [None, "cur-1"])
+        self.assertEqual(len(releases), 2)
+        self.assertIn(third, stage_release.registry_known_digests(releases))
 
     def test_record_resumes_from_the_newest_recorded_release_not_the_given_revision(self):
         third = "sha256:" + "c" * 64

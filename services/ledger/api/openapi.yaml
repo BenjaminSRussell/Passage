@@ -1013,6 +1013,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    Problem500:
+      description: Unexpected server error (COM-0500); no internal detail is returned
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     Problem403:
       description: Forbidden (duty missing, or caller scoped to another legal entity)
       content:
@@ -1780,7 +1785,9 @@ paths:
       tags: [journal]
       operationId: listLedgerSets
       x-passage-duty: ledger.journal.read
-      description: Ledger sets visible to the caller's legal-entity scope, ordered by legal entity then code (at most 500).
+      description: Ledger sets visible to the caller's legal-entity scope, ordered by legal entity then code, 100 per page; pass nextCursor back as cursor for the next page.
+      parameters:
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Ledger sets with their member ledgers
@@ -1792,8 +1799,11 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/LedgerSet" }
+                  nextCursor: { type: string, description: Present only when more sets follow }
+        "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
+        "500": { $ref: "#/components/responses/Problem500" }
     post:
       tags: [journal]
       operationId: createLedgerSet
@@ -1838,6 +1848,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+        "500": { $ref: "#/components/responses/Problem500" }
   /v1/ledger/ledger-sets/{setId}/journal-entries:
     post:
       tags: [journal]
@@ -1887,9 +1898,10 @@ paths:
       tags: [journal]
       operationId: listAccountMappings
       x-passage-duty: ledger.journal.read
-      description: Every account mapping of this ledger, ordered by source account then effectiveFrom. 404 LEDGER_NOT_FOUND for a ledger outside the caller's scope.
+      description: Every account mapping of this ledger, ordered by source account then effectiveFrom, 100 per page; pass nextCursor back as cursor for the next page. 404 LEDGER_NOT_FOUND for a ledger outside the caller's scope.
       parameters:
         - $ref: "#/components/parameters/LedgerId"
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Account mappings
@@ -1901,9 +1913,12 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/AccountMapping" }
+                  nextCursor: { type: string, description: Present only when more mappings follow }
+        "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+        "500": { $ref: "#/components/responses/Problem500" }
     post:
       tags: [journal]
       operationId: createAccountMapping

@@ -24,6 +24,7 @@ SERVICE = "hello-ledger"
 API_URL_VARIABLE = "PASSAGE_PLATFORM_API_URL"
 API_TOKEN_VARIABLE = "PASSAGE_PLATFORM_API_TOKEN"
 RECORD_TIMEOUT_SECONDS = 10
+NEXT_CURSOR_HEADER = "X-Next-Cursor"
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
@@ -284,9 +285,11 @@ def _api_headers(extra=None):
     return headers
 
 
-def _call_api(request):
+def _call_api(request, headers_out=None):
     try:
         with _OPENER.open(request, timeout=RECORD_TIMEOUT_SECONDS) as response:
+            if headers_out is not None:
+                headers_out.update(response.headers)
             return json.load(response)
     except urllib.error.HTTPError as error:
         raise ReleaseError(f"release API answered {error.code}: {error.read().decode(errors='replace')[:300]}") from error
@@ -295,13 +298,29 @@ def _call_api(request):
 
 
 def _list_releases(base, env):
-    query = urllib.parse.urlencode({"service": SERVICE, "env": env})
-    releases = _call_api(
-        urllib.request.Request(f"{base}/v1/platform/releases?{query}", headers=_api_headers(), method="GET")
-    )
-    if not isinstance(releases, list):
-        raise ReleaseError("release API list answered a non-array body")
-    return releases
+    releases = []
+    cursor = None
+    seen = set()
+    while True:
+        params = {"service": SERVICE, "env": env}
+        if cursor:
+            params["cursor"] = cursor
+        headers = {}
+        page = _call_api(
+            urllib.request.Request(
+                f"{base}/v1/platform/releases?{urllib.parse.urlencode(params)}", headers=_api_headers(), method="GET"
+            ),
+            headers,
+        )
+        if not isinstance(page, list):
+            raise ReleaseError("release API list answered a non-array body")
+        releases.extend(page)
+        cursor = headers.get(NEXT_CURSOR_HEADER)
+        if not cursor:
+            return releases
+        if cursor in seen:
+            raise ReleaseError("release API list repeated a pagination cursor")
+        seen.add(cursor)
 
 
 def _is_ancestor(root, ancestor, descendant):
@@ -432,6 +451,14 @@ def record(root, env, since):
     else:
         registry = []
     since = since if since and set(since) != {"0"} else "HEAD~1"
+    try:
+        _git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{since}^{{commit}}")
+    except ReleaseError:
+        print(f"release not recorded: --since {since} is not a readable commit", file=sys.stderr)
+        return 3
+    if _digest_at(root, env, since) is None:
+        print(f"release not recorded: {env} manifest at {since} is unreadable", file=sys.stderr)
+        return 3
     releases, unreadable = merged_releases(root, env, since, registry_known_digests(registry))
     status = 3 if unreadable else 0
     if not releases:

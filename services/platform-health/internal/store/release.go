@@ -45,6 +45,8 @@ type Release struct {
 	RecordedByTenant string `json:"-"`
 	Replayed         bool   `json:"-"`
 	ChainBreak       bool   `json:"-"`
+
+	ExpectedPreviousDigest string `json:"-"`
 }
 
 func replayRelease(ctx context.Context, tx pgx.Tx, callerTenant string, key *string, in Release, r *Release) (bool, error) {
@@ -80,6 +82,9 @@ type releaseEventData struct {
 	GitSHA         string `json:"git_sha"`
 	Actor          string `json:"actor"`
 	Reason         string `json:"reason,omitempty"`
+
+	ChainBreak             bool   `json:"chain_break"`
+	ExpectedPreviousDigest string `json:"expected_previous_digest,omitempty"`
 }
 
 func scanRelease(row pgx.Row, r *Release) error {
@@ -120,6 +125,9 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 		if !known {
 			return ErrUnknownEnvironment
 		}
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, in.Service+"/"+in.Environment); err != nil {
+			return err
+		}
 		if in.Action == ActionRollback {
 			var promoted bool
 			if err := tx.QueryRow(ctx, `select exists (select 1 from platform_release where service = $1 and environment = $2 and ((action = 'promote' and image_digest = $3) or previous_digest = $3))`,
@@ -141,8 +149,8 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 		if in.Reason != "" {
 			reason = &in.Reason
 		}
-		err = scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant, recorded_by_user, reason, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		err = scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant, recorded_by_user, reason, idempotency_key, created_at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, clock_timestamp())
 			on conflict (recorded_by_tenant, idempotency_key) do nothing
 			returning `+releaseColumns,
 			ids.Nil, ids.New(), in.Service, in.Environment, in.Action, in.ImageDigest, in.PreviousDigest, in.GitSHA, in.Signed, caller.TenantID, actor, reason, key), &r)
@@ -154,9 +162,13 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 			return err
 		}
 		r.ChainBreak = chainBreak
+		if chainBreak {
+			r.ExpectedPreviousDigest = latest
+		}
 		evt, err := events.New(typ, eventSource, r.ID, ids.Nil, releaseEventData{
 			ReleaseID: r.ID, Service: r.Service, Environment: r.Environment, ImageDigest: r.ImageDigest,
 			PreviousDigest: r.PreviousDigest, GitSHA: r.GitSHA, Actor: r.Actor, Reason: r.Reason,
+			ChainBreak: r.ChainBreak, ExpectedPreviousDigest: r.ExpectedPreviousDigest,
 		})
 		if err != nil {
 			return err
@@ -171,12 +183,13 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 	return r, err
 }
 
-func (s *Postgres) ListReleases(ctx context.Context, service, environment string) ([]Release, error) {
+func (s *Postgres) ListReleases(ctx context.Context, service, environment, after string) ([]Release, string, error) {
 	releases := []Release{}
 	err := dbx.WithTenantTx(platformScope(ctx), s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+releaseColumns+` from platform_release
 			where ($1 = '' or service = $1) and ($2 = '' or environment = $2)
-			order by created_at desc, id desc limit $3`, service, environment, listLimit)
+			and ($3 = '' or (created_at, id) < (select created_at, id from platform_release where id = $3::uuid))
+			order by created_at desc, id desc limit $4`, service, environment, after, listLimit+1)
 		if err != nil {
 			return err
 		}
@@ -190,5 +203,10 @@ func (s *Postgres) ListReleases(ctx context.Context, service, environment string
 		}
 		return rows.Err()
 	})
-	return releases, err
+	next := ""
+	if len(releases) > listLimit {
+		releases = releases[:listLimit]
+		next = releases[listLimit-1].ID
+	}
+	return releases, next, err
 }

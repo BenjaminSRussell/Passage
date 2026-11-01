@@ -177,16 +177,20 @@ func loadLedgerSet(ctx context.Context, tx pgx.Tx, tenantID, id string) (LedgerS
 	return set, err
 }
 
-func (s *Postgres) ListLedgerSets(ctx context.Context) ([]LedgerSet, error) {
+const setListPageSize = 100
+
+func (s *Postgres) ListLedgerSets(ctx context.Context, after string) ([]LedgerSet, string, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := []LedgerSet{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select s.id::text, s.legal_entity_id::text, s.code, s.name, s.leading_ledger_id::text, s.created_at,
 				array(select m.ledger_id::text from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id order by m.ledger_id)
-			from ledger_set s where s.tenant_id = $1 order by s.legal_entity_id, s.code limit 500`, p.TenantID)
+			from ledger_set s where s.tenant_id = $1
+				and ($2 = '' or (s.legal_entity_id, s.code) > (select a.legal_entity_id, a.code from ledger_set a where a.tenant_id = $1 and a.id = $2::uuid))
+			order by s.legal_entity_id, s.code limit $3`, p.TenantID, after, setListPageSize+1)
 		if err != nil {
 			return err
 		}
@@ -200,13 +204,18 @@ func (s *Postgres) ListLedgerSets(ctx context.Context) ([]LedgerSet, error) {
 		}
 		return rows.Err()
 	})
-	return out, err
+	next := ""
+	if len(out) > setListPageSize {
+		out = out[:setListPageSize]
+		next = out[setListPageSize-1].ID
+	}
+	return out, next, err
 }
 
-func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID string) ([]AccountMapping, error) {
+func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID, after string) ([]AccountMapping, string, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := []AccountMapping{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -214,7 +223,9 @@ func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID string) ([]
 			return err
 		}
 		rows, err := tx.Query(ctx, `select id::text, ledger_id::text, source_account, target_account, effective_from::text
-			from ledger_account_mapping where tenant_id = $1 and ledger_id = $2 order by source_account, effective_from`, p.TenantID, ledgerID)
+			from ledger_account_mapping where tenant_id = $1 and ledger_id = $2
+				and ($3 = '' or (source_account, effective_from) > (select a.source_account, a.effective_from from ledger_account_mapping a where a.tenant_id = $1 and a.ledger_id = $2 and a.id = $3::uuid))
+			order by source_account, effective_from limit $4`, p.TenantID, ledgerID, after, setListPageSize+1)
 		if err != nil {
 			return err
 		}
@@ -228,7 +239,12 @@ func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID string) ([]
 		}
 		return rows.Err()
 	})
-	return out, err
+	next := ""
+	if len(out) > setListPageSize {
+		out = out[:setListPageSize]
+		next = out[setListPageSize-1].ID
+	}
+	return out, next, err
 }
 
 func (s *Postgres) CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error) {

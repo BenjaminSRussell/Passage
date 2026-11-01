@@ -182,6 +182,18 @@ func TestListReleasesFiltersAndValidates(t *testing.T) {
 	}
 }
 
+func TestListReleasesCursor(t *testing.T) {
+	f := &fakeStore{nextCursor: "00000000-0000-4000-8000-000000000001"}
+	r, _ := newRouter(f)
+	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000002", "", "View platform releases", "")
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Next-Cursor") != f.nextCursor || f.lastAfter != "00000000-0000-4000-8000-000000000002" {
+		t.Fatalf("got %d header %q after %q", rec.Code, rec.Header().Get("X-Next-Cursor"), f.lastAfter)
+	}
+	if rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=not-an-id", "", "View platform releases", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad cursor: %d", rec.Code)
+	}
+}
+
 func newRouterOnly(f *fakeStore) http.Handler { r, _ := newRouter(f); return r }
 
 func TestReleasesRequireDuty(t *testing.T) {
