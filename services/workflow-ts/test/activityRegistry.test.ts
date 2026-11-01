@@ -18,11 +18,26 @@ describe("worker activity registry", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it("registers the payment run activities next to the party one when a key is present", () => {
+  it("registers the payment run, ECO and CAPA activities next to the party one when a key is present", () => {
     const warn = vi.fn();
     const activities = buildActivities({ PASSAGE_SERVICE_SIGNING_KEY: seed }, () => "", warn);
     expect(Object.keys(activities).sort()).toEqual(
-      ["completePaymentRun", "decidePartyChange", "failPaymentRun", "generatePaymentFile", "postPaymentJournal", "settlePaymentRun", "startPaymentRun"],
+      [
+        "approveEco",
+        "cancelEco",
+        "checkEffectiveness",
+        "completePaymentRun",
+        "completeStep",
+        "decidePartyChange",
+        "failPaymentRun",
+        "generatePaymentFile",
+        "postPaymentJournal",
+        "rejectEco",
+        "releaseEco",
+        "settlePaymentRun",
+        "startCorrection",
+        "startPaymentRun",
+      ],
     );
     expect(warn).not.toHaveBeenCalled();
   });

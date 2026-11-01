@@ -8,6 +8,10 @@ const SEED_BYTES = 32;
 export const SERVICE_NAME = "workflow-ts";
 export const PAYABLES_AUDIENCE = "payables";
 export const PAYABLES_GRANT = ["payment-run.execute"] as const;
+export const ENGINEERING_AUDIENCE = "engineering";
+export const ENGINEERING_GRANT = ["engineering.eco.workflow"] as const;
+export const QUALITY_AUDIENCE = "quality";
+export const QUALITY_GRANT = ["quality.capa.execute"] as const;
 
 export interface TokenSubject {
   tenantId: string;
@@ -17,6 +21,8 @@ export interface TokenSubject {
 
 export interface ServiceTokenSigner {
   mintForPayables(subject: TokenSubject): string;
+  mintForEngineering(subject: TokenSubject): string;
+  mintForQuality(subject: TokenSubject): string;
 }
 
 export interface SignerOptions {
@@ -32,26 +38,29 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
   const key = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: "der", type: "pkcs8" });
   const now = options.now ?? Date.now;
   const newJti = options.newJti ?? (() => randomBytes(16).toString("hex"));
+  function mint(audience: string, grant: readonly string[], { tenantId, legalEntityId, actor }: TokenSubject): string {
+    if (!tenantId || !legalEntityId || !actor) throw new TypeError("a service token needs a tenant, one legal entity and the acting user");
+    const iat = Math.floor(now() / 1000);
+    const claims = {
+      iss: SERVICE_NAME,
+      ...(options.keyId ? { kid: options.keyId } : {}),
+      aud: audience,
+      tid: tenantId,
+      le: legalEntityId,
+      act: actor,
+      duties: [...grant],
+      iat,
+      exp: iat + TOKEN_TTL_SECONDS,
+      jti: newJti(),
+    };
+    const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    const signature = sign(null, Buffer.from(TOKEN_CONTEXT + body), key).toString("base64url");
+    return `${body}.${signature}`;
+  }
   return {
-    mintForPayables({ tenantId, legalEntityId, actor }) {
-      if (!tenantId || !legalEntityId || !actor) throw new TypeError("a service token needs a tenant, one legal entity and the acting user");
-      const iat = Math.floor(now() / 1000);
-      const claims = {
-        iss: SERVICE_NAME,
-        ...(options.keyId ? { kid: options.keyId } : {}),
-        aud: PAYABLES_AUDIENCE,
-        tid: tenantId,
-        le: legalEntityId,
-        act: actor,
-        duties: [...PAYABLES_GRANT],
-        iat,
-        exp: iat + TOKEN_TTL_SECONDS,
-        jti: newJti(),
-      };
-      const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
-      const signature = sign(null, Buffer.from(TOKEN_CONTEXT + body), key).toString("base64url");
-      return `${body}.${signature}`;
-    },
+    mintForPayables: (subject) => mint(PAYABLES_AUDIENCE, PAYABLES_GRANT, subject),
+    mintForEngineering: (subject) => mint(ENGINEERING_AUDIENCE, ENGINEERING_GRANT, subject),
+    mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject),
   };
 }
 

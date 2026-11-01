@@ -33,6 +33,7 @@ const (
 	dutyRead          = "engineering.read"
 	dutyBomWrite      = "engineering.bom.write"
 	dutyEcoApprove    = "engineering.eco.approve"
+	dutyEcoWorkflow   = "engineering.eco.workflow"
 	dutyResourceWrite = "engineering.resource.write"
 	dutyRouteWrite    = "engineering.route.write"
 	dateLayout        = "2006-01-02"
@@ -91,7 +92,11 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos", a.listEcos)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}", a.getEco)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}/impact", a.ecoImpact)
-		r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+		ecoDecider := r.With(authz.RequireAnyDuty(dutyEcoApprove, dutyEcoWorkflow))
+		ecoDecider.Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+		ecoDecider.Post("/v1/engineering/ecos/{id}:approve", a.decideEco(domain.EcoApproved))
+		ecoDecider.Post("/v1/engineering/ecos/{id}:reject", a.decideEco(domain.EcoRejected))
+		ecoDecider.Post("/v1/engineering/ecos/{id}:cancel", a.decideEco(domain.EcoCancelled))
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars", a.createCalendar)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars/{id}:generate", a.generateCalendar)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars/{id}/days", a.calendarDays)
@@ -676,6 +681,40 @@ func (a *API) releaseEco(w http.ResponseWriter, r *http.Request) {
 		a.ecosReleased.Add(1)
 	}
 	httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
+}
+
+func (a *API) decideEco(to domain.EcoState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validTenant(w, r) {
+			return
+		}
+		id := chi.URLParam(r, "id")
+		if !ids.Valid(id) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "ECO id must be a UUID"))
+			return
+		}
+		record, err := a.store.GetEco(r.Context(), id)
+		if err != nil {
+			a.fail(w, r, "load eco", err, &a.ecosFailed)
+			return
+		}
+		eco, previous := record.Eco, record.Eco.State
+		if previous == to {
+			httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		if err := eco.Decide(to, p.UserID); err != nil {
+			a.fail(w, r, "decide eco", err, &a.ecosFailed)
+			return
+		}
+		if err := a.store.ReleaseEco(r.Context(), eco, previous, domain.ReleasePlan{}); err != nil {
+			a.fail(w, r, "persist eco decision", err, &a.ecosFailed)
+			return
+		}
+		slog.InfoContext(r.Context(), "eco decided", "ecoId", eco.ID, "state", string(to), "decidedBy", p.UserID, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
+	}
 }
 
 func (a *API) today() time.Time {

@@ -75,7 +75,9 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.ledger.lookup"},
 	},
 	"workflow-ts": {
-		"payables": {"payment-run.execute"},
+		"payables":    {"payment-run.execute"},
+		"engineering": {"engineering.eco.workflow"},
+		"quality":     {"quality.capa.execute"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},

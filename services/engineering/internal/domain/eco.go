@@ -87,6 +87,17 @@ func (e *Eco) Review(ctx context.Context, ap Approver) error {
 	return e.Transition(EcoApproved)
 }
 
+func (e *Eco) Decide(to EcoState, actor string) error {
+	if to != EcoApproved && to != EcoRejected && to != EcoCancelled {
+		return errf(CodeEcoState, "an ECO is decided as approved, rejected or cancelled, not %s", to)
+	}
+	if e.State != EcoSubmitted {
+		return errf(CodeEcoState, "ECO %s is %s, only a submitted ECO can be decided", e.ID, e.State)
+	}
+	e.DecidedBy = actor
+	return e.Transition(to)
+}
+
 func (e *Eco) Release(versions []BomVersion, today time.Time) (ReleasePlan, error) {
 	if e.State != EcoApproved && e.State != EcoScheduled {
 		return ReleasePlan{}, errf(CodeEcoNotApproved, "ECO %s must be approved before release.", e.Number)

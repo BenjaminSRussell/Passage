@@ -46,6 +46,8 @@ spec:
             - name: TEMPORAL_TASK_QUEUE
               value: {{ .Values.temporal.taskQueue | quote }}
             - { name: PAYABLES_BASE_URL, value: {{ .Values.payablesUrl | quote }} }
+            - { name: ENGINEERING_BASE_URL, value: {{ .Values.engineeringUrl | quote }} }
+            - { name: QUALITY_BASE_URL, value: {{ .Values.qualityUrl | quote }} }
             - { name: PASSAGE_SERVICE_NAME, value: workflow-ts }
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - { name: PASSAGE_SERVICE_SIGNING_KEY_FILE, value: /var/run/passage/service-identity/signing-key }

@@ -25,7 +25,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `GET /v1/engineering/bom-versions/{id}`, `GET /v1/engineering/route-versions`, `GET /v1/engineering/route-versions:active`, `GET /v1/engineering/route-versions/{id}` | `engineering.read` |
 | `POST /v1/engineering/boms:explode`, `GET /v1/engineering/boms:where-used`, `POST /v1/engineering/routes:lead-time` | `engineering.read` |
 | `POST /v1/engineering/ecos` | `engineering.bom.write` |
-| `POST /v1/engineering/ecos/{id}:release` | `engineering.eco.approve` |
+| `POST /v1/engineering/ecos/{id}:release`, `:approve`, `:reject`, `:cancel` | `engineering.eco.approve`, or the service-only `engineering.eco.workflow` that `workflow-ts` signs. `:approve`, `:reject` and `:cancel` decide a submitted ECO as the token's acting user (409 `ENG-ECO-STATE` from any other state, 200 unchanged on a repeat); `:release` of an approved ECO does not call the approver seam. |
 | `POST /v1/engineering/calendars`, `POST /v1/engineering/calendars/{id}:generate`, `POST /v1/engineering/resource-groups`, `POST /v1/engineering/capabilities`, `POST /v1/engineering/resources` | `engineering.resource.write` |
 | `GET /v1/engineering/calendars/{id}/days`, `GET /v1/engineering/resources/{id}`, `GET /v1/engineering/resources`, `GET /v1/engineering/resource-groups`, `GET /v1/engineering/capabilities` | `engineering.read` |
 | `POST /v1/engineering/route-versions/{id}:activate` | `engineering.route.write` |

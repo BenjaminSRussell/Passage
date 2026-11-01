@@ -634,7 +634,7 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 				return err
 			}
 		}
-		if prev == domain.EcoSubmitted && e.State != domain.EcoRejected {
+		if prev == domain.EcoSubmitted && e.State != domain.EcoRejected && e.State != domain.EcoCancelled {
 			if err := emit(ctx, tx, p, e.ID, engevents.EcoApproved, aggregateEco, e.ID, e.EventData()); err != nil {
 				return err
 			}

@@ -3,6 +3,11 @@
 | Deliverable | Status | Reason |
 |---|---|---|
 | Payment run workflow (#102) | built | `src/paymentRunWorkflow.ts`, `src/paymentRunActivities.ts`, `src/startPaymentRun.ts`; crash and re-run proof in `test/paymentRun.test.ts` |
+| ECO approval workflow (wave 09 AC3) | built | `src/ecoApprovalWorkflow.ts`, `src/ecoActivities.ts`; approve, reject, timeout, scheduled release and lost-reply proof in `test/ecoApproval.test.ts` |
+| CAPA workflow (wave 33 AC4) | built | `src/capaWorkflow.ts`, `src/capaActivities.ts`; effectiveness check, reopen, escalation and stall proof in `test/capa.test.ts` |
+| Trigger that starts `ecoApprovalWorkflow` and `capaWorkflow` | not built | nothing starts them on `eco.submitted` or an approved nonconformance yet; the caller supplies the approver, timeouts and (for CAPA) the starting user |
+| Delegation or escalation of the ECO approver | not built | one named approver; a missed decision cancels the ECO instead of escalating |
+| Test against live engineering and quality | not built | the workflow tests run on the SDK time-skipping server against stateful fakes of the two contracts; the Go tests in `services/engineering` and `services/quality` cover the endpoints |
 | Trigger that starts `paymentRunWorkflow` | not built | no API route or event calls `startPaymentRunWorkflow`; the caller supplies only tenant, legal entity, proposal and the starting user |
 | Test against a live payables and Postgres | not built | the workflow tests run on the SDK time-skipping server against a stateful fake of the payables contract; the Go tests in `services/payables` cover the endpoints against Postgres |
 | Service identity for the party calls | #226 | the party activity still sends header identity and a hardcoded duty; the payment run activities use a signed service token (#303) |

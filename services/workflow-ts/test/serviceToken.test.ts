@@ -2,7 +2,14 @@ import { createPrivateKey, createPublicKey, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { createServiceTokenSigner, PAYABLES_GRANT, SERVICE_NAME, serviceTokenSignerFromEnv } from "../src/serviceToken.js";
+import {
+  createServiceTokenSigner,
+  ENGINEERING_GRANT,
+  PAYABLES_GRANT,
+  QUALITY_GRANT,
+  SERVICE_NAME,
+  serviceTokenSignerFromEnv,
+} from "../src/serviceToken.js";
 
 const vector = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../../platform/go/tenant/testdata/workflow_ts_token_vector.json", import.meta.url)), "utf8"),
@@ -24,7 +31,20 @@ describe("service token", () => {
     const data = JSON.parse(readFileSync(fileURLToPath(new URL("../../../policies/authz/data.json", import.meta.url)), "utf8")) as {
       service_grants: Record<string, Record<string, string[]>>;
     };
-    expect(data.service_grants[SERVICE_NAME]).toEqual({ payables: [...PAYABLES_GRANT] });
+    expect(data.service_grants[SERVICE_NAME]).toEqual({
+      payables: [...PAYABLES_GRANT],
+      engineering: [...ENGINEERING_GRANT],
+      quality: [...QUALITY_GRANT],
+    });
+  });
+
+  it("signs each target with its own audience and its single service duty", () => {
+    const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") });
+    const subject = { tenantId: "t", legalEntityId: "l", actor: "a" };
+    const claims = (token: string) => JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString()) as { aud: string; duties: string[]; iss: string };
+    expect(claims(signer.mintForEngineering(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "engineering", duties: ["engineering.eco.workflow"] });
+    expect(claims(signer.mintForQuality(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "quality", duties: ["quality.capa.execute"] });
+    expect(claims(signer.mintForPayables(subject))).toMatchObject({ aud: "payables", duties: ["payment-run.execute"] });
   });
 
   it("expires after 60 seconds and omits kid when none is set", () => {
@@ -38,6 +58,8 @@ describe("service token", () => {
     const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") });
     for (const bad of [{ tenantId: "", legalEntityId: "l", actor: "a" }, { tenantId: "t", legalEntityId: "", actor: "a" }, { tenantId: "t", legalEntityId: "l", actor: "" }]) {
       expect(() => signer.mintForPayables(bad)).toThrow(/needs/);
+      expect(() => signer.mintForEngineering(bad)).toThrow(/needs/);
+      expect(() => signer.mintForQuality(bad)).toThrow(/needs/);
     }
   });
 

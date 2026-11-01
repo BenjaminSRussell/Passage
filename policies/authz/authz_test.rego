@@ -702,3 +702,25 @@ test_batch_service_grant_reaches_only_the_product_job_routes if {
 	not allowed("product.variants.explode", "GET", "/v1/product/released-products")
 	not allowed("product.jobs.write", "GET", "/v1/product/released-products")
 }
+
+test_workflow_ts_eco_and_capa_service_duties if {
+	data.service_grants["workflow-ts"].engineering == ["engineering.eco.workflow"]
+	data.service_grants["workflow-ts"].quality == ["quality.capa.execute"]
+	data.duties["engineering.eco.workflow"].service_only
+	data.duties["quality.capa.execute"].service_only
+	every action in ["approve", "reject", "cancel", "release"] {
+		allowed("engineering.eco.workflow", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
+		allowed("engineering.eco.approve", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
+	}
+	not allowed("engineering.eco.workflow", "POST", "/v1/engineering/ecos")
+	not allowed("engineering.eco.workflow", "GET", "/v1/engineering/ecos/e1")
+	not allowed("engineering.eco.workflow", "POST", "/v1/engineering/bom-versions")
+	allowed("quality.capa.execute", "GET", "/v1/quality/nonconformances/n1")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1/corrections")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:complete-step")
+	allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:check-effectiveness")
+	not allowed("quality.capa.execute", "GET", "/v1/quality/nonconformances")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
+	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
+}
