@@ -374,4 +374,7 @@ func TestReleases_ListPaginatesWithAKeysetCursor(t *testing.T) {
 	if second[0].ID == first[99].ID {
 		t.Fatalf("pages overlap")
 	}
+	if _, _, err := s.ListReleases(ctx, "", "", ids.New()); !errors.Is(err, store.ErrUnknownCursor) {
+		t.Fatalf("unknown cursor: err = %v, want ErrUnknownCursor", err)
+	}
 }

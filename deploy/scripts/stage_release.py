@@ -24,7 +24,7 @@ SERVICE = "hello-ledger"
 API_URL_VARIABLE = "PASSAGE_PLATFORM_API_URL"
 API_TOKEN_VARIABLE = "PASSAGE_PLATFORM_API_TOKEN"
 RECORD_TIMEOUT_SECONDS = 10
-NEXT_CURSOR_HEADER = "X-Next-Cursor"
+NEXT_CURSOR_HEADER = "x-next-cursor"
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
@@ -289,7 +289,7 @@ def _call_api(request, headers_out=None):
     try:
         with _OPENER.open(request, timeout=RECORD_TIMEOUT_SECONDS) as response:
             if headers_out is not None:
-                headers_out.update(response.headers)
+                headers_out.update({name.lower(): value for name, value in response.headers.items()})
             return json.load(response)
     except urllib.error.HTTPError as error:
         raise ReleaseError(f"release API answered {error.code}: {error.read().decode(errors='replace')[:300]}") from error
@@ -433,9 +433,18 @@ def merged_releases(root, env, since, known=()):
     return releases, unreadable
 
 
+def _unreadable_start(base, detail):
+    if not base:
+        print(f"WARNING: {API_URL_VARIABLE} is not set and {detail}; nothing recorded", file=sys.stderr)
+        return 0
+    print(f"release not recorded: {detail}", file=sys.stderr)
+    return 3
+
+
 def record(root, env, since):
     root = Path(root).resolve()
     base = _api_base()
+    source = "--since" if since and set(since) != {"0"} else "default HEAD~1"
     if base:
         try:
             registry = _list_releases(base, env)
@@ -444,7 +453,7 @@ def record(root, env, since):
                 print(f"{env} registry is ahead of this checkout; nothing to record")
                 return 0
             if cursor:
-                since = cursor
+                since, source = cursor, "registry cursor"
         except ReleaseError as error:
             print(f"release not recorded: {error}", file=sys.stderr)
             return 3
@@ -454,11 +463,9 @@ def record(root, env, since):
     try:
         _git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{since}^{{commit}}")
     except ReleaseError:
-        print(f"release not recorded: --since {since} is not a readable commit", file=sys.stderr)
-        return 3
+        return _unreadable_start(base, f"{source} {since} is not a readable commit")
     if _digest_at(root, env, since) is None:
-        print(f"release not recorded: {env} manifest at {since} is unreadable", file=sys.stderr)
-        return 3
+        return _unreadable_start(base, f"{env} manifest at {source} {since} is unreadable")
     releases, unreadable = merged_releases(root, env, since, registry_known_digests(registry))
     status = 3 if unreadable else 0
     if not releases:

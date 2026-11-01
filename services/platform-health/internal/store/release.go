@@ -26,6 +26,7 @@ const (
 var (
 	ErrUnknownEnvironment   = errors.New("unknown environment")
 	ErrIdempotencyConflict  = errors.New("idempotency key reused with a different release")
+	ErrUnknownCursor        = errors.New("cursor does not name a release")
 	ErrRollbackTargetUnseen = errors.New("rollback target was never promoted or previously running on this service and environment")
 )
 
@@ -186,6 +187,15 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 func (s *Postgres) ListReleases(ctx context.Context, service, environment, after string) ([]Release, string, error) {
 	releases := []Release{}
 	err := dbx.WithTenantTx(platformScope(ctx), s.pool, func(tx pgx.Tx) error {
+		if after != "" {
+			var known bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from platform_release where id = $1::uuid)`, after).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return ErrUnknownCursor
+			}
+		}
 		rows, err := tx.Query(ctx, `select `+releaseColumns+` from platform_release
 			where ($1 = '' or service = $1) and ($2 = '' or environment = $2)
 			and ($3 = '' or (created_at, id) < (select created_at, id from platform_release where id = $3::uuid))

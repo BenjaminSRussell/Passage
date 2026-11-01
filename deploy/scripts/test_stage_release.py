@@ -645,8 +645,18 @@ class StageReleaseTests(unittest.TestCase):
         result, errors = self.record(since="f" * 40)
 
         self.assertEqual(result, 3)
+        self.assertIn("--since", errors)
         self.assertIn("not a readable commit", errors)
         self.assertEqual(received, [])
+
+    def test_record_only_warns_for_an_unreadable_start_when_the_api_url_is_unset(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        os.environ.pop(stage_release.API_URL_VARIABLE, None)
+
+        result, errors = self.record(since="f" * 40)
+
+        self.assertEqual(result, 0)
+        self.assertIn("is not set", errors)
 
     def test_record_exits_3_when_the_manifest_at_since_is_unreadable(self):
         broken, _ = self.publish_unreadable_stage_then(PROMOTED_DIGEST)
@@ -676,7 +686,7 @@ class StageReleaseTests(unittest.TestCase):
                 handler.send_response(200)
                 handler.send_header("Content-Type", "application/json")
                 if nxt:
-                    handler.send_header("X-Next-Cursor", nxt)
+                    handler.send_header("x-next-cursor", nxt)
                 handler.end_headers()
                 handler.wfile.write(json.dumps(rows).encode())
 

@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: temporal-postgres
 spec:
-  serviceName: temporal-postgres
+  serviceName: temporal-postgres-rw
   replicas: 1
   selector:
     matchLabels:
@@ -40,10 +40,14 @@ spec:
           readinessProbe:
             exec:
               command: [pg_isready, -U, temporal, -d, temporal]
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, temporal, -d, temporal]
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             exec:
               command: [pg_isready, -U, temporal, -d, temporal]
-            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6

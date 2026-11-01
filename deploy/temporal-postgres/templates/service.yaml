@@ -9,16 +9,3 @@ spec:
     app.kubernetes.io/name: temporal-postgres
   ports:
     - { name: pg, port: 5432, targetPort: pg }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: temporal-postgres
-  labels:
-    app.kubernetes.io/name: temporal-postgres
-spec:
-  clusterIP: None
-  selector:
-    app.kubernetes.io/name: temporal-postgres
-  ports:
-    - { name: pg, port: 5432, targetPort: pg }

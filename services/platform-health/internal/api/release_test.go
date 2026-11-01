@@ -182,6 +182,14 @@ func TestListReleasesFiltersAndValidates(t *testing.T) {
 	}
 }
 
+func TestListReleasesUnknownCursorIs400(t *testing.T) {
+	r, _ := newRouter(&fakeStore{err: store.ErrUnknownCursor})
+	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000009", "", "View platform releases", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListReleasesCursor(t *testing.T) {
 	f := &fakeStore{nextCursor: "00000000-0000-4000-8000-000000000001"}
 	r, _ := newRouter(f)

@@ -221,6 +221,12 @@ func TestPostgres_ListAccountMappingsPagesByKeysetCursor(t *testing.T) {
 	if err != nil || len(first) != 100 || next != first[99].ID {
 		t.Fatalf("first page: %d items, next %q, %v", len(first), next, err)
 	}
+	if _, _, err := e.store.ListAccountMappings(e.ctx, e.local.ID, ids.New()); problemCode(err) != "COM-0001" {
+		t.Fatalf("unknown mapping cursor: %v", err)
+	}
+	if _, _, err := e.store.ListLedgerSets(e.ctx, ids.New()); problemCode(err) != "COM-0001" {
+		t.Fatalf("unknown set cursor: %v", err)
+	}
 	second, next, err := e.store.ListAccountMappings(e.ctx, e.local.ID, next)
 	if err != nil || len(second) != 2 || next != "" || second[0].EffectiveFrom <= first[99].EffectiveFrom {
 		t.Fatalf("second page: %+v next %q %v", second, next, err)

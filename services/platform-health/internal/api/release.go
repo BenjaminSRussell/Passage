@@ -162,6 +162,10 @@ func (a *API) listReleases(w http.ResponseWriter, r *http.Request) {
 		after = canonical
 	}
 	releases, next, err := a.store.ListReleases(r.Context(), service, environment, after)
+	if errors.Is(err, store.ErrUnknownCursor) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be a release id returned by this endpoint"))
+		return
+	}
 	if err != nil {
 		slog.Error("list releases failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

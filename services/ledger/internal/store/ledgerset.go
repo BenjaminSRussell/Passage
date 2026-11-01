@@ -179,6 +179,10 @@ func loadLedgerSet(ctx context.Context, tx pgx.Tx, tenantID, id string) (LedgerS
 
 const setListPageSize = 100
 
+func errUnknownCursor() error {
+	return httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor is not a cursor returned by this endpoint")
+}
+
 func (s *Postgres) ListLedgerSets(ctx context.Context, after string) ([]LedgerSet, string, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
@@ -186,6 +190,15 @@ func (s *Postgres) ListLedgerSets(ctx context.Context, after string) ([]LedgerSe
 	}
 	out := []LedgerSet{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if after != "" {
+			var known bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from ledger_set where tenant_id = $1 and id = $2::uuid)`, p.TenantID, after).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return errUnknownCursor()
+			}
+		}
 		rows, err := tx.Query(ctx, `select s.id::text, s.legal_entity_id::text, s.code, s.name, s.leading_ledger_id::text, s.created_at,
 				array(select m.ledger_id::text from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id order by m.ledger_id)
 			from ledger_set s where s.tenant_id = $1
@@ -221,6 +234,15 @@ func (s *Postgres) ListAccountMappings(ctx context.Context, ledgerID, after stri
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := loadLedger(ctx, tx, p.TenantID, ledgerID, false); err != nil {
 			return err
+		}
+		if after != "" {
+			var known bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from ledger_account_mapping where tenant_id = $1 and ledger_id = $2 and id = $3::uuid)`, p.TenantID, ledgerID, after).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return errUnknownCursor()
+			}
 		}
 		rows, err := tx.Query(ctx, `select id::text, ledger_id::text, source_account, target_account, effective_from::text
 			from ledger_account_mapping where tenant_id = $1 and ledger_id = $2
