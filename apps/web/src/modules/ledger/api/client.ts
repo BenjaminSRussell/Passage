@@ -58,6 +58,9 @@ export const entrySchema = z.object({
   reversalOfEntryId: z.string().optional(),
   reasonCode: z.string().optional(),
   reasonComment: z.string().optional(),
+  /** A dimension realignment entry or its reversal (FR-11.24); reversed only through its run. */
+  isRealignment: z.boolean().optional(),
+  realignmentRunId: z.string().optional(),
   traceId: z.string(),
   totals: z.object({ currency: z.string(), debit: z.string(), credit: z.string() }),
   lines: z.array(entryLineSchema),
@@ -668,6 +671,7 @@ export const journalLineSchema = z.object({
   sourceUri: z.string().optional(),
   sourceLineRef: z.string().optional(),
   reversalOfEntryId: z.string().optional(),
+  isRealignment: z.boolean().optional(),
   traceId: z.string(),
 });
 export type JournalLine = z.infer<typeof journalLineSchema>;
@@ -1381,4 +1385,102 @@ export function putValidationRule(ledgerId: string, id: string, input: Validatio
     input,
     lockVersion ? ifMatch(lockVersion) : {},
   );
+}
+
+/** Dimension realignment (FR-11.24): a restatement of posted balances from old to new dimension values. */
+export const REALIGNMENT_STATUSES = ["proposed", "posted", "reversed", "cancelled"] as const;
+export type RealignmentStatus = (typeof REALIGNMENT_STATUSES)[number];
+
+export const realignmentFilterSchema = z.object({
+  accountFrom: z.string().optional(),
+  accountTo: z.string().optional(),
+  periodFrom: z.string(),
+  periodTo: z.string(),
+});
+export type RealignmentFilter = z.infer<typeof realignmentFilterSchema>;
+
+/** Dimension attribute to old value to new value. */
+export type RealignmentMapping = Record<string, Record<string, string>>;
+
+export const realignmentRowSchema = z.object({
+  account: z.string(),
+  period: z.string(),
+  oldDimensions: z.record(z.string(), z.string()),
+  newDimensions: z.record(z.string(), z.string()),
+  oldCombination: z.string(),
+  newCombination: z.string(),
+  net: z.string(),
+  lineCount: z.number(),
+});
+export type RealignmentRow = z.infer<typeof realignmentRowSchema>;
+
+export const realignmentRunSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  status: z.enum(REALIGNMENT_STATUSES),
+  filter: realignmentFilterSchema,
+  mapping: z.record(z.string(), z.record(z.string(), z.string())),
+  reasonCode: z.string().optional(),
+  reasonComment: z.string().optional(),
+  combinationsAffected: z.number(),
+  lineCount: z.number(),
+  amountMoved: z.string(),
+  currency: z.string(),
+  preview: z.array(realignmentRowSchema),
+  previewTruncated: z.boolean(),
+  entryIds: z.array(z.string()),
+  reversalEntryIds: z.array(z.string()),
+  version: z.number(),
+  createdBy: z.string().optional(),
+  createdAt: z.string().optional(),
+  postedBy: z.string().optional(),
+  postedAt: z.string().optional(),
+  reversedBy: z.string().optional(),
+  reversedAt: z.string().optional(),
+});
+export type RealignmentRun = z.infer<typeof realignmentRunSchema>;
+
+export interface RealignmentInput {
+  filter: RealignmentFilter;
+  mapping: RealignmentMapping;
+}
+
+export interface RealignmentActionInput {
+  reasonCode?: string;
+  reasonComment?: string;
+  /** Reverse only: dates every reversing entry that day instead of its original date. */
+  postingDate?: string;
+}
+
+const realignmentListSchema = z.object({ items: z.array(realignmentRunSchema) });
+
+function realignmentBase(ledgerId: string): string {
+  return `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/realignments`;
+}
+
+/** GET /api/v1/ledger/ledgers/{ledger}/realignments (without previews). */
+export async function fetchRealignments(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<RealignmentRun[]> {
+  return (await getJSON(realignmentBase(ledgerId), realignmentListSchema, fetchImpl)).items;
+}
+
+/** GET .../realignments/{id}: the run with its affected rows. */
+export function fetchRealignment(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<RealignmentRun> {
+  return getJSON(`${realignmentBase(ledgerId)}/${encodeURIComponent(id)}`, realignmentRunSchema, fetchImpl);
+}
+
+/** POST .../realignments: simulates a run (nothing is posted). One Idempotency-Key per user-intended run. */
+export function createRealignment(ledgerId: string, input: RealignmentInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<RealignmentRun> {
+  return sendJSON("POST", realignmentBase(ledgerId), realignmentRunSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
+}
+
+/** POST .../realignments/{id}:post, :reverse or :cancel. Post and reverse need a reason code and an Idempotency-Key. */
+export function actOnRealignment(
+  action: "post" | "reverse" | "cancel",
+  ledgerId: string,
+  id: string,
+  input: RealignmentActionInput,
+  idempotencyKey: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RealignmentRun> {
+  return sendJSON("POST", `${realignmentBase(ledgerId)}/${encodeURIComponent(id)}:${action}`, realignmentRunSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
 }

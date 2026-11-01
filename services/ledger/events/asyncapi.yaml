@@ -61,7 +61,20 @@ channels:
     messages:
       rulesChanged:
         $ref: "#/components/messages/RulesChanged"
+  realignmentCompleted:
+    address: passage.ledger.realignment
+    description: |
+      A dimension realignment run (FR-11.24) was posted or reversed, written to the outbox in the same
+      transaction that posts or reverses its reclassification entries (aggregate type realignment_run).
+      Reporting and the audit trail read it.
+    messages:
+      realignmentCompleted:
+        $ref: "#/components/messages/RealignmentCompleted"
 operations:
+  publishRealignmentCompleted:
+    action: send
+    channel: { $ref: "#/channels/realignmentCompleted" }
+    summary: A dimension realignment run was posted or reversed.
   publishRulesChanged:
     action: send
     channel: { $ref: "#/channels/rulesChanged" }
@@ -251,6 +264,31 @@ components:
               rowsWritten: { type: integer, format: int64 }
               rowsDiffering: { type: integer, format: int64, description: Greater than zero raises a P1 alert }
               durationMs: { type: integer, format: int64 }
+    RealignmentCompleted:
+      name: dev.passage.ledger.realignment.completed.v1
+      title: Dimension realignment completed
+      summary: A dimension realignment run was posted, or reversed as a unit.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.realignment.completed.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: The realignment run id }
+          data:
+            type: object
+            required: [runId, ledgerId, periodFrom, periodTo, combinationsAffected, entryIds, reversal, actor]
+            properties:
+              runId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              periodFrom: { type: string, description: First period of the run, YYYY-MM }
+              periodTo: { type: string, description: Last period of the run, YYYY-MM }
+              combinationsAffected: { type: integer, description: Rows moved, one per account, period and old combination }
+              entryIds: { type: array, items: { type: string, format: uuid }, description: The reclassification entries, or the reversing entries when reversal is true }
+              reversal: { type: boolean }
+              actor: { type: string }
     RulesChanged:
       name: dev.passage.ledger.rules.changed.v1
       title: Ledger rules changed

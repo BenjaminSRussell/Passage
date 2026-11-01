@@ -214,6 +214,14 @@ export function EntryScreen() {
                 </dd>
               </div>
             ) : null}
+            {entry.isRealignment && entry.realignmentRunId ? (
+              <div className={styles.entry}>
+                <dt className={styles.term}>Dimension realignment</dt>
+                <dd className={styles.value}>
+                  <Link to={`/ledger/realignments/${entry.realignmentRunId}?ledger=${encodeURIComponent(entry.ledgerId)}`}>Realignment run</Link>
+                </dd>
+              </div>
+            ) : null}
             {entry.reasonCode ? <Detail term="Reason code" value={entry.reasonCode} mono /> : null}
             {entry.reasonComment ? <Detail term="Reason comment" value={entry.reasonComment} /> : null}
             <Detail term="Trace" value={entry.traceId} mono />
@@ -228,7 +236,11 @@ export function EntryScreen() {
         loading={result.isPending}
         empty={{ title: "No lines" }}
       />
-      {entry ? <ReverseEntryForm entry={entry} /> : null}
+      {entry?.isRealignment ? (
+        <p className={styles.note}>This entry belongs to a dimension realignment run; reverse it from the run, which reverses all of its entries together.</p>
+      ) : entry ? (
+        <ReverseEntryForm entry={entry} />
+      ) : null}
     </div>
   );
 }

@@ -144,6 +144,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerDerivation(r)
 		a.registerValidationRules(r)
 		a.registerSplitting(r)
+		a.registerRealignment(r)
 	})
 }
 

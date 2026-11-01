@@ -237,6 +237,7 @@ components:
         sourceUri: { type: string }
         sourceLineRef: { type: string }
         reversalOfEntryId: { type: string, format: uuid, description: Set on the lines of a reversing entry }
+        isRealignment: { type: boolean, description: The line belongs to a dimension realignment entry or its reversal (FR-11.24) }
         traceId: { type: string, description: W3C trace id of the posting request }
     Entry:
       type: object
@@ -254,6 +255,12 @@ components:
         reversalOfEntryId: { type: string, format: uuid }
         reasonCode: { type: string }
         reasonComment: { type: string }
+        isRealignment:
+          type: boolean
+          description: |
+            A reclassification entry of a dimension realignment run, or its reversal (FR-11.24). It counts in
+            balances and the trial balance like any entry; it is reversed only through its run.
+        realignmentRunId: { type: string, format: uuid, description: The realignment run, when isRealignment is true }
         postedAt: { type: string, format: date-time }
         postedBy: { type: string }
         traceId: { type: string }
@@ -1098,6 +1105,75 @@ components:
         kind: { type: string, enum: [inherited, default, clearing], description: inherited from carrying lines, set from the default value, or a zero-balance clearing line }
         dimensions: { type: object, additionalProperties: { type: string }, description: The splitting dimension values the line received }
         amount: { type: string, description: Decimal string in the ledger currency }
+    RealignmentFilter:
+      type: object
+      required: [periodFrom, periodTo]
+      properties:
+        accountFrom: { type: string, description: First account number of the range; blank is open }
+        accountTo: { type: string, description: Last account number of the range; blank is open }
+        periodFrom: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', description: First period, YYYY-MM }
+        periodTo: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', description: Last period, YYYY-MM; a run spans at most 60 periods }
+    RealignmentRequest:
+      type: object
+      required: [filter, mapping]
+      properties:
+        filter: { $ref: "#/components/schemas/RealignmentFilter" }
+        mapping:
+          type: object
+          description: Per dimension attribute of the ledger, the old value and the new value that replaces it; at most 200 pairs
+          additionalProperties:
+            type: object
+            additionalProperties: { type: string }
+    RealignmentRow:
+      type: object
+      required: [account, period, oldDimensions, newDimensions, oldCombination, newCombination, net, lineCount]
+      properties:
+        account: { type: string }
+        period: { type: string }
+        oldDimensions: { type: object, additionalProperties: { type: string } }
+        newDimensions: { type: object, additionalProperties: { type: string } }
+        oldCombination: { type: string, description: Display name of the combination the balance moves from }
+        newCombination: { type: string, description: Display name of the combination the balance moves to }
+        net: { type: string, description: Debit minus credit of the period balance being moved, decimal string in the ledger currency }
+        lineCount: { type: integer, format: int64, description: Posted lines behind the balance }
+    RealignmentRun:
+      type: object
+      required: [id, ledgerId, status, filter, mapping, combinationsAffected, lineCount, amountMoved, currency, preview, previewTruncated, entryIds, reversalEntryIds, version]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        status: { type: string, enum: [proposed, posted, reversed, cancelled] }
+        filter: { $ref: "#/components/schemas/RealignmentFilter" }
+        mapping: { type: object, additionalProperties: { type: object, additionalProperties: { type: string } } }
+        reasonCode: { type: string, description: Set when the run is posted }
+        reasonComment: { type: string }
+        combinationsAffected: { type: integer, description: Number of (account, period, old combination) rows moved }
+        lineCount: { type: integer, format: int64 }
+        amountMoved: { type: string, description: Sum of the absolute nets moved, decimal string in the ledger currency }
+        currency: { type: string }
+        preview: { type: array, items: { $ref: "#/components/schemas/RealignmentRow" }, description: The affected rows, at most 1,000; empty in the list }
+        previewTruncated: { type: boolean }
+        entryIds: { type: array, items: { type: string, format: uuid }, description: The reclassification entries, one per period }
+        reversalEntryIds: { type: array, items: { type: string, format: uuid } }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        postedBy: { type: string }
+        postedAt: { type: string, format: date-time }
+        reversedBy: { type: string }
+        reversedAt: { type: string, format: date-time }
+    RealignmentActionBody:
+      type: object
+      properties:
+        reasonCode: { type: string, description: Reason code of the shared catalogue; required to post and to reverse }
+        reasonComment: { type: string, maxLength: 255, description: Required when the reason code says so }
+        postingDate:
+          type: string
+          format: date
+          description: |
+            Read by :reverse only. Dates every reversing entry that day instead of its original posting date,
+            for example when a period of the run was closed since it was posted; needs a reason code with
+            alternativePostingDateAllowed and may not precede an original date.
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -2094,7 +2170,8 @@ paths:
         Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
         (FB50L, 403 AUTH-0003). An entry with an open item in an active clearing document (including a
         clearing's own difference entry) is refused with 409 LEDGER_OPEN_ITEM_ALREADY_CLEARED until that
-        clearing is reset.
+        clearing is reset. An entry of a dimension realignment run (isRealignment) is reversed only
+        through its run (409 LEDGER_REALIGNMENT_ENTRY).
         A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
         be active and apply to the ledger module, and a comment is required when the code says so. A
         code with alternativePostingDateAllowed = false refuses any date other than the original. A code
@@ -3388,6 +3465,188 @@ paths:
         "409": { $ref: "#/components/responses/SplittingProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/realignments:
+    get:
+      tags: [derivation]
+      operationId: listRealignments
+      summary: List the dimension realignment runs of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Runs newest first, without their previews (get one run for its affected rows).
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The runs of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RealignmentRun" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    post:
+      tags: [derivation]
+      operationId: createRealignment
+      summary: Simulate a dimension realignment run
+      x-passage-duty: ledger.realignment.run
+      description: |
+        Dimension realignment (FR-11.24) restates posted balances without touching a posted line. The filter
+        (account range, period range of at most 60 periods) and the mapping (per dimension attribute, old
+        value to new value) select the period balances whose combination holds an old value; the response
+        lists them with the combination they would move to, their line counts and amounts. Balances with a
+        zero net, combinations the mapping does not change and open-item managed accounts are left out. The
+        run is stored as proposed and nothing is posted. A repeat with the same Idempotency-Key and body
+        returns the stored run with 200.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealignmentRequest" }
+      responses:
+        "200":
+          description: The stored run of a repeated Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "201":
+          description: The run was simulated and stored as proposed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/realignments/{id}:
+    get:
+      tags: [derivation]
+      operationId: getRealignment
+      summary: Get a dimension realignment run
+      x-passage-duty: ledger.journal.read
+      description: One run with its affected rows, status, reason and the entries it posted and reversed.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/realignments/{id}:post:
+    post:
+      tags: [derivation]
+      operationId: postRealignment
+      summary: Post a proposed dimension realignment run
+      x-passage-duty: ledger.realignment.run
+      description: |
+        Re-reads the balances under the ledger lock and posts one reclassification entry per period (a period
+        with more than 5,000 moved balances posts several), dated the period's last day (today while the
+        period is running), with source ledger/realignment, the reason code, and isRealignment set: for each
+        moved balance the old combination is credited (or debited, for a credit balance) and the new one
+        takes the opposite side, so the old combination's period balance returns to zero. Amounts are in the
+        ledger's accounting currency (the ledger is single-currency until wave 12). Derivation and document
+        splitting do not run: the old side is the stored combination and the new side the explicit mapping.
+        The new side is validated like any posting (account structures, registered and active dimension
+        values, and the ledger's active validation rules: line rules on the new side, header rules on the
+        whole entry with source type realignment); the old side is exempt. Every period must be open, or on
+        hold or closed with duty ledger.period.postclosed, else 422 LEDGER_REALIGNMENT_PERIOD_CLOSED and
+        nothing is posted. Needs an active reason code of the shared catalogue that applies to ledger, with
+        a comment when the code requires one. The stored preview is replaced by the posted rows. A repeat on
+        a posted run returns it unchanged. Announces dev.passage.ledger.realignment.completed.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealignmentActionBody" }
+      responses:
+        "200":
+          description: The run, posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/realignments/{id}:reverse:
+    post:
+      tags: [derivation]
+      operationId: reverseRealignment
+      summary: Reverse a posted dimension realignment run
+      x-passage-duty: ledger.realignment.run
+      description: |
+        Reverses every reclassification entry of a posted run in one transaction, with the given reason
+        code and the normal reversal rules, so the balance of every combination returns to its value
+        before the run. Each reversing entry is dated like its original unless postingDate is given; a
+        period closed since the post is 422 LEDGER_REALIGNMENT_PERIOD_CLOSED (nothing is reversed), and
+        postingDate moves every reversal into an open period instead (the cumulative balances return,
+        the closed periods keep the restatement). The reversing entries carry the run and isRealignment too. A run that is not
+        posted is 409 LEDGER_REALIGNMENT_STATE; a repeat on a reversed run returns it unchanged.
+        Announces dev.passage.ledger.realignment.completed.v1 with reversal true.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealignmentActionBody" }
+      responses:
+        "200":
+          description: The run, reversed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/realignments/{id}:cancel:
+    post:
+      tags: [derivation]
+      operationId: cancelRealignment
+      summary: Cancel a proposed dimension realignment run
+      x-passage-duty: ledger.realignment.run
+      description: Drops a proposed run; nothing was posted by it. A run in any other status is 409 LEDGER_REALIGNMENT_STATE; a repeat on a cancelled run returns it unchanged.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealignmentActionBody" }
+      responses:
+        "200":
+          description: The run, cancelled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RealignmentRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
   /v1/ledger/ledgers/{ledger}/derivation-strategies:
     get:
       tags: [derivation]

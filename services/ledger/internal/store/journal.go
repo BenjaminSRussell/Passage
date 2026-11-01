@@ -42,7 +42,9 @@ type newEntry struct {
 	reversalOf    *string
 	reasonCode    string
 	reasonComment string
-	lines         []writeLine
+	// realignmentRunID marks a reclassification entry of a dimension realignment run (FR-11.24).
+	realignmentRunID string
+	lines            []writeLine
 }
 
 // PostEntry validates and posts one entry atomically. The ledger row lock taken
@@ -217,11 +219,18 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		}
 	}
 	var orig struct {
-		voucher, postingDate, documentID, sourceSystem string
+		voucher, postingDate, documentID, sourceSystem, realignmentRunID string
 	}
-	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system from journal_entry where tenant_id = $1 and id = $2`,
-		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem); err != nil {
+	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system, coalesce(realignment_run_id::text, '')
+		from journal_entry where tenant_id = $1 and id = $2`,
+		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem, &orig.realignmentRunID); err != nil {
 		return out, err
+	}
+	if orig.realignmentRunID != "" && orig.realignmentRunID != in.realignmentRunID {
+		// A realignment run is reversed as a unit (FR-11.24); reversing one of its entries alone
+		// would leave the run posted with a partial restatement.
+		return out, httpx.NewProblem(http.StatusConflict, CodeRealignmentEntry, fmt.Sprintf(
+			"entry %s belongs to dimension realignment run %s; reverse the run instead", orig.voucher, orig.realignmentRunID))
 	}
 	var reversingVoucher string
 	err = tx.QueryRow(ctx, `select voucher from journal_entry where tenant_id = $1 and reversal_of_entry_id = $2`,
@@ -277,7 +286,7 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		ledger: ledger, documentID: orig.documentID, postingDate: postingDate, description: description,
 		source: ledgerevents.Source{System: "ledger", Type: "reversal", ID: orig.voucher, URI: "passage://ledger/journal-entries/" + origID},
 		key:    in.Key, hash: in.Hash, actor: in.Actor, traceID: in.TraceID, reversalOf: &origID, lines: lines,
-		reasonCode: in.ReasonCode, reasonComment: in.ReasonComment,
+		reasonCode: in.ReasonCode, reasonComment: in.ReasonComment, realignmentRunID: in.realignmentRunID,
 	})
 	if err != nil {
 		return out, err
@@ -354,12 +363,12 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	if _, err := tx.Exec(ctx, `insert into journal_entry (tenant_id, id, legal_entity_id, ledger_id, document_id, voucher, posting_sequence, posting_date, period_key,
 			document_date, description, source_system, source_type, source_id, source_uri, idempotency_key, payload_hash, reversal_of_entry_id, posted_by, trace_id,
-			reason_code, reason_comment)
+			reason_code, reason_comment, is_realignment, realignment_run_id)
 		values ($1, $2, $3, $4, $5, $6, $7, $8::text::date, $9, nullif($10::text, '')::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-			nullif($21::text, ''), nullif($22::text, ''))`,
+			nullif($21::text, ''), nullif($22::text, ''), $23::text <> '', nullif($23::text, '')::uuid)`,
 		tenantID, entryID, l.LegalEntityID, l.ID, ne.documentID, voucher, seq, postingDate, period, docDate, ne.description,
 		ne.source.System, ne.source.Type, ne.source.ID, ne.source.URI, ne.key, ne.hash, ne.reversalOf, ne.actor, ne.traceID,
-		ne.reasonCode, ne.reasonComment); err != nil {
+		ne.reasonCode, ne.reasonComment, ne.realignmentRunID); err != nil {
 		return Entry{}, err
 	}
 
@@ -414,6 +423,11 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 		ID: entryID, LedgerID: l.ID, DocumentID: ne.documentID, Voucher: voucher, PostingSequence: seq,
 		PostingDate: postingDate, PeriodKey: period, Description: ne.description, Source: ne.source,
 		ReversalOfEntryID: ne.reversalOf, PostedAt: time.Now().UTC(), PostedBy: ne.actor, TraceID: ne.traceID,
+		IsRealignment: ne.realignmentRunID != "",
+	}
+	if ne.realignmentRunID != "" {
+		runID := ne.realignmentRunID
+		entry.RealignmentRunID = &runID
 	}
 	if docDate != "" {
 		entry.DocumentDate = &docDate
@@ -501,14 +515,15 @@ func loadEntryTx(ctx context.Context, tx pgx.Tx, tenantID, id string) (Entry, er
 	var e Entry
 	row := tx.QueryRow(ctx, `select e.id, e.ledger_id, e.document_id, e.voucher, e.posting_sequence, e.posting_date::text, e.period_key,
 			e.document_date::text, coalesce(e.description, ''), e.source_system, e.source_type, e.source_id, coalesce(e.source_uri, ''),
-			e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, e.reason_code, e.reason_comment, l.currency
+			e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, e.reason_code, e.reason_comment, l.currency,
+			e.is_realignment, e.realignment_run_id::text
 		from journal_entry e join ledger l on l.tenant_id = e.tenant_id and l.id = e.ledger_id
 		where e.tenant_id = $1 and e.id = $2`, tenantID, id)
 	var currency string
 	var src ledgerevents.Source
 	err := row.Scan(&e.ID, &e.LedgerID, &e.DocumentID, &e.Voucher, &e.PostingSequence, &e.PostingDate, &e.PeriodKey,
 		&e.DocumentDate, &e.Description, &src.System, &src.Type, &src.ID, &src.URI, &e.ReversalOfEntryID, &e.PostedAt,
-		&e.PostedBy, &e.TraceID, &e.ReasonCode, &e.ReasonComment, &currency)
+		&e.PostedBy, &e.TraceID, &e.ReasonCode, &e.ReasonComment, &currency, &e.IsRealignment, &e.RealignmentRunID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return e, httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
 	}

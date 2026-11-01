@@ -106,6 +106,12 @@ type Store interface {
 	ListSplittingRules(ctx context.Context, ledgerID string) ([]domain.SplittingRule, error)
 	GetSplittingRule(ctx context.Context, ledgerID, id string) (domain.SplittingRule, error)
 	PutSplittingRule(ctx context.Context, ledgerID, id string, version int, in domain.SplittingRule) (domain.SplittingRule, bool, error)
+	CreateRealignment(ctx context.Context, in RealignmentInput) (RealignmentRun, bool, error)
+	ListRealignments(ctx context.Context, ledgerID string) ([]RealignmentRun, error)
+	GetRealignment(ctx context.Context, ledgerID, id string) (RealignmentRun, error)
+	PostRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
+	ReverseRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
+	CancelRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
 	Ping(ctx context.Context) error
 }
 
@@ -217,6 +223,8 @@ type ReverseInput struct {
 	// clearingReset is set by ResetClearing, which reverses its own difference
 	// entry while that entry's open item is still cleared by the document.
 	clearingReset bool
+	// realignmentRunID is set when a realignment run reverses its own entries (FR-11.24).
+	realignmentRunID string
 }
 
 // Idempotency reports the replay state of a keyed request.
@@ -243,24 +251,28 @@ type Notice struct {
 
 // Entry is a posted journal entry with its lines.
 type Entry struct {
-	ID                string               `json:"id"`
-	LedgerID          string               `json:"ledgerId"`
-	DocumentID        string               `json:"documentId"`
-	Voucher           string               `json:"voucher"`
-	PostingSequence   int64                `json:"postingSequence"`
-	PostingDate       string               `json:"postingDate"`
-	PeriodKey         string               `json:"periodKey"`
-	DocumentDate      *string              `json:"documentDate,omitempty"`
-	Description       string               `json:"description"`
-	Source            ledgerevents.Source  `json:"source"`
-	ReversalOfEntryID *string              `json:"reversalOfEntryId,omitempty"`
-	ReasonCode        *string              `json:"reasonCode,omitempty"`
-	ReasonComment     *string              `json:"reasonComment,omitempty"`
-	PostedAt          time.Time            `json:"postedAt"`
-	PostedBy          string               `json:"postedBy"`
-	TraceID           string               `json:"traceId"`
-	Totals            ledgerevents.Amounts `json:"totals"`
-	Lines             []Line               `json:"lines"`
+	ID                string              `json:"id"`
+	LedgerID          string              `json:"ledgerId"`
+	DocumentID        string              `json:"documentId"`
+	Voucher           string              `json:"voucher"`
+	PostingSequence   int64               `json:"postingSequence"`
+	PostingDate       string              `json:"postingDate"`
+	PeriodKey         string              `json:"periodKey"`
+	DocumentDate      *string             `json:"documentDate,omitempty"`
+	Description       string              `json:"description"`
+	Source            ledgerevents.Source `json:"source"`
+	ReversalOfEntryID *string             `json:"reversalOfEntryId,omitempty"`
+	ReasonCode        *string             `json:"reasonCode,omitempty"`
+	ReasonComment     *string             `json:"reasonComment,omitempty"`
+	// IsRealignment marks a reclassification entry of a dimension realignment run, or its
+	// reversal (FR-11.24); RealignmentRunID names the run. Balances treat it as an ordinary entry.
+	IsRealignment    bool                 `json:"isRealignment"`
+	RealignmentRunID *string              `json:"realignmentRunId,omitempty"`
+	PostedAt         time.Time            `json:"postedAt"`
+	PostedBy         string               `json:"postedBy"`
+	TraceID          string               `json:"traceId"`
+	Totals           ledgerevents.Amounts `json:"totals"`
+	Lines            []Line               `json:"lines"`
 }
 
 // Line is one journal line.

@@ -24,7 +24,22 @@ const (
 	// RulesChanged is announced when a derivation strategy is activated, a lookup
 	// table it may use is replaced or a validation rule is saved (PRD rules.changed; posting caches invalidate on it).
 	RulesChanged = "dev.passage.ledger.rules.changed.v1"
+	// RealignmentCompleted is announced when a dimension realignment run (FR-11.24) is posted or reversed.
+	RealignmentCompleted = "dev.passage.ledger.realignment.completed.v1"
 )
+
+// RealignmentCompletedData is the payload of dev.passage.ledger.realignment.completed.v1. EntryIDs are
+// the reclassification entries of a posted run, or the reversing entries when Reversal is true.
+type RealignmentCompletedData struct {
+	RunID                string   `json:"runId"`
+	LedgerID             string   `json:"ledgerId"`
+	PeriodFrom           string   `json:"periodFrom"`
+	PeriodTo             string   `json:"periodTo"`
+	CombinationsAffected int      `json:"combinationsAffected"`
+	EntryIDs             []string `json:"entryIds"`
+	Reversal             bool     `json:"reversal"`
+	Actor                string   `json:"actor"`
+}
 
 // RulesChangedData is the payload of dev.passage.ledger.rules.changed.v1. Kind is
 // derivation_strategy (ID is the strategy row, Version its version number) or

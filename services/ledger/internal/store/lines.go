@@ -61,7 +61,9 @@ type JournalLine struct {
 	SourceURI       string            `json:"sourceUri,omitempty"`
 	SourceLineRef   string            `json:"sourceLineRef,omitempty"`
 	ReversalOfEntry string            `json:"reversalOfEntryId,omitempty"`
-	TraceID         string            `json:"traceId"`
+	// IsRealignment marks a line of a dimension realignment entry or its reversal (FR-11.24).
+	IsRealignment bool   `json:"isRealignment"`
+	TraceID       string `json:"traceId"`
 }
 
 // LinePage is one keyset page. Next is set when more lines follow.
@@ -127,7 +129,7 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 		rows, err := tx.Query(ctx, `select l.id::text, e.id::text, e.voucher, e.posting_sequence, e.posting_date::text, l.line_number,
 				m.account_number, d.display_name, d.dimensions, l.debit_credit::text, l.amount_txn::text, l.amount_acct::text, l.currency_txn::text,
 				l.negative_posting, coalesce(l.line_text, ''), coalesce(e.description, ''), e.source_system, e.source_type, e.source_id,
-				coalesce(e.source_uri, ''), coalesce(l.source_line_ref, ''), coalesce(e.reversal_of_entry_id::text, ''), e.trace_id
+				coalesce(e.source_uri, ''), coalesce(l.source_line_ref, ''), coalesce(e.reversal_of_entry_id::text, ''), e.is_realignment, e.trace_id
 			from journal_entry e
 			join journal_line l on l.tenant_id = e.tenant_id and l.entry_id = e.id
 			join main_account m on m.tenant_id = l.tenant_id and m.id = l.main_account_id
@@ -144,7 +146,7 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 			if err := rows.Scan(&j.ID, &j.EntryID, &j.Voucher, &j.PostingSequence, &j.PostingDate, &j.LineNumber,
 				&j.Account, &j.DisplayName, &j.Dimensions, &j.DebitCredit, &j.Amount, &j.AmountAcct, &j.Currency,
 				&j.NegativePosting, &j.Text, &j.Description, &j.SourceSystem, &j.SourceType, &j.SourceID,
-				&j.SourceURI, &j.SourceLineRef, &j.ReversalOfEntry, &j.TraceID); err != nil {
+				&j.SourceURI, &j.SourceLineRef, &j.ReversalOfEntry, &j.IsRealignment, &j.TraceID); err != nil {
 				return err
 			}
 			j.Amount = fmtMoney(j.Amount, j.Currency)

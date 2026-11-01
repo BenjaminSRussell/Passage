@@ -34,6 +34,7 @@ type fakeStore struct {
 	deriv    derivationFake
 	vrules   validationFake
 	split    splittingFake
+	realign  realignFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error
