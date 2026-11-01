@@ -2342,6 +2342,7 @@
     "scheduling.downtime.apply": {"permissions": [
       {"resource": "/v1/scheduling/resources/*/capacity-overrides", "methods": ["POST"]}
     ]},
+    "scheduling.order.import": {"flag": true, "permissions": []},
     "scheduling.read": {"permissions": [
       {"resource": "/v1/scheduling/campaign-proposals", "methods": ["GET"]},
       {"resource": "/v1/scheduling/campaigns", "methods": ["GET"]},
@@ -2582,6 +2583,7 @@
   },
   "service_principals": {
     "receiving-ers": ["VendorInvoicePost"],
-    "scheduling-downtime": ["scheduling.downtime.apply"]
+    "scheduling-downtime": ["scheduling.downtime.apply"],
+    "scheduling-order-import": ["scheduling.order.import"]
   }
 }
