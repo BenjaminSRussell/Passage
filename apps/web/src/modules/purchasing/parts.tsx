@@ -69,6 +69,11 @@ const tones: Record<string, BadgeTone> = {
   INVITED: "neutral",
   REPLIED: "success",
   INVOICED: "success",
+  STAGED: "info",
+  COMMITTED: "success",
+  ACCEPTABLE: "info",
+  ERROR: "danger",
+  ACCEPTED: "success",
 };
 
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */

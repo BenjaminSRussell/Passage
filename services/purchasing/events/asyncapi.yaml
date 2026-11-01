@@ -61,6 +61,12 @@ channels:
         $ref: '#/components/messages/CatalogPublished'
       catalogRetired:
         $ref: '#/components/messages/CatalogRetired'
+  catalogimport:
+    address: passage.procurement.catalogimport
+    description: Vendor catalog imports committed to a catalog (FR-17.18); the Kafka key is the import id.
+    messages:
+      catalogImportCommitted:
+        $ref: '#/components/messages/CatalogImportCommitted'
   sarelease:
     address: passage.procurement.sarelease
     description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
@@ -146,8 +152,28 @@ operations:
       $ref: '#/channels/catalog'
     messages:
       - $ref: '#/channels/catalog/messages/catalogRetired'
+  publishCatalogImportCommitted:
+    action: send
+    channel:
+      $ref: '#/channels/catalogimport'
+    messages:
+      - $ref: '#/channels/catalogimport/messages/catalogImportCommitted'
 components:
   messages:
+    CatalogImportCommitted:
+      name: CatalogImportCommitted
+      title: catalogimport.committed.v1
+      x-passage-type: dev.passage.procurement.catalogimport.committed.v1
+      summary: The accepted rows of a staged vendor catalog file were added to a catalog (FR-17.18, AC-17.13); a PUBLISHED catalog shows them in the requisition picker at once.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.catalogimport.committed.v1 }
+              subject: { type: string, format: uuid, description: import id }
+              data: { $ref: '#/components/schemas/CatalogImportData' }
     CatalogPublished:
       name: CatalogPublished
       title: catalog.published.v1
@@ -610,6 +636,22 @@ components:
         org_unit_ids: { type: array, items: { type: string, format: uuid }, description: "Empty means every operating unit." }
         entry_count: { type: integer, minimum: 1 }
         version: { type: integer, minimum: 2 }
+    CatalogImportData:
+      type: object
+      required: [import_id, catalog_id, catalog_number, legal_entity_id, vendor_id, total_rows, accepted_rows, rejected_rows, error_rows, skipped_rows, catalog_version]
+      additionalProperties: false
+      properties:
+        import_id: { type: string, format: uuid }
+        catalog_id: { type: string, format: uuid }
+        catalog_number: { type: string, example: CAT-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        total_rows: { type: integer, minimum: 1 }
+        accepted_rows: { type: integer, minimum: 1, description: "Entries added to the catalog." }
+        rejected_rows: { type: integer, minimum: 0 }
+        error_rows: { type: integer, minimum: 0 }
+        skipped_rows: { type: integer, minimum: 0, description: "Rows still undecided (ACCEPTABLE) at the commit; they stay out of the catalog." }
+        catalog_version: { type: integer, minimum: 2 }
     PolicyChangedData:
       type: object
       required: [legal_entity_id, version, change_management_default, po_four_eyes, allow_invoice_before_receipt]

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
+import { CatalogImportCreatePage, CatalogImportDetailPage, CatalogImportsPage } from "./CatalogImportPages";
 import { CatalogCreatePage, CatalogDetailPage, CatalogsPage } from "./CatalogPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
@@ -66,6 +67,9 @@ const purchasing: PassageModule = {
     { path: "/purchasing/catalogs", element: createElement(CatalogsPage) },
     { path: "/purchasing/catalogs/new", element: createElement(CatalogCreatePage), handle: { title: "New procurement catalog" } },
     { path: "/purchasing/catalogs/:id", element: createElement(CatalogDetailPage), handle: { title: "Procurement catalog" } },
+    { path: "/purchasing/catalogs/:id/import", element: createElement(CatalogImportCreatePage), handle: { title: "Import vendor file" } },
+    { path: "/purchasing/catalog-imports", element: createElement(CatalogImportsPage) },
+    { path: "/purchasing/catalog-imports/:id", element: createElement(CatalogImportDetailPage), handle: { title: "Vendor catalog import" } },
     { path: "/purchasing/policies", element: createElement(PolicyListPage) },
     { path: "/purchasing/policies/:legalEntityId", element: createElement(PolicyDetailPage), handle: { title: "Purchasing policy" } },
   ],

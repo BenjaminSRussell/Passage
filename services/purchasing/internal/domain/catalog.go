@@ -25,25 +25,31 @@ const (
 	CodeCatalogCurrency    = "PRC-CAT-006"
 )
 
-// MaxCatalogEntries caps the entries of one catalog.
-const MaxCatalogEntries = 2000
+// MaxCatalogEntries caps the entries of one catalog. The PRD sets no catalog cap, only
+// the 50,000-row limit of one vendor file, so a catalog holds at least one full file;
+// reads page the entries (GET /catalogs/{id}/entries) rather than return them all.
+const MaxCatalogEntries = MaxImportRows
 
 // Catalog is a procurement catalog (FR-17.18): vendor product entries published
 // to operating units for a validity window. OrgUnitIDs empty means every unit.
 type Catalog struct {
-	ID            string         `json:"id"`
-	Number        string         `json:"number"`
-	LegalEntityID string         `json:"legalEntityId"`
-	Name          string         `json:"name"`
-	Description   string         `json:"description,omitempty"`
-	Status        string         `json:"status"`
-	ValidFrom     Day            `json:"validFrom"`
-	ValidTo       *Day           `json:"validTo,omitempty"`
-	OrgUnitIDs    []string       `json:"orgUnitIds"`
-	Version       int            `json:"version"`
-	Entries       []CatalogEntry `json:"entries"`
-	CreatedAt     time.Time      `json:"createdAt"`
-	UpdatedAt     time.Time      `json:"updatedAt"`
+	ID            string   `json:"id"`
+	Number        string   `json:"number"`
+	LegalEntityID string   `json:"legalEntityId"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	Status        string   `json:"status"`
+	ValidFrom     Day      `json:"validFrom"`
+	ValidTo       *Day     `json:"validTo,omitempty"`
+	OrgUnitIDs    []string `json:"orgUnitIds"`
+	Version       int      `json:"version"`
+	// EntryCount is the number of entries; Entries holds the first page of them in
+	// entry order, and EntriesNextCursor, when set, pages on through GET .../entries.
+	EntryCount        int            `json:"entryCount"`
+	Entries           []CatalogEntry `json:"entries"`
+	EntriesNextCursor string         `json:"entriesNextCursor,omitempty"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
 }
 
 // CatalogEntry is one orderable item: a vendor's product at a price and lead time.

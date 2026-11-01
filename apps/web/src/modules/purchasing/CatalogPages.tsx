@@ -21,6 +21,7 @@ import {
   getCatalog,
   listCatalogs,
   newIdempotencyKey,
+  listCatalogEntries,
   removeCatalogEntry,
   searchCatalogEntries,
   type Catalog,
@@ -82,9 +83,14 @@ export function CatalogsPage() {
         title="Procurement catalogs"
         description="Vendor products with agreed prices that requesters pick from when they raise a requisition."
         actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
-            New catalog
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to="/purchasing/catalog-imports">
+              Vendor imports
+            </Link>
+            <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
+              New catalog
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>
@@ -415,6 +421,25 @@ export function CatalogDetailPage() {
   const [errors, setErrors] = useState<Errors>({});
   const catalog = changed ?? resource.data?.body ?? null;
   const actionKey = useMemo(() => newIdempotencyKey(), [catalog?.version]);
+  // Entries past the first page, read for the catalog version they were loaded at.
+  const [more, setMore] = useState<{ version: number; items: CatalogEntry[]; next?: string } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const extra = more && catalog && more.version === catalog.version ? more : null;
+  const nextCursor = extra ? extra.next : catalog?.entriesNextCursor;
+
+  async function loadMore() {
+    if (!catalog || !nextCursor) return;
+    setLoadingMore(true);
+    setFailure(null);
+    try {
+      const page = await listCatalogEntries(catalog.id, { cursor: nextCursor, limit: 200 });
+      setMore({ version: catalog.version, items: [...(extra?.items ?? []), ...page.items], next: page.nextCursor });
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function run(label: string, call: (c: Catalog) => Promise<{ body: Catalog }>, done: (c: Catalog) => string) {
     if (!catalog) return;
@@ -494,15 +519,22 @@ export function CatalogDetailPage() {
         description={catalog.name}
         meta={<StatusBadge status={catalog.status} />}
         actions={
-          isDraft ? (
-            <Button variant="primary" loading={busy === "publish"} disabled={busy !== null && busy !== "publish"} onClick={() => void act("publish")}>
-              Publish
-            </Button>
-          ) : catalog.status === "PUBLISHED" ? (
-            <Button variant="secondary" loading={busy === "retire"} disabled={busy !== null && busy !== "retire"} onClick={() => void act("retire")}>
-              Retire
-            </Button>
-          ) : undefined
+          <>
+            {catalog.status !== "RETIRED" ? (
+              <Link className={buttonClassName("secondary")} to={`/purchasing/catalogs/${catalog.id}/import`}>
+                Import vendor file
+              </Link>
+            ) : null}
+            {isDraft ? (
+              <Button variant="primary" loading={busy === "publish"} disabled={busy !== null && busy !== "publish"} onClick={() => void act("publish")}>
+                Publish
+              </Button>
+            ) : catalog.status === "PUBLISHED" ? (
+              <Button variant="secondary" loading={busy === "retire"} disabled={busy !== null && busy !== "retire"} onClick={() => void act("retire")}>
+                Retire
+              </Button>
+            ) : null}
+          </>
         }
       />
       <Alert tone="danger" live="alert">
@@ -518,6 +550,7 @@ export function CatalogDetailPage() {
             { label: "Validity", value: validity(catalog), mono: true },
             { label: "Published to", value: catalog.orgUnitIds.length === 0 ? "Every operating unit" : catalog.orgUnitIds.join(", "), mono: catalog.orgUnitIds.length > 0 },
             { label: "Description", value: catalog.description ?? "" },
+            { label: "Items", value: String(catalog.entryCount), mono: true },
             { label: "Version", value: String(catalog.version), mono: true },
           ]}
         />
@@ -535,10 +568,17 @@ export function CatalogDetailPage() {
             : undefined,
           busy,
         )}
-        rows={catalog.entries}
+        rows={extra ? [...catalog.entries, ...extra.items] : catalog.entries}
         getRowKey={(e) => e.id}
         empty={{ title: "No items yet", description: isDraft ? "Add the first item below, then publish the catalog." : "This catalog has no items." }}
       />
+      {nextCursor ? (
+        <div className={styles.actions}>
+          <Button loading={loadingMore} onClick={() => void loadMore()}>
+            Show more items
+          </Button>
+        </div>
+      ) : null}
       {isDraft ? (
         <form className={styles.form} onSubmit={addEntry} noValidate>
           <Card title="Add an item">

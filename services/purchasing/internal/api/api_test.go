@@ -76,6 +76,7 @@ type fakeStore struct {
 
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
+	imp importLog
 }
 
 func newFake() *fakeStore {

@@ -22,3 +22,24 @@ type CatalogData struct {
 	EntryCount    int      `json:"entry_count"`
 	Version       int      `json:"version"`
 }
+
+// CatalogImportCommitted is written by the commit of a staged vendor catalog import
+// (FR-17.18), in the transaction that adds the accepted rows to the catalog; the
+// subject is the import id. The type has one entity segment, catalogimport, as the
+// platform type grammar allows.
+const CatalogImportCommitted = "dev.passage.procurement.catalogimport.committed.v1"
+
+// CatalogImportData is the data member of catalogimport.committed.v1.
+type CatalogImportData struct {
+	ImportID       string `json:"import_id"`
+	CatalogID      string `json:"catalog_id"`
+	CatalogNumber  string `json:"catalog_number"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	VendorID       string `json:"vendor_id"`
+	TotalRows      int    `json:"total_rows"`
+	AcceptedRows   int    `json:"accepted_rows"`
+	RejectedRows   int    `json:"rejected_rows"`
+	ErrorRows      int    `json:"error_rows"`
+	SkippedRows    int    `json:"skipped_rows"`
+	CatalogVersion int    `json:"catalog_version"`
+}

@@ -116,6 +116,9 @@ type API struct {
 
 	catalogsCreated   atomic.Int64
 	catalogsPublished atomic.Int64
+
+	catalogImportsStaged    atomic.Int64
+	catalogImportsCommitted atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -223,8 +226,17 @@ func (a *API) Register(r chi.Router) {
 		catalogRead.Get("/catalogs", a.listCatalogs)
 		catalogRead.Get("/catalogs/{id}", a.getCatalog)
 		catalogWrite.Post("/catalogs/{id}", a.catalogAction)
+		catalogRead.Get("/catalogs/{id}/entries", a.listCatalogEntries)
 		catalogWrite.Post("/catalogs/{id}/entries", a.addCatalogEntries)
 		catalogWrite.Delete("/catalogs/{id}/entries/{entryId}", a.removeCatalogEntry)
+		// Vendor catalog import (FR-17.18): stage a file, decide rows, commit; ":commit" and
+		// ":cancel" arrive as one path segment, see catalogImportAction.
+		catalogWrite.Post("/catalogs/{id}/vendor-import", a.vendorImport)
+		catalogRead.Get("/catalog-imports", a.listCatalogImports)
+		catalogRead.Get("/catalog-imports/{id}", a.getCatalogImport)
+		catalogRead.Get("/catalog-imports/{id}/rows", a.listImportRows)
+		catalogWrite.Post("/catalog-imports/{id}", a.catalogImportAction)
+		catalogWrite.Post("/catalog-imports/{id}/decisions", a.decideImportRows)
 		r.With(authz.Require(anyDuty{dutyRequisitionCreate, dutyCatalogMaintain}, dutyRequisitionCreate+" or "+dutyCatalogMaintain, "")).
 			Get("/catalog-entries", a.searchCatalogEntries)
 	})
@@ -262,6 +274,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_scheduling_agreement_releases_created_total", "Scheduling agreement releases created (FRC and JIT).", a.saReleasesCreated.Load()},
 			{"purchasing_catalogs_created_total", "Procurement catalogs created; idempotent replays are counted.", a.catalogsCreated.Load()},
 			{"purchasing_catalogs_published_total", "Procurement catalogs published.", a.catalogsPublished.Load()},
+			{"purchasing_catalog_imports_staged_total", "Vendor catalog files staged; idempotent replays are counted.", a.catalogImportsStaged.Load()},
+			{"purchasing_catalog_imports_committed_total", "Vendor catalog imports committed to a catalog.", a.catalogImportsCommitted.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

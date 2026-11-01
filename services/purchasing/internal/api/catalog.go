@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -21,6 +22,9 @@ const dutyCatalogMaintain = "CatalogMaintain"
 
 // maxImageURL bounds an entry image reference; images live in the object store.
 const maxImageURL = 2000
+
+// maxUnitPrice is the first price the numeric(20,6) column cannot hold.
+var maxUnitPrice = decimal.New(1, 14)
 
 type catalogBody struct {
 	LegalEntityID string             `json:"legalEntityId"`
@@ -78,6 +82,9 @@ func buildCatalogEntry(prefix string, i int, e catalogEntryBody) (domain.Catalog
 	}
 	if price.Exponent() < -6 {
 		return domain.CatalogEntry{}, invalid(field("unitPrice"), "has at most 6 decimal places")
+	}
+	if price.GreaterThanOrEqual(maxUnitPrice) {
+		return domain.CatalogEntry{}, invalid(field("unitPrice"), "must be below 100000000000000 (14 digits before the point)")
 	}
 	out.UnitPrice = price
 	if out.Currency, err = currencyField(e.Currency); err != nil {
@@ -192,6 +199,47 @@ func (a *API) getCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", etag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// listCatalogEntries handles GET /catalogs/{id}/entries: the entries in entry order,
+// paged by entry number, so a large catalog is read a page at a time.
+func (a *API) listCatalogEntries(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	limit, after, err := numberPageParams(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	page, err := a.store.ListCatalogEntries(r.Context(), id, after, limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	next := ""
+	if page.Next > 0 {
+		next = strconv.Itoa(page.Next)
+	}
+	httpx.JSON(w, http.StatusOK, pageBody[domain.CatalogEntry]{Items: page.Items, NextCursor: next})
+}
+
+// numberPageParams reads limit and a cursor that is a row or entry number.
+func numberPageParams(r *http.Request) (limit, after int, err error) {
+	q := r.URL.Query()
+	if raw := q.Get("limit"); raw != "" {
+		if limit, err = strconv.Atoi(raw); err != nil || limit < 1 || limit > store.MaxPageSize {
+			return 0, 0, invalid("limit", "must be an integer from 1 to "+strconv.Itoa(store.MaxPageSize))
+		}
+	}
+	if raw := q.Get("cursor"); raw != "" {
+		if after, err = strconv.Atoi(raw); err != nil || after < 0 {
+			return 0, 0, invalid("cursor", "is invalid")
+		}
+	}
+	return limit, after, nil
 }
 
 func (a *API) listCatalogs(w http.ResponseWriter, r *http.Request) {

@@ -1212,7 +1212,10 @@ export interface Catalog {
   validTo?: string;
   orgUnitIds: string[];
   version: number;
+  entryCount: number;
+  /** The first 200 entries; entriesNextCursor pages on through listCatalogEntries. */
   entries: CatalogEntry[];
+  entriesNextCursor?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1279,10 +1282,94 @@ export function removeCatalogEntry(id: string, entryId: string, version: number)
   });
 }
 
+/** A catalog's entries in entry order, a page at a time (up to 50,000 entries per catalog). */
+export function listCatalogEntries(id: string, options: ListOptions = {}) {
+  return list<CatalogEntry>(`/catalogs/${encodeURIComponent(id)}/entries`, {}, options);
+}
+
 /** The requisition picker: entries of catalogs published today to the legal entity and unit. */
 export function searchCatalogEntries(
   filters: { legalEntityId: string; operatingUnitId?: string; q?: string; category?: string },
   options: ListOptions = {},
 ) {
   return list<CatalogHit>("/catalog-entries", { ...filters }, options);
+}
+
+// --- Vendor catalog import (FR-17.18, AC-17.13) ---
+
+export type CatalogImportStatus = "STAGED" | "COMMITTED" | "CANCELLED";
+export type ImportRowStatus = "ACCEPTABLE" | "ERROR" | "ACCEPTED" | "REJECTED";
+export type CatalogImportAction = "commit" | "cancel";
+
+export interface CatalogImport {
+  id: string;
+  catalogId: string;
+  legalEntityId: string;
+  vendorId: string;
+  format: "CSV" | "JSON";
+  fileName?: string;
+  status: CatalogImportStatus;
+  totalRows: number;
+  acceptableRows: number;
+  errorRows: number;
+  acceptedRows: number;
+  rejectedRows: number;
+  entriesAdded: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportRow {
+  rowNo: number;
+  status: ImportRowStatus;
+  reason?: string;
+  raw: Record<string, string>;
+  entry?: CatalogEntryInput;
+}
+
+export interface VendorImportInput {
+  vendorId: string;
+  format: "CSV";
+  fileName?: string;
+  csv: string;
+}
+
+export interface ImportDecisions {
+  acceptAll?: boolean;
+  accept?: number[];
+  reject?: number[];
+}
+
+export function stageVendorImport(catalogId: string, input: VendorImportInput, idempotencyKey = newIdempotencyKey()) {
+  return send<CatalogImport>("POST", `/catalogs/${encodeURIComponent(catalogId)}/vendor-import`, {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export function listCatalogImports(filters: { catalogId?: string; status?: CatalogImportStatus | "" } = {}, options: ListOptions = {}) {
+  return list<CatalogImport>("/catalog-imports", { catalogId: filters.catalogId, status: filters.status || undefined }, options);
+}
+
+export function getCatalogImport(id: string, signal?: AbortSignal) {
+  return send<CatalogImport>("GET", `/catalog-imports/${encodeURIComponent(id)}`, { signal });
+}
+
+export function listImportRows(id: string, filters: { status?: ImportRowStatus | "" } = {}, options: ListOptions = {}) {
+  return list<ImportRow>(`/catalog-imports/${encodeURIComponent(id)}/rows`, { status: filters.status || undefined }, options);
+}
+
+/** The buyer's accept and reject choices; version is the ETag read with the import. */
+export function decideImportRows(id: string, decisions: ImportDecisions, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<CatalogImport>("POST", `/catalog-imports/${encodeURIComponent(id)}/decisions`, {
+    body: decisions,
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function actOnCatalogImport(id: string, action: CatalogImportAction, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<CatalogImport>("POST", `/catalog-imports/${encodeURIComponent(id)}:${action}`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
 }

@@ -11,19 +11,20 @@ import (
 )
 
 var allTypes = map[string]string{
-	events.RequisitionSubmitted: "requisition",
-	events.RequisitionApproved:  "requisition",
-	events.AgreementThreshold:   "agreement",
-	events.POConfirmed:          "po",
-	events.POVersionCreated:     "poversion",
-	events.POCancelled:          "po",
-	events.PORepriced:           "po",
-	events.RFQSent:              "rfq",
-	events.RFQAwarded:           "rfq",
-	events.SAReleaseCreated:     "sarelease",
-	events.PolicyChanged:        "policy",
-	events.CatalogPublished:     "catalog",
-	events.CatalogRetired:       "catalog",
+	events.RequisitionSubmitted:   "requisition",
+	events.RequisitionApproved:    "requisition",
+	events.AgreementThreshold:     "agreement",
+	events.POConfirmed:            "po",
+	events.POVersionCreated:       "poversion",
+	events.POCancelled:            "po",
+	events.PORepriced:             "po",
+	events.RFQSent:                "rfq",
+	events.RFQAwarded:             "rfq",
+	events.SAReleaseCreated:       "sarelease",
+	events.PolicyChanged:          "policy",
+	events.CatalogPublished:       "catalog",
+	events.CatalogRetired:         "catalog",
+	events.CatalogImportCommitted: "catalogimport",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -76,6 +77,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.SAReleaseCreatedData{Lines: []events.SAReleaseLine{{}}},
 		events.PolicyChangedData{UpdatedBy: "u"},
 		events.CatalogData{ValidTo: "2027-12-31"},
+		events.CatalogImportData{},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

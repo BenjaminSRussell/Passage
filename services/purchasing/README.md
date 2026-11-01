@@ -120,9 +120,14 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain or PurchaseOrderInquire | The policy, or the defaults at version 0; ETag is the version |
 | PUT `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
 | POST `/catalogs` | CatalogMaintain | Idempotency-Key required; creates a DRAFT catalog with optional entries; ETag is the version |
-| GET `/catalogs`, `/catalogs/{id}` | CatalogMaintain or PurchaseOrderInquire | List (`status`, `legalEntityId`) and read with entries |
+| GET `/catalogs`, `/catalogs/{id}` | CatalogMaintain or PurchaseOrderInquire | List (`status`, `legalEntityId`) and read with the entry count and the first 200 entries (`entriesNextCursor` when there are more) |
+| GET `/catalogs/{id}/entries` | CatalogMaintain or PurchaseOrderInquire | The entries in entry order, a page at a time (`cursor` is the last entry number, `limit` up to 200) |
 | POST `/catalogs/{id}:publish`, `:retire` | CatalogMaintain | Idempotency-Key and If-Match required; publish needs at least one entry (PRC-CAT-001); writes `catalog.published.v1` or `catalog.retired.v1` |
-| POST `/catalogs/{id}/entries`, DELETE `/catalogs/{id}/entries/{entryId}` | CatalogMaintain | If-Match required; DRAFT catalogs only (PRC-CAT-STATE); at most 2,000 entries |
+| POST `/catalogs/{id}/entries`, DELETE `/catalogs/{id}/entries/{entryId}` | CatalogMaintain | If-Match required; DRAFT catalogs only (PRC-CAT-STATE); at most 50,000 entries |
+| POST `/catalogs/{id}/vendor-import` | CatalogMaintain | Idempotency-Key required; stages a vendor file (CSV text or JSON rows, up to 50,000) against a DRAFT or PUBLISHED catalog: each row ACCEPTABLE or ERROR with a reason (PRC-CAT-005) |
+| GET `/catalog-imports`, `/catalog-imports/{id}`, `/catalog-imports/{id}/rows` | CatalogMaintain or PurchaseOrderInquire | Imports (`catalogId`, `status`), one import with row counts, and its rows (`status`, row-number cursor) |
+| POST `/catalog-imports/{id}/decisions` | CatalogMaintain | Idempotency-Key and If-Match required; `acceptAll`, `accept` and `reject` by row number while STAGED |
+| POST `/catalog-imports/{id}:commit`, `:cancel` | CatalogMaintain | Idempotency-Key and If-Match required; commit adds the ACCEPTED rows to the catalog and writes `catalogimport.committed.v1` |
 | GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
@@ -309,7 +314,12 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   unit), and moves DRAFT → PUBLISHED → RETIRED. Entries (vendor, optional product,
   category, unit, price with up to six decimals, currency, lead time, preferred,
   image reference) are added and removed only while DRAFT; a published catalog is
-  frozen, so a change is a new catalog. The picker returns entries of PUBLISHED
+  frozen, so a change is a new catalog. The one exception is the reviewed vendor
+  import below: its commit adds entries to a PUBLISHED catalog, because AC-17.13
+  has the accepted rows of a published catalog show in the picker; nothing changes
+  or removes an entry of a published catalog. A catalog holds up to 50,000 entries
+  (the PRD caps a vendor file at 50,000 rows and sets no catalog cap); reads carry
+  the count and the first 200 entries and page the rest. The picker returns entries of PUBLISHED
   catalogs valid on the date and published to the unit, newest first. A
   requisition line that names `catalogEntryId` is checked against the same rules
   on the requisition's legal entity, unit and currency (PRC-CAT-004,
@@ -317,6 +327,24 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   where the request left them blank, and keeps the link on the line; a different
   unit or product is refused, and an entry the caller cannot see is a field error
   on the line (COM-0001). Entries are not re-priced after a requisition is saved.
+- **Vendor catalog import (FR-17.18, AC-17.13).** A vendor file is staged, not applied.
+  The CSV header is matched by name (`Vendor part number`, `Name`, `Category`, `UOM`,
+  `Price`, `Currency`, `Lead time`, `Image URL`, `Product id`; name, category, unit,
+  price and currency must be present), and every row is validated like a catalog
+  entry: a row that fails is ERROR with its reason, as is a vendor part number
+  repeated in the file or already held by the vendor in the catalog. The rest are
+  ACCEPTABLE. The buyer accepts or rejects rows (an ERROR row cannot be accepted),
+  and the commit adds the ACCEPTED rows to the catalog as entries, in one transaction
+  with the version bump and the event. Rows left undecided stay out. The one place
+  a PUBLISHED catalog takes entries is this reviewed commit, so the new items show
+  in the picker for the catalog's units at once; a RETIRED catalog takes none. The
+  same file (vendor and rows) is staged once per catalog unless its import was
+  cancelled (PRC-CAT-IMPORT-DUPLICATE; PRD 3.17.16 keys the import on the file
+  hash), and a part number that another import committed after this one was staged
+  stops the commit (PRC-CAT-005) until the buyer rejects that row. The request body
+  is capped at 32 MiB (a 50,000-row file is about 8 MB as CSV, 20 MB as JSON rows);
+  the commit adds all accepted rows in one statement (50,000 rows stage in about a
+  second and commit in under one on a laptop Postgres).
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -385,8 +413,15 @@ store codes are returned as the `code` field.
 | PRC-CAT-001 | 422 | A catalog with no entries cannot be published |
 | PRC-CAT-004 | 422 | The requisition line's catalog is not published to the legal entity and unit on the date |
 | PRC-CAT-006 | 422 | The catalog entry's currency differs from the requisition's |
-| PRC-CAT-007 | 422 | A catalog would hold more than 2,000 entries |
-| PRC-CAT-STATE | 409 | The catalog status does not allow the action (entries change only in DRAFT; publish needs DRAFT, retire needs PUBLISHED) |
+| PRC-CAT-005 | 422 | A vendor file has no header, lacks a required column or has no rows; a row is ERROR (the reason is on the row) and is accepted; or an accepted row's vendor part number reached the catalog after staging (commit) |
+| PRC-CAT-007 | 422 | A catalog would hold more than 50,000 entries |
+| PRC-CAT-008 | 422 | A vendor file holds more than 50,000 rows |
+| PRC-CAT-009 | 422 | A vendor import is committed with no accepted row |
+| PRC-CAT-IMPORT-DUPLICATE | 409 | The same vendor file is already staged or committed for the catalog (cancel that import to stage it again) |
+| PRC-CAT-IMPORT-STATE | 409 | The import is not STAGED (decide, commit and cancel need STAGED) |
+| PRC-CAT-IMPORT-NOT-FOUND | 404 | Import not found (or outside the caller's legal entity scope) |
+| PRC-CAT-IMPORT-ROW-NOT-FOUND | 404 | A decision names a row number the import does not have |
+| PRC-CAT-STATE | 409 | The catalog status does not allow the action (entries change only in DRAFT, apart from a vendor import commit into a PUBLISHED catalog; publish needs DRAFT, retire needs PUBLISHED; a RETIRED catalog takes no import) |
 | PRC-CAT-NOT-FOUND | 404 | Catalog not found (or outside the caller's legal entity scope) |
 | PRC-CAT-ENTRY-NOT-FOUND | 404 | The catalog has no such entry, or a requisition line names an unknown entry |
 | PRC-SA-001 | 422 | A firm-zone schedule line is reduced, moved or removed without a reason code |

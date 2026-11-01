@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,29 +88,88 @@ func catalogEntryDest(e *domain.CatalogEntry) []any {
 		&e.UnitPrice, &e.Currency, &e.LeadTimeDays, &e.Preferred, &e.ImageURL}
 }
 
-func loadCatalog(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.Catalog, error) {
+// CatalogEntryPageSize is how many entries a catalog read carries; the rest are paged
+// through ListCatalogEntries, so a 50,000-entry catalog is never read in one go.
+const CatalogEntryPageSize = MaxPageSize
+
+// CatalogEntryPage is a page of a catalog's entries in entry order; Next is the last
+// entry number, 0 on the last page.
+type CatalogEntryPage struct {
+	Items []domain.CatalogEntry
+	Next  int
+}
+
+// loadCatalogHeader reads a catalog without its entries, with the entry count and the
+// highest entry number (the next entry is numbered after it), optionally locked.
+func loadCatalogHeader(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.Catalog, int, error) {
 	p, _ := tenant.FromContext(ctx)
-	q := `select ` + catalogColumns + ` from procurement_catalog c where c.tenant_id = $1 and c.id = $2`
 	if lock {
-		q += ` for update`
+		var locked string
+		if err := tx.QueryRow(ctx, `select id::text from procurement_catalog where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, id).Scan(&locked); err != nil {
+			return domain.Catalog{}, 0, notFound(err, CodeCatalogNotFound, "procurement catalog not found")
+		}
 	}
 	var c domain.Catalog
-	if err := scanCatalog(tx.QueryRow(ctx, q, p.TenantID, id), &c); err != nil {
-		return domain.Catalog{}, notFound(err, CodeCatalogNotFound, "procurement catalog not found")
+	var maxNo int
+	row := tx.QueryRow(ctx, `select `+catalogColumns+`, n.count, n.max_no from procurement_catalog c
+		cross join lateral (select count(*) as count, coalesce(max(e.entry_no), 0) as max_no from procurement_catalog_entry e
+			where e.tenant_id = c.tenant_id and e.catalog_id = c.id) n
+		where c.tenant_id = $1 and c.id = $2`, p.TenantID, id)
+	var from time.Time
+	var to *time.Time
+	if err := row.Scan(&c.ID, &c.Number, &c.LegalEntityID, &c.Name, &c.Description, &c.Status, &from, &to, &c.OrgUnitIDs,
+		&c.Version, &c.CreatedAt, &c.UpdatedAt, &c.EntryCount, &maxNo); err != nil {
+		return domain.Catalog{}, 0, notFound(err, CodeCatalogNotFound, "procurement catalog not found")
 	}
+	c.ValidFrom, c.ValidTo = day(from), dayOrNil(to)
+	if c.OrgUnitIDs == nil {
+		c.OrgUnitIDs = []string{}
+	}
+	c.Entries = []domain.CatalogEntry{}
+	return c, maxNo, nil
+}
+
+// catalogEntries reads up to limit entries of a catalog after entry number afterNo.
+func catalogEntries(ctx context.Context, tx pgx.Tx, id string, afterNo, limit int) (CatalogEntryPage, error) {
+	p, _ := tenant.FromContext(ctx)
 	rows, err := tx.Query(ctx, `select `+catalogEntryColumns+` from procurement_catalog_entry e
-		where e.tenant_id = $1 and e.catalog_id = $2 order by e.entry_no`, p.TenantID, id)
+		where e.tenant_id = $1 and e.catalog_id = $2 and e.entry_no > $3 order by e.entry_no limit $4`, p.TenantID, id, afterNo, limit+1)
 	if err != nil {
-		return domain.Catalog{}, err
+		return CatalogEntryPage{}, err
 	}
-	c.Entries, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.CatalogEntry, error) {
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.CatalogEntry, error) {
 		var e domain.CatalogEntry
 		return e, row.Scan(catalogEntryDest(&e)...)
 	})
-	if c.Entries == nil {
-		c.Entries = []domain.CatalogEntry{}
+	if err != nil {
+		return CatalogEntryPage{}, err
 	}
-	return c, err
+	if items == nil {
+		items = []domain.CatalogEntry{}
+	}
+	page := CatalogEntryPage{Items: items}
+	if len(items) > limit {
+		page.Items, page.Next = items[:limit], items[limit-1].EntryNo
+	}
+	return page, nil
+}
+
+// loadCatalog reads a catalog with its entry count and the first page of entries.
+func loadCatalog(ctx context.Context, tx pgx.Tx, id string) (domain.Catalog, error) {
+	c, _, err := loadCatalogHeader(ctx, tx, id, false)
+	if err != nil {
+		return c, err
+	}
+	page, err := catalogEntries(ctx, tx, id, 0, CatalogEntryPageSize)
+	if err != nil {
+		return domain.Catalog{}, err
+	}
+	c.Entries = page.Items
+	if page.Next > 0 {
+		c.EntriesNextCursor = strconv.Itoa(page.Next)
+	}
+	return c, nil
 }
 
 func insertCatalogEntry(ctx context.Context, tx pgx.Tx, catalogID, legalEntityID string, no int, e domain.CatalogEntry) error {
@@ -137,7 +197,7 @@ func (s *Postgres) CreateCatalog(ctx context.Context, in domain.Catalog, idem Id
 			return err
 		}
 		if replay {
-			out, err = loadCatalog(ctx, tx, existing, false)
+			out, err = loadCatalog(ctx, tx, existing)
 			return err
 		}
 		var seq int64
@@ -156,7 +216,7 @@ func (s *Postgres) CreateCatalog(ctx context.Context, in domain.Catalog, idem Id
 				return err
 			}
 		}
-		out, err = loadCatalog(ctx, tx, in.ID, false)
+		out, err = loadCatalog(ctx, tx, in.ID)
 		return err
 	})
 	return out, err
@@ -166,7 +226,21 @@ func (s *Postgres) CreateCatalog(ctx context.Context, in domain.Catalog, idem Id
 func (s *Postgres) GetCatalog(ctx context.Context, id string) (domain.Catalog, error) {
 	var out domain.Catalog
 	err := s.withTx(ctx, func(tx pgx.Tx) (err error) {
-		out, err = loadCatalog(ctx, tx, id, false)
+		out, err = loadCatalog(ctx, tx, id)
+		return err
+	})
+	return out, err
+}
+
+// ListCatalogEntries pages a catalog's entries in entry order after entry number afterNo.
+func (s *Postgres) ListCatalogEntries(ctx context.Context, id string, afterNo, limit int) (CatalogEntryPage, error) {
+	var out CatalogEntryPage
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, _, err := loadCatalogHeader(ctx, tx, id, false); err != nil {
+			return err
+		}
+		var err error
+		out, err = catalogEntries(ctx, tx, id, afterNo, clampLimit(limit))
 		return err
 	})
 	return out, err
@@ -214,16 +288,18 @@ func catalogConflict(cur, want int) error {
 
 // editDraftCatalog locks the catalog, checks the version and that it is still a
 // DRAFT, runs change and bumps the version. A replayed key returns the catalog as is.
-func (s *Postgres) editDraftCatalog(ctx context.Context, id string, ifMatch int, idem Idem, change func(tx pgx.Tx, c domain.Catalog) error) (domain.Catalog, error) {
+func (s *Postgres) editDraftCatalog(ctx context.Context, id string, ifMatch int, idem Idem, change func(tx pgx.Tx, c domain.Catalog, maxNo int) error) (domain.Catalog, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Catalog
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		cur, err := loadCatalog(ctx, tx, id, true)
+		cur, maxNo, err := loadCatalogHeader(ctx, tx, id, true)
 		if err != nil {
 			return err
 		}
-		if _, replay, err := claimKey(ctx, tx, idem, id); err != nil || replay {
-			out = cur
+		if _, replay, err := claimKey(ctx, tx, idem, id); err != nil {
+			return err
+		} else if replay {
+			out, err = loadCatalog(ctx, tx, id)
 			return err
 		}
 		if cur.Version != ifMatch {
@@ -232,14 +308,14 @@ func (s *Postgres) editDraftCatalog(ctx context.Context, id string, ifMatch int,
 		if cur.Status != domain.CatalogDraft {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeCatalogState, "entries can only change while the catalog is a draft")
 		}
-		if err := change(tx, cur); err != nil {
+		if err := change(tx, cur, maxNo); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update procurement_catalog set row_version = row_version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, id); err != nil {
 			return err
 		}
-		out, err = loadCatalog(ctx, tx, id, false)
+		out, err = loadCatalog(ctx, tx, id)
 		return err
 	})
 	return out, err
@@ -247,14 +323,10 @@ func (s *Postgres) editDraftCatalog(ctx context.Context, id string, ifMatch int,
 
 // AddCatalogEntries appends entries to a DRAFT catalog under If-Match.
 func (s *Postgres) AddCatalogEntries(ctx context.Context, id string, ifMatch int, entries []domain.CatalogEntry, idem Idem) (domain.Catalog, error) {
-	return s.editDraftCatalog(ctx, id, ifMatch, idem, func(tx pgx.Tx, c domain.Catalog) error {
-		if len(c.Entries)+len(entries) > domain.MaxCatalogEntries {
+	return s.editDraftCatalog(ctx, id, ifMatch, idem, func(tx pgx.Tx, c domain.Catalog, next int) error {
+		if c.EntryCount+len(entries) > domain.MaxCatalogEntries {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeCatalogTooManyEntry,
 				fmt.Sprintf("a catalog holds at most %d entries", domain.MaxCatalogEntries))
-		}
-		next := 0
-		for _, e := range c.Entries {
-			next = max(next, e.EntryNo)
 		}
 		for i, e := range entries {
 			if err := insertCatalogEntry(ctx, tx, id, c.LegalEntityID, next+i+1, e); err != nil {
@@ -268,7 +340,7 @@ func (s *Postgres) AddCatalogEntries(ctx context.Context, id string, ifMatch int
 // RemoveCatalogEntry deletes one entry of a DRAFT catalog under If-Match.
 func (s *Postgres) RemoveCatalogEntry(ctx context.Context, id, entryID string, ifMatch int) (domain.Catalog, error) {
 	p, _ := tenant.FromContext(ctx)
-	return s.editDraftCatalog(ctx, id, ifMatch, Idem{}, func(tx pgx.Tx, _ domain.Catalog) error {
+	return s.editDraftCatalog(ctx, id, ifMatch, Idem{}, func(tx pgx.Tx, _ domain.Catalog, _ int) error {
 		tag, err := tx.Exec(ctx, `delete from procurement_catalog_entry where tenant_id = $1 and catalog_id = $2 and id = $3`,
 			p.TenantID, id, entryID)
 		if err != nil {
@@ -287,18 +359,20 @@ func (s *Postgres) ActOnCatalog(ctx context.Context, id string, ifMatch int, act
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Catalog
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		cur, err := loadCatalog(ctx, tx, id, true)
+		cur, _, err := loadCatalogHeader(ctx, tx, id, true)
 		if err != nil {
 			return err
 		}
-		if _, replay, err := claimKey(ctx, tx, idem, id); err != nil || replay {
-			out = cur
+		if _, replay, err := claimKey(ctx, tx, idem, id); err != nil {
+			return err
+		} else if replay {
+			out, err = loadCatalog(ctx, tx, id)
 			return err
 		}
 		if cur.Version != ifMatch {
 			return catalogConflict(cur.Version, ifMatch)
 		}
-		next, err := domain.NextCatalogStatus(cur.Status, action, len(cur.Entries))
+		next, err := domain.NextCatalogStatus(cur.Status, action, cur.EntryCount)
 		if err != nil {
 			if de, ok := err.(*domain.Error); ok {
 				status := http.StatusConflict
@@ -313,7 +387,7 @@ func (s *Postgres) ActOnCatalog(ctx context.Context, id string, ifMatch int, act
 			where tenant_id = $1 and id = $2`, p.TenantID, id, next); err != nil {
 			return err
 		}
-		if out, err = loadCatalog(ctx, tx, id, false); err != nil {
+		if out, err = loadCatalog(ctx, tx, id); err != nil {
 			return err
 		}
 		evt := purchasingevents.CatalogPublished
@@ -321,7 +395,7 @@ func (s *Postgres) ActOnCatalog(ctx context.Context, id string, ifMatch int, act
 			evt = purchasingevents.CatalogRetired
 		}
 		data := purchasingevents.CatalogData{CatalogID: out.ID, Number: out.Number, LegalEntityID: out.LegalEntityID, Name: out.Name,
-			Status: out.Status, ValidFrom: out.ValidFrom.String(), OrgUnitIDs: out.OrgUnitIDs, EntryCount: len(out.Entries), Version: out.Version}
+			Status: out.Status, ValidFrom: out.ValidFrom.String(), OrgUnitIDs: out.OrgUnitIDs, EntryCount: out.EntryCount, Version: out.Version}
 		if out.ValidTo != nil {
 			data.ValidTo = out.ValidTo.String()
 		}

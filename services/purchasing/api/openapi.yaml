@@ -1117,16 +1117,16 @@ components:
         validFrom: { $ref: '#/components/schemas/Day' }
         validTo: { $ref: '#/components/schemas/Day' }
         orgUnitIds: { type: array, items: { type: string, format: uuid }, description: "Operating units the catalog is published to; empty means every unit." }
-        entries: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/CatalogEntryInput' } }
+        entries: { type: array, maxItems: 50000, items: { $ref: '#/components/schemas/CatalogEntryInput' } }
     CatalogEntriesInput:
       type: object
       required: [entries]
       additionalProperties: false
       properties:
-        entries: { type: array, minItems: 1, maxItems: 2000, items: { $ref: '#/components/schemas/CatalogEntryInput' } }
+        entries: { type: array, minItems: 1, maxItems: 50000, items: { $ref: '#/components/schemas/CatalogEntryInput' } }
     Catalog:
       type: object
-      required: [id, number, legalEntityId, name, status, validFrom, orgUnitIds, version, entries]
+      required: [id, number, legalEntityId, name, status, validFrom, orgUnitIds, version, entryCount, entries]
       properties:
         id: { type: string, format: uuid }
         number: { type: string, example: "CAT-00000001" }
@@ -1138,7 +1138,9 @@ components:
         validTo: { $ref: '#/components/schemas/Day' }
         orgUnitIds: { type: array, items: { type: string, format: uuid } }
         version: { type: integer, description: "Also the ETag; If-Match for entries and actions." }
-        entries: { type: array, items: { $ref: '#/components/schemas/CatalogEntry' } }
+        entryCount: { type: integer, minimum: 0, maximum: 50000 }
+        entries: { type: array, maxItems: 200, description: "The first 200 entries in entry order; page on with GET /catalogs/{id}/entries from entriesNextCursor.", items: { $ref: '#/components/schemas/CatalogEntry' } }
+        entriesNextCursor: { type: string, description: "Set when the catalog has more entries than the first page: the last entry number; pass it as cursor to GET /catalogs/{id}/entries." }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     CatalogSummary:
@@ -1170,12 +1172,99 @@ components:
             catalogId: { type: string, format: uuid }
             catalogNumber: { type: string }
             catalogName: { type: string }
+    CatalogEntryPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogEntry' } }
+        nextCursor: { type: string, description: "The last entry number of this page; pass it as cursor." }
     CatalogHitPage:
       type: object
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/CatalogHit' } }
         nextCursor: { type: string, format: uuid }
+    VendorImportInput:
+      type: object
+      required: [vendorId, format]
+      additionalProperties: false
+      description: >-
+        The vendor's file. Format CSV carries the file text in csv (first record is the header; columns are matched by
+        name, so "Vendor part number", "UOM" and "Price" work; name, category, unit, unitPrice and currency must be
+        present); format JSON carries rows. At most 50,000 rows.
+      properties:
+        vendorId: { type: string, format: uuid, description: "The vendor of every row." }
+        format: { type: string, enum: [CSV, JSON] }
+        fileName: { type: string, maxLength: 255 }
+        csv: { type: string, description: "CSV text, for format CSV." }
+        rows:
+          type: array
+          maxItems: 50000
+          description: "Rows for format JSON; vendorId is not read from a row."
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, category, unit, unitPrice, currency]
+            properties:
+              vendorPartNo: { type: string }
+              productId: { type: string, format: uuid }
+              name: { type: string }
+              description: { type: string }
+              category: { type: string }
+              unit: { type: string }
+              unitPrice: { $ref: '#/components/schemas/Money' }
+              currency: { type: string }
+              leadTimeDays: { type: integer, minimum: 0, maximum: 3650 }
+              imageUrl: { type: string }
+    ImportDecisionsInput:
+      type: object
+      additionalProperties: false
+      description: "The buyer's choices; acceptAll runs first, then accept and reject by row number (a row in both lists is refused)."
+      properties:
+        acceptAll: { type: boolean, description: "Accept every ACCEPTABLE row." }
+        accept: { type: array, items: { type: integer, minimum: 1, maximum: 50000 } }
+        reject: { type: array, items: { type: integer, minimum: 1, maximum: 50000 } }
+    CatalogImport:
+      type: object
+      required: [id, catalogId, legalEntityId, vendorId, format, status, totalRows, acceptableRows, errorRows, acceptedRows, rejectedRows, entriesAdded, version]
+      properties:
+        id: { type: string, format: uuid }
+        catalogId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        format: { type: string, enum: [CSV, JSON] }
+        fileName: { type: string }
+        status: { type: string, enum: [STAGED, COMMITTED, CANCELLED] }
+        totalRows: { type: integer }
+        acceptableRows: { type: integer, description: "Rows that passed validation and await a decision." }
+        errorRows: { type: integer, description: "Rows that failed validation or repeat a vendor part number (PRC-CAT-005)." }
+        acceptedRows: { type: integer }
+        rejectedRows: { type: integer }
+        entriesAdded: { type: integer, description: "Entries the commit added to the catalog." }
+        version: { type: integer, description: "Also the ETag; If-Match for decisions and actions." }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CatalogImportPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogImport' } }
+        nextCursor: { type: string, format: uuid }
+    ImportRow:
+      type: object
+      required: [rowNo, status, raw]
+      properties:
+        rowNo: { type: integer, minimum: 1, description: "Position in the file, header excluded." }
+        status: { type: string, enum: [ACCEPTABLE, ERROR, ACCEPTED, REJECTED] }
+        reason: { type: string, description: "Why an ERROR row failed." }
+        raw: { type: object, additionalProperties: { type: string }, description: "What the file said, under the canonical column names." }
+        entry: { $ref: '#/components/schemas/CatalogEntryInput' }
+    ImportRowPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ImportRow' } }
+        nextCursor: { type: string, description: "The last row number of this page; pass it as cursor." }
 paths:
   /v1/procurement/requisitions:
     post:
@@ -2493,6 +2582,25 @@ paths:
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or transition not allowed (PRC-CAT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/catalogs/{id}/entries:
+    get:
+      operationId: listCatalogEntries
+      x-passage-duty: CatalogMaintain or PurchaseOrderInquire
+      summary: Page the entries of a catalog in entry order (FR-17.18; duty CatalogMaintain or PurchaseOrderInquire)
+      description: >-
+        A catalog holds up to 50,000 entries, so reads return them a page at a time; GET /catalogs/{id} carries the first page.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: "The nextCursor of the previous page (or the catalog's entriesNextCursor): an entry number.", schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: One page of entries
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogEntryPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Catalog not found (PRC-CAT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
       operationId: addCatalogEntries
       x-passage-duty: CatalogMaintain
@@ -2565,3 +2673,167 @@ paths:
               schema: { $ref: '#/components/schemas/CatalogHitPage' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/catalogs/{id}/vendor-import:
+    post:
+      operationId: stageVendorCatalogImport
+      x-passage-duty: CatalogMaintain
+      summary: Stage a vendor catalog file against a DRAFT or PUBLISHED catalog (FR-17.18, AC-17.13; duty CatalogMaintain)
+      description: >-
+        Every row is validated like a catalog entry and staged as ACCEPTABLE, or ERROR with its reason (PRC-CAT-005); a vendor
+        part number repeated in the file or already in the catalog for the vendor is an ERROR. The same file (same vendor and
+        rows) is staged once per catalog unless its import was cancelled. The body is at most 32 MiB (about 20 MB for 50,000 JSON rows). Nothing reaches the catalog
+        until the buyer accepts rows and commits. Used by the buyer and, later, by the supplier portal upload (FR-20.19).
+        A replayed Idempotency-Key returns the import created by the first request.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorImportInput' }
+      responses:
+        '201':
+          description: Staged; the ETag is the import version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Catalog not found (PRC-CAT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The catalog is retired (PRC-CAT-STATE), or the same vendor file is already staged or committed for the catalog (PRC-CAT-IMPORT-DUPLICATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '413': { description: Request body over the size limit (COM-0413), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), the file has no header, lacks a required column or has no rows (PRC-CAT-005), more than 50,000 rows (PRC-CAT-008) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/catalog-imports:
+    get:
+      operationId: listCatalogImports
+      x-passage-duty: CatalogMaintain or PurchaseOrderInquire
+      summary: List staged vendor catalog imports, newest first (FR-17.18; duty CatalogMaintain or PurchaseOrderInquire)
+      parameters:
+        - { name: catalogId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [STAGED, COMMITTED, CANCELLED] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImportPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/catalog-imports/{id}:
+    get:
+      operationId: getCatalogImport
+      x-passage-duty: CatalogMaintain or PurchaseOrderInquire
+      summary: Read a vendor catalog import with its row counts (ETag = version; duty CatalogMaintain or PurchaseOrderInquire)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImport' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/catalog-imports/{id}/rows:
+    get:
+      operationId: listCatalogImportRows
+      x-passage-duty: CatalogMaintain or PurchaseOrderInquire
+      summary: List the staged rows of an import in file order (FR-17.18; duty CatalogMaintain or PurchaseOrderInquire)
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [ACCEPTABLE, ERROR, ACCEPTED, REJECTED] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: "The nextCursor of the previous page: a row number.", schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: One page of rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportRowPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/catalog-imports/{id}/decisions:
+    post:
+      operationId: decideCatalogImportRows
+      x-passage-duty: CatalogMaintain
+      summary: Accept or reject staged rows of an import (FR-17.18, AC-17.13; duty CatalogMaintain)
+      description: >-
+        Allowed while the import is STAGED. An ERROR row cannot be accepted (PRC-CAT-005). A rejected row can be accepted
+        again before the commit. A replayed Idempotency-Key returns the import as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportDecisionsInput' }
+      responses:
+        '200':
+          description: The import at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Import (PRC-CAT-IMPORT-NOT-FOUND) or row (PRC-CAT-IMPORT-ROW-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the import is not staged (PRC-CAT-IMPORT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), an ERROR row named in accept (PRC-CAT-005) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/catalog-imports/{id}:commit:
+    post:
+      operationId: commitCatalogImport
+      x-passage-duty: CatalogMaintain
+      summary: Add the accepted rows of an import to the catalog (FR-17.18, AC-17.13; duty CatalogMaintain). Writes catalogimport.committed.v1.
+      description: >-
+        Rows still ACCEPTABLE (undecided), rejected and ERROR rows stay out. The catalog may be DRAFT or PUBLISHED, so the entries are visible in the requisition picker at once when it is published; the catalog version rises by one. A replayed Idempotency-Key returns the import as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: Now COMMITTED
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImport' }
+        '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT), the import is not staged (PRC-CAT-IMPORT-STATE) or the catalog is retired (PRC-CAT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: No row is accepted (PRC-CAT-009), the catalog would hold more than 50,000 entries (PRC-CAT-007), or an accepted row's vendor part number reached the catalog after staging (PRC-CAT-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/catalog-imports/{id}:cancel:
+    post:
+      operationId: cancelCatalogImport
+      x-passage-duty: CatalogMaintain
+      summary: Cancel a staged import; the catalog is untouched (FR-17.18; duty CatalogMaintain)
+      description: >-
+        The import stays as the record. A replayed Idempotency-Key returns the import as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: Now CANCELLED
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogImport' }
+        '403': { description: Missing duty CatalogMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Import not found (PRC-CAT-IMPORT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the import is not staged (PRC-CAT-IMPORT-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

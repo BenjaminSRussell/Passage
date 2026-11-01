@@ -99,6 +99,13 @@ type Store interface {
 	ActOnCatalog(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.Catalog, error)
 	SearchCatalogEntries(ctx context.Context, f CatalogSearch, after string, limit int) (Page[CatalogHit], error)
 	GetCatalogEntry(ctx context.Context, entryID string) (domain.Catalog, domain.CatalogEntry, error)
+	ListCatalogEntries(ctx context.Context, id string, afterNo, limit int) (CatalogEntryPage, error)
+	StageVendorImport(ctx context.Context, catalogID string, in ImportInput, idem Idem) (domain.CatalogImport, error)
+	GetCatalogImport(ctx context.Context, id string) (domain.CatalogImport, error)
+	ListCatalogImports(ctx context.Context, f ImportFilter, after string, limit int) (Page[domain.CatalogImport], error)
+	ListImportRows(ctx context.Context, importID, status string, afterRow, limit int) (ImportRowPage, error)
+	DecideImportRows(ctx context.Context, id string, ifMatch int, d ImportDecisions, idem Idem) (domain.CatalogImport, error)
+	ActOnCatalogImport(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.CatalogImport, error)
 	Ping(ctx context.Context) error
 }
 

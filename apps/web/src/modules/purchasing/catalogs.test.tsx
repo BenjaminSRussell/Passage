@@ -35,6 +35,7 @@ const catalog = {
   validTo: "2027-12-31",
   orgUnitIds: [],
   version: 1,
+  entryCount: 1,
   entries: [entry],
   createdAt: "2026-10-26T10:00:00Z",
   updatedAt: "2026-10-26T10:00:00Z",
