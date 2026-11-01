@@ -77,6 +77,12 @@ channels:
         $ref: '#/components/messages/CategoryManagerAssigned'
       categoryManagerRemoved:
         $ref: '#/components/messages/CategoryManagerRemoved'
+  signinglimit:
+    address: passage.procurement.signinglimit
+    description: Signing limits set, changed or recertified (FR-17.17); the Kafka key is the signing limit id.
+    messages:
+      signingLimitChanged:
+        $ref: '#/components/messages/SigningLimitChanged'
   catalogimport:
     address: passage.procurement.catalogimport
     description: Vendor catalog imports committed to a catalog (FR-17.18); the Kafka key is the import id.
@@ -180,6 +186,12 @@ operations:
       $ref: '#/channels/categorymanager'
     messages:
       - $ref: '#/channels/categorymanager/messages/categoryManagerRemoved'
+  publishSigningLimitChanged:
+    action: send
+    channel:
+      $ref: '#/channels/signinglimit'
+    messages:
+      - $ref: '#/channels/signinglimit/messages/signingLimitChanged'
   publishCatalogPublished:
     action: send
     channel:
@@ -298,6 +310,20 @@ components:
               type: { type: string, const: dev.passage.procurement.categorymanager.removed.v1 }
               subject: { type: string, format: uuid, description: manager row id }
               data: { $ref: '#/components/schemas/CategoryManagerData' }
+    SigningLimitChanged:
+      name: SigningLimitChanged
+      title: signinglimit.changed.v1
+      x-passage-type: dev.passage.procurement.signinglimit.changed.v1
+      summary: A worker's signing limit was set by an approved request, or recertified (FR-17.17).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.signinglimit.changed.v1 }
+              subject: { type: string, format: uuid, description: signing limit id }
+              data: { $ref: '#/components/schemas/SigningLimitData' }
     PolicyChanged:
       name: PolicyChanged
       title: policy.changed.v1
@@ -771,6 +797,22 @@ components:
         legal_entity_id: { type: string, format: uuid }
         category: { type: string }
         worker_id: { type: string, format: uuid }
+        changed_by: { type: string, format: uuid }
+    SigningLimitData:
+      type: object
+      required: [limit_id, legal_entity_id, worker_id, document_type, currency, spending_limit, approval_limit, recertify_by, reason, version]
+      additionalProperties: false
+      properties:
+        limit_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        worker_id: { type: string, format: uuid }
+        document_type: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        spending_limit: { type: string, description: Decimal string. }
+        approval_limit: { type: string, description: Decimal string. }
+        recertify_by: { type: string, format: date }
+        reason: { type: string, enum: [REQUEST_APPROVED, RECERTIFIED] }
+        version: { type: integer, minimum: 1 }
         changed_by: { type: string, format: uuid }
     PolicyChangedData:
       type: object

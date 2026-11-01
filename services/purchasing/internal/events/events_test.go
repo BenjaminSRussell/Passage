@@ -29,6 +29,7 @@ var allTypes = map[string]string{
 	events.CategoryVendorChanged:   "categoryvendor",
 	events.CategoryManagerAssigned: "categorymanager",
 	events.CategoryManagerRemoved:  "categorymanager",
+	events.SigningLimitChanged:     "signinglimit",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -84,6 +85,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.CatalogImportData{},
 		events.CategoryVendorData{ValidTo: "2027-12-31", ChangedBy: "u"},
 		events.CategoryManagerData{ChangedBy: "u"},
+		events.SigningLimitData{ChangedBy: "u"},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

@@ -77,6 +77,9 @@ type fakeStore struct {
 	// Category vendor assignments and managers (FR-17.20).
 	categories categoryLog
 
+	// Signing limits and their requests (FR-17.17).
+	signing signingLog
+
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
 	imp importLog

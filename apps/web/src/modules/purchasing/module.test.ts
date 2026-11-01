@@ -29,6 +29,19 @@ describe("purchasing module", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/scheduling-agreements/:id/releases/:releaseNo");
   });
 
+  it("routes the signing limit and request pages", () => {
+    const paths = purchasing.routes.map((r) => r.path);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/purchasing/signing-limits",
+        "/purchasing/signing-limits/:id",
+        "/purchasing/signing-limit-requests",
+        "/purchasing/signing-limit-requests/new",
+        "/purchasing/signing-limit-requests/:id",
+      ]),
+    );
+  });
+
   it("routes the category vendor list, create and detail pages and the managers page", () => {
     const paths = purchasing.routes.map((r) => r.path);
     expect(paths).toEqual(

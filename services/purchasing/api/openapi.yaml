@@ -13,6 +13,8 @@ info:
     subsequent price change (reprice) of confirmed purchase orders, and scheduling
     agreements with firm and trade-off zones and FRC/JIT releases with cumulative quantities, and
     the purchasing policy per legal entity (change management default, PO four-eyes, invoice before receipt).
+    Slice 13 adds signing limits (FR-17.17): requests, approval, recertification, and the spending and approval
+    limit rules on requisition submit and PO approval.
     Mounted at /v1/procurement. The browser reaches the same paths under /api/v1/procurement
     through the web BFF. Errors are RFC 9457 problem details; see README for codes.
 servers:
@@ -73,6 +75,83 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    SigningLimit:
+      type: object
+      required: [id, legalEntityId, workerId, documentType, currency, spendingLimit, approvalLimit, recertifyBy, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        documentType: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        spendingLimit: { type: string, description: "Decimal string. What the worker may request before one more approval level is added." }
+        approvalLimit: { type: string, description: "Decimal string. What the worker may approve." }
+        recertifyBy: { $ref: '#/components/schemas/Day' }
+        lastRecertifiedOn: { $ref: '#/components/schemas/Day' }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    SigningLimitPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SigningLimit' } }
+        nextCursor: { type: string, format: uuid }
+    SigningLimitRequest:
+      type: object
+      required: [id, legalEntityId, workerId, documentType, currency, spendingLimit, approvalLimit, status, requestedBy, requestedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        documentType: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        spendingLimit: { type: string }
+        approvalLimit: { type: string }
+        reason: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        requestedBy: { type: string, format: uuid }
+        requestedAt: { type: string, format: date-time }
+        decidedBy: { type: string, format: uuid }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        signingLimitId: { type: string, format: uuid, description: "The limit written by an approval" }
+        version: { type: integer, minimum: 1 }
+    SigningLimitRequestInput:
+      type: object
+      required: [legalEntityId, workerId, documentType, currency, spendingLimit, approvalLimit]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        documentType: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        spendingLimit: { type: string, description: "Decimal string, zero or more, at most 6 decimals." }
+        approvalLimit: { type: string, description: "Decimal string, zero or more, at most 6 decimals." }
+        reason: { type: string, maxLength: 1000 }
+    SigningLimitRequestPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SigningLimitRequest' } }
+        nextCursor: { type: string, format: uuid }
+    SigningLimitDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 1000 }
+    SigningLimitEvaluation:
+      type: object
+      required: [expired, requesterEscalates, approverAllowed]
+      properties:
+        limit: { $ref: '#/components/schemas/SigningLimit' }
+        expired: { type: boolean }
+        requesterEscalates: { type: boolean, description: "A document of this amount raised by the worker gets one more approval level" }
+        approverAllowed: { type: boolean, description: "The worker may approve a document of this amount" }
+        code: { type: string, description: "PRC-SL-001 or PRC-SL-002 when approverAllowed is false" }
+        detail: { type: string }
     PurchasingPolicy:
       type: object
       required: [legalEntityId, changeManagementDefault, poFourEyes, allowInvoiceBeforeReceipt, categoryAccessMode, version]
@@ -1402,6 +1481,9 @@ paths:
       operationId: submitRequisition
       x-passage-duty: RequisitionCreate
       summary: Submit for approval; routes by amount and category; APPROVED when the chain is empty. A replayed Idempotency-Key returns the requisition as it is now.
+      description: >-
+        A requester whose REQUISITION spending limit in the requisition currency is below the total, or whose limit is past its recertification date
+        (warning PRC-SL-001), gets one more approval level, NEXT_APPROVER, at the end of the chain (FR-17.17, BR-17.15). A requester whose REQUISITION limits are all in other currencies gets the level too (amounts are not converted yet); a requester with no REQUISITION limit at all gets none until default signing limits exist.
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -1626,7 +1708,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '403': { description: "Missing PurchaseOrderConfirm duty (AUTH-0003), or the purchasing policy has poFourEyes on and the caller created, submitted or last changed the PO (PRC-POL-002)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing PurchaseOrderConfirm duty (AUTH-0003), or the purchasing policy has poFourEyes on and the caller created, submitted or last changed the PO (PRC-POL-002), or the caller's PURCHASE_ORDER approval limit in the PO currency is below the PO total (PRC-SL-002; a caller with no limit in the PO currency, or that is not a named user, has a limit of zero and approves only a zero total) or past its recertification date (PRC-SL-001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Not IN_REVIEW (PRC-PO-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found (PRC-PO-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the current row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -3068,3 +3150,217 @@ paths:
         '403': { description: Missing duty CategoryMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Manager not found (PRC-CAT-MANAGER-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limit-requests:
+    post:
+      operationId: createSigningLimitRequest
+      x-passage-duty: RequisitionCreate
+      summary: Request a worker's signing limit for a document type and currency (FR-17.17; duty RequisitionCreate)
+      description: >-
+        The request is PENDING until a holder of SigningLimitApprove approves or rejects it; the limit is written only by approval.
+        A replayed Idempotency-Key returns the first request.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningLimitRequestInput' }
+      responses:
+        '201':
+          description: The request at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty RequisitionCreate or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - ids, document type, currency or limits (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listSigningLimitRequests
+      x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
+      summary: List signing limit requests, newest first (FR-17.17)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: workerId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, REJECTED] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitRequestPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limit-requests/{id}:
+    get:
+      operationId: getSigningLimitRequest
+      x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
+      summary: Read one signing limit request (FR-17.17)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The request
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitRequest' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Request not found (PRC-SL-REQUEST-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limit-requests/{id}:approve:
+    post:
+      operationId: approveSigningLimitRequest
+      x-passage-duty: SigningLimitApprove
+      summary: Approve a PENDING signing limit request and write the worker's limit (FR-17.17; duty SigningLimitApprove)
+      description: >-
+        Writes the limit for the worker, document type and currency (a new limit, or the existing one at its next version) with a recertification date 12 months out, and signinglimit.changed.v1, in one transaction. The requester and the worker cannot approve (PRC-SL-003). A replayed Idempotency-Key returns the request as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningLimitDecision' }
+      responses:
+        '200':
+          description: The result at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitRequest' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The request was already decided (PRC-SL-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limit-requests/{id}:reject:
+    post:
+      operationId: rejectSigningLimitRequest
+      x-passage-duty: SigningLimitApprove
+      summary: Reject a PENDING signing limit request (FR-17.17; duty SigningLimitApprove)
+      description: >-
+        The limit is not changed. The requester and the worker cannot reject (PRC-SL-003). A replayed Idempotency-Key returns the request as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningLimitDecision' }
+      responses:
+        '200':
+          description: The result at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitRequest' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller made the request or is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The request was already decided (PRC-SL-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limits:
+    get:
+      operationId: listSigningLimits
+      x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
+      summary: List signing limits, newest first (FR-17.17)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: workerId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: documentType, in: query, required: false, schema: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] } }
+        - { name: expired, in: query, required: false, description: "true keeps limits past their recertification date", schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limits/evaluation:
+    get:
+      operationId: evaluateSigningLimit
+      x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
+      summary: What a worker's limit does to a document of an amount, as requester and as approver (FR-17.17, BR-17.15)
+      description: >-
+        Compares the amount with the worker's limit for the document type in the currency. Limits are not converted between currencies. As approver the rule fails closed: no limit in the currency (none at all, or only in other currencies) is an approval limit of zero (PRC-SL-002). As requester, limits only in other currencies add the level; no limit at all adds none.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: workerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: documentType, in: query, required: true, schema: { type: string, enum: [REQUISITION, PURCHASE_ORDER, INVOICE, EXPENSE] } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: amount, in: query, required: true, description: Decimal amount, schema: { type: string } }
+      responses:
+        '200':
+          description: The evaluation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimitEvaluation' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A parameter is missing or malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limits/{id}:
+    get:
+      operationId: getSigningLimit
+      x-passage-duty: SigningLimitApprove or PurchaseOrderInquire
+      summary: Read one signing limit (FR-17.17)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The limit
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimit' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Limit not found (PRC-SL-LIMIT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/signing-limits/{id}:recertify:
+    post:
+      operationId: recertifySigningLimit
+      x-passage-duty: SigningLimitApprove
+      summary: Recertify a signing limit for another 12 months (FR-17.17; duty SigningLimitApprove)
+      description: >-
+        Moves recertifyBy to 12 months after today and writes signinglimit.changed.v1. The worker cannot recertify their own limit (PRC-SL-003). An expired limit cannot approve, and escalates the worker's own documents, until it is recertified.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: The result at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningLimit' }
+        '400': { description: Idempotency-Key missing (PRC-IDEM-001) or If-Match not a number (PRC-IFMATCH-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty SigningLimitApprove or legal entity outside the caller's scope (AUTH-0003), or the caller is the worker (PRC-SL-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Not found (PRC-SL-REQUEST-NOT-FOUND or PRC-SL-LIMIT-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-SL-005), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

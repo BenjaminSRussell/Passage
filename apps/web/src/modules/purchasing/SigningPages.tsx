@@ -1,0 +1,510 @@
+import { useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  createSigningLimitRequest,
+  decideSigningLimitRequest,
+  describeProblem,
+  getSigningLimit,
+  getSigningLimitRequest,
+  listSigningLimitRequests,
+  listSigningLimits,
+  newIdempotencyKey,
+  recertifySigningLimit,
+  type SigningDocumentType,
+  type SigningLimit,
+  type SigningLimitRequest,
+  type SigningRequestStatus,
+} from "./api/client";
+import { Details, LoadError, ShortId, StatusBadge, currencyPattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
+import styles from "./pages.module.css";
+
+const DOC_TYPES: SigningDocumentType[] = ["REQUISITION", "PURCHASE_ORDER", "INVOICE", "EXPENSE"];
+const REQUEST_STATUSES: SigningRequestStatus[] = ["PENDING", "APPROVED", "REJECTED"];
+
+type Errors = Record<string, string>;
+
+const amount = (value: string, currency: string) => `${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${currency}`;
+const expired = (l: SigningLimit) => l.recertifyBy < todayIso();
+
+const limitColumns: DataTableColumn<SigningLimit>[] = [
+  { key: "workerId", header: "Worker", render: (l) => <ShortId id={l.workerId} /> },
+  { key: "documentType", header: "Document", render: (l) => statusLabel(l.documentType) },
+  { key: "spendingLimit", header: "Spending limit", mono: true, render: (l) => amount(l.spendingLimit, l.currency) },
+  { key: "approvalLimit", header: "Approval limit", mono: true, render: (l) => amount(l.approvalLimit, l.currency) },
+  {
+    key: "recertifyBy",
+    header: "Recertify by",
+    mono: true,
+    render: (l) => (expired(l) ? <Badge tone="warning">{`Expired ${l.recertifyBy}`}</Badge> : l.recertifyBy),
+  },
+];
+
+/** Signing limits with document type and expired filters and load-more paging (FR-17.17). */
+export function SigningLimitsPage() {
+  const navigate = useNavigate();
+  const [documentType, setDocumentType] = useState<SigningDocumentType | "">("");
+  const [onlyExpired, setOnlyExpired] = useState("");
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [rows, setRows] = useState<SigningLimit[]>([]);
+  const page = useResource(
+    async (signal) => {
+      const result = await listSigningLimits({ documentType, expired: onlyExpired === "yes" }, { cursor, signal });
+      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
+      return result;
+    },
+    [documentType, onlyExpired, cursor],
+  );
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Signing limits"
+        description="What each worker may request and approve. A requester above their spending limit gets one more approval level. An approver above their approval limit, or past recertification, leaves the approval to the next approver."
+        actions={
+          <>
+            <Link className={buttonClassName("secondary")} to="/purchasing/signing-limit-requests">
+              Limit requests
+            </Link>
+            <Link className={buttonClassName("primary")} to="/purchasing/signing-limit-requests/new">
+              Request a limit
+            </Link>
+          </>
+        }
+      />
+      <div className={styles.toolbar}>
+        <div className={styles.filter}>
+          <FormField id="sl-doc-filter" label="Document">
+            {(control) => (
+              <Select
+                {...control}
+                value={documentType}
+                onChange={(e) => {
+                  setCursor(undefined);
+                  setDocumentType(e.target.value as SigningDocumentType | "");
+                }}
+              >
+                <option value="">All documents</option>
+                {DOC_TYPES.map((d) => (
+                  <option key={d} value={d}>
+                    {statusLabel(d)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+        <div className={styles.filter}>
+          <FormField id="sl-expired-filter" label="Recertification">
+            {(control) => (
+              <Select
+                {...control}
+                value={onlyExpired}
+                onChange={(e) => {
+                  setCursor(undefined);
+                  setOnlyExpired(e.target.value);
+                }}
+              >
+                <option value="">All limits</option>
+                <option value="yes">Expired only</option>
+              </Select>
+            )}
+          </FormField>
+        </div>
+      </div>
+      {page.error ? <LoadError what="signing limits" error={page.error} onRetry={page.reload} /> : null}
+      <DataTable
+        label="Signing limits"
+        columns={limitColumns}
+        rows={page.error ? [] : rows}
+        getRowKey={(l) => l.id}
+        loading={page.loading && rows.length === 0}
+        empty={{ title: "No signing limits yet", description: "Request a limit for a worker; a limit exists once its request is approved." }}
+        onRowOpen={(l) => navigate(`/purchasing/signing-limits/${l.id}`)}
+      />
+      {page.data?.nextCursor ? (
+        <div className={styles.actions}>
+          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One limit with its recertification action (duty SigningLimitApprove in the service). */
+export function SigningLimitDetailPage() {
+  const { id = "" } = useParams();
+  const resource = useResource(async (signal) => (await getSigningLimit(id, signal)).body, [id]);
+  const [current, setCurrent] = useState<SigningLimit | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const limit = current && current.id === id ? current : resource.data;
+
+  async function onRecertify() {
+    if (!limit) return;
+    setBusy(true);
+    setFailure(null);
+    setNotice(null);
+    try {
+      const { body } = await recertifySigningLimit(limit.id, limit.version);
+      setCurrent(body);
+      setNotice(`Recertified until ${body.recertifyBy}.`);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const stale = failure?.code === "PRC-SL-005";
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Signing limit"
+        actions={
+          <Link className={buttonClassName("secondary")} to="/purchasing/signing-limits">
+            All signing limits
+          </Link>
+        }
+      />
+      {resource.error ? <LoadError what="the signing limit" error={resource.error} onRetry={resource.reload} /> : null}
+      {resource.loading && !limit ? <Skeleton /> : null}
+      {limit ? (
+        <>
+          <Card>
+            <Details
+              items={[
+                { label: "Worker", value: limit.workerId, mono: true },
+                { label: "Legal entity", value: limit.legalEntityId, mono: true },
+                { label: "Document", value: statusLabel(limit.documentType) },
+                { label: "Spending limit", value: amount(limit.spendingLimit, limit.currency), mono: true },
+                { label: "Approval limit", value: amount(limit.approvalLimit, limit.currency), mono: true },
+                { label: "Recertify by", value: expired(limit) ? <Badge tone="warning">{`Expired ${limit.recertifyBy}`}</Badge> : limit.recertifyBy, mono: true },
+                { label: "Last recertified", value: limit.lastRecertifiedOn ?? "Never", mono: true },
+                { label: "Version", value: String(limit.version), mono: true },
+              ]}
+            />
+          </Card>
+          <Alert
+            tone="danger"
+            live="alert"
+            action={
+              stale ? (
+                <Button type="button" variant="secondary" onClick={() => { setCurrent(null); setFailure(null); resource.reload(); }}>
+                  Reload limit
+                </Button>
+              ) : undefined
+            }
+          >
+            {failure ? `${failure.message} (${failure.code})` : null}
+          </Alert>
+          <Alert tone="success" live="status">
+            {notice}
+          </Alert>
+          <div className={styles.actions}>
+            <Button variant="primary" loading={busy} onClick={onRecertify}>
+              Recertify for 12 months
+            </Button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+const requestColumns: DataTableColumn<SigningLimitRequest>[] = [
+  { key: "workerId", header: "Worker", render: (r) => <ShortId id={r.workerId} /> },
+  { key: "documentType", header: "Document", render: (r) => statusLabel(r.documentType) },
+  { key: "spendingLimit", header: "Spending limit", mono: true, render: (r) => amount(r.spendingLimit, r.currency) },
+  { key: "approvalLimit", header: "Approval limit", mono: true, render: (r) => amount(r.approvalLimit, r.currency) },
+  { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
+];
+
+/** Signing limit requests with a status filter and load-more paging. */
+export function SigningLimitRequestsPage() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<SigningRequestStatus | "">("PENDING");
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [rows, setRows] = useState<SigningLimitRequest[]>([]);
+  const page = useResource(
+    async (signal) => {
+      const result = await listSigningLimitRequests({ status }, { cursor, signal });
+      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
+      return result;
+    },
+    [status, cursor],
+  );
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Signing limit requests"
+        description="A limit is set only by approving its request. The person who made a request, and the worker it is for, cannot decide it."
+        actions={
+          <>
+            <Link className={buttonClassName("secondary")} to="/purchasing/signing-limits">
+              Signing limits
+            </Link>
+            <Link className={buttonClassName("primary")} to="/purchasing/signing-limit-requests/new">
+              Request a limit
+            </Link>
+          </>
+        }
+      />
+      <div className={styles.toolbar}>
+        <div className={styles.filter}>
+          <FormField id="slr-status-filter" label="Status">
+            {(control) => (
+              <Select
+                {...control}
+                value={status}
+                onChange={(e) => {
+                  setCursor(undefined);
+                  setStatus(e.target.value as SigningRequestStatus | "");
+                }}
+              >
+                <option value="">All statuses</option>
+                {REQUEST_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {statusLabel(s)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+      </div>
+      {page.error ? <LoadError what="signing limit requests" error={page.error} onRetry={page.reload} /> : null}
+      <DataTable
+        label="Signing limit requests"
+        columns={requestColumns}
+        rows={page.error ? [] : rows}
+        getRowKey={(r) => r.id}
+        loading={page.loading && rows.length === 0}
+        empty={{ title: "No requests", description: "Requests for a worker's signing limit appear here until they are decided." }}
+        onRowOpen={(r) => navigate(`/purchasing/signing-limit-requests/${r.id}`)}
+      />
+      {page.data?.nextCursor ? (
+        <div className={styles.actions}>
+          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Create form: request a worker's limit for a document type and currency. */
+export function SigningLimitRequestCreatePage() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({
+    legalEntityId: "",
+    workerId: "",
+    documentType: "PURCHASE_ORDER" as SigningDocumentType,
+    currency: "USD",
+    spendingLimit: "",
+    approvalLimit: "",
+    reason: "",
+  });
+  const [errors, setErrors] = useState<Errors>({});
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [busy, setBusy] = useState(false);
+  const key = useMemo(() => newIdempotencyKey(), [form]);
+  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const found: Errors = {};
+    if (!uuidPattern.test(form.legalEntityId.trim())) found.legalEntityId = "Enter the legal entity id (a UUID).";
+    if (!uuidPattern.test(form.workerId.trim())) found.workerId = "Enter the worker id (a UUID).";
+    if (!currencyPattern.test(form.currency.trim())) found.currency = "Enter a three-letter currency code, such as USD.";
+    if (!decimalPattern.test(form.spendingLimit.trim())) found.spendingLimit = "Enter an amount of zero or more.";
+    if (!decimalPattern.test(form.approvalLimit.trim())) found.approvalLimit = "Enter an amount of zero or more.";
+    setErrors(found);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const { body } = await createSigningLimitRequest(
+        {
+          legalEntityId: form.legalEntityId.trim(),
+          workerId: form.workerId.trim(),
+          documentType: form.documentType,
+          currency: form.currency.trim(),
+          spendingLimit: form.spendingLimit.trim(),
+          approvalLimit: form.approvalLimit.trim(),
+          reason: form.reason.trim() || undefined,
+        },
+        key,
+      );
+      navigate(`/purchasing/signing-limit-requests/${body.id}`);
+    } catch (error) {
+      const problem = describeProblem(error);
+      setFailure(problem);
+      if (problem.errors) setErrors(problem.errors);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Request a signing limit"
+        description="The spending limit is what the worker may request before one more approval level is added. The approval limit is what the worker may approve."
+      />
+      <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <Card title="Limit">
+          <div className={styles.grid}>
+            <FormField id="slr-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
+              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+            </FormField>
+            <FormField id="slr-worker" label="Worker id" error={errors.workerId}>
+              {(c) => <Input {...c} value={form.workerId} onChange={(e) => set({ workerId: e.target.value })} />}
+            </FormField>
+            <FormField id="slr-doc" label="Document" error={errors.documentType}>
+              {(c) => (
+                <Select {...c} value={form.documentType} onChange={(e) => set({ documentType: e.target.value as SigningDocumentType })}>
+                  {DOC_TYPES.map((d) => (
+                    <option key={d} value={d}>
+                      {statusLabel(d)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField id="slr-currency" label="Currency" error={errors.currency}>
+              {(c) => <Input {...c} value={form.currency} onChange={(e) => set({ currency: e.target.value.toUpperCase() })} />}
+            </FormField>
+            <FormField id="slr-spending" label="Spending limit" error={errors.spendingLimit}>
+              {(c) => <Input {...c} inputMode="decimal" value={form.spendingLimit} onChange={(e) => set({ spendingLimit: e.target.value })} />}
+            </FormField>
+            <FormField id="slr-approval" label="Approval limit" error={errors.approvalLimit}>
+              {(c) => <Input {...c} inputMode="decimal" value={form.approvalLimit} onChange={(e) => set({ approvalLimit: e.target.value })} />}
+            </FormField>
+            <FormField id="slr-reason" label="Reason" optional>
+              {(c) => <Input {...c} value={form.reason} onChange={(e) => set({ reason: e.target.value })} />}
+            </FormField>
+          </div>
+        </Card>
+        <Alert tone="danger" live="alert">
+          {failure ? `${failure.message} (${failure.code})` : null}
+        </Alert>
+        <div className={styles.actions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Send request
+          </Button>
+          <Link className={buttonClassName("ghost")} to="/purchasing/signing-limit-requests">
+            Cancel
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** One request with approve and reject while it is PENDING (duty SigningLimitApprove in the service). */
+export function SigningLimitRequestDetailPage() {
+  const { id = "" } = useParams();
+  const resource = useResource(async (signal) => (await getSigningLimitRequest(id, signal)).body, [id]);
+  const [decided, setDecided] = useState<SigningLimitRequest | null>(null);
+  const [note, setNote] = useState("");
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const request = decided && decided.id === id ? decided : resource.data;
+
+  async function decide(action: "approve" | "reject") {
+    if (!request) return;
+    setBusy(action);
+    setFailure(null);
+    setNotice(null);
+    try {
+      const { body } = await decideSigningLimitRequest(request.id, action, request.version, note.trim());
+      setDecided(body);
+      setNotice(action === "approve" ? "Request approved; the limit is in force." : "Request rejected.");
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const stale = failure?.code === "PRC-SL-005" || failure?.code === "PRC-SL-004";
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Signing limit request"
+        actions={
+          <Link className={buttonClassName("secondary")} to="/purchasing/signing-limit-requests">
+            All requests
+          </Link>
+        }
+      />
+      {resource.error ? <LoadError what="the request" error={resource.error} onRetry={resource.reload} /> : null}
+      {resource.loading && !request ? <Skeleton /> : null}
+      {request ? (
+        <>
+          <Card>
+            <Details
+              items={[
+                { label: "Status", value: <StatusBadge status={request.status} /> },
+                { label: "Worker", value: request.workerId, mono: true },
+                { label: "Legal entity", value: request.legalEntityId, mono: true },
+                { label: "Document", value: statusLabel(request.documentType) },
+                { label: "Spending limit", value: amount(request.spendingLimit, request.currency), mono: true },
+                { label: "Approval limit", value: amount(request.approvalLimit, request.currency), mono: true },
+                { label: "Requested by", value: request.requestedBy, mono: true },
+                { label: "Reason", value: request.reason || "None given" },
+                ...(request.decidedBy
+                  ? [
+                      { label: "Decided by", value: request.decidedBy, mono: true },
+                      { label: "Decision note", value: request.decisionNote || "None given" },
+                    ]
+                  : []),
+              ]}
+            />
+            {request.signingLimitId ? (
+              <p>
+                <Link to={`/purchasing/signing-limits/${request.signingLimitId}`}>Open the limit</Link>
+              </p>
+            ) : null}
+          </Card>
+          <Alert
+            tone="danger"
+            live="alert"
+            action={
+              stale ? (
+                <Button type="button" variant="secondary" onClick={() => { setDecided(null); setFailure(null); resource.reload(); }}>
+                  Reload request
+                </Button>
+              ) : undefined
+            }
+          >
+            {failure ? `${failure.message} (${failure.code})` : null}
+          </Alert>
+          <Alert tone="success" live="status">
+            {notice}
+          </Alert>
+          {request.status === "PENDING" ? (
+            <Card title="Decision">
+              <FormField id="slrd-note" label="Note" optional>
+                {(c) => <Input {...c} value={note} onChange={(e) => setNote(e.target.value)} />}
+              </FormField>
+              <div className={styles.actions}>
+                <Button variant="primary" loading={busy === "approve"} onClick={() => decide("approve")}>
+                  Approve request
+                </Button>
+                <Button variant="secondary" loading={busy === "reject"} onClick={() => decide("reject")}>
+                  Reject request
+                </Button>
+              </div>
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}

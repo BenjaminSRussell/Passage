@@ -193,6 +193,25 @@ func (a *API) orderAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	// FR-17.17 / BR-17.15: an approver whose approval limit is below the PO total, or whose
+	// limit is past its recertification date, leaves the approval to the next approver. The
+	// total checked is the one at the If-Match version: every edit or reprice moves the row
+	// version, and the store refuses any other version under its row lock, so the PO cannot
+	// be approved at a total that was not checked. A PO already past that version is a
+	// replay of an approval (answered from the key) or a 412, so the check is left to it.
+	if action == domain.POActionApprove {
+		po, err := a.store.GetPurchaseOrder(r.Context(), id)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		if po.RowVersion == want {
+			if err := a.approverCheck(r, po.LegalEntityID, p.UserID, domain.DocPurchaseOrder, po.Total, po.Currency); err != nil {
+				fail(w, r, err)
+				return
+			}
+		}
+	}
 	idem := store.Idem{Key: key, Hash: hashBody("purchase-order."+action, map[string]any{"id": id, "ifMatch": want})}
 	out, err := a.store.ActOnPurchaseOrder(r.Context(), id, want, action, idem)
 	if err != nil {

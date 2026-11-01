@@ -1472,3 +1472,100 @@ export function createCategoryManager(input: CategoryManagerInput, idempotencyKe
 export function removeCategoryManager(id: string) {
   return send<void>("DELETE", `/category-managers/${encodeURIComponent(id)}`);
 }
+
+// --- Signing limits and their requests (FR-17.17) ---
+
+export type SigningDocumentType = "REQUISITION" | "PURCHASE_ORDER" | "INVOICE" | "EXPENSE";
+export type SigningRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface SigningLimit {
+  id: string;
+  legalEntityId: string;
+  workerId: string;
+  documentType: SigningDocumentType;
+  currency: string;
+  spendingLimit: string;
+  approvalLimit: string;
+  recertifyBy: string;
+  lastRecertifiedOn?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SigningLimitRequest {
+  id: string;
+  legalEntityId: string;
+  workerId: string;
+  documentType: SigningDocumentType;
+  currency: string;
+  spendingLimit: string;
+  approvalLimit: string;
+  reason?: string;
+  status: SigningRequestStatus;
+  requestedBy: string;
+  requestedAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  decisionNote?: string;
+  signingLimitId?: string;
+  version: number;
+}
+
+export interface SigningLimitRequestInput {
+  legalEntityId: string;
+  workerId: string;
+  documentType: SigningDocumentType;
+  currency: string;
+  spendingLimit: string;
+  approvalLimit: string;
+  reason?: string;
+}
+
+export function listSigningLimits(
+  filters: { documentType?: SigningDocumentType | ""; workerId?: string; expired?: boolean } = {},
+  options: ListOptions = {},
+) {
+  return list<SigningLimit>(
+    "/signing-limits",
+    { documentType: filters.documentType || undefined, workerId: filters.workerId, expired: filters.expired ? "true" : undefined },
+    options,
+  );
+}
+
+export function getSigningLimit(id: string, signal?: AbortSignal) {
+  return send<SigningLimit>("GET", `/signing-limits/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Moves the recertification date 12 months out; needs SigningLimitApprove. */
+export function recertifySigningLimit(id: string, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<SigningLimit>("POST", `/signing-limits/${encodeURIComponent(id)}:recertify`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function listSigningLimitRequests(filters: { status?: SigningRequestStatus | ""; workerId?: string } = {}, options: ListOptions = {}) {
+  return list<SigningLimitRequest>("/signing-limit-requests", { status: filters.status || undefined, workerId: filters.workerId }, options);
+}
+
+export function getSigningLimitRequest(id: string, signal?: AbortSignal) {
+  return send<SigningLimitRequest>("GET", `/signing-limit-requests/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createSigningLimitRequest(input: SigningLimitRequestInput, idempotencyKey = newIdempotencyKey()) {
+  return send<SigningLimitRequest>("POST", "/signing-limit-requests", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Approves or rejects a pending request; needs SigningLimitApprove. */
+export function decideSigningLimitRequest(
+  id: string,
+  action: "approve" | "reject",
+  version: number,
+  note: string,
+  idempotencyKey = newIdempotencyKey(),
+) {
+  return send<SigningLimitRequest>("POST", `/signing-limit-requests/${encodeURIComponent(id)}:${action}`, {
+    body: note ? { note } : undefined,
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}

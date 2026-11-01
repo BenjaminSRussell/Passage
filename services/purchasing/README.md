@@ -131,6 +131,10 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
 | POST `/category-vendors`, GET `/category-vendors`, GET `/category-vendors/{id}`, PUT `/category-vendors/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Vendor assignments to a procurement category (FR-17.20): status APPROVED, PROVISIONAL or BLOCKED and a validity window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CAT-013) and keeps the stored `validFrom` when left out; one assignment per vendor and category (409 PRC-CAT-011); writes `categoryvendor.assigned.v1` and `categoryvendor.changed.v1` |
 | POST `/category-managers`, GET `/category-managers`, DELETE `/category-managers/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Workers who manage a category (FR-17.20); POST needs an Idempotency-Key (409 PRC-CAT-012 for the same worker twice); writes `categorymanager.assigned.v1` and `categorymanager.removed.v1` |
+| POST `/signing-limit-requests`, GET `/signing-limit-requests`, GET `/signing-limit-requests/{id}` | RequisitionCreate to request; reads need SigningLimitApprove or PurchaseOrderInquire | Requests for a worker's signing limit (FR-17.17) per document type and currency with a spending and an approval limit; POST needs an Idempotency-Key |
+| POST `/signing-limit-requests/{id}:approve`, `:reject` | SigningLimitApprove | Idempotency-Key and If-Match required (412 PRC-SL-005); approving writes or changes the worker's limit and `signinglimit.changed.v1` in one transaction; a decided request is 409 PRC-SL-004; the requester and the worker cannot decide (403 PRC-SL-003) |
+| GET `/signing-limits`, GET `/signing-limits/{id}`, GET `/signing-limits/evaluation` | SigningLimitApprove or PurchaseOrderInquire | Limits (filter by worker, document type, `expired=true`); the evaluation shows what a limit does to an amount as requester and as approver |
+| POST `/signing-limits/{id}:recertify` | SigningLimitApprove | Idempotency-Key and If-Match required; moves `recertifyBy` 12 months past today; the worker cannot recertify their own limit (403 PRC-SL-003); writes `signinglimit.changed.v1` |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -377,6 +381,29 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   is capped at 32 MiB (a 50,000-row file is about 8 MB as CSV, 20 MB as JSON rows);
   the commit adds all accepted rows in one statement (50,000 rows stage in about a
   second and commit in under one on a laptop Postgres).
+- **Signing limits (FR-17.17, BR-17.15, AC-17.12 limit half).** A signing limit is a
+  worker's spending limit and approval limit for one document type (REQUISITION,
+  PURCHASE_ORDER, INVOICE, EXPENSE) in one currency of a legal entity. It is written
+  only by approving a `signing_limit_request`; approving a second request for the same
+  worker, type and currency changes the same limit. It must be recertified within 12
+  months (`recertifyBy`; the 12 is fixed until the `signing_limit_recertification_months`
+  setting exists). Two rules read it. At requisition submit, a requester whose spending
+  limit in the requisition currency is below the total, or whose limit is past
+  `recertifyBy` (warning PRC-SL-001), gets one more approval level, `NEXT_APPROVER`,
+  appended to the chain. At PO `:approve`, an approver whose approval limit in the PO
+  currency is below the PO total (403 PRC-SL-002), or whose limit is past `recertifyBy`
+  (403 PRC-SL-001), cannot approve and the next approver must. The approver rule fails
+  closed: an approver with no PURCHASE_ORDER limit in the PO currency (none at all, or
+  only limits in other currencies, since amounts are not converted until wave 12 rates
+  are wired) has an approval limit of zero, as does a caller that is not a named user,
+  so only a zero total can be approved without a limit. The total checked is the one
+  at the If-Match version, which the store re-checks under the row lock, so an edit or
+  reprice after the check is a 412 and a changed PO that needs re-approval is checked
+  again at its new total. A requester whose limits are all in other currencies gets the
+  extra level; a requester with no REQUISITION limit at all gets none until default
+  signing limits by job exist (waves 7 and 42). The requester of a request and the
+  worker it is for cannot approve or reject it, and a worker cannot recertify their own
+  limit (403 PRC-SL-003). `workerId` is the worker's user id until worker records exist.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -447,6 +474,11 @@ store codes are returned as the `code` field.
 | PRC-CAT-011 | 409 | The vendor already has an assignment for the category (change that one) |
 | PRC-CAT-012 | 409 | The worker already manages the category |
 | PRC-CAT-013 | 412 | If-Match is not the category vendor assignment's version |
+| PRC-SL-001 | 403 / warning | The signing limit is past its recertification date: an approver cannot approve; a requester's document gets one more approval level (warning on submit) |
+| PRC-SL-002 | 403 | The amount is above the approver's approval limit, or the approver has no limit in the document currency |
+| PRC-SL-003 | 403 | A worker cannot decide a signing limit request they made or that is for them, or recertify their own limit |
+| PRC-SL-004 | 409 | The signing limit request was already approved or rejected |
+| PRC-SL-005 | 412 | If-Match is not the signing limit's or request's version |
 | PRC-CAT-VENDOR-NOT-FOUND | 404 | Category vendor assignment not found (or outside the caller's legal entity scope) |
 | PRC-CAT-MANAGER-NOT-FOUND | 404 | Category manager not found (or outside the caller's legal entity scope) |
 | PRC-CAT-001 | 422 | A catalog with no entries cannot be published |

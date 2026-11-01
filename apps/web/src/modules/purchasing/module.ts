@@ -18,6 +18,13 @@ import {
   SchedulingAgreementsPage,
   SchedulingReleasePage,
 } from "./SchedulingPages";
+import {
+  SigningLimitDetailPage,
+  SigningLimitRequestCreatePage,
+  SigningLimitRequestDetailPage,
+  SigningLimitRequestsPage,
+  SigningLimitsPage,
+} from "./SigningPages";
 import { TradeAgreementCreatePage, TradeAgreementDetailPage, TradeAgreementsPage } from "./TradeAgreementPages";
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -25,7 +32,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -75,6 +82,11 @@ const purchasing: PassageModule = {
     { path: "/purchasing/category-vendors/new", element: createElement(CategoryVendorCreatePage), handle: { title: "New category vendor assignment" } },
     { path: "/purchasing/category-vendors/:id", element: createElement(CategoryVendorDetailPage), handle: { title: "Category vendor assignment" } },
     { path: "/purchasing/category-managers", element: createElement(CategoryManagersPage) },
+    { path: "/purchasing/signing-limits", element: createElement(SigningLimitsPage) },
+    { path: "/purchasing/signing-limits/:id", element: createElement(SigningLimitDetailPage), handle: { title: "Signing limit" } },
+    { path: "/purchasing/signing-limit-requests", element: createElement(SigningLimitRequestsPage) },
+    { path: "/purchasing/signing-limit-requests/new", element: createElement(SigningLimitRequestCreatePage), handle: { title: "Request a signing limit" } },
+    { path: "/purchasing/signing-limit-requests/:id", element: createElement(SigningLimitRequestDetailPage), handle: { title: "Signing limit request" } },
     { path: "/purchasing/policies", element: createElement(PolicyListPage) },
     { path: "/purchasing/policies/:legalEntityId", element: createElement(PolicyDetailPage), handle: { title: "Purchasing policy" } },
   ],
@@ -91,6 +103,7 @@ const purchasing: PassageModule = {
     { label: "Price lookup", to: "/purchasing/pricing", duty: "PurchaseOrderMaintain" },
     { label: "Catalogs", to: "/purchasing/catalogs", duty: "PurchaseOrderInquire" },
     { label: "Category vendors", to: "/purchasing/category-vendors", duty: "PurchaseOrderInquire" },
+    { label: "Signing limits", to: "/purchasing/signing-limits", duty: "PurchaseOrderInquire" },
     { label: "Policies", to: "/purchasing/policies", duty: "PurchaseOrderInquire" },
   ],
 };

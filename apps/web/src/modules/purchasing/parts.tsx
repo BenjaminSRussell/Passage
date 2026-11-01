@@ -74,6 +74,7 @@ const tones: Record<string, BadgeTone> = {
   ACCEPTABLE: "info",
   ERROR: "danger",
   ACCEPTED: "success",
+  PENDING: "warning",
 };
 
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */

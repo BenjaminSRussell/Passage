@@ -301,7 +301,23 @@ func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 	// The chain is computed from the version read here; the store refuses the
 	// submit if the requisition moved past that version in between.
 	idem := store.Idem{Key: key, Hash: hashBody("requisition.submit", map[string]any{"id": id, "version": version})}
-	out, err := a.store.SubmitRequisition(r.Context(), id, version, a.approvalChain(cur), domain.DefaultPolicyVersion, idem)
+	chain := a.approvalChain(cur)
+	// FR-17.17 / BR-17.15: a requester whose spending limit is below the total (or whose limit
+	// is past its recertification date) gets one more approval level, not a rejection.
+	if cur.Status == store.RequisitionDraft {
+		limits, err := a.store.SigningLimitsFor(r.Context(), cur.LegalEntityID, cur.RequesterID, domain.DocRequisition)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		if escalate, warn := domain.RequesterEscalates(limits, cur.Total, cur.Currency, a.today()); escalate {
+			chain = append(chain, domain.RoleNextApprover)
+			if warn != nil {
+				warnings = append(warnings, store.Warning{Code: warn.Code, Detail: warn.Detail})
+			}
+		}
+	}
+	out, err := a.store.SubmitRequisition(r.Context(), id, version, chain, domain.DefaultPolicyVersion, idem)
 	if err != nil {
 		fail(w, r, err)
 		return

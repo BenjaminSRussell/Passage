@@ -42,6 +42,11 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/category-vendors/new` | Legal entity, category, vendor, status and validity window | `POST /category-vendors` |
 | `/purchasing/category-vendors/:id` | The assignment and a change form for status, window and notes; stale version shown with PRC-CAT-013 | `GET /category-vendors/{id}`, `PUT /category-vendors/{id}` (If-Match) |
 | `/purchasing/category-managers` | Category managers with a category filter, an add form and Remove | `GET /category-managers`, `POST /category-managers`, `DELETE /category-managers/{id}` |
+| `/purchasing/signing-limits` | Signing limits with document type and expired-only filters, expired limits marked, load-more paging (nav item gated on PurchaseOrderInquire) | `GET /signing-limits` |
+| `/purchasing/signing-limits/:id` | One limit and Recertify for 12 months (SigningLimitApprove in the service); stale version shown with PRC-SL-005 | `GET /signing-limits/{id}`, `POST /signing-limits/{id}:recertify` (If-Match) |
+| `/purchasing/signing-limit-requests` | Requests, pending first, with a status filter | `GET /signing-limit-requests` |
+| `/purchasing/signing-limit-requests/new` | Legal entity, worker, document, currency, spending and approval limits, reason | `POST /signing-limit-requests` |
+| `/purchasing/signing-limit-requests/:id` | The request and, while pending, Approve and Reject with a note (SigningLimitApprove in the service); PRC-SL-003, -004 and -005 shown with their codes | `GET /signing-limit-requests/{id}`, `POST /signing-limit-requests/{id}:approve`, `:reject` (If-Match) |
 | `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt, category access), open any legal entity by id | `GET /purchasing-policies` |
 | `/purchasing/policies/:legalEntityId` | The settings with their meaning, including the category access mode (hard, soft, off); Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 
@@ -52,5 +57,5 @@ floats. Ids are typed as UUIDs until the vendor, product and legal-entity picker
 waves 6 to 8 are available to modules.
 
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
-`consolidation.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx` and `scheduling.test.tsx` drive every route against a stubbed `fetch` through
+`consolidation.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx` and `signing.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).

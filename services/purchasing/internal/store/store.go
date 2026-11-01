@@ -114,6 +114,14 @@ type Store interface {
 	CreateCategoryManager(ctx context.Context, in domain.CategoryManager, idem Idem) (domain.CategoryManager, error)
 	ListCategoryManagers(ctx context.Context, f CategoryManagerFilter, after string, limit int) (Page[domain.CategoryManager], error)
 	DeleteCategoryManager(ctx context.Context, id string) error
+	CreateSigningLimitRequest(ctx context.Context, in domain.SigningLimitRequest, idem Idem) (domain.SigningLimitRequest, error)
+	GetSigningLimitRequest(ctx context.Context, id string) (domain.SigningLimitRequest, error)
+	ListSigningLimitRequests(ctx context.Context, f SigningRequestFilter, after string, limit int) (Page[domain.SigningLimitRequest], error)
+	DecideSigningLimitRequest(ctx context.Context, id string, ifMatch int, action, note string, today domain.Day, idem Idem) (domain.SigningLimitRequest, error)
+	GetSigningLimit(ctx context.Context, id string) (domain.SigningLimit, error)
+	ListSigningLimits(ctx context.Context, f SigningLimitFilter, after string, limit int) (Page[domain.SigningLimit], error)
+	SigningLimitsFor(ctx context.Context, legalEntityID, workerID, documentType string) ([]domain.SigningLimit, error)
+	RecertifySigningLimit(ctx context.Context, id string, ifMatch int, today domain.Day, idem Idem) (domain.SigningLimit, error)
 	Ping(ctx context.Context) error
 }
 

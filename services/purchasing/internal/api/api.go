@@ -243,6 +243,8 @@ func (a *API) Register(r chi.Router) {
 			Get("/catalog-entries", a.searchCatalogEntries)
 		// Category vendor assignment and managers (FR-17.20).
 		a.registerCategoryRoutes(r)
+		// Signing limits and their requests (FR-17.17).
+		a.registerSigningRoutes(r)
 	})
 }
 
@@ -332,7 +334,8 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeRFQSealed || de.Code == domain.CodeFourEyes {
+		if de.Code == domain.CodeRFQSealed || de.Code == domain.CodeFourEyes ||
+			de.Code == domain.CodeSigningSelfDecision || de.Code == domain.CodeSigningExpired || de.Code == domain.CodeSigningApprovalLimit {
 			status = http.StatusForbidden
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
