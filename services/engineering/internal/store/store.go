@@ -88,6 +88,8 @@ type Store interface {
 	CreateBomVersion(ctx context.Context, v domain.BomVersion, idem Idem, check func(Snapshot) error) (domain.BomVersion, error)
 	ListBomVersions(ctx context.Context, f BomVersionFilter, afterID string, limit int) (BomVersionPage, error)
 	GetBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
+	ActivateBomVersion(ctx context.Context, id string, check func(Snapshot, domain.BomVersion) error) (domain.BomVersion, error)
+	CancelBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
@@ -654,4 +656,110 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 		}
 		return nil
 	})
+}
+
+// ActivateBomVersion makes a draft BOM version active under the product lock and emits
+// bomversion.activated. An already active version is returned unchanged with no second event. check
+// sees the active and expired versions reachable from the draft and may refuse (cycle, overlap, or
+// ENG-BOM-ECO-REQUIRED when the product and site already have a version). A draft that an open ECO
+// will release is refused with ENG-BOM-IN-ECO, so the ECO release cannot find it already active.
+func (s *Postgres) ActivateBomVersion(ctx context.Context, id string, check func(Snapshot, domain.BomVersion) error) (v domain.BomVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var done bool
+		if v, done, err = lockedDraft(ctx, tx, p.TenantID, id, domain.StatusActive); err != nil || done {
+			return err
+		}
+		if err := ensureNotInOpenEco(ctx, tx, p.TenantID, id, "an open ECO releases this draft; approve and release the ECO instead"); err != nil {
+			return err
+		}
+		snapshot, err := loadSnapshot(ctx, tx, p.TenantID, versionRoots(v), false)
+		if err != nil {
+			return err
+		}
+		if err := check(snapshot, v); err != nil {
+			return err
+		}
+		if err := draftTo(ctx, tx, p.TenantID, id, domain.StatusActive); err != nil {
+			return err
+		}
+		v.Status = domain.StatusActive
+		return emit(ctx, tx, p, id, engevents.BomVersionActivated, aggregateBomVersion, id, v.ActivatedEvent(""))
+	})
+	return v, err
+}
+
+// CancelBomVersion moves a draft BOM version to cancelled (BR-9.1). The row and its lines are kept,
+// so the draft stays auditable, and an already cancelled version is returned unchanged. A draft that
+// an open ECO will release is refused with ENG-BOM-IN-ECO; once that ECO is rejected or cancelled the
+// draft can be cancelled. Creating a draft emits no event, so cancelling one emits none either.
+func (s *Postgres) CancelBomVersion(ctx context.Context, id string) (v domain.BomVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var done bool
+		if v, done, err = lockedDraft(ctx, tx, p.TenantID, id, domain.StatusCancelled); err != nil || done {
+			return err
+		}
+		if err := ensureNotInOpenEco(ctx, tx, p.TenantID, id, "an open ECO releases this draft; reject or cancel the ECO first"); err != nil {
+			return err
+		}
+		if err := draftTo(ctx, tx, p.TenantID, id, domain.StatusCancelled); err != nil {
+			return err
+		}
+		v.Status = domain.StatusCancelled
+		return nil
+	})
+	return v, err
+}
+
+// lockedDraft loads a BOM version, takes its product lock (the same lock activation and ECO release
+// take) and loads it again. done is true when the version is already in target, which callers return
+// unchanged; any other status than draft is refused with ENG-BOM-STATE.
+func lockedDraft(ctx context.Context, tx pgx.Tx, tenantID, id, target string) (v domain.BomVersion, done bool, err error) {
+	load := func() error {
+		found, err := loadVersions(ctx, tx, tenantID, `id = $2::uuid`, id)
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return notFound(CodeBomNotFound, "BOM version not found")
+		}
+		v = found[0]
+		return nil
+	}
+	if err := load(); err != nil || v.Status == target {
+		return v, err == nil, err
+	}
+	if err := lockProducts(ctx, tx, tenantID, v.ProductID); err != nil {
+		return v, false, err
+	}
+	if err := load(); err != nil || v.Status == target {
+		return v, err == nil, err
+	}
+	return v, false, v.EnsureDraft()
+}
+
+// ensureNotInOpenEco refuses with ENG-BOM-IN-ECO when an ECO that is not yet released, rejected or
+// cancelled replaces an old version with this draft.
+func ensureNotInOpenEco(ctx context.Context, tx pgx.Tx, tenantID, id, detail string) error {
+	var pending bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from eco_replacement r join eco e on e.tenant_id = r.tenant_id and e.id = r.eco_id
+		where r.tenant_id = $1 and r.new_version_id = $2::uuid and e.state not in ('released', 'rejected', 'cancelled'))`, tenantID, id).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return &domain.Error{Code: domain.CodeBomInEco, Detail: detail}
+	}
+	return nil
+}
+
+func draftTo(ctx context.Context, tx pgx.Tx, tenantID, id, status string) error {
+	tag, err := tx.Exec(ctx, `update bom_version set status = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'draft'`, tenantID, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return &domain.Error{Code: domain.CodeBomState, Detail: "the BOM version changed concurrently, reload and retry"}
+	}
+	return nil
 }

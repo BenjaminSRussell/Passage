@@ -13,7 +13,9 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import {
+  activateBomVersion,
   ApiError,
+  cancelBomVersion,
   createBomVersion,
   getBomVersion,
   listBomVersions,
@@ -23,10 +25,11 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 
-const bomStatuses = ["draft", "active", "expired", "superseded"];
+const bomStatuses = ["draft", "active", "expired", "superseded", "cancelled"];
 const emptyFilters: BomVersionFilters = { productId: "", siteId: "", status: "", asOf: "" };
 const notFoundCode = "ENG-BOM-NOTFOUND";
 const forbiddenStatus = 403;
+const forbiddenText = "You do not have permission to change bills of material";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
@@ -194,11 +197,45 @@ export function BomVersionPage({
   const [version, setVersion] = useState<BomVersion | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+
+  async function change(action: () => Promise<void>) {
+    setActionError("");
+    setBusy(true);
+    try {
+      await action();
+    } catch (e) {
+      setActionError(e instanceof ApiError && e.status === forbiddenStatus ? forbiddenText : errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const activate = () =>
+    change(async () => {
+      const activated = await activateBomVersion(id);
+      setVersion(activated);
+      setAnnouncement(`BOM ${activated.productId} is now active`);
+    });
+
+  const cancel = () =>
+    change(async () => {
+      const cancelled = await cancelBomVersion(id);
+      setConfirmCancel(false);
+      setVersion(cancelled);
+      setAnnouncement(`BOM ${cancelled.productId} draft is cancelled`);
+    });
 
   useEffect(() => {
     let current = true;
     setVersion(null);
     setLoadError(null);
+    setActionError("");
+    setAnnouncement("");
+    setConfirmCancel(false);
     getBomVersion(id)
       .then((loaded) => current && setVersion(loaded))
       .catch((e: Error) => current && setLoadError(e));
@@ -245,10 +282,34 @@ export function BomVersionPage({
       <div className={styles.toolbar}>
         {onBack ? <Button size="sm" onClick={onBack}>Back to bills of material</Button> : null}
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
+        {version?.status === "draft" ? (
+          <>
+            <Button size="sm" variant="primary" onClick={activate} disabled={busy}>
+              Activate
+            </Button>
+            {confirmCancel ? (
+              <>
+                <Button size="sm" onClick={cancel} disabled={busy}>
+                  Confirm cancel
+                </Button>
+                <Button size="sm" onClick={() => setConfirmCancel(false)} disabled={busy}>
+                  Keep draft
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => setConfirmCancel(true)} disabled={busy}>
+                Cancel draft
+              </Button>
+            )}
+          </>
+        ) : null}
       </div>
+      <p className="visually-hidden" aria-live="polite">
+        {announcement}
+      </p>
       <div className={styles.alertSlot}>
         <Alert tone="danger" live="alert">
-          {loadError ? (notFound ? "This BOM version does not exist" : errorText(loadError)) : null}
+          {loadError ? (notFound ? "This BOM version does not exist" : errorText(loadError)) : actionError || null}
         </Alert>
       </div>
       {!version && !loadError ? (

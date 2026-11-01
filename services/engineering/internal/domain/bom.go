@@ -15,6 +15,7 @@ const (
 	StatusActive     = "active"
 	StatusExpired    = "expired"
 	StatusSuperseded = "superseded"
+	StatusCancelled  = "cancelled"
 
 	LineItem      = "item"
 	LinePhantom   = "phantom"
@@ -310,6 +311,14 @@ func CheckDirectActivation(existing []BomVersion, candidate BomVersion) error {
 		if other.ID != candidate.ID && other.ProductID == candidate.ProductID && other.SiteID == candidate.SiteID {
 			return errf(CodeBomEcoRequired, "%s already has a version for this site; create a draft and release it through an ECO.", candidate.ProductID)
 		}
+	}
+	return nil
+}
+
+// EnsureDraft refuses a status other than draft: only a draft can be activated or cancelled (BR-9.1).
+func (v BomVersion) EnsureDraft() error {
+	if v.Status != StatusDraft {
+		return errf(CodeBomState, "BOM version %s is %s, only a draft can be changed this way", v.ID, v.Status)
 	}
 	return nil
 }

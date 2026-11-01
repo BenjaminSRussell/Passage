@@ -52,6 +52,8 @@ const (
 
 	CodeBomTooLarge            = "ENG-BOM-TOOLARGE"
 	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"
+	CodeBomState               = "ENG-BOM-STATE"
+	CodeBomInEco               = "ENG-BOM-IN-ECO"
 	CodeEcoApproverUnavailable = "ENG-ECO-APPROVER-UNAVAILABLE"
 	CodeEcoSelfApproval        = "ENG-ECO-SELF-APPROVAL"
 	CodeEcoActorRequired       = "ENG-ECO-ACTOR-REQUIRED"

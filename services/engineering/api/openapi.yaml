@@ -30,7 +30,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
         - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
         - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
-        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, superseded] } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, superseded, cancelled] } }
         - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
       responses:
         '200':
@@ -51,6 +51,43 @@ paths:
           description: The BOM version with its lines in line-number order, the body create returns.
           content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/bom-versions/{id}:activate:
+    post:
+      operationId: activateBomVersion
+      summary: Activate a draft BOM version
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The BOM version with its lines, now active. Activating an already active version returns it unchanged and emits no second bomversion.activated event.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-BOM-STATE, the version is not a draft (it is expired, superseded or cancelled); or ENG-BOM-IN-ECO, an ECO that is not yet released, rejected or cancelled replaces an old version with this draft, so the ECO release activates it.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-BOM-ECO-REQUIRED, the product and site already have a version so the draft must be released through an ECO; ENG-BOM-OVERLAP, an active version overlaps its dates and quantities; or ENG-BOM-CYCLE, a component would create a cycle.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/bom-versions/{id}:cancel:
+    post:
+      operationId: cancelBomVersion
+      summary: Cancel a draft BOM version
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The BOM version with its lines, now cancelled (BR-9.1 draft to cancelled). The row is kept and no event is emitted, as creating a draft emits none. Cancelling an already cancelled version returns it unchanged.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-BOM-STATE, the version is not a draft; or ENG-BOM-IN-ECO, an ECO that is not yet released, rejected or cancelled replaces an old version with this draft.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions:
     get:
@@ -273,7 +310,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: The ECO is approved, decidedBy is the acting user (never its creator: 403 ENG-ECO-SELF-APPROVAL; no user: ENG-ECO-ACTOR-REQUIRED), and eco.approved is enqueued. No BOM version changes until the ECO is released. Repeating it on an approved ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
+          description: 'The ECO is approved, decidedBy is the acting user (never its creator: 403 ENG-ECO-SELF-APPROVAL; no user: ENG-ECO-ACTOR-REQUIRED), and eco.approved is enqueued. No BOM version changes until the ECO is released. Repeating it on an approved ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404':
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
@@ -289,7 +326,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: The ECO is rejected and decidedBy is the acting user. A rejected ECO is final. An optional JSON body {reason} (200 characters at most) is kept as decisionReason; the creator cannot reject: 403 ENG-ECO-SELF-APPROVAL. Repeating it on a rejected ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
+          description: 'The ECO is rejected and decidedBy is the acting user. A rejected ECO is final. An optional JSON body {reason} (200 characters at most) is kept as decisionReason; the creator cannot reject: 403 ENG-ECO-SELF-APPROVAL. Repeating it on a rejected ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404':
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
@@ -584,7 +621,7 @@ components:
         effectiveTo: { type: string, format: date }
         fromQty: { type: string }
         toQty: { type: string }
-        status: { type: string, enum: [draft, active, expired, superseded], default: draft }
+        status: { type: string, enum: [draft, active, expired, superseded, cancelled], default: draft }
         lines: { type: array, minItems: 1, maxItems: 5000, items: { $ref: '#/components/schemas/BomLine' } }
     OperationRequirement:
       type: object

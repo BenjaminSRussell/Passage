@@ -232,3 +232,40 @@ func (a *API) getEco(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, bodyFromEco(record.Eco))
 }
+
+func (a *API) activateBomVersion(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.store.ActivateBomVersion(r.Context(), id, func(existing store.Snapshot, draft domain.BomVersion) error {
+		draft.Status = domain.StatusActive
+		return checkVersion(draft)(existing)
+	})
+	if err != nil {
+		a.fail(w, r, "activate bom version", err, &a.bomFailed)
+		return
+	}
+	a.bomActivated.Add(1)
+	httpx.JSON(w, http.StatusOK, bodyFromVersion(v))
+}
+
+func (a *API) cancelBomVersion(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.store.CancelBomVersion(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "cancel bom version", err, &a.bomFailed)
+		return
+	}
+	a.bomCancelled.Add(1)
+	httpx.JSON(w, http.StatusOK, bodyFromVersion(v))
+}

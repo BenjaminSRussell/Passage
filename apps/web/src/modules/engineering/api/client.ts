@@ -327,6 +327,15 @@ export function createBomVersion(body: BomVersionInput, idempotencyKey: string):
   });
 }
 
+export function activateBomVersion(id: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}:activate`, { method: "POST" });
+}
+
+/** Cancels a draft BOM version (BR-9.1). The version is kept with status cancelled. */
+export function cancelBomVersion(id: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}:cancel`, { method: "POST" });
+}
+
 export interface EcoReplacement {
   oldVersionId: string;
   newVersionId: string;

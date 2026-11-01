@@ -58,6 +58,8 @@ type API struct {
 	now          func() time.Time
 	bomCreated   atomic.Int64
 	bomFailed    atomic.Int64
+	bomActivated atomic.Int64
+	bomCancelled atomic.Int64
 	ecosReleased atomic.Int64
 	ecosFailed   atomic.Int64
 	explosions   atomic.Int64
@@ -81,6 +83,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:activate", a.activateBomVersion)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:cancel", a.cancelBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
@@ -339,9 +343,9 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch f.Status {
-	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusSuperseded:
+	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusSuperseded, domain.StatusCancelled:
 	default:
-		fields["status"] = "must be draft, active, expired or superseded"
+		fields["status"] = "must be draft, active, expired, superseded or cancelled"
 	}
 	f.AsOf = optionalDate("asOf", q.Get("asOf"), fields)
 	if len(fields) > 0 {
@@ -767,7 +771,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap:
+	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable

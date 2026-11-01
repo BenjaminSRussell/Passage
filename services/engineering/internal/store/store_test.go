@@ -442,3 +442,143 @@ func TestPostgres_ReleaseEco_PersistsRejectedAndScheduledStates(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgres_ActivateBomVersion_EmitsOnceAndRefusesWhenProductHasVersions(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	first := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	if _, err := s.CreateBomVersion(ctx, first, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	refuseIfAny := func(existing store.Snapshot, v domain.BomVersion) error {
+		v.Status = domain.StatusActive
+		return domain.CheckDirectActivation(existing.VersionsFor(v.ProductID), v)
+	}
+	for range 2 {
+		got, err := s.ActivateBomVersion(ctx, first.ID, refuseIfAny)
+		if err != nil || got.Status != domain.StatusActive || len(got.Lines) != 1 {
+			t.Fatalf("activate = %+v, %v", got, err)
+		}
+	}
+	if types := outboxTypes(t, pool, ctx, first.ID); len(types) != 1 || types[0] != "dev.passage.engineering.bomversion.activated.v1" {
+		t.Fatalf("outbox = %v; want exactly one bomversion.activated", types)
+	}
+	second := version("BIKE", domain.StatusDraft, releaseDay.AddDate(1, 0, 0), "WHEEL")
+	if _, err := s.CreateBomVersion(ctx, second, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateBomVersion(ctx, second.ID, refuseIfAny); !domain.HasCode(err, domain.CodeBomEcoRequired) {
+		t.Fatalf("second version = %v; want %s", err, domain.CodeBomEcoRequired)
+	}
+	if got, _ := s.GetBomVersion(ctx, second.ID); got.Status != domain.StatusDraft || len(outboxTypes(t, pool, ctx, second.ID)) != 0 {
+		t.Fatalf("refused activation changed state: %s", got.Status)
+	}
+	if _, err := s.ActivateBomVersion(ctx, ids.New(), refuseIfAny); problemCode(err) != store.CodeBomNotFound {
+		t.Fatalf("unknown id = %v; want %s", err, store.CodeBomNotFound)
+	}
+}
+
+func TestPostgres_CancelBomVersion_DraftOnlyKeepsTheRowAndWaitsForAnOpenEco(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	active := version("BIKE", domain.StatusActive, releaseDay.AddDate(-1, 0, 0), "WHEEL")
+	draft := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL", "FRAME")
+	lone := version("TRIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	for _, v := range []domain.BomVersion{active, draft, lone} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.CancelBomVersion(ctx, active.ID); !domain.HasCode(err, domain.CodeBomState) {
+		t.Fatalf("cancel active = %v; want %s", err, domain.CodeBomState)
+	}
+	eco := domain.Eco{ID: ids.New(), Number: "ECO-D", State: domain.EcoSubmitted, ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: active.ID, NewVersionID: draft.ID}}}
+	if _, err := s.CreateEco(ctx, eco, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelBomVersion(ctx, draft.ID); !domain.HasCode(err, domain.CodeBomInEco) {
+		t.Fatalf("cancel a draft in an open ECO = %v; want %s", err, domain.CodeBomInEco)
+	}
+	if got, _ := s.GetBomVersion(ctx, draft.ID); got.Status != domain.StatusDraft {
+		t.Fatalf("refused cancel changed the draft to %s", got.Status)
+	}
+	if _, err := pool.Exec(ctx, `update eco set state = 'cancelled' where id = $1::uuid`, eco.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CancelBomVersion(ctx, draft.ID); err != nil || got.Status != domain.StatusCancelled {
+		t.Fatalf("cancel after the ECO was cancelled = %+v, %v", got, err)
+	}
+	for range 2 {
+		got, err := s.CancelBomVersion(ctx, lone.ID)
+		if err != nil || got.Status != domain.StatusCancelled || len(got.Lines) != 1 {
+			t.Fatalf("cancel = %+v, %v; want cancelled with its line, also on a repeat", got, err)
+		}
+	}
+	var status string
+	var rowVersion int
+	if err := pool.QueryRow(ctx, `select status, version from bom_version where id = $1::uuid`, lone.ID).Scan(&status, &rowVersion); err != nil || status != "cancelled" || rowVersion != 2 {
+		t.Fatalf("after cancel the row is %s version %d, %v; want it kept, cancelled, version 2", status, rowVersion, err)
+	}
+	if len(outboxTypes(t, pool, ctx, lone.ID)) != 0 {
+		t.Fatal("cancelling a draft emitted an event")
+	}
+	if _, err := s.ActivateBomVersion(ctx, lone.ID, noActivationCheck); !domain.HasCode(err, domain.CodeBomState) {
+		t.Fatalf("activate a cancelled version = %v; want %s", err, domain.CodeBomState)
+	}
+	if _, err := s.CancelBomVersion(ctx, ids.New()); problemCode(err) != store.CodeBomNotFound {
+		t.Fatalf("unknown id = %v; want %s", err, store.CodeBomNotFound)
+	}
+}
+
+func noActivationCheck(store.Snapshot, domain.BomVersion) error { return nil }
+
+func TestPostgres_ActivateBomVersion_RefusesADraftAnOpenEcoReleases(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	old := version("BIKE", domain.StatusActive, releaseDay.AddDate(-1, 0, 0), "WHEEL")
+	// A draft for another site passes the ECO-required check, which looks at the same product and site.
+	draft := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	draft.SiteID = "SITE-2"
+	for _, v := range []domain.BomVersion{old, draft} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	direct := func(existing store.Snapshot, v domain.BomVersion) error {
+		v.Status = domain.StatusActive
+		return domain.CheckDirectActivation(existing.VersionsFor(v.ProductID), v)
+	}
+	eco := domain.Eco{ID: ids.New(), Number: "ECO-OPEN", State: domain.EcoSubmitted, ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: old.ID, NewVersionID: draft.ID}}}
+	if _, err := s.CreateEco(ctx, eco, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateBomVersion(ctx, draft.ID, direct); !domain.HasCode(err, domain.CodeBomInEco) {
+		t.Fatalf("activate a draft in an open ECO = %v; want %s", err, domain.CodeBomInEco)
+	}
+	if _, err := pool.Exec(ctx, `update eco set state = 'rejected' where id = $1::uuid`, eco.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ActivateBomVersion(ctx, draft.ID, direct)
+	if err != nil || got.Status != domain.StatusActive {
+		t.Fatalf("activate after the ECO was rejected = %+v, %v", got, err)
+	}
+}
+
+func TestPostgres_BomLifecycle_RLSRefusesAnotherTenantsDraft(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	owner, intruder := principalContext(1), principalContext(2)
+	draft := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	if _, err := s.CreateBomVersion(owner, draft, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateBomVersion(intruder, draft.ID, noActivationCheck); problemCode(err) != store.CodeBomNotFound {
+		t.Fatalf("tenant 2 activate = %v; want %s", err, store.CodeBomNotFound)
+	}
+	if _, err := s.CancelBomVersion(intruder, draft.ID); problemCode(err) != store.CodeBomNotFound {
+		t.Fatalf("tenant 2 cancel = %v; want %s", err, store.CodeBomNotFound)
+	}
+	if got, err := s.GetBomVersion(owner, draft.ID); err != nil || got.Status != domain.StatusDraft {
+		t.Fatalf("owner's draft after tenant 2 tried = %+v, %v; want it still a draft", got, err)
+	}
+}

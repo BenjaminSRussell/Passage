@@ -60,6 +60,8 @@ func (a *API) Metrics() http.Handler {
 	}{
 		{"engineering_bom_versions_created_total", "BOM versions created.", &a.bomCreated},
 		{"engineering_bom_versions_failed_total", "BOM requests that failed in the store or domain with an unexpected error.", &a.bomFailed},
+		{"engineering_bom_versions_activated_total", "BOM version activate requests that succeeded, including idempotent repeats.", &a.bomActivated},
+		{"engineering_bom_versions_cancelled_total", "BOM version cancel requests that succeeded, including idempotent repeats.", &a.bomCancelled},
 		{"engineering_ecos_released_total", "ECOs released to production.", &a.ecosReleased},
 		{"engineering_ecos_failed_total", "ECO requests that failed in the store or domain with an unexpected error, including an unavailable approver.", &a.ecosFailed},
 		{"engineering_explosions_total", "BOM explosions served.", &a.explosions},
