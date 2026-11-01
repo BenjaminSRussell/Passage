@@ -8,6 +8,15 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- `platform/go/eventing` is the shared at-least-once CloudEvents consumer (franz-go, structured and
+  binary decoding, `consumer_inbox` dedupe in the handler's transaction, bounded retry, dead-letter
+  topic, metrics) and `tenant.ServicePrincipal` the narrow-duty background actor
+  (`service_principals` in `policies/authz/data.json`). `receiving consume` settles ERS receipts
+  from `receipt.posted` as `service:receiving-ers`, fed by a new `outbox-receiving` Debezium
+  connector (#97, #106).
+
 ### Security
 
 - `apps/web` upgrades `zod` from 3.23.8 to 4.6.7, which fixes the high-severity advisory

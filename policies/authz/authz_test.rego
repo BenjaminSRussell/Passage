@@ -502,6 +502,16 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 
 granted_duty_known(duty) if data.duties[duty]
 
+test_service_principals_hold_only_known_unprivileged_duties if {
+	every _, duties in data.service_principals {
+		count(duties) > 0
+		every duty in duties {
+			granted_duty_known(duty)
+			not duty in {"org.switcher.all_scope", "tenant.administer"}
+		}
+	}
+}
+
 test_service_grants_allow_only_their_declared_routes if {
 	every _, targets in data.service_grants {
 		every _, duties in targets {

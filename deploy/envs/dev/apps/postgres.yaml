@@ -38,6 +38,12 @@ data:
     SELECT 'CREATE DATABASE passage_org OWNER passage_org_owner' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_org')\gexec
     GRANT CONNECT ON DATABASE passage_org TO passage_app;
     SQL
+  50-receiving-cdc.sh: |
+    [ -n "$CDC_PASSWORD" ] || exit 0
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_PASSWORD" <<'SQL'
+    CREATE ROLE debezium_cdc LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    GRANT CONNECT ON DATABASE passage_receiving TO debezium_cdc;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -57,7 +63,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "4"
+        passage.dev/init-rev: "5"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -69,6 +75,7 @@ spec:
       containers:
         - name: postgres
           image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+          args: [-c, wal_level=logical]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -83,6 +90,9 @@ spec:
             - name: APP_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: APP_PASSWORD }
+            - name: CDC_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: hello-ledger-db, key: CDC_PASSWORD, optional: true }
             - name: ORG_OWNER_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: ORG_OWNER_PASSWORD, optional: true }
@@ -139,5 +149,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: org
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
       ports:
         - { protocol: TCP, port: 5432 }
