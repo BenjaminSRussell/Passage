@@ -31,6 +31,10 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/trade-agreements/new` | New PRICE row; PRC-TA-002 overlap shown inline | `POST /trade-agreements` |
 | `/purchasing/trade-agreements/:id` | One price row | `GET /trade-agreements/{id}` |
 | `/purchasing/pricing` | Price lookup with the explain table | `GET /pricing/lookup` |
+| `/purchasing/catalogs` | Procurement catalogs with a status filter and load-more paging (nav item gated on PurchaseOrderInquire; writes need CatalogMaintain in the service) | `GET /catalogs` |
+| `/purchasing/catalogs/new` | Catalog header, validity, operating units and optional first items | `POST /catalogs` |
+| `/purchasing/catalogs/:id` | Summary and items with their images; Publish or Retire; while a draft, add and remove items | `GET /catalogs/{id}`, `POST /catalogs/{id}:publish`, `:retire`, `POST /catalogs/{id}/entries`, `DELETE /catalogs/{id}/entries/{entryId}` (If-Match) |
+| `/purchasing/requisitions/new` (picker) | Search published catalogs for the legal entity and operating unit, with item images and prices; Add puts a catalog line on the requisition, which sends only `catalogEntryId`, quantity, unit and date; the requisition detail marks each line Catalog or Non-catalog | `GET /catalog-entries` |
 | `/purchasing/policies` | Saved purchasing policies per legal entity (change management default, PO four-eyes, invoice before receipt), open any legal entity by id | `GET /purchasing-policies` |
 | `/purchasing/policies/:legalEntityId` | The three settings with their meaning; Save policy (unsaved entity, If-Match 0) or Update policy; stale version shown with PRC-POL-003 | `GET /purchasing-policies/{legalEntityId}`, `PUT /purchasing-policies/{legalEntityId}` (If-Match) |
 

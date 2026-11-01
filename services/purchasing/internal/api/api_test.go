@@ -73,6 +73,9 @@ type fakeStore struct {
 
 	// Purchasing policy: what the policy methods received.
 	pol policyLog
+
+	// Procurement catalogs: what the catalog methods received and answer.
+	cat catalogLog
 }
 
 func newFake() *fakeStore {

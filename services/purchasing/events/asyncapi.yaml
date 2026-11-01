@@ -53,6 +53,14 @@ channels:
     messages:
       policyChanged:
         $ref: '#/components/messages/PolicyChanged'
+  catalog:
+    address: passage.procurement.catalog
+    description: Procurement catalog publication and retirement (FR-17.18); the Kafka key is the catalog id so changes stay ordered.
+    messages:
+      catalogPublished:
+        $ref: '#/components/messages/CatalogPublished'
+      catalogRetired:
+        $ref: '#/components/messages/CatalogRetired'
   sarelease:
     address: passage.procurement.sarelease
     description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
@@ -126,8 +134,48 @@ operations:
       $ref: '#/channels/policy'
     messages:
       - $ref: '#/channels/policy/messages/policyChanged'
+  publishCatalogPublished:
+    action: send
+    channel:
+      $ref: '#/channels/catalog'
+    messages:
+      - $ref: '#/channels/catalog/messages/catalogPublished'
+  publishCatalogRetired:
+    action: send
+    channel:
+      $ref: '#/channels/catalog'
+    messages:
+      - $ref: '#/channels/catalog/messages/catalogRetired'
 components:
   messages:
+    CatalogPublished:
+      name: CatalogPublished
+      title: catalog.published.v1
+      x-passage-type: dev.passage.procurement.catalog.published.v1
+      summary: A DRAFT procurement catalog was published (FR-17.18); requesters of the listed operating units can pick its entries from its validity start.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.catalog.published.v1 }
+              subject: { type: string, format: uuid, description: catalog id }
+              data: { $ref: '#/components/schemas/CatalogData' }
+    CatalogRetired:
+      name: CatalogRetired
+      title: catalog.retired.v1
+      x-passage-type: dev.passage.procurement.catalog.retired.v1
+      summary: A PUBLISHED procurement catalog was retired (FR-17.18); its entries leave the requisition picker.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.catalog.retired.v1 }
+              subject: { type: string, format: uuid, description: catalog id }
+              data: { $ref: '#/components/schemas/CatalogData' }
     PolicyChanged:
       name: PolicyChanged
       title: policy.changed.v1
@@ -547,6 +595,21 @@ components:
               cumulative_received: { type: string, description: "decimal string; running Σ received up to this line" }
               zone: { type: string, enum: [FIRM, TRADEOFF, FORECAST], description: "zone on the run date (BR-17.13)" }
               in_horizon: { type: boolean, description: "inside the FRC or JIT horizon of the kind" }
+    CatalogData:
+      type: object
+      required: [catalog_id, number, legal_entity_id, name, status, valid_from, org_unit_ids, entry_count, version]
+      additionalProperties: false
+      properties:
+        catalog_id: { type: string, format: uuid }
+        number: { type: string, example: CAT-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [PUBLISHED, RETIRED] }
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date }
+        org_unit_ids: { type: array, items: { type: string, format: uuid }, description: "Empty means every operating unit." }
+        entry_count: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 2 }
     PolicyChangedData:
       type: object
       required: [legal_entity_id, version, change_management_default, po_four_eyes, allow_invoice_before_receipt]

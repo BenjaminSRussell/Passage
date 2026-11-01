@@ -47,6 +47,12 @@ describe("purchasing module", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/consolidation");
   });
 
+  it("routes the procurement catalog list, create form and detail", () => {
+    expect(purchasing.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/purchasing/catalogs", "/purchasing/catalogs/new", "/purchasing/catalogs/:id"]),
+    );
+  });
+
   it("routes the purchasing policy list and detail", () => {
     expect(purchasing.routes.map((r) => r.path)).toEqual(expect.arrayContaining(["/purchasing/policies", "/purchasing/policies/:legalEntityId"]));
   });

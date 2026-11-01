@@ -194,3 +194,12 @@
   outline: 2px solid transparent;
   box-shadow: var(--focus-ring);
 }
+
+.thumbnail {
+  display: block;
+  inline-size: var(--space-10);
+  block-size: var(--space-10);
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+}

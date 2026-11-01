@@ -119,6 +119,11 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/purchasing-policies` | ProcurementPolicyMaintain or PurchaseOrderInquire | Saved purchasing policies of the caller's legal entities |
 | GET `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain or PurchaseOrderInquire | The policy, or the defaults at version 0; ETag is the version |
 | PUT `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
+| POST `/catalogs` | CatalogMaintain | Idempotency-Key required; creates a DRAFT catalog with optional entries; ETag is the version |
+| GET `/catalogs`, `/catalogs/{id}` | CatalogMaintain or PurchaseOrderInquire | List (`status`, `legalEntityId`) and read with entries |
+| POST `/catalogs/{id}:publish`, `:retire` | CatalogMaintain | Idempotency-Key and If-Match required; publish needs at least one entry (PRC-CAT-001); writes `catalog.published.v1` or `catalog.retired.v1` |
+| POST `/catalogs/{id}/entries`, DELETE `/catalogs/{id}/entries/{entryId}` | CatalogMaintain | If-Match required; DRAFT catalogs only (PRC-CAT-STATE); at most 2,000 entries |
+| GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -299,6 +304,19 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   refused while the policy is on; an actor not recorded on an older PO blocks no
   one. The routes live under `/purchasing-policies` so `/policies` stays free for
   the FR-17.16 policy framework.
+- **Procurement catalogs (FR-17.18).** A catalog belongs to a legal entity, has a
+  validity window and the operating units it is published to (none means every
+  unit), and moves DRAFT → PUBLISHED → RETIRED. Entries (vendor, optional product,
+  category, unit, price with up to six decimals, currency, lead time, preferred,
+  image reference) are added and removed only while DRAFT; a published catalog is
+  frozen, so a change is a new catalog. The picker returns entries of PUBLISHED
+  catalogs valid on the date and published to the unit, newest first. A
+  requisition line that names `catalogEntryId` is checked against the same rules
+  on the requisition's legal entity, unit and currency (PRC-CAT-004,
+  PRC-CAT-006), takes the entry's product, name, category, unit, price and vendor
+  where the request left them blank, and keeps the link on the line; a different
+  unit or product is refused, and an entry the caller cannot see is a field error
+  on the line (COM-0001). Entries are not re-priced after a requisition is saved.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -364,6 +382,13 @@ store codes are returned as the `code` field.
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
 | PRC-POL-002 | 403 | Four-eyes policy: a user who created, submitted or last changed the PO (or a caller with no user id) cannot approve or confirm it |
 | PRC-POL-003 | 412 | If-Match is not the saved purchasing policy version (0 when none is saved) |
+| PRC-CAT-001 | 422 | A catalog with no entries cannot be published |
+| PRC-CAT-004 | 422 | The requisition line's catalog is not published to the legal entity and unit on the date |
+| PRC-CAT-006 | 422 | The catalog entry's currency differs from the requisition's |
+| PRC-CAT-007 | 422 | A catalog would hold more than 2,000 entries |
+| PRC-CAT-STATE | 409 | The catalog status does not allow the action (entries change only in DRAFT; publish needs DRAFT, retire needs PUBLISHED) |
+| PRC-CAT-NOT-FOUND | 404 | Catalog not found (or outside the caller's legal entity scope) |
+| PRC-CAT-ENTRY-NOT-FOUND | 404 | The catalog has no such entry, or a requisition line names an unknown entry |
 | PRC-SA-001 | 422 | A firm-zone schedule line is reduced, moved or removed without a reason code |
 | PRC-SA-002 | 422 | A schedule line would drop below the quantity already received against it |
 | PRC-SA-003 | 422 | A release would lower cumulative released below the previous release without a cumulative reset |
@@ -385,4 +410,4 @@ and detail pages, the consolidation board, the price lookup with explain, sealed
 and scoring screens on the RFQ, the invoicing plan page per PO line, the price
 change pages (one PO, and the run over many), and the scheduling agreement
 monitor, create form, detail page (schedule editor, release run, releases) and
-release documentation, and the purchasing policy list and editor. See its README.
+release documentation, the purchasing policy list and editor, the procurement catalog list, create form and detail page, and the catalog picker on the requisition form. See its README.

@@ -68,6 +68,8 @@ export interface RequisitionLine {
   requestedDate: string;
   siteId?: string;
   preferredVendorId?: string;
+  /** The procurement catalog entry the line was picked from; absent on a non-catalog line. */
+  catalogEntryId?: string;
   status: string;
   /** Set when CONSOLIDATED: the purchase order line that orders this line. */
   purchaseOrderId?: string;
@@ -115,6 +117,8 @@ export interface RequisitionLineInput {
   requestedDate: string;
   siteId?: string;
   preferredVendorId?: string;
+  /** Pick the line from a published catalog entry; the service fills the blanks from it. */
+  catalogEntryId?: string;
 }
 
 export interface RequisitionInput {
@@ -1170,4 +1174,115 @@ export function savePolicy(legalEntityId: string, input: PurchasingPolicyInput, 
     body: input,
     headers: { "If-Match": `"${version}"` },
   });
+}
+
+// --- Procurement catalogs (FR-17.18) ---
+
+export type CatalogStatus = "DRAFT" | "PUBLISHED" | "RETIRED";
+export type CatalogAction = "publish" | "retire";
+
+export interface CatalogEntryInput {
+  vendorId: string;
+  vendorPartNo?: string;
+  productId?: string;
+  name: string;
+  description?: string;
+  category: string;
+  unit: string;
+  unitPrice: string;
+  currency: string;
+  leadTimeDays?: number;
+  preferred?: boolean;
+  imageUrl?: string;
+}
+
+export interface CatalogEntry extends CatalogEntryInput {
+  id: string;
+  entryNo: number;
+}
+
+export interface Catalog {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  name: string;
+  description?: string;
+  status: CatalogStatus;
+  validFrom: string;
+  validTo?: string;
+  orgUnitIds: string[];
+  version: number;
+  entries: CatalogEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CatalogSummary {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  name: string;
+  status: CatalogStatus;
+  validFrom: string;
+  validTo?: string;
+  entryCount: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface CatalogInput {
+  legalEntityId: string;
+  name: string;
+  description?: string;
+  validFrom: string;
+  validTo?: string;
+  orgUnitIds?: string[];
+  entries?: CatalogEntryInput[];
+}
+
+/** One requisition picker result: an entry with the catalog it belongs to. */
+export interface CatalogHit extends CatalogEntry {
+  catalogId: string;
+  catalogNumber: string;
+  catalogName: string;
+}
+
+export function listCatalogs(filters: { status?: CatalogStatus | "" } = {}, options: ListOptions = {}) {
+  return list<CatalogSummary>("/catalogs", { status: filters.status || undefined }, options);
+}
+
+export function getCatalog(id: string, signal?: AbortSignal) {
+  return send<Catalog>("GET", `/catalogs/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createCatalog(input: CatalogInput, idempotencyKey = newIdempotencyKey()) {
+  return send<Catalog>("POST", "/catalogs", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Publishes or retires a catalog; version is the ETag read when it was loaded. */
+export function actOnCatalog(id: string, action: CatalogAction, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<Catalog>("POST", `/catalogs/${encodeURIComponent(id)}:${action}`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function addCatalogEntries(id: string, entries: CatalogEntryInput[], version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<Catalog>("POST", `/catalogs/${encodeURIComponent(id)}/entries`, {
+    body: { entries },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function removeCatalogEntry(id: string, entryId: string, version: number) {
+  return send<Catalog>("DELETE", `/catalogs/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}`, {
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
+/** The requisition picker: entries of catalogs published today to the legal entity and unit. */
+export function searchCatalogEntries(
+  filters: { legalEntityId: string; operatingUnitId?: string; q?: string; category?: string },
+  options: ListOptions = {},
+) {
+  return list<CatalogHit>("/catalog-entries", { ...filters }, options);
 }

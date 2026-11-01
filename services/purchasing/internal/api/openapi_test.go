@@ -56,6 +56,7 @@ var customMethods = map[string][]string{
 	"/v1/procurement/purchase-orders/{id}":       {"submit", "approve", "reject", "confirm", "cancel", "reprice"},
 	"/v1/procurement/rfqs/{id}":                  {"send", "close", "cancel", "award"},
 	"/v1/procurement/scheduling-agreements/{id}": {"release"},
+	"/v1/procurement/catalogs/{id}":              {"publish", "retire"},
 }
 
 func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {

@@ -22,12 +22,14 @@ import {
   newIdempotencyKey,
   submitRequisition,
   type Requisition,
+  type CatalogHit,
   type RequisitionInput,
   type RequisitionLine,
   type RequisitionStatus,
   type RequisitionSummary,
   type Warning,
 } from "./api/client";
+import { CatalogPicker } from "./CatalogPages";
 import {
   Details,
   LoadError,
@@ -141,6 +143,8 @@ interface LineDraft {
   estimatedUnitPrice: string;
   requestedDate: string;
   preferredVendorId: string;
+  /** Set when the line was picked from a catalog; the service fills the item from the entry. */
+  catalogEntryId: string;
 }
 
 function emptyLine(): LineDraft {
@@ -154,38 +158,58 @@ function emptyLine(): LineDraft {
     estimatedUnitPrice: "",
     requestedDate: todayIso(),
     preferredVendorId: "",
+    catalogEntryId: "",
+  };
+}
+
+function catalogLine(hit: CatalogHit): LineDraft {
+  return {
+    ...emptyLine(),
+    catalogEntryId: hit.id,
+    productId: hit.productId ?? "",
+    description: hit.name,
+    category: hit.category,
+    unit: hit.unit,
+    estimatedUnitPrice: hit.unitPrice,
+    preferredVendorId: hit.vendorId,
   };
 }
 
 type Errors = Record<string, string>;
 
 /** Client-side checks mirroring the service's validation, keyed like its `errors` map. */
-export function validateRequisition(legalEntityId: string, currency: string, lines: LineDraft[]): Errors {
+export function validateRequisition(legalEntityId: string, currency: string, lines: LineDraft[], operatingUnitId = ""): Errors {
   const errors: Errors = {};
+  if (operatingUnitId !== "" && !uuidPattern.test(operatingUnitId)) errors.operatingUnitId = "Operating unit id must be a UUID.";
   if (!uuidPattern.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (!currencyPattern.test(currency)) errors.currency = "Use a three-letter ISO code such as USD.";
   if (lines.length === 0) errors.lines = "Add at least one line.";
   lines.forEach((l, i) => {
     const f = (name: string) => `lines[${i}].${name}`;
+    if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
+    if (!datePattern.test(l.requestedDate)) errors[f("requestedDate")] = "Enter a date.";
+    if (l.catalogEntryId !== "") return;
     if (l.productId !== "" && !uuidPattern.test(l.productId)) errors[f("productId")] = "Product id must be a UUID.";
     if (l.productId === "" && (l.description.trim() === "" || l.category.trim() === "")) {
       errors[f("description")] = "Enter a product id, or a description and a category.";
     }
-    if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
     if (l.unit.trim() === "") errors[f("unit")] = "Enter a unit.";
     if (l.estimatedUnitPrice !== "" && !decimalPattern.test(l.estimatedUnitPrice)) errors[f("estimatedUnitPrice")] = "Enter a decimal price.";
-    if (!datePattern.test(l.requestedDate)) errors[f("requestedDate")] = "Enter a date.";
     if (l.preferredVendorId !== "" && !uuidPattern.test(l.preferredVendorId)) errors[f("preferredVendorId")] = "Vendor id must be a UUID.";
   });
   return errors;
 }
 
-function toInput(legalEntityId: string, currency: string, lines: LineDraft[]): RequisitionInput {
+function toInput(legalEntityId: string, currency: string, lines: LineDraft[], operatingUnitId = ""): RequisitionInput {
   const opt = (v: string) => (v.trim() === "" ? undefined : v.trim());
   return {
     legalEntityId,
+    operatingUnitId: opt(operatingUnitId),
     currency,
-    lines: lines.map((l) => ({
+    lines: lines.map((l) =>
+      l.catalogEntryId !== ""
+        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate }
+        : {
       productId: opt(l.productId),
       description: opt(l.description),
       category: opt(l.category),
@@ -194,33 +218,40 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[]): R
       estimatedUnitPrice: opt(l.estimatedUnitPrice),
       requestedDate: l.requestedDate,
       preferredVendorId: opt(l.preferredVendorId),
-    })),
+    },
+    ),
   };
+}
+
+/** A line the requester has not touched, replaced by the first catalog pick. */
+function isBlankLine(l: LineDraft): boolean {
+  return l.catalogEntryId === "" && l.productId === "" && l.description === "" && l.category === "" && l.estimatedUnitPrice === "" && l.preferredVendorId === "";
 }
 
 /** New requisition: header plus any number of lines; saves a DRAFT and opens it. */
 export function RequisitionCreatePage() {
   const navigate = useNavigate();
   const [legalEntityId, setLegalEntityId] = useState("");
+  const [operatingUnitId, setOperatingUnitId] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   // One key per logical create so a retry after a network failure cannot duplicate it.
-  const key = useMemo(() => newIdempotencyKey(), [legalEntityId, currency, lines]);
+  const key = useMemo(() => newIdempotencyKey(), [legalEntityId, operatingUnitId, currency, lines]);
 
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    const found = validateRequisition(legalEntityId.trim(), currency, lines);
+    const found = validateRequisition(legalEntityId.trim(), currency, lines, operatingUnitId.trim());
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const { body } = await createRequisition(toInput(legalEntityId.trim(), currency, lines), key);
+      const { body } = await createRequisition(toInput(legalEntityId.trim(), currency, lines, operatingUnitId.trim()), key);
       navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -236,11 +267,22 @@ export function RequisitionCreatePage() {
   return (
     <div className={styles.stack}>
       <PageHeader title="New requisition" description="Leave the estimate blank to take the preferred vendor's trade agreement price." />
+      <CatalogPicker
+        legalEntityId={legalEntityId.trim()}
+        operatingUnitId={operatingUnitId.trim()}
+        onPick={(hit) => {
+          if (hit.currency !== currency) setCurrency(hit.currency);
+          setLines((ls) => [...ls.filter((l) => !isBlankLine(l)), catalogLine(hit)]);
+        }}
+      />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Requisition">
           <div className={styles.grid}>
             <FormField id="req-legal-entity" label="Legal entity id" error={field("legalEntityId")}>
               {(control) => <Input {...control} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
+            </FormField>
+            <FormField id="req-operating-unit" label="Operating unit id" optional hint="Decides which catalogs you can pick from" error={field("operatingUnitId")}>
+              {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
             </FormField>
             <FormField id="req-currency" label="Currency" error={field("currency")}>
               {(control) => (
@@ -261,6 +303,7 @@ export function RequisitionCreatePage() {
           {lines.map((line, i) => {
             const id = (name: string) => `req-line-${i}-${name}`;
             const err = (name: string) => field(`lines[${i}].${name}`);
+            const fromCatalog = line.catalogEntryId !== "";
             return (
               <fieldset key={line.key} className={styles.lineCard} aria-label={`Line ${i + 1}`}>
                 <div className={styles.lineHead}>
@@ -271,6 +314,22 @@ export function RequisitionCreatePage() {
                     </Button>
                   ) : null}
                 </div>
+                {fromCatalog ? (
+                  <>
+                    <p className={styles.muted}>
+                      Catalog item: {line.description} at {money(line.estimatedUnitPrice, currency)} per {line.unit}
+                    </p>
+                    <div className={styles.grid}>
+                      <FormField id={id("qty")} label="Quantity" error={err("qty")}>
+                        {(c) => <Input {...c} inputMode="decimal" value={line.qty} onChange={(e) => update(i, { qty: e.target.value })} />}
+                      </FormField>
+                      <FormField id={id("date")} label="Requested date" error={err("requestedDate")}>
+                        {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
+                      </FormField>
+                    </div>
+                  </>
+                ) : null}
+                {fromCatalog ? null : (
                 <div className={styles.grid}>
                   <FormField id={id("product")} label="Product id" optional error={err("productId")}>
                     {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
@@ -299,6 +358,7 @@ export function RequisitionCreatePage() {
                     {(c) => <Input {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
                   </FormField>
                 </div>
+                )}
               </fieldset>
             );
           })}
@@ -323,6 +383,7 @@ const lineColumns = (currency: string): DataTableColumn<RequisitionLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
   { key: "category", header: "Category", render: (l) => l.category || "—" },
+  { key: "source", header: "Source", render: (l) => (l.catalogEntryId ? "Catalog" : "Non-catalog") },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "estimatedUnitPrice", header: "Estimate", align: "end", render: (l) => money(l.estimatedUnitPrice, currency) },
   { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },

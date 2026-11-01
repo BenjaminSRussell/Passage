@@ -91,6 +91,14 @@ type Store interface {
 	GetPolicy(ctx context.Context, legalEntityID string) (domain.Policy, error)
 	ListPolicies(ctx context.Context) ([]domain.Policy, error)
 	PutPolicy(ctx context.Context, in domain.Policy, ifMatch int) (domain.Policy, error)
+	CreateCatalog(ctx context.Context, in domain.Catalog, idem Idem) (domain.Catalog, error)
+	GetCatalog(ctx context.Context, id string) (domain.Catalog, error)
+	ListCatalogs(ctx context.Context, f CatalogFilter, after string, limit int) (Page[CatalogSummary], error)
+	AddCatalogEntries(ctx context.Context, id string, ifMatch int, entries []domain.CatalogEntry, idem Idem) (domain.Catalog, error)
+	RemoveCatalogEntry(ctx context.Context, id, entryID string, ifMatch int) (domain.Catalog, error)
+	ActOnCatalog(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.Catalog, error)
+	SearchCatalogEntries(ctx context.Context, f CatalogSearch, after string, limit int) (Page[CatalogHit], error)
+	GetCatalogEntry(ctx context.Context, entryID string) (domain.Catalog, domain.CatalogEntry, error)
 	Ping(ctx context.Context) error
 }
 

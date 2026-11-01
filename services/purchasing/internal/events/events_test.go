@@ -22,6 +22,8 @@ var allTypes = map[string]string{
 	events.RFQAwarded:           "rfq",
 	events.SAReleaseCreated:     "sarelease",
 	events.PolicyChanged:        "policy",
+	events.CatalogPublished:     "catalog",
+	events.CatalogRetired:       "catalog",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -73,6 +75,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.RFQAwardedData{Awards: []events.RFQAwardedLine{{OverrideReason: "only bid"}}},
 		events.SAReleaseCreatedData{Lines: []events.SAReleaseLine{{}}},
 		events.PolicyChangedData{UpdatedBy: "u"},
+		events.CatalogData{ValidTo: "2027-12-31"},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

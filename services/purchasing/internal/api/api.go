@@ -113,6 +113,9 @@ type API struct {
 
 	schedulingAgreementsCreated atomic.Int64
 	saReleasesCreated           atomic.Int64
+
+	catalogsCreated   atomic.Int64
+	catalogsPublished atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -210,6 +213,20 @@ func (a *API) Register(r chi.Router) {
 		policyRead.Get("/purchasing-policies", a.listPolicies)
 		policyRead.Get("/purchasing-policies/{legalEntityId}", a.getPolicy)
 		r.With(authz.RequireDuty(dutyPolicyMaintain)).Put("/purchasing-policies/{legalEntityId}", a.putPolicy)
+		// Procurement catalogs (FR-17.18). Writes need CatalogMaintain; reading catalogs is open to
+		// PurchaseOrderInquire; the requisition picker is open to requesters. ":publish" and
+		// ":retire" arrive as one path segment, see catalogAction.
+		catalogWrite := r.With(authz.RequireDuty(dutyCatalogMaintain))
+		catalogRead := r.With(authz.Require(anyDuty{dutyCatalogMaintain, dutyPurchaseOrderInquire},
+			dutyCatalogMaintain+" or "+dutyPurchaseOrderInquire, ""))
+		catalogWrite.Post("/catalogs", a.createCatalog)
+		catalogRead.Get("/catalogs", a.listCatalogs)
+		catalogRead.Get("/catalogs/{id}", a.getCatalog)
+		catalogWrite.Post("/catalogs/{id}", a.catalogAction)
+		catalogWrite.Post("/catalogs/{id}/entries", a.addCatalogEntries)
+		catalogWrite.Delete("/catalogs/{id}/entries/{entryId}", a.removeCatalogEntry)
+		r.With(authz.Require(anyDuty{dutyRequisitionCreate, dutyCatalogMaintain}, dutyRequisitionCreate+" or "+dutyCatalogMaintain, "")).
+			Get("/catalog-entries", a.searchCatalogEntries)
 	})
 }
 
@@ -243,6 +260,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_purchase_orders_repriced_total", "Subsequent price changes applied to a purchase order.", a.repricesApplied.Load()},
 			{"purchasing_scheduling_agreements_created_total", "Scheduling agreements created; idempotent replays are counted.", a.schedulingAgreementsCreated.Load()},
 			{"purchasing_scheduling_agreement_releases_created_total", "Scheduling agreement releases created (FRC and JIT).", a.saReleasesCreated.Load()},
+			{"purchasing_catalogs_created_total", "Procurement catalogs created; idempotent replays are counted.", a.catalogsCreated.Load()},
+			{"purchasing_catalogs_published_total", "Procurement catalogs published.", a.catalogsPublished.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}
