@@ -73,6 +73,8 @@ type API struct {
 	routeFailed      atomic.Int64
 	routeActivated   atomic.Int64
 	routeCancelled   atomic.Int64
+	routeUpdated     atomic.Int64
+	routeConflicts   atomic.Int64
 	bomCopied        atomic.Int64
 	routeCopied      atomic.Int64
 }
@@ -95,6 +97,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Put("/v1/engineering/route-versions/{id}", a.updateRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:cancel", a.cancelRouteVersion)
 		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:copy", a.copyRouteVersion)
@@ -785,7 +788,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict:
+	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable

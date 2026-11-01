@@ -219,7 +219,17 @@ const notFoundCode = "ENG-ROUTE-NOTFOUND";
 const forbiddenStatus = 403;
 const activateForbiddenText = "You do not have permission to change routes";
 
-export function RouteVersionPage({ id, onBack, onOpenCopy }: { id: string; onBack?: () => void; onOpenCopy?: (id: string) => void }) {
+export function RouteVersionPage({
+  id,
+  onBack,
+  onOpenCopy,
+  onEdit,
+}: {
+  id: string;
+  onBack?: () => void;
+  onOpenCopy?: (id: string) => void;
+  onEdit?: (id: string) => void;
+}) {
   const [version, setVersion] = useState<RouteVersion | null>(null);
   const [loadError, setLoadError] = useState<ApiError | Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -260,6 +270,7 @@ export function RouteVersionPage({ id, onBack, onOpenCopy }: { id: string; onBac
         ["Version", version.versionNo],
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
         ["Status", <StatusPill status={version.status} />],
+        ...(version.status === "draft" && version.version ? ([["Draft version", String(version.version)]] as [string, ReactNode][]) : []),
         ...(version.copiedFromVersionId ? ([["Copied from", <code>{version.copiedFromVersionId}</code>]] as [string, ReactNode][]) : []),
       ]
     : [];
@@ -337,6 +348,11 @@ export function RouteVersionPage({ id, onBack, onOpenCopy }: { id: string; onBac
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
         {version?.status === "draft" ? (
           <>
+            {onEdit ? (
+              <Button size="sm" onClick={() => onEdit(id)} disabled={activating}>
+                Edit draft
+              </Button>
+            ) : null}
             <Button size="sm" onClick={activate} disabled={activating}>
               Activate
             </Button>

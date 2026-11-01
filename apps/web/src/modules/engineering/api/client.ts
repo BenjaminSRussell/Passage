@@ -67,6 +67,8 @@ export interface RouteVersionHeader {
   operationCount: number;
   /** The version this one was copied from (FR-9.12 lineage). */
   copiedFromVersionId?: string;
+  /** The optimistic-locking counter (BR-9.3): starts at 1, each edit, activation and cancellation adds 1. */
+  version?: number;
 }
 
 export interface OperationRequirement {
@@ -89,6 +91,8 @@ export interface RouteVersionOperation {
   queueAfterH?: string;
   transitH?: string;
   efficiencyPct?: string;
+  overlapQty?: string;
+  scrapPercent?: string;
   requirements?: OperationRequirement[];
 }
 
@@ -266,6 +270,15 @@ export function getRouteVersion(id: string): Promise<RouteVersion> {
 export function createRouteVersion(body: RouteVersionInput, idempotencyKey: string): Promise<RouteVersion> {
   return request("/route-versions", {
     method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Saves an edited draft (BR-9.3): replaces the dates and every operation. A stale `version` is 409 ENG-ROUTE-VERSION-CONFLICT. */
+export function updateRouteVersion(id: string, body: RouteVersionInput & { version: number }, idempotencyKey: string): Promise<RouteVersion> {
+  return request(`/route-versions/${encodeURIComponent(id)}`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(body),
   });

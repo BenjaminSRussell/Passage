@@ -213,6 +213,32 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
         '404': { $ref: '#/components/responses/NotFound' }
         default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: updateRouteVersion
+      summary: Save an edited draft route version
+      x-passage-duty: engineering.route.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersionEdit' } } }
+      responses:
+        '200':
+          description: The draft as saved (BR-9.3). The effectivity and every operation with its requirements are replaced by the request, so an operation left out is deleted; version is the loaded version plus 1. The product, site, route code, version number, status and id do not change and no event is emitted, as creating a draft emits none. The version field of the request is required and must be the value the editor loaded. An Idempotency-Key replay returns the draft as it is now.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '400':
+          description: COM-0001 with per-field errors, for a missing version, a changed productId, siteId, routeCode or versionNo, a missing or malformed date, a value an operation column cannot hold, an unknown field, or an id that is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-ROUTE-VERSION-CONFLICT, another save came first (reload the draft and merge); ENG-ROUTE-STATE, the version is not a draft; or the Idempotency-Key is in flight.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: A route rule failed, such as ENG-ROUTE-CYCLE, ENG-ROUTE-NEXT, ENG-ROUTE-OP-DUP, ENG-ROUTE-OPS-LIMIT, ENG-ROUTE-QTY, ENG-ROUTE-REQ-KIND or ENG-ROUTE-SECONDARY-NOPRIMARY; or idempotency_key_reuse, the key was used for a different request.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions/{id}:activate:
     post:
       operationId: activateRouteVersion
@@ -741,7 +767,7 @@ components:
       properties:
         { id: { type: string, format: uuid }, productId: { type: string }, siteId: { type: string }, routeCode: { type: string }, versionNo: { type: integer },
           effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [draft, active, expired, cancelled] },
-          operationCount: { type: integer }, copiedFromVersionId: { type: string, format: uuid, description: The version this one was copied from (FR-9.12 lineage). } }
+          operationCount: { type: integer }, version: { type: integer, minimum: 1, description: 'The optimistic-locking counter (BR-9.3): it starts at 1 and each edit, activation and cancellation adds 1.' }, copiedFromVersionId: { type: string, format: uuid, description: The version this one was copied from (FR-9.12 lineage). } }
     BomCopyRequest:
       type: object
       additionalProperties: false
@@ -772,6 +798,19 @@ components:
         versionNo: { type: integer, minimum: 1, maximum: 2147483647, description: Omit to take the next number for the product, site and route code. }
         effectiveFrom: { type: string, format: date }
         effectiveTo: { type: string, format: date }
+        operations: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RouteVersionOperation' } }
+    RouteVersionEdit:
+      type: object
+      additionalProperties: false
+      required: [effectiveFrom, operations, version]
+      properties:
+        productId: { type: string, maxLength: 64, description: Optional; when sent it must equal the draft's product. }
+        siteId: { type: string, maxLength: 64, description: Optional; when sent it must equal the draft's site. }
+        routeCode: { type: string, maxLength: 64, description: Optional; when sent it must equal the draft's route code. }
+        versionNo: { type: integer, minimum: 1, maximum: 2147483647, description: Optional; when sent it must equal the draft's number. }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        version: { type: integer, minimum: 1, description: The optimistic-locking counter the editor loaded (BR-9.3). }
         operations: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RouteVersionOperation' } }
     RouteVersion:
       allOf:

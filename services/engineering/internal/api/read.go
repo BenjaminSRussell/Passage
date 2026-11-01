@@ -50,6 +50,8 @@ type routeVersionHeaderBody struct {
 	Status         string `json:"status"`
 	OperationCount int    `json:"operationCount"`
 	CopiedFrom     string `json:"copiedFromVersionId,omitempty"`
+	// Version is the draft's optimistic-locking counter (BR-9.3); PUT requires the value the editor loaded.
+	Version int `json:"version,omitempty"`
 }
 
 type routeVersionBody struct {
@@ -60,7 +62,7 @@ type routeVersionBody struct {
 func headerBody(v domain.RouteVersion, operations int) routeVersionHeaderBody {
 	return routeVersionHeaderBody{
 		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, RouteCode: v.RouteCode, VersionNo: v.VersionNo,
-		EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo), Status: v.Status, OperationCount: operations, CopiedFrom: v.CopiedFrom,
+		EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo), Status: v.Status, OperationCount: operations, CopiedFrom: v.CopiedFrom, Version: v.Version,
 	}
 }
 

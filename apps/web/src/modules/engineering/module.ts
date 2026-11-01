@@ -9,6 +9,7 @@ import { BomVersionEditPage } from "./bomEdit";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
 import { EcoCreatePage, EcoPage, EcosPage } from "./eco";
 import { RouteVersionCreatePage } from "./routeCreate";
+import { RouteVersionEditPage } from "./routeEdit";
 
 function EngineeringRoute() {
   const navigate = useNavigate();
@@ -106,6 +107,13 @@ function RouteVersionCreateRoute() {
   });
 }
 
+function RouteVersionEditRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const back = () => navigate(`/engineering/routes/${encodeURIComponent(id)}`);
+  return createElement(RouteVersionEditPage, { id, onSaved: back, onCancel: back });
+}
+
 function RouteVersionRoute() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
@@ -113,6 +121,7 @@ function RouteVersionRoute() {
     id,
     onBack: () => navigate("/engineering/routes"),
     onOpenCopy: (copyId: string) => navigate(`/engineering/routes/${encodeURIComponent(copyId)}`),
+    onEdit: (versionId: string) => navigate(`/engineering/routes/${encodeURIComponent(versionId)}/edit`),
   });
 }
 
@@ -172,6 +181,7 @@ const engineering: PassageModule = {
     { path: "/engineering/ecos/:id", element: createElement(EcoRoute), handle: { title: "Change order" } },
     { path: "/engineering/routes", element: createElement(RouteVersionsRoute) },
     { path: "/engineering/routes/new", element: createElement(RouteVersionCreateRoute), handle: { title: "New route version" } },
+    { path: "/engineering/routes/:id/edit", element: createElement(RouteVersionEditRoute), handle: { title: "Edit route draft" } },
     { path: "/engineering/routes/:id", element: createElement(RouteVersionRoute), handle: { title: "Route version" } },
     { path: "/engineering/resources", element: createElement(ResourcesRoute), handle: { title: "Resources" } },
     { path: "/engineering/resources/:id", element: createElement(ResourceRoute), handle: { title: "Resource" } },

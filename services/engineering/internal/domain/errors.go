@@ -49,6 +49,7 @@ const (
 	CodeRouteReqKind     = "ENG-ROUTE-REQ-KIND"
 	CodeRouteVersion     = "ENG-ROUTE-VERSION"
 	CodeRouteState       = "ENG-ROUTE-STATE"
+	CodeRouteConflict    = "ENG-ROUTE-VERSION-CONFLICT"
 
 	CodeBomTooLarge            = "ENG-BOM-TOOLARGE"
 	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"

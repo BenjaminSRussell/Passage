@@ -164,6 +164,7 @@ func TestPostgres_RouteVersions_RLSHidesOtherTenant(t *testing.T) {
 		"get":      func() error { _, err := s.GetRouteVersion(principalContext(2), v.ID); return err },
 		"activate": func() error { _, err := s.ActivateRouteVersion(principalContext(2), v.ID); return err },
 		"cancel":   func() error { _, err := s.CancelRouteVersion(principalContext(2), v.ID); return err },
+		"update":   func() error { _, err := s.UpdateRouteDraft(principalContext(2), v, 1, store.Idem{}); return err },
 	} {
 		if err := call(); problemCode(err) != store.CodeRouteNotFound {
 			t.Fatalf("tenant 2 %s = %v; want %s", name, err, store.CodeRouteNotFound)

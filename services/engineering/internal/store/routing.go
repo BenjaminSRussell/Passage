@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	routeVersionColumns   = `id::text, product_id, site_id, route_code, version_no, effective_from, effective_to, status, coalesce(copied_from_version_id::text, '')`
+	routeVersionColumns   = `id::text, product_id, site_id, route_code, version_no, effective_from, effective_to, status, coalesce(copied_from_version_id::text, ''), version`
 	routeOperationColumns = `operation_no, operation_id, next_no, link_type, priority, setup_h::text, run_h::text, process_qty::text,
 		queue_before_h::text, queue_after_h::text, transit_h::text, efficiency_pct::text, overlap_qty::text, scrap_percent::text`
 	insertRouteOperation = `insert into route_operation (tenant_id, route_version_id, operation_no, operation_id, next_no, link_type, priority, setup_h, run_h, process_qty,
@@ -37,7 +37,7 @@ type RouteVersionHeader struct {
 
 func scanRouteVersion(row pgx.Row, extra ...any) (v domain.RouteVersion, err error) {
 	var to *time.Time
-	if err = row.Scan(append([]any{&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status, &v.CopiedFrom}, extra...)...); err == nil {
+	if err = row.Scan(append([]any{&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status, &v.CopiedFrom, &v.Version}, extra...)...); err == nil {
 		v.EffectiveTo = valueOrZero(to)
 	}
 	return v, err
@@ -86,9 +86,25 @@ func getRouteVersion(ctx context.Context, tx pgx.Tx, tenantID, id string) (domai
 		if err := rows.Scan(&no, &r.Kind, &r.RefID, &r.Level, &r.Quantity); err != nil {
 			return v, err
 		}
-		v.Operations[at[no]].Requirements = append(v.Operations[at[no]].Requirements, r)
+		i, ok := at[no]
+		if !ok {
+			return v, fmt.Errorf("route version %s has a requirement on operation %d, which it does not hold", id, no)
+		}
+		v.Operations[i].Requirements = append(v.Operations[i].Requirements, r)
 	}
 	return v, rows.Err()
+}
+
+// readRouteVersion loads a version for a reader that takes no product lock. The header, operations
+// and requirements are three statements, and under read committed a draft edit committing between
+// them would mix two saves (BR-9.3). FOR SHARE on the header waits for an edit, activation or
+// cancellation in flight and holds the next one off until this transaction ends, so the three reads
+// see one save. Writers read under the product lock instead and must not call this before taking it.
+func readRouteVersion(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.RouteVersion, error) {
+	if _, err := tx.Exec(ctx, `select 1 from route_version where tenant_id = $1 and id = $2::uuid for share`, tenantID, id); err != nil {
+		return domain.RouteVersion{}, err
+	}
+	return getRouteVersion(ctx, tx, tenantID, id)
 }
 
 func insertRouteVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.RouteVersion) error {
@@ -110,6 +126,10 @@ func insertRouteVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domai
 		tenantID, v.ID, v.ProductID, v.SiteID, v.RouteCode, v.VersionNo, v.EffectiveFrom, zeroToNil(v.EffectiveTo), v.CopiedFrom); err != nil {
 		return err
 	}
+	return insertRouteOperations(ctx, tx, tenantID, v)
+}
+
+func insertRouteOperations(ctx context.Context, tx pgx.Tx, tenantID string, v domain.RouteVersion) error {
 	batch := &pgx.Batch{}
 	for _, o := range v.Operations {
 		linkType := o.LinkType
@@ -142,10 +162,73 @@ func (s *Postgres) CreateRouteVersion(ctx context.Context, v domain.RouteVersion
 	return created, err
 }
 
+// UpdateRouteDraft replaces the effectivity and every operation and requirement of a draft route
+// version (BR-9.3). The product, site, route code and version number are the version's identity and
+// stay. v carries the new content under the stored id; expectedVersion is the counter the caller
+// edited: another save in between answers ENG-ROUTE-VERSION-CONFLICT and nothing is written. Only a
+// draft can be edited (ENG-ROUTE-STATE). The save adds 1 to version and emits no event, as creating a
+// draft emits none. A replayed Idempotency-Key returns the version as it is now without writing again.
+func (s *Postgres) UpdateRouteDraft(ctx context.Context, v domain.RouteVersion, expectedVersion int, idem Idem) (updated domain.RouteVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		id, found, err := replay(ctx, tx, p.TenantID, idem)
+		if err != nil {
+			return err
+		}
+		if found {
+			updated, err = readRouteVersion(ctx, tx, p.TenantID, id)
+			return err
+		}
+		stored, err := getRouteVersion(ctx, tx, p.TenantID, v.ID)
+		if err != nil {
+			return err
+		}
+		if err = lockProducts(ctx, tx, p.TenantID, stored.ProductID); err != nil {
+			return err
+		}
+		if stored, err = getRouteVersion(ctx, tx, p.TenantID, v.ID); err != nil {
+			return err
+		}
+		if err = stored.EnsureDraft(); err != nil {
+			return err
+		}
+		if stored.Version != expectedVersion {
+			return &domain.Error{Code: domain.CodeRouteConflict, Detail: fmt.Sprintf("the draft is at version %d, you edited version %d; reload it and merge your changes", stored.Version, expectedVersion)}
+		}
+		v.ProductID, v.SiteID, v.RouteCode, v.VersionNo, v.CopiedFrom = stored.ProductID, stored.SiteID, stored.RouteCode, stored.VersionNo, stored.CopiedFrom
+		if err = domain.ValidateRouteVersion(v); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `update route_version set effective_from = $3, effective_to = $4, version = version + 1
+			where tenant_id = $1 and id = $2::uuid and status = 'draft' and version = $5`, p.TenantID, v.ID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), expectedVersion)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return &domain.Error{Code: domain.CodeRouteConflict, Detail: "the draft changed concurrently; reload it and merge your changes"}
+		}
+		for _, table := range []string{"operation_requirement", "route_operation"} {
+			if _, err = tx.Exec(ctx, `delete from `+table+` where tenant_id = $1 and route_version_id = $2::uuid`, p.TenantID, v.ID); err != nil {
+				return err
+			}
+		}
+		if err = insertRouteOperations(ctx, tx, p.TenantID, v); err != nil {
+			return err
+		}
+		if err = remember(ctx, tx, p.TenantID, idem, v.ID); err != nil {
+			return err
+		}
+		updated = v
+		updated.Status, updated.Version = stored.Status, expectedVersion+1
+		return nil
+	})
+	return updated, conflictOnDuplicate(err)
+}
+
 func (s *Postgres) GetRouteVersion(ctx context.Context, id string) (v domain.RouteVersion, err error) {
 	p, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
-		v, err = getRouteVersion(ctx, tx, p.TenantID, id)
+		v, err = readRouteVersion(ctx, tx, p.TenantID, id)
 		return err
 	})
 	return v, err
@@ -202,7 +285,7 @@ func (s *Postgres) ActiveRouteVersion(ctx context.Context, productID, siteID str
 		if err != nil {
 			return err
 		}
-		v, err = getRouteVersion(ctx, tx, p.TenantID, id)
+		v, err = readRouteVersion(ctx, tx, p.TenantID, id)
 		return err
 	})
 	return v, err
@@ -281,10 +364,10 @@ func (s *Postgres) ActivateRouteVersion(ctx context.Context, id string) (v domai
 		if err = domain.CheckRequirements(v, resources); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `update route_version set status = 'active' where tenant_id = $1 and id = $2::uuid`, p.TenantID, id); err != nil {
+		if _, err = tx.Exec(ctx, `update route_version set status = 'active', version = version + 1 where tenant_id = $1 and id = $2::uuid`, p.TenantID, id); err != nil {
 			return err
 		}
-		v.Status = domain.StatusActive
+		v.Status, v.Version = domain.StatusActive, v.Version+1
 		return emit(ctx, tx, p, id, engevents.RouteVersionActivated, aggregateRouteVersion, id, v.ActivatedEvent())
 	})
 	return v, err
@@ -308,10 +391,10 @@ func (s *Postgres) CancelRouteVersion(ctx context.Context, id string) (v domain.
 		if err = v.EnsureDraft(); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `update route_version set status = 'cancelled' where tenant_id = $1 and id = $2::uuid and status = 'draft'`, p.TenantID, id); err != nil {
+		if _, err = tx.Exec(ctx, `update route_version set status = 'cancelled', version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'draft'`, p.TenantID, id); err != nil {
 			return err
 		}
-		v.Status = domain.StatusCancelled
+		v.Status, v.Version = domain.StatusCancelled, v.Version+1
 		return nil
 	})
 	return v, err

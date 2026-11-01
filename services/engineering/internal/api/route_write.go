@@ -32,6 +32,8 @@ type routeVersionRequest struct {
 	EffectiveFrom string               `json:"effectiveFrom"`
 	EffectiveTo   string               `json:"effectiveTo"`
 	Operations    []routeOperationBody `json:"operations"`
+	// Version is only read by PUT (BR-9.3): the version number the editor loaded. Create ignores it.
+	Version int `json:"version,omitempty"`
 }
 
 func below(d decimal.Decimal, exp int32) bool { return d.Abs().LessThan(decimal.New(1, exp)) }
@@ -126,4 +128,62 @@ func (a *API) createRouteVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, bodyFromRouteVersion(created))
+}
+
+// updateRouteVersion saves an edited draft route version (BR-9.3): the request carries the effectivity
+// and every operation with its requirements, plus the version number the editor loaded. The operations
+// are replaced as a whole, so one left out is deleted. The product, site, route code and version number
+// are the version's identity and cannot change (copy the version to change them), nor can the status
+// (:activate and :cancel). A stale version number is 409 ENG-ROUTE-VERSION-CONFLICT and nothing is
+// written; the editor reloads the draft and merges. Like creating a draft, saving one emits no event.
+func (a *API) updateRouteVersion(w http.ResponseWriter, r *http.Request) {
+	var body routeVersionRequest
+	if !readBody(w, r, &body) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	stored, err := a.store.GetRouteVersion(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "update route version", err, &a.routeFailed)
+		return
+	}
+	// The identity fields may be omitted (the editor sends what it loaded) but not changed.
+	for _, c := range []struct {
+		name, got, want string
+	}{{"productId", body.ProductID, stored.ProductID}, {"siteId", body.SiteID, stored.SiteID}, {"routeCode", body.RouteCode, stored.RouteCode}} {
+		if c.got == "" {
+			continue
+		}
+		if c.got != c.want {
+			invalid(w, r, map[string]string{c.name: "cannot be changed; copy the version instead"})
+			return
+		}
+	}
+	if body.VersionNo != 0 && body.VersionNo != stored.VersionNo {
+		invalid(w, r, map[string]string{"versionNo": "cannot be changed; copy the version instead"})
+		return
+	}
+	body.ProductID, body.SiteID, body.RouteCode, body.VersionNo = stored.ProductID, stored.SiteID, stored.RouteCode, stored.VersionNo
+	draft, fields := body.toDomain()
+	if body.Version < 1 {
+		fields["version"] = "is required: the version number you loaded"
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	draft.ID = id
+	updated, err := a.store.UpdateRouteDraft(r.Context(), draft, body.Version, copyIdem(r, id, body))
+	if err != nil {
+		if domain.HasCode(err, domain.CodeRouteConflict) {
+			a.routeConflicts.Add(1)
+		}
+		a.fail(w, r, "update route version", err, &a.routeFailed)
+		return
+	}
+	a.routeUpdated.Add(1)
+	httpx.JSON(w, http.StatusOK, bodyFromRouteVersion(updated))
 }

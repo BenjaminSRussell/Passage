@@ -36,7 +36,7 @@ describe("engineering module", () => {
 
   it("declares the routing routes and nav entries", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(
-      expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id"]),
+      expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id", "/engineering/routes/:id/edit"]),
     );
     expect(engineering.nav.map((n) => n.label)).toContain("Routings");
   });

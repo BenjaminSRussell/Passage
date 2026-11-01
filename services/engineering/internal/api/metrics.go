@@ -64,6 +64,8 @@ func (a *API) Metrics() http.Handler {
 		{"engineering_bom_versions_cancelled_total", "BOM version cancel requests that succeeded, including idempotent repeats.", &a.bomCancelled},
 		{"engineering_bom_versions_updated_total", "Draft BOM version edits that were saved.", &a.bomUpdated},
 		{"engineering_bom_version_conflicts_total", "Draft BOM version edits refused because another save came first (ENG-BOM-VERSION-CONFLICT).", &a.bomConflicts},
+		{"engineering_route_versions_updated_total", "Draft route version edits that were saved.", &a.routeUpdated},
+		{"engineering_route_version_conflicts_total", "Draft route version edits refused because another save came first (ENG-ROUTE-VERSION-CONFLICT).", &a.routeConflicts},
 		{"engineering_ecos_released_total", "ECOs released to production.", &a.ecosReleased},
 		{"engineering_ecos_failed_total", "ECO requests that failed in the store or domain with an unexpected error, including an unavailable approver.", &a.ecosFailed},
 		{"engineering_explosions_total", "BOM explosions served.", &a.explosions},

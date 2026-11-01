@@ -114,6 +114,7 @@ type Store interface {
 	GetRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	ActivateRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	CancelRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
+	UpdateRouteDraft(ctx context.Context, v domain.RouteVersion, expectedVersion int, idem Idem) (domain.RouteVersion, error)
 	ListRouteVersions(ctx context.Context, f RouteVersionFilter, afterID string, limit int) (Page[RouteVersionHeader], error)
 	ActiveRouteVersion(ctx context.Context, productID, siteID string, asOf time.Time) (domain.RouteVersion, error)
 	Ping(ctx context.Context) error
