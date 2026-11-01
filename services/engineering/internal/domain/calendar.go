@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -15,6 +16,8 @@ const (
 	minutesPerDay    = 1440
 	dateKey          = "2006-01-02"
 )
+
+var weekdayNames = [7]string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
 
 var (
 	minEfficiency = decimal.NewFromInt(1)
@@ -119,13 +122,48 @@ func validateDay(shifts []Shift) error {
 	return nil
 }
 
+// spillOverlap rejects a shift that runs past midnight into a shift of the next day, which would
+// count the same hours twice.
+func spillOverlap(day, next []Shift, nextName string) error {
+	spill := 0
+	for _, s := range day {
+		if _, end, err := s.span(); err == nil && end-minutesPerDay > spill {
+			spill = end - minutesPerDay
+		}
+	}
+	for _, s := range next {
+		if start, _, err := s.span(); err == nil && start < spill {
+			return errf(CodeCalShift, "a shift running to %02d:%02d the next morning overlaps the %s shift %s-%s", spill/60, spill%60, nextName, s.Start, s.End)
+		}
+	}
+	return nil
+}
+
+// dayError names the weekday in a shift error so the problem detail says which pattern to fix.
+func dayError(day int, err error) error {
+	var de *Error
+	if errors.As(err, &de) {
+		return &Error{Code: de.Code, Detail: weekdayNames[day] + ": " + de.Detail, Cause: de.Cause}
+	}
+	return err
+}
+
+// ValidateCalendar checks every day pattern (hh:mm shifts, 24:00 only as an end, an end before the
+// start running past midnight, no overlaps within a day or into the next day, at most five shifts)
+// and warns when the week holds more than 48 hours.
 func ValidateCalendar(cal WorkCalendar) (warnings []string, err error) {
 	week := decimal.Zero
 	for i, shifts := range cal.Template {
 		if err := validateDay(shifts); err != nil {
-			return nil, fmt.Errorf("day %d: %w", i, err)
+			return nil, dayError(i, err)
 		}
 		week = week.Add(dayHours(shifts))
+	}
+	for i, shifts := range cal.Template {
+		next := (i + 1) % len(cal.Template)
+		if err := spillOverlap(shifts, cal.Template[next], weekdayNames[next]); err != nil {
+			return nil, dayError(i, err)
+		}
 	}
 	if week.GreaterThan(weeklyWarnH) {
 		warnings = append(warnings, fmt.Sprintf("weekly shift hours %s exceed %d", week.String(), WeeklyHoursWarn))

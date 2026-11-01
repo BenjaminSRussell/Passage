@@ -323,6 +323,63 @@ export function deleteResource(id: string): Promise<void> {
   return request(`/resources/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export interface ResourceInput {
+  code: string;
+  name: string;
+  type: string;
+  siteId: string;
+  groupId?: string;
+  calendarId?: string;
+  efficiencyPct?: string;
+  capacityPerDayH?: string;
+  exclusive: boolean;
+  vendorPartyId?: string;
+  capabilities: ResourceCapability[];
+}
+
+export interface CalendarInput {
+  code: string;
+  name: string;
+  template: Shift[][];
+  closedDates: string[];
+}
+
+export interface CalendarGeneration {
+  openDays: number;
+  totalHours: string;
+}
+
+function post<T>(path: string, body: unknown, idempotencyKey?: string): Promise<T> {
+  return request(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Creates a resource with its capabilities. 422 ENG-RES-VENDOR (vendor without a party) and ENG-RES-SITE (group at another site). */
+export function createResource(body: ResourceInput, idempotencyKey: string): Promise<Resource> {
+  return post("/resources", body, idempotencyKey);
+}
+
+export function createResourceGroup(body: { code: string; name: string; siteId: string; calendarId?: string }, idempotencyKey: string): Promise<ResourceGroup> {
+  return post("/resource-groups", body, idempotencyKey);
+}
+
+export function createCapability(body: { code: string; name: string }, idempotencyKey: string): Promise<Capability> {
+  return post("/capabilities", body, idempotencyKey);
+}
+
+/** Creates a work calendar from its weekly template (Monday first) and closed dates. 422 ENG-CAL-SHIFT for overlapping or malformed shifts. */
+export function createCalendar(body: CalendarInput, idempotencyKey: string): Promise<WorkCalendar> {
+  return post("/calendars", body, idempotencyKey);
+}
+
+/** Generates the calendar's days for a range; repeating a range upserts the same days. */
+export function generateCalendar(id: string, range: { from: string; to: string }): Promise<CalendarGeneration> {
+  return post(`/calendars/${encodeURIComponent(id)}:generate`, range);
+}
+
 export function listResourceGroups(filters: ResourceGroupFilters, cursor?: string): Promise<Page<ResourceGroup>> {
   return request(`/resource-groups${query({ ...filters, cursor })}`);
 }

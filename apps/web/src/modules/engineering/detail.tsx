@@ -12,6 +12,7 @@ import {
   type WorkCalendar,
 } from "./api/client";
 import { calendarLink, PagedTable } from "./resources";
+import { GenerateDays } from "./setup";
 import { errorText } from "./screens";
 import styles from "./pages.module.css";
 
@@ -48,7 +49,7 @@ function DetailShell<T>({
   id: string;
   onBack?: () => void;
   backLabel: string;
-  children: (item: T) => ReactNode;
+  children: (item: T, refresh: () => void) => ReactNode;
 }) {
   const [item, setItem] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -86,7 +87,7 @@ function DetailShell<T>({
           <Skeleton />
         </Card>
       ) : null}
-      {item ? children(item) : null}
+      {item ? children(item, () => void load(id).then(setItem, () => undefined)) : null}
     </>
   );
 }
@@ -179,7 +180,7 @@ const templateColumns: DataTableColumn<TemplateRow>[] = [
   { key: "hours", header: "Hours", align: "end" },
 ];
 
-export function CalendarDetailPage({ id, onBack }: { id: string; onBack?: () => void }) {
+export function CalendarDetailPage({ id, onBack, canGenerate = false }: { id: string; onBack?: () => void; canGenerate?: boolean }) {
   return (
     <DetailShell<WorkCalendar>
       title={(c) => (c ? `Calendar ${c.code}` : "Calendar")}
@@ -190,7 +191,7 @@ export function CalendarDetailPage({ id, onBack }: { id: string; onBack?: () => 
       onBack={onBack}
       backLabel="Back to calendars"
     >
-      {(calendar) => (
+      {(calendar, reload) => (
         <>
           <Card title="Calendar">
             <Facts
@@ -204,6 +205,7 @@ export function CalendarDetailPage({ id, onBack }: { id: string; onBack?: () => 
               ]}
             />
           </Card>
+          {canGenerate ? <GenerateDays calendarId={calendar.id} onGenerated={reload} /> : null}
           <div className={styles.results}>
             <DataTable
               label="Weekly template"
@@ -234,10 +236,10 @@ const calendarColumns: DataTableColumn<WorkCalendar>[] = [
 const noFilters = {};
 const fetchCalendars = (_filters: object, cursor?: string) => listCalendars(cursor);
 
-export function CalendarsPage() {
+export function CalendarsPage({ onCreate }: { onCreate?: () => void }) {
   return (
     <>
-      <PageHeader title="Work calendars" description="Shift calendars that drive resource availability." />
+      <PageHeader title="Work calendars" description="Shift calendars that drive resource availability." actions={onCreate ? <Button variant="primary" onClick={onCreate}>New calendar</Button> : undefined} />
       <PagedTable
         label="Work calendars"
         emptyTitle="No work calendars yet"

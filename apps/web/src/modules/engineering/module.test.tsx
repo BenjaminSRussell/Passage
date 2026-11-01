@@ -1,6 +1,8 @@
 import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { PrincipalProvider } from "../../shell/principal";
 import { loadModules } from "../registry";
 import engineering from "./module";
 import { EngineeringHome, WhereUsedPage } from "./pages";
@@ -53,6 +55,10 @@ describe("engineering module", () => {
         "/engineering/calendars/:id/days",
         "/engineering/resource-groups/:id",
         "/engineering/capabilities/:id",
+        "/engineering/resources/new",
+        "/engineering/resource-groups/new",
+        "/engineering/capabilities/new",
+        "/engineering/calendars/new",
       ]),
     );
     expect(engineering.routes.filter((r) => r.path !== "/engineering" && r.path !== "/engineering/where-used" && r.path !== "/engineering/routes").every((r) => r.handle?.title)).toBe(true);
@@ -63,6 +69,27 @@ describe("engineering module", () => {
       ["Capabilities", "/engineering/capabilities", "engineering.read"],
       ["Work calendars", "/engineering/calendars", "engineering.read"],
     ]);
+  });
+
+  it("gates the set-up routes and their New buttons on engineering.resource.write", async () => {
+    const created = ["/engineering/resources/new", "/engineering/resource-groups/new", "/engineering/capabilities/new", "/engineering/calendars/new"];
+    expect(engineering.routes.filter((r) => created.includes(r.path ?? "")).map((r) => (r.handle as { duty?: string }).duty)).toEqual(created.map(() => "engineering.resource.write"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ items: [] }) }));
+    const calendars = engineering.routes.find((r) => r.path === "/engineering/calendars")!.element;
+    const reader = render(
+      <PrincipalProvider duties={["engineering.read"]}>
+        <MemoryRouter>{calendars}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByText("No work calendars yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New calendar" })).toBeNull();
+    reader.unmount();
+    render(
+      <PrincipalProvider duties={["engineering.read", "engineering.resource.write"]}>
+        <MemoryRouter>{calendars}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "New calendar" })).toBeInTheDocument();
   });
 
   it("offers to open resources, groups and capabilities from the overview", () => {

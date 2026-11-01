@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
 import { EngineeringHome, WhereUsedPage } from "./pages";
 import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupDetailPage } from "./detail";
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
@@ -10,6 +12,16 @@ import { RouteVersionPage, RouteVersionsPage } from "./screens";
 import { EcoCreatePage, EcoPage, EcosPage } from "./eco";
 import { RouteVersionCreatePage } from "./routeCreate";
 import { RouteVersionEditPage } from "./routeEdit";
+import { CalendarCreatePage, CapabilityCreatePage, ResourceCreatePage, ResourceGroupCreatePage } from "./setup";
+
+/** Every resource, group, capability and calendar write, including Generate days, is under this seeded duty. */
+const dutyResourceWrite = "engineering.resource.write";
+
+/** UX only: hides the New buttons from principals without the write duty; the service still enforces it. */
+function useCreateAction(to: string): (() => void) | undefined {
+  const navigate = useNavigate();
+  return holdsDuty(usePrincipalDuties(), dutyResourceWrite) ? () => navigate(to) : undefined;
+}
 
 function EngineeringRoute() {
   const navigate = useNavigate();
@@ -128,11 +140,13 @@ function RouteVersionRoute() {
 function ResourcesRoute() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const onCreate = useCreateAction("/engineering/resources/new");
   const initial = Object.fromEntries(["siteId", "type", "groupId", "capabilityId"].flatMap((key) => (params.get(key) ? [[key, params.get(key)]] : [])));
   return createElement(ResourcesPage, {
     key: params.toString(),
     initial,
     onOpen: (id: string) => navigate(`/engineering/resources/${encodeURIComponent(id)}`),
+    onCreate,
   });
 }
 
@@ -141,6 +155,33 @@ function ResourceRoute() {
   const { id = "" } = useParams();
   return createElement(ResourceDetailPage, { id, onBack: () => navigate("/engineering/resources") });
 }
+
+function ResourceGroupsRoute() {
+  return createElement(ResourceGroupsPage, { onCreate: useCreateAction("/engineering/resource-groups/new") });
+}
+
+function CapabilitiesRoute() {
+  return createElement(CapabilitiesPage, { onCreate: useCreateAction("/engineering/capabilities/new") });
+}
+
+function CalendarsRoute() {
+  return createElement(CalendarsPage, { onCreate: useCreateAction("/engineering/calendars/new") });
+}
+
+function createRoute(Page: typeof ResourceCreatePage, list: string, detail: string) {
+  return function CreateRoute() {
+    const navigate = useNavigate();
+    return createElement(Page, {
+      onCreated: (id: string) => navigate(`/engineering/${detail}/${encodeURIComponent(id)}`),
+      onCancel: () => navigate(`/engineering/${list}`),
+    });
+  };
+}
+
+const ResourceCreateRoute = createRoute(ResourceCreatePage, "resources", "resources");
+const ResourceGroupCreateRoute = createRoute(ResourceGroupCreatePage, "resource-groups", "resource-groups");
+const CapabilityCreateRoute = createRoute(CapabilityCreatePage, "capabilities", "capabilities");
+const CalendarCreateRoute = createRoute(CalendarCreatePage, "calendars", "calendars");
 
 function CalendarRoute() {
   const { id = "" } = useParams();
@@ -162,7 +203,8 @@ function CapabilityRoute() {
 function CalendarDetailRoute() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
-  return createElement(CalendarDetailPage, { id, onBack: () => navigate("/engineering/calendars") });
+  const canGenerate = holdsDuty(usePrincipalDuties(), dutyResourceWrite);
+  return createElement(CalendarDetailPage, { id, onBack: () => navigate("/engineering/calendars"), canGenerate });
 }
 
 const engineering: PassageModule = {
@@ -184,12 +226,16 @@ const engineering: PassageModule = {
     { path: "/engineering/routes/:id/edit", element: createElement(RouteVersionEditRoute), handle: { title: "Edit route draft" } },
     { path: "/engineering/routes/:id", element: createElement(RouteVersionRoute), handle: { title: "Route version" } },
     { path: "/engineering/resources", element: createElement(ResourcesRoute), handle: { title: "Resources" } },
+    { path: "/engineering/resources/new", element: createElement(ResourceCreateRoute), handle: { title: "New resource", duty: dutyResourceWrite } },
     { path: "/engineering/resources/:id", element: createElement(ResourceRoute), handle: { title: "Resource" } },
-    { path: "/engineering/resource-groups", element: createElement(ResourceGroupsPage), handle: { title: "Resource groups" } },
-    { path: "/engineering/capabilities", element: createElement(CapabilitiesPage), handle: { title: "Capabilities" } },
+    { path: "/engineering/resource-groups", element: createElement(ResourceGroupsRoute), handle: { title: "Resource groups" } },
+    { path: "/engineering/capabilities", element: createElement(CapabilitiesRoute), handle: { title: "Capabilities" } },
+    { path: "/engineering/resource-groups/new", element: createElement(ResourceGroupCreateRoute), handle: { title: "New resource group", duty: dutyResourceWrite } },
     { path: "/engineering/resource-groups/:id", element: createElement(GroupRoute), handle: { title: "Resource group" } },
+    { path: "/engineering/capabilities/new", element: createElement(CapabilityCreateRoute), handle: { title: "New capability", duty: dutyResourceWrite } },
     { path: "/engineering/capabilities/:id", element: createElement(CapabilityRoute), handle: { title: "Capability" } },
-    { path: "/engineering/calendars", element: createElement(CalendarsPage), handle: { title: "Work calendars" } },
+    { path: "/engineering/calendars", element: createElement(CalendarsRoute), handle: { title: "Work calendars" } },
+    { path: "/engineering/calendars/new", element: createElement(CalendarCreateRoute), handle: { title: "New calendar", duty: dutyResourceWrite } },
     { path: "/engineering/calendars/:id", element: createElement(CalendarDetailRoute), handle: { title: "Calendar" } },
     { path: "/engineering/calendars/:id/days", element: createElement(CalendarRoute), handle: { title: "Calendar days" } },
   ],

@@ -2,7 +2,9 @@ package domain_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +111,40 @@ func TestValidateCalendar_Shifts(t *testing.T) {
 				t.Fatalf("err = %v, want %s", err, tc.code)
 			}
 		})
+	}
+}
+
+func TestValidateCalendar_ShiftsAcrossMidnight(t *testing.T) {
+	var spill [7][]domain.Shift
+	spill[0] = []domain.Shift{shift("22:00", "06:00")}
+	spill[1] = []domain.Shift{shift("05:00", "13:00")}
+	_, err := domain.ValidateCalendar(domain.WorkCalendar{Template: spill})
+	if !domain.HasCode(err, domain.CodeCalShift) || !strings.HasPrefix(err.(*domain.Error).Detail, "Monday: ") || !strings.Contains(err.Error(), "Tuesday shift 05:00-13:00") {
+		t.Fatalf("Monday night shift into Tuesday 05:00: err = %v, want ENG-CAL-SHIFT naming Monday and the Tuesday shift", err)
+	}
+
+	var sunday [7][]domain.Shift
+	sunday[6] = []domain.Shift{shift("23:00", "01:00")}
+	sunday[0] = []domain.Shift{shift("00:30", "08:00")}
+	if _, err := domain.ValidateCalendar(domain.WorkCalendar{Template: sunday}); !domain.HasCode(err, domain.CodeCalShift) || !strings.HasPrefix(err.(*domain.Error).Detail, "Sunday: ") {
+		t.Fatalf("Sunday night shift into Monday: err = %v, want ENG-CAL-SHIFT on Sunday", err)
+	}
+
+	var handover [7][]domain.Shift
+	handover[0] = []domain.Shift{shift("22:00", "06:00")}
+	handover[1] = []domain.Shift{shift("06:00", "14:00")}
+	if _, err := domain.ValidateCalendar(domain.WorkCalendar{Template: handover}); err != nil {
+		t.Fatalf("night shift ending as the morning shift starts: %v", err)
+	}
+}
+
+func TestValidateCalendar_DetailNamesTheDay(t *testing.T) {
+	var template [7][]domain.Shift
+	template[2] = []domain.Shift{shift("06:00", "10:00"), shift("09:00", "12:00")}
+	_, err := domain.ValidateCalendar(domain.WorkCalendar{Template: template})
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodeCalShift || de.Detail != "Wednesday: shifts overlap at 09:00" {
+		t.Fatalf("err = %#v, want ENG-CAL-SHIFT \"Wednesday: shifts overlap at 09:00\"", err)
 	}
 }
 

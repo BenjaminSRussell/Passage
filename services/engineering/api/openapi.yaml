@@ -502,7 +502,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CalendarRequest' } } }
       responses:
         '201':
-          description: Calendar created, or the original calendar on an Idempotency-Key replay. warnings lists soft limits such as weekly shift hours above 48. Overlapping or malformed shifts are 422 ENG-CAL-SHIFT.
+          description: Calendar created, or the original calendar on an Idempotency-Key replay. warnings lists soft limits such as weekly shift hours above 48. Malformed or overlapping shifts are 422 ENG-CAL-SHIFT with the weekday named in detail; that includes a shift that runs past midnight into a shift of the next day.
           content: { application/json: { schema: { $ref: '#/components/schemas/Calendar' } } }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
@@ -970,7 +970,7 @@ components:
       required: [start, end]
       properties:
         start: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$' }
-        end: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: An end before start runs past midnight }
+        end: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: 'An end before start runs past midnight and must not overlap the next day''s shifts; 24:00 is allowed as an end only' }
         efficiencyPct: { type: string, description: 1 to 100 with at most two decimals }
     CalendarRequest:
       type: object

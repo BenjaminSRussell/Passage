@@ -153,7 +153,7 @@ const textFilters = [
   { key: "capabilityId", id: "resource-capability", label: "Capability" },
 ] as const;
 
-export function ResourcesPage({ initial = {}, onOpen }: { initial?: ResourceFilters; onOpen?: (id: string) => void }) {
+export function ResourcesPage({ initial = {}, onOpen, onCreate }: { initial?: ResourceFilters; onOpen?: (id: string) => void; onCreate?: () => void }) {
   const [draft, setDraft] = useState<ResourceFilters>(initial);
   const [applied, setApplied] = useState<ResourceFilters>(initial);
 
@@ -169,7 +169,7 @@ export function ResourcesPage({ initial = {}, onOpen }: { initial?: ResourceFilt
 
   return (
     <>
-      <PageHeader title="Resources" description="Machines, tools, labor, vendors and locations." />
+      <PageHeader title="Resources" description="Machines, tools, labor, vendors and locations." actions={onCreate ? <Button variant="primary" onClick={onCreate}>New resource</Button> : undefined} />
       <Card>
         <form className={styles.form} onSubmit={applyFilters}>
           <div className={styles.field}>
@@ -317,7 +317,7 @@ const groupColumns: DataTableColumn<ResourceGroup>[] = [
   { key: "calendarId", header: "Calendar", render: (row) => calendarLink(row.calendarId) },
 ];
 
-export function ResourceGroupsPage() {
+export function ResourceGroupsPage({ onCreate }: { onCreate?: () => void }) {
   const [draft, setDraft] = useState("");
   const [applied, setApplied] = useState<ResourceGroupFilters>({});
 
@@ -328,7 +328,7 @@ export function ResourceGroupsPage() {
 
   return (
     <>
-      <PageHeader title="Resource groups" description="Groups of resources by site." />
+      <PageHeader title="Resource groups" description="Groups of resources by site." actions={onCreate ? <Button variant="primary" onClick={onCreate}>New resource group</Button> : undefined} />
       <Card>
         <form className={styles.form} onSubmit={applyFilters}>
           <div className={styles.field}>
@@ -364,10 +364,10 @@ const capabilityListColumns: DataTableColumn<Capability>[] = [
 const noFilters = {};
 const fetchCapabilities = (_filters: object, cursor?: string) => listCapabilities(cursor);
 
-export function CapabilitiesPage() {
+export function CapabilitiesPage({ onCreate }: { onCreate?: () => void }) {
   return (
     <>
-      <PageHeader title="Capabilities" description="Skills and abilities resources can hold." />
+      <PageHeader title="Capabilities" description="Skills and abilities resources can hold." actions={onCreate ? <Button variant="primary" onClick={onCreate}>New capability</Button> : undefined} />
       <PagedTable
         label="Capabilities"
         emptyTitle="No capabilities yet"
