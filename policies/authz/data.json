@@ -273,7 +273,8 @@
     "inventory.batch.write": {"permissions": [{"resource": "/v1/inventory/batch-expiries/*/*", "methods": ["PUT"]}]},
     "inventory.blocking.write": {"permissions": [
       {"resource": "/v1/inventory/blockings", "methods": ["POST"]},
-      {"resource": "/v1/inventory/blockings/*:release", "methods": ["POST"]}
+      {"resource": "/v1/inventory/blockings/*:release", "methods": ["POST"]},
+      {"resource": "/v1/inventory/blockings/*:block", "methods": ["POST"]}
     ]},
     "inventory.blocking.scrap": {"flag": true, "permissions": []},
     "inventory.hold.write": {"permissions": [
@@ -321,7 +322,8 @@
       {"resource": "/v1/procurement/requisitions", "methods": ["GET", "POST"]},
       {"resource": "/v1/procurement/requisitions/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisitions/*:submit", "methods": ["POST"]},
-      {"resource": "/v1/procurement/catalog-entries", "methods": ["GET"]}
+      {"resource": "/v1/procurement/catalog-entries", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limit-requests", "methods": ["POST"]}
     ]},
     "PurchaseOrderMaintain": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders", "methods": ["POST"]},
@@ -362,7 +364,11 @@
       {"resource": "/v1/procurement/purchasing-policies/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/category-vendors", "methods": ["GET"]},
       {"resource": "/v1/procurement/category-vendors/*", "methods": ["GET"]},
-      {"resource": "/v1/procurement/category-managers", "methods": ["GET"]}
+      {"resource": "/v1/procurement/category-managers", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limit-requests", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limit-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limits", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limits/*", "methods": ["GET"]}
     ]},
     "PurchaseOrderConfirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
@@ -424,6 +430,15 @@
       {"resource": "/v1/procurement/category-vendors/*", "methods": ["GET", "PUT"]},
       {"resource": "/v1/procurement/category-managers", "methods": ["GET", "POST"]},
       {"resource": "/v1/procurement/category-managers/*", "methods": ["DELETE"]}
+    ]},
+    "SigningLimitApprove": {"permissions": [
+      {"resource": "/v1/procurement/signing-limit-requests", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limit-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limit-requests/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/procurement/signing-limit-requests/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/procurement/signing-limits", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limits/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/signing-limits/*:recertify", "methods": ["POST"]}
     ]},
     "MatchingPolicyMaintain": {"permissions": [
       {"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]},
@@ -2229,7 +2244,9 @@
       {"resource": "/v1/sales/product-proposal-rules", "methods": ["POST"]},
       {"resource": "/v1/sales/product-proposal-rules/*", "methods": ["DELETE"]},
       {"resource": "/v1/sales/supplementary-item-rules", "methods": ["POST"]},
-      {"resource": "/v1/sales/supplementary-item-rules/*", "methods": ["DELETE"]}
+      {"resource": "/v1/sales/supplementary-item-rules/*", "methods": ["DELETE"]},
+      {"resource": "/v1/sales/alternative-item-rules", "methods": ["POST"]},
+      {"resource": "/v1/sales/alternative-item-rules/*", "methods": ["DELETE"]}
     ]},
     "sales.order.approve": {"permissions": [
       {"resource": "/v1/sales/change-requests/*:approve", "methods": ["POST"]},
@@ -2274,7 +2291,9 @@
       {"resource": "/v1/sales/summary", "methods": ["GET"]},
       {"resource": "/v1/sales/supplementary-item-rules", "methods": ["GET"]},
       {"resource": "/v1/sales/supplementary-items:evaluate", "methods": ["POST"]},
-      {"resource": "/v1/sales/agreements/*/versions", "methods": ["GET"]}
+      {"resource": "/v1/sales/agreements/*/versions", "methods": ["GET"]},
+      {"resource": "/v1/sales/alternative-item-rules", "methods": ["GET"]},
+      {"resource": "/v1/sales/alternative-items:evaluate", "methods": ["POST"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
@@ -2334,7 +2353,9 @@
       {"resource": "/v1/scheduling/capacity-load/jobs", "methods": ["GET"]},
       {"resource": "/v1/scheduling/capacity-blocks/*", "methods": ["GET"]},
       {"resource": "/v1/scheduling/late-orders", "methods": ["GET"]},
-      {"resource": "/v1/scheduling/runs/*/kpis", "methods": ["GET"]}
+      {"resource": "/v1/scheduling/runs/*/kpis", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/order-imports", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/order-imports/*", "methods": ["GET"]}
     ]},
     "scheduling.run": {"permissions": [{"resource": "/v1/scheduling/runs", "methods": ["POST"]}]},
     "scheduling.schedule.write": {"permissions": [
