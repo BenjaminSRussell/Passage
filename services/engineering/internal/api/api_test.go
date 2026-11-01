@@ -66,6 +66,7 @@ type fakeStore struct {
 	groupList   []domain.ResourceGroup
 	capList     []domain.Capability
 	calList     []store.Calendar
+	inUse       bool
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {

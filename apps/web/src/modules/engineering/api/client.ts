@@ -160,6 +160,8 @@ export interface Resource {
   vendorPartyId?: string;
   capabilities?: ResourceCapability[];
   effectiveCalendarId?: string;
+  /** Counts each saved edit; an edit must send the value it loaded. */
+  version?: number;
 }
 
 export interface ResourceGroup {
@@ -235,6 +237,8 @@ function fieldErrors(raw: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+const NO_CONTENT = 204;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = init ? await fetch(`${base}${path}`, init) : await fetch(`${base}${path}`);
   if (!res.ok) {
@@ -243,6 +247,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const message = typeof problem.detail === "string" && problem.detail ? problem.detail : typeof problem.title === "string" ? problem.title : "Request failed";
     throw new ApiError(message, res.status, typeof problem.code === "string" ? problem.code : undefined, fieldErrors(problem.errors));
   }
+  if (res.status === NO_CONTENT) return undefined as T;
   return res.json();
 }
 
@@ -302,6 +307,20 @@ export function listResources(filters: ResourceFilters, cursor?: string): Promis
 
 export function getResource(id: string): Promise<Resource> {
   return request(`/resources/${encodeURIComponent(id)}`);
+}
+
+/** Saves an edited resource: replaces its fields and capabilities. A stale `version` is 409 ENG-RES-VERSION-CONFLICT. */
+export function updateResource(id: string, body: Resource & { version: number }, idempotencyKey: string): Promise<Resource> {
+  return request(`/resources/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Deletes a resource (BR-9.11). 409 ENG-RES-IN-USE while an active route requires it directly. */
+export function deleteResource(id: string): Promise<void> {
+  return request(`/resources/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function listResourceGroups(filters: ResourceGroupFilters, cursor?: string): Promise<Page<ResourceGroup>> {

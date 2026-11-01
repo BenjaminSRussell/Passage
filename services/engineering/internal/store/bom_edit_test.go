@@ -1,7 +1,9 @@
 package store_test
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -116,5 +118,123 @@ func TestPostgres_UpdateBomDraft_RLSHidesAnotherTenantsDraft(t *testing.T) {
 	}
 	if _, err := s.UpdateBomDraft(principalContext(2), edited(draft, "", "HUB"), 1, store.Idem{}, noCheck); problemCode(err) != store.CodeBomNotFound {
 		t.Fatalf("another tenant's edit = %v; want %s", err, store.CodeBomNotFound)
+	}
+}
+
+// A reader never sees the header of one save with the lines of another: two contents alternate, each
+// with its own effective date and line count, while goroutines read through the plain get and
+// through the idempotent replay of a save. Without the share lock on the header the lines can come
+// from the next save.
+func TestPostgres_ReadBomVersion_DuringEditsSeesOneSave(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	draft := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	if _, err := s.CreateBomVersion(ctx, draft, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	shapes := []domain.BomVersion{edited(draft, "S1", "HUB"), edited(draft, "S1", "HUB", "AXLE", "SPOKE")}
+	shapes[1].EffectiveFrom = releaseDay.AddDate(0, 2, 0)
+	if _, err := s.UpdateBomDraft(ctx, shapes[0], 1, store.Idem{Key: "seed", Hash: "h"}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	check := func(got domain.BomVersion) error {
+		two := got.EffectiveFrom.Equal(shapes[1].EffectiveFrom)
+		if got.Version > 1 && two != (len(got.Lines) == 3) {
+			return fmt.Errorf("mixed read at version %d: from %s with %d lines", got.Version, got.EffectiveFrom, len(got.Lines))
+		}
+		return nil
+	}
+	done := make(chan struct{})
+	readers := []func() (domain.BomVersion, error){
+		func() (domain.BomVersion, error) { return s.GetBomVersion(ctx, draft.ID) },
+		func() (domain.BomVersion, error) {
+			return s.UpdateBomDraft(ctx, shapes[0], 1, store.Idem{Key: "seed", Hash: "h"}, noCheck)
+		},
+	}
+	errs := make(chan error, len(readers))
+	for _, read := range readers {
+		go func() {
+			for {
+				select {
+				case <-done:
+					errs <- nil
+					return
+				default:
+				}
+				got, err := read()
+				if err == nil {
+					err = check(got)
+				}
+				if err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	var saveErr error
+	for i := 0; i < 30 && saveErr == nil; i++ {
+		_, saveErr = s.UpdateBomDraft(ctx, shapes[(i+1)%2], i+2, store.Idem{}, noCheck)
+	}
+	close(done)
+	for range readers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if saveErr != nil {
+		t.Fatal(saveErr)
+	}
+}
+
+// GetEco takes FOR SHARE on the headers of the ECO's products in id order. A release must write those
+// headers in the same order: here the new version sorts before the old one, and a reader holds the
+// new one while it waits for the old one. A release that expired the old header first would hold it
+// while waiting for the new one, and Postgres would abort one side as a deadlock.
+func TestPostgres_ReleaseEco_WritesHeadersInTheOrderReadersLockThem(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	lo, hi := ids.New(), ids.New()
+	if hi < lo {
+		lo, hi = hi, lo
+	}
+	old := version("BIKE", domain.StatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), "WHEEL")
+	next := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL", "FRAME")
+	old.ID, next.ID = hi, lo
+	for _, v := range []domain.BomVersion{old, next} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eco := domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoSubmitted, CreatedBy: "rita", ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}}
+	if _, err := s.CreateEco(ctx, eco, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.GetEco(ctx, eco.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := record.Eco
+	if err := loaded.Review(ctx, approverOf(true)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loaded.Release(record.Versions, releaseDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, commit := inFlight(t, pool, ctx)
+	if err := exec(`select 1 from bom_version where id = $1::uuid for share`, lo); err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan error, 1)
+	go func() { released <- s.ReleaseEco(ctx, loaded, domain.EcoSubmitted, plan) }()
+	time.Sleep(300 * time.Millisecond)
+	if err := exec(`select 1 from bom_version where id = $1::uuid for share`, hi); err != nil {
+		t.Fatalf("reader's second share lock = %v; the release must not hold a header the reader locks later", err)
+	}
+	commit()
+	if err := <-released; err != nil {
+		t.Fatalf("release = %v", err)
+	}
+	if got, err := s.GetBomVersion(ctx, next.ID); err != nil || got.Status != domain.StatusActive {
+		t.Fatalf("new version = %+v, %v; want active", got, err)
 	}
 }

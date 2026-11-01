@@ -39,6 +39,7 @@ type Resource struct {
 	VendorPartyID   string
 	Exclusive       bool
 	Capabilities    []ResourceCapability
+	Version         int
 }
 
 type ResourceGroup struct {

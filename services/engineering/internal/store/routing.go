@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -335,6 +337,31 @@ func loadSiteResources(ctx context.Context, tx pgx.Tx, tenantID, siteID string) 
 	return resources, rows.Err()
 }
 
+// shareRequiredResources takes FOR SHARE on the resources an activating version requires directly,
+// in id order, before the site's resources are read. DeleteResource takes the row FOR UPDATE and only
+// then looks for active routes requiring it (BR-9.11), so the two serialize: a delete in flight makes
+// the activation wait and then find the resource gone (ENG-ROUTE-UNSATISFIED), and an activation in
+// flight makes the delete wait and then find the route active (ENG-RES-IN-USE). Activation holds the
+// product lock first and delete never takes one, and shared locks never wait on each other, so the
+// order cannot deadlock. A reference that is not a UUID names no stored resource and is left to the
+// requirement check.
+func shareRequiredResources(ctx context.Context, tx pgx.Tx, tenantID string, v domain.RouteVersion) error {
+	var refs []string
+	for _, o := range v.Operations {
+		for _, r := range o.Requirements {
+			if r.Kind == domain.ReqResource && ids.Valid(r.RefID) {
+				refs = append(refs, strings.ToLower(r.RefID))
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	slices.Sort(refs)
+	_, err := tx.Exec(ctx, `select 1 from resource where tenant_id = $1 and id = any($2::uuid[]) order by id for share`, tenantID, slices.Compact(refs))
+	return err
+}
+
 func (s *Postgres) ActivateRouteVersion(ctx context.Context, id string) (v domain.RouteVersion, err error) {
 	p, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -355,6 +382,9 @@ func (s *Postgres) ActivateRouteVersion(ctx context.Context, id string) (v domai
 			return err
 		}
 		if err = domain.CheckRouteNoOverlap(active, v); err != nil {
+			return err
+		}
+		if err = shareRequiredResources(ctx, tx, p.TenantID, v); err != nil {
 			return err
 		}
 		resources, err := loadSiteResources(ctx, tx, p.TenantID, v.SiteID)

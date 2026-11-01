@@ -67,16 +67,19 @@ type API struct {
 	explosions   atomic.Int64
 	stats        routeStats
 
-	calendarsCreated atomic.Int64
-	resourcesCreated atomic.Int64
-	resourceFailed   atomic.Int64
-	routeFailed      atomic.Int64
-	routeActivated   atomic.Int64
-	routeCancelled   atomic.Int64
-	routeUpdated     atomic.Int64
-	routeConflicts   atomic.Int64
-	bomCopied        atomic.Int64
-	routeCopied      atomic.Int64
+	calendarsCreated  atomic.Int64
+	resourcesCreated  atomic.Int64
+	resourceFailed    atomic.Int64
+	routeFailed       atomic.Int64
+	routeActivated    atomic.Int64
+	routeCancelled    atomic.Int64
+	routeUpdated      atomic.Int64
+	routeConflicts    atomic.Int64
+	resourcesUpdated  atomic.Int64
+	resourcesDeleted  atomic.Int64
+	resourceConflicts atomic.Int64
+	bomCopied         atomic.Int64
+	routeCopied       atomic.Int64
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
@@ -122,6 +125,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resources", a.createResource)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources", a.listResources)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Put("/v1/engineering/resources/{id}", a.updateResource)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Delete("/v1/engineering/resources/{id}", a.deleteResource)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups", a.listResourceGroups)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities", a.listCapabilities)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities/{id}", a.getCapability)
@@ -788,7 +793,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict:
+	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict, domain.CodeResInUse, domain.CodeResConflict:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable

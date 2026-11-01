@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -103,6 +104,8 @@ type Store interface {
 	CreateCapability(ctx context.Context, c domain.Capability, idem Idem) (domain.Capability, error)
 	CreateResource(ctx context.Context, r domain.Resource, idem Idem) (ResourceRecord, error)
 	GetResource(ctx context.Context, id string) (ResourceRecord, error)
+	UpdateResource(ctx context.Context, r domain.Resource, expectedVersion int, idem Idem) (ResourceRecord, error)
+	DeleteResource(ctx context.Context, id string) error
 	ListResources(ctx context.Context, f ResourceFilter, afterID string, limit int) (Page[ResourceRecord], error)
 	ListResourceGroups(ctx context.Context, siteID, afterID string, limit int) (Page[domain.ResourceGroup], error)
 	ListCapabilities(ctx context.Context, afterID string, limit int) (Page[domain.Capability], error)
@@ -242,6 +245,33 @@ func loadVersions(ctx context.Context, tx pgx.Tx, tenantID, cond string, args ..
 	return versions, rows.Err()
 }
 
+// readVersions loads versions for a reader that takes no product lock. Header and lines are separate
+// statements, and under read committed a draft edit (BR-9.3) committing between them would show the
+// new header with the old lines or the reverse. FOR SHARE on the matching headers waits for an edit,
+// activation or cancellation in flight and holds the next one off until this transaction ends, so
+// the line read sees the save the header read saw. Writers load under the product lock instead and
+// must not call this before taking it. A header with no line rows is a version with no lines; a
+// header the share lock found but the load did not is an error, not an empty result.
+func readVersions(ctx context.Context, tx pgx.Tx, tenantID, cond string, args ...any) ([]domain.BomVersion, error) {
+	rows, err := tx.Query(ctx, `select id::text from bom_version v where tenant_id = $1 and (`+cond+`) order by id for share`, append([]any{tenantID}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	locked := 0
+	for rows.Next() {
+		locked++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	versions, err := loadVersions(ctx, tx, tenantID, cond, args...)
+	if err == nil && len(versions) < locked {
+		err = fmt.Errorf("BOM versions locked for reading (%d) disappeared before they were loaded (%d)", locked, len(versions))
+	}
+	return versions, err
+}
+
 func loadSnapshot(ctx context.Context, tx pgx.Tx, tenantID string, roots []string, up bool) (Snapshot, error) {
 	reach := reachDown
 	if up {
@@ -365,7 +395,7 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 			return err
 		}
 		if found {
-			original, err := loadVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
+			original, err := readVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
 			if err != nil || len(original) == 0 {
 				return errors.Join(err, fmt.Errorf("idempotent BOM version %s is missing", id))
 			}
@@ -437,7 +467,7 @@ func (s *Postgres) ListBomVersions(ctx context.Context, f BomVersionFilter, afte
 func (s *Postgres) GetBomVersion(ctx context.Context, id string) (v domain.BomVersion, err error) {
 	p, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		found, err := loadVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
+		found, err := readVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
 		if err != nil {
 			return err
 		}
@@ -550,7 +580,7 @@ func (s *Postgres) GetEco(ctx context.Context, id string) (EcoRecord, error) {
 		for _, r := range rec.Eco.Replaces {
 			versionIDs = append(versionIDs, r.OldVersionID, r.NewVersionID)
 		}
-		rec.Versions, err = loadVersions(ctx, tx, p.TenantID, `product_id in (select product_id from bom_version where tenant_id = $1 and id = any($2::uuid[]))`, versionIDs)
+		rec.Versions, err = readVersions(ctx, tx, p.TenantID, `product_id in (select product_id from bom_version where tenant_id = $1 and id = any($2::uuid[]))`, versionIDs)
 		return err
 	})
 	return rec, err
@@ -633,15 +663,23 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 			p.TenantID, e.ID, string(e.State), e.DecidedBy, string(prev), e.DecisionReason); err != nil {
 			return err
 		}
+		// Headers are written in id order: readVersions (GetEco) takes FOR SHARE on several headers
+		// in id order, so a release writing them in plan order could hold one the reader wants
+		// while waiting for one the reader holds, and deadlock.
+		type headerWrite struct {
+			id, query string
+			at        time.Time
+		}
+		writes := make([]headerWrite, 0, len(plan.Expire)+len(plan.Activate))
 		for _, v := range plan.Expire {
-			if err := transition(ctx, tx, `update bom_version set status = 'expired', effective_to = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'active'`,
-				p.TenantID, v.ID, v.EffectiveTo); err != nil {
-				return err
-			}
+			writes = append(writes, headerWrite{v.ID, `update bom_version set status = 'expired', effective_to = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'active'`, v.EffectiveTo})
 		}
 		for _, v := range plan.Activate {
-			if err := transition(ctx, tx, `update bom_version set status = 'active', effective_from = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'draft'`,
-				p.TenantID, v.ID, v.EffectiveFrom); err != nil {
+			writes = append(writes, headerWrite{v.ID, `update bom_version set status = 'active', effective_from = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'draft'`, v.EffectiveFrom})
+		}
+		slices.SortFunc(writes, func(a, b headerWrite) int { return strings.Compare(strings.ToLower(a.id), strings.ToLower(b.id)) })
+		for _, w := range writes {
+			if err := transition(ctx, tx, w.query, p.TenantID, w.id, w.at); err != nil {
 				return err
 			}
 		}
@@ -741,7 +779,7 @@ func (s *Postgres) UpdateBomDraft(ctx context.Context, v domain.BomVersion, expe
 			return err
 		}
 		if found {
-			current, err := loadVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
+			current, err := readVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
 			if err != nil || len(current) == 0 {
 				return errors.Join(err, fmt.Errorf("idempotent BOM version %s is missing", id))
 			}

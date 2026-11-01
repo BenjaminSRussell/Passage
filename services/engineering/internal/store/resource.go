@@ -21,7 +21,7 @@ import (
 const (
 	dateLayout      = "2006-01-02"
 	calendarColumns = `id::text, code, name, template, closed_dates, generated_from, generated_to, version`
-	resourceColumns = `id::text, code, name, type, site_id, coalesce(group_id::text, ''), coalesce(calendar_id::text, ''), efficiency_pct::text, capacity_per_day_h::text, exclusive, coalesce(vendor_party_id, '')`
+	resourceColumns = `id::text, code, name, type, site_id, coalesce(group_id::text, ''), coalesce(calendar_id::text, ''), efficiency_pct::text, capacity_per_day_h::text, exclusive, coalesce(vendor_party_id, ''), version`
 	upsertDay       = `insert into calendar_day (tenant_id, calendar_id, date, open, shifts, total_h) values ($1, $2::uuid, $3, $4, $5::jsonb, $6::numeric)
 		on conflict (tenant_id, calendar_id, date) do update set open = excluded.open, shifts = excluded.shifts, total_h = excluded.total_h`
 )
@@ -234,7 +234,7 @@ func (s *Postgres) CreateCapability(ctx context.Context, c domain.Capability, id
 
 func scanResource(row pgx.Row, extra ...any) (r domain.Resource, err error) {
 	var efficiency, capacity string
-	if err = row.Scan(append([]any{&r.ID, &r.Code, &r.Name, &r.Type, &r.SiteID, &r.GroupID, &r.CalendarID, &efficiency, &capacity, &r.Exclusive, &r.VendorPartyID}, extra...)...); err != nil {
+	if err = row.Scan(append([]any{&r.ID, &r.Code, &r.Name, &r.Type, &r.SiteID, &r.GroupID, &r.CalendarID, &efficiency, &capacity, &r.Exclusive, &r.VendorPartyID, &r.Version}, extra...)...); err != nil {
 		return r, err
 	}
 	var failure error
@@ -288,7 +288,9 @@ func changedFields(r domain.Resource) []string {
 	return fields
 }
 
-func insertResource(ctx context.Context, tx pgx.Tx, p tenant.Principal, r domain.Resource) error {
+// checkResourceRefs validates a resource and the rows it points at: its group (same site), calendar
+// and capabilities.
+func checkResourceRefs(ctx context.Context, tx pgx.Tx, p tenant.Principal, r domain.Resource) error {
 	if err := domain.ValidateResource(r); err != nil {
 		return err
 	}
@@ -315,6 +317,13 @@ func insertResource(ctx context.Context, tx pgx.Tx, p tenant.Principal, r domain
 	if missing > 0 {
 		return notFound(CodeResNotFound, "a referenced capability does not exist")
 	}
+	return nil
+}
+
+func insertResource(ctx context.Context, tx pgx.Tx, p tenant.Principal, r domain.Resource) error {
+	if err := checkResourceRefs(ctx, tx, p, r); err != nil {
+		return err
+	}
 	efficiency := r.EfficiencyPct
 	if efficiency.IsZero() {
 		efficiency = decimal.NewFromInt(100)
@@ -324,12 +333,7 @@ func insertResource(ctx context.Context, tx pgx.Tx, p tenant.Principal, r domain
 		p.TenantID, r.ID, r.Code, r.Name, r.Type, r.SiteID, emptyToNil(r.GroupID), emptyToNil(r.CalendarID), efficiency.String(), r.CapacityPerDayH.String(), r.Exclusive, emptyToNil(r.VendorPartyID)); err != nil {
 		return err
 	}
-	batch := &pgx.Batch{}
-	for _, c := range r.Capabilities {
-		batch.Queue(`insert into resource_capability (tenant_id, resource_id, capability_id, effective_from, level, effective_to) values ($1, $2, $3, $4, $5, $6)`,
-			p.TenantID, r.ID, c.CapabilityID, c.EffectiveFrom, c.Level, zeroToNil(c.EffectiveTo))
-	}
-	if err := execBatch(ctx, tx, batch); err != nil {
+	if err := insertResourceCapabilities(ctx, tx, p.TenantID, r); err != nil {
 		return err
 	}
 	data := engevents.ResourceChangedData{ResourceID: r.ID, SiteID: r.SiteID, CalendarID: r.CalendarID, EfficiencyPct: efficiency.String(), ChangedFields: changedFields(r)}
@@ -499,4 +503,154 @@ func (s *Postgres) GetCapability(ctx context.Context, id string) (c domain.Capab
 		return err
 	})
 	return c, err
+}
+
+func insertResourceCapabilities(ctx context.Context, tx pgx.Tx, tenantID string, r domain.Resource) error {
+	batch := &pgx.Batch{}
+	for _, c := range r.Capabilities {
+		batch.Queue(`insert into resource_capability (tenant_id, resource_id, capability_id, effective_from, level, effective_to) values ($1, $2, $3, $4, $5, $6)`,
+			tenantID, r.ID, c.CapabilityID, c.EffectiveFrom, c.Level, zeroToNil(c.EffectiveTo))
+	}
+	return execBatch(ctx, tx, batch)
+}
+
+// lockResource takes the resource row FOR UPDATE, so an edit, a delete and a route activation that
+// reads it queue behind one another, and returns the stored record.
+func lockResource(ctx context.Context, tx pgx.Tx, tenantID, id string) (ResourceRecord, error) {
+	var locked string
+	if err := tx.QueryRow(ctx, `select id::text from resource where tenant_id = $1 and id = $2::uuid for update`, tenantID, id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
+		return ResourceRecord{}, notFound(CodeResNotFound, "resource not found")
+	} else if err != nil {
+		return ResourceRecord{}, err
+	}
+	return getResource(ctx, tx, tenantID, id)
+}
+
+func sameCapabilities(a, b []domain.ResourceCapability) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(c domain.ResourceCapability) string {
+		return fmt.Sprintf("%s|%d|%s|%s", c.CapabilityID, c.Level, c.EffectiveFrom.Format(time.DateOnly), c.EffectiveTo.Format(time.DateOnly))
+	}
+	seen := map[string]int{}
+	for _, c := range a {
+		seen[key(c)]++
+	}
+	for _, c := range b {
+		seen[key(c)]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func differingFields(old, next domain.Resource) []string {
+	var out []string
+	for _, f := range []struct {
+		name string
+		same bool
+	}{
+		{"name", old.Name == next.Name}, {"type", old.Type == next.Type}, {"groupId", old.GroupID == next.GroupID}, {"calendarId", old.CalendarID == next.CalendarID},
+		{"efficiencyPct", old.EfficiencyPct.Equal(next.EfficiencyPct)}, {"capacityPerDayH", old.CapacityPerDayH.Equal(next.CapacityPerDayH)},
+		{"exclusive", old.Exclusive == next.Exclusive}, {"vendorPartyId", old.VendorPartyID == next.VendorPartyID}, {"capabilities", sameCapabilities(old.Capabilities, next.Capabilities)},
+	} {
+		if !f.same {
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
+
+// UpdateResource replaces the name, type, group, calendar, efficiency, capacity, exclusivity, vendor
+// and capabilities of a resource. The code and site are its identity and stay (the caller refuses a
+// change). expectedVersion is the counter the caller edited: another save in between answers
+// ENG-RES-VERSION-CONFLICT and nothing is written. A save that changes nothing writes nothing and
+// emits nothing; any other adds 1 to version and emits resource.changed naming the changed fields.
+// A replayed Idempotency-Key returns the resource as it is now without writing again.
+func (s *Postgres) UpdateResource(ctx context.Context, r domain.Resource, expectedVersion int, idem Idem) (rec ResourceRecord, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		id, found, err := replay(ctx, tx, p.TenantID, idem)
+		if err != nil {
+			return err
+		}
+		if found {
+			rec, err = getResource(ctx, tx, p.TenantID, id)
+			return err
+		}
+		stored, err := lockResource(ctx, tx, p.TenantID, r.ID)
+		if err != nil {
+			return err
+		}
+		if stored.Resource.Version != expectedVersion {
+			return &domain.Error{Code: domain.CodeResConflict, Detail: fmt.Sprintf("the resource is at version %d, you edited version %d; reload it and merge your changes", stored.Resource.Version, expectedVersion)}
+		}
+		r.Code, r.SiteID = stored.Resource.Code, stored.Resource.SiteID
+		if err := checkResourceRefs(ctx, tx, p, r); err != nil {
+			return err
+		}
+		if r.EfficiencyPct.IsZero() {
+			r.EfficiencyPct = decimal.NewFromInt(100)
+		}
+		changed := differingFields(stored.Resource, r)
+		if len(changed) > 0 {
+			if _, err := tx.Exec(ctx, `update resource set name = $3, type = $4, group_id = $5, calendar_id = $6, efficiency_pct = $7::numeric, capacity_per_day_h = $8::numeric,
+				exclusive = $9, vendor_party_id = $10, version = version + 1 where tenant_id = $1 and id = $2::uuid`,
+				p.TenantID, r.ID, r.Name, r.Type, emptyToNil(r.GroupID), emptyToNil(r.CalendarID), r.EfficiencyPct.String(), r.CapacityPerDayH.String(), r.Exclusive, emptyToNil(r.VendorPartyID)); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `delete from resource_capability where tenant_id = $1 and resource_id = $2::uuid`, p.TenantID, r.ID); err != nil {
+				return err
+			}
+			if err := insertResourceCapabilities(ctx, tx, p.TenantID, r); err != nil {
+				return err
+			}
+			data := engevents.ResourceChangedData{ResourceID: r.ID, SiteID: stored.Resource.SiteID, CalendarID: r.CalendarID, EfficiencyPct: r.EfficiencyPct.String(), ChangedFields: changed}
+			if err := emit(ctx, tx, p, r.ID, engevents.ResourceChanged, aggregateResource, r.ID, data); err != nil {
+				return err
+			}
+		}
+		if err := remember(ctx, tx, p.TenantID, idem, r.ID); err != nil {
+			return err
+		}
+		rec, err = getResource(ctx, tx, p.TenantID, r.ID)
+		return err
+	})
+	return rec, conflictOnDuplicate(err)
+}
+
+// DeleteResource removes a resource and its capabilities (BR-9.11). It is refused with
+// ENG-RES-IN-USE while an active route version requires the resource directly; requirements by
+// group, capability or type are unaffected. It emits resource.changed with the changed field
+// "deleted", so schedulers that cache the resource can drop it.
+func (s *Postgres) DeleteResource(ctx context.Context, id string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		stored, err := lockResource(ctx, tx, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		var route string
+		err = tx.QueryRow(ctx, `select v.product_id || ' ' || v.route_code || ' v' || v.version_no from operation_requirement q
+			join route_version v on v.tenant_id = q.tenant_id and v.id = q.route_version_id
+			where q.tenant_id = $1 and q.kind = 'resource' and q.ref_id = $2 and v.status = 'active' order by v.id limit 1`, p.TenantID, id).Scan(&route)
+		if err == nil {
+			return &domain.Error{Code: domain.CodeResInUse, Detail: fmt.Sprintf("resource %s is required by active route %s; change the route first", stored.Resource.Code, route)}
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `delete from resource_capability where tenant_id = $1 and resource_id = $2::uuid`, p.TenantID, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `delete from resource where tenant_id = $1 and id = $2::uuid`, p.TenantID, id); err != nil {
+			return err
+		}
+		data := engevents.ResourceChangedData{ResourceID: id, SiteID: stored.Resource.SiteID, CalendarID: stored.Resource.CalendarID, EfficiencyPct: stored.Resource.EfficiencyPct.String(), ChangedFields: []string{"deleted"}}
+		return emit(ctx, tx, p, id, engevents.ResourceChanged, aggregateResource, id, data)
+	})
 }

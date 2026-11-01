@@ -63,8 +63,10 @@ const (
 )
 
 const (
-	CodeCalShift  = "ENG-CAL-SHIFT"
-	CodeCalRange  = "ENG-CAL-RANGE"
-	CodeResVendor = "ENG-RES-VENDOR"
-	CodeResSite   = "ENG-RES-SITE"
+	CodeCalShift    = "ENG-CAL-SHIFT"
+	CodeCalRange    = "ENG-CAL-RANGE"
+	CodeResVendor   = "ENG-RES-VENDOR"
+	CodeResSite     = "ENG-RES-SITE"
+	CodeResInUse    = "ENG-RES-IN-USE"
+	CodeResConflict = "ENG-RES-VERSION-CONFLICT"
 )

@@ -256,7 +256,7 @@ paths:
           description: ENG-ROUTE-STATE, the version is not a draft, or ENG-ROUTE-OVERLAP, another active version of the same product and site overlaps its dates.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: ENG-ROUTE-UNSATISFIED, an operation requirement cannot be met by the resources of the site.
+          description: ENG-ROUTE-UNSATISFIED, an operation requirement cannot be met by the resources of the site; a requirement naming a resource that no longer exists (deleted since the draft was written) says which resource.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions/{id}:cancel:
@@ -699,6 +699,49 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
         '404': { $ref: '#/components/responses/NotFound' }
         default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: updateResource
+      summary: Save an edited resource
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
+      responses:
+        '200':
+          description: The resource as saved. Name, type, group, calendar, efficiency, capacity, exclusivity, vendor and every capability are replaced by the request, so a capability left out is removed; version is the loaded version plus 1 and resource.changed names the fields that differ. A save that changes nothing writes nothing and emits no event. The code and site are the resource's identity; they may be omitted but not changed. The version field of the request is required and must be the value the editor loaded. An Idempotency-Key replay returns the resource as it is now.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
+        '400':
+          description: COM-0001 with per-field errors, for a missing version, a changed code or siteId, a bad type, efficiency, capacity or capability, an unknown field, or an id that is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-RES-VERSION-CONFLICT, another save came first (reload the resource and merge); or the Idempotency-Key is in flight.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-RES-VENDOR, a vendor resource needs vendorPartyId and others must not carry one; ENG-RES-SITE, the group is at another site; or idempotency_key_reuse, the key was used for a different request.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteResource
+      summary: Delete a resource
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: 'The resource and its capabilities are deleted (BR-9.11) and resource.changed is emitted with the changed field deleted. Route versions that are not active keep naming the id; activating such a draft fails ENG-ROUTE-UNSATISFIED. A delete waits for an activation in flight that requires the resource and is then refused if it went active.' }
+        '400':
+          description: COM-0001, the id is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-RES-IN-USE, an active route version requires this resource directly; change the route first. Requirements by group, capability or type do not block.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -1009,6 +1052,7 @@ components:
         vendorPartyId: { type: string, maxLength: 64, description: Required for type vendor and refused for other types }
         capabilities: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ResourceCapability' } }
         effectiveCalendarId: { type: string, format: uuid, readOnly: true }
+        version: { type: integer, minimum: 1, description: 'Starts at 1 and counts each saved edit. Required on PUT as the value the editor loaded; ignored on POST.' }
     Problem:
       type: object
       required: [type, title, status]

@@ -99,6 +99,7 @@ type resourceBody struct {
 	VendorPartyID       string                   `json:"vendorPartyId,omitempty"`
 	Capabilities        []resourceCapabilityBody `json:"capabilities"`
 	EffectiveCalendarID string                   `json:"effectiveCalendarId,omitempty"`
+	Version             int                      `json:"version,omitempty"`
 }
 
 func requireName(value string, fields map[string]string) {
@@ -380,7 +381,7 @@ func bodyFromResource(rec store.ResourceRecord) resourceBody {
 	body := resourceBody{
 		ID: r.ID, Code: r.Code, Name: r.Name, Type: r.Type, SiteID: r.SiteID, GroupID: r.GroupID, CalendarID: r.CalendarID,
 		EfficiencyPct: &efficiency, CapacityPerDayH: &capacity, Exclusive: r.Exclusive, VendorPartyID: r.VendorPartyID,
-		Capabilities: make([]resourceCapabilityBody, len(r.Capabilities)), EffectiveCalendarID: rec.EffectiveCalendarID,
+		Capabilities: make([]resourceCapabilityBody, len(r.Capabilities)), EffectiveCalendarID: rec.EffectiveCalendarID, Version: r.Version,
 	}
 	for i, c := range r.Capabilities {
 		body.Capabilities[i] = resourceCapabilityBody{CapabilityID: c.CapabilityID, Level: c.Level, EffectiveFrom: formatDate(c.EffectiveFrom), EffectiveTo: formatDate(c.EffectiveTo)}
@@ -409,4 +410,68 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getResource(w http.ResponseWriter, r *http.Request) {
 	getByID(a, w, r, "get resource", a.store.GetResource, bodyFromResource)
+}
+
+// updateResource saves an edited resource: the request carries the whole editable record plus the
+// version number the editor loaded. Capabilities are replaced as a whole. The code and site are the
+// resource's identity and cannot change (they may be omitted). A stale version is 409
+// ENG-RES-VERSION-CONFLICT and nothing is written.
+func (a *API) updateResource(w http.ResponseWriter, r *http.Request) {
+	var body resourceBody
+	if !readBody(w, r, &body) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	stored, err := a.store.GetResource(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "update resource", err, &a.resourceFailed)
+		return
+	}
+	for _, c := range []struct{ name, got, want string }{{"code", body.Code, stored.Resource.Code}, {"siteId", body.SiteID, stored.Resource.SiteID}} {
+		if c.got != "" && c.got != c.want {
+			invalid(w, r, map[string]string{c.name: "cannot be changed; create another resource instead"})
+			return
+		}
+	}
+	body.Code, body.SiteID = stored.Resource.Code, stored.Resource.SiteID
+	resource, fields := body.toDomain()
+	if body.Version < 1 {
+		fields["version"] = "is required: the version number you loaded"
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	resource.ID = id
+	updated, err := a.store.UpdateResource(r.Context(), resource, body.Version, copyIdem(r, id, body))
+	if err != nil {
+		if domain.HasCode(err, domain.CodeResConflict) {
+			a.resourceConflicts.Add(1)
+		}
+		a.fail(w, r, "update resource", err, &a.resourceFailed)
+		return
+	}
+	a.resourcesUpdated.Add(1)
+	httpx.JSON(w, http.StatusOK, bodyFromResource(updated))
+}
+
+// deleteResource removes a resource (BR-9.11). It is 409 ENG-RES-IN-USE while an active route
+// version requires the resource directly.
+func (a *API) deleteResource(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := a.store.DeleteResource(r.Context(), id); err != nil {
+		a.fail(w, r, "delete resource", err, &a.resourceFailed)
+		return
+	}
+	a.resourcesDeleted.Add(1)
+	w.WriteHeader(http.StatusNoContent)
 }

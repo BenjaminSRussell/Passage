@@ -29,6 +29,7 @@ import {
   type ResourceGroupFilters,
 } from "./api/client";
 import { errorText } from "./screens";
+import { ResourceActions } from "./resourceEdit";
 import styles from "./pages.module.css";
 
 const resourceTypes = ["machine", "tool", "labor", "vendor", "location"];
@@ -219,7 +220,7 @@ export function calendarLink(calendarId?: string): ReactNode {
   return calendarId ? <Link to={`/engineering/calendars/${encodeURIComponent(calendarId)}/days`}>Calendar days</Link> : "";
 }
 
-export function ResourceDetailPage({ id, onBack }: { id: string; onBack?: () => void }) {
+export function ResourceDetailPage({ id, onBack, onDeleted }: { id: string; onBack?: () => void; onDeleted?: () => void }) {
   const [resource, setResource] = useState<Resource | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -278,6 +279,7 @@ export function ResourceDetailPage({ id, onBack }: { id: string; onBack?: () => 
       ) : null}
       {resource ? (
         <>
+          <ResourceActions key={`${resource.id}-${resource.version ?? 0}`} resource={resource} onSaved={() => setAttempt((n) => n + 1)} onDeleted={onDeleted ?? onBack} />
           <Card title="Resource">
             <dl className={styles.facts}>
               {facts.map(([term, value]) => (

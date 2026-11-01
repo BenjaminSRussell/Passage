@@ -344,9 +344,16 @@ func CheckRequirements(v RouteVersion, resources []Resource) error {
 				need = 1
 			}
 			req := Requirement{Kind: r.Kind, ID: r.RefID, MinLevel: r.Level, Type: r.RefID}
-			if len(Satisfies(req, atSite, groups, v.EffectiveFrom)) < need {
-				unmet = append(unmet, fmt.Sprintf("operation %d requirement[%d]", o.No, i))
+			if len(Satisfies(req, atSite, groups, v.EffectiveFrom)) >= need {
+				continue
 			}
+			if r.Kind == ReqResource {
+				// A draft may still name a resource deleted since it was written (BR-9.11 refuses a
+				// delete only for active routes), so say which one is missing.
+				unmet = append(unmet, fmt.Sprintf("operation %d requirement[%d] (resource %s does not exist at this site; it may have been deleted)", o.No, i, r.RefID))
+				continue
+			}
+			unmet = append(unmet, fmt.Sprintf("operation %d requirement[%d]", o.No, i))
 		}
 	}
 	if len(unmet) > 0 {

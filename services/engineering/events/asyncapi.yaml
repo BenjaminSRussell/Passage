@@ -124,7 +124,8 @@ components:
       x-passage-type: dev.passage.engineering.routeversion.activated.v1
     resourceChanged:
       name: resourceChanged
-      title: Resource created or changed
+      title: Resource created, changed or deleted
+      description: Emitted when a resource is created, when an edit changes at least one field, and when it is deleted. changedFields names the fields that differ; a delete carries the single value deleted.
       payload:
         type: object
         required: [resourceId, efficiencyPct, changedFields]
