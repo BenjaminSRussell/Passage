@@ -237,3 +237,26 @@ func TestPlanCampaign_Property(t *testing.T) {
 		}
 	})
 }
+
+func TestCanCompleteAndCancel(t *testing.T) {
+	for status, want := range map[string]struct{ complete, cancel string }{
+		CampaignProposed:  {CodeCampaignNotStarted, ""},
+		CampaignPlanned:   {CodeCampaignNotStarted, ""},
+		CampaignStarted:   {"", ""},
+		CampaignCompleted: {CodeCampaignStarted, CodeCampaignStarted},
+		CampaignCancelled: {CodeCampaignStarted, CodeCampaignStarted},
+	} {
+		code := func(c *Conflict) string {
+			if c == nil {
+				return ""
+			}
+			return c.Code
+		}
+		if got := code(CanComplete(status)); got != want.complete {
+			t.Errorf("CanComplete(%s) = %q, want %q", status, got, want.complete)
+		}
+		if got := code(CanCancel(status)); got != want.cancel {
+			t.Errorf("CanCancel(%s) = %q, want %q", status, got, want.cancel)
+		}
+	}
+}

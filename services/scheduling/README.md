@@ -69,6 +69,8 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   a resource has run since its last cleanout (BR-23.13). Sequencing reads it;
   starting a campaign sets it to the plan's carry-out and refuses with
   SCHED-0123 when another campaign moved it after this one was sequenced.
+  Cancelling a started campaign sets it back to the plan's carry-in, but only
+  while that campaign is still the last to have moved it.
 - **CapacityBlock** (`scheduling_capacity_block`): weekly windows in the
   resource's time zone, one dated window, or a recurrence (an RRULE subset,
   `FREQ=DAILY|WEEKLY` with `INTERVAL`, `BYDAY`, and `COUNT` or `UNTIL`, from a
@@ -228,6 +230,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST / DELETE | `/v1/scheduling/campaigns/{id}/orders`, `/orders/{orderId}` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:sequence` (Idempotency-Key, If-Match) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/campaigns/{id}:start` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
+| POST | `/v1/scheduling/campaigns/{id}:complete` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
+| POST | `/v1/scheduling/campaigns/{id}:cancel` (Idempotency-Key, If-Match, optional `reason`) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:allocate-cost` (computes only; nothing is stored) | `scheduling.campaign.write` |
 | GET | `/v1/scheduling/campaign-proposals?from&windowDays&resourceId` (computes only; nothing is stored) | `scheduling.read` |
 
@@ -243,6 +247,8 @@ The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
 | `dev.passage.scheduling.orderdates.changed.v1` | an order's scheduled start, end or lateness changed |
 | `dev.passage.scheduling.campaign.sequenced.v1` | a campaign is sequenced (order sequence and cleanouts for production) |
 | `dev.passage.scheduling.campaign.started.v1` | a campaign starts and is frozen |
+| `dev.passage.scheduling.campaign.completed.v1` | a started campaign is completed |
+| `dev.passage.scheduling.campaign.cancelled.v1` | a campaign is cancelled; carries the released order ids and whether the cleanout counter was given back |
 
 The PRD names the last one `passage.scheduling.order.dates-changed.v1`; the
 platform naming rule allows no hyphen in the verb, so the entity is
@@ -264,7 +270,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
 | `SCHED-0010` | 422 / run warning | A move breaks a network step's transfer or maximum wait; in a run, a frozen predecessor left the successor waiting too long |
 | `SCHED-0006` | campaign plan message | cp-sat campaign: the solver status (OPTIMAL, FEASIBLE, UNKNOWN, INFEASIBLE, UNAVAILABLE when scheduler-opt is not configured or failed, TOO_LARGE above 50 orders) and whether the optimized or the heuristic sequence was kept |
-| `SCHED-0011` | 422 | The campaign has started (or is completed or cancelled); orders cannot join, leave or be resequenced |
+| `SCHED-0011` | 422 | The campaign has started (or is completed or cancelled); orders cannot join, leave or be resequenced, and a completed or cancelled campaign cannot be completed or cancelled again |
 | `SCHED-0012` | warning | In a campaign plan or a run: no setup matrix entry for a group pair; the route setup time was used |
 | `SCHED-0014` | run warning | The job matches no capacity block on its resource and was placed in unblocked capacity |
 | `SCHED-0101` | 409 | Resource code already exists |
@@ -291,6 +297,8 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0122` | 404 | Order peg not found |
 | `SCHED-0130` | 404 | Capacity override not found |
 | `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
+| `SCHED-0124` | 412 | If-Match is stale: the resource changed since it was read |
+| `SCHED-0125` | 422 | Complete needs a started campaign |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

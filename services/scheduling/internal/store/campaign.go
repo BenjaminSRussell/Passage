@@ -30,6 +30,7 @@ const (
 	CodeCampaignNotPlanned    = "SCHED-0117"
 	CodeCampaignOrderNotFound = "SCHED-0118"
 	CodeCleanoutCounterMoved  = "SCHED-0123"
+	CodeCampaignNotStarted    = domain.CodeCampaignNotStarted
 )
 
 // CampaignOrder is one production order in a campaign. Position is the order
@@ -85,6 +86,9 @@ type Campaign struct {
 	Plan              *CampaignPlan    `json:"plan"`
 	SequencedAt       *time.Time       `json:"sequencedAt"`
 	StartedAt         *time.Time       `json:"startedAt"`
+	CompletedAt       *time.Time       `json:"completedAt"`
+	CancelledAt       *time.Time       `json:"cancelledAt"`
+	CancelReason      *string          `json:"cancelReason"`
 	Version           int              `json:"version"`
 	CreatedAt         time.Time        `json:"createdAt"`
 	Orders            []CampaignOrder  `json:"orders,omitempty"`
@@ -120,6 +124,7 @@ type CampaignCommand struct {
 	Version    int
 	Order      CampaignOrder
 	OrderID    string
+	Reason     string
 	Proposal   *domain.SolverProposal
 }
 
@@ -132,13 +137,15 @@ type CampaignStore interface {
 	RemoveCampaignOrder(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	SequenceCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	StartCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
+	CompleteCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
+	CancelCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	CampaignSetupMatrix(ctx context.Context, resourceID string, on time.Time) (domain.SetupMatrix, error)
 	ProposeCampaigns(ctx context.Context, f ProposalFilter) ([]domain.ProposedCampaign, error)
 }
 
 const campaignCols = `c.id::text, c.resource_id::text, c.campaign_key, c.status, c.planned_start, c.max_orders, c.max_qty::text, c.max_minutes,
 	c.sequence_rule, c.current_setup_group, (select count(*) from scheduling_campaign_order o where o.campaign_id = c.id)::int,
-	c.run_minutes, c.total_changeover_minutes, c.cleanout_minutes, c.plan, c.sequenced_at, c.started_at, c.version, c.created_at`
+	c.run_minutes, c.total_changeover_minutes, c.cleanout_minutes, c.plan, c.sequenced_at, c.started_at, c.completed_at, c.cancelled_at, c.cancel_reason, c.version, c.created_at`
 
 func scanCampaign(row pgx.Row) (Campaign, error) {
 	var c Campaign
@@ -146,7 +153,7 @@ func scanCampaign(row pgx.Row) (Campaign, error) {
 	var plan []byte
 	if err := row.Scan(&c.ID, &c.ResourceID, &c.CampaignKey, &c.Status, &c.PlannedStart, &c.MaxOrders, &maxQty, &c.MaxMinutes,
 		&c.SequenceRule, &c.CurrentSetupGroup, &c.OrderCount, &c.RunMinutes, &c.ChangeoverMinutes, &c.CleanoutMinutes, &plan,
-		&c.SequencedAt, &c.StartedAt, &c.Version, &c.CreatedAt); err != nil {
+		&c.SequencedAt, &c.StartedAt, &c.CompletedAt, &c.CancelledAt, &c.CancelReason, &c.Version, &c.CreatedAt); err != nil {
 		return Campaign{}, err
 	}
 	if maxQty != nil {
@@ -541,6 +548,70 @@ func (s *Postgres) StartCampaign(ctx context.Context, cmd CampaignCommand, idem 
 		}
 		return enqueue(ctx, tx, "campaign", c.ID, schedevents.CampaignStarted,
 			schedevents.CampaignStartedData{CampaignID: c.ID, ResourceID: c.ResourceID, StartedAt: rfc(startedAt), Version: version})
+	})
+}
+
+// CompleteCampaign finishes a started campaign (FR-23.14). Its orders stay on
+// it for the record and campaign.completed is published.
+func (s *Postgres) CompleteCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error) {
+	return s.campaignCommand(ctx, cmd, idem, func(tx pgx.Tx, c Campaign) error {
+		if conflict := domain.CanComplete(c.Status); conflict != nil {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, conflict.Code, conflict.Detail)
+		}
+		var at time.Time
+		var version int
+		if err := tx.QueryRow(ctx, `update scheduling_campaign set status = 'completed', completed_at = now(), version = version + 1
+			where id = $1 returning completed_at, version`, c.ID).Scan(&at, &version); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "campaign", c.ID, schedevents.CampaignCompleted,
+			schedevents.CampaignCompletedData{CampaignID: c.ID, ResourceID: c.ResourceID, CompletedAt: rfc(at), Version: version})
+	})
+}
+
+// CancelCampaign cancels a campaign that is not finished and releases its
+// orders so they can join another campaign (the order belongs to at most one).
+// A started campaign gives back the cleanout counter it advanced, but only
+// while nothing has moved the counter since; otherwise the counter stays, as
+// the later campaign already built on it.
+func (s *Postgres) CancelCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error) {
+	return s.campaignCommand(ctx, cmd, idem, func(tx pgx.Tx, c Campaign) error {
+		if conflict := domain.CanCancel(c.Status); conflict != nil {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, conflict.Code, conflict.Detail)
+		}
+		restored := false
+		if c.Status == domain.CampaignStarted && c.Plan != nil {
+			counter, err := cleanoutCounter(ctx, tx, c.ResourceID, true)
+			if err != nil {
+				return err
+			}
+			var last *string
+			if err := tx.QueryRow(ctx, `select last_campaign_id::text from scheduling_cleanout_counter where resource_id = $1`, c.ResourceID).Scan(&last); err != nil {
+				return err
+			}
+			if last != nil && *last == c.ID && counter == c.Plan.CarryOut {
+				if _, err := tx.Exec(ctx, `update scheduling_cleanout_counter set batches_since = $2, minutes_since = $3, last_campaign_id = null,
+					updated_at = now() where resource_id = $1`, c.ResourceID, c.Plan.CarryIn.Batches, c.Plan.CarryIn.Minutes); err != nil {
+					return err
+				}
+				restored = true
+			}
+		}
+		orderIDs := make([]string, 0, len(c.Orders))
+		for _, o := range c.Orders {
+			orderIDs = append(orderIDs, o.OrderID)
+		}
+		if _, err := tx.Exec(ctx, `delete from scheduling_campaign_order where campaign_id = $1`, c.ID); err != nil {
+			return err
+		}
+		var at time.Time
+		var version int
+		if err := tx.QueryRow(ctx, `update scheduling_campaign set status = 'cancelled', cancelled_at = now(), cancel_reason = nullif($2, ''),
+			version = version + 1 where id = $1 returning cancelled_at, version`, c.ID, cmd.Reason).Scan(&at, &version); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "campaign", c.ID, schedevents.CampaignCancelled, schedevents.CampaignCancelledData{CampaignID: c.ID,
+			ResourceID: c.ResourceID, CancelledAt: rfc(at), Reason: cmd.Reason, OrderIDs: orderIDs, CounterRestored: restored, Version: version})
 	})
 }
 

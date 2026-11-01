@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -320,6 +321,61 @@ func (a *API) startCampaign(w http.ResponseWriter, r *http.Request) {
 	a.campaignCommand(w, r, "start", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
 		return a.store.StartCampaign(r.Context(), cmd, idem)
 	}, store.CampaignCommand{CampaignID: id})
+}
+
+func (a *API) completeCampaign(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := campaignID(w, r)
+	if !ok {
+		return
+	}
+	body, err := readBody(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.campaignCommand(w, r, "complete", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+		return a.store.CompleteCampaign(r.Context(), cmd, idem)
+	}, store.CampaignCommand{CampaignID: id})
+}
+
+type cancelCampaignRequest struct {
+	Reason string `json:"reason"`
+}
+
+// maxCancelReason bounds the free-text reason kept on a cancelled campaign.
+const maxCancelReason = 500
+
+func (a *API) cancelCampaign(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := campaignID(w, r)
+	if !ok {
+		return
+	}
+	var req cancelCampaignRequest
+	body, err := readBody(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if len(strings.TrimSpace(string(body))) > 0 {
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if utf8.RuneCountInString(req.Reason) > maxCancelReason {
+		invalid(w, r, map[string]string{"reason": fmt.Sprintf("must be at most %d characters", maxCancelReason)})
+		return
+	}
+	a.campaignCommand(w, r, "cancel", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+		return a.store.CancelCampaign(r.Context(), cmd, idem)
+	}, store.CampaignCommand{CampaignID: id, Reason: req.Reason})
 }
 
 type allocationActual struct {

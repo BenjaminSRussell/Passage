@@ -117,6 +117,14 @@ func (f *fakeStore) StartCampaign(_ context.Context, cmd store.CampaignCommand, 
 	return f.command(cmd, idem)
 }
 
+func (f *fakeStore) CompleteCampaign(_ context.Context, cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+	return f.command(cmd, idem)
+}
+
+func (f *fakeStore) CancelCampaign(_ context.Context, cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+	return f.command(cmd, idem)
+}
+
 func doWith(h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("X-Passage-Tenant", tenantID)
@@ -387,5 +395,39 @@ func TestListCampaigns_Filters(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/v1/scheduling/campaigns/not-a-uuid", "", allDuties, ""); rec.Code != http.StatusNotFound || problemOf(t, rec).Code != store.CodeCampaignNotFound {
 		t.Fatalf("bad id: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCampaignCompleteAndCancel(t *testing.T) {
+	f := &fakeStore{campaign: seededCampaign()}
+	h := newRouter(f)
+	hdr := map[string]string{"If-Match": `"5"`, "Idempotency-Key": "k1"}
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":complete", "", allDuties, hdr); rec.Code != http.StatusOK ||
+		f.lastCmd.Version != 5 || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("complete: %d %+v", rec.Code, f.lastCmd)
+	}
+	// Cancel takes an optional reason, trimmed; an empty body is fine.
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":cancel", `{"reason":"  customer dropped the run "}`, allDuties, hdr); rec.Code != http.StatusOK ||
+		f.lastCmd.Reason != "customer dropped the run" || f.lastCmd.CampaignID != campID {
+		t.Fatalf("cancel: %d %+v", rec.Code, f.lastCmd)
+	}
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":cancel", "", allDuties, hdr); rec.Code != http.StatusOK || f.lastCmd.Reason != "" {
+		t.Fatalf("cancel without body: %d %+v", rec.Code, f.lastCmd)
+	}
+	long := `{"reason":"` + strings.Repeat("x", 501) + `"}`
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":cancel", long, allDuties, hdr); rec.Code != http.StatusBadRequest {
+		t.Fatalf("long reason: %d", rec.Code)
+	}
+	// Both need the key and the version, and the campaign duty.
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":cancel", "", allDuties, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("cancel without If-Match: %d", rec.Code)
+	}
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":complete", "", "scheduling.read", hdr); rec.Code != http.StatusForbidden {
+		t.Fatalf("complete without duty: %d", rec.Code)
+	}
+	f.err = httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeCampaignNotStarted, "start the campaign before you complete it")
+	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":complete", "", allDuties, hdr); rec.Code != http.StatusUnprocessableEntity ||
+		problemOf(t, rec).Code != "SCHED-0125" {
+		t.Fatalf("not started: %d %s", rec.Code, rec.Body)
 	}
 }

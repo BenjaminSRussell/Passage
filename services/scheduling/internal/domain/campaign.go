@@ -113,6 +113,31 @@ func CanJoin(status string) *Conflict {
 	return &Conflict{Code: CodeCampaignStarted, Detail: "unknown campaign status " + status}
 }
 
+// CodeCampaignNotStarted is SCHED-0125: only a started campaign can be completed.
+const CodeCampaignNotStarted = "SCHED-0125"
+
+// CanComplete reports whether a campaign with this status may be completed:
+// only a started one (FR-23.14).
+func CanComplete(status string) *Conflict {
+	switch status {
+	case CampaignStarted:
+		return nil
+	case CampaignProposed, CampaignPlanned:
+		return &Conflict{Code: CodeCampaignNotStarted, Detail: "start the campaign before you complete it"}
+	}
+	return &Conflict{Code: CodeCampaignStarted, Detail: fmt.Sprintf("campaign is already %s", status)}
+}
+
+// CanCancel reports whether a campaign with this status may be cancelled: any
+// that is not already completed or cancelled.
+func CanCancel(status string) *Conflict {
+	switch status {
+	case CampaignProposed, CampaignPlanned, CampaignStarted:
+		return nil
+	}
+	return &Conflict{Code: CodeCampaignStarted, Detail: fmt.Sprintf("campaign is already %s", status)}
+}
+
 // CheckOrders validates a campaign's order list against its limits on order
 // count and quantity. The duration limit needs the sequence and is checked by
 // PlanCampaign.

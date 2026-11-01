@@ -67,6 +67,26 @@ affected jobs after saving, stale-version message with a reload of the
 latest version), linked from the resource detail. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
 No new duty.
 
+Slice 14 builds campaign completion and cancellation (FR-23.14).
+`POST /campaigns/{id}:complete` (a started campaign only, SCHED-0125 otherwise)
+and `POST /campaigns/{id}:cancel` (optional `reason`, at most 500 characters;
+any campaign that is not completed or cancelled), both duty
+`scheduling.campaign.write`, Idempotency-Key and If-Match with the campaign
+version. Cancelling releases the orders (their rows are removed, so they can
+join another campaign; the list is in `campaign.cancelled`), and a started
+campaign gives back the resource's cleanout counter (its plan's carry-in) only
+while it is still the last campaign to have moved the counter and the counter
+still equals its carry-out. A completed campaign keeps its orders. Migration
+`0011_campaign_close.sql` adds `completed_at`, `cancelled_at`, `cancel_reason`
+with a check that each time is set exactly for its status and a reason only on
+a cancelled campaign (no new table; the campaign UPDATE and DELETE grants of
+0002 apply). `campaign.completed` and `campaign.cancelled` go through the
+outbox. A cancelled campaign no longer lists its orders; the released order ids
+are only in `campaign.cancelled`. Web: Complete on a started campaign and a
+Cancel campaign confirmation step with an optional reason on the campaign
+detail screen, and the completion or cancellation time and reason in its facts.
+No new duty. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc gates.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -307,7 +327,7 @@ moved-out handoff rows.
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
-| 7 | Campaign start from the first order Started; complete and cancel transitions | partial — wave 21 (order status events) | `:start` freezes a planned campaign explicitly; there are no complete or cancel endpoints yet (later slice of PSG-23). |
+| 7 | Campaign start from the first order Started; complete and cancel transitions | built (slice 14) as explicit commands; automatic transitions are a handoff to wave 21 (order status events) | `:start`, `:complete` and `:cancel` are planner commands. Completing when the last order ends and starting when the first order starts need wave 21 order events. Cancelling does not unplace or cancel the orders themselves; production decides from `campaign.cancelled`. |
 | 7 | Campaign proposals from planned and firmed orders sharing a campaign key within a window (default 14 days) | built (slice 8) as an inquiry | `GET /campaign-proposals` over scheduled jobs and the campaign proposals screen; the planner enters quantities and creates the campaign. The window is a query parameter until site parameters exist. |
 | 7 | The nightly `campaign-proposal` job (23:00 per site and key) storing `proposed` campaigns and replacing them per key, with the count reported | later slice of PSG-23 | Needs the job runner (FR-23.11) and an order quantity to store: scheduling operations carry no quantity, so proposals are not stored and quantities are typed when a campaign is created. |
 | 7 | Proposals from wave 22 planned orders not yet scheduled, and orders excluded once Started | handoff — wave 22 (planned orders) and wave 25 (order start) | Only orders with a scheduled job are proposed; scheduling has no Started status yet, so every scheduled order outside a campaign is eligible. |

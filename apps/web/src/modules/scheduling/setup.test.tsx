@@ -257,6 +257,91 @@ describe("Campaign detail", () => {
     });
   });
 
+  it("completes a started campaign and cancels another, releasing its orders", async () => {
+    const started: Campaign = { ...planned, status: "started", version: 5, startedAt: "2026-10-26T08:00:00Z" };
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith(":complete") && init.method === "POST") return json(200, { ...started, status: "completed", version: 6, completedAt: "2026-10-26T09:00:00Z" });
+      if (url.pathname.endsWith(":cancel") && init.method === "POST") return json(200, { ...planned, status: "cancelled", version: 5, orders: [], orderCount: 0, cancelledAt: "2026-10-26T09:00:00Z" });
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, started);
+      return undefined;
+    });
+    renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByRole("heading", { name: "FAMILY-1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Complete" }));
+    expect(await screen.findByText("Campaign completed.")).toBeInTheDocument();
+    expect(header(lastCall("POST", ":complete")!, "If-Match")).toBe('"5"');
+    expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel campaign" })).not.toBeInTheDocument();
+  });
+
+  it("cancels with a reason after the confirmation step and shows the released orders", async () => {
+    const cancelled: Campaign = { ...planned, status: "cancelled", version: 5, orders: [], orderCount: 0, cancelledAt: "2026-10-26T09:00:00Z", cancelReason: "Demand dropped" };
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith(":cancel") && init.method === "POST") return json(200, cancelled);
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, planned);
+      return undefined;
+    });
+    const { container } = renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByRole("heading", { name: "FAMILY-1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel campaign" }));
+    let form = screen.getByRole("form", { name: "Cancel the campaign" });
+    expect(within(form).getByLabelText(/Reason/)).toHaveFocus();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(within(form).getByRole("button", { name: "Keep campaign" }));
+    expect(screen.queryByRole("form", { name: "Cancel the campaign" })).not.toBeInTheDocument();
+    expect(lastCall("POST", ":cancel")).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel campaign" }));
+    form = screen.getByRole("form", { name: "Cancel the campaign" });
+    fireEvent.change(within(form).getByLabelText(/Reason/), { target: { value: "x".repeat(501) } });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel campaign" }));
+    expect(await within(form).findByText("Keep the reason to 500 characters.")).toBeInTheDocument();
+    expect(lastCall("POST", ":cancel")).toBeUndefined();
+
+    fireEvent.change(within(form).getByLabelText(/Reason/), { target: { value: "  Demand dropped " } });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel campaign" }));
+    expect(await screen.findByText("Campaign cancelled. Its orders are free again.")).toBeInTheDocument();
+    const call = lastCall("POST", ":cancel")!;
+    expect(header(call, "If-Match")).toBe('"4"');
+    expect(call.body).toEqual({ reason: "Demand dropped" });
+    expect(screen.getByText("Demand dropped")).toBeInTheDocument();
+    expect(screen.getByText("The campaign is cancelled; its orders were released and can join another campaign.")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Cancel the campaign" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel campaign" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the cancel form open and offers a reload when the campaign changed meanwhile", async () => {
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith(":cancel") && init.method === "POST") return json(412, { code: "SCHED-0115", detail: "campaign was changed by another user; current version is 5" });
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, planned);
+      return undefined;
+    });
+    renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByRole("heading", { name: "FAMILY-1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel campaign" }));
+    fireEvent.click(within(screen.getByRole("form", { name: "Cancel the campaign" })).getByRole("button", { name: "Cancel campaign" }));
+    const alert = await findAlert();
+    expect(alert).toHaveTextContent("Someone else changed this campaign");
+    expect(within(alert).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    expect(lastCall("POST", ":cancel")!.body).toEqual({});
+    expect(screen.getByRole("form", { name: "Cancel the campaign" })).toBeInTheDocument();
+  });
+
+  it("explains a refused completion", async () => {
+    const started: Campaign = { ...planned, status: "started", version: 5, startedAt: "2026-10-26T08:00:00Z" };
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith(":complete") && init.method === "POST") return json(422, { code: "SCHED-0125", detail: "start the campaign before you complete it" });
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, started);
+      return undefined;
+    });
+    renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByRole("heading", { name: "FAMILY-1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Complete" }));
+    expect(await findAlert()).toHaveTextContent("Start the campaign before you complete it");
+    expect(screen.getByRole("button", { name: "Complete" })).toBeInTheDocument();
+  });
+
   it("sequences with If-Match and shows the plan of AC-23.11", async () => {
     handler = withResources((url, init) => {
       if (url.pathname.endsWith(`:sequence`) && init.method === "POST") return json(200, planned);

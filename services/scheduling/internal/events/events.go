@@ -15,6 +15,8 @@ var (
 	OrderDatesChanged = events.Type(Context, "orderdates", "changed", 1)
 	CampaignSequenced = events.Type(Context, "campaign", "sequenced", 1)
 	CampaignStarted   = events.Type(Context, "campaign", "started", 1)
+	CampaignCompleted = events.Type(Context, "campaign", "completed", 1)
+	CampaignCancelled = events.Type(Context, "campaign", "cancelled", 1)
 
 	CapacityOverrideCreated = events.Type(Context, "capacityoverride", "created", 1)
 	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
@@ -24,7 +26,7 @@ var (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated}
 }
 
 type RunCompletedData struct {
@@ -98,6 +100,27 @@ type CampaignStartedData struct {
 	ResourceID string `json:"resourceId"`
 	StartedAt  string `json:"startedAt"`
 	Version    int    `json:"version"`
+}
+
+// CampaignCompletedData marks a started campaign finished.
+type CampaignCompletedData struct {
+	CampaignID  string `json:"campaignId"`
+	ResourceID  string `json:"resourceId"`
+	CompletedAt string `json:"completedAt"`
+	Version     int    `json:"version"`
+}
+
+// CampaignCancelledData marks a campaign cancelled. OrderIDs are the orders
+// released from it; they can join another campaign. CounterRestored is true
+// when a started campaign gave the resource's cleanout counter back.
+type CampaignCancelledData struct {
+	CampaignID      string   `json:"campaignId"`
+	ResourceID      string   `json:"resourceId"`
+	CancelledAt     string   `json:"cancelledAt"`
+	Reason          string   `json:"reason"`
+	OrderIDs        []string `json:"orderIds"`
+	CounterRestored bool     `json:"counterRestored"`
+	Version         int      `json:"version"`
 }
 
 // CapacityOverrideData announces a downtime or extra shift on a resource

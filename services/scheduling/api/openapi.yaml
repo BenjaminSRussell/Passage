@@ -933,6 +933,52 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:complete:
+    post:
+      operationId: completeCampaign
+      summary: >
+        Complete a started campaign (FR-23.14); its orders stay on it and campaign.completed is
+        published. 422 SCHED-0125 when it has not started, SCHED-0011 when it is already completed or cancelled.
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:cancel:
+    post:
+      operationId: cancelCampaign
+      summary: >
+        Cancel a campaign that is not completed or cancelled. Its orders are released and can join
+        another campaign; a started campaign gives back the resource's cleanout counter while nothing
+        has moved it since. campaign.cancelled is published. The body is optional. 422 SCHED-0011
+        when it is already completed or cancelled.
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/campaigns/{id}:allocate-cost:
     post:
       operationId: allocateCampaignCost
@@ -1638,6 +1684,9 @@ components:
             optimized: { type: boolean, description: The solver's order was kept }
         sequencedAt: { type: [string, 'null'], format: date-time }
         startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        cancelledAt: { type: [string, 'null'], format: date-time }
+        cancelReason: { type: [string, 'null'] }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         orders:

@@ -594,6 +594,9 @@ export interface Campaign {
   plan: CampaignPlan | null;
   sequencedAt: string | null;
   startedAt: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   version: number;
   createdAt: string;
   orders?: CampaignOrder[];
@@ -755,6 +758,16 @@ export function sequenceCampaign(id: string, version: number, key: string = newK
 
 export function startCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
   return campaignCommand(id, ":start", "POST", version, {}, key);
+}
+
+/** Finishes a started campaign; its orders stay on it. */
+export function completeCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":complete", "POST", version, {}, key);
+}
+
+/** Cancels a campaign that is not finished; its orders are released for another campaign. */
+export function cancelCampaign(id: string, version: number, reason?: string, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":cancel", "POST", version, reason ? { reason } : {}, key);
 }
 
 /** Computes the split of a campaign's setup and cleanout cost; nothing is posted. */

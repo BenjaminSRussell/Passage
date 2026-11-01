@@ -13,11 +13,14 @@ import {
   PageHeader,
   Select,
   Skeleton,
+  Textarea,
   type DataTableColumn,
 } from "../../shell/ui";
 import {
   addCampaignOrder,
   allocateCampaignCost,
+  cancelCampaign,
+  completeCampaign,
   ALLOCATION_BASES,
   describeProblem,
   getCampaign,
@@ -112,6 +115,7 @@ export function CampaignDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   if (state.error) {
     return (
@@ -137,6 +141,7 @@ export function CampaignDetailPage() {
   const codes = state.data.codes;
   const orders = campaign.orders ?? [];
   const open = editable(campaign);
+  const cancellable = campaign.status !== "completed" && campaign.status !== "cancelled";
 
   /** Runs a campaign command; resolves to the problem, or null when it succeeded. */
   async function run(name: string, command: () => Promise<Campaign>, done: string): Promise<Problem | null> {
@@ -206,6 +211,13 @@ export function CampaignDetailPage() {
     ["Cleanout", formatMinutes(campaign.cleanoutMinutes)],
     ["Sequenced", formatDateTime(campaign.sequencedAt)],
     ["Started", formatDateTime(campaign.startedAt)],
+    ...(campaign.status === "completed" ? ([["Completed", formatDateTime(campaign.completedAt ?? null)]] as [string, ReactNode][]) : []),
+    ...(campaign.status === "cancelled"
+      ? ([
+          ["Cancelled", formatDateTime(campaign.cancelledAt ?? null)],
+          ["Cancel reason", campaign.cancelReason ?? dash],
+        ] as [string, ReactNode][])
+      : []),
     ["Version", String(campaign.version)],
   ];
 
@@ -237,6 +249,21 @@ export function CampaignDetailPage() {
                 Start
               </Button>
             ) : null}
+            {campaign.status === "started" ? (
+              <Button
+                variant="primary"
+                loading={busy === "complete"}
+                disabled={busy !== null}
+                onClick={() => run("complete", () => completeCampaign(campaign.id, campaign.version), "Campaign completed.")}
+              >
+                Complete
+              </Button>
+            ) : null}
+            {cancellable && !cancelling ? (
+              <Button variant="danger" disabled={busy !== null} onClick={() => setCancelling(true)}>
+                Cancel campaign
+              </Button>
+            ) : null}
             <Link className={buttonClassName("ghost")} to="/scheduling/campaigns">
               All campaigns
             </Link>
@@ -258,6 +285,18 @@ export function CampaignDetailPage() {
           {`Version ${campaign.version}.`}
         </Alert>
       ) : null}
+      {cancellable && cancelling ? (
+        <CancelCampaignForm
+          started={campaign.status === "started"}
+          busy={busy === "cancel"}
+          onKeep={() => setCancelling(false)}
+          onCancel={async (reason) => {
+            const problem = await run("cancel", () => cancelCampaign(campaign.id, campaign.version, reason), "Campaign cancelled. Its orders are free again.");
+            if (problem === null) setCancelling(false);
+            return problem;
+          }}
+        />
+      ) : null}
       <Card>
         <dl className={styles.details}>
           {facts.map(([term, value]) => (
@@ -270,13 +309,23 @@ export function CampaignDetailPage() {
       </Card>
       <Card title="Orders">
         <div className={styles.stack}>
-          {!open ? <p className={styles.note}>{`The campaign is ${campaign.status}; orders can no longer join or leave it (SCHED-0011).`}</p> : null}
+          {!open ? (
+            <p className={styles.note}>
+              {campaign.status === "cancelled"
+                ? "The campaign is cancelled; its orders were released and can join another campaign."
+                : `The campaign is ${campaign.status}; orders can no longer join or leave it (SCHED-0011).`}
+            </p>
+          ) : null}
           <DataTable
             label="Campaign orders"
             columns={orderColumns}
             rows={orders}
             getRowKey={(o) => o.orderId}
-            empty={{ title: "No orders yet", description: "Add the production orders that share this campaign's setup family." }}
+            empty={
+              campaign.status === "cancelled"
+                ? { title: "No orders", description: "Cancelling released this campaign's orders." }
+                : { title: "No orders yet", description: "Add the production orders that share this campaign's setup family." }
+            }
           />
           {open ? (
             <AddOrderForm
@@ -366,9 +415,71 @@ function AddOrderForm({ disabled, onAdd }: { disabled: boolean; onAdd(order: New
   );
 }
 
+/** The longest cancellation reason the service keeps. */
+export const CANCEL_REASON_MAX = 500;
+
+interface CancelCampaignFormProps {
+  started: boolean;
+  busy: boolean;
+  onCancel(reason: string): Promise<Problem | null>;
+  onKeep(): void;
+}
+
+/** The confirmation step of a cancellation, with an optional reason kept on the campaign. */
+function CancelCampaignForm({ started, busy, onCancel, onKeep }: CancelCampaignFormProps) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | undefined>();
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const text = reason.trim();
+    if ([...text].length > CANCEL_REASON_MAX) {
+      setError(`Keep the reason to ${CANCEL_REASON_MAX} characters.`);
+      return;
+    }
+    setError(undefined);
+    const problem = await onCancel(text);
+    if (problem?.fields.reason) setError(problem.fields.reason);
+  }
+
+  return (
+    <Card title="Cancel this campaign">
+      <form className={styles.form} onSubmit={submit} noValidate aria-label="Cancel the campaign">
+        <p className={styles.note}>
+          {started
+            ? "Its orders are released and can join another campaign. The resource's cleanout counter goes back to where it was before this campaign if no later campaign has used it."
+            : "Its orders are released and can join another campaign."}
+        </p>
+        <FormField id="campaign-cancel-reason" label="Reason" optional hint="Kept on the campaign and sent with the cancellation." error={error}>
+          {(control) => (
+            <Textarea
+              {...control}
+              autoFocus
+              rows={2}
+              maxLength={CANCEL_REASON_MAX}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              invalid={Boolean(error)}
+            />
+          )}
+        </FormField>
+        <div className={styles.formActions}>
+          <Button type="submit" variant="danger" loading={busy}>
+            Cancel campaign
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={onKeep}>
+            Keep campaign
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 const failureTitles: Record<string, string> = {
   "SCHED-0115": "Someone else changed this campaign",
   "SCHED-0123": "Sequence the campaign again before you start it",
+  "SCHED-0125": "Start the campaign before you complete it",
 };
 
 /** SCHED-0006 reports the optimizer outcome of a cp-sat campaign. */
