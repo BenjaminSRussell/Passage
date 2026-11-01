@@ -215,7 +215,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
 | `ledger.period.postclosed` | Flag duty (the close adjustment). Every posting path (`POST /journal-entries`, `/validate`, reversal, `/journal-batches/{id}/submit` and `/post`, `/ledger-sets/{setId}/journal-entries`) asks the close service (`GET /v1/close/periods:resolve`, signed `period.check`; non-open answers cached 30 s per ledger, module and date; an open answer is reused only within one request) for the posting date's period status and answers 422 `LEDGER_PERIOD_CLOSED` unless it is `open`. The duty overrides `closed` and `on_hold` only (the ledger has no user group to pass to close's hold exception); `permanently_closed` and `never_opened` always refuse. A date close has no registered period for is governed by `first_open_date` alone. A close service that cannot confirm the status gives 503 `LEDGER_PERIOD_STATUS_UNAVAILABLE` and nothing is posted. The service refuses to start unless `CLOSE_URL` is set (with a service signing key) or `LEDGER_PERIOD_CHECK=disabled` (dev and test; logs a warning). A reversal asks about the original entry's source module |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
-| `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel`, `PUT /recurring-journals/{id}`, `POST /recurring-journals/{id}/pause`, `/resume`, `/generate` (PRD "Maintain ledger journals") |
+| `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel`, `PUT /recurring-journals/{id}`, `POST /recurring-journals/{id}/pause`, `/resume`, `/generate`, `PUT` and `DELETE /journal-batches/{id}/attachments/{attachmentId}` (PRD "Maintain ledger journals") |
 | `ledger.journal.approve` | `POST .../approve`, `POST .../reject` (PRD "Approve ledger journals") |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
@@ -375,6 +375,9 @@ today:
 | `LEDGER_JOURNAL_NAME_INVALID` | 422: a batch names an unknown or inactive journal name (create, submit) |
 | `LEDGER_BATCH_NOT_FOUND` | 404: journal batch does not exist or is outside the caller's tenant or legal-entity scope |
 | `LEDGER_BATCH_STATE` | 409: the batch's status does not allow the action (BR-11.10), or a posted batch is posted again with another key |
+| `LEDGER_ATTACHMENT_INVALID` | 422: a malformed attachment or note (name, document type, retention class, store reference, content type, size over 25 MB), with `violations[]` |
+| `LEDGER_ATTACHMENT_RETAINED` | 409: the file of a posted batch is retained until its retention class expires (counted from the posting date) |
+| `LEDGER_ATTACHMENT_LIMIT` / `LEDGER_ATTACHMENT_CONFLICT` / `LEDGER_ATTACHMENT_NOT_FOUND` | 409 for the 51st file or 201st note of a batch, 409 for an id re-used with other content, 404 for an unknown id |
 | `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
 | `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
 | `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |

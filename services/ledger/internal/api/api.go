@@ -143,6 +143,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerAutoClearing(r)
 		a.registerDerivation(r)
 		a.registerAdvancedRules(r)
+		a.registerAttachments(r)
 		a.registerValidationRules(r)
 		a.registerSplitting(r)
 		a.registerRealignment(r)

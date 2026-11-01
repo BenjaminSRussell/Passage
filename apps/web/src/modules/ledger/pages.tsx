@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Card, DataTable, FormField, Input, PageHeader, Button, type DataTableColumn } from "../../shell/ui";
 import { fetchEntry, fetchTrialBalance, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
+import { EntryAttachmentsCard } from "./BatchAttachments";
 import styles from "./pages.module.css";
 import { ReverseEntryForm } from "./ReverseEntryForm";
 
@@ -236,6 +237,7 @@ export function EntryScreen() {
         loading={result.isPending}
         empty={{ title: "No lines" }}
       />
+      {entry ? <EntryAttachmentsCard entryId={entry.id} /> : null}
       {entry?.isRealignment ? (
         <p className={styles.note}>This entry belongs to a dimension realignment run; reverse it from the run, which reverses all of its entries together.</p>
       ) : entry ? (

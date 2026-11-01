@@ -1527,3 +1527,62 @@ export function actOnRealignment(
 ): Promise<RealignmentRun> {
   return sendJSON("POST", `${realignmentBase(ledgerId)}/${encodeURIComponent(id)}:${action}`, realignmentRunSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
 }
+
+/** Shipped document types (FR-11.18) and retention classes of voucher attachments. */
+export const DOCUMENT_TYPES = ["invoice_image", "approval_evidence", "supporting_calculation", "correspondence", "other"] as const;
+export const RETENTION_CLASSES = ["financial_record_10y", "financial_record_7y", "financial_record_6y", "working_paper_2y"] as const;
+
+/** An attachment (kind attachment) or a note (kind note) on a journal batch (FR-11.11). `retainedUntil` is set once the batch is posted. */
+export const attachmentSchema = z.object({
+  id: z.string(),
+  batchId: z.string(),
+  kind: z.enum(["attachment", "note"]),
+  name: z.string().optional(),
+  documentType: z.string().optional(),
+  retentionClass: z.string().optional(),
+  retainedUntil: z.string().optional(),
+  storeRef: z.string().optional(),
+  contentType: z.string().optional(),
+  sizeBytes: z.number().int().optional(),
+  note: z.string().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+});
+export type BatchAttachment = z.infer<typeof attachmentSchema>;
+
+export interface BatchAttachmentInput {
+  kind: "attachment" | "note";
+  name?: string;
+  documentType?: string;
+  retentionClass?: string;
+  storeRef?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  note?: string;
+}
+
+const attachmentListSchema = z.object({ items: z.array(attachmentSchema) });
+
+/** GET /api/v1/ledger/journal-batches/{id}/attachments: files and notes, oldest first. */
+export async function fetchBatchAttachments(batchId: string, fetchImpl: FetchLike = defaultFetch): Promise<BatchAttachment[]> {
+  return (await getJSON(`/api/v1/ledger/journal-batches/${encodeURIComponent(batchId)}/attachments`, attachmentListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/journal-entries/{id}/attachments: the files and notes of the batch posted as the entry (FR-11.18). */
+export async function fetchEntryAttachments(entryId: string, fetchImpl: FetchLike = defaultFetch): Promise<BatchAttachment[]> {
+  return (await getJSON(`/api/v1/ledger/journal-entries/${encodeURIComponent(entryId)}/attachments`, attachmentListSchema, fetchImpl)).items;
+}
+
+/** PUT .../attachments/{id}: adds under a client-chosen id, so a retry of the same request is a no-op. */
+export function putBatchAttachment(batchId: string, id: string, input: BatchAttachmentInput, fetchImpl: FetchLike = defaultFetch): Promise<BatchAttachment> {
+  return sendJSON("PUT", `/api/v1/ledger/journal-batches/${encodeURIComponent(batchId)}/attachments/${encodeURIComponent(id)}`, attachmentSchema, fetchImpl, input);
+}
+
+/** DELETE .../attachments/{id}: 409 LEDGER_ATTACHMENT_RETAINED while a posted batch's retention class runs. */
+export async function deleteBatchAttachment(batchId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<void> {
+  const res = await fetchImpl(`/api/v1/ledger/journal-batches/${encodeURIComponent(batchId)}/attachments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw await readProblem(res);
+}

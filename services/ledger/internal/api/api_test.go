@@ -36,6 +36,7 @@ type fakeStore struct {
 	arules   advancedFake
 	split    splittingFake
 	realign  realignFake
+	attach   attachFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error

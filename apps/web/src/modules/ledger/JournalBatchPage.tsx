@@ -17,6 +17,7 @@ import {
   type JournalBatch,
   type Violation,
 } from "./api/client";
+import { BatchAttachmentsCard } from "./BatchAttachments";
 import { BatchLinesEditor, emptyLine, linesToDrafts, serviceLineErrors, toLineInputs, validateLines, type LineDraft } from "./BatchLinesEditor";
 import { BatchStatusBadge } from "./JournalBatchesPage";
 import { LedgerPicker, useLedgerParam } from "./LedgerPicker";
@@ -565,6 +566,7 @@ export function JournalBatchPage() {
           ) : (
             <DataTable label="Batch lines" columns={lineColumns} rows={batch.lines ?? []} getRowKey={(l) => String(l.lineNumber)} empty={{ title: "No lines" }} />
           )}
+          <BatchAttachmentsCard batchId={batch.id} status={batch.status} />
           {batch.status === "posted" || batch.status === "cancelled" ? (
             <p className={styles.note}>{batch.status === "posted" ? "Posted batches can't be changed; reverse the journal entry instead." : "Cancelled batches can't be changed."}</p>
           ) : null}

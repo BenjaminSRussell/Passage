@@ -115,6 +115,10 @@ type Store interface {
 	PostRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
 	ReverseRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
 	CancelRealignment(ctx context.Context, in RealignmentAction) (RealignmentRun, error)
+	ListBatchAttachments(ctx context.Context, batchID string) ([]domain.Attachment, error)
+	ListEntryAttachments(ctx context.Context, entryID string) ([]domain.Attachment, error)
+	PutBatchAttachment(ctx context.Context, batchID, id string, in domain.Attachment) (domain.Attachment, bool, error)
+	DeleteBatchAttachment(ctx context.Context, batchID, id string, today time.Time) error
 	Ping(ctx context.Context) error
 }
 

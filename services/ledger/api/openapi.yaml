@@ -25,6 +25,7 @@ tags:
   - name: derivation
   - name: validation
   - name: advanced-rules
+  - name: attachments
   - name: ops
 components:
   parameters:
@@ -70,6 +71,12 @@ components:
       in: path
       required: true
       schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' }
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      description: Chosen by the client; repeating a request with the same id and content is a no-op
+      schema: { type: string, format: uuid }
     IfMatch:
       name: If-Match
       in: header
@@ -521,6 +528,38 @@ components:
           maxItems: 500
           description: Constraint rows over the added segments, with the semantics of the structure's rows
           items: { $ref: "#/components/schemas/StructureConstraint" }
+    AttachmentBody:
+      type: object
+      required: [kind]
+      additionalProperties: false
+      description: A file reference (kind attachment) or a note (kind note); a note carries only its text
+      properties:
+        kind: { type: string, enum: [attachment, note] }
+        name: { type: string, maxLength: 200, description: File name without a path }
+        documentType: { type: string, enum: [invoice_image, approval_evidence, supporting_calculation, correspondence, other], default: other }
+        retentionClass: { type: string, enum: [financial_record_10y, financial_record_7y, financial_record_6y, working_paper_2y], default: financial_record_10y }
+        storeRef:
+          type: string
+          maxLength: 1024
+          description: >-
+            Where the document service stored the file. Either an object-storage key under the caller's tenant
+            prefix ({tenant-id}/segment/..., letters, digits and . _ = + - per segment, no empty, . or .. segment)
+            or dms://{connector}/{document} for an external DMS, resolved by the tenant's configured connector.
+            http(s) URLs, other schemes and another tenant's prefix are refused (422). The ledger never fetches it.
+        contentType: { type: string, description: "One of the allowed content types, for example application/pdf. Asserted by the caller; the document service verifies the stored bytes." }
+        sizeBytes: { type: integer, format: int64, minimum: 1, maximum: 26214400, description: "File size in bytes, asserted by the caller; the document service verifies it." }
+        note: { type: string, maxLength: 2000 }
+    Attachment:
+      allOf:
+        - $ref: "#/components/schemas/AttachmentBody"
+        - type: object
+          required: [id, batchId, createdBy, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            batchId: { type: string, format: uuid }
+            retainedUntil: { type: string, format: date, description: Set on a file of a posted batch; the posting date plus the retention class }
+            createdBy: { type: string }
+            createdAt: { type: string, format: date-time }
     AdvancedRule:
       allOf:
         - $ref: "#/components/schemas/AdvancedRuleBody"
@@ -1271,6 +1310,11 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     AdvancedRuleProblem409:
       description: LEDGER_STRUCTURE_LOCKED (the structure version is not a draft), LEDGER_ADVANCED_RULE_NAME_DUPLICATE (the name is used by another rule of the structure version) or LEDGER_ADVANCED_RULE_LIMIT (a structure version has at most 100 rules)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AttachmentProblem409:
+      description: LEDGER_BATCH_STATE (a posted or cancelled batch is immutable), LEDGER_ATTACHMENT_LIMIT (50 files and 200 notes per batch), LEDGER_ATTACHMENT_CONFLICT (the id holds other content) or LEDGER_ATTACHMENT_RETAINED (the file is retained until its retention class expires)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -3921,6 +3965,117 @@ paths:
         "409": { $ref: "#/components/responses/AdvancedRuleProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/journal-batches/{id}/attachments:
+    get:
+      tags: [attachments]
+      operationId: listBatchAttachments
+      summary: List the attachments and notes of a journal batch
+      x-passage-duty: ledger.journal.read
+      description: |
+        The files and notes of the batch, oldest first (FR-11.11, FR-11.18). For a posted batch every file
+        carries retainedUntil, the posting date plus its retention class.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: The attachments and notes of the batch
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/journal-batches/{id}/attachments/{attachmentId}:
+    put:
+      tags: [attachments]
+      operationId: putBatchAttachment
+      summary: Add an attachment or a note to a journal batch
+      x-passage-duty: ledger.journal.write
+      description: |
+        Adds a file reference or a note under an id the client chooses (FR-11.11, FR-11.18); the request is
+        idempotent on that id. The ledger stores the metadata and the store reference (an object-storage key under the
+        caller's tenant prefix or a dms:// URI), not the bytes; the content type and size are the caller's assertion. A file has a document type (default other), a retention class
+        (default financial_record_10y), an allowed content type and 1 byte to 25 MB; a batch holds at most 50
+        files and 200 notes. Re-sending the stored content answers 200 and changes nothing; other content under
+        the id is 409 LEDGER_ATTACHMENT_CONFLICT. A posted or cancelled batch is immutable (409 LEDGER_BATCH_STATE).
+        Malformed content is 422 LEDGER_ATTACHMENT_INVALID with every violation. Announces
+        dev.passage.ledger.batch.attachmentchanged.v1 with action added.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+        - $ref: "#/components/parameters/AttachmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttachmentBody" }
+      responses:
+        "200":
+          description: The same content was already stored under the id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "201":
+          description: Attachment or note added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AttachmentProblem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+    delete:
+      tags: [attachments]
+      operationId: deleteBatchAttachment
+      summary: Remove an attachment or a note from a journal batch
+      x-passage-duty: ledger.journal.write
+      description: |
+        Before the batch is posted an attachment or note can be removed freely. After posting a file is retained
+        for its retention class from the posting date: removing it earlier is 409 LEDGER_ATTACHMENT_RETAINED,
+        and a note of a posted batch is 409 LEDGER_BATCH_STATE. Announces
+        dev.passage.ledger.batch.attachmentchanged.v1 with action removed.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "204":
+          description: Removed
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AttachmentProblem409" }
+  /v1/ledger/journal-entries/{id}/attachments:
+    get:
+      tags: [attachments]
+      operationId: listEntryAttachments
+      summary: List the attachments and notes of the batch that was posted as an entry
+      x-passage-duty: ledger.journal.read
+      description: |
+        The voucher's attachments stay readable from the posted entry (FR-11.18). An entry that did not come
+        from a journal batch has none.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: The attachments and notes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
   /v1/ledger/ledgers/{ledger}/validation-rules:
     get:
       tags: [validation]

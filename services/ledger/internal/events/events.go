@@ -26,7 +26,21 @@ const (
 	RulesChanged = "dev.passage.ledger.rules.changed.v1"
 	// RealignmentCompleted is announced when a dimension realignment run (FR-11.24) is posted or reversed.
 	RealignmentCompleted = "dev.passage.ledger.realignment.completed.v1"
+	// BatchAttachmentChanged is announced when an attachment or note is added to or removed from a
+	// batch (FR-11.11); it shares the batch topic.
+	BatchAttachmentChanged = "dev.passage.ledger.batch.attachmentchanged.v1"
 )
+
+// BatchAttachmentChangedData is the payload of dev.passage.ledger.batch.attachmentchanged.v1.
+// Action is added or removed; Kind is attachment or note.
+type BatchAttachmentChangedData struct {
+	BatchID      string `json:"batchId"`
+	LedgerID     string `json:"ledgerId"`
+	AttachmentID string `json:"attachmentId"`
+	Kind         string `json:"kind"`
+	Action       string `json:"action"`
+	Actor        string `json:"actor"`
+}
 
 // RealignmentCompletedData is the payload of dev.passage.ledger.realignment.completed.v1. EntryIDs are
 // the reclassification entries of a posted run, or the reversing entries when Reversal is true.

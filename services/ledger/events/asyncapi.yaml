@@ -70,7 +70,20 @@ channels:
     messages:
       realignmentCompleted:
         $ref: "#/components/messages/RealignmentCompleted"
+  batchAttachmentChanged:
+    address: passage.ledger.batch
+    description: |
+      An attachment or note was added to or removed from a journal batch (FR-11.11, FR-11.18), written
+      to the outbox in the same transaction (aggregate type batch_attachment). The file itself is not in
+      the event.
+    messages:
+      batchAttachmentChanged:
+        $ref: "#/components/messages/BatchAttachmentChanged"
 operations:
+  publishBatchAttachmentChanged:
+    action: send
+    channel: { $ref: "#/channels/batchAttachmentChanged" }
+    summary: An attachment or note was added to or removed from a batch.
   publishRealignmentCompleted:
     action: send
     channel: { $ref: "#/channels/realignmentCompleted" }
@@ -191,6 +204,29 @@ components:
               to: { type: string, enum: [draft, validated, in_approval, approved, rejected, posted, cancelled] }
               actor: { type: string, description: User who caused the transition }
               postedEntryId: { type: string, format: uuid, description: Set when to = posted }
+    BatchAttachmentChanged:
+      name: dev.passage.ledger.batch.attachmentchanged.v1
+      title: Journal batch attachment changed
+      summary: An attachment or note was added to or removed from a journal batch.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.batch.attachmentchanged.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Attachment id }
+          data:
+            type: object
+            required: [batchId, ledgerId, attachmentId, kind, action, actor]
+            properties:
+              batchId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              attachmentId: { type: string, format: uuid }
+              kind: { type: string, enum: [attachment, note] }
+              action: { type: string, enum: [added, removed] }
+              actor: { type: string, description: User who changed the batch }
     RecurringGenerated:
       name: dev.passage.ledger.recurring.generated.v1
       title: Recurring journal generated
