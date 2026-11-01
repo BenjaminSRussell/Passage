@@ -1,0 +1,341 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { checkAxeAA } from "../../shell/a11y";
+import { PrincipalProvider } from "../../shell/principal";
+import { findTable } from "../../test-utils";
+import type { KeyRewriteRules, MigrationProject } from "./api/client";
+import { checkRewriteRules, cutoverInput, parseProjectEdit, parseProjectForm, type ProjectForm } from "./domain";
+import migration from "./module";
+
+type Reply = { status: number; body: unknown };
+let handler: (url: URL, init: RequestInit) => Reply | undefined;
+let calls: { method: string; url: URL; init: RequestInit; body: unknown }[];
+const json = (status: number, body: unknown): Reply => ({ status, body });
+const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
+const violations = (container: HTMLElement) => checkAxeAA(container).filter((v) => !shellRules.has(v.id));
+
+beforeEach(() => {
+  calls = [];
+  handler = () => undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init: RequestInit = {}) => {
+      const url = new URL(input, "http://localhost");
+      calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: "no fake" });
+      return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
+    }),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
+
+function renderAt(path: string, duties: string[] = ["migration.run", "migration.project.write"]) {
+  return render(
+    <PrincipalProvider duties={duties}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {migration.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </PrincipalProvider>,
+  );
+}
+
+const PROJECT = "0195f0a0-0000-7000-8000-0000000000d1";
+const LE_A = "0195f0a0-0000-7000-8000-0000000000e1";
+const LE_B = "0195f0a0-0000-7000-8000-0000000000e2";
+const copyProject: MigrationProject = {
+  id: PROJECT,
+  name: "USMF to CAMF",
+  projectType: "copy",
+  sourceLegalEntityId: LE_A,
+  targetLegalEntityId: LE_B,
+  status: "active",
+  version: 1,
+  createdBy: "u1",
+  createdAt: "2026-10-30T09:00:00Z",
+  updatedAt: "2026-10-30T09:00:00Z",
+};
+const axProject: MigrationProject = { ...copyProject, id: "0195f0a0-0000-7000-8000-0000000000d2", name: "AX customers", projectType: "migrate", sourceSystem: "ax2012", sourceLegalEntityId: undefined, targetLegalEntityId: undefined, cutoverAt: "2027-03-01T04:00:00Z" };
+const noRules: KeyRewriteRules = { version: 1, items: [] };
+
+describe("project form parsing", () => {
+  const base: ProjectForm = { name: " USMF to CAMF ", projectType: "copy", sourceSystem: "", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B, cutoverAt: "", scheduleCron: "" };
+  it("trims and accepts a copy project", () => {
+    expect(parseProjectForm(base).value).toEqual({ name: "USMF to CAMF", projectType: "copy", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B });
+  });
+  it("converts the cutover to UTC and keeps the schedule", () => {
+    const { value } = parseProjectForm({ ...base, cutoverAt: "2027-03-01T05:00", scheduleCron: " 0 2 * * * " });
+    expect(value?.cutoverAt).toBe("2027-03-01T05:00:00.000Z");
+    expect(value?.scheduleCron).toBe("0 2 * * *");
+  });
+  it("reports each field", () => {
+    expect(Object.keys(parseProjectForm({ ...base, name: "", sourceLegalEntityId: "x", targetLegalEntityId: "y" }).errors).sort()).toEqual(["name", "sourceLegalEntityId", "targetLegalEntityId"]);
+    expect(parseProjectForm({ ...base, targetLegalEntityId: LE_A.toUpperCase() }).errors.targetLegalEntityId).toMatch(/differ/);
+    expect(parseProjectForm({ ...base, projectType: "migrate" }).errors.sourceSystem).toBeTruthy();
+    expect(parseProjectForm({ ...base, projectType: "migrate", sourceSystem: "ax2012" }).value?.sourceSystem).toBe("ax2012");
+    expect(parseProjectForm({ ...base, scheduleCron: "* *" }).errors.scheduleCron).toBeTruthy();
+    expect(parseProjectForm({ ...base, name: "x".repeat(81) }).errors.name).toMatch(/80/);
+    expect(parseProjectForm({ ...base, projectType: "config_package" }).value).toEqual({ name: "USMF to CAMF", projectType: "config_package" });
+  });
+  it("checks rewrite rules", () => {
+    const rules = [
+      { field: "@key", from: "A", to: "B" },
+      { field: "@key", from: "A", to: "C" },
+      { field: "", from: "A", to: "B" },
+      { field: "x", from: "", to: "B" },
+      { field: "x", from: "Q", to: "Q" },
+    ];
+    const problems = checkRewriteRules(rules);
+    expect(problems[0]).toBeUndefined();
+    expect(problems.slice(1).every(Boolean)).toBe(true);
+  });
+  it("refuses a rule an earlier, shorter prefix always wins over, but not the other way round", () => {
+    expect(checkRewriteRules([{ field: "@key", from: "US", to: "CA" }, { field: "dataAreaId", from: "USMF", to: "CAMF" }, { field: "@key", from: "USMF", to: "CAMF" }])[2]).toMatch(/Rule 1 already matches/);
+    expect(checkRewriteRules([{ field: "@key", from: "USMF", to: "CAMF" }, { field: "@key", from: "US", to: "CA" }]).every((p) => p === undefined)).toBe(true);
+  });
+  it("sends only the changed details, and clears an emptied schedule", () => {
+    const current = { ...axProject, scheduleCron: "0 2 * * *" };
+    const unchanged = { name: current.name, cutoverAt: cutoverInput(current.cutoverAt), scheduleCron: current.scheduleCron };
+    expect(unchanged.cutoverAt).toBe("2027-03-01T04:00");
+    expect(parseProjectEdit(unchanged, current).value).toEqual({});
+    expect(parseProjectEdit({ ...unchanged, name: " AX vendors ", scheduleCron: "", cutoverAt: "" }, current).value).toEqual({ name: "AX vendors", scheduleCron: "", cutoverAt: "" });
+    expect(parseProjectEdit({ ...unchanged, cutoverAt: "2027-04-01T06:30" }, current).value).toEqual({ cutoverAt: "2027-04-01T06:30:00.000Z" });
+    expect(Object.keys(parseProjectEdit({ ...unchanged, name: " ", scheduleCron: "0 2" }, current).errors).sort()).toEqual(["name", "scheduleCron"]);
+    expect(cutoverInput("2027-03-01T04:00:30Z")).toBe("2027-03-01T04:00:30");
+  });
+});
+
+describe("projects list", () => {
+  it("shows projects, filters by type, and opens one", async () => {
+    handler = () => json(200, { items: [copyProject, axProject] });
+    const { container } = renderAt("/migration/projects");
+    const table = await findTable({ name: "Migration projects" });
+    expect(table).toHaveTextContent("USMF to CAMF");
+    expect(table).toHaveTextContent("Dynamics AX 2012");
+    expect(violations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "copy" } });
+    await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("projectType") === "copy")).toBe(true));
+    expect(screen.getByRole("link", { name: "New project" })).toBeInTheDocument();
+  });
+
+  it("loads the next page with the cursor", async () => {
+    handler = (url) => (url.searchParams.get("cursor") ? json(200, { items: [axProject] }) : json(200, { items: [copyProject], nextCursor: "c1" }));
+    renderAt("/migration/projects");
+    await findTable({ name: "Migration projects" });
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(screen.getByRole("table")).toHaveTextContent("AX customers"));
+    expect(screen.getByRole("table")).toHaveTextContent("USMF to CAMF");
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state and hides New project without the duty", async () => {
+    handler = () => json(200, { items: [] });
+    renderAt("/migration/projects", ["migration.run"]);
+    expect(await screen.findByText("No migration projects yet")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "New project" })).not.toBeInTheDocument();
+  });
+
+  it("shows the error state and retries", async () => {
+    handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
+    renderAt("/migration/projects");
+    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    handler = () => json(200, { items: [copyProject] });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await findTable({ name: "Migration projects" })).toHaveTextContent("USMF to CAMF");
+  });
+});
+
+describe("new project", () => {
+  it("validates locally, then posts with an idempotency key and opens the project", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, copyProject);
+      if (url.pathname.endsWith("/key-rewrite-rules")) return json(200, noRules);
+      return json(200, copyProject);
+    };
+    const { container } = renderAt("/migration/projects/new");
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText("Enter a project name.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "USMF to CAMF" } });
+    fireEvent.change(screen.getByLabelText("Source legal entity id"), { target: { value: LE_A } });
+    fireEvent.change(screen.getByLabelText("Target legal entity id"), { target: { value: LE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByRole("heading", { name: "USMF to CAMF" })).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ name: "USMF to CAMF", projectType: "copy", sourceLegalEntityId: LE_A, targetLegalEntityId: LE_B });
+    expect(new Headers(post?.init.headers).get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("asks for a source system on a migrate project and shows the service problem", async () => {
+    handler = () => json(409, { code: "MIG-PROJECT-NAME-EXISTS", detail: "a migration project with this name already exists" });
+    renderAt("/migration/projects/new");
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "migrate" } });
+    expect(screen.queryByLabelText("Source legal entity id")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AX customers" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText("Choose the legacy source system.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Source system"), { target: { value: "ax2012" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText(/already exists \(MIG-PROJECT-NAME-EXISTS\)/)).toBeInTheDocument();
+  });
+});
+
+describe("project detail", () => {
+  it("shows a migrate project without a rules card", async () => {
+    handler = () => json(200, axProject);
+    renderAt(`/migration/projects/${axProject.id}`);
+    expect(await screen.findByRole("heading", { name: "AX customers" })).toBeInTheDocument();
+    expect(screen.queryByText("Key rewrite rules")).not.toBeInTheDocument();
+    expect(calls.every((c) => !c.url.pathname.includes("key-rewrite-rules"))).toBe(true);
+  });
+
+  it("shows a not-found error", async () => {
+    handler = () => json(404, { code: "AUTH-0404", detail: "migration project not found" });
+    renderAt(`/migration/projects/${PROJECT}`);
+    expect(await screen.findByText(/migration project not found \(AUTH-0404\)/)).toBeInTheDocument();
+  });
+
+  it("archives with the current version", async () => {
+    handler = (url, init) => {
+      if (init.method === "PATCH") return json(200, { ...copyProject, status: "archived", version: 2 });
+      if (url.pathname.endsWith("/key-rewrite-rules")) return json(200, noRules);
+      return json(200, copyProject);
+    };
+    renderAt(`/migration/projects/${PROJECT}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Archive project" }));
+    expect(await screen.findByRole("button", { name: "Reactivate project" })).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 1, status: "archived" });
+  });
+
+  it("edits the name and schedule with the current version", async () => {
+    handler = (_url, init) => {
+      if (init.method === "PATCH") return json(200, { ...axProject, name: "AX vendors", scheduleCron: "0 3 * * *", version: 2 });
+      return json(200, axProject);
+    };
+    const { container } = renderAt(`/migration/projects/${axProject.id}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AX vendors" } });
+    fireEvent.change(screen.getByLabelText(/^Schedule/), { target: { value: "0 3 * * *" } });
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+    expect(await screen.findByRole("heading", { name: "AX vendors" })).toBeInTheDocument();
+    expect(screen.getByText("0 3 * * *")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 1, name: "AX vendors", scheduleCron: "0 3 * * *" });
+  });
+
+  it("shows the service's field message when an edit is refused", async () => {
+    handler = (_url, init) =>
+      init.method === "PATCH" ? json(400, { code: "COM-0422", detail: "validation failed", errors: { scheduleCron: "must leave at least 15 minutes between runs" } }) : json(200, axProject);
+    renderAt(`/migration/projects/${axProject.id}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(screen.getByLabelText(/^Schedule/), { target: { value: "*/5 * * * *" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+    expect(await screen.findByText("must leave at least 15 minutes between runs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save details" })).toBeInTheDocument();
+  });
+
+  it("freezes an archived project's details and rules", async () => {
+    const archived = { ...copyProject, status: "archived" as const };
+    handler = (url) => (url.pathname.endsWith("/key-rewrite-rules") ? json(200, { version: 1, items: [{ field: "@key", from: "USMF", to: "CAMF" }] }) : json(200, archived));
+    renderAt(`/migration/projects/${PROJECT}`);
+    expect(await screen.findByLabelText("Rule 1 field")).toBeDisabled();
+    expect(screen.getByText(/reactivate it to change its rules/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save rules" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reactivate project" })).toBeInTheDocument();
+  });
+
+  it("hides the write actions without the duty", async () => {
+    handler = (url) => (url.pathname.endsWith("/key-rewrite-rules") ? json(200, { version: 1, items: [{ field: "@key", from: "USMF", to: "CAMF" }] }) : json(200, copyProject));
+    renderAt(`/migration/projects/${PROJECT}`, ["migration.run"]);
+    expect(await screen.findByLabelText("Rule 1 field")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Archive project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save rules" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add rule" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
+  });
+});
+
+describe("key rewrite rules", () => {
+  function rulesHandler(stored: KeyRewriteRules) {
+    handler = (url, init) => {
+      if (url.pathname.endsWith(":preview")) return json(200, { items: [{ key: "USMF-C1", rewritten: "CAMF-C1", changed: true }, { key: "DE-C2", rewritten: "DE-C2", changed: false }] });
+      if (url.pathname.endsWith("/key-rewrite-rules")) {
+        if (init.method === "PUT") return json(200, { version: 2, items: (JSON.parse(String(init.body)) as { rules: unknown[] }).rules });
+        return json(200, stored);
+      }
+      return json(200, copyProject);
+    };
+  }
+
+  it("shows the empty state, adds a rule and saves it with the version", async () => {
+    rulesHandler(noRules);
+    const { container } = renderAt(`/migration/projects/${PROJECT}`);
+    expect(await screen.findByText(/No rules yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    fireEvent.change(screen.getByLabelText("Rule 1 replace prefix"), { target: { value: "USMF" } });
+    fireEvent.change(screen.getByLabelText("Rule 1 with prefix"), { target: { value: "CAMF" } });
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Save rules" }));
+    expect(await screen.findByText("Rules saved")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ version: 1, rules: [{ field: "@key", from: "USMF", to: "CAMF" }] });
+  });
+
+  it("blocks an invalid rule locally", async () => {
+    rulesHandler(noRules);
+    renderAt(`/migration/projects/${PROJECT}`);
+    await screen.findByText(/No rules yet/);
+    fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save rules" }));
+    expect(await screen.findByText("Enter the prefix to replace.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("removes a rule", async () => {
+    rulesHandler({ version: 1, items: [{ field: "@key", from: "USMF", to: "CAMF" }, { field: "dataAreaId", from: "USMF", to: "CAMF" }] });
+    renderAt(`/migration/projects/${PROJECT}`);
+    await screen.findByLabelText("Rule 2 field");
+    fireEvent.click(screen.getByRole("button", { name: "Remove rule 1" }));
+    expect(screen.queryByLabelText("Rule 2 field")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Rule 1 field")).toHaveValue("dataAreaId");
+  });
+
+  it("previews sample keys with the unsaved rules", async () => {
+    rulesHandler({ version: 1, items: [{ field: "@key", from: "USMF", to: "CAMF" }] });
+    renderAt(`/migration/projects/${PROJECT}`);
+    await screen.findByLabelText("Rule 1 field");
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByText(/Enter at least one sample key/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Sample keys (one per line)"), { target: { value: "USMF-C1\n\nDE-C2\n" } });
+    fireEvent.change(screen.getByLabelText("Rule 1 with prefix"), { target: { value: "MXMF" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const table = await findTable({ name: "Rewrite preview" });
+    expect(within(table).getByText("CAMF-C1")).toBeInTheDocument();
+    expect(calls.find((c) => c.url.pathname.endsWith(":preview"))?.body).toEqual({ keys: ["USMF-C1", "DE-C2"], rules: [{ field: "@key", from: "USMF", to: "MXMF" }] });
+  });
+
+  it("offers a reload after a version conflict", async () => {
+    handler = (url, init) => {
+      if (url.pathname.endsWith("/key-rewrite-rules")) return init.method === "PUT" ? json(409, { code: "MIG-VERSION-CONFLICT", detail: "current version is 3" }) : json(200, noRules);
+      return json(200, copyProject);
+    };
+    renderAt(`/migration/projects/${PROJECT}`);
+    await screen.findByText(/No rules yet/);
+    fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    fireEvent.change(screen.getByLabelText("Rule 1 replace prefix"), { target: { value: "A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save rules" }));
+    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload rules" })).toBeInTheDocument();
+  });
+
+  it("shows the error state for the rules", async () => {
+    handler = (url) => (url.pathname.endsWith("/key-rewrite-rules") ? json(500, { code: "COM-0500", detail: "internal error" }) : json(200, copyProject));
+    renderAt(`/migration/projects/${PROJECT}`);
+    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+  });
+});

@@ -93,7 +93,14 @@ type Store interface {
 	AppendPackageApplied(ctx context.Context, id string, entry PackageApplied) (ConfigPackage, error)
 	GetConfigPackage(ctx context.Context, id string) (ConfigPackage, error)
 	ListConfigPackages(ctx context.Context, limit int) ([]ConfigPackage, error)
-	SaveRewriteRules(ctx context.Context, projectID string, rules []domain.KeyRewrite) error
+	// SaveProject creates a migration project (EN-064); created is false when the Idempotency-Key already stored it.
+	SaveProject(ctx context.Context, p Project, idempotencyKey string) (saved Project, created bool, err error)
+	GetProject(ctx context.Context, id string) (Project, error)
+	ListProjects(ctx context.Context, f ProjectFilter) ([]Project, error)
+	// UpdateProject applies edit under the project's version (409 MIG-VERSION-CONFLICT otherwise) and bumps it.
+	UpdateProject(ctx context.Context, id string, version int, edit func(*Project) error) (Project, error)
+	// ReplaceRewriteRules swaps a project's whole rule set under its version and bumps the version.
+	ReplaceRewriteRules(ctx context.Context, projectID string, version int, rules []domain.KeyRewrite) (Project, error)
 	RewriteRules(ctx context.Context, projectID string) ([]domain.KeyRewrite, error)
 	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
@@ -493,6 +500,8 @@ type Mem struct {
 
 	pkgOnce  sync.Once
 	pkgState *memPackages
+	pjOnce   sync.Once
+	pjState  *memProjects
 }
 
 func NewMem() *Mem {

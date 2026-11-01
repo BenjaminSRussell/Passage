@@ -158,3 +158,20 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm-size);
 }
+
+.ruleRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(8rem, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.ruleRowEnd {
+  align-self: end;
+}
+
+@media (max-width: 40rem) {
+  .ruleRow {
+    grid-template-columns: 1fr;
+  }
+}

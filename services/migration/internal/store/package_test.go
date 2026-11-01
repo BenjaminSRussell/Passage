@@ -14,8 +14,6 @@ import (
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
-const projectID = "00000000-0000-7000-8000-0000000000aa"
-
 func samplePackage() store.ConfigPackage {
 	return store.ConfigPackage{
 		Version: "1.2.0", SchemaVersion: 1, Signature: []byte{1, 2, 3},
@@ -56,11 +54,15 @@ func exercise(t *testing.T, s store.Store, one, two context.Context, tenantAware
 	if list, err := s.ListConfigPackages(one, 0); err != nil || len(list) != 1 {
 		t.Fatalf("list = %+v %v", list, err)
 	}
-	rules := []domain.KeyRewrite{{Field: domain.KeyField, From: "USMF", To: "CAMF"}, {Field: "dataAreaId", From: "USMF", To: "CAMF"}}
-	if err := s.SaveRewriteRules(one, projectID, rules); err != nil {
+	proj, _, err := s.SaveProject(one, store.Project{Name: "rules", Type: domain.ProjectCopy, Status: domain.ProjectActive, SourceLegalEntityID: leA, TargetLegalEntityID: leB}, "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.RewriteRules(one, projectID); err != nil || len(got) != 2 || got[0] != rules[0] || got[1] != rules[1] {
+	rules := []domain.KeyRewrite{{Field: domain.KeyField, From: "USMF", To: "CAMF"}, {Field: "dataAreaId", From: "USMF", To: "CAMF"}}
+	if saved, err := s.ReplaceRewriteRules(one, proj.ID, 1, rules); err != nil || saved.Version != 2 {
+		t.Fatalf("replace = %+v %v", saved, err)
+	}
+	if got, err := s.RewriteRules(one, proj.ID); err != nil || len(got) != 2 || got[0] != rules[0] || got[1] != rules[1] {
 		t.Fatalf("rules = %+v %v", got, err)
 	}
 	if _, err := s.GetConfigPackage(one, "not-a-uuid"); err == nil {
@@ -78,7 +80,7 @@ func exercise(t *testing.T, s store.Store, one, two context.Context, tenantAware
 	if list, _ := s.ListConfigPackages(two, 0); len(list) != 0 {
 		t.Fatalf("tenant 2 lists %d packages", len(list))
 	}
-	if got, err := s.RewriteRules(two, projectID); err != nil || len(got) != 0 {
+	if got, err := s.RewriteRules(two, proj.ID); err != nil || len(got) != 0 {
 		t.Fatalf("tenant 2 reads %d rules, %v", len(got), err)
 	}
 	if _, ok, _ := s.ConfigPackageByKey(two, "key-1"); ok {

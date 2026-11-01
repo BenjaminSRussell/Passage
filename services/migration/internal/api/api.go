@@ -149,6 +149,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerTemplates(r)
 	a.registerXref(r)
 	a.registerPackages(r)
+	a.registerProjects(r)
 }
 
 func (a *API) Metrics() http.Handler {

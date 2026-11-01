@@ -185,19 +185,6 @@ func (s *Postgres) ListConfigPackages(ctx context.Context, limit int) ([]ConfigP
 	return out, err
 }
 
-func (s *Postgres) SaveRewriteRules(ctx context.Context, projectID string, rules []domain.KeyRewrite) error {
-	p, _ := tenant.FromContext(ctx)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		for i, r := range rules {
-			if _, err := tx.Exec(ctx, `insert into migration.key_rewrite_rule (tenant_id, id, project_id, field, from_value, to_value, position)
-				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, ids.New(), projectID, r.Field, r.From, r.To, i); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 func (s *Postgres) RewriteRules(ctx context.Context, projectID string) ([]domain.KeyRewrite, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := []domain.KeyRewrite{}
@@ -314,14 +301,6 @@ func (m *Mem) ListConfigPackages(_ context.Context, limit int) ([]ConfigPackage,
 		out = append(out, st.pkgs[i])
 	}
 	return out, nil
-}
-
-func (m *Mem) SaveRewriteRules(_ context.Context, projectID string, rules []domain.KeyRewrite) error {
-	st := m.pk()
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.rules[projectID] = append(st.rules[projectID], rules...)
-	return nil
 }
 
 func (m *Mem) RewriteRules(_ context.Context, projectID string) ([]domain.KeyRewrite, error) {

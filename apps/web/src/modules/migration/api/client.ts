@@ -254,3 +254,91 @@ export async function listXref(filter: XrefFilter, signal?: AbortSignal): Promis
 }
 
 export const xrefSummary = (signal?: AbortSignal) => items<XrefCount>("/xref/summary", signal);
+
+export type ProjectType = "migrate" | "copy" | "config_package";
+export type ProjectStatus = "active" | "archived";
+
+export interface MigrationProject {
+  id: string;
+  name: string;
+  projectType: ProjectType;
+  sourceSystem?: SourceSystem;
+  sourceLegalEntityId?: string;
+  targetLegalEntityId?: string;
+  status: ProjectStatus;
+  cutoverAt?: string;
+  scheduleCron?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  projectType: ProjectType;
+  sourceSystem?: SourceSystem;
+  sourceLegalEntityId?: string;
+  targetLegalEntityId?: string;
+  cutoverAt?: string;
+  scheduleCron?: string;
+}
+
+export interface KeyRewrite {
+  field: string;
+  from: string;
+  to: string;
+}
+
+export interface KeyRewriteRules {
+  /** The project version to send back with the next replacement. */
+  version: number;
+  items: KeyRewrite[];
+}
+
+export interface KeyRewritePreview {
+  key: string;
+  rewritten: string;
+  changed: boolean;
+}
+
+export interface ProjectPage {
+  items: MigrationProject[];
+  nextCursor?: string;
+}
+
+export async function listProjects(filter: { projectType?: string; status?: string; cursor?: string }, signal?: AbortSignal): Promise<ProjectPage> {
+  const body = await send<ProjectPage>(`/projects${query({ ...filter, limit: "50" })}`, {}, signal);
+  if (!Array.isArray(body.items)) throw new MigrationApiError(0, "COM-0001", "The response has no items");
+  return body;
+}
+
+export const getProject = (id: string, signal?: AbortSignal) => send<MigrationProject>(`/projects/${encodeURIComponent(id)}`, {}, signal);
+
+export const createProject = (input: CreateProjectInput, key: string = newKey()) =>
+  send<MigrationProject>("/projects", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+/** The editable fields of a project; an omitted field is unchanged and an empty cutoverAt or scheduleCron clears it. */
+export interface ProjectEdit {
+  name?: string;
+  status?: ProjectStatus;
+  cutoverAt?: string;
+  scheduleCron?: string;
+}
+
+export const updateProject = (id: string, version: number, edit: ProjectEdit) =>
+  send<MigrationProject>(`/projects/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+export const getKeyRewriteRules = (id: string, signal?: AbortSignal) => send<KeyRewriteRules>(`/projects/${encodeURIComponent(id)}/key-rewrite-rules`, {}, signal);
+
+export const replaceKeyRewriteRules = (id: string, version: number, rules: KeyRewrite[]) =>
+  send<KeyRewriteRules>(`/projects/${encodeURIComponent(id)}/key-rewrite-rules`, { method: "PUT", body: JSON.stringify({ version, rules }) });
+
+/** Shows what the given rules would do to sample keys; nothing is saved. */
+export async function previewKeyRewrite(id: string, keys: string[], rules: KeyRewrite[]): Promise<KeyRewritePreview[]> {
+  const body = await send<{ items: KeyRewritePreview[] }>(`/projects/${encodeURIComponent(id)}/key-rewrite-rules:preview`, {
+    method: "POST",
+    body: JSON.stringify({ keys, rules }),
+  });
+  return body.items;
+}

@@ -227,6 +227,146 @@ paths:
           description: One row per source system and entity.
           content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/XrefCount' } } } } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/projects:
+    get:
+      operationId: listMigrationProjects
+      summary: List migration projects
+      description: Migration projects (EN-064) in name order, optionally filtered by type and status, paged with the opaque nextCursor. Callers scoped to one legal entity are refused.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: projectType, in: query, schema: { type: string, enum: [migrate, copy, config_package] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of projects; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MigrationProject' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createMigrationProject
+      summary: Create a migration project
+      description: Creates a migrate, copy (between two different legal entities of the tenant, FR-10.14) or config_package project. Type, source system and legal entities are fixed once created; name, status, cutover and schedule can be changed with the version. Legal entity ids are not checked against the org service.
+      x-passage-duty: migration.project.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateMigrationProject' } } }
+      responses:
+        '201':
+          description: The project was created.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationProject' } } }
+        '200':
+          description: The Idempotency-Key was replayed; the stored project is returned.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationProject' } } }
+        '409':
+          description: MIG-PROJECT-NAME-EXISTS, a project with this name already exists.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse, the key was used for a different project.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/projects/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getMigrationProject
+      summary: Get a migration project
+      description: Returns one migration project with its current version.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The project.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationProject' } } }
+        '404':
+          description: AUTH-0404, no migration project with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateMigrationProject
+      summary: Change a migration project
+      description: Changes name, status, cutover time or schedule under the project's version. An omitted or null field is unchanged; an empty cutoverAt or scheduleCron clears it. A stale version is a conflict. An archived project takes no change except reactivation (status active), which may carry other edits.
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateMigrationProject' } } }
+      responses:
+        '200':
+          description: The updated project with its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationProject' } } }
+        '404':
+          description: AUTH-0404, no migration project with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale; MIG-PROJECT-NAME-EXISTS; or MIG-PROJECT-ARCHIVED, the project is archived and the change does not reactivate it.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/projects/{id}/key-rewrite-rules:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getKeyRewriteRules
+      summary: Get a copy project's key rewrite rules
+      description: The ordered rules that rewrite legal-entity-scoped keys when a copy runs, with the project version to send back when replacing them. Only copy projects have rules.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The rules in the order they are tried.
+          content: { application/json: { schema: { $ref: '#/components/schemas/KeyRewriteRules' } } }
+        '404':
+          description: AUTH-0404, no migration project with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-PROJECT-NOT-COPY, only copy projects have key rewrite rules.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: replaceKeyRewriteRules
+      summary: Replace a copy project's key rewrite rules
+      description: Replaces the whole rule set under the project's version and bumps the version; an empty list clears the rules. For one field the first matching rule wins, so a rule whose prefix starts with an earlier rule's prefix for the same field (USMF after US, or a repeat) could never apply and is refused. An archived project's rules cannot be replaced.
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReplaceKeyRewriteRules' } } }
+      responses:
+        '200':
+          description: The stored rules and the new project version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/KeyRewriteRules' } } }
+        '404':
+          description: AUTH-0404, no migration project with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale, or MIG-PROJECT-ARCHIVED, the project is archived.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-PROJECT-NOT-COPY, only copy projects have key rewrite rules.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/projects/{id}/key-rewrite-rules:preview:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: previewKeyRewriteRules
+      summary: Preview key rewriting on sample keys
+      description: Shows what the rules would do to sample record keys, using the rules in the request or, when omitted, the stored ones. Nothing is saved.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewKeyRewrite' } } }
+      responses:
+        '200':
+          description: One row per sample key, in request order.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/KeyRewritePreview' } } } } } }
+        '404':
+          description: AUTH-0404, no migration project with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-PROJECT-NOT-COPY, only copy projects have key rewrite rules.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
     get:
       operationId: listConfigPackages
@@ -328,7 +468,7 @@ paths:
 components:
   responses:
     Problem:
-      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse, MIG-MAP-* or MIG-PKG-*.
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 409 MIG-VERSION-CONFLICT, 422 idempotency_key_reuse, MIG-MAP-* or MIG-PKG-*.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   schemas:
     CreateMigrationRun:
@@ -430,6 +570,81 @@ components:
         sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
         entity: { type: string }
         count: { type: integer, minimum: 1 }
+    MigrationProject:
+      type: object
+      required: [id, name, projectType, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 80 }
+        projectType: { type: string, enum: [migrate, copy, config_package] }
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4], description: Migrate projects only. }
+        sourceLegalEntityId: { type: string, format: uuid, description: Copy projects only. }
+        targetLegalEntityId: { type: string, format: uuid, description: Copy projects only. }
+        status: { type: string, enum: [active, archived] }
+        cutoverAt: { type: string, format: date-time }
+        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16); stored, not yet run by a scheduler. }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateMigrationProject:
+      type: object
+      additionalProperties: false
+      description: A migrate project needs sourceSystem; a copy project needs two different legal entities and no source system; a config_package project takes neither.
+      required: [name, projectType]
+      properties:
+        name: { type: string, maxLength: 80 }
+        projectType: { type: string, enum: [migrate, copy, config_package] }
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        sourceLegalEntityId: { type: string, format: uuid }
+        targetLegalEntityId: { type: string, format: uuid }
+        cutoverAt: { type: string, format: date-time }
+        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs (FR-10.16). }
+    UpdateMigrationProject:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        name: { type: string, maxLength: 80 }
+        status: { type: string, enum: [active, archived] }
+        cutoverAt: { type: string, description: RFC 3339 timestamp, or empty to clear. }
+        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs, or empty to clear. }
+    KeyRewrite:
+      type: object
+      additionalProperties: false
+      required: [field, from, to]
+      properties:
+        field: { type: string, maxLength: 100, description: A field name, or "@key" for the record's own natural key. }
+        from: { type: string, minLength: 1, maxLength: 100, description: A value of the field starting with this text has it replaced. }
+        to: { type: string, maxLength: 100 }
+    KeyRewriteRules:
+      type: object
+      required: [version, items]
+      properties:
+        version: { type: integer, minimum: 1, description: The project version; send it with the next replacement. }
+        items: { type: array, items: { $ref: '#/components/schemas/KeyRewrite' } }
+    ReplaceKeyRewriteRules:
+      type: object
+      additionalProperties: false
+      required: [version, rules]
+      properties:
+        version: { type: integer, minimum: 1 }
+        rules: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/KeyRewrite' } }
+    PreviewKeyRewrite:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys: { type: array, minItems: 1, maxItems: 200, items: { type: string, maxLength: 200 } }
+        rules: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/KeyRewrite' }, description: Rules to try instead of the stored ones. An empty list rewrites nothing. }
+    KeyRewritePreview:
+      type: object
+      required: [key, rewritten, changed]
+      properties:
+        key: { type: string }
+        rewritten: { type: string }
+        changed: { type: boolean }
     DataTemplate:
       type: object
       required: [id, entity, name, version, checksum, defaultCount, createdAt]
