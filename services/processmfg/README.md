@@ -123,6 +123,10 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/batch-attributes:check` | `production.batch-attribute.write` | Check recorded attribute values against the item's definitions; out-of-limit values are flagged as exceptions (FR-24.5) |
 | POST | `/v1/production/batch-picking:proposal` | `production.batch-order.read` | What-if proposal over batches the caller describes: available only, FEFO, potency band, expired only on the `production.batch.consume-expired` override with a reason (FR-24.3, FR-24.5, FR-24.6, BR-24.10); a batch of the register is refused with PMF-0112 |
 | POST | `/v1/production/batch-picking:propose-stored` | `production.batch-order.read` | The same proposal over registered batches of one item: disposition, expiry and attribute values read from the register, on-hand quantity per batch from the caller, potency band on the item's potency attribute by default (FR-24.3, FR-24.5, FR-24.6, AC-24.4, AC-24.10) |
+| POST | `/v1/production/customer-batch-requirements` | `production.batch-requirement.write` | Define a customer batch requirement for an item at a customer, customer group or item scope: sellable days, attribute range, same-batch flag, validity; writes `batchrequirement.defined` (FR-24.19, BR-24.13) |
+| GET | `/v1/production/customer-batch-requirements`, `/{id}` | `production.batch-order.read` | The rules, filtered by legal entity, item, customer, group and the day they are active |
+| POST | `/v1/production/customer-batch-requirements/{id}:retire` | `production.batch-requirement.write` | Retire a rule under the version read; writes `batchrequirement.retired` |
+| POST | `/v1/production/batch-requirements:check-stored` | `production.batch-order.read` | Check registered batches against the stored rules of the legal entity (default the caller's) for the item, customer and group in force on the ship date; on-hand quantity per batch from the caller (FR-24.19, AC-24.14). Precedence per field: customer over group over item default; within a scope the rule that started last, then the one defined last. Customer and group ids are party/sales references checked for form only; ship date and expiry are calendar days compared without time-zone conversion |
 | POST | `/v1/production/rework-orders:preview` | `production.batch-order.write` | Rework batch order plan: output batch, disposition, quality order, variance type, genealogy (FR-24.18) |
 | POST | `/v1/production/batch-attribute-definitions` | `production.batch-attribute.write` | Define a batch attribute of an item, role generic or potency (one per item) (FR-24.5); Idempotency-Key |
 | GET | `/v1/production/batch-attribute-definitions` | `production.batch-order.read` | Definitions by item and name; `itemId`, `limit` |
@@ -178,6 +182,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0110` | 409 | The item already defines a batch attribute of that name, or already has a potency attribute |
 | `PMF-0111` | 409 | The batch already has the requested disposition |
 | `PMF-0112` | 409 | The caller-supplied picking proposal lists a batch of the batch register; propose it with `batch-picking:propose-stored` (not in the PRD catalog) |
+| `PMF-0113` | 404 | Customer batch requirement not found |
+| `PMF-0114` | 409 | The customer batch requirement is already retired |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

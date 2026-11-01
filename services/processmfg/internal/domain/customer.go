@@ -189,3 +189,62 @@ func expiresBefore(a, b Batch) bool {
 	}
 	return ea.Date.Before(*eb.Date)
 }
+
+// ValidateRequirement checks one rule before it is stored (FR-24.19): it must
+// set sellable days, an attribute range or the same-batch flag, and what it
+// sets must pass the checks Resolve applies.
+func ValidateRequirement(r Requirement) error {
+	if r.SellableDays == nil && r.Attribute == "" && r.SameBatch == nil {
+		return errorf(CodeInvalid, "a requirement sets sellable days, an attribute range or the same-batch flag")
+	}
+	_, err := Resolve([]Requirement{r})
+	return err
+}
+
+// Deciding returns, in input order, the indexes of the rows Resolve takes a
+// value from: for sellable days, the same-batch flag and each attribute range,
+// the first row of the highest level that sets it. Rows it overrides are left
+// out, so a caller can name the rules a resolved requirement came from.
+func Deciding(rows []Requirement) []int {
+	daysAt, sameAt := -1, -1
+	rangeAt := map[string]int{}
+	better := func(at, i int) bool { return at < 0 || rows[i].Level > rows[at].Level }
+	for i, r := range rows {
+		if r.SellableDays != nil && better(daysAt, i) {
+			daysAt = i
+		}
+		if r.SameBatch != nil && better(sameAt, i) {
+			sameAt = i
+		}
+		if r.Attribute != "" {
+			at, ok := rangeAt[r.Attribute]
+			if !ok {
+				at = -1
+			}
+			if better(at, i) {
+				rangeAt[r.Attribute] = i
+			}
+		}
+	}
+	used := make([]bool, len(rows))
+	for _, at := range append([]int{daysAt, sameAt}, mapValues(rangeAt)...) {
+		if at >= 0 {
+			used[at] = true
+		}
+	}
+	out := []int{}
+	for i, u := range used {
+		if u {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func mapValues(m map[string]int) []int {
+	out := make([]int, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}

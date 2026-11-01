@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Process Manufacturing
-  version: 0.5.0
+  version: 0.6.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11 to 13): formulas, batch orders
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11 to 14): formulas, batch orders
     scaled from a formula snapshot, the potency, catch-weight and co-product
     allocation calculators (slice 1), the batch derivation, merge, consolidation,
     customer requirement and EBR approval previews (slice 2), and the batch
     attribute check, the picking proposal and the rework plan (slice 3), and the
-    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11), and the merge of stored batches with its genealogy (slice 13). Routes
+    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11), the merge of stored batches with its genealogy (slice 13), and the customer batch requirements with the requirement check over stored batches (slice 14). Routes
     match the handlers in internal/api (checked by internal/api/openapi_test.go).
     Errors are RFC 9457 problem details (application/problem+json) with a stable
     `code`; see README.md. The gateway routes /api/v1/production/* paths listed
@@ -493,6 +493,132 @@ paths:
           description: A listed batch does not exist (PMF-0108).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/customer-batch-requirements:
+    post:
+      operationId: createCustomerBatchRequirement
+      summary: Define a customer batch requirement for an item (FR-24.19, BR-24.13)
+      description: A rule for an item at one scope (a customer, a customer group or everyone) that sets sellable days (minimum remaining shelf life at shipment, 0 to 3650), a numeric range for one attribute and the same-batch flag; it sets at least one. When a line is checked, each field (sellable days, the same-batch flag, each attribute range) comes from the most specific rule that sets it (customer over customer group over item default, BR-24.13); within one scope the rule that started last wins (no validFrom counts as earliest), then the one defined last, so a rule with a later validFrom takes over from an open-ended one from that day. A rule is never edited; retire it, or define its successor with a later validFrom. customerId and customerGroupId are references to party and sales master data, checked for form (UUID) only. legalEntityId defaults to the caller's legal entity. Writes dev.passage.production.batchrequirement.defined.v1 in the same transaction.
+      x-passage-duty: production.batch-requirement.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CustomerRequirementRequest' } } }
+      responses:
+        '201':
+          description: 'The stored rule at version 1. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/CustomerRequirement' } } }
+        '400':
+          description: COM-0001 for a malformed body, a rule that sets nothing, a customer and a group together, sellable days outside 0 to 3650, a range without an attribute (or the reverse) or with min above max, or dates out of order.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003 when the legal entity is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCustomerBatchRequirements
+      summary: Customer batch requirements by item, oldest first
+      description: Filter by legal entity, item, customer or customer group. With activeOn the list keeps the rules in force that day and not retired; without it retired rules are listed too.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: customerGroupId, in: query, schema: { type: string, format: uuid } }
+        - { name: activeOn, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CustomerRequirement' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/customer-batch-requirements/{id}:
+    get:
+      operationId: getCustomerBatchRequirement
+      summary: One customer batch requirement
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The rule, with its version and whether it is retired.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CustomerRequirement' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0113
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/customer-batch-requirements/{id}:retire:
+    post:
+      operationId: retireCustomerBatchRequirement
+      summary: Retire a customer batch requirement
+      description: The rule stops applying at once and stays on record. Writes dev.passage.production.batchrequirement.retired.v1 in the same transaction.
+      x-passage-duty: production.batch-requirement.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The retired rule at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/CustomerRequirement' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0113
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0114 when the rule is already retired.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-requirements:check-stored:
+    post:
+      operationId: checkStoredBatchRequirements
+      summary: Check stored batches against a customer's stored requirements (FR-24.19, AC-24.14)
+      description: >-
+        Resolves the stored rules of the legal entity (default the caller's) for the item that are in force on the
+        ship date and apply to the customer, the customer's group or everyone (customer over group over item default,
+        field by field; within a scope the rule that started last, then the one defined last), reads the disposition,
+        expiry and attribute values of each batch from the batch register, and splits the batches into qualifying and
+        excluded (PMF-0009 with the reason) as batch-requirements:check does. The register keeps no quantity, so the
+        caller passes the on-hand quantity per batch. A batch outside the caller's scope is 404 PMF-0108; one of another
+        item is 400. The customer and group ids are references to party and sales master data, checked for form only;
+        the caller names the customer's group. The ship date and the batch expiry are calendar days compared as such
+        (expiry − ship date ≥ sellable days, BR-24.13) with no time-zone conversion; send the shipping site's local
+        day. Stores nothing.
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CheckStoredRequest' } } }
+      responses:
+        '200':
+          description: The resolved requirement, the rules it came from, the qualifying and excluded batches, the same-batch pick and the batch numbers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckStoredResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: AUTH-0003 when the legal entity is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: A listed batch does not exist (PMF-0108).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0008 (SAME_BATCH_UNAVAILABLE) when the line is same-batch and no qualifying batch holds its whole quantity; the detail names the largest available quantity.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/production/rework-orders:preview:
     post:
       operationId: previewReworkOrder
@@ -902,6 +1028,72 @@ components:
       properties:
         batch: { $ref: '#/components/schemas/BatchRecord' }
         checks: { type: array, items: { $ref: '#/components/schemas/AttributeCheck' } }
+    CustomerRequirementRequest:
+      type: object
+      required: [itemId]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        itemId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid, description: "The rule is the customer's (scope 3). Not with customerGroupId. A party/sales customer id, not looked up." }
+        customerGroupId: { type: string, format: uuid, description: "The rule is the customer group's (scope 2). With neither, it is the item default (scope 1). A sales customer-group id, not looked up." }
+        sellableDays: { type: integer, minimum: 0, maximum: 3650, description: Minimum remaining shelf life in whole days at shipment. }
+        attribute: { type: string, minLength: 1, maxLength: 40, description: The attribute a value must lie in the range of; needs min or max. }
+        min: { $ref: '#/components/schemas/Decimal' }
+        max: { $ref: '#/components/schemas/Decimal' }
+        sameBatch: { type: boolean, description: The whole line quantity must come from one batch. }
+        validFrom: { type: string, format: date, description: First day the rule applies; empty for no start. }
+        validTo: { type: string, format: date, description: Last day the rule applies (inclusive); empty for no end. }
+    CustomerRequirement:
+      type: object
+      required: [id, legalEntityId, itemId, level, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        customerGroupId: { type: string, format: uuid }
+        level: { type: integer, enum: [1, 2, 3], description: 3 for a customer, 2 for a customer group, 1 for the item default. }
+        sellableDays: { type: integer }
+        attribute: { type: string }
+        min: { $ref: '#/components/schemas/Decimal' }
+        max: { $ref: '#/components/schemas/Decimal' }
+        sameBatch: { type: boolean }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date }
+        retiredAt: { type: string, format: date-time }
+        retiredBy: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CheckStoredRequest:
+      type: object
+      required: [itemId, shipDate, qty, onHand]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: The legal entity whose rules apply. Defaults to the caller's legal entity. }
+        itemId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        customerGroupId: { type: string, format: uuid, description: The customer's group; the service does not look it up. }
+        shipDate: { type: string, format: date, description: The shipping site's local calendar day. }
+        qty: { $ref: '#/components/schemas/Quantity' }
+        onHand:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [batchId, qty]
+            properties:
+              batchId: { type: string, format: uuid }
+              qty: { $ref: '#/components/schemas/Decimal' }
+    CheckStoredResponse:
+      allOf:
+        - $ref: '#/components/schemas/CheckResponse'
+        - type: object
+          required: [applied, batchNumbers]
+          properties:
+            applied: { type: array, items: { type: string, format: uuid }, description: "The stored rules the requirement took a value from, in precedence order; overridden rules are left out." }
+            batchNumbers: { type: object, additionalProperties: { type: string }, description: Batch number by batch id. }
     Decimal:
       type: string
       description: Decimal as a JSON string (numbers are accepted on input).

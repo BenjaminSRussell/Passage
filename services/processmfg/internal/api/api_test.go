@@ -31,33 +31,39 @@ const (
 // fakeStore records the calls the handlers make and returns canned results.
 // The store's own behaviour is covered by the database tests in internal/store.
 type fakeStore struct {
-	formula    store.Formula
-	order      store.BatchOrder
-	err        error
-	replay     bool
-	gotFormula store.Formula
-	gotOrder   store.NewBatchOrder
-	gotIdem    store.Idem
-	gotFilter  store.OrderFilter
-	gotLimit   int
-	gotVersion int
-	gotSize    decimal.Decimal
-	gotCmd     string
-	gotReport  store.ReportInput
-	gotEnd     store.EndInput
-	batch      store.Batch
-	gotDef     store.AttributeDefinition
-	gotNew     store.NewBatch
-	gotValues  map[string]domain.Value
-	gotTo      string
-	gotReason  string
-	gotItem    string
-	gotBatches store.BatchFilter
-	gotOnHand  []store.OnHand
-	cands      []store.PickCandidate
-	potency    string
-	registered []string
-	gotIDs     []string
+	formula      store.Formula
+	order        store.BatchOrder
+	err          error
+	replay       bool
+	gotFormula   store.Formula
+	gotOrder     store.NewBatchOrder
+	gotIdem      store.Idem
+	gotFilter    store.OrderFilter
+	gotLimit     int
+	gotVersion   int
+	gotSize      decimal.Decimal
+	gotCmd       string
+	gotReport    store.ReportInput
+	gotEnd       store.EndInput
+	batch        store.Batch
+	gotDef       store.AttributeDefinition
+	gotNew       store.NewBatch
+	gotValues    map[string]domain.Value
+	gotTo        string
+	gotReason    string
+	gotItem      string
+	gotBatches   store.BatchFilter
+	gotOnHand    []store.OnHand
+	cands        []store.PickCandidate
+	potency      string
+	registered   []string
+	gotIDs       []string
+	reqs         []store.CustomerRequirement
+	gotReq       store.CustomerRequirement
+	gotReqFilt   store.RequirementFilter
+	gotReqWho    store.ReqScope
+	gotReqDate   string
+	gotReqEntity string
 }
 
 func (f *fakeStore) CreateFormula(_ context.Context, in store.Formula, idem store.Idem) (store.Formula, bool, error) {

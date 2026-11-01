@@ -11,7 +11,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/domain"
-	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
 )
 
 const pickStoredPath = "/v1/production/batch-picking:propose-stored"
@@ -68,26 +67,9 @@ func (a *API) proposePickingStored(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, map[string]string{"itemId": "must be a UUID"})
 		return
 	}
-	if len(in.OnHand) == 0 || len(in.OnHand) > maxBatches {
-		invalid(w, r, map[string]string{"onHand": "must list 1 to 200 batches"})
+	onHand, ok := parseOnHand(w, r, in.OnHand)
+	if !ok {
 		return
-	}
-	seen := map[string]bool{}
-	onHand := make([]store.OnHand, len(in.OnHand))
-	for i, oh := range in.OnHand {
-		// Canonical form, so an upper-case id matches the register and
-		// cannot be listed twice under two spellings.
-		id, ok := ids.Canonical(oh.BatchID)
-		if !ok || seen[id] {
-			invalid(w, r, map[string]string{"onHand": "batchId must be a distinct UUID per entry"})
-			return
-		}
-		if !validQtyOrZero(oh.Qty) {
-			invalid(w, r, map[string]string{"onHand": "qty must be from 0 below 10^12 with at most 6 decimals"})
-			return
-		}
-		seen[id] = true
-		onHand[i] = store.OnHand{BatchID: id, Qty: oh.Qty}
 	}
 	cands, potencyAttr, err := a.store.PickCandidates(r.Context(), item, onHand)
 	if err != nil {

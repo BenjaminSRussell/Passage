@@ -364,6 +364,13 @@ func checkRequirements(in checkRequest) (checkResponse, error) {
 	if err != nil {
 		return checkResponse{}, err
 	}
+	return evaluateRequirement(req, ship, in.Qty, batches)
+}
+
+// evaluateRequirement splits batches into qualifying and excluded for the
+// resolved requirement and, for a same-batch line, picks the batch that
+// supplies the whole quantity (PMF-0008 when none can).
+func evaluateRequirement(req domain.Resolved, ship time.Time, qty decimal.Decimal, batches []domain.Batch) (checkResponse, error) {
 	out := checkResponse{
 		Requirement: resolvedDTO{SellableDays: req.SellableDays, SameBatch: req.SameBatch, Ranges: map[string]rangeDTO{}},
 		Qualifying:  []qualifyingDTO{},
@@ -388,7 +395,7 @@ func checkRequirements(in checkRequest) (checkResponse, error) {
 		out.QtyAvailable = out.QtyAvailable.Add(b.Qty)
 	}
 	if req.SameBatch {
-		pick, err := domain.SelectSameBatch(ok, in.Qty)
+		pick, err := domain.SelectSameBatch(ok, qty)
 		if err != nil {
 			return checkResponse{}, err
 		}

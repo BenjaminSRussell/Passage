@@ -91,6 +91,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerQuality(r)
 	a.registerPickStored(r)
 	a.registerMerge(r)
+	a.registerCustomerRequirements(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

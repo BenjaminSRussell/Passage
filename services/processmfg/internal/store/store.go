@@ -152,6 +152,11 @@ type Store interface {
 	ChangeDisposition(ctx context.Context, id, to, reason string, version int, idem Idem) (Batch, bool, error)
 	MergeBatches(ctx context.Context, in MergeInput, idem Idem) (MergeResult, bool, error)
 	GetGenealogy(ctx context.Context, id string) (Genealogy, error)
+	CreateCustomerRequirement(ctx context.Context, in CustomerRequirement, idem Idem) (CustomerRequirement, bool, error)
+	ListCustomerRequirements(ctx context.Context, f RequirementFilter) ([]CustomerRequirement, error)
+	GetCustomerRequirement(ctx context.Context, id string) (CustomerRequirement, error)
+	RetireCustomerRequirement(ctx context.Context, id string, version int, idem Idem) (CustomerRequirement, bool, error)
+	ApplicableRequirements(ctx context.Context, legalEntityID, itemID string, who ReqScope, shipDate string) ([]CustomerRequirement, error)
 	PickCandidates(ctx context.Context, itemID string, onHand []OnHand) ([]PickCandidate, string, error)
 	RegisteredBatches(ctx context.Context, batchIDs []string) ([]string, error)
 	Ping(ctx context.Context) error

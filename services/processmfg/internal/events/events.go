@@ -27,12 +27,17 @@ const (
 	BatchDispositionChanged = "dev.passage.production.batch.dispositionchanged.v1"
 	// BatchMerged is written when stored batches are merged into a new one (FR-24.16).
 	BatchMerged = "dev.passage.production.batch.merged.v1"
+	// BatchRequirementDefined and BatchRequirementRetired cover the customer
+	// batch requirements (FR-24.19): sales and picking read the rules from them.
+	BatchRequirementDefined = "dev.passage.production.batchrequirement.defined.v1"
+	BatchRequirementRetired = "dev.passage.production.batchrequirement.retired.v1"
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{FormulaCreated, BatchOrderCreated, BatchOrderRescaled, BatchOrderStateChanged, CoProductAllocated,
-		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged}
+		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged,
+		BatchRequirementDefined, BatchRequirementRetired}
 }
 
 // FormulaCreatedData is the payload of FormulaCreated.
@@ -211,4 +216,24 @@ type BatchMergedData struct {
 	Qty           string         `json:"qty"`
 	UnitCost      string         `json:"unitCost"`
 	Parents       []MergedParent `json:"parents"`
+}
+
+// BatchRequirementData is the payload of BatchRequirementDefined and
+// BatchRequirementRetired. Level is 3 for a customer, 2 for a customer group
+// and 1 for the item default (BR-24.13).
+type BatchRequirementData struct {
+	RequirementID   string `json:"requirementId"`
+	LegalEntityID   string `json:"legalEntityId"`
+	ItemID          string `json:"itemId"`
+	CustomerID      string `json:"customerId,omitempty"`
+	CustomerGroupID string `json:"customerGroupId,omitempty"`
+	Level           int    `json:"level"`
+	SellableDays    *int   `json:"sellableDays,omitempty"`
+	Attribute       string `json:"attribute,omitempty"`
+	Min             string `json:"min,omitempty"`
+	Max             string `json:"max,omitempty"`
+	SameBatch       *bool  `json:"sameBatch,omitempty"`
+	ValidFrom       string `json:"validFrom,omitempty"`
+	ValidTo         string `json:"validTo,omitempty"`
+	Version         int    `json:"version"`
 }

@@ -678,3 +678,87 @@ export function mergeStoredBatches(input: StoredMergeRequest, key: string = newK
 export function getBatchGenealogy(id: string, signal?: AbortSignal): Promise<Genealogy> {
   return send<Genealogy>(`/batches/${encodeURIComponent(id)}/genealogy`, {}, signal);
 }
+
+/** FR-24.19: a stored customer batch requirement. Level 3 is a customer, 2 a customer group, 1 the item default. */
+export interface CustomerRequirement {
+  id: string;
+  legalEntityId: string;
+  itemId: string;
+  customerId?: string;
+  customerGroupId?: string;
+  level: 1 | 2 | 3;
+  sellableDays?: number;
+  attribute?: string;
+  min?: string;
+  max?: string;
+  sameBatch?: boolean;
+  validFrom?: string;
+  validTo?: string;
+  retiredAt?: string;
+  retiredBy?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewCustomerRequirement {
+  itemId: string;
+  customerId?: string;
+  customerGroupId?: string;
+  sellableDays?: number;
+  attribute?: string;
+  min?: string;
+  max?: string;
+  sameBatch?: boolean;
+  validFrom?: string;
+  validTo?: string;
+}
+
+export interface RequirementFilter {
+  itemId?: string;
+  customerId?: string;
+  customerGroupId?: string;
+  activeOn?: string;
+}
+
+export function listCustomerRequirements(filter: RequirementFilter = {}, signal?: AbortSignal): Promise<CustomerRequirement[]> {
+  return items<CustomerRequirement>(`/customer-batch-requirements${query({ ...filter, limit: 200 })}`, signal);
+}
+
+export function getCustomerRequirement(id: string, signal?: AbortSignal): Promise<CustomerRequirement> {
+  return send<CustomerRequirement>(`/customer-batch-requirements/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Reuse one key per form so a retried submit cannot define the rule twice. */
+export function createCustomerRequirement(input: NewCustomerRequirement, key: string = newKey()): Promise<CustomerRequirement> {
+  return post<CustomerRequirement>("/customer-batch-requirements", input, key);
+}
+
+export function retireCustomerRequirement(id: string, version: number, key: string = newKey()): Promise<CustomerRequirement> {
+  return post<CustomerRequirement>(`/customer-batch-requirements/${encodeURIComponent(id)}:retire`, { version }, key);
+}
+
+export interface StoredRequirementCheckRequest {
+  itemId: string;
+  customerId?: string;
+  customerGroupId?: string;
+  shipDate: string;
+  qty: string;
+  onHand: { batchId: string; qty: string }[];
+}
+
+export interface StoredRequirementCheck {
+  requirement: { sellableDays: number; sameBatch: boolean; ranges: Record<string, { min?: string; max?: string }> };
+  qualifying: { batchId: string; qty: string; expiry?: string }[];
+  excluded: { batchId: string; reason: string; warningCode: string }[];
+  qtyAvailable: string;
+  sameBatchId?: string | null;
+  applied: string[];
+  batchNumbers: Record<string, string>;
+}
+
+/** FR-24.19, AC-24.14: checks stored batches against the stored requirements of a customer. */
+export function checkStoredRequirements(input: StoredRequirementCheckRequest): Promise<StoredRequirementCheck> {
+  return post<StoredRequirementCheck>("/batch-requirements:check-stored", input);
+}
