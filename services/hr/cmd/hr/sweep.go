@@ -33,12 +33,16 @@ func newActionSweep(getenv func(string) string, apply func(context.Context) (sto
 		return nil, nil
 	}
 	var tenants []string
+	seen := map[string]bool{}
 	for _, part := range strings.Split(raw, ",") {
 		id, ok := ids.Canonical(strings.TrimSpace(part))
 		if !ok || id == ids.Nil {
 			return nil, fmt.Errorf("HR_ACTION_SWEEP_TENANT_IDS entry %q is not a UUID", part)
 		}
-		tenants = append(tenants, id)
+		if !seen[id] {
+			seen[id] = true
+			tenants = append(tenants, id)
+		}
 	}
 	interval := defaultSweepInterval
 	if v := getenv("HR_ACTION_SWEEP_INTERVAL"); v != "" {

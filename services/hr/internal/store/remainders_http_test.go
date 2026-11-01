@@ -153,6 +153,11 @@ func TestRequisitionNumberComesFromTheSequenceWhenOmitted(t *testing.T) {
 	if first.Code != http.StatusCreated || !strings.Contains(first.Body.String(), `"requisitionNumber":"REQ-1"`) {
 		t.Fatalf("create: status %d body %s", first.Code, first.Body.String())
 	}
+	for key := range seq.issued {
+		if key != "hr:REQ:key-1" {
+			t.Fatalf("numbering key = %q, want it scoped as hr:REQ:key-1", key)
+		}
+	}
 	replay := o.postRequisition(o.users["mgr"], body, "key-1")
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), `"requisitionNumber":"REQ-1"`) || len(seq.issued) != 1 {
 		t.Fatalf("replay: status %d body %s issued %v, want the same number from the same key", replay.Code, replay.Body.String(), seq.issued)
@@ -160,6 +165,12 @@ func TestRequisitionNumberComesFromTheSequenceWhenOmitted(t *testing.T) {
 	if second := o.postRequisition(o.users["mgr"], body, ""); second.Code != http.StatusCreated || !strings.Contains(second.Body.String(), `"requisitionNumber":"REQ-2"`) {
 		t.Fatalf("keyless create: status %d body %s, want the next number", second.Code, second.Body.String())
 	}
+
+	seq.err = errors.New("numbering down")
+	if down := o.postRequisition(o.users["mgr"], body, "key-1"); down.Code != http.StatusOK || !strings.Contains(down.Body.String(), `"requisitionNumber":"REQ-1"`) {
+		t.Fatalf("replay while numbering is down: status %d body %s, want the stored requisition", down.Code, down.Body.String())
+	}
+	seq.err = nil
 
 	calls := seq.calls
 	manual := o.postRequisition(o.users["mgr"], o.requisitionBody(t, "man-1"), "")
@@ -269,6 +280,25 @@ func TestManagerWorksheetShowsAndAcceptsOnlyDirectReports(t *testing.T) {
 	read := o.as(o.users["mgr"], http.MethodGet, sheet, "", dutyMssApprove)
 	if got := decodeBody[listOf[store.WorksheetRow]](t, read); read.Code != http.StatusOK || len(got.Items) != 1 || got.Items[0].WorkerID != o.workers["rep"].ID {
 		t.Fatalf("manager view: status %d body %s, want only rep", read.Code, read.Body.String())
+	}
+
+	submit := o.as(o.users["mgr"], http.MethodPost, sheet+"/submit", "", dutyMssApprove)
+	if got := decodeBody[listOf[store.WorksheetRow]](t, submit); submit.Code != http.StatusOK || len(got.Items) != 1 || got.Items[0].Status != "SUBMITTED" {
+		t.Fatalf("manager submit: status %d body %s", submit.Code, submit.Body.String())
+	}
+	status := map[string]string{}
+	all, err := o.st.GetWorksheet(o.ctx, cycle.ID, o.workers["mgr"].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range all {
+		status[r.WorkerID] = r.Status
+	}
+	if status[o.workers["rep"].ID] != "SUBMITTED" || status[o.workers["peer"].ID] != "DRAFT" {
+		t.Fatalf("statuses after the manager's submit = %v, want rep SUBMITTED and the stale peer row still DRAFT", status)
+	}
+	if rec := save(o.users["ceo"], "peer"); rec.Code != http.StatusOK {
+		t.Fatalf("the peer's current manager saving the stale draft: status %d body %s", rec.Code, rec.Body.String())
 	}
 
 	if rec := o.as(o.users["mgr"], http.MethodGet, sheet, "", dutyEssBase); rec.Code != http.StatusForbidden {

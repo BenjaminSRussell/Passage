@@ -32,7 +32,7 @@ func TestNewActionSweep_ConfigurationIsValidated(t *testing.T) {
 			t.Errorf("%s: want an error", name)
 		}
 	}
-	s, err := newActionSweep(envOf(map[string]string{"HR_ACTION_SWEEP_TENANT_IDS": tenantA + " , " + tenantB, "HR_ACTION_SWEEP_INTERVAL": "2m"}), apply)
+	s, err := newActionSweep(envOf(map[string]string{"HR_ACTION_SWEEP_TENANT_IDS": tenantA + " , " + tenantB + "," + tenantA, "HR_ACTION_SWEEP_INTERVAL": "2m"}), apply)
 	if err != nil || len(s.tenants) != 2 || s.interval != 2*time.Minute {
 		t.Fatalf("sweep = %+v, %v", s, err)
 	}

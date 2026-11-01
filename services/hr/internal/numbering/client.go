@@ -3,12 +3,12 @@ package numbering
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -69,20 +69,11 @@ func (c *Client) allocate(ctx context.Context, code, idempotencyKey string) (str
 		return "", err
 	}
 	p, _ := tenant.FromContext(ctx)
-	signed, err := c.signer.ApplyDuties(req, p, audience, "", []string{allocateDuty})
-	if err != nil {
-		return "", err
+	if c.signer == nil {
+		return "", errors.New("no service signing key configured")
 	}
-	if !signed {
-		duties := make([]string, 0, len(p.Duties))
-		for d := range p.Duties {
-			duties = append(duties, d)
-		}
-		sort.Strings(duties)
-		req.Header.Set(tenant.HeaderTenant, p.TenantID)
-		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
-		req.Header.Set(tenant.HeaderUser, p.UserID)
-		req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+	if _, err := c.signer.ApplyDuties(req, p, audience, "", []string{allocateDuty}); err != nil {
+		return "", err
 	}
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := c.http.Do(req)

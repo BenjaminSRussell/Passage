@@ -307,6 +307,6 @@ func (a *API) getWorksheet(w http.ResponseWriter, r *http.Request, cycleID strin
 }
 
 func (a *API) submitWorksheet(w http.ResponseWriter, r *http.Request, cycleID string, wa worksheetAccess) {
-	rows, err := a.store.SubmitWorksheet(r.Context(), cycleID, wa.managerID)
+	rows, err := a.store.SubmitWorksheet(r.Context(), cycleID, wa.managerID, wa.onlyReports)
 	a.writeWorksheet(w, r, wa, "submit worksheet", rows, err)
 }

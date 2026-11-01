@@ -85,10 +85,20 @@ func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.Header.Get(idempotencyKey)
+	if generate && key != "" {
+		stored, found, err := a.store.RequisitionByKey(r.Context(), key)
+		if err != nil {
+			a.fail(w, r, "look up requisition replay", err)
+			return
+		}
+		if found {
+			in.RequisitionNumber, generate = stored.RequisitionNumber, false
+		}
+	}
 	if generate {
-		numberingKey := key
-		if numberingKey == "" {
-			numberingKey = ids.New()
+		numberingKey := ids.New()
+		if key != "" {
+			numberingKey = "hr:" + requisitionSequence + ":" + key
 		}
 		formatted, err := a.sequence.Next(r.Context(), requisitionSequence, numberingKey)
 		if err != nil {

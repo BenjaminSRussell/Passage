@@ -22,6 +22,12 @@ func principalContext() context.Context {
 	})
 }
 
+func testSigner() *tenant.ServiceSigner {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("hr", priv)
+	return signer
+}
+
 func wantProblem(t *testing.T, err error, status int, code string) {
 	t.Helper()
 	var p *httpx.Problem
@@ -52,18 +58,14 @@ func TestNext_SignedSendsOnlyTheAllocateDuty(t *testing.T) {
 	}
 }
 
-func TestNext_UnsignedForwardsThePrincipalHeaders(t *testing.T) {
-	var got http.Header
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Clone()
-		_, _ = w.Write([]byte(`{"formatted":"REQ-000008"}`))
-	}))
+func TestNext_WithoutASignerIsUnavailableAndSendsNothing(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
 	defer srv.Close()
-	if _, err := numbering.New(srv.URL).Next(principalContext(), "REQ", "key-2"); err != nil {
-		t.Fatal(err)
-	}
-	if got.Get(tenant.HeaderLegalEntity) != entityID || got.Get(tenant.HeaderDuties) != "HcmRecruitMaintain" {
-		t.Fatalf("headers %v", got)
+	_, err := numbering.New(srv.URL).Next(principalContext(), "REQ", "key-2")
+	wantProblem(t, err, http.StatusServiceUnavailable, numbering.CodeUnavailable)
+	if calls != 0 {
+		t.Fatalf("numbering called %d times without a signer", calls)
 	}
 }
 
@@ -74,7 +76,7 @@ func TestNext_FailuresAreUnavailableAndNeedASingleEntity(t *testing.T) {
 		func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"value":1}`)) },
 	} {
 		srv := httptest.NewServer(handler)
-		_, err := numbering.New(srv.URL).Next(principalContext(), "REQ", "k")
+		_, err := numbering.New(srv.URL).WithSigner(testSigner()).Next(principalContext(), "REQ", "k")
 		srv.Close()
 		wantProblem(t, err, http.StatusServiceUnavailable, numbering.CodeUnavailable)
 	}

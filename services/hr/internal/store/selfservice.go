@@ -119,23 +119,27 @@ func (s *Postgres) IsDirectReport(ctx context.Context, managerWorkerID, workerID
 func (s *Postgres) DirectReportsAmong(ctx context.Context, managerWorkerID string, workerIDs []string, at time.Time) (map[string]bool, error) {
 	p := principal(ctx)
 	reports := map[string]bool{}
-	if len(workerIDs) == 0 {
-		return reports, nil
-	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, teamCTE+`
-			select worker_id::text from team where manager_id = $4::uuid and worker_id = any($5::uuid[])`,
-			p.TenantID, at, s.depth, managerWorkerID, workerIDs)
-		if err != nil {
-			return err
-		}
-		found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		found, err := directReportsTx(ctx, tx, p.TenantID, managerWorkerID, workerIDs, at, s.depth)
 		for _, id := range found {
 			reports[id] = true
 		}
 		return err
 	})
 	return reports, err
+}
+
+func directReportsTx(ctx context.Context, tx pgx.Tx, tenantID, managerWorkerID string, workerIDs []string, at time.Time, depth int) ([]string, error) {
+	if len(workerIDs) == 0 {
+		return []string{}, nil
+	}
+	rows, err := tx.Query(ctx, teamCTE+`
+		select worker_id::text from team where manager_id = $4::uuid and worker_id = any($5::uuid[])`,
+		tenantID, at, depth, managerWorkerID, workerIDs)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // TeamAbsenceRequests pages the absence requests of a manager's direct reports
