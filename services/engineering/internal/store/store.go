@@ -90,6 +90,7 @@ type Store interface {
 	GetBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
 	ActivateBomVersion(ctx context.Context, id string, check func(Snapshot, domain.BomVersion) error) (domain.BomVersion, error)
 	CancelBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
+	UpdateBomDraft(ctx context.Context, v domain.BomVersion, expectedVersion int, idem Idem, check func(Snapshot) error) (domain.BomVersion, error)
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
@@ -125,7 +126,7 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const (
-	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status, coalesce(copied_from_version_id::text, '')`
+	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status, coalesce(copied_from_version_id::text, ''), version`
 	lineColumns    = `bom_version_id::text, line_no, component_product_id, quantity::text, series::text, line_type, scrap_const::text, scrap_var_pct::text, round_up, effective_from, effective_to`
 	activeStatuses = `v.status in ('active', 'expired')`
 	reachDown      = `with recursive reach(product_id) as (
@@ -192,7 +193,7 @@ func queryVersions(ctx context.Context, tx pgx.Tx, query string, args ...any) ([
 		var v domain.BomVersion
 		var to *time.Time
 		var fromQty, toQty *string
-		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status, &v.CopiedFrom); err != nil {
+		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status, &v.CopiedFrom, &v.Version); err != nil {
 			return nil, err
 		}
 		var failure error
@@ -334,6 +335,10 @@ func insertVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.Bom
 		tenantID, v.ID, v.ProductID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), v.Status, v.CopiedFrom); err != nil {
 		return err
 	}
+	return insertLines(ctx, tx, tenantID, v)
+}
+
+func insertLines(ctx context.Context, tx pgx.Tx, tenantID string, v domain.BomVersion) error {
 	batch := &pgx.Batch{}
 	for _, l := range v.Lines {
 		batch.Queue(`insert into bom_line (tenant_id, bom_version_id, line_no, component_product_id, quantity, series, line_type, scrap_const, scrap_var_pct, round_up, effective_from, effective_to)
@@ -379,6 +384,7 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 		if err := insertVersion(ctx, tx, p.TenantID, v); err != nil {
 			return err
 		}
+		created.Version = 1
 		if v.Status == domain.StatusActive {
 			if err := emit(ctx, tx, p, v.ID, engevents.BomVersionActivated, aggregateBomVersion, v.ID, v.ActivatedEvent("")); err != nil {
 				return err
@@ -502,11 +508,17 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 			}
 		}
 		var known int
-		if err := tx.QueryRow(ctx, `select count(*) from bom_version where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, versionIDs).Scan(&known); err != nil {
+		var products []string
+		if err := tx.QueryRow(ctx, `select count(*), coalesce(array_agg(distinct product_id), '{}') from bom_version where tenant_id = $1 and id = any($2::uuid[])`, p.TenantID, versionIDs).Scan(&known, &products); err != nil {
 			return err
 		}
 		if known != len(versionIDs) {
 			return httpx.NewProblem(http.StatusNotFound, CodeVersionNotFound, "a replaced or replacing BOM version does not exist")
+		}
+		// The product lock serialises this with a draft edit, activation and cancel (BR-9.3): an edit that
+		// passed its open-ECO check commits before the ECO sees the draft, and a later edit sees the ECO.
+		if err := lockProducts(ctx, tx, p.TenantID, products...); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into eco (tenant_id, id, number, state, release_date, created_by) values ($1, $2, $3, $4, $5, $6)`,
 			p.TenantID, e.ID, e.Number, string(e.State), zeroToNil(e.ReleaseDate), e.CreatedBy); err != nil {
@@ -684,7 +696,7 @@ func (s *Postgres) ActivateBomVersion(ctx context.Context, id string, check func
 		if err := draftTo(ctx, tx, p.TenantID, id, domain.StatusActive); err != nil {
 			return err
 		}
-		v.Status = domain.StatusActive
+		v.Status, v.Version = domain.StatusActive, v.Version+1
 		return emit(ctx, tx, p, id, engevents.BomVersionActivated, aggregateBomVersion, id, v.ActivatedEvent(""))
 	})
 	return v, err
@@ -707,10 +719,77 @@ func (s *Postgres) CancelBomVersion(ctx context.Context, id string) (v domain.Bo
 		if err := draftTo(ctx, tx, p.TenantID, id, domain.StatusCancelled); err != nil {
 			return err
 		}
-		v.Status = domain.StatusCancelled
+		v.Status, v.Version = domain.StatusCancelled, v.Version+1
 		return nil
 	})
 	return v, err
+}
+
+// UpdateBomDraft replaces the header (site, effectivity, quantity range) and every line of a draft BOM
+// version (BR-9.3). The product is fixed. v carries the new content under the stored id; expectedVersion
+// is the version number the caller edited: another save in between answers ENG-BOM-VERSION-CONFLICT and
+// nothing is written. Only a draft can be edited (ENG-BOM-STATE), and not one an open ECO will release
+// (ENG-BOM-IN-ECO), because the approvers reviewed its lines. check runs the create-time cycle check
+// under the product lock. The save adds 1 to version and emits no event, as creating a draft emits
+// none. A replayed Idempotency-Key returns the version as it is now without writing again.
+func (s *Postgres) UpdateBomDraft(ctx context.Context, v domain.BomVersion, expectedVersion int, idem Idem, check func(Snapshot) error) (updated domain.BomVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		id, found, err := replay(ctx, tx, p.TenantID, idem)
+		if err != nil {
+			return err
+		}
+		if found {
+			current, err := loadVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
+			if err != nil || len(current) == 0 {
+				return errors.Join(err, fmt.Errorf("idempotent BOM version %s is missing", id))
+			}
+			updated = current[0]
+			return nil
+		}
+		stored, _, err := lockedDraft(ctx, tx, p.TenantID, v.ID, "")
+		if err != nil {
+			return err
+		}
+		if stored.Version != expectedVersion {
+			return &domain.Error{Code: domain.CodeBomVersionConflict, Detail: fmt.Sprintf("the draft is at version %d, you edited version %d; reload it and merge your changes", stored.Version, expectedVersion)}
+		}
+		if err := ensureNotInOpenEco(ctx, tx, p.TenantID, v.ID, "an open ECO releases this draft; reject or cancel the ECO before editing it"); err != nil {
+			return err
+		}
+		if v.ProductID != stored.ProductID {
+			return &domain.Error{Code: domain.CodeBomState, Detail: "the product of a draft cannot change; copy the version to another product instead"}
+		}
+		snapshot, err := loadSnapshot(ctx, tx, p.TenantID, versionRoots(v), false)
+		if err != nil {
+			return err
+		}
+		if err := check(snapshot); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `update bom_version set site_id = $3, effective_from = $4, effective_to = $5, from_qty = $6::numeric, to_qty = $7::numeric, version = version + 1
+			where tenant_id = $1 and id = $2::uuid and status = 'draft' and version = $8`,
+			p.TenantID, v.ID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), expectedVersion)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return &domain.Error{Code: domain.CodeBomVersionConflict, Detail: "the draft changed concurrently; reload it and merge your changes"}
+		}
+		if _, err := tx.Exec(ctx, `delete from bom_line where tenant_id = $1 and bom_version_id = $2::uuid`, p.TenantID, v.ID); err != nil {
+			return err
+		}
+		if err := insertLines(ctx, tx, p.TenantID, v); err != nil {
+			return err
+		}
+		if err := remember(ctx, tx, p.TenantID, idem, v.ID); err != nil {
+			return err
+		}
+		updated = v
+		updated.Status, updated.CopiedFrom, updated.Version = stored.Status, stored.CopiedFrom, expectedVersion+1
+		return nil
+	})
+	return updated, conflictOnDuplicate(err)
 }
 
 // lockedDraft loads a BOM version, takes its product lock (the same lock activation and ECO release

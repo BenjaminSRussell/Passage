@@ -192,11 +192,13 @@ export function BomVersionPage({
   onBack,
   onWhereUsed,
   onOpenCopy,
+  onEdit,
 }: {
   id: string;
   onBack?: () => void;
   onWhereUsed?: (component: string) => void;
   onOpenCopy?: (id: string) => void;
+  onEdit?: (id: string) => void;
 }) {
   const [version, setVersion] = useState<BomVersion | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -256,6 +258,7 @@ export function BomVersionPage({
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
         ["Quantity range", qtyRange(version)],
         ["Status", <StatusPill status={version.status} />],
+        ...(version.status === "draft" && version.version ? ([["Draft version", String(version.version)]] as [string, ReactNode][]) : []),
         ...(version.copiedFromVersionId ? ([["Copied from", <code>{version.copiedFromVersionId}</code>]] as [string, ReactNode][]) : []),
       ]
     : [];
@@ -289,6 +292,11 @@ export function BomVersionPage({
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
         {version?.status === "draft" ? (
           <>
+            {onEdit ? (
+              <Button size="sm" onClick={() => onEdit(id)} disabled={busy}>
+                Edit draft
+              </Button>
+            ) : null}
             <Button size="sm" variant="primary" onClick={activate} disabled={busy}>
               Activate
             </Button>

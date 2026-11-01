@@ -22,7 +22,7 @@ describe("engineering module", () => {
 
   it("declares the BOM routes and nav entry", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(
-      expect.arrayContaining(["/engineering/boms", "/engineering/boms/new", "/engineering/boms/:id"]),
+      expect.arrayContaining(["/engineering/boms", "/engineering/boms/new", "/engineering/boms/:id", "/engineering/boms/:id/edit"]),
     );
     expect(engineering.nav.find((n) => n.label === "Bills of material")).toMatchObject({ to: "/engineering/boms", duty: "engineering.read" });
   });

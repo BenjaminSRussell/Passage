@@ -455,8 +455,9 @@ func TestPostgres_ActivateBomVersion_EmitsOnceAndRefusesWhenProductHasVersions(t
 	}
 	for range 2 {
 		got, err := s.ActivateBomVersion(ctx, first.ID, refuseIfAny)
-		if err != nil || got.Status != domain.StatusActive || len(got.Lines) != 1 {
-			t.Fatalf("activate = %+v, %v", got, err)
+		// The first call bumps the draft's version from 1 to 2 and the idempotent repeat reports the same.
+		if err != nil || got.Status != domain.StatusActive || len(got.Lines) != 1 || got.Version != 2 {
+			t.Fatalf("activate = %+v, %v; want active at version 2", got, err)
 		}
 	}
 	if types := outboxTypes(t, pool, ctx, first.ID); len(types) != 1 || types[0] != "dev.passage.engineering.bomversion.activated.v1" {

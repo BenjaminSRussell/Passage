@@ -55,6 +55,9 @@ type BomVersion struct {
 	Lines         []BomLine
 	// CopiedFrom is the version this one was copied from (FR-9.12 lineage), empty for a plain create.
 	CopiedFrom string
+	// Version is the optimistic-locking counter (BR-9.3): it starts at 1 and every edit, activation
+	// or cancellation of a draft adds 1. Zero means the version was not loaded from the store.
+	Version int
 }
 
 type Catalog interface {

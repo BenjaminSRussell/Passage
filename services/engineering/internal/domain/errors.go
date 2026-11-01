@@ -54,6 +54,7 @@ const (
 	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"
 	CodeBomState               = "ENG-BOM-STATE"
 	CodeBomInEco               = "ENG-BOM-IN-ECO"
+	CodeBomVersionConflict     = "ENG-BOM-VERSION-CONFLICT"
 	CodeEcoApproverUnavailable = "ENG-ECO-APPROVER-UNAVAILABLE"
 	CodeEcoSelfApproval        = "ENG-ECO-SELF-APPROVAL"
 	CodeEcoActorRequired       = "ENG-ECO-ACTOR-REQUIRED"

@@ -33,9 +33,13 @@ export interface BomVersion {
   lines?: BomLine[];
   /** The version this one was copied from (FR-9.12 lineage). */
   copiedFromVersionId?: string;
+  /** Optimistic-locking counter of a draft (BR-9.3); send the loaded value back when saving an edit. */
+  version?: number;
 }
 
 export interface BomVersionInput {
+  fromQty?: string;
+  toQty?: string;
   productId: string;
   siteId?: string;
   effectiveFrom: string;
@@ -326,6 +330,15 @@ export function getBomVersion(id: string): Promise<BomVersion> {
 export function createBomVersion(body: BomVersionInput, idempotencyKey: string): Promise<BomVersion> {
   return request("/bom-versions", {
     method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Saves an edited draft (BR-9.3): replaces the header and every line. A stale `version` is 409 ENG-BOM-VERSION-CONFLICT. */
+export function updateBomVersion(id: string, body: BomVersionInput & { version: number }, idempotencyKey: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(body),
   });

@@ -5,6 +5,7 @@ import { EngineeringHome, WhereUsedPage } from "./pages";
 import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupDetailPage } from "./detail";
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
 import { BomVersionCreatePage, BomVersionPage, BomVersionsPage } from "./bom";
+import { BomVersionEditPage } from "./bomEdit";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
 import { EcoCreatePage, EcoPage, EcosPage } from "./eco";
 import { RouteVersionCreatePage } from "./routeCreate";
@@ -38,7 +39,15 @@ function BomVersionRoute() {
     onBack: () => navigate("/engineering/boms"),
     onWhereUsed: (component: string) => navigate(`/engineering/where-used?component=${encodeURIComponent(component)}`),
     onOpenCopy: (copyId: string) => navigate(`/engineering/boms/${encodeURIComponent(copyId)}`),
+    onEdit: (versionId: string) => navigate(`/engineering/boms/${encodeURIComponent(versionId)}/edit`),
   });
+}
+
+function BomVersionEditRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const back = () => navigate(`/engineering/boms/${encodeURIComponent(id)}`);
+  return createElement(BomVersionEditPage, { id, onSaved: back, onCancel: back });
 }
 
 function BomVersionCreateRoute() {
@@ -156,6 +165,7 @@ const engineering: PassageModule = {
     { path: "/engineering/where-used", element: createElement(WhereUsedRoute) },
     { path: "/engineering/boms", element: createElement(BomVersionsRoute), handle: { title: "Bills of material" } },
     { path: "/engineering/boms/new", element: createElement(BomVersionCreateRoute), handle: { title: "New BOM version" } },
+    { path: "/engineering/boms/:id/edit", element: createElement(BomVersionEditRoute), handle: { title: "Edit BOM draft" } },
     { path: "/engineering/boms/:id", element: createElement(BomVersionRoute), handle: { title: "BOM version" } },
     { path: "/engineering/ecos", element: createElement(EcosRoute), handle: { title: "Change orders" } },
     { path: "/engineering/ecos/new", element: createElement(EcoCreateRoute), handle: { title: "New change order" } },

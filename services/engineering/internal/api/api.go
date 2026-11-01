@@ -60,6 +60,8 @@ type API struct {
 	bomFailed    atomic.Int64
 	bomActivated atomic.Int64
 	bomCancelled atomic.Int64
+	bomUpdated   atomic.Int64
+	bomConflicts atomic.Int64
 	ecosReleased atomic.Int64
 	ecosFailed   atomic.Int64
 	explosions   atomic.Int64
@@ -86,6 +88,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
+		r.With(authz.RequireDuty(dutyBomWrite)).Put("/v1/engineering/bom-versions/{id}", a.updateBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:activate", a.activateBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:cancel", a.cancelBomVersion)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions/{id}:copy", a.copyBomVersion)
@@ -161,6 +164,9 @@ type bomVersionBody struct {
 	Lines         []bomLineBody    `json:"lines,omitempty"`
 	// CopiedFrom is read-only (FR-9.12 lineage): create ignores it, only :copy sets it.
 	CopiedFrom string `json:"copiedFromVersionId,omitempty"`
+	// Version is the draft's optimistic-locking counter (BR-9.3). Reads return it; create ignores it and
+	// PUT requires the value the editor loaded.
+	Version int `json:"version,omitempty"`
 }
 
 type page[T any] struct {
@@ -286,7 +292,7 @@ func (lb bomLineBody) toDomain(index int) (domain.BomLine, string) {
 func bodyFromVersion(v domain.BomVersion) bomVersionBody {
 	body := bomVersionBody{
 		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo),
-		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status, CopiedFrom: v.CopiedFrom,
+		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status, CopiedFrom: v.CopiedFrom, Version: v.Version,
 	}
 	for _, l := range v.Lines {
 		series := l.Series
@@ -779,7 +785,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco:
+	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
