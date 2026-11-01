@@ -2167,6 +2167,84 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment-orders/{id}:close:
+    post:
+      operationId: closeConsignmentOrder
+      summary: Close a partly received replenishment order, giving up the open quantity (FR-16.17)
+      description: |
+        Ends a PARTIALLY_RECEIVED order: the vendor-owned stock already received stays, the open
+        quantity of each line is no longer expected (openQty becomes 0, givenUpQty carries it) and
+        the order takes no further receipt. Nothing moves in the ledger or the on-hand projection.
+        An order nothing was received against is INV-CNS-005 (cancel it instead); a RECEIVED,
+        CLOSED or CANCELLED order is INV-CNS-003. The optional reason (at most 200 characters) is
+        kept with who closed it and when, and the call emits dev.passage.inventory.consignment.closed.v1
+        in the same transaction. Requires If-Match.
+      x-passage-duty: inventory.consignment.write
+      parameters:
+        - $ref: '#/components/parameters/ConsignmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndConsignmentRequest' }
+      responses:
+        '200':
+          description: The order after it ended, at a higher version
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '400':
+          description: The reason is longer than 200 characters or the body is not valid JSON
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment-orders/{id}:cancel:
+    post:
+      operationId: cancelConsignmentOrder
+      summary: Cancel a replenishment order nothing was received against (FR-16.17)
+      description: |
+        Ends a CREATED order. A cancelled order takes no receipt and expects no quantity. An order
+        with receipts is INV-CNS-004 (close it instead); an ended order is INV-CNS-003. The optional
+        reason (at most 200 characters) is kept with who cancelled it and when, and the call emits
+        dev.passage.inventory.consignment.closed.v1 with disposition CANCELLED in the same
+        transaction. Requires If-Match.
+      x-passage-duty: inventory.consignment.write
+      parameters:
+        - $ref: '#/components/parameters/ConsignmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndConsignmentRequest' }
+      responses:
+        '200':
+          description: The order after it ended, at a higher version
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '400':
+          description: The reason is longer than 200 characters or the body is not valid JSON
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/inventory/consignment/stock:
     get:
       operationId: listConsignmentStock
@@ -3245,7 +3323,12 @@ components:
               class: { type: string, enum: [A, B, C, N] }
     ConsignmentStatus:
       type: string
-      enum: [CREATED, PARTIALLY_RECEIVED, RECEIVED]
+      enum: [CREATED, PARTIALLY_RECEIVED, RECEIVED, CLOSED, CANCELLED]
+    EndConsignmentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 200, description: Why the order was closed or cancelled }
     CreateConsignmentRequest:
       type: object
       additionalProperties: false
@@ -3290,7 +3373,7 @@ components:
               qty: { $ref: '#/components/schemas/Decimal' }
     ConsignmentLine:
       type: object
-      required: [id, lineNo, productId, dimensions, unit, qty, receivedQty, openQty, consignmentPrice]
+      required: [id, lineNo, productId, dimensions, unit, qty, receivedQty, openQty, givenUpQty, consignmentPrice]
       properties:
         id: { type: string, format: uuid }
         lineNo: { type: integer }
@@ -3299,11 +3382,12 @@ components:
         unit: { type: string }
         qty: { $ref: '#/components/schemas/Decimal' }
         receivedQty: { $ref: '#/components/schemas/Decimal' }
-        openQty: { $ref: '#/components/schemas/Decimal' }
+        openQty: { $ref: '#/components/schemas/Decimal', description: Quantity still expected; 0 once the order is closed or cancelled }
+        givenUpQty: { $ref: '#/components/schemas/Decimal', description: Quantity a closed or cancelled order no longer expects; 0 otherwise }
         consignmentPrice: { $ref: '#/components/schemas/Decimal' }
     ConsignmentOrder:
       type: object
-      required: [id, legalEntityId, number, vendorId, siteId, warehouseId, requestedDate, currency, status, version, createdAt, lines]
+      required: [id, legalEntityId, number, vendorId, siteId, warehouseId, requestedDate, currency, status, version, createdAt, closedAt, lines]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -3316,6 +3400,9 @@ components:
         status: { $ref: '#/components/schemas/ConsignmentStatus' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time, description: When the order was closed or cancelled }
+        closedBy: { type: string, description: User who closed or cancelled the order }
+        closeReason: { type: string, description: Reason given when closing or cancelling }
         lines:
           type: array
           items: { $ref: '#/components/schemas/ConsignmentLine' }

@@ -259,6 +259,59 @@ func (s *Postgres) ReceiveConsignment(ctx context.Context, id string, version in
 	return out, err
 }
 
+// CancelConsignment cancels a CREATED replenishment order; nothing was received,
+// so no stock moves. An order with receipts is INV-CNS-004 (close it). The
+// version must match (If-Match). It emits consignment.closed with disposition
+// CANCELLED.
+func (s *Postgres) CancelConsignment(ctx context.Context, id string, version int, reason string) (domain.ConsignmentOrder, error) {
+	return s.endConsignment(ctx, id, version, reason, domain.ConsignmentCancelled, domain.CheckCancelConsignment)
+}
+
+// CloseConsignment closes a PARTIALLY_RECEIVED replenishment order: the received
+// vendor-owned stock stays and the open quantity is given up (nothing moves).
+// An untouched order is INV-CNS-005 (cancel it). The version must match
+// (If-Match). It emits consignment.closed with disposition CLOSED.
+func (s *Postgres) CloseConsignment(ctx context.Context, id string, version int, reason string) (domain.ConsignmentOrder, error) {
+	return s.endConsignment(ctx, id, version, reason, domain.ConsignmentClosed, domain.CheckCloseConsignment)
+}
+
+func (s *Postgres) endConsignment(ctx context.Context, id string, version int, reason, status string, check func(domain.ConsignmentOrder) error) (domain.ConsignmentOrder, error) {
+	tp, _ := tenant.FromContext(ctx)
+	var out domain.ConsignmentOrder
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		o, err := loadConsignment(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		if o.Version != version {
+			return problem(http.StatusPreconditionFailed, CodeConflictVersion, "replenishment order changed since it was read; reread and retry")
+		}
+		if err := check(o); err != nil {
+			return domainProblem(err)
+		}
+		if _, err := tx.Exec(ctx, `update consignment_order set status = $3, closed_at = now(), closed_by = nullif($4, ''), close_reason = nullif($5, ''),
+			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, tp.TenantID, o.ID, status, tp.UserID, reason); err != nil {
+			return err
+		}
+		if out, err = loadConsignment(ctx, tx, id, false); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "consignment", out.ID, invevents.ConsignmentClosed, tp.TenantID, consignmentClosed(out))
+	})
+	return out, err
+}
+
+// consignmentClosed is the consignment.closed payload of an order that has just ended.
+func consignmentClosed(o domain.ConsignmentOrder) invevents.ConsignmentClosedData {
+	out := invevents.ConsignmentClosedData{ConsignmentOrderID: o.ID, LegalEntityID: o.LegalEntityID, Number: o.Number, VendorID: o.VendorID,
+		Disposition: o.Status, Reason: o.CloseReason, Lines: []invevents.ConsignmentClosedLine{}}
+	for _, l := range o.Lines {
+		out.Lines = append(out.Lines, invevents.ConsignmentClosedLine{LineID: l.ID, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(),
+			ReceivedQty: l.ReceivedQty.String(), GivenUpQty: o.GivenUpQty(l).String()})
+	}
+	return out
+}
+
 // ListConsignmentStock is the consignment stock report: vendor-owned physical
 // stock by vendor and dimension set, oldest receipt first (at most 500 rows).
 func (s *Postgres) ListConsignmentStock(ctx context.Context, vendor string) ([]ConsignmentStockRow, error) {
@@ -311,7 +364,7 @@ func (s *Postgres) ListConsignmentStock(ctx context.Context, vendor string) ([]C
 }
 
 const consignmentColumns = `id::text, legal_entity_id::text, number, vendor_id, site, warehouse, to_char(requested_date, 'YYYY-MM-DD'),
-	currency::text, status, version, created_at`
+	currency::text, status, version, created_at, closed_at, coalesce(closed_by, ''), coalesce(close_reason, '')`
 
 const consignmentLineColumns = `l.id::text, l.line_no, l.product_id::text, d.dims::text, l.unit, l.qty::text, l.received_qty::text, l.price::text`
 
@@ -319,7 +372,7 @@ func scanConsignment(row pgx.Row) (domain.ConsignmentOrder, error) {
 	var o domain.ConsignmentOrder
 	var requested string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.Number, &o.VendorID, &o.Site, &o.Warehouse, &requested, &o.Currency, &o.Status,
-		&o.Version, &o.CreatedAt); err != nil {
+		&o.Version, &o.CreatedAt, &o.ClosedAt, &o.ClosedBy, &o.CloseReason); err != nil {
 		return o, err
 	}
 	var err error

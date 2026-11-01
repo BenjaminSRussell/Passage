@@ -82,6 +82,8 @@ func TestPayloadsMatchAsyncAPISchemas(t *testing.T) {
 		"TransferData":           TransferData{},
 		"OwnershipChangedData":   OwnershipChangedData{},
 		"OwnershipLineData":      OwnershipLineData{},
+		"ConsignmentClosedData":  ConsignmentClosedData{},
+		"ConsignmentClosedLine":  ConsignmentClosedLine{},
 		"ReconciliationDiffData": ReconciliationDiffData{},
 		"JournalNameData":        JournalNameData{},
 	}

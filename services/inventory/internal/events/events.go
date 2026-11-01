@@ -19,7 +19,7 @@ const (
 // All lists every event type the service publishes.
 func All() []string {
 	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased, BlockingEscalated, HoldPlaced, HoldReleased,
-		TransferShipped, TransferReceived, OwnershipChanged, ReconciliationDiff, CountSheetChanged, JournalNameCreated, JournalNameUpdated}
+		TransferShipped, TransferReceived, OwnershipChanged, ConsignmentClosed, ReconciliationDiff, CountSheetChanged, JournalNameCreated, JournalNameUpdated}
 }
 
 // On-hand buckets an onhand.changed event names as moved. BucketPosted is

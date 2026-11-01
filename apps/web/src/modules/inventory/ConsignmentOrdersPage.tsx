@@ -9,7 +9,7 @@ import { useLoad } from "./useLoad";
 
 /** "120 of 500 received" across the order's lines. */
 function received(order: ConsignmentOrder): string {
-  if (order.status === "CREATED") return dash;
+  if (order.status === "CREATED" || order.status === "CANCELLED") return dash;
   const sum = (pick: (l: ConsignmentOrder["lines"][number]) => string) => order.lines.reduce((total, l) => total + Number(pick(l)), 0);
   return `${sum((l) => l.receivedQty)} of ${sum((l) => l.qty)}`;
 }

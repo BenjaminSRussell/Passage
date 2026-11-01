@@ -58,6 +58,11 @@ channels:
     messages:
       ownershipChanged:
         $ref: '#/components/messages/OwnershipChanged'
+  consignmentClosed:
+    address: passage.inventory.consignment
+    messages:
+      consignmentClosed:
+        $ref: '#/components/messages/ConsignmentClosed'
   countSheet:
     address: passage.inventory.countsheet
     messages:
@@ -108,6 +113,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/ownershipChanged' }
     summary: An OWNERSHIP_CHANGE journal posted, moving vendor-owned stock to the legal entity (FR-16.17); wave 18 settles it
+  publishConsignmentClosed:
+    action: send
+    channel: { $ref: '#/channels/consignmentClosed' }
+    summary: A vendor replenishment order was closed short or cancelled; it takes no further receipt (FR-16.17)
   publishCountSheetChanged:
     action: send
     channel: { $ref: '#/channels/countSheet' }
@@ -242,6 +251,14 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OwnershipChangedData'
+    ConsignmentClosed:
+      title: Consignment order closed
+      summary: A vendor replenishment order was closed (partly received, open quantity given up) or cancelled (nothing received).
+      name: dev.passage.inventory.consignment.closed.v1
+      x-passage-type: dev.passage.inventory.consignment.closed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ConsignmentClosedData'
     CountSheetChanged:
       title: Count sheet changed
       summary: A count sheet moved through its review steps; the action names which one.
@@ -288,6 +305,32 @@ components:
         unit: { type: string }
         consignmentPrice: { type: string }
         amountAcct: { type: string, description: 'qty x consignmentPrice in currency, rounded to its minor unit' }
+    ConsignmentClosedData:
+      type: object
+      required: [consignmentOrderId, legalEntityId, number, vendorId, disposition, reason, lines]
+      description: |
+        Emitted in the transaction that closes or cancels a replenishment order. The received
+        vendor-owned stock is untouched; givenUpQty is what the order no longer expects.
+      properties:
+        consignmentOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string, description: CRO- plus 12 hex digits }
+        vendorId: { type: string }
+        disposition: { type: string, enum: [CLOSED, CANCELLED], description: CLOSED for a partly received order, CANCELLED when nothing was received }
+        reason: { type: string, description: Reason given by the user; empty when none }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/ConsignmentClosedLine' }
+    ConsignmentClosedLine:
+      type: object
+      required: [lineId, productId, unit, qty, receivedQty, givenUpQty]
+      properties:
+        lineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        unit: { type: string }
+        qty: { type: string, description: Ordered quantity }
+        receivedQty: { type: string }
+        givenUpQty: { type: string, description: Ordered minus received }
     TransferData:
       type: object
       required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, lines]

@@ -1347,7 +1347,7 @@ export async function getAbcRun(id: string, signal?: AbortSignal): Promise<AbcRu
 
 // ---- Vendor consignment (FR-16.17) ----
 
-export const CONSIGNMENT_STATUSES = ["CREATED", "PARTIALLY_RECEIVED", "RECEIVED"] as const;
+export const CONSIGNMENT_STATUSES = ["CREATED", "PARTIALLY_RECEIVED", "RECEIVED", "CLOSED", "CANCELLED"] as const;
 export type ConsignmentStatus = (typeof CONSIGNMENT_STATUSES)[number];
 
 /** Dimensions a replenishment line may name; site, warehouse and owner come from the order. */
@@ -1363,7 +1363,10 @@ export interface ConsignmentLine {
   unit: string;
   qty: string;
   receivedQty: string;
+  /** Still expected; 0 once the order is closed or cancelled. */
   openQty: string;
+  /** What a closed or cancelled order no longer expects; 0 otherwise. */
+  givenUpQty: string;
   consignmentPrice: string;
 }
 
@@ -1379,6 +1382,10 @@ export interface ConsignmentOrder {
   status: ConsignmentStatus;
   version: number;
   createdAt: string;
+  /** Set when the order was closed or cancelled. */
+  closedAt: string | null;
+  closedBy?: string;
+  closeReason?: string;
   lines: ConsignmentLine[];
 }
 
@@ -1448,6 +1455,21 @@ export async function receiveConsignment(id: string, version: number, receiptDat
       method: "POST",
       headers: { "If-Match": `"${version}"` },
       body: JSON.stringify({ receiptDate, lines }),
+    })
+  ).body;
+}
+
+/**
+ * Ends an order at the version the screen shows (If-Match): "close" gives up the open quantity of a
+ * partly received order, "cancel" ends an order nothing was received against.
+ */
+export async function endConsignment(id: string, action: "close" | "cancel", version: number, reason: string): Promise<ConsignmentOrder> {
+  const body = reason.trim() ? { reason: reason.trim() } : {};
+  return (
+    await send<ConsignmentOrder>(`/consignment-orders/${encodeURIComponent(id)}:${action}`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify(body),
     })
   ).body;
 }

@@ -193,3 +193,43 @@ func TestWithOwner(t *testing.T) {
 		t.Fatalf("legal-entity stock %q must hash like %q", a.Canonical(), b.Canonical())
 	}
 }
+
+func TestCloseAndCancelConsignmentRules(t *testing.T) {
+	tests := []struct {
+		status string
+		cancel string
+		close  string
+	}{
+		{ConsignmentCreated, "", CodeConsignmentUntouched},
+		{ConsignmentPartial, CodeConsignmentStarted, ""},
+		{ConsignmentReceived, CodeConsignmentState, CodeConsignmentState},
+		{ConsignmentClosed, CodeConsignmentState, CodeConsignmentState},
+		{ConsignmentCancelled, CodeConsignmentState, CodeConsignmentState},
+	}
+	for _, tt := range tests {
+		o := consignment()
+		o.Status = tt.status
+		if got := codeOf(CheckCancelConsignment(o)); got != tt.cancel {
+			t.Errorf("cancel at %s: code %q, want %q", tt.status, got, tt.cancel)
+		}
+		if got := codeOf(CheckCloseConsignment(o)); got != tt.close {
+			t.Errorf("close at %s: code %q, want %q", tt.status, got, tt.close)
+		}
+	}
+}
+
+func TestEndedConsignmentExpectsNothingMore(t *testing.T) {
+	o := consignment()
+	o.Status = ConsignmentPartial
+	o.Lines[0].ReceivedQty = d("200")
+	if !o.OpenQty(o.Lines[0]).Equal(d("300")) || !o.GivenUpQty(o.Lines[0]).IsZero() {
+		t.Fatalf("partial: open %s given up %s", o.OpenQty(o.Lines[0]), o.GivenUpQty(o.Lines[0]))
+	}
+	o.Status = ConsignmentClosed
+	if !o.OpenQty(o.Lines[0]).IsZero() || !o.GivenUpQty(o.Lines[0]).Equal(d("300")) {
+		t.Fatalf("closed: open %s given up %s", o.OpenQty(o.Lines[0]), o.GivenUpQty(o.Lines[0]))
+	}
+	if _, _, err := ApplyConsignmentReceipts(o, []ConsignmentReceipt{{LineID: "l1", Qty: d("1")}}); codeOf(err) != CodeConsignmentState {
+		t.Fatalf("receipt on a closed order: %v", err)
+	}
+}

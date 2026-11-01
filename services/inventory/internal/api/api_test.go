@@ -97,6 +97,8 @@ type fakeStore struct {
 	consVersion       int
 	consReceipts      []domain.ConsignmentReceipt
 	consDate          time.Time
+	consEnd           string
+	consEndReason     string
 	stockVendor       string
 
 	// slice 6: transactions:apply and named backward commands (fake methods in status_step_test.go)
@@ -656,8 +658,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 78 {
-		t.Fatalf("router walk yielded %d operations, want 78: %v", len(served), served)
+	if len(served) != 80 {
+		t.Fatalf("router walk yielded %d operations, want 80: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

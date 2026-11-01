@@ -3,7 +3,10 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -293,5 +297,87 @@ func TestOnHandPassesOwnerAndSegmentFilters(t *testing.T) {
 	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/inventory/onhand?owner=V1&segment=PROJECT:P1&groupBy=owner,segment", "", []string{"inventory.read"}, nil)
 	if rec.Code != http.StatusOK || fs.onHand.Owner != "V1" || fs.onHand.Segment != "PROJECT:P1" || len(fs.onHand.GroupBy) != 2 {
 		t.Fatalf("status %d; store got %+v", rec.Code, fs.onHand)
+	}
+}
+
+func (f *fakeStore) CloseConsignment(_ context.Context, id string, version int, reason string) (domain.ConsignmentOrder, error) {
+	return f.endConsignment(id, version, reason, domain.ConsignmentClosed)
+}
+
+func (f *fakeStore) CancelConsignment(_ context.Context, id string, version int, reason string) (domain.ConsignmentOrder, error) {
+	return f.endConsignment(id, version, reason, domain.ConsignmentCancelled)
+}
+
+func (f *fakeStore) endConsignment(id string, version int, reason, status string) (domain.ConsignmentOrder, error) {
+	if f.err != nil {
+		return domain.ConsignmentOrder{}, f.err
+	}
+	f.consVersion, f.consEnd, f.consEndReason = version, status, reason
+	o, _ := f.GetConsignment(context.Background(), id)
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	o.Status, o.Version, o.ClosedAt, o.CloseReason = status, version+1, &now, reason
+	return o, nil
+}
+
+func TestCloseAndCancelConsignment(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	duty := []string{"inventory.consignment.write"}
+	id := ids.New()
+	for _, op := range []string{"close", "cancel"} {
+		path := "/v1/inventory/consignment-orders/" + id + ":" + op
+		if rec := do(t, h, http.MethodPost, path, `{}`, duty, nil); rec.Code != http.StatusPreconditionRequired {
+			t.Fatalf("%s without If-Match: status %d, want 428", op, rec.Code)
+		}
+		if rec := do(t, h, http.MethodPost, path, `{}`, []string{"inventory.read"}, map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s without the write duty: status %d, want 403", op, rec.Code)
+		}
+	}
+	rec := do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":close", `{"reason":"  vendor stopped supplying  "}`, duty, map[string]string{"If-Match": `"3"`})
+	var out struct {
+		Status string `json:"status"`
+		Lines  []struct {
+			OpenQty    string `json:"openQty"`
+			GivenUpQty string `json:"givenUpQty"`
+		} `json:"lines"`
+		ClosedAt    *time.Time `json:"closedAt"`
+		CloseReason string     `json:"closeReason"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || fs.consEnd != domain.ConsignmentClosed ||
+		fs.consVersion != 3 || fs.consEndReason != "vendor stopped supplying" || out.Status != "CLOSED" || out.ClosedAt == nil ||
+		out.Lines[0].OpenQty != "0" || out.Lines[0].GivenUpQty != "6" || out.CloseReason != "vendor stopped supplying" {
+		t.Fatalf("close: status %d err %v store %+v body %s", rec.Code, err, fs, rec.Body.String())
+	}
+	// A cancel with no body at all is allowed: the reason is optional.
+	rec = do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":cancel", "", duty, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusOK || fs.consEnd != domain.ConsignmentCancelled || fs.consEndReason != "" {
+		t.Fatalf("cancel: status %d store %+v body %s", rec.Code, fs, rec.Body.String())
+	}
+	// An empty body of unknown length (chunked through a proxy) is no body, not malformed JSON.
+	req := httptest.NewRequest(http.MethodPost, "/v1/inventory/consignment-orders/"+id+":cancel", io.NopCloser(strings.NewReader("")))
+	req.ContentLength = -1
+	req = req.WithContext(testkit.Ctx(testkit.TenantID(1), duty...))
+	req.Header.Set("If-Match", `"1"`)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel with an empty chunked body: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":close", `{"why":"x"}`, duty, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field: status %d body %s", rec.Code, rec.Body.String())
+	}
+	// 200 characters is the limit, counted in characters rather than bytes.
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":close", `{"reason":"`+strings.Repeat("é", 200)+`"}`, duty, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK {
+		t.Fatalf("200-character reason: status %d body %s", rec.Code, rec.Body.String())
+	}
+	long := `{"reason":"` + strings.Repeat("x", 201) + `"}`
+	rec = do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":close", long, duty, map[string]string{"If-Match": `"1"`})
+	if p := decodeProblem(t, rec); rec.Code != http.StatusBadRequest || p.Errors["reason"] == "" {
+		t.Fatalf("long reason: status %d body %s", rec.Code, rec.Body.String())
+	}
+	fs.err = httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeConsignmentStarted, "has receipts")
+	rec = do(t, h, http.MethodPost, "/v1/inventory/consignment-orders/"+id+":cancel", `{}`, duty, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusUnprocessableEntity || decodeProblem(t, rec).Code != domain.CodeConsignmentStarted {
+		t.Fatalf("cancel with receipts: status %d body %s", rec.Code, rec.Body.String())
 	}
 }

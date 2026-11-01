@@ -235,6 +235,31 @@ the adjustment account (wave 11 posting profiles), and a link back from a revers
 the journal reversal puts the stock back at the restricted status while the blocking stays RELEASED (SCRAP); block it again
 to track it.
 
+PSG-1618 (wave 16 slice 18) adds closing and cancelling vendor replenishment orders (FR-16.17). Migration 0019 adds
+`closed_at`, `closed_by` and `close_reason` to `consignment_order`, widens the status check to CLOSED and CANCELLED and checks
+that a terminal status and `closed_at` go together; no new table, so no new grant. `POST
+/v1/inventory/consignment-orders/{id}:cancel` (`inventory.consignment.write`, If-Match, optional `reason` of at most 200
+characters) ends a CREATED order: nothing was received, so nothing moves (`INV-CNS-004` when it has receipts).
+`POST .../{id}:close` ends a PARTIALLY_RECEIVED order: the vendor-owned stock already received stays, the open quantity of each
+line is given up and the order takes no more receipt (`INV-CNS-005` when nothing was received, `INV-CNS-003` for a RECEIVED,
+CLOSED or CANCELLED order, which also refuses `:receive`). Both lock the order, check the version (412 `conflict_version`) and
+write `dev.passage.inventory.consignment.closed.v1` (disposition CLOSED or CANCELLED, reason, per line ordered, received and
+given-up quantity) through the outbox in the same transaction. The order row lock and the version make a receipt and a close
+at the same version mutually exclusive: the loser gets 412, and a receipt reread after the close gets `INV-CNS-003`, so nothing is
+booked against an ended order (`TestConcurrentReceiptAndCloseNeverBookAgainstAClosedOrder`). Like the other `If-Match`
+transitions of the service there is no Idempotency-Key: a retried close at the old version is 412 and emits nothing, and the reread
+shows CLOSED. Creating a replenishment order posts no ordered or expected-receipt quantity and no planning or ATP read uses its open
+quantity, so ending it has no supply to release; `consignment.closed` is there for a future consumer. The order and its lines now carry `closedAt`, `closedBy`,
+`closeReason` and `givenUpQty`; `openQty` is 0 on an ended order. Store tests: `TestCloseConsignmentKeepsReceivedStockAndGivesUpTheRest`
+(stock stays, receipt and second close refused, event, another legal entity gets 404) and
+`TestCancelConsignmentEndsAnUntouchedOrder`. The reason is also bounded in the table (1 to 200 characters or null). Web: the consignment order page shows a Close order or Cancel order card (reason,
+confirmation dialog) to holders of `inventory.consignment.write`, hides the receipt form once the order has ended, and shows who
+ended it and why; the list filters by Closed and Cancelled. No new duty. The OpenAPI and AsyncAPI documents have no FAIL lines on
+the documentation gates. Handoff for #313 / the policy bundle: `policies/authz/data.json` has route rows for
+`/v1/inventory/consignment-orders/*:receive` only; add `POST /v1/inventory/consignment-orders/*:close` and `:cancel` under
+`inventory.consignment.write` (no new duty). Not built: reopening an ended order,
+reversing a close, a planning (wave 22) consumer of `consignment.closed`, and closing by age.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -290,7 +315,8 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 7 | Ownership dimension, vendor consignment replenishment order, OWNERSHIP_CHANGE journal, consignment stock report | built (slice 5) | `POST` / `GET /consignment-orders`, `GET /consignment-orders/{id}`, `:receive` (`If-Match`), `GET /consignment/stock`. A replenishment order (vendor, site, warehouse, requested date, currency; lines with product, quantity, consignment price and location / batch / serial) is received as RECEIVED transactions (origin `CONSIGNMENT_LINE`) at its dimensions with `owner = vendor`: value 0, no financial date, no GL entry, no GR/IR; over-receipt `INV-CNS-002`. An OWNERSHIP_CHANGE journal (also needs `inventory.consignment.write` to create; one vendor per journal; lines name the vendor-owned source, a positive quantity and the consignment price) posts per line a DEDUCTED issue of the vendor-owned stock at 0 and a PURCHASED receipt (origin `OWNERSHIP_CHANGE`) at the same dimensions without owner at quantity x price; the GL entry is Dr inventory / Cr consignment accrual (`INV_CONSIGNMENT_ACCRUAL_ACCOUNT`; unset is `INV-JNL-005`), and `ownership.changed` carries the lines and amounts. More than the available vendor-owned quantity is `INV-OWN-002` whatever the negative policy. Any other document that names an owner is `INV-OWN-001` (journals, transfers, reservations; blockings and tags refuse the dimension). The stock report lists vendor-owned quantity by vendor and dimension set with the first receipt, its age and a statistical value at the vendor's latest consignment price. Store tests: `TestConsignmentReceiptAndOwnershipChange` (AC-16.12), `TestVendorOwnedStockStaysOutOfValuedOperations`, `TestConsignmentIdempotencyReceiptsAndScope`. |
 | 7 | Consignment price from the wave 17 trade agreement (`consignment=true`), accrual account from the posting profile per legal entity | handoff — wave 17 (trade agreements), wave 11 (posting profiles) | The ownership-change line carries the price (the replenishment price is shown on the order and the stock report); one accrual account comes from configuration. |
 | 7 | `auto_ownership_change_on_issue`, stock determination (`OWN_FIRST` / `CONSIGNMENT_FIRST`), the ownership-change batch (consumption- and age-driven, `max_consignment_days`) | later slice of PSG-16 / handoff — wave 8 (item model groups) | Needs the item model group and warehouse parameters and a scheduler (see the Temporal jobs row). Issues of vendor-owned stock are refused until an ownership change is posted. |
-| 7 | Reversing an ownership change (return to the vendor), cancelling or closing a replenishment order, the `CRO-` number from the wave 5 sequence, the printed replenishment order, age buckets and the inventory value report exclusion | later slice of PSG-16 / handoff — waves 5, 15, 18 | A posted ownership change cannot be reversed (`INV-JNL-003`); returns to the vendor need the wave 18 vendor return. Numbers are `CRO-` plus 12 hex digits of the order id. The stock report gives the age in days rather than buckets; vendor-owned rows carry no value, so they add nothing to value totals. |
+| 7 | Cancelling or closing a replenishment order | built (slice 18) | See the slice 18 paragraph. |
+| 7 | Reversing an ownership change (return to the vendor), the `CRO-` number from the wave 5 sequence, the printed replenishment order, age buckets and the inventory value report exclusion | later slice of PSG-16 / handoff — waves 5, 15, 18 | A posted ownership change cannot be reversed (`INV-JNL-003`); returns to the vendor need the wave 18 vendor return. Numbers are `CRO-` plus 12 hex digits of the order id. The stock report gives the age in days rather than buckets; vendor-owned rows carry no value, so they add nothing to value totals. |
 | 7 | `owner_dimension_active` per tracking dimension group | handoff — wave 8 (dimension groups) | The owner dimension is accepted for every product. |
 | 7 | Customer consignment warehouse (`CUSTOMER_CONSIGNMENT`) | later slice of PSG-16 (documents in wave 27) | Warehouse type belongs to wave 6 master data. |
 | 8 | Tag counting (`CountTag`, TAG- sequence, transfer to COUNT) | built (slice 4) | `POST /count-plans/{id}:generate-tags` (1 to 1000 tags, Idempotency-Key), `GET /count-plans/{id}/tags` (status filter: the missing / void list before transfer), `POST /count-tags/{id}:use` and `:void` (`If-Match`), `POST /count-plans/{id}:transfer-tags`. A tag is counted once (`INV-TAG-001`); zero is a count; the plan's warehouse is filled in and another warehouse refused. The transfer sums the untransferred USED tags per product x dimension set into a new OPEN count sheet (expected = book now), which is posted like any count sheet (COUNT journal, tolerance approval). Open tags block it (`INV-TAG-002`) unless `markOpenMissing`, which needs `inventory.count.approve` (`INV-TAG-006`). Store test: `TestTagCountingTransfersSummedTagsToACountSheet` (AC-16.13 at reduced scale). |

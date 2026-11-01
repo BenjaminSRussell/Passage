@@ -13,11 +13,13 @@ import (
 // 3.16.18 catalog; the INV-CNS codes are service codes for the replenishment
 // order, which the catalog does not list.
 const (
-	CodeOwnershipValue      = "INV-OWN-001" // vendor-owned stock cannot be valued or financially posted
-	CodeOwnershipExceeds    = "INV-OWN-002" // ownership change exceeds the vendor-owned quantity
-	CodeConsignmentNotFound = "INV-CNS-001" // unknown replenishment order or line
-	CodeConsignmentOver     = "INV-CNS-002" // receipt beyond the ordered quantity
-	CodeConsignmentState    = "INV-CNS-003" // the order is fully received
+	CodeOwnershipValue       = "INV-OWN-001" // vendor-owned stock cannot be valued or financially posted
+	CodeOwnershipExceeds     = "INV-OWN-002" // ownership change exceeds the vendor-owned quantity
+	CodeConsignmentNotFound  = "INV-CNS-001" // unknown replenishment order or line
+	CodeConsignmentOver      = "INV-CNS-002" // receipt beyond the ordered quantity
+	CodeConsignmentState     = "INV-CNS-003" // the order is fully received, closed or cancelled
+	CodeConsignmentStarted   = "INV-CNS-004" // cancelling an order that has receipts
+	CodeConsignmentUntouched = "INV-CNS-005" // closing an order nothing was received against
 )
 
 // Replenishment order statuses (FR-16.17).
@@ -25,10 +27,61 @@ const (
 	ConsignmentCreated  = "CREATED"
 	ConsignmentPartial  = "PARTIALLY_RECEIVED"
 	ConsignmentReceived = "RECEIVED"
+	// ConsignmentClosed ends a partly received order: the open quantity is given up.
+	ConsignmentClosed = "CLOSED"
+	// ConsignmentCancelled ends an order nothing was received against.
+	ConsignmentCancelled = "CANCELLED"
 )
 
 // ConsignmentStatuses lists every replenishment order status.
-var ConsignmentStatuses = []string{ConsignmentCreated, ConsignmentPartial, ConsignmentReceived}
+var ConsignmentStatuses = []string{ConsignmentCreated, ConsignmentPartial, ConsignmentReceived, ConsignmentClosed, ConsignmentCancelled}
+
+// ConsignmentEnded reports whether the order takes no further receipt.
+func ConsignmentEnded(status string) bool {
+	return status == ConsignmentReceived || status == ConsignmentClosed || status == ConsignmentCancelled
+}
+
+// CheckCancelConsignment allows cancelling an order nothing was received against
+// (CREATED). A started order is INV-CNS-004 (close it instead); an ended one
+// INV-CNS-003.
+func CheckCancelConsignment(o ConsignmentOrder) error {
+	switch o.Status {
+	case ConsignmentCreated:
+		return nil
+	case ConsignmentPartial:
+		return fail(CodeConsignmentStarted, "replenishment order %s has receipts; close it to give up the open quantity", o.Number)
+	}
+	return fail(CodeConsignmentState, "replenishment order %s is already %s", o.Number, o.Status)
+}
+
+// CheckCloseConsignment allows closing a PARTIALLY_RECEIVED order: the open
+// quantity is given up and the received stock stays. An untouched order is
+// INV-CNS-005 (cancel it instead); an ended one INV-CNS-003.
+func CheckCloseConsignment(o ConsignmentOrder) error {
+	switch o.Status {
+	case ConsignmentPartial:
+		return nil
+	case ConsignmentCreated:
+		return fail(CodeConsignmentUntouched, "nothing was received against replenishment order %s; cancel it instead", o.Number)
+	}
+	return fail(CodeConsignmentState, "replenishment order %s is already %s", o.Number, o.Status)
+}
+
+// OpenQty is what the line still expects: nothing once the order has ended.
+func (o ConsignmentOrder) OpenQty(l ConsignmentLine) decimal.Decimal {
+	if o.Status == ConsignmentClosed || o.Status == ConsignmentCancelled {
+		return decimal.Zero
+	}
+	return l.Qty.Sub(l.ReceivedQty)
+}
+
+// GivenUpQty is the quantity a closed or cancelled order no longer expects.
+func (o ConsignmentOrder) GivenUpQty(l ConsignmentLine) decimal.Decimal {
+	if o.Status == ConsignmentClosed || o.Status == ConsignmentCancelled {
+		return l.Qty.Sub(l.ReceivedQty)
+	}
+	return decimal.Zero
+}
 
 // consignmentLineDimensions are the dimensions a replenishment line may name.
 // Site, warehouse and owner come from the order; inventory status, segment and
@@ -84,7 +137,11 @@ type ConsignmentOrder struct {
 	Status        string
 	Version       int
 	CreatedAt     time.Time
-	Lines         []ConsignmentLine
+	// ClosedAt, ClosedBy and CloseReason are set when the order was closed or cancelled.
+	ClosedAt    *time.Time
+	ClosedBy    string
+	CloseReason string
+	Lines       []ConsignmentLine
 }
 
 // LineDims is the dimension set a replenishment line is received into: the
@@ -147,8 +204,8 @@ type ConsignmentReceipt struct {
 // than it ordered (INV-CNS-002) and a fully received order takes no receipt
 // (INV-CNS-003).
 func ApplyConsignmentReceipts(o ConsignmentOrder, receipts []ConsignmentReceipt) (ConsignmentOrder, []PostedLine, error) {
-	if o.Status == ConsignmentReceived {
-		return o, nil, fail(CodeConsignmentState, "replenishment order %s is fully received", o.Number)
+	if ConsignmentEnded(o.Status) {
+		return o, nil, fail(CodeConsignmentState, "replenishment order %s takes no receipt (%s)", o.Number, o.Status)
 	}
 	if len(receipts) == 0 {
 		return o, nil, fail(CodeInvalid, "a receipt needs at least one line")

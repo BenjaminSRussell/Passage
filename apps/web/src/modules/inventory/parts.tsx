@@ -55,6 +55,7 @@ export const stateTones: Record<string, BadgeTone> = {
   PARTIALLY_RECEIVED: "warning",
   RECEIVED: "success",
   CANCELLED: "neutral",
+  CLOSED: "neutral",
 };
 
 export function money(amount: string | undefined, currency: string): string {

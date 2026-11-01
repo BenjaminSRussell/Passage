@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -63,6 +66,7 @@ type consignmentLineResponse struct {
 	Qty              string            `json:"qty"`
 	ReceivedQty      string            `json:"receivedQty"`
 	OpenQty          string            `json:"openQty"`
+	GivenUpQty       string            `json:"givenUpQty"`
 	ConsignmentPrice string            `json:"consignmentPrice"`
 }
 
@@ -78,6 +82,9 @@ type consignmentResponse struct {
 	Status        string                    `json:"status"`
 	Version       int                       `json:"version"`
 	CreatedAt     time.Time                 `json:"createdAt"`
+	ClosedAt      *time.Time                `json:"closedAt"`
+	ClosedBy      string                    `json:"closedBy,omitempty"`
+	CloseReason   string                    `json:"closeReason,omitempty"`
 	Lines         []consignmentLineResponse `json:"lines"`
 }
 
@@ -100,6 +107,8 @@ func (a *API) registerConsignment(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(consignmentPath, a.listConsignments)
 	r.With(authz.RequireDuty(dutyRead)).Get(consignmentPath+"/{id}", consignmentRoute(a.getConsignment))
 	r.With(authz.RequireDuty(dutyConsignmentWrite)).Post(consignmentPath+"/{id}:receive", consignmentRoute(a.receiveConsignment))
+	r.With(authz.RequireDuty(dutyConsignmentWrite)).Post(consignmentPath+"/{id}:close", consignmentRoute(a.closeConsignment))
+	r.With(authz.RequireDuty(dutyConsignmentWrite)).Post(consignmentPath+"/{id}:cancel", consignmentRoute(a.cancelConsignment))
 	r.With(authz.RequireDuty(dutyRead)).Get(consignmentStockPath, a.consignmentStock)
 }
 
@@ -194,7 +203,7 @@ func (a *API) listConsignments(w http.ResponseWriter, r *http.Request) {
 	}
 	f := store.ConsignmentFilter{Status: r.URL.Query().Get("status"), VendorID: strings.TrimSpace(r.URL.Query().Get("vendor"))}
 	if f.Status != "" && !slices.Contains(domain.ConsignmentStatuses, f.Status) {
-		fieldProblem(w, r, map[string]string{"status": "must be CREATED, PARTIALLY_RECEIVED or RECEIVED"})
+		fieldProblem(w, r, map[string]string{"status": "must be CREATED, PARTIALLY_RECEIVED, RECEIVED, CLOSED or CANCELLED"})
 		return
 	}
 	orders, err := a.store.ListConsignments(r.Context(), f)
@@ -266,6 +275,80 @@ func (a *API) receiveConsignment(w http.ResponseWriter, r *http.Request, id stri
 	writeConsignment(w, http.StatusOK, o)
 }
 
+type consignmentEndRequest struct {
+	Reason string `json:"reason"`
+}
+
+// endRequest reads the optional reason of :close and :cancel (at most 200 characters; a request
+// without a body, including an empty chunked one, has none). It answers false after writing the
+// problem.
+func endRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req consignmentEndRequest
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxEndBody))
+	if err != nil {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "could not read the request body"))
+		return "", false
+	}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return "", false
+		}
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if utf8.RuneCountInString(req.Reason) > maxCloseReason {
+		fieldProblem(w, r, map[string]string{"reason": fmt.Sprintf("must be at most %d characters", maxCloseReason)})
+		return "", false
+	}
+	return req.Reason, true
+}
+
+// maxCloseReason bounds the free-text reason of closing or cancelling an order; maxEndBody bounds
+// the body read for it.
+const (
+	maxCloseReason = 200
+	maxEndBody     = 64 << 10
+)
+
+// closeConsignment gives up the open quantity of a partly received order (If-Match).
+func (a *API) closeConsignment(w http.ResponseWriter, r *http.Request, id string) {
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	reason, ok := endRequest(w, r)
+	if !ok {
+		return
+	}
+	o, err := a.store.CloseConsignment(r.Context(), id, version, reason)
+	if err != nil {
+		a.failed(w, r, "close replenishment order", err)
+		return
+	}
+	writeConsignment(w, http.StatusOK, o)
+}
+
+// cancelConsignment cancels an order nothing was received against (If-Match).
+func (a *API) cancelConsignment(w http.ResponseWriter, r *http.Request, id string) {
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	reason, ok := endRequest(w, r)
+	if !ok {
+		return
+	}
+	o, err := a.store.CancelConsignment(r.Context(), id, version, reason)
+	if err != nil {
+		a.failed(w, r, "cancel replenishment order", err)
+		return
+	}
+	writeConsignment(w, http.StatusOK, o)
+}
+
 // consignmentStock answers the consignment stock report (3.16.14): vendor-owned
 // quantity by vendor and dimension set, with its age and statistical value.
 func (a *API) consignmentStock(w http.ResponseWriter, r *http.Request) {
@@ -299,10 +382,10 @@ func (a *API) consignmentStock(w http.ResponseWriter, r *http.Request) {
 func toConsignmentResponse(o domain.ConsignmentOrder) consignmentResponse {
 	out := consignmentResponse{ID: o.ID, LegalEntityID: o.LegalEntityID, Number: o.Number, VendorID: o.VendorID, SiteID: o.Site,
 		WarehouseID: o.Warehouse, RequestedDate: o.RequestedDate.Format(dateFormat), Currency: o.Currency, Status: o.Status,
-		Version: o.Version, CreatedAt: o.CreatedAt, Lines: []consignmentLineResponse{}}
+		Version: o.Version, CreatedAt: o.CreatedAt, ClosedAt: o.ClosedAt, ClosedBy: o.ClosedBy, CloseReason: o.CloseReason, Lines: []consignmentLineResponse{}}
 	for _, l := range o.Lines {
 		out.Lines = append(out.Lines, consignmentLineResponse{ID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID, Dimensions: l.Dims,
-			Unit: l.Unit, Qty: l.Qty.String(), ReceivedQty: l.ReceivedQty.String(), OpenQty: l.Qty.Sub(l.ReceivedQty).String(),
+			Unit: l.Unit, Qty: l.Qty.String(), ReceivedQty: l.ReceivedQty.String(), OpenQty: o.OpenQty(l).String(), GivenUpQty: o.GivenUpQty(l).String(),
 			ConsignmentPrice: l.Price.String()})
 	}
 	return out

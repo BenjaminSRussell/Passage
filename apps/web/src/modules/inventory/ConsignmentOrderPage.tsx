@@ -1,7 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getConsignment, receiveConsignment, type ConsignmentLine, type ConsignmentOrder, type Problem } from "./api/client";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { describeProblem, endConsignment, getConsignment, receiveConsignment, type ConsignmentLine, type ConsignmentOrder, type Problem } from "./api/client";
 import { DECIMAL, describeDimensions, formatDateTime, sentence, shortId, today } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
@@ -18,8 +20,89 @@ function lineColumns(currency: string): DataTableColumn<ConsignmentLine>[] {
     { key: "qty", header: "Ordered", align: "end", mono: true, render: (row) => `${row.qty} ${row.unit}` },
     { key: "receivedQty", header: "Received", align: "end", mono: true },
     { key: "openQty", header: "Open", align: "end", mono: true },
+    { key: "givenUpQty", header: "Given up", align: "end", mono: true },
     { key: "consignmentPrice", header: "Consignment price", align: "end", mono: true, render: (row) => `${row.consignmentPrice} ${currency}` },
   ];
+}
+
+export const DUTY_CONSIGNMENT_WRITE = "inventory.consignment.write";
+
+/**
+ * Ends the order: a partly received one is closed (the open quantity is given up, the stock received
+ * stays), one nothing was received against is cancelled. Both ask for confirmation first.
+ */
+function EndCard({ order, onDone, onError }: { order: ConsignmentOrder; onDone(next: ConsignmentOrder, action: "close" | "cancel"): void; onError(p: Problem, action: "close" | "cancel"): void }) {
+  const action = order.status === "CREATED" ? "cancel" : "close";
+  const [reason, setReason] = useState("");
+  const [invalid, setInvalid] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
+  // Per line and unit, as the service sends it: lines can be in different units and summing decimal
+  // strings as numbers would show float noise.
+  const open = order.lines
+    .filter((l) => Number(l.openQty) > 0)
+    .map((l) => `${l.openQty} ${l.unit}`)
+    .join(", ");
+
+  async function confirm() {
+    if (sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    try {
+      onDone(await endConsignment(order.id, action, order.version, reason), action);
+    } catch (error) {
+      onError(describeProblem(error), action);
+    } finally {
+      sending.current = false;
+      setBusy(false);
+      setAsking(false);
+    }
+  }
+
+  function ask(event: FormEvent) {
+    event.preventDefault();
+    if (reason.trim().length > 200) {
+      setInvalid("Use at most 200 characters.");
+      return;
+    }
+    setInvalid("");
+    setAsking(true);
+  }
+
+  return (
+    <Card title={action === "cancel" ? "Cancel order" : "Close order"}>
+      <form onSubmit={ask} noValidate className={styles.form}>
+        <FormField
+          id="cro-end-reason"
+          label="Reason"
+          hint={action === "cancel" ? "Nothing was received, so cancelling moves no stock." : `The open quantity (${open}) is given up; the stock already received stays.`}
+          error={invalid}
+        >
+          {(control) => <Input {...control} value={reason} onChange={(event) => setReason(event.target.value)} invalid={Boolean(invalid)} />}
+        </FormField>
+        <div className={styles.formActions}>
+          <Button type="submit" variant="secondary">
+            {action === "cancel" ? "Cancel order" : "Close order"}
+          </Button>
+        </div>
+      </form>
+      {asking ? (
+        <ConfirmDialog
+          title={action === "cancel" ? "Cancel this consignment order?" : "Close this consignment order?"}
+          description={
+            action === "cancel"
+              ? `Order ${order.number} will no longer expect any stock from vendor ${order.vendorId}.`
+              : `Order ${order.number} will stop expecting the ${open} still open. Vendor-owned stock already received stays.`
+          }
+          confirmLabel={busy ? "Working" : action === "cancel" ? "Cancel order" : "Close order"}
+          cancelLabel="Keep order"
+          onCancel={() => (busy ? undefined : setAsking(false))}
+          onConfirm={() => void confirm()}
+        />
+      ) : null}
+    </Card>
+  );
 }
 
 /** Receipt entry for the open lines; each receipt adds vendor-owned stock at no value. */
@@ -102,8 +185,10 @@ export function ConsignmentOrderPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getConsignment(id, signal), id);
   const [order, setOrder] = useState<ConsignmentOrder | null>(null);
-  const [failure, setFailure] = useState<Problem | null>(null);
+  // The refusal and what was refused: a receipt, a close or a cancel.
+  const [failure, setFailure] = useState<{ title: string; problem: Problem } | null>(null);
   const [notice, setNotice] = useState("");
+  const canWrite = holdsDuty(usePrincipalDuties(), DUTY_CONSIGNMENT_WRITE);
 
   useEffect(() => {
     setOrder(state.data);
@@ -152,11 +237,11 @@ export function ConsignmentOrderPage() {
       {failure ? (
         <Alert
           tone="danger"
-          title="The receipt was not booked"
+          title={failure.title}
           live="alert"
-          action={failure.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload order</Button> : undefined}
+          action={failure.problem.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload order</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          {failure.problem.message} ({failure.problem.code})
         </Alert>
       ) : null}
       <Card title="Details">
@@ -176,9 +261,15 @@ export function ConsignmentOrderPage() {
           <Detail term="Requested date">{order.requestedDate}</Detail>
           <Detail term="Currency">{order.currency}</Detail>
           <Detail term="Created">{formatDateTime(order.createdAt)}</Detail>
+          {order.closedAt ? (
+            <Detail term={order.status === "CANCELLED" ? "Cancelled" : "Closed"}>
+              {`${formatDateTime(order.closedAt)}${order.closedBy ? ` by ${order.closedBy}` : ""}`}
+            </Detail>
+          ) : null}
+          {order.closeReason ? <Detail term="Reason">{order.closeReason}</Detail> : null}
         </dl>
       </Card>
-      {order.status !== "RECEIVED" ? (
+      {order.status === "CREATED" || order.status === "PARTIALLY_RECEIVED" ? (
         <ReceiveForm
           key={order.version}
           order={order}
@@ -187,7 +278,19 @@ export function ConsignmentOrderPage() {
             setOrder(next);
             setNotice(next.status === "RECEIVED" ? `Consignment order ${next.number} fully received.` : "Receipt booked as vendor-owned stock.");
           }}
-          onError={setFailure}
+          onError={(problem) => setFailure({ title: "The receipt was not booked", problem })}
+        />
+      ) : null}
+      {canWrite && (order.status === "CREATED" || order.status === "PARTIALLY_RECEIVED") ? (
+        <EndCard
+          key={`end-${order.version}`}
+          order={order}
+          onDone={(next, action) => {
+            setFailure(null);
+            setOrder(next);
+            setNotice(action === "cancel" ? `Consignment order ${next.number} cancelled.` : `Consignment order ${next.number} closed; the open quantity is given up.`);
+          }}
+          onError={(problem, action) => setFailure({ title: action === "cancel" ? "The order was not cancelled" : "The order was not closed", problem })}
         />
       ) : null}
       <DataTable label="Consignment lines" columns={lineColumns(order.currency)} rows={order.lines} getRowKey={(row) => row.id} empty={{ title: "No lines" }} />
