@@ -25,6 +25,15 @@ secret:
 config:
   managerMaxDepth: "10"
   migrateOnStart: "false"
+  # Comma-separated tenant UUIDs the in-process due personnel-action sweep (#263) runs for; empty disables it.
+  actionSweepTenantIds: ""
+  actionSweepInterval: "15m"
+
+# Requisitions without a requisitionNumber take the next number of the REQ sequence from numbering (#266).
+numberingUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
 
 resources:
   requests:

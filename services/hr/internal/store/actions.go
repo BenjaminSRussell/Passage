@@ -683,21 +683,19 @@ func scopeIsAll(ctx context.Context, tx pgx.Tx) (bool, error) {
 	return scopes == "*", nil
 }
 
-func withAllEntities[T any](ctx context.Context, tx pgx.Tx, fn func() (T, error)) (T, error) {
-	var zero T
+func withAllEntities[T any](ctx context.Context, tx pgx.Tx, fn func() (T, error)) (out T, err error) {
 	var saved string
-	if err := tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&saved); err != nil {
-		return zero, err
+	if err = tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&saved); err != nil {
+		return out, err
 	}
-	if _, err := tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', '*', true)`); err != nil {
-		return zero, err
+	if _, err = tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', '*', true)`); err != nil {
+		return out, err
 	}
-	out, err := fn()
-	if err != nil {
-		return zero, err
-	}
-	if _, err := tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', $1, true)`, saved); err != nil {
-		return zero, err
-	}
-	return out, nil
+	defer func() {
+		if _, restoreErr := tx.Exec(ctx, `select set_config('passage.legal_entity_scopes', $1, true)`, saved); restoreErr != nil && err == nil {
+			var zero T
+			out, err = zero, restoreErr
+		}
+	}()
+	return fn()
 }

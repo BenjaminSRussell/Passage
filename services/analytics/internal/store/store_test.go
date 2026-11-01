@@ -109,6 +109,37 @@ func TestRecordReconciliation_EventOnlyOnChangeAndTrustCounter(t *testing.T) {
 	}
 }
 
+func TestRecordReconciliation_ConcurrentReplicasWriteOneEvent(t *testing.T) {
+	pool := migrated(t)
+	st := New(pool)
+	ctx := ctxFor(1, "")
+	const replicas = 8
+	changes := make(chan bool, replicas)
+	errs := make(chan error, replicas)
+	for i := 0; i < replicas; i++ {
+		go func() {
+			_, changed, err := st.RecordReconciliation(ctx, recon(leUSMF, "revenue", "2026-10-05", "42.00", "42.00"))
+			changes <- changed
+			errs <- err
+		}()
+	}
+	changed := 0
+	for i := 0; i < replicas; i++ {
+		if <-changes {
+			changed++
+		}
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("%d replicas reported a change, want exactly 1", changed)
+	}
+	if n := outboxCount(t, pool); n != 1 {
+		t.Fatalf("outbox rows %d, want 1", n)
+	}
+}
+
 func TestRecordReconciliation_TrustedAfterThirtyDaysAndValidation(t *testing.T) {
 	pool := migrated(t)
 	st := New(pool)

@@ -114,6 +114,7 @@
     "ledger.ledger.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]}]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
     "ledger.journal.postledger": {"flag": true, "permissions": []},
+    "ledger.period.postclosed": {"flag": true, "permissions": []},
     "ledger.journal.reverse": {"permissions": [{"resource": "/v1/ledger/journal-entries/*/reverse", "methods": ["POST"]}]},
     "ledger.journal.write": {"permissions": [
       {"resource": "/v1/ledger/journal-batches", "methods": ["POST"]},
@@ -182,6 +183,7 @@
       {"resource": "/v1/inventory/transactions/*", "methods": ["GET"]},
       {"resource": "/v1/inventory/reservations", "methods": ["GET"]},
       {"resource": "/v1/inventory/blockings", "methods": ["GET"]},
+      {"resource": "/v1/inventory/holds", "methods": ["GET"]},
       {"resource": "/v1/inventory/status-changes", "methods": ["GET"]},
       {"resource": "/v1/inventory/count-plans", "methods": ["GET"]},
       {"resource": "/v1/inventory/count-plans/*/tags", "methods": ["GET"]},
@@ -228,6 +230,15 @@
     "inventory.blocking.write": {"permissions": [
       {"resource": "/v1/inventory/blockings", "methods": ["POST"]},
       {"resource": "/v1/inventory/blockings/*:release", "methods": ["POST"]}
+    ]},
+    "inventory.hold.write": {"permissions": [
+      {"resource": "/v1/inventory/holds", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds/*:release", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
+    ]},
+    "inventory.hold.apply": {"service_only": true, "permissions": [
+      {"resource": "/v1/inventory/holds", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
     "inventory.transaction.apply": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
     "inventory.transaction.step": {"permissions": [
@@ -995,7 +1006,9 @@
     ]},
     "MssApprove": {"permissions": [
       {"resource": "/v1/hr/absence/requests/*/decide", "methods": ["POST"]},
-      {"resource": "/v1/hr/courses/registrations/*/approve", "methods": ["POST"]}
+      {"resource": "/v1/hr/courses/registrations/*/approve", "methods": ["POST"]},
+      {"resource": "/v1/hr/me/compensation/cycles/*/worksheet", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/hr/me/compensation/cycles/*/worksheet/submit", "methods": ["POST"]}
     ]},
     "MssBase": {"permissions": [
       {"resource": "/v1/hr/me/team", "methods": ["GET"]},
@@ -2332,6 +2345,12 @@
     "close": {
       "ledger": ["ledger.ledger.lookup"]
     },
+    "ledger": {
+      "close": ["period.check"]
+    },
+    "analytics": {
+      "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
+    },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
@@ -2345,6 +2364,15 @@
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]
+    },
+    "quality": {
+      "inventory": ["inventory.hold.apply"]
+    },
+    "hr": {
+      "numbering": ["numbering.sequence.allocate"]
     }
+  },
+  "service_principals": {
+    "receiving-ers": ["VendorInvoicePost"]
   }
 }

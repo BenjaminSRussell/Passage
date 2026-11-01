@@ -41,3 +41,12 @@ serviceIdentity:
 fieldCrypt:
   keysSecret: ""
   currentKeyId: ""
+
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: receiving-ers
+    username: receiving-consumer
+    secret: ""
