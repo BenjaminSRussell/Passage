@@ -92,34 +92,54 @@ func TestStatus_UnreachableAndUnsignedFail(t *testing.T) {
 	}
 }
 
-func TestStatus_CachesPerLedgerModuleAndDateForThirtySeconds(t *testing.T) {
-	calls := 0
+func TestStatus_NeverAnswersOpenFromTheProcessCache(t *testing.T) {
+	status, calls := "open", 0
 	c, ctx, le, ledgerID := fixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		_, _ = w.Write([]byte(`{"status":"open"}`))
+		_, _ = w.Write([]byte(`{"status":"` + status + `"}`))
 	})
-	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	c.now = func() time.Time { return now }
-	ask := func(source string, date time.Time) {
-		t.Helper()
-		if _, err := c.Status(ctx, le, ledgerID, date, source); err != nil {
-			t.Fatal(err)
-		}
+	if got, _ := c.Status(ctx, le, ledgerID, postingDate, "ap"); got != "open" {
+		t.Fatalf("got %q", got)
 	}
-	ask("ap", postingDate)
-	ask("ap", postingDate)
-	if calls != 1 {
-		t.Fatalf("calls %d, want the second answer from cache", calls)
+	status = "closed"
+	got, err := c.Status(ctx, le, ledgerID, postingDate, "ap")
+	if err != nil || got != "closed" || calls != 2 {
+		t.Fatalf("a period closed after an open answer must be seen on the next call: %q %v calls %d", got, err, calls)
 	}
-	ask("ar", postingDate)
-	ask("ap", postingDate.AddDate(0, 0, 1))
-	if calls != 3 {
-		t.Fatalf("calls %d, a different module or date must not share an entry", calls)
-	}
-	now = now.Add(CacheTTL + time.Second)
-	ask("ap", postingDate)
-	if calls != 4 {
-		t.Fatalf("calls %d, an expired entry must be fetched again", calls)
+}
+
+func TestStatus_CachesNonOpenPerLedgerModuleAndDateForThirtySeconds(t *testing.T) {
+	for _, closed := range []string{"closed", "on_hold", "permanently_closed", "never_opened"} {
+		t.Run(closed, func(t *testing.T) {
+			calls := 0
+			c, ctx, le, ledgerID := fixture(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				_, _ = w.Write([]byte(`{"status":"` + closed + `"}`))
+			})
+			now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+			c.now = func() time.Time { return now }
+			ask := func(source string, date time.Time) {
+				t.Helper()
+				if got, err := c.Status(ctx, le, ledgerID, date, source); err != nil || got != closed {
+					t.Fatalf("%q %v", got, err)
+				}
+			}
+			ask("ap", postingDate)
+			ask("ap", postingDate)
+			if calls != 1 {
+				t.Fatalf("calls %d, the second answer must come from cache", calls)
+			}
+			ask("ar", postingDate)
+			ask("ap", postingDate.AddDate(0, 0, 1))
+			if calls != 3 {
+				t.Fatalf("calls %d, a different module or date must not share an entry", calls)
+			}
+			now = now.Add(CacheTTL + time.Second)
+			ask("ap", postingDate)
+			if calls != 4 {
+				t.Fatalf("calls %d, an expired entry must be fetched again", calls)
+			}
+		})
 	}
 }
 

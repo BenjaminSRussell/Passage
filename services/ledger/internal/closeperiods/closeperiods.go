@@ -26,6 +26,7 @@ const (
 	dutyPeriodCheck = "period.check"
 	codeNoPeriod    = "CLOSE-0005"
 	maxResponseSize = 1 << 20
+	statusOpen      = "open"
 	CacheTTL        = 30 * time.Second
 	maxCacheEntries = 10000
 )
@@ -63,7 +64,7 @@ func (c *Client) Status(ctx context.Context, legalEntityID, ledgerID string, pos
 		return hit.status, nil
 	}
 	status, err := c.fetch(ctx, legalEntityID, ledgerID, postingDate, sourceSystem)
-	if err == nil {
+	if err == nil && status != statusOpen {
 		c.mu.Lock()
 		if len(c.cache) >= maxCacheEntries {
 			c.cache = map[string]cached{}
