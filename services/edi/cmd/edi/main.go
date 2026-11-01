@@ -12,9 +12,11 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
@@ -63,8 +65,16 @@ func run() error {
 	if addr == "" {
 		addr = ":8080"
 	}
+	signer, err := tenant.ServiceSignerFromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
 	a := api.New(store.New(pool, dupDays))
 	a.Sender = sender
+	a.AllowBodyOutbound = os.Getenv("EDI_ALLOW_BODY_OUTBOUND") == "true"
+	if signer != nil {
+		a.Sources = sources.New(signer, os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL"), nil)
+	}
 	return httpx.Serve(ctx, addr, a.Routes())
 }
 

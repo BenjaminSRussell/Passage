@@ -107,7 +107,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/free-text-invoices", a.createProposal)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/proposals", a.createShipmentProposals)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices", a.listInvoices)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}", a.getInvoice)
+	r.With(authz.RequireAnyDuty(dutyView, "billing.invoice.read")).Get("/v1/billing/invoices/{id}", a.getInvoice)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}/trace", a.invoiceTrace)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)

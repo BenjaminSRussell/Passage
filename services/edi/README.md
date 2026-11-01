@@ -44,7 +44,22 @@ Built in this slice:
     plus charges minus allowances; TDS01 and SAC05 are N2.
   - 855 acknowledgment: BAK02 AD (no change, all lines IA), AC (with change), RD (all IR),
     AK and RJ (no lines); the acknowledgment date is BAK09; PO1/ACK per line.
-- **Outbound generation**: `POST /edi/v1/partners/{id}/outbound` builds one of the above
+- **Outbound from the owning services**: `POST /edi/v1/partners/{id}/outbound:from-source`
+  with `{"transactionSet":"856"|"810","sourceId"}` reads the fulfillment shipment (856) or the
+  billing invoice (810), plus the sales order for the customer PO, from their services under
+  the service grant `edi` -> `fulfillment`/`billing`/`sales` (duties `fulfillment.shipment.read`,
+  `billing.invoice.read`, `sales.order.lookup`, nothing else) for the legal entity of the
+  partner's trade profile (`PUT /edi/v1/partners/{id}/trade-profile`: legal entity, customer,
+  ship-from/ship-to/bill-to/remit-to names and GLNs, default SCAC). The document must belong to
+  the profile's legal entity and customer (422 EDI-0011) and be final: shipment shipped with
+  shipped containers, invoice posted (409 EDI-0013). It is an explicit API call: the
+  `wms.load.shipped` and `invoice.posted` consumers are not built (the shared eventing consumer
+  needs a Kafka wiring and service principal that the source services' events do not yet
+  justify). Idempotent per source document: a repeat returns the recorded interchange (200) and
+  takes no control number; a source that changed after it was sent is `idempotency_key_reuse`.
+  Line discounts become one 810 allowance (SAC C310) and header charges one SAC ZZZZ.
+- **Outbound generation from a request body**: `POST /edi/v1/partners/{id}/outbound`, served only
+  with `EDI_ALLOW_BODY_OUTBOUND=true` (tests and development), builds one of the above
   from its canonical JSON, envelopes it from our identity to the partner with the next
   number of the same gap-free counter the 997s use (ISA13 and GS06, BR-35.5) and records
   an OUT interchange (ack status PENDING, message MAPPED). `Idempotency-Key` is required.
@@ -182,7 +197,9 @@ testdata/x12/       X12 fixtures for the domain and API tests
 | POST | /edi/v1/partners | EDI_ADMIN | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422 |
 | GET | /edi/v1/partners?environment= | EDI_ADMIN | `{items}` by name |
 | GET | /edi/v1/partners/{id} | EDI_ADMIN | `ETag` carries the version |
-| POST | /edi/v1/partners/{id}/outbound | EDI_OPERATE | Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
+| PUT | /edi/v1/partners/{id}/trade-profile | EDI_ADMIN | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
+| POST | /edi/v1/partners/{id}/outbound:from-source | EDI_OPERATE | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
+| POST | /edi/v1/partners/{id}/outbound | EDI_OPERATE | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
 | POST | /edi/v1/maps:test | EDI_ADMIN | Body `{"raw": "<X12>"}`; nothing is stored |
 | POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
@@ -213,7 +230,10 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/edi
 
 Configuration: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`),
 `MIGRATE_ON_START` (dev only), `EDI_DUP_WINDOW_DAYS` (default 30), `EDI_ISA_QUALIFIER`
-and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE).
+and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE),
+`PASSAGE_SERVICE_NAME=edi` with `PASSAGE_SERVICE_SIGNING_KEY` or `_FILE` (and `PASSAGE_SERVICE_KEY_ID`),
+`EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
+route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (default off).
 
 ## Dependencies
 

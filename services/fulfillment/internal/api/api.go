@@ -72,7 +72,7 @@ func (a *API) SetClock(now func() time.Time) { a.now = now }
 func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/releases:run", a.runRelease)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments", a.listShipments)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}", a.getShipment)
+	r.With(authz.RequireAnyDuty("WarehouseView", "fulfillment.shipment.read")).Get("/v1/fulfillment/shipments/{id}", a.getShipment)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-slips", a.listPackingSlips)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
 	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/shipments/{id}:confirm-pick", a.confirmPick)

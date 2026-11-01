@@ -304,6 +304,9 @@
       {"resource": "/v1/inventory/holds/*:release", "methods": ["POST"]},
       {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
+    "fulfillment.shipment.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/shipments/*", "methods": ["GET"]}]},
+    "billing.invoice.read": {"service_only": true, "permissions": [{"resource": "/v1/billing/invoices/*", "methods": ["GET"]}]},
+    "sales.order.lookup": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*", "methods": ["GET"]}]},
     "inventory.hold.apply": {"service_only": true, "permissions": [
       {"resource": "/v1/inventory/holds", "methods": ["POST"]},
       {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
@@ -843,7 +846,8 @@
     "EDI_ADMIN": {"permissions": [
       {"resource": "/edi/v1/maps:test", "methods": ["POST"]},
       {"resource": "/edi/v1/partners", "methods": ["GET", "POST"]},
-      {"resource": "/edi/v1/partners/*", "methods": ["GET"]}
+      {"resource": "/edi/v1/partners/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]}
     ]},
     "EDI_OPERATE": {"permissions": [
       {"resource": "/edi/v1/inbound/x12", "methods": ["POST"]},
@@ -855,6 +859,7 @@
       {"resource": "/edi/v1/messages", "methods": ["GET"]},
       {"resource": "/edi/v1/messages/*", "methods": ["GET"]},
       {"resource": "/edi/v1/partners/*/outbound", "methods": ["POST"]},
+      {"resource": "/edi/v1/partners/*/outbound:from-source", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
     ]},
     "EDI_PII_VIEW": {"flag": true, "permissions": []},
@@ -2742,6 +2747,11 @@
     },
     "integration-hub": {
       "migration": ["migration.outbound.render", "migration.xref.record"]
+    },
+    "edi": {
+      "fulfillment": ["fulfillment.shipment.read"],
+      "billing": ["billing.invoice.read"],
+      "sales": ["sales.order.lookup"]
     }
   },
   "service_principals": {

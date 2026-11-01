@@ -43,6 +43,11 @@ const (
 	CodePartnerInactive  = "EDI-0008"
 	CodeNotInbound       = "EDI-0009"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
+	CodeSourceDown       = "EDI-0010"
+	CodeSourceScope      = "EDI-0011"
+	CodeNoTradeProfile   = "EDI-0012"
+	CodeSourceNotFinal   = "EDI-0013"
+	CodeSourceForbidden  = "EDI-0014"
 )
 
 // Interchange list page size: default and maximum.
@@ -61,9 +66,13 @@ var DefaultSender = domain.Party{Qualifier: "ZZ", ID: "PASSAGE"}
 // API holds the store used by the handlers that persist state. Sender is our
 // ISA06/GS02 identity on outbound documents.
 type API struct {
-	store  *store.Store
-	now    func() time.Time
-	Sender domain.Party
+	store   *store.Store
+	now     func() time.Time
+	Sender  domain.Party
+	Sources Sources
+	// AllowBodyOutbound mounts POST /partners/{id}/outbound, which takes the
+	// canonical document from the request body. Tests and development only.
+	AllowBodyOutbound bool
 }
 
 // New returns the API. The store may be nil for routes that do not persist
@@ -79,7 +88,11 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/partners", a.createPartner)
 		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners", a.listPartners)
 		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners/{id}", a.getPartner)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound", a.createOutbound)
+		r.With(authz.RequireDuty("EDI_ADMIN")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound:from-source", a.outboundFromSource)
+		if a.AllowBodyOutbound {
+			r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound", a.createOutbound)
+		}
 		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/maps:test", a.mapsTest)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/inbound/x12", a.receiveX12)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges", a.listInterchanges)
@@ -531,10 +544,9 @@ type outboundRequest struct {
 	Document       json.RawMessage `json:"document"`
 }
 
-// createOutbound builds an 855, 856 or 810 from its canonical document, wraps
-// it in an interchange to the partner with the next gap-free control number
-// and records it with ack_status PENDING until the partner's 997 is matched.
-// Transmission (AS2/SFTP) is not built; the message stays MAPPED.
+// createOutbound builds an 855, 856 or 810 from a caller-supplied canonical
+// document. It is mounted only when AllowBodyOutbound is set (tests and
+// development); production documents come from outboundFromSource.
 func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
@@ -551,11 +563,19 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	if domain.FunctionalIDOf(req.TransactionSet) == "" {
+	a.sendOutbound(w, r, key, id, req.TransactionSet, req.Document)
+}
+
+// sendOutbound builds the transaction for a canonical document, wraps it in an
+// interchange to the partner with the next gap-free control number and records
+// it with ack_status PENDING until the partner's 997 is matched. Transmission
+// (AS2/SFTP) is not built; the message stays MAPPED.
+func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerID, setID string, document json.RawMessage) {
+	if domain.FunctionalIDOf(setID) == "" {
 		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ")}))
 		return
 	}
-	tr, canonical, err := domain.BuildOutbound(req.TransactionSet, req.Document)
+	tr, canonical, err := domain.BuildOutbound(setID, document)
 	if errors.Is(err, domain.ErrOutbound) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
@@ -564,7 +584,7 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	partner, err := a.store.GetPartner(r.Context(), id)
+	partner, err := a.store.GetPartner(r.Context(), partnerID)
 	if errors.Is(err, store.ErrNotFound) {
 		httpx.Fail(w, r, notFound("partner"))
 		return
@@ -583,10 +603,10 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	}
 	to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
 	at := a.now()
-	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+req.TransactionSet+"\x00"), canonical...))
+	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
 	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), store.Outbound{
 		PartnerID:      partner.ID,
-		TransactionSet: req.TransactionSet,
+		TransactionSet: setID,
 		Canonical:      canonical,
 		Build: func(control int64) (string, error) {
 			ic, err := domain.OutboundEnvelope(tr, a.Sender, to, usage, control, at)
@@ -601,7 +621,6 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, domain.ErrSyntax) {
-		// A value carries an envelope delimiter; Serialize refuses it.
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
 	}
