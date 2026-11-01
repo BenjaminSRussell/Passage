@@ -115,25 +115,37 @@ func Rejected(err error) bool {
 	return errors.As(err, &le) && le.Status >= 400 && le.Status < 500 && le.Status != http.StatusConflict && le.Status != http.StatusRequestTimeout
 }
 
-func (e Entry) Validate() error {
+// Rounded returns the entry with every line rounded to the currency's minor unit, refusing it when it has fewer than two lines,
+// a line that rounds to zero, or debits and credits that differ on the rounded amounts.
+func (e Entry) Rounded() (Entry, error) {
 	if len(e.Lines) < 2 || e.Currency == "" || e.LedgerID == "" || e.IdempotencyKey == "" {
-		return ErrEmptyEntry
+		return Entry{}, ErrEmptyEntry
 	}
+	mu := money.MinorUnits(e.Currency)
+	out := e
+	out.Lines = make([]Line, len(e.Lines))
 	debit, credit := decimal.Zero, decimal.Zero
-	for _, l := range e.Lines {
+	for i, l := range e.Lines {
+		l.Amount = l.Amount.Round(mu)
 		if l.Account == "" || !l.Amount.IsPositive() {
-			return ErrEmptyEntry
+			return Entry{}, ErrEmptyEntry
 		}
 		if l.Credit {
 			credit = credit.Add(l.Amount)
 		} else {
 			debit = debit.Add(l.Amount)
 		}
+		out.Lines[i] = l
 	}
 	if !debit.Equal(credit) {
-		return fmt.Errorf("%w: debit %s credit %s", ErrUnbalanced, debit, credit)
+		return Entry{}, fmt.Errorf("%w: debit %s credit %s", ErrUnbalanced, debit, credit)
 	}
-	return nil
+	return out, nil
+}
+
+func (e Entry) Validate() error {
+	_, err := e.Rounded()
+	return err
 }
 
 type Client struct {
@@ -278,7 +290,8 @@ func entryID(ctx context.Context, op, subject string, raw []byte) (string, error
 }
 
 func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
-	if err := e.Validate(); err != nil {
+	e, err := e.Rounded()
+	if err != nil {
 		return "", err
 	}
 	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate,

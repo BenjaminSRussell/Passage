@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 )
 
@@ -58,10 +59,10 @@ func (s *Postgres) CreateAsset(ctx context.Context, in Asset, key string) (Asset
 		}
 		id := ids.New()
 		a, err := scanAsset(tx.QueryRow(ctx, `insert into asset (tenant_id, id, asset_number, name, asset_type, site_id,
-		    criticality, production_resource_id, idempotency_key)
-		  values ($1, $2, 'AST-' || nextval('asset_number_seq'), $3, $4, $5, $6, $7, $8)
+		    criticality, production_resource_id, idempotency_key, legal_entity_id)
+		  values ($1, $2, 'AST-' || nextval('asset_number_seq'), $3, $4, $5, $6, $7, $8, $9)
 		  returning `+assetColumns,
-			t, id, in.Name, in.AssetType, in.SiteID, in.Criticality, in.ProductionResourceID, optStr(key)))
+			t, id, in.Name, in.AssetType, in.SiteID, in.Criticality, in.ProductionResourceID, optStr(key), callerEntity(ctx)))
 		out = a
 		return err
 	})
@@ -326,4 +327,14 @@ func (s *Postgres) Workspace(ctx context.Context) (Workspace, error) {
 			Scan(&out.OpenWorkOrders, &out.DueIn7Days, &out.Overdue)
 	})
 	return out, err
+}
+
+// callerEntity is the caller's single legal entity scope, or nil when it has none or several.
+func callerEntity(ctx context.Context) *string {
+	if p, ok := tenant.FromContext(ctx); ok {
+		if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
+			return &scopes[0]
+		}
+	}
+	return nil
 }

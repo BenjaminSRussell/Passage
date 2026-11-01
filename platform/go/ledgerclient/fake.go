@@ -51,7 +51,8 @@ func (f *Fake) Entries() []Stored {
 }
 
 func (f *Fake) Post(_ context.Context, e Entry) (string, error) {
-	if err := e.Validate(); err != nil {
+	e, err := e.Rounded()
+	if err != nil {
 		return "", err
 	}
 	f.mu.Lock()

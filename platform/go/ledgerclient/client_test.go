@@ -214,3 +214,25 @@ func TestFromEnv(t *testing.T) {
 		t.Fatalf("configured: %v %v", c, err)
 	}
 }
+
+func TestEntry_RoundsEachLineBeforeCheckingBalance(t *testing.T) {
+	e := entry()
+	e.Lines[0].Amount, e.Lines[1].Amount = decimal.RequireFromString("10.004"), decimal.RequireFromString("9.996")
+	r, err := e.Rounded()
+	if err != nil || !r.Lines[0].Amount.Equal(decimal.RequireFromString("10.00")) || !r.Lines[1].Amount.Equal(decimal.RequireFromString("10.00")) {
+		t.Fatalf("rounded %+v %v", r, err)
+	}
+	e.Lines[1].Amount = decimal.RequireFromString("10.006")
+	if _, err := e.Rounded(); !errors.Is(err, ledgerclient.ErrUnbalanced) {
+		t.Fatalf("lines that differ after rounding must be refused: %v", err)
+	}
+	e.Lines[0].Amount, e.Lines[1].Amount = decimal.RequireFromString("0.004"), decimal.RequireFromString("0.004")
+	if _, err := e.Rounded(); !errors.Is(err, ledgerclient.ErrEmptyEntry) {
+		t.Fatalf("a line that rounds to 0.00 must be refused: %v", err)
+	}
+	e.Currency = "JPY"
+	e.Lines[0].Amount, e.Lines[1].Amount = decimal.RequireFromString("100.4"), decimal.RequireFromString("100")
+	if r, err := e.Rounded(); err != nil || !r.Lines[0].Amount.Equal(decimal.NewFromInt(100)) {
+		t.Fatalf("JPY has no minor unit: %+v %v", r, err)
+	}
+}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 const (
 	MaxGLOrdersPerRun = 200
 	CodeGLFailed      = "EAM-GL-001"
+	CodeNoEntity      = "EAM-GL-004"
 	allTypes          = "ALL"
 	glSourceType      = "work-order"
 )
@@ -159,14 +161,49 @@ type glOrder struct {
 	count                              int
 }
 
+type pendingLine struct {
+	Account string `json:"account"`
+	Credit  bool   `json:"credit"`
+	Amount  string `json:"amount"`
+}
+
+// pendingBooking is the exact payload of one ledger entry, stored before the ledger is called.
+type pendingBooking struct {
+	seq                    int
+	legalEntityID          string
+	ledgerID, currency     string
+	date, key              string
+	lines                  []pendingLine
+	partsBasis, laborBasis decimal.Decimal
+}
+
+func (p pendingBooking) entry(number string) ledgerclient.Entry {
+	e := ledgerclient.Entry{LegalEntityID: p.legalEntityID, LedgerID: p.ledgerID, DocumentID: number, PostingDate: p.date, Currency: p.currency, IdempotencyKey: p.key, SourceType: glSourceType}
+	for _, l := range p.lines {
+		e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: decimal.RequireFromString(l.Amount)})
+	}
+	return e
+}
+
 func (o glOrder) deltas(currency string) (parts, labor decimal.Decimal) {
 	mu := money.MinorUnits(currency)
 	return o.parts.Round(mu).Sub(o.partsBase.Round(mu)), o.labor.Round(mu).Sub(o.laborBase.Round(mu))
 }
 
+const glOrderColumns = `w.id::text, w.number, w.work_order_type, w.actual_end, w.parts_cost::text, w.labor_cost::text, w.gl_parts_basis::text, w.gl_labor_basis::text, w.gl_post_count`
+
+func scanGLOrder(row pgx.Row) (glOrder, error) {
+	var o glOrder
+	var parts, labor, pb, lb string
+	if err := row.Scan(&o.id, &o.number, &o.typ, &o.end, &parts, &labor, &pb, &lb, &o.count); err != nil {
+		return o, err
+	}
+	o.parts, o.labor, o.partsBase, o.laborBase = decimal.RequireFromString(parts), decimal.RequireFromString(labor), decimal.RequireFromString(pb), decimal.RequireFromString(lb)
+	return o, nil
+}
+
 func (s *Postgres) unpostedOrders(ctx context.Context, tx pgx.Tx, t string, in GLPostRequest) ([]glOrder, error) {
-	rows, err := tx.Query(ctx, `select w.id::text, w.number, w.work_order_type, w.actual_end, w.parts_cost::text, w.labor_cost::text,
-			w.gl_parts_basis::text, w.gl_labor_basis::text, w.gl_post_count
+	rows, err := tx.Query(ctx, `select `+glOrderColumns+`
 		from work_order w join asset a on a.tenant_id = w.tenant_id and a.id = w.asset_id
 		where w.tenant_id = $1 and w.legal_entity_id = $6::uuid and w.status in ('COMPLETED', 'CLOSED') and w.currency = $2 and ($3 = '' or a.site_id = $3::uuid)
 			and ($4 = '' or w.id = $4::uuid) and (w.parts_cost <> w.gl_parts_basis or w.labor_cost <> w.gl_labor_basis)
@@ -177,25 +214,18 @@ func (s *Postgres) unpostedOrders(ctx context.Context, tx pgx.Tx, t string, in G
 	defer rows.Close()
 	var out []glOrder
 	for rows.Next() {
-		var o glOrder
-		var parts, labor, pb, lb string
-		if err := rows.Scan(&o.id, &o.number, &o.typ, &o.end, &parts, &labor, &pb, &lb, &o.count); err != nil {
+		o, err := scanGLOrder(rows)
+		if err != nil {
 			return nil, err
 		}
-		o.parts, o.labor, o.partsBase, o.laborBase = decimal.RequireFromString(parts), decimal.RequireFromString(labor), decimal.RequireFromString(pb), decimal.RequireFromString(lb)
 		out = append(out, o)
 	}
 	return out, rows.Err()
 }
 
-func (o glOrder) entry(in GLPostRequest, p PostingProfile, today time.Time) ledgerclient.Entry {
-	date := today
-	if o.count == 0 && o.end != nil {
-		date = *o.end
-	}
-	e := ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: o.number, PostingDate: date.UTC().Format(time.DateOnly), Currency: in.Currency,
-		IdempotencyKey: fmt.Sprintf("eam-work-order:%s:%d", o.id, o.count+1), SourceType: glSourceType}
-	parts, labor := o.deltas(in.Currency)
+func (o glOrder) lines(p PostingProfile, currency string) []pendingLine {
+	var out []pendingLine
+	parts, labor := o.deltas(currency)
 	for _, l := range []struct {
 		delta           decimal.Decimal
 		expense, offset string
@@ -203,45 +233,95 @@ func (o glOrder) entry(in GLPostRequest, p PostingProfile, today time.Time) ledg
 		if l.delta.IsZero() {
 			continue
 		}
-		e.Lines = append(e.Lines,
-			ledgerclient.Line{Account: l.expense, Credit: l.delta.IsNegative(), Amount: l.delta.Abs()},
-			ledgerclient.Line{Account: l.offset, Credit: l.delta.IsPositive(), Amount: l.delta.Abs()})
+		mu := money.MinorUnits(currency)
+		amount := l.delta.Abs().StringFixed(mu)
+		out = append(out,
+			pendingLine{Account: l.expense, Credit: l.delta.IsNegative(), Amount: amount},
+			pendingLine{Account: l.offset, Credit: l.delta.IsPositive(), Amount: amount})
 	}
-	return e
+	return out
 }
 
-func (s *Postgres) markPosted(ctx context.Context, o glOrder, in GLPostRequest, e ledgerclient.Entry, entryID string) error {
-	return s.withTx(ctx, func(tx pgx.Tx, t string) error {
-		var count int
-		if err := tx.QueryRow(ctx, `select gl_post_count from work_order where tenant_id = $1 and id = $2 for update`, t, o.id).Scan(&count); err != nil {
+// decide returns the booking to send for the order. A pending booking left by an earlier attempt is returned unchanged; otherwise the cost not yet
+// booked becomes one, stored in this transaction under the order's row lock before the ledger is called. Cost that rounds to nothing only moves the basis.
+func (s *Postgres) decide(ctx context.Context, id string, in GLPostRequest, profiles []PostingProfile) (glOrder, *pendingBooking, error) {
+	var o glOrder
+	var pb *pendingBooking
+	err := s.withTx(ctx, func(tx pgx.Tx, t string) (err error) {
+		if o, err = scanGLOrder(tx.QueryRow(ctx, `select `+glOrderColumns+` from work_order w where w.tenant_id = $1 and w.id = $2 for update`, t, id)); err != nil {
 			return err
 		}
-		if count != o.count {
+		var p pendingBooking
+		var pbase, lbase string
+		err = tx.QueryRow(ctx, `select seq, legal_entity_id::text, ledger_id::text, currency, posting_date::text, idempotency_key, lines, parts_basis::text, labor_basis::text
+			from eam_pending_booking where tenant_id = $1 and work_order_id = $2`, t, id).Scan(&p.seq, &p.legalEntityID, &p.ledgerID, &p.currency, &p.date, &p.key, &p.lines, &pbase, &lbase)
+		if err == nil {
+			p.partsBasis, p.laborBasis = decimal.RequireFromString(pbase), decimal.RequireFromString(lbase)
+			pb = &p
 			return nil
 		}
-		next := o.count
-		if len(e.Lines) > 0 {
-			next++
-			for _, l := range e.Lines {
-				dr, cr := l.Amount, decimal.Zero
-				if l.Credit {
-					dr, cr = cr, dr
-				}
-				if _, err := tx.Exec(ctx, `insert into eam_gl_posting (tenant_id, id, legal_entity_id, work_order_id, seq, account, amount_dr, amount_cr, currency, posting_date, journal_entry_id)
-					values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11)`, t, ids.New(), in.LegalEntityID, o.id, next, l.Account, dr.String(), cr.String(), in.Currency, e.PostingDate, entryID); err != nil {
-					return err
-				}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		date := s.now()
+		if o.count == 0 && o.end != nil {
+			date = *o.end
+		}
+		p = pendingBooking{seq: o.count + 1, legalEntityID: in.LegalEntityID, ledgerID: in.LedgerID, currency: in.Currency, date: date.UTC().Format(time.DateOnly),
+			key: fmt.Sprintf("eam-work-order:%s:%d", o.id, o.count+1), lines: o.lines(resolveProfile(profiles, o.typ), in.Currency), partsBasis: o.parts, laborBasis: o.labor}
+		if len(p.lines) == 0 {
+			_, err = tx.Exec(ctx, `update work_order set gl_parts_basis = $3::numeric, gl_labor_basis = $4::numeric where tenant_id = $1 and id = $2`, t, id, o.parts.String(), o.labor.String())
+			return err
+		}
+		raw, err := json.Marshal(p.lines)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `insert into eam_pending_booking (tenant_id, work_order_id, seq, legal_entity_id, ledger_id, currency, posting_date, idempotency_key, lines, parts_basis, labor_basis)
+			values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10::numeric, $11::numeric)`, t, id, p.seq, p.legalEntityID, p.ledgerID, p.currency, p.date, p.key, raw, p.partsBasis.String(), p.laborBasis.String()); err != nil {
+			return err
+		}
+		pb = &p
+		return nil
+	})
+	return o, pb, err
+}
+
+// confirm records a booking the ledger accepted: its lines enter the GL subledger, the basis moves and the pending row goes, in one transaction.
+func (s *Postgres) confirm(ctx context.Context, o glOrder, p pendingBooking, entryID string) error {
+	return s.withTx(ctx, func(tx pgx.Tx, t string) error {
+		tag, err := tx.Exec(ctx, `delete from eam_pending_booking where tenant_id = $1 and work_order_id = $2 and seq = $3`, t, o.id, p.seq)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		for _, l := range p.lines {
+			dr, cr := l.Amount, "0"
+			if l.Credit {
+				dr, cr = cr, dr
+			}
+			if _, err := tx.Exec(ctx, `insert into eam_gl_posting (tenant_id, id, legal_entity_id, work_order_id, seq, account, amount_dr, amount_cr, currency, posting_date, journal_entry_id)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10::date, $11)`, t, ids.New(), p.legalEntityID, o.id, p.seq, l.Account, dr, cr, p.currency, p.date, entryID); err != nil {
+				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `update work_order set gl_parts_basis = $3::numeric, gl_labor_basis = $4::numeric, gl_post_count = $5 where tenant_id = $1 and id = $2`,
-			t, o.id, o.parts.String(), o.labor.String(), next)
+		_, err = tx.Exec(ctx, `update work_order set gl_parts_basis = $3::numeric, gl_labor_basis = $4::numeric, gl_post_count = $5 where tenant_id = $1 and id = $2`,
+			t, o.id, p.partsBasis.String(), p.laborBasis.String(), p.seq)
 		return err
 	})
 }
 
-// PostWorkOrderCosts books the parts and labor cost of completed and closed work orders (FR-44.11): per order one balanced entry for the cost
-// not yet booked, keyed by order and booking number so a retry returns the same entry. A cost that changes after booking is booked as a delta.
-// Only orders created under the legal entity are booked into its ledger. An order the ledger refuses is reported and the rest go on.
+// discard drops a pending booking the ledger rejected for good, so the next run derives it again from the current profile.
+func (s *Postgres) discard(ctx context.Context, id string, seq int) error {
+	return s.withTx(ctx, func(tx pgx.Tx, t string) error {
+		_, err := tx.Exec(ctx, `delete from eam_pending_booking where tenant_id = $1 and work_order_id = $2 and seq = $3`, t, id, seq)
+		return err
+	})
+}
+
+// PostWorkOrderCosts books the parts and labor cost of completed and closed work orders of the legal entity (FR-44.11): per order one balanced entry
+// for the cost not yet booked, stored as a pending booking before the ledger is called and resent unchanged until the ledger confirms it, so a retry
+// returns the same entry even after the profile or the cost changed. A cost that changes after booking is booked as a delta. An order the ledger
+// refuses is reported and the rest go on; a refusal other than a closed period drops the pending booking so the next run rebuilds it.
 func (s *Postgres) PostWorkOrderCosts(ctx context.Context, ledger ledgerclient.Ledger, in GLPostRequest) (GLPostResult, error) {
 	var orders []glOrder
 	var profiles []PostingProfile
@@ -271,29 +351,39 @@ func (s *Postgres) PostWorkOrderCosts(ctx context.Context, ledger ledgerclient.L
 	if len(orders) > MaxGLOrdersPerRun {
 		res.More, orders = true, orders[:MaxGLOrdersPerRun]
 	}
-	for _, o := range orders {
-		profile := resolveProfile(profiles, o.typ)
-		entry := o.entry(in, profile, s.now())
-		entryID := ""
-		if len(entry.Lines) > 0 {
-			if entryID, err = ledger.Post(ctx, entry); err != nil {
-				code := ledgerclient.CodeOf(err)
-				if code == "" {
-					code = CodeGLFailed
-				}
-				slog.ErrorContext(ctx, "eam GL booking failed", "workOrder", o.number, "key", entry.IdempotencyKey, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
-				res.Failed = append(res.Failed, GLFailed{WorkOrder: o.number, Code: code})
-				continue
-			}
-		}
-		if err := s.markPosted(ctx, o, in, entry, entryID); err != nil {
-			slog.ErrorContext(ctx, "eam GL booking not recorded", "workOrder", o.number, "key", entry.IdempotencyKey, "entryId", entryID, "err", err, "correlationId", middleware.GetReqID(ctx))
-			res.Failed = append(res.Failed, GLFailed{WorkOrder: o.number, Code: CodeGLFailed})
+	fail := func(ctx context.Context, number, key, code string, err error) {
+		slog.ErrorContext(ctx, "eam GL booking failed", "workOrder", number, "key", key, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
+		res.Failed = append(res.Failed, GLFailed{WorkOrder: number, Code: code})
+	}
+	for _, c := range orders {
+		o, pb, err := s.decide(ctx, c.id, in, profiles)
+		if err != nil {
+			fail(ctx, c.number, "", CodeGLFailed, err)
 			continue
 		}
-		if entryID != "" {
-			res.Booked = append(res.Booked, GLBooked{WorkOrder: o.number, EntryID: entryID, Lines: len(entry.Lines), Placeholder: profile.Placeholder})
+		if pb == nil {
+			continue
 		}
+		entry := pb.entry(o.number)
+		entryID, err := ledger.Post(ctx, entry)
+		if err != nil {
+			code := ledgerclient.CodeOf(err)
+			if code == "" {
+				code = CodeGLFailed
+			}
+			if ledgerclient.Rejected(err) && code != ledgerclient.CodePeriodClosed {
+				if derr := s.discard(ctx, o.id, pb.seq); derr != nil {
+					slog.ErrorContext(ctx, "eam pending booking not dropped", "workOrder", o.number, "err", derr, "correlationId", middleware.GetReqID(ctx))
+				}
+			}
+			fail(ctx, o.number, entry.IdempotencyKey, code, err)
+			continue
+		}
+		if err := s.confirm(ctx, o, *pb, entryID); err != nil {
+			fail(ctx, o.number, entry.IdempotencyKey, CodeGLFailed, err)
+			continue
+		}
+		res.Booked = append(res.Booked, GLBooked{WorkOrder: o.number, EntryID: entryID, Lines: len(entry.Lines), Placeholder: resolveProfile(profiles, o.typ).Placeholder})
 	}
 	return res, nil
 }
@@ -312,10 +402,41 @@ type GLAccountRecon struct {
 	Difference decimal.Decimal `json:"difference"`
 }
 
+// OrderList is a count of work orders and the numbers of the first ones.
+type OrderList struct {
+	Count   int      `json:"count"`
+	Numbers []string `json:"numbers"`
+}
+
 type GLReconciliation struct {
-	Currency   string           `json:"currency"`
-	Accounts   []GLAccountRecon `json:"accounts"`
-	Reconciled bool             `json:"reconciled"`
+	Currency string           `json:"currency"`
+	Accounts []GLAccountRecon `json:"accounts"`
+	// Unbooked are completed or closed orders of the legal entity whose cost is not (fully) in the ledger; NoEntity are completed or closed orders of the
+	// tenant with no legal entity, which no ledger will ever receive. Reconciled needs both empty.
+	Unbooked   OrderList `json:"unbookedWorkOrders"`
+	NoEntity   OrderList `json:"workOrdersWithoutEntity"`
+	Reconciled bool      `json:"reconciled"`
+}
+
+func orderList(ctx context.Context, tx pgx.Tx, where string, args ...any) (OrderList, error) {
+	out := OrderList{Numbers: []string{}}
+	base := `from work_order w where w.tenant_id = $1 and w.status in ('COMPLETED', 'CLOSED') and w.currency = $2 and ` + where
+	if err := tx.QueryRow(ctx, `select count(*) `+base, args...).Scan(&out.Count); err != nil {
+		return out, err
+	}
+	rows, err := tx.Query(ctx, `select w.number `+base+` order by w.number limit 100`, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return out, err
+		}
+		out.Numbers = append(out.Numbers, n)
+	}
+	return out, rows.Err()
 }
 
 // ReconcileGL compares, per account the service booked on, the net of its GL subledger with the ledger's balance of the account
@@ -339,11 +460,20 @@ func (s *Postgres) ReconcileGL(ctx context.Context, ledger ledgerclient.Ledger, 
 			a.Subledger = decimal.RequireFromString(net)
 			out.Accounts = append(out.Accounts, a)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		if out.Unbooked, err = orderList(ctx, tx, `w.legal_entity_id = $3::uuid and (w.parts_cost <> w.gl_parts_basis or w.labor_cost <> w.gl_labor_basis)`, t, in.Currency, in.LegalEntityID); err != nil {
+			return err
+		}
+		out.NoEntity, err = orderList(ctx, tx, `w.legal_entity_id is null and (w.parts_cost <> 0 or w.labor_cost <> 0)`, t, in.Currency)
+		return err
 	})
 	if err != nil {
 		return GLReconciliation{}, err
 	}
+	out.Reconciled = out.Unbooked.Count == 0 && out.NoEntity.Count == 0
 	for i := range out.Accounts {
 		a := &out.Accounts[i]
 		bal, err := ledger.Balance(ctx, ledgerclient.BalanceQuery{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, Account: a.Account, PeriodTo: in.PeriodTo})

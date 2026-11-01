@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 	eamevents "github.com/BenjaminSRussell/passage/services/eam/internal/events"
 )
@@ -84,10 +84,11 @@ func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key
 	}
 	id := ids.New()
 	var legalEntity *string
-	if p, ok := tenant.FromContext(ctx); ok {
-		if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
-			legalEntity = &scopes[0]
-		}
+	if err := tx.QueryRow(ctx, `select legal_entity_id::text from asset where tenant_id = $1 and id = $2`, t, in.AssetID).Scan(&legalEntity); err != nil {
+		return "", notFound(err, "asset")
+	}
+	if legalEntity == nil {
+		return "", problem(http.StatusUnprocessableEntity, CodeNoEntity, "the asset has no legal entity, so its work order cost could not be booked in a ledger; create the asset under one legal entity scope")
 	}
 	_, err := tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
 	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key, legal_entity_id)

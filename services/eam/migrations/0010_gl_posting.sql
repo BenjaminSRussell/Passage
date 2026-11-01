@@ -19,12 +19,36 @@ CREATE TABLE IF NOT EXISTS eam_posting_profile (
 );
 
 -- The basis is the exact cost the booked entries stand for (rounded to the currency's minor unit when booked).
--- legal_entity_id is the single entity scope of the creating caller; NULL (older or unscoped) orders are never booked.
+-- An asset carries the single legal entity scope of the caller that created it; a work order takes its entity from its asset when it is created
+-- (creation is refused when the asset has none), so the cost is booked into that entity's ledger. NULL entities are reported by the GL reconciliation.
+ALTER TABLE asset ADD COLUMN IF NOT EXISTS legal_entity_id uuid;
 ALTER TABLE work_order
   ADD COLUMN IF NOT EXISTS legal_entity_id uuid,
   ADD COLUMN IF NOT EXISTS gl_parts_basis numeric(20,6) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS gl_labor_basis numeric(20,6) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS gl_post_count integer NOT NULL DEFAULT 0;
+
+UPDATE work_order w SET legal_entity_id = a.legal_entity_id
+  FROM asset a WHERE a.tenant_id = w.tenant_id AND a.id = w.asset_id AND w.legal_entity_id IS NULL AND a.legal_entity_id IS NOT NULL;
+
+-- A booking is written here, in the transaction that decides it, before the ledger is called; retries resend exactly this payload and the row is
+-- deleted when the ledger has confirmed it and eam_gl_posting holds its lines.
+CREATE TABLE IF NOT EXISTS eam_pending_booking (
+  tenant_id uuid NOT NULL,
+  work_order_id uuid NOT NULL,
+  seq integer NOT NULL CHECK (seq >= 1),
+  legal_entity_id uuid NOT NULL,
+  ledger_id uuid NOT NULL,
+  currency char(3) NOT NULL,
+  posting_date date NOT NULL,
+  idempotency_key text NOT NULL,
+  lines jsonb NOT NULL,
+  parts_basis numeric(20,6) NOT NULL,
+  labor_basis numeric(20,6) NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, work_order_id),
+  FOREIGN KEY (tenant_id, work_order_id) REFERENCES work_order (tenant_id, id)
+);
 
 CREATE TABLE IF NOT EXISTS eam_gl_posting (
   tenant_id uuid NOT NULL,
@@ -49,7 +73,7 @@ CREATE INDEX IF NOT EXISTS eam_gl_posting_account ON eam_gl_posting (tenant_id, 
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['eam_posting_profile', 'eam_gl_posting'] LOOP
+  FOREACH t IN ARRAY ARRAY['eam_posting_profile', 'eam_gl_posting', 'eam_pending_booking'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS %I_tenant_access ON %I', t, t);
@@ -65,6 +89,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON eam_posting_profile TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON eam_gl_posting TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON eam_pending_booking TO passage_app';
   END IF;
 END
 $$;
