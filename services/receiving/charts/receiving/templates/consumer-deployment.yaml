@@ -1,0 +1,85 @@
+{{- if .Values.consumer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-consumer
+  labels:
+    app.kubernetes.io/name: receiving
+    app.kubernetes.io/component: consumer
+spec:
+  replicas: {{ .Values.consumer.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: receiving
+      app.kubernetes.io/component: consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: receiving
+        app.kubernetes.io/component: consumer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: kafka
+          secret:
+            secretName: {{ required "consumer.kafka.secret is required" .Values.consumer.kafka.secret }}
+            defaultMode: 0440
+{{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
+      containers:
+        - name: receiving-consumer
+          image: {{ include "receiving.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [consume]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ required "consumer.kafka.brokers is required" .Values.consumer.kafka.brokers | quote }}
+            - name: KAFKA_GROUP
+              value: {{ .Values.consumer.kafka.group | quote }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.consumer.kafka.username | quote }}
+            - name: KAFKA_PASSWORD_FILE
+              value: /var/run/passage/kafka/password
+            - name: KAFKA_TLS_CA_FILE
+              value: /var/run/passage/kafka/ca.crt
+            {{- include "receiving.env" . | nindent 12 }}
+          volumeMounts:
+            - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
+          ports:
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: admin }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

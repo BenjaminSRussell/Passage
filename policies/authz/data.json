@@ -2337,5 +2337,8 @@
     "hr": {
       "numbering": ["numbering.sequence.allocate"]
     }
+  },
+  "service_principals": {
+    "receiving-ers": ["VendorInvoicePost"]
   }
 }

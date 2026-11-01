@@ -29,7 +29,7 @@ func TestRun(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := run(context.Background(), func(k string) string { return tc.env[k] })
+			err := run(context.Background(), func(k string) string { return tc.env[k] }, []string{"receiving"})
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("got %v, want error containing %q", err, tc.wantErr)
 			}

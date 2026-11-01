@@ -3,17 +3,17 @@ package eventing
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 
+	platform "github.com/BenjaminSRussell/passage/platform/eventing"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
-var ErrInvalidArgument = errors.New("invalid argument")
+var ErrInvalidArgument = platform.ErrInvalidArgument
 
 type Row struct {
 	ID          string

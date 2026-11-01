@@ -413,6 +413,9 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		return ServiceClaims{}, ErrServiceToken
 	}
 	now := v.now()
+	if IsServiceActor(c.Act) && !isKnownServiceActor(c.Act) {
+		return ServiceClaims{}, ErrServiceToken
+	}
 	if c.Aud != v.self || c.Jti == "" || c.Act == "" ||
 		c.Exp <= now.Unix() || c.Exp-c.Iat > int64(ServiceTokenMaxTTL/time.Second) || c.Iat > now.Add(serviceClockSkew).Unix() {
 		return ServiceClaims{}, ErrServiceToken
