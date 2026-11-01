@@ -166,11 +166,12 @@ type glAccountOut struct {
 }
 
 type glReconciliationOut struct {
-	Currency   string          `json:"currency"`
-	Reconciled bool            `json:"reconciled"`
-	Unbooked   store.OrderList `json:"unbookedWorkOrders"`
-	NoEntity   store.OrderList `json:"workOrdersWithoutEntity"`
-	Accounts   []glAccountOut  `json:"accounts"`
+	Currency       string          `json:"currency"`
+	Reconciled     bool            `json:"reconciled"`
+	Unbooked       store.OrderList `json:"unbookedWorkOrders"`
+	NoEntity       store.OrderList `json:"workOrdersWithoutEntity"`
+	AssetsNoEntity store.OrderList `json:"assetsWithoutEntity"`
+	Accounts       []glAccountOut  `json:"accounts"`
 }
 
 func (h *Handler) glReconciliation(w http.ResponseWriter, r *http.Request) {
@@ -203,10 +204,38 @@ func (h *Handler) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Unbooked: rec.Unbooked, NoEntity: rec.NoEntity, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
+	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Unbooked: rec.Unbooked, NoEntity: rec.NoEntity, AssetsNoEntity: rec.AssetsNoEntity, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
 	for _, a := range rec.Accounts {
 		mu := money.MinorUnits(rec.Currency)
 		out.Accounts = append(out.Accounts, glAccountOut{Account: a.Account, Subledger: a.Subledger.StringFixed(mu), GL: a.GL.StringFixed(mu), Difference: a.Difference.StringFixed(mu)})
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+type legalEntityIn struct {
+	LegalEntityID string `json:"legalEntityId"`
+}
+
+// setAssetLegalEntity gives an asset without a legal entity the one named in the body (set once, within the caller's scope).
+func (h *Handler) setAssetLegalEntity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	var in legalEntityIn
+	if err := decode(r, &in); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if !ids.Valid(in.LegalEntityID) {
+		fail(w, r, invalid("legalEntityId must be a UUID"))
+		return
+	}
+	a, err := h.store.SetAssetLegalEntity(r.Context(), id, in.LegalEntityID)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, a)
 }

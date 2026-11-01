@@ -87,6 +87,7 @@ func (h *Handler) router() chi.Router {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/work-orders/{id}", h.getWorkOrder)
 		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets", h.createAsset)
 		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets/{id}/activate", h.activateAsset)
+		r.With(authz.RequireDuty(DutyAssetMaintain)).Put("/assets/{id}/legal-entity", h.setAssetLegalEntity)
 		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets/{id}/counters", h.createCounter)
 		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/counters/{id}/rules", h.createRule)
 		r.With(authz.RequireDuty(DutyCounterRegister)).Post("/counters/{id}/readings", h.recordReading)

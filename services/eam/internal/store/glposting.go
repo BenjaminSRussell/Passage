@@ -22,6 +22,7 @@ const (
 	MaxGLOrdersPerRun = 200
 	CodeGLFailed      = "EAM-GL-001"
 	CodeNoEntity      = "EAM-GL-004"
+	CodeEntityLocked  = "EAM-GL-005"
 	allTypes          = "ALL"
 	glSourceType      = "work-order"
 )
@@ -413,9 +414,11 @@ type GLReconciliation struct {
 	Accounts []GLAccountRecon `json:"accounts"`
 	// Unbooked are completed or closed orders of the legal entity whose cost is not (fully) in the ledger; NoEntity are completed or closed orders of the
 	// tenant with no legal entity, which no ledger will ever receive. Reconciled needs both empty.
-	Unbooked   OrderList `json:"unbookedWorkOrders"`
-	NoEntity   OrderList `json:"workOrdersWithoutEntity"`
-	Reconciled bool      `json:"reconciled"`
+	Unbooked OrderList `json:"unbookedWorkOrders"`
+	NoEntity OrderList `json:"workOrdersWithoutEntity"`
+	// AssetsNoEntity are the tenant's assets with no legal entity (their orders are refused or skipped); set with PUT /v1/eam/assets/{id}/legal-entity.
+	AssetsNoEntity OrderList `json:"assetsWithoutEntity"`
+	Reconciled     bool      `json:"reconciled"`
 }
 
 func orderList(ctx context.Context, tx pgx.Tx, where string, args ...any) (OrderList, error) {
@@ -467,8 +470,26 @@ func (s *Postgres) ReconcileGL(ctx context.Context, ledger ledgerclient.Ledger, 
 		if out.Unbooked, err = orderList(ctx, tx, `w.legal_entity_id = $3::uuid and (w.parts_cost <> w.gl_parts_basis or w.labor_cost <> w.gl_labor_basis)`, t, in.Currency, in.LegalEntityID); err != nil {
 			return err
 		}
-		out.NoEntity, err = orderList(ctx, tx, `w.legal_entity_id is null and (w.parts_cost <> 0 or w.labor_cost <> 0)`, t, in.Currency)
-		return err
+		if out.NoEntity, err = orderList(ctx, tx, `w.legal_entity_id is null and (w.parts_cost <> 0 or w.labor_cost <> 0)`, t, in.Currency); err != nil {
+			return err
+		}
+		out.AssetsNoEntity = OrderList{Numbers: []string{}}
+		if err := tx.QueryRow(ctx, `select count(*) from asset where tenant_id = $1 and legal_entity_id is null`, t).Scan(&out.AssetsNoEntity.Count); err != nil {
+			return err
+		}
+		arows, err := tx.Query(ctx, `select asset_number from asset where tenant_id = $1 and legal_entity_id is null order by asset_number limit 100`, t)
+		if err != nil {
+			return err
+		}
+		defer arows.Close()
+		for arows.Next() {
+			var n string
+			if err := arows.Scan(&n); err != nil {
+				return err
+			}
+			out.AssetsNoEntity.Numbers = append(out.AssetsNoEntity.Numbers, n)
+		}
+		return arows.Err()
 	})
 	if err != nil {
 		return GLReconciliation{}, err

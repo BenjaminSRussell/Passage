@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS eam_posting_profile (
 -- An asset carries the single legal entity scope of the caller that created it; a work order takes its entity from its asset when it is created
 -- (creation is refused when the asset has none), so the cost is booked into that entity's ledger. NULL entities are reported by the GL reconciliation.
 ALTER TABLE asset ADD COLUMN IF NOT EXISTS legal_entity_id uuid;
+-- Existing assets: the eam schema holds no legal entity anywhere (sites, cost centers and the creating scope are not stored), so the only link is a
+-- site whose other assets already name exactly one legal entity. The rest are listed by the GL reconciliation and set with PUT /v1/eam/assets/{id}/legal-entity.
+UPDATE asset a SET legal_entity_id = s.legal_entity_id
+  FROM (SELECT tenant_id, site_id, min(legal_entity_id::text)::uuid AS legal_entity_id FROM asset WHERE legal_entity_id IS NOT NULL
+        GROUP BY tenant_id, site_id HAVING count(DISTINCT legal_entity_id) = 1) s
+  WHERE a.tenant_id = s.tenant_id AND a.site_id = s.site_id AND a.legal_entity_id IS NULL;
 ALTER TABLE work_order
   ADD COLUMN IF NOT EXISTS legal_entity_id uuid,
   ADD COLUMN IF NOT EXISTS gl_parts_basis numeric(20,6) NOT NULL DEFAULT 0,
@@ -69,6 +75,11 @@ CREATE TABLE IF NOT EXISTS eam_gl_posting (
 );
 CREATE INDEX IF NOT EXISTS eam_gl_posting_order ON eam_gl_posting (tenant_id, work_order_id, seq);
 CREATE INDEX IF NOT EXISTS eam_gl_posting_account ON eam_gl_posting (tenant_id, legal_entity_id, currency, account);
+
+DROP POLICY IF EXISTS eam_pending_booking_legal_entity_scope ON eam_pending_booking;
+CREATE POLICY eam_pending_booking_legal_entity_scope ON eam_pending_booking AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 DO $$
 DECLARE t text;

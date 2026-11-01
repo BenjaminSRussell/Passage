@@ -891,6 +891,30 @@ paths:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/BacklogRow" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/legal-entity:
+    put:
+      operationId: setAssetLegalEntity
+      x-passage-duty: EamAssetMaintain
+      description: |
+        Gives an asset without a legal entity the one named in the body, which must be in the caller's scope. Set once: the same entity again is a no-op and
+        another entity is EAM-GL-005 (409). The asset's work orders without an entity take it too, so their cost can be booked. New assets take the creating
+        caller's single entity scope, or the legalEntityId of the create request (required for a caller with several entities or the all-entity scope).
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+      responses:
+        "200": { description: the asset, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/eam/posting-profiles:
     get:
       operationId: listPostingProfiles
@@ -1010,6 +1034,7 @@ paths:
                   reconciled: { type: boolean }
                   unbookedWorkOrders: { $ref: "#/components/schemas/OrderList" }
                   workOrdersWithoutEntity: { $ref: "#/components/schemas/OrderList" }
+                  assetsWithoutEntity: { $ref: "#/components/schemas/OrderList" }
                   accounts:
                     type: array
                     items:
@@ -1322,10 +1347,12 @@ components:
         siteId: { type: string, format: uuid }
         criticality: { type: integer, minimum: 1, maximum: 5 }
         productionResourceId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's single legal entity scope; required for a caller with several entities or the all-entity scope. }
     Asset:
       type: object
       properties:
         id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid, description: Set at creation (or later, once) and required to create work orders. }
         assetNumber: { type: string }
         name: { type: string }
         assetType: { type: string }
@@ -1490,6 +1517,7 @@ components:
         evaluated: { type: integer }
         generated: { type: integer }
         skipped: { type: integer }
+        skippedNoEntity: { type: integer, description: Lines skipped (counted in skipped too) because their asset has no legal entity. }
     RequestIn:
       type: object
       required: [assetId, source, severity, description]

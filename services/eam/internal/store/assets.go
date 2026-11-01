@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,17 +24,18 @@ type Asset struct {
 	LifecycleState       string    `json:"lifecycleState"`
 	ProductionResourceID *string   `json:"productionResourceId,omitempty"`
 	FunctionalLocationID *string   `json:"functionalLocationId,omitempty"`
+	LegalEntityID        *string   `json:"legalEntityId,omitempty"`
 	Version              int       `json:"version"`
 	CreatedAt            time.Time `json:"createdAt"`
 }
 
 const assetColumns = `id::text, asset_number, name, asset_type, site_id::text, criticality, lifecycle_state,
-  production_resource_id::text, functional_location_id::text, version, created_at`
+  production_resource_id::text, functional_location_id::text, legal_entity_id::text, version, created_at`
 
 func scanAsset(row pgx.Row) (Asset, error) {
 	var a Asset
 	err := row.Scan(&a.ID, &a.AssetNumber, &a.Name, &a.AssetType, &a.SiteID, &a.Criticality,
-		&a.LifecycleState, &a.ProductionResourceID, &a.FunctionalLocationID, &a.Version, &a.CreatedAt)
+		&a.LifecycleState, &a.ProductionResourceID, &a.FunctionalLocationID, &a.LegalEntityID, &a.Version, &a.CreatedAt)
 	return a, err
 }
 
@@ -57,12 +60,16 @@ func (s *Postgres) CreateAsset(ctx context.Context, in Asset, key string) (Asset
 			out, gerr = getAsset(ctx, tx, t, id, false)
 			return gerr
 		}
+		entity, err := entityForNewAsset(ctx, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
 		id := ids.New()
 		a, err := scanAsset(tx.QueryRow(ctx, `insert into asset (tenant_id, id, asset_number, name, asset_type, site_id,
 		    criticality, production_resource_id, idempotency_key, legal_entity_id)
 		  values ($1, $2, 'AST-' || nextval('asset_number_seq'), $3, $4, $5, $6, $7, $8, $9)
 		  returning `+assetColumns,
-			t, id, in.Name, in.AssetType, in.SiteID, in.Criticality, in.ProductionResourceID, optStr(key), callerEntity(ctx)))
+			t, id, in.Name, in.AssetType, in.SiteID, in.Criticality, in.ProductionResourceID, optStr(key), entity))
 		out = a
 		return err
 	})
@@ -329,12 +336,51 @@ func (s *Postgres) Workspace(ctx context.Context) (Workspace, error) {
 	return out, err
 }
 
-// callerEntity is the caller's single legal entity scope, or nil when it has none or several.
-func callerEntity(ctx context.Context) *string {
-	if p, ok := tenant.FromContext(ctx); ok {
-		if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
-			return &scopes[0]
+// entityForNewAsset is the legal entity a new asset belongs to: the one named in the request, which must be in the caller's scope, or the caller's
+// single entity scope. A caller with several entities or the all-entity scope has to name it.
+func entityForNewAsset(ctx context.Context, requested *string) (*string, error) {
+	p, _ := tenant.FromContext(ctx)
+	if requested != nil && *requested != "" {
+		if !tenant.InLegalEntityScope(p, *requested) {
+			return nil, problem(http.StatusBadRequest, CodeValidation, "legalEntityId must be a legal entity of the caller")
 		}
+		return requested, nil
 	}
-	return nil
+	if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
+		return &scopes[0], nil
+	}
+	return nil, problem(http.StatusBadRequest, CodeValidation, "legalEntityId is required: the caller is not scoped to exactly one legal entity")
+}
+
+// SetAssetLegalEntity gives an asset without one its legal entity (set once: a different entity later is EAM-GL-005) and the entity-less work orders of the
+// asset with it, so their cost can be booked. The entity must be in the caller's scope.
+func (s *Postgres) SetAssetLegalEntity(ctx context.Context, id, legalEntityID string) (Asset, error) {
+	p, _ := tenant.FromContext(ctx)
+	if !tenant.InLegalEntityScope(p, legalEntityID) {
+		return Asset{}, problem(http.StatusBadRequest, CodeValidation, "legalEntityId must be a legal entity of the caller")
+	}
+	var out Asset
+	err := s.withTx(ctx, func(tx pgx.Tx, t string) error {
+		cur, err := getAsset(ctx, tx, t, id, true)
+		if err != nil {
+			return err
+		}
+		if cur.LegalEntityID != nil {
+			if *cur.LegalEntityID != legalEntityID {
+				return problem(http.StatusConflict, CodeEntityLocked, "the asset already belongs to another legal entity; it is set once")
+			}
+			out = cur
+			return nil
+		}
+		if out, err = scanAsset(tx.QueryRow(ctx, `update asset set legal_entity_id = $3, updated_at = now() where tenant_id = $1 and id = $2 returning `+assetColumns, t, id, legalEntityID)); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `update work_order set legal_entity_id = $3 where tenant_id = $1 and asset_id = $2 and legal_entity_id is null`, t, id, legalEntityID)
+		if err != nil {
+			return err
+		}
+		slog.InfoContext(ctx, "asset legal entity set", "asset", id, "legalEntityId", legalEntityID, "actor", p.UserID, "workOrders", tag.RowsAffected())
+		return nil
+	})
+	return out, err
 }

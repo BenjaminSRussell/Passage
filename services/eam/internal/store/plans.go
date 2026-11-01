@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,6 +56,8 @@ type ScheduleResult struct {
 	Evaluated int `json:"evaluated"`
 	Generated int `json:"generated"`
 	Skipped   int `json:"skipped"`
+	// NoEntity counts lines skipped (also in Skipped) because their asset has no legal entity yet.
+	NoEntity int `json:"skippedNoEntity"`
 }
 
 // validateLine checks a line against the plan line rules before it is stored.
@@ -356,6 +359,14 @@ func scheduleLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any, 
 		if !domain.Generate(sched, l.early, l.horizon, now) {
 			continue
 		}
+		if has, err := assetHasEntity(ctx, tx, t, l.assetID); err != nil {
+			return res, err
+		} else if !has {
+			slog.WarnContext(ctx, "plan line skipped: its asset has no legal entity", "planLine", l.id, "asset", l.assetID, "code", CodeNoEntity)
+			res.Skipped++
+			res.NoEntity++
+			continue
+		}
 		if l.roundID != nil {
 			generated, err := scheduleRound(ctx, tx, t, l, sched, now)
 			if err != nil {
@@ -451,4 +462,10 @@ func loadLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any) ([]l
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+func assetHasEntity(ctx context.Context, tx pgx.Tx, t, assetID string) (bool, error) {
+	var has bool
+	err := tx.QueryRow(ctx, `select legal_entity_id is not null from asset where tenant_id = $1 and id = $2`, t, assetID).Scan(&has)
+	return has, notFound(err, "asset")
 }

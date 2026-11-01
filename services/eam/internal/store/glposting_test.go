@@ -308,20 +308,89 @@ func TestGLPosting_OrdersTakeTheLegalEntityOfTheirAssetAndOnlyThatEntityBooksThe
 	}
 }
 
-func TestGLPosting_AnAssetWithoutALegalEntityCannotTakeWorkOrders(t *testing.T) {
-	f := newGLFixture(t, 7110)
-	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{"EamPlanner": {}}})
-	a, err := f.s.CreateAsset(unscoped, Asset{Name: "Press", AssetType: "PRESS", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-asset-none")
+func (f *glFixture) legacyAsset(name string) Asset {
+	f.t.Helper()
+	a, err := f.s.CreateAsset(f.ctx, Asset{Name: name, AssetType: "PRESS", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-legacy-"+name)
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
-	if _, err := f.s.ActivateAsset(unscoped, a.ID, a.Version); err != nil {
-		t.Fatal(err)
+	if a, err = f.s.ActivateAsset(f.ctx, a.ID, a.Version); err != nil {
+		f.t.Fatal(err)
 	}
-	_, err = f.s.CreateWorkOrder(unscoped, WorkOrder{AssetID: a.ID, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-no-le")
+	if err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(f.ctx, `update asset set legal_entity_id = null where id = $1`, a.ID)
+		return err
+	}); err != nil {
+		f.t.Fatal(err)
+	}
+	return a
+}
+
+func TestGLPosting_NewAssetsNeedAnEntityAndLegacyOnesCannotTakeWorkOrders(t *testing.T) {
+	f := newGLFixture(t, 7110)
+	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{"EamAssetMaintain": {}}})
+	in := Asset{Name: "Press", AssetType: "PRESS", SiteID: testkit.TenantID(9), Criticality: 3}
 	var prob *httpx.Problem
+	if _, err := f.s.CreateAsset(unscoped, in, "gl-asset-none"); !errors.As(err, &prob) || prob.Status != http.StatusBadRequest {
+		t.Fatalf("a caller without exactly one entity must name it: %v", err)
+	}
+	other := "00000000-0000-0000-0000-0000000000e2"
+	in.LegalEntityID = &other
+	if _, err := f.s.CreateAsset(unscoped, in, "gl-asset-named"); !errors.As(err, &prob) {
+		t.Fatalf("a caller outside the entity cannot name it: %v", err)
+	}
+	named := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
+	if a, err := f.s.CreateAsset(named, in, "gl-asset-named2"); err != nil || a.LegalEntityID == nil || *a.LegalEntityID != other {
+		t.Fatalf("an all-entity caller names the entity: %+v %v", a, err)
+	}
+	legacy := f.legacyAsset("old")
+	_, err := f.s.CreateWorkOrder(f.ctx, WorkOrder{AssetID: legacy.ID, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-no-le")
 	if !errors.As(err, &prob) || prob.Code != CodeNoEntity || prob.Status != http.StatusUnprocessableEntity {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestGLPosting_SettingTheEntityOfALegacyAssetUnblocksItOnce(t *testing.T) {
+	f := newGLFixture(t, 7114)
+	legacy := f.legacyAsset("old2")
+	var prob *httpx.Problem
+	outside := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7114), LegalEntityID: "00000000-0000-0000-0000-0000000000e2", UserID: "u4"})
+	if _, err := f.s.SetAssetLegalEntity(outside, legacy.ID, glLegalEntity); !errors.As(err, &prob) || prob.Status != http.StatusBadRequest {
+		t.Fatalf("an entity outside the caller's scope: %v", err)
+	}
+	a, err := f.s.SetAssetLegalEntity(f.ctx, legacy.ID, glLegalEntity)
+	if err != nil || a.LegalEntityID == nil || *a.LegalEntityID != glLegalEntity {
+		t.Fatalf("set: %+v %v", a, err)
+	}
+	if _, err := f.s.SetAssetLegalEntity(f.ctx, legacy.ID, glLegalEntity); err != nil {
+		t.Fatalf("the same entity again is a no-op: %v", err)
+	}
+	e2 := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7114), LegalEntityID: "00000000-0000-0000-0000-0000000000e2", UserID: "u4"})
+	if _, err := f.s.SetAssetLegalEntity(e2, legacy.ID, "00000000-0000-0000-0000-0000000000e2"); !errors.As(err, &prob) || prob.Code != CodeEntityLocked {
+		t.Fatalf("set once: %v", err)
+	}
+	if _, err := f.s.CreateWorkOrder(f.ctx, WorkOrder{AssetID: legacy.ID, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-after-set"); err != nil {
+		t.Fatalf("work order after the entity is set: %v", err)
+	}
+}
+
+func TestGLPosting_TheSchedulerSkipsAnEntitylessAssetAndKeepsGoing(t *testing.T) {
+	f := newGLFixture(t, 7115)
+	legacy := f.legacyAsset("old3")
+	line := func(asset string) PlanLineInput {
+		v, unit := 1, "DAYS"
+		return PlanLineInput{AssetID: asset, Kind: "TIME", IntervalValue: &v, IntervalUnit: &unit, JobType: "LUBE"}
+	}
+	if _, err := f.s.CreatePlan(f.ctx, PlanInput{Code: "GLSKIP", Name: "Skip", Currency: "USD", Lines: []PlanLineInput{line(legacy.ID), line(f.asset)}}, "gl-plan"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.s.SchedulePlans(f.ctx)
+	if err != nil || res.NoEntity != 1 || res.Generated != 1 || res.Skipped < 1 {
+		t.Fatalf("sweep: %+v %v", res, err)
+	}
+	rec, err := f.s.ReconcileGL(f.ctx, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
+	if err != nil || rec.AssetsNoEntity.Count != 1 {
+		t.Fatalf("the reconciliation names assets without an entity: %+v %v", rec.AssetsNoEntity, err)
 	}
 }
 
