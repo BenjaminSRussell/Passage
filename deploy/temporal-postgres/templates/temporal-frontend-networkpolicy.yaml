@@ -15,8 +15,8 @@ spec:
               app.kubernetes.io/name: temporal
     - from:
         - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: passage
+            matchExpressions:
+              - { key: kubernetes.io/metadata.name, operator: In, values: [passage, hello-ledger] }
           podSelector:
             matchLabels:
               passage.dev/temporal-client: "true"

@@ -70,7 +70,7 @@ describe("CAPA workflow", () => {
 
   const steps = (handle: Handle, from: number, to: number, actor = "engineer") => {
     const sends = [];
-    for (let step = from; step <= to; step += 1) sends.push(() => handle.signal(capaStepDoneSignal, { step, notes: `D${step} done`, actor }));
+    for (let step = from; step <= to; step += 1) sends.push(() => handle.signal(capaStepDoneSignal, { step, notes: `D${step} done`, actor, scope: [input.legalEntityId] }));
     return sends.reduce((chain, send) => chain.then(send), Promise.resolve());
   };
   const until = async (handle: Handle, ready: (state: CapaState) => boolean) => {
@@ -87,7 +87,7 @@ describe("CAPA workflow", () => {
     await until(handle, (state) => state.status === "awaiting_effectiveness");
   };
   const check = (handle: Handle, actor: string, result: EffectivenessResult = "EFFECTIVE") =>
-    handle.signal(capaEffectivenessSignal, { result, note: `${result} per audit`, actor });
+    handle.signal(capaEffectivenessSignal, { result, note: `${result} per audit`, actor, scope: [input.legalEntityId] });
   const closeOut = async (fake: FakeQuality, handle: Handle, actor = "reviewer") => {
     await steps(handle, 1, 7);
     await whenDue(fake, handle);
@@ -97,7 +97,7 @@ describe("CAPA workflow", () => {
   it("walks D1 to D7, waits out the effectiveness period and closes on an independent EFFECTIVE check", async () => {
     const fake = new FakeQuality();
     const result = await run(fake, (handle) => closeOut(fake, handle));
-    expect(result).toEqual({ ncrId: NCR_ID, tenantId: input.tenantId, status: "closed", currentStep: 8, reopened: 0, implementer: "engineer", refusedChecks: 0 });
+    expect(result).toEqual({ ncrId: NCR_ID, tenantId: input.tenantId, legalEntityId: input.legalEntityId, status: "closed", currentStep: 8, reopened: 0, implementer: "engineer", refusedChecks: 0 });
     expect(fake.ncr).toMatchObject({ status: "CLOSED", correction: { status: "CLOSED", effectivenessResult: "EFFECTIVE" } });
     expect(fake.effects).toEqual({ corrections: 1, stepWrites: 7, effectivenessChecks: 1 });
     expect(fake.tokens.map((claims) => claims.act)).toEqual([
@@ -190,7 +190,7 @@ describe("CAPA workflow", () => {
   it("applies steps in order even when the signals arrive out of order", async () => {
     const fake = new FakeQuality();
     const result = await run(fake, async (handle) => {
-      for (const step of [3, 1, 2, 4, 6, 5, 7]) await handle.signal(capaStepDoneSignal, { step, notes: `D${step}`, actor: "engineer" });
+      for (const step of [3, 1, 2, 4, 6, 5, 7]) await handle.signal(capaStepDoneSignal, { step, notes: `D${step}`, actor: "engineer", scope: [input.legalEntityId] });
       await whenDue(fake, handle);
       await check(handle, "reviewer");
     });

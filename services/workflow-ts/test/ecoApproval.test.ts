@@ -22,9 +22,9 @@ const input: EcoApprovalInput = {
   approvalTimeoutMs: 7 * 24 * 60 * 60 * 1000,
 };
 
-const approve = (handle: { signal: (...args: any[]) => Promise<void> }, actor: string) => handle.signal(ecoDecisionSignal, { decision: "approved", actor });
+const approve = (handle: { signal: (...args: any[]) => Promise<void> }, actor: string) => handle.signal(ecoDecisionSignal, { decision: "approved", actor, scope: [input.legalEntityId] });
 const reject = (handle: { signal: (...args: any[]) => Promise<void> }, actor: string, reason?: string) =>
-  handle.signal(ecoDecisionSignal, { decision: "rejected", actor, ...(reason ? { reason } : {}) });
+  handle.signal(ecoDecisionSignal, { decision: "rejected", actor, scope: [input.legalEntityId], ...(reason ? { reason } : {}) });
 
 const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 5).toString("base64") });
 
@@ -110,6 +110,16 @@ describe("ECO approval workflow", () => {
     expect(fake.calls.approve).toBe(2);
   }, 60_000);
 
+  it("never mints a token for a legal entity outside the decider's scope, so nothing reaches engineering", async () => {
+    const fake = new FakeEngineering();
+    const result = await run(fake, async (handle) => {
+      await handle.signal(ecoDecisionSignal, { decision: "approved", actor: "alice", scope: ["00000000-0000-0000-0000-0000000000ff"] });
+      await approve(handle, "alice");
+    });
+    expect(result).toMatchObject({ status: "released", refusedDecisions: 1 });
+    expect(fake.calls.approve).toBe(1);
+  }, 60_000);
+
   it("times the ECO out when only refused decisions arrive", async () => {
     const fake = new FakeEngineering();
     fake.eco.createdBy = "rita";
@@ -142,7 +152,7 @@ describe("ECO approval workflow", () => {
       seen = await handle.query(ecoApprovalStateQuery);
       await approve(handle, "alice");
     });
-    expect(seen).toEqual({ ecoId: ECO_ID, tenantId: input.tenantId, requester: "rita", status: "awaiting_approval", refusedDecisions: 0 });
+    expect(seen).toEqual({ ecoId: ECO_ID, tenantId: input.tenantId, legalEntityId: input.legalEntityId, requester: "rita", status: "awaiting_approval", refusedDecisions: 0 });
   }, 60_000);
 
   it.each(["approve", "release"] as const)("a reply lost after %s committed re-runs the step without a second effect", async (action) => {

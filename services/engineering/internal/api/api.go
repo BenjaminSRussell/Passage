@@ -623,6 +623,10 @@ func (a *API) createEco(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	creator, _ := tenant.FromContext(r.Context())
+	if creator.UserID == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "creating an ECO needs the acting user"))
+		return
+	}
 	eco.CreatedBy = creator.UserID
 	created, err := a.store.CreateEco(r.Context(), eco, store.Idem{Key: r.Header.Get(idempotencyKey), Hash: hashOf(body)})
 	if err != nil {
@@ -767,7 +771,7 @@ func problemFrom(de *domain.Error) *httpx.Problem {
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
-	case domain.CodeEcoSelfApproval:
+	case domain.CodeEcoSelfApproval, domain.CodeEcoCreatorUnknown:
 		status = http.StatusForbidden
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

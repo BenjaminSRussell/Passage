@@ -19,6 +19,7 @@ export interface CapaRef {
   legalEntityId: string;
   ncrId: string;
   actor: string;
+  scope: string[];
 }
 
 export interface CapaNcr {
@@ -37,6 +38,7 @@ export interface CapaNcr {
 export interface CapaState {
   ncrId: string;
   tenantId: string;
+  legalEntityId: string;
   status: "in_correction" | "effectiveness_pending" | "awaiting_effectiveness" | "closed" | "stalled" | "escalated";
   currentStep: number;
   reopened: number;
@@ -49,12 +51,14 @@ interface StepDone {
   step: number;
   notes: string;
   actor: string;
+  scope: string[];
 }
 
 interface EffectivenessChecked {
   result: EffectivenessResult;
   note: string;
   actor: string;
+  scope: string[];
 }
 
 export const capaStepDoneSignal = defineSignal<[done: StepDone]>("capa-step-done");
@@ -84,7 +88,7 @@ export function validateCapaInput(input: CapaInput): void {
 export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
   validateCapaInput(input);
 
-  const state: CapaState = { ncrId: input.ncrId, tenantId: input.tenantId, status: "in_correction", currentStep: 1, reopened: 0, refusedChecks: 0 };
+  const state: CapaState = { ncrId: input.ncrId, tenantId: input.tenantId, legalEntityId: input.legalEntityId, status: "in_correction", currentStep: 1, reopened: 0, refusedChecks: 0 };
   const stepsDone: StepDone[] = [];
   const checks: EffectivenessChecked[] = [];
   setHandler(capaStateQuery, () => ({ ...state }));
@@ -93,7 +97,7 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
     if (state.status === "awaiting_effectiveness") checks.push(checked);
   });
 
-  const as = (actor: string): CapaRef => ({ tenantId: input.tenantId, legalEntityId: input.legalEntityId, ncrId: input.ncrId, actor });
+  const as = (actor: string, scope: string[]): CapaRef => ({ tenantId: input.tenantId, legalEntityId: input.legalEntityId, ncrId: input.ncrId, actor, scope });
   const stalled = (at: "step" | "effectiveness"): CapaState => {
     metricMeter.createCounter("passage_capa_stalled", "1", "CAPAs whose next step or effectiveness check never arrived").add(1, { ncr_id: input.ncrId, at });
     return Object.assign(state, { status: "stalled" as const, stalledAt: at });
@@ -104,7 +108,7 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
     state.implementer = ncr.correction?.steps.find((s) => s.step === LAST_STEP)?.completedBy;
   };
 
-  let ncr = await activities.startCorrection({ ...as(input.startedBy), effectivenessCheckDays: input.effectivenessCheckDays });
+  let ncr = await activities.startCorrection({ ...as(input.startedBy, [input.legalEntityId]), effectivenessCheckDays: input.effectivenessCheckDays });
   follow(ncr);
 
   for (;;) {
@@ -113,7 +117,7 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
       const arrived = await condition(() => stepsDone.some((done) => done.step === wanted), input.stepTimeoutMs);
       if (!arrived) return stalled("step");
       const done = stepsDone.splice(stepsDone.findIndex((candidate) => candidate.step === wanted), 1)[0]!;
-      ncr = await activities.completeStep({ ...as(done.actor), step: done.step, notes: done.notes });
+      ncr = await activities.completeStep({ ...as(done.actor, done.scope), step: done.step, notes: done.notes });
       follow(ncr);
     }
 
@@ -129,7 +133,7 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
       if (!(await condition(() => checks.length > 0, input.effectivenessTimeoutMs))) return stalled("effectiveness");
       const candidate = checks.shift()!;
       try {
-        ncr = await activities.checkEffectiveness({ ...as(candidate.actor), result: candidate.result, note: candidate.note });
+        ncr = await activities.checkEffectiveness({ ...as(candidate.actor, candidate.scope), result: candidate.result, note: candidate.note });
         checked = true;
       } catch (error) {
         if (!(error instanceof ActivityFailure)) throw error;

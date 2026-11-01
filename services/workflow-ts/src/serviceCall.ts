@@ -3,6 +3,14 @@ import { ApplicationFailure } from "@temporalio/activity";
 export const REJECTED = "ServiceCallRejected";
 const RETRYABLE_CLIENT_STATUSES = [408, 412, 429];
 
+export function mintOrReject(mint: () => string): string {
+  try {
+    return mint();
+  } catch (error) {
+    throw ApplicationFailure.nonRetryable(error instanceof Error ? error.message : String(error), REJECTED);
+  }
+}
+
 interface Problem {
   detail?: string;
   code?: string;

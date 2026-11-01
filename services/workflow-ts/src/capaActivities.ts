@@ -1,6 +1,6 @@
 import { Context } from "@temporalio/activity";
 import type { CapaNcr, CapaRef, EffectivenessResult } from "./capaWorkflow.js";
-import { callFailure } from "./serviceCall.js";
+import { callFailure, mintOrReject } from "./serviceCall.js";
 import type { ServiceTokenSigner } from "./serviceToken.js";
 
 export interface CapaActivities {
@@ -16,7 +16,7 @@ export function createCapaActivities(baseUrl: string, signer: ServiceTokenSigner
     const response = await fetchImpl(`${baseUrl}/v1/quality/nonconformances/${encodeURIComponent(ref.ncrId)}${path}`, {
       method: init.method,
       headers: {
-        "X-Passage-Service-Token": signer.mintForQuality({ tenantId: ref.tenantId, legalEntityId: ref.legalEntityId, actor: ref.actor }),
+        "X-Passage-Service-Token": mintOrReject(() => signer.mintForQuality({ tenantId: ref.tenantId, legalEntityId: ref.legalEntityId, actor: ref.actor, scope: ref.scope })),
         ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
         ...init.headers,
       },

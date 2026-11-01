@@ -17,3 +17,5 @@ qualityUrl: http://quality.passage.svc
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+networkPolicy:
+  gatewayNamespace: envoy-gateway-system

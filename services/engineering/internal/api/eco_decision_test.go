@@ -157,3 +157,30 @@ func TestDecideEco_ThenReleaseNeedsNoApprover(t *testing.T) {
 		t.Fatalf("release of an approved eco = %d %s %+v", code, body, f.released)
 	}
 }
+
+func TestDecideEco_RefusesWhenTheCreatorIsUnknown(t *testing.T) {
+	for _, action := range []string{"approve", "reject", "cancel"} {
+		record := releasableRecord(domain.EcoSubmitted, time.Time{})
+		record.Eco.CreatedBy = ""
+		f := &fakeStore{record: record}
+		r, _ := newRouter(f, approves)
+		if code, body := decide(r, action, workflowDuty, "carol"); code != http.StatusForbidden || !strings.Contains(body, domain.CodeEcoCreatorUnknown) || len(f.released) != 0 {
+			t.Fatalf("%s with no recorded creator = %d %s %+v", action, code, body, f.released)
+		}
+	}
+	record := releasableRecord(domain.EcoSubmitted, time.Time{})
+	record.Eco.CreatedBy = ""
+	f := &fakeStore{record: record}
+	r, _ := newRouter(f, approves)
+	if rec := release(r, allDuties); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), domain.CodeEcoCreatorUnknown) || len(f.released) != 0 {
+		t.Fatalf("approver seam with no recorded creator = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateEco_NeedsTheActingUser(t *testing.T) {
+	r, _ := newRouter(&fakeStore{}, approves)
+	body := `{"number":"ECO-9","replaces":[{"oldVersionId":"` + oldVersion + `","newVersionId":"` + newVersion + `"}]}`
+	if rec := do(r, http.MethodPost, ecos, body, allDuties, true); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("create without a user = %d %s", rec.Code, rec.Body)
+	}
+}

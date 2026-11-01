@@ -16,6 +16,7 @@ export interface EcoRef {
   legalEntityId: string;
   ecoId: string;
   actor: string;
+  scope: string[];
   reason?: string;
 }
 
@@ -30,12 +31,14 @@ export interface EcoSnapshot {
 export interface EcoDecision {
   decision: "approved" | "rejected";
   actor: string;
+  scope: string[];
   reason?: string;
 }
 
 export interface EcoApprovalState {
   ecoId: string;
   tenantId: string;
+  legalEntityId: string;
   requester: string;
   status: "awaiting_approval" | "approved" | "released" | "rejected" | "timed_out" | "release_failed";
   decidedBy?: string;
@@ -69,6 +72,7 @@ export async function ecoApprovalWorkflow(input: EcoApprovalInput): Promise<EcoA
   const state: EcoApprovalState = {
     ecoId: input.ecoId,
     tenantId: input.tenantId,
+    legalEntityId: input.legalEntityId,
     requester: input.requester,
     status: "awaiting_approval",
     refusedDecisions: 0,
@@ -77,11 +81,12 @@ export async function ecoApprovalWorkflow(input: EcoApprovalInput): Promise<EcoA
   setHandler(ecoApprovalStateQuery, () => ({ ...state }));
   setHandler(ecoDecisionSignal, (decision) => void decisions.push(decision));
 
-  const as = (actor: string, reason?: string): EcoRef => ({
+  const as = (actor: string, scope: string[], reason?: string): EcoRef => ({
     tenantId: input.tenantId,
     legalEntityId: input.legalEntityId,
     ecoId: input.ecoId,
     actor,
+    scope,
     ...(reason ? { reason } : {}),
   });
 
@@ -89,30 +94,30 @@ export async function ecoApprovalWorkflow(input: EcoApprovalInput): Promise<EcoA
   for (;;) {
     const arrived = await condition(() => decisions.length > 0, Math.max(1, deadline - Date.now()));
     if (!arrived) {
-      const cancelled = await activities.cancelEco(as(ECO_TIMEOUT_ACTOR, "no decision within the approval window"));
+      const cancelled = await activities.cancelEco(as(ECO_TIMEOUT_ACTOR, [input.legalEntityId], "no decision within the approval window"));
       return Object.assign(state, { status: "timed_out" as const, decidedBy: cancelled.decidedBy });
     }
     const decision = decisions.shift()!;
     try {
       const decided = await (decision.decision === "rejected"
-        ? activities.rejectEco(as(decision.actor, decision.reason))
-        : activities.approveEco(as(decision.actor)));
+        ? activities.rejectEco(as(decision.actor, decision.scope, decision.reason))
+        : activities.approveEco(as(decision.actor, decision.scope)));
       state.decidedBy = decided.decidedBy;
       if (decision.decision === "rejected") return Object.assign(state, { status: "rejected" as const });
       state.status = "approved";
-      return await release(decision.actor);
+      return await release(decision.actor, decision.scope);
     } catch (error) {
       if (!(error instanceof ActivityFailure) || state.status === "approved") throw error;
       state.refusedDecisions += 1;
     }
   }
 
-  async function release(actor: string): Promise<EcoApprovalState> {
+  async function release(actor: string, scope: string[]): Promise<EcoApprovalState> {
     try {
-      let eco = await activities.releaseEco(as(actor));
+      let eco = await activities.releaseEco(as(actor, scope));
       if (eco.state === "scheduled" && eco.releaseDate) {
         await sleep(Math.max(0, Date.parse(`${eco.releaseDate}T00:00:00Z`) - Date.now()));
-        eco = await activities.releaseEco(as(actor));
+        eco = await activities.releaseEco(as(actor, scope));
       }
       state.status = eco.state === "released" ? "released" : "release_failed";
       if (state.status === "release_failed") state.failureReason = `ECO is ${eco.state} after release`;

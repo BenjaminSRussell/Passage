@@ -9,11 +9,13 @@ import {
   ecoApprovalWorkflowId,
   ecoDecisionSignal,
 } from "./workflows.js";
+import { inLegalEntityScope } from "./serviceToken.js";
 
 export const ECO_DECIDE_DUTY = "engineering.eco.approve";
 export const CAPA_DECIDE_DUTY = "QM_CAPA_MAINTAIN";
 
 const MAX_BODY_BYTES = 8192;
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ECO_ROUTE = /^\/v1\/workflows\/eco-approvals\/([^/:]+):(approve|reject)$/;
 const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/;
@@ -21,6 +23,7 @@ const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/
 interface Principal {
   tenantId: string;
   userId: string;
+  scope: string[];
   duties: Set<string>;
 }
 
@@ -64,7 +67,11 @@ function principalOf(request: IncomingMessage): Principal {
   const userId = String(request.headers["x-passage-user"] ?? "").trim();
   if (!UUID.test(tenantId) || !userId) throw new Refusal(401, "AUTH-0001", "missing tenant or user");
   const duties = new Set(String(request.headers["x-passage-duties"] ?? "").split(",").map((duty) => duty.trim()).filter(Boolean));
-  return { tenantId, userId, duties };
+  const scope = String(request.headers["x-passage-legal-entity"] ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => UUID.test(entry) && entry !== NIL_UUID);
+  return { tenantId, userId, scope, duties };
 }
 
 function requireDuty(principal: Principal, duty: string): void {
@@ -96,7 +103,7 @@ function text(body: Record<string, unknown>, field: string, max: number, require
   return value.trim();
 }
 
-async function stateOf<T extends { tenantId: string }>(read: () => Promise<T>, principal: Principal): Promise<T> {
+async function stateOf<T extends { tenantId: string; legalEntityId: string }>(read: () => Promise<T>, principal: Principal): Promise<T> {
   let state: T;
   try {
     state = await read();
@@ -105,6 +112,7 @@ async function stateOf<T extends { tenantId: string }>(read: () => Promise<T>, p
     throw error;
   }
   if (state.tenantId !== principal.tenantId) throw new Refusal(404, "WF-0404", "no workflow is running for this record");
+  if (!inLegalEntityScope(principal.scope, state.legalEntityId)) throw new Refusal(403, "AUTH-0003", "the record belongs to a legal entity outside your scope");
   return state;
 }
 
@@ -115,7 +123,7 @@ async function decideEco(client: Pick<Client, "workflow">, principal: Principal,
   const state = await stateOf(() => handle.query(ecoApprovalStateQuery), principal);
   if (state.status !== "awaiting_approval") throw new Refusal(409, "WF-0409", `the ECO approval is ${state.status}`);
   if (state.requester === principal.userId) throw new Refusal(403, "ENG-ECO-SELF-APPROVAL", "the user who created the ECO cannot decide it");
-  await handle.signal(ecoDecisionSignal, { decision: action === "approve" ? "approved" : "rejected", actor: principal.userId, ...(reason ? { reason } : {}) });
+  await handle.signal(ecoDecisionSignal, { decision: action === "approve" ? "approved" : "rejected", actor: principal.userId, scope: principal.scope, ...(reason ? { reason } : {}) });
 }
 
 async function advanceCapa(client: Pick<Client, "workflow">, principal: Principal, ncrId: string, action: "step-done" | "effectiveness", body: Record<string, unknown>): Promise<void> {
@@ -127,7 +135,7 @@ async function advanceCapa(client: Pick<Client, "workflow">, principal: Principa
     const notes = text(body, "notes", 2000, true)!;
     const state = await stateOf(() => handle.query(capaStateQuery), principal);
     if (state.status !== "in_correction" || state.currentStep !== step) throw new Refusal(409, "WF-0409", `D${state.currentStep} is the current step (${state.status})`);
-    await handle.signal(capaStepDoneSignal, { step: step as number, notes, actor: principal.userId });
+    await handle.signal(capaStepDoneSignal, { step: step as number, notes, actor: principal.userId, scope: principal.scope });
     return;
   }
   const result = body.result;
@@ -136,7 +144,7 @@ async function advanceCapa(client: Pick<Client, "workflow">, principal: Principa
   const state = await stateOf(() => handle.query(capaStateQuery), principal);
   if (state.status !== "awaiting_effectiveness") throw new Refusal(409, "WF-0409", `the effectiveness check is not open (${state.status})`);
   if (!state.implementer || state.implementer === principal.userId) throw new Refusal(403, "QM-0175", "the effectiveness check must be made by a user other than the one who completed D7");
-  await handle.signal(capaEffectivenessSignal, { result, note, actor: principal.userId });
+  await handle.signal(capaEffectivenessSignal, { result, note, actor: principal.userId, scope: principal.scope });
 }
 
 function reply(response: ServerResponse, refusal: Refusal): void {

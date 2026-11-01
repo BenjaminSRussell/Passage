@@ -17,6 +17,12 @@ export interface TokenSubject {
   tenantId: string;
   legalEntityId: string;
   actor: string;
+  scope?: readonly string[];
+}
+
+export function inLegalEntityScope(scope: readonly string[] | undefined, legalEntityId: string): boolean {
+  const wanted = legalEntityId.trim().toLowerCase();
+  return !!wanted && (scope ?? []).some((entry) => entry.trim().toLowerCase() === wanted);
 }
 
 export interface ServiceTokenSigner {
@@ -38,8 +44,9 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
   const key = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: "der", type: "pkcs8" });
   const now = options.now ?? Date.now;
   const newJti = options.newJti ?? (() => randomBytes(16).toString("hex"));
-  function mint(audience: string, grant: readonly string[], { tenantId, legalEntityId, actor }: TokenSubject): string {
+  function mint(audience: string, grant: readonly string[], { tenantId, legalEntityId, actor, scope }: TokenSubject, scoped: boolean): string {
     if (!tenantId || !legalEntityId || !actor) throw new TypeError("a service token needs a tenant, one legal entity and the acting user");
+    if (scoped && !inLegalEntityScope(scope, legalEntityId)) throw new TypeError("a service token needs a legal entity within the acting user's scope");
     const iat = Math.floor(now() / 1000);
     const claims = {
       iss: SERVICE_NAME,
@@ -58,9 +65,9 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
     return `${body}.${signature}`;
   }
   return {
-    mintForPayables: (subject) => mint(PAYABLES_AUDIENCE, PAYABLES_GRANT, subject),
-    mintForEngineering: (subject) => mint(ENGINEERING_AUDIENCE, ENGINEERING_GRANT, subject),
-    mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject),
+    mintForPayables: (subject) => mint(PAYABLES_AUDIENCE, PAYABLES_GRANT, subject, false),
+    mintForEngineering: (subject) => mint(ENGINEERING_AUDIENCE, ENGINEERING_GRANT, subject, true),
+    mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject, true),
   };
 }
 

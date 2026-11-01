@@ -96,7 +96,10 @@ func (e *Eco) checkSeparation(actor string) error {
 	if actor == "" {
 		return errf(CodeEcoActorRequired, "an ECO decision needs the deciding user")
 	}
-	if e.CreatedBy != "" && actor == e.CreatedBy {
+	if e.CreatedBy == "" {
+		return errf(CodeEcoCreatorUnknown, "ECO %s has no recorded creator, so separation of duties cannot be shown", e.Number)
+	}
+	if actor == e.CreatedBy {
 		return errf(CodeEcoSelfApproval, "the user who created ECO %s cannot decide it", e.Number)
 	}
 	return nil
