@@ -83,10 +83,22 @@ var serviceGrants = map[string]map[string][]string{
 	"assets": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
 	},
+	"ledger": {
+		"close": {"period.check"},
+	},
+	"analytics": {
+		"ledger": {"ledger.entry.lookup", "ledger.ledger.lookup"},
+	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
 	},
 	"party": {
+		"numbering": {"numbering.sequence.allocate"},
+	},
+	"quality": {
+		"inventory": {"inventory.hold.apply"},
+	},
+	"hr": {
 		"numbering": {"numbering.sequence.allocate"},
 	},
 }
@@ -419,6 +431,9 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		return ServiceClaims{}, ErrServiceToken
 	}
 	now := v.now()
+	if IsServiceActor(c.Act) && !isKnownServiceActor(c.Act) {
+		return ServiceClaims{}, ErrServiceToken
+	}
 	if c.Aud != v.self || c.Jti == "" || c.Act == "" ||
 		c.Exp <= now.Unix() || c.Exp-c.Iat > int64(ServiceTokenMaxTTL/time.Second) || c.Iat > now.Add(serviceClockSkew).Unix() {
 		return ServiceClaims{}, ErrServiceToken

@@ -20,6 +20,8 @@ import (
 const (
 	maxReasonLength = 280
 	prodEnvironment = "prod"
+
+	nextCursorHeader = "X-Next-Cursor"
 )
 
 var (
@@ -87,7 +89,7 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 		a.releasesRecorded.Add(1)
 		if release.ChainBreak {
 			a.chainBreaks.Add(1)
-			slog.Warn("release chain break", "service", release.Service, "environment", release.Environment, "previousDigest", release.PreviousDigest, "releaseId", release.ID, "correlationId", middleware.GetReqID(r.Context()))
+			slog.Warn("release chain break", "service", release.Service, "environment", release.Environment, "previousDigest", release.PreviousDigest, "expectedPreviousDigest", release.ExpectedPreviousDigest, "releaseId", release.ID, "correlationId", middleware.GetReqID(r.Context()))
 		}
 	}
 	httpx.JSON(w, http.StatusCreated, release)
@@ -150,7 +152,20 @@ func (a *API) listReleases(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "service and env must be lowercase names"))
 		return
 	}
-	releases, err := a.store.ListReleases(r.Context(), service, environment)
+	after := r.URL.Query().Get("cursor")
+	if after != "" {
+		canonical, ok := ids.Canonical(after)
+		if !ok {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be a release id"))
+			return
+		}
+		after = canonical
+	}
+	releases, next, err := a.store.ListReleases(r.Context(), service, environment, after)
+	if errors.Is(err, store.ErrUnknownCursor) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be a release id returned by this endpoint"))
+		return
+	}
 	if err != nil {
 		slog.Error("list releases failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -160,6 +175,9 @@ func (a *API) listReleases(w http.ResponseWriter, r *http.Request) {
 		for i := range releases {
 			releases[i].Actor = ""
 		}
+	}
+	if next != "" {
+		w.Header().Set(nextCursorHeader, next)
 	}
 	httpx.JSON(w, http.StatusOK, releases)
 }

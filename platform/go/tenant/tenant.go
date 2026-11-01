@@ -236,7 +236,13 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 			reject(w, r, http.StatusBadRequest, "COM-0001", "Bad Request", "invalid legal entity")
 			return
 		}
-		p := Principal{TenantID: t, LegalEntityID: le, UserID: r.Header.Get(HeaderUser), Duties: map[string]struct{}{}}
+		user := r.Header.Get(HeaderUser)
+		if IsServiceActor(user) {
+			slog.WarnContext(r.Context(), "user header claims a service actor", "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
+			reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid user")
+			return
+		}
+		p := Principal{TenantID: t, LegalEntityID: le, UserID: user, Duties: map[string]struct{}{}}
 		for _, d := range strings.Split(r.Header.Get(HeaderDuties), ",") {
 			if d = strings.TrimSpace(d); d != "" {
 				p.Duties[d] = struct{}{}

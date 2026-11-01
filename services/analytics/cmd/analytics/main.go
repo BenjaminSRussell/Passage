@@ -54,6 +54,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	st := store.New(pool)
+	job, err := newReconJob(getenv, st)
+	if err != nil {
+		return err
+	}
+	if job != nil {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go job.Loop(ctx)
+	}
 	router := httpx.NewRouter()
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})

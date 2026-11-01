@@ -28,6 +28,12 @@ spec:
             items:
               - key: {{ .Values.secret.fieldcryptKeysKey }}
                 path: keys
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+        {{- end }}
       containers:
         - name: hr
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -50,6 +56,22 @@ spec:
               value: {{ .Values.config.managerMaxDepth | quote }}
             - name: MIGRATE_ON_START
               value: {{ .Values.config.migrateOnStart | quote }}
+            - name: HR_ACTION_SWEEP_TENANT_IDS
+              value: {{ .Values.config.actionSweepTenantIds | quote }}
+            - name: HR_ACTION_SWEEP_INTERVAL
+              value: {{ .Values.config.actionSweepInterval | quote }}
+            - name: NUMBERING_URL
+              value: {{ .Values.numberingUrl | quote }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_NAME
+              value: hr
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -72,6 +94,11 @@ spec:
             - name: field-crypt
               mountPath: /var/run/passage/field-crypt
               readOnly: true
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: service-identity
+              mountPath: /var/run/passage/service-identity
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

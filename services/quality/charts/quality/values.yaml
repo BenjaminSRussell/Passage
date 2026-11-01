@@ -6,3 +6,9 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }
 serviceMonitor: { enabled: false }
+serviceUrls:
+  inventory: ""
+holdTenants: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""

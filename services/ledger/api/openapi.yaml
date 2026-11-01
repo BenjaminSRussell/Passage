@@ -210,7 +210,7 @@ components:
     LedgerLine:
       type: object
       description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
-      required: [id, entryId, voucher, postingSequence, postingDate, lineNumber, account, displayName, debitCredit, amount, currency, negativePosting, sourceSystem, sourceType, sourceId, traceId]
+      required: [id, entryId, voucher, postingSequence, postingDate, lineNumber, account, displayName, debitCredit, amount, amountAcct, currency, negativePosting, sourceSystem, sourceType, sourceId, traceId]
       properties:
         id: { type: string, format: uuid }
         entryId: { type: string, format: uuid }
@@ -225,6 +225,7 @@ components:
           additionalProperties: { type: string }
         debitCredit: { type: string, enum: [D, C] }
         amount: { type: string, description: Decimal at the currency's minor-unit scale }
+        amountAcct: { type: string, description: Amount in the ledger's accounting currency at that currency's scale, always positive (the sign is debitCredit) }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         negativePosting: { type: boolean }
         text: { type: string, description: Line text }
@@ -1013,6 +1014,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    Problem500:
+      description: Unexpected server error (COM-0500); no internal detail is returned
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     Problem403:
       description: Forbidden (duty missing, or caller scoped to another legal entity)
       content:
@@ -1746,6 +1752,12 @@ paths:
         idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
         are new requests.
 
+        Period control: with CLOSE_URL configured, every posting path (this one, validate, reversal,
+        batch submit and post, ledger-set post) asks the close service for the posting date's period status
+        and answers 422 LEDGER_PERIOD_CLOSED unless the status is open. Flag duty ledger.period.postclosed
+        overrides a closed or on_hold period only; permanently_closed and never_opened always refuse. A close
+        service that cannot confirm the status gives 503 LEDGER_PERIOD_STATUS_UNAVAILABLE and nothing is posted.
+
         Posting to a ledger that is a non-leading member of a ledger set also needs the duty
         ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003. POST
         /ledger/validate applies the same check, and reversing an entry of such a ledger needs the
@@ -1780,7 +1792,9 @@ paths:
       tags: [journal]
       operationId: listLedgerSets
       x-passage-duty: ledger.journal.read
-      description: Ledger sets visible to the caller's legal-entity scope, ordered by legal entity then code (at most 500).
+      description: Ledger sets visible to the caller's legal-entity scope, ordered by legal entity then code, 100 per page; pass nextCursor back as cursor for the next page.
+      parameters:
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Ledger sets with their member ledgers
@@ -1792,8 +1806,11 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/LedgerSet" }
+                  nextCursor: { type: string, description: Present only when more sets follow }
+        "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
+        "500": { $ref: "#/components/responses/Problem500" }
     post:
       tags: [journal]
       operationId: createLedgerSet
@@ -1838,6 +1855,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+        "500": { $ref: "#/components/responses/Problem500" }
   /v1/ledger/ledger-sets/{setId}/journal-entries:
     post:
       tags: [journal]
@@ -1887,9 +1905,10 @@ paths:
       tags: [journal]
       operationId: listAccountMappings
       x-passage-duty: ledger.journal.read
-      description: Every account mapping of this ledger, ordered by source account then effectiveFrom. 404 LEDGER_NOT_FOUND for a ledger outside the caller's scope.
+      description: Every account mapping of this ledger, ordered by source account then effectiveFrom, 100 per page; pass nextCursor back as cursor for the next page. 404 LEDGER_NOT_FOUND for a ledger outside the caller's scope.
       parameters:
         - $ref: "#/components/parameters/LedgerId"
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Account mappings
@@ -1901,9 +1920,12 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/AccountMapping" }
+                  nextCursor: { type: string, description: Present only when more mappings follow }
+        "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+        "500": { $ref: "#/components/responses/Problem500" }
     post:
       tags: [journal]
       operationId: createAccountMapping

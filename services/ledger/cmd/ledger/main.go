@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/api"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/closeperiods"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 	"github.com/BenjaminSRussell/passage/services/ledger/migrations"
 )
@@ -66,6 +67,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	a := api.New(store.New(pool))
+	gate, err := periodGate(getenv)
+	if err != nil {
+		return err
+	}
+	if gate != nil {
+		a.WithPeriodGate(gate)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := a.Admin()
@@ -76,6 +84,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func periodGate(getenv func(string) string) (store.PeriodGate, error) {
+	url := getenv("CLOSE_URL")
+	switch {
+	case getenv("LEDGER_PERIOD_CHECK") == "disabled":
+		slog.Warn("period control disabled; postings are not checked against the close service", "closeUrlSet", url != "")
+		return nil, nil
+	case url == "":
+		return nil, errors.New("CLOSE_URL is required, or set LEDGER_PERIOD_CHECK=disabled to run without period control")
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if signer == nil {
+		return nil, errors.New("CLOSE_URL is set but there is no service signing key (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+	}
+	return closeperiods.New(url, nil, signer), nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

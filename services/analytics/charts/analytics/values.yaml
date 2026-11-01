@@ -15,6 +15,23 @@ database:
 
 migrateOnStart: false
 
+# Nightly 02:00 revenue-to-GL reconciliation (FR-46.13). Off while tenantId is empty.
+# ledgers is legalEntityId=ledgerId pairs, revenueAccounts is FROM-TO account numbers.
+reconciliation:
+  tenantId: ""
+  timezone: UTC
+  ledgers: ""
+  revenueAccounts: ""
+  cubeUrl: ""
+  cubeTokenSecret:
+    name: analytics-cube
+    key: CUBE_API_TOKEN
+  ledgerUrl: ""
+
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+
 serviceMonitor:
   enabled: false
   interval: 30s

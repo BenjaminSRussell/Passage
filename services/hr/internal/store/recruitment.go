@@ -137,6 +137,20 @@ func (s *Postgres) CreateRequisition(ctx context.Context, in Requisition, idempo
 	return out, inserted, err
 }
 
+func (s *Postgres) RequisitionByKey(ctx context.Context, idempotencyKey string) (Requisition, bool, error) {
+	p := principal(ctx)
+	var out Requisition
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanRequisition(tx.QueryRow(ctx, requisitionSelect+` where r.tenant_id = $1 and r.idempotency_key = $2`, p.TenantID, idempotencyKey))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Requisition{}, false, nil
+	}
+	return out, err == nil, err
+}
+
 func (s *Postgres) GetRequisition(ctx context.Context, id string) (Requisition, error) {
 	p := principal(ctx)
 	var out Requisition

@@ -31,6 +31,28 @@ Routes and nav are in `module.ts`; the shell discovers it through the registry.
 | `/hr/courses/new` | New course: skill outcomes picked from the catalog with ratings on each skill's scale, the certificate and its validity, manager approval | `GET /skills`, `POST /courses` |
 | `/hr/courses/:id` | Course detail: what a pass awards, the sessions with seats, waitlist and cost, and a schedule-session form (times in UTC) | `GET /courses/{id}`, `GET`/`POST /courses/{id}/sessions` |
 | `/hr/courses/sessions/:id` | Session: seat tiles, the attendance list in registration order with approve, decline and cancel, a register-worker form until the session ends (full and approval warnings shown), and attendance with pass or fail from the session start | `GET /courses/sessions/{id}`, `GET`/`POST /courses/sessions/{id}/registrations`, `POST /courses/registrations/{id}/approve`, `POST /courses/registrations/{id}/cancel`, `POST /courses/sessions/{id}/complete`, `GET /workers` |
+| `/hr/actions?status=` | Personnel actions with status filter | `GET /actions` |
+| `/hr/actions/new` | Submit a hire, transfer, termination or pay change (pay fields need `HcmCompAdmin`; a 403 is explained) | `POST /actions` |
+| `/hr/actions/:id` | Action detail; pay shown only when the service returned it; withdraw a pending action after a confirmation | `GET /actions/{id}`, `POST /actions/{id}/withdraw` |
+| `/hr/jobs`, `/hr/jobs/new`, `/hr/jobs/:id` | Job catalog with optional pay range (currency, minimum, maximum together) | `GET`/`POST /jobs`, `GET /jobs/{id}` |
+| `/hr/compensation/plans`, `/hr/compensation/plans/new` | Compensation plans (annual or hourly, one currency) | `GET`/`POST /compensation/plans` |
+| `/hr/requisitions`, `/new`, `/:id` | Requisitions with approve, open (vacancy refusal shown) and cancel; the candidate pipeline by stage and an add-candidate form that records consent | `GET`/`POST /requisitions`, `POST /requisitions/{id}/transition`, `GET`/`POST /requisitions/{id}/candidates` |
+| `/hr/candidates/:id` | Candidate: only the contact data the service returned, move along the pipeline or reject, create an offer at the offer stage | `GET /candidates/{id}`, `POST /candidates/{id}/move`, `POST /candidates/{id}/offers` |
+| `/hr/offers/:id` | Offer: send, accept, decline, withdraw; hire from an accepted offer (once) | `GET /offers/{id}`, `POST /offers/{id}/transition`, `POST /offers/{id}/hire` |
+| `/hr/compensation/cycles`, `/new`, `/:id` | Merit and bonus cycles: guideline matrix and department budgets, advance, apply after a confirmation | `GET`/`POST /compensation/cycles`, `POST .../advance`, `POST .../apply` |
+| `/hr/compensation/cycles/:id/worksheets/:managerId` | A manager's proposals: save a draft, see the guideline result, submit after a confirmation | `GET`/`PUT /compensation/cycles/{id}/worksheets/{managerId}`, `POST .../submit` |
+| `/hr/incidents`, `/new`, `/:id` | Incident register (privacy-case worker hidden), report an incident, case page with the opened medical details and review/close | `GET`/`POST /incidents`, `GET /incidents/{id}`, `POST /incidents/{id}/status` |
+| `/hr/incidents/osha?year=&siteId=` | OSHA 300 log, 300A summary and 301 detail | `GET /incidents/osha-extract` |
+| `/hr/loaned-items`, `/hr/workers/:id/loaned-items` | Outstanding loans with overdue flag and returned/lost; a worker's loans and a lend form | `GET /loaned-items/outstanding`, `GET`/`POST /workers/{id}/loaned-items`, `POST /loaned-items/{id}/close` |
+| `/hr/checklist-templates`, `/new` | Onboarding, offboarding and transfer templates | `GET`/`POST /checklist-templates` |
+| `/hr/workers/:id/checklists`, `/hr/checklists/:id`, `/hr/tasks` | A worker's checklists and a start form; checklist tasks (evidence, done, skip) and completion; owned tasks | `GET`/`POST /workers/{id}/checklists`, `GET /checklists/{id}`, `POST /checklists/{id}/complete`, `GET /tasks`, `POST /tasks/{id}/finish` |
+| `/hr/questionnaires`, `/new`, `/:id` | Questionnaires, design form, and a schedule form that leads to the results | `GET`/`POST /questionnaires`, `GET /questionnaires/{id}`, `POST /questionnaires/schedules` |
+| `/hr/questionnaires/schedules/:id/results?by=department` | Response rate and statistics; the suppressed state, the 409 before an anonymous close, the 403 `HCM-QST-SCOPE` and the 422 small-group refusal each have their own message | `GET /questionnaires/schedules/{id}/results` |
+| `/hr/my/questionnaires`, `/hr/my/questionnaires/:id` | Open questionnaires and answering as the signed-in worker | `GET /questionnaires/schedules/open`, `GET /questionnaires/schedules/{id}`, `POST .../answers` |
+
+Server problem codes are turned into plain messages in `parts.tsx` (`problemText`);
+sealed data (candidate contact details, pay, medical details) is rendered only
+when the response carries it.
 
 The as-of date is kept in the URL (`?date=`), so it survives reloads and can be
 shared (PRD 8.42.6). Every create form sends one `Idempotency-Key` per filled-in

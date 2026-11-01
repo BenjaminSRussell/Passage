@@ -37,6 +37,13 @@ channels:
         $ref: '#/components/messages/BlockingCreated'
       blockingReleased:
         $ref: '#/components/messages/BlockingReleased'
+  hold:
+    address: passage.inventory.hold
+    messages:
+      holdPlaced:
+        $ref: '#/components/messages/HoldPlaced'
+      holdReleased:
+        $ref: '#/components/messages/HoldReleased'
   transfer:
     address: passage.inventory.transfer
     messages:
@@ -87,6 +94,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/blocking' }
     summary: Stock was blocked or quarantined, or a blocking was released (FR-16.8)
+  publishHold:
+    action: send
+    channel: { $ref: '#/channels/hold' }
+    summary: Stock was held out of availability, or all or part of a hold was released
   publishTransfer:
     action: send
     channel: { $ref: '#/channels/transfer' }
@@ -165,6 +176,22 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
+    HoldPlaced:
+      title: Hold placed
+      summary: A quantity was held out of availability for a reason and a source document.
+      name: dev.passage.inventory.hold.placed.v1
+      x-passage-type: dev.passage.inventory.hold.placed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HoldData'
+    HoldReleased:
+      title: Hold released
+      summary: All or part of a hold was released back to availability; state RELEASED when nothing remains held.
+      name: dev.passage.inventory.hold.released.v1
+      x-passage-type: dev.passage.inventory.hold.released.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HoldData'
     JournalNameCreated:
       title: Journal name created
       summary: A journal name was created for a legal entity.
@@ -315,7 +342,7 @@ components:
         availPhysical: { type: string }
         availOrdered: { type: string }
         physicalInvent: { type: string }
-        deltaBucket: { type: string, enum: [POSTED, ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, ORDERED, ARRIVED, REGISTERED, RECEIVED], description: 'Projection bucket the change moved: POSTED for journals, blocking and transfer legs, RESERVED_PHYSICAL for reservations, RECEIVED for vendor-owned consignment receipts, DEDUCTED for the vendor-owned leg of an ownership change; for a registration or status move (transactions:apply, named backward commands) the bucket of the status reached, POSTED for SOLD / PURCHASED' }
+        deltaBucket: { type: string, enum: [POSTED, ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, HELD_PHYSICAL, PICKED, DEDUCTED, ORDERED, ARRIVED, REGISTERED, RECEIVED], description: 'Projection bucket the change moved: POSTED for journals, blocking and transfer legs, RESERVED_PHYSICAL for reservations, HELD_PHYSICAL for holds, RECEIVED for vendor-owned consignment receipts, DEDUCTED for the vendor-owned leg of an ownership change; for a registration or status move (transactions:apply, named backward commands) the bucket of the status reached, POSTED for SOLD / PURCHASED' }
         deltaQty: { type: string, description: Net signed quantity change of that bucket }
     JournalPostedData:
       type: object
@@ -379,6 +406,20 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }
+    HoldData:
+      type: object
+      required: [holdId, legalEntityId, productId, dimensionSet, qty, releasedQty, reason, sourceType, sourceRef, state]
+      properties:
+        holdId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string } }
+        qty: { type: string, description: Quantity placed }
+        releasedQty: { type: string, description: Cumulative quantity released }
+        reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
+        sourceType: { type: string }
+        sourceRef: { type: string }
+        state: { type: string, enum: [ACTIVE, RELEASED] }
     CountSheetChangedData:
       type: object
       required: [sheetId, legalEntityId, planId, number, action, status, lineCount, countedCount, recountLines, lineId, reason]

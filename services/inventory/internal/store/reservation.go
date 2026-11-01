@@ -256,7 +256,7 @@ func (s *Postgres) UpsertBatchExpiry(ctx context.Context, productID, batchID str
 // ascending dimension-set order, and returns them by rowKey.
 func lockProductRows(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, productID string) (map[string]*row, error) {
 	rows, err := tx.Query(ctx, `select o.dimension_set_hash, d.dims, o.posted_qty::text, o.posted_value::text, o.received::text, o.registered::text,
-		o.arrived::text, o.ordered::text, o.deducted::text, o.picked::text, o.reserved_physical::text, o.reserved_ordered::text, o.on_order::text,
+		o.arrived::text, o.ordered::text, o.deducted::text, o.picked::text, o.reserved_physical::text, o.held_physical::text, o.reserved_ordered::text, o.on_order::text,
 		coalesce(o.currency::text, ''), o.last_txn_seq
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.product_id = $3
@@ -269,7 +269,7 @@ func lockProductRows(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, pr
 	for rows.Next() {
 		r := &row{product: productID}
 		var raw []byte
-		var b [11]string
+		var b [12]string
 		dest := []any{&r.hash, &raw}
 		for i := range b {
 			dest = append(dest, &b[i])

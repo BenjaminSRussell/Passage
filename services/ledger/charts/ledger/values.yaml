@@ -24,5 +24,11 @@ resources:
 serviceMonitor:
   enabled: false
 
+# The ledger refuses to start unless closeUrl is set or periodCheck is "disabled"
+# (dev and test only; it logs a warning).
+closeUrl: ""
+periodCheck: ""
 serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
   publicKeys: ""

@@ -115,6 +115,33 @@ func (s *Postgres) IsDirectReport(ctx context.Context, managerWorkerID, workerID
 	return ok, err
 }
 
+// DirectReportsAmong returns the subset of workerIDs whose manager as-of at is managerWorkerID.
+func (s *Postgres) DirectReportsAmong(ctx context.Context, managerWorkerID string, workerIDs []string, at time.Time) (map[string]bool, error) {
+	p := principal(ctx)
+	reports := map[string]bool{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		found, err := directReportsTx(ctx, tx, p.TenantID, managerWorkerID, workerIDs, at, s.depth)
+		for _, id := range found {
+			reports[id] = true
+		}
+		return err
+	})
+	return reports, err
+}
+
+func directReportsTx(ctx context.Context, tx pgx.Tx, tenantID, managerWorkerID string, workerIDs []string, at time.Time, depth int) ([]string, error) {
+	if len(workerIDs) == 0 {
+		return []string{}, nil
+	}
+	rows, err := tx.Query(ctx, teamCTE+`
+		select worker_id::text from team where manager_id = $4::uuid and worker_id = any($5::uuid[])`,
+		tenantID, at, depth, managerWorkerID, workerIDs)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 // TeamAbsenceRequests pages the absence requests of a manager's direct reports
 // and the manager's own, oldest first, in the order of ListAbsenceRequests.
 func (s *Postgres) TeamAbsenceRequests(ctx context.Context, managerWorkerID string, f RequestFilter, after string, limit int) (AbsenceRequestPage, error) {
@@ -160,6 +187,19 @@ func absCursor(after string) (string, string, error) {
 		return "", "", problem(http.StatusBadRequest, "COM-0001", "cursor must come from a previous page")
 	}
 	return d, id, nil
+}
+
+// RegistrationWorker is the worker a course registration belongs to.
+func (s *Postgres) RegistrationWorker(ctx context.Context, registrationID string) (string, error) {
+	p := principal(ctx)
+	var workerID string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select worker_id::text from hr_course_registration where tenant_id = $1 and id = $2`, p.TenantID, registrationID).Scan(&workerID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", problem(http.StatusNotFound, CodeRegistrationNotFound, "registration not found")
+	}
+	return workerID, err
 }
 
 // AbsenceRequestWorker is the worker an absence request belongs to.

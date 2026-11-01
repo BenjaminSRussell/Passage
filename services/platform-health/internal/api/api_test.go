@@ -26,6 +26,8 @@ type fakeStore struct {
 	lastKey    string
 	seenKeys   map[string]bool
 	chainBreak bool
+	lastAfter  string
+	nextCursor string
 }
 
 func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key string) (store.Release, error) {
@@ -48,17 +50,18 @@ func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key strin
 	return in, nil
 }
 
-func (f *fakeStore) ListReleases(_ context.Context, service, environment string) ([]store.Release, error) {
+func (f *fakeStore) ListReleases(_ context.Context, service, environment, after string) ([]store.Release, string, error) {
 	if f.err != nil {
-		return nil, f.err
+		return nil, "", f.err
 	}
+	f.lastAfter = after
 	out := []store.Release{}
 	for _, r := range f.releases {
 		if (service == "" || r.Service == service) && (environment == "" || r.Environment == environment) {
 			out = append(out, r)
 		}
 	}
-	return out, nil
+	return out, f.nextCursor, nil
 }
 
 func (f *fakeStore) Create(_ context.Context, message, _ string) (store.Entry, error) {
