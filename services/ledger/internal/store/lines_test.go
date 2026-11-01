@@ -98,6 +98,9 @@ func TestPostgres_ListLines_Filters(t *testing.T) {
 		{"two dimensions must both match", LineFilter{Dimensions: map[string]string{"DEPT": "D200", "CC": "C1"}},
 			[]string{vouchers[1] + "/6010"}},
 		{"dimension value absent", LineFilter{Dimensions: map[string]string{"DEPT": "NOPE"}}, nil},
+		{"an empty value keeps lines without the attribute", LineFilter{Dimensions: map[string]string{"DEPT": ""}},
+			[]string{vouchers[0] + "/2100", vouchers[1] + "/2100", vouchers[2] + "/2100"}},
+		{"an empty value excludes lines that set it", LineFilter{Dimensions: map[string]string{"DEPT": "D100", "CC": ""}}, nil},
 		{"voucher", LineFilter{Voucher: vouchers[1]}, []string{vouchers[1] + "/6010", vouchers[1] + "/2100"}},
 		{"source system", LineFilter{SourceSystem: "ar"}, nil},
 	}

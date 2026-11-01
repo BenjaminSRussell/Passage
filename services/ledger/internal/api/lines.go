@@ -91,8 +91,8 @@ func (a *API) listLines(w http.ResponseWriter, r *http.Request) {
 			fields[key] = "the attribute must be A-Z, digits or underscore, starting with a letter"
 			continue
 		}
-		if len(values) != 1 || values[0] == "" || utf8.RuneCountInString(values[0]) > 20 {
-			fields[key] = "must be given once, 1 to 20 characters"
+		if len(values) != 1 || utf8.RuneCountInString(values[0]) > 20 {
+			fields[key] = "must be given once, at most 20 characters (empty: the attribute is not set)"
 			continue
 		}
 		f.Dimensions[attr] = values[0]

@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Card, DataTable, FormField, Input, PageHeader, Button, type DataTableColumn } from "../../shell/ui";
-import { fetchEntry, fetchTrialBalance, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
+import { fetchEntry, fetchTrialBalance, LedgerApiError, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
 import { EntryAttachmentsCard } from "./BatchAttachments";
+import { parseDimensionFilter } from "./BatchLinesEditor";
 import styles from "./pages.module.css";
 import { ReverseEntryForm } from "./ReverseEntryForm";
 
@@ -17,8 +18,12 @@ type Row = TrialBalance["rows"][number];
  * the posting dates its periods cover (period keys are calendar months until
  * fiscal calendars arrive).
  */
-export function transactionsLink(q: TrialBalanceQuery, account: string): string {
+export function transactionsLink(q: TrialBalanceQuery, account: string, groupValues: Record<string, string> = {}): string {
   const params = new URLSearchParams({ ledger: q.ledgerId, account_from: account, account_to: account });
+  const dims = { ...(q.dimensions ?? {}) };
+  // An empty group value is the "(none)" row: the lines whose combination does not set the attribute.
+  for (const [attr, value] of Object.entries(groupValues)) dims[attr] = value;
+  if (Object.keys(dims).length > 0) params.set("dims", Object.entries(dims).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join(", "));
   if (q.periodFrom) params.set("date_from", `${q.periodFrom}-01`);
   if (q.periodTo) {
     const [y, m] = q.periodTo.split("-").map(Number);
@@ -27,9 +32,25 @@ export function transactionsLink(q: TrialBalanceQuery, account: string): string 
   return `/ledger/transactions?${params.toString()}`;
 }
 
-const balanceColumns: DataTableColumn<Row>[] = [
-  { key: "account", header: "Account", mono: true },
-  { key: "name", header: "Name" },
+const ATTRIBUTE = /^[A-Z][A-Z0-9_]{0,19}$/;
+
+/** Parses "DEPT, CC" into distinct attributes; null when malformed or more than five. */
+export function parseGroupBy(text: string): string[] | null {
+  const attrs = text.split(",").map((p) => p.trim()).filter(Boolean);
+  if (attrs.length > 5 || new Set(attrs).size !== attrs.length || !attrs.every((a) => ATTRIBUTE.test(a))) return null;
+  return attrs;
+}
+
+function columnsFor(groupBy: string[]): DataTableColumn<Row>[] {
+  return [
+    { key: "account", header: "Account", mono: true },
+    { key: "name", header: "Name" },
+    ...groupBy.map((attr): DataTableColumn<Row> => ({ key: `dim-${attr}`, header: attr, mono: true, render: (r) => r.dimensions?.[attr] || "(none)" })),
+    ...amountColumns,
+  ];
+}
+
+const amountColumns: DataTableColumn<Row>[] = [
   { key: "debit", header: "Debit", align: "end" },
   { key: "credit", header: "Credit", align: "end" },
   { key: "net", header: "Net", align: "end" },
@@ -37,9 +58,20 @@ const balanceColumns: DataTableColumn<Row>[] = [
 ];
 
 /** Trial balance: account rows from the balance projection, with the balanced check. */
+/** The error message with any field errors the service named (an unknown attribute, for example). */
+function problemText(error: unknown): string {
+  if (error instanceof LedgerApiError) {
+    const fields = Object.entries(error.fields).map(([k, v]) => `${k} ${v}`);
+    return fields.length > 0 ? `${error.message}: ${fields.join("; ")}` : error.message;
+  }
+  return error instanceof Error ? error.message : "The request failed.";
+}
+
 export function TrialBalanceScreen() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<TrialBalanceQuery>({ ledgerId: "" });
+  const [dimText, setDimText] = useState("");
+  const [groupText, setGroupText] = useState("");
   const [query, setQuery] = useState<TrialBalanceQuery | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -55,9 +87,18 @@ export function TrialBalanceScreen() {
     if (!UUID.test(draft.ledgerId.trim())) found.ledgerId = "Enter the ledger id as a UUID.";
     if (draft.periodFrom && !PERIOD.test(draft.periodFrom)) found.periodFrom = "Periods use the form YYYY-MM.";
     if (draft.periodTo && !PERIOD.test(draft.periodTo)) found.periodTo = "Periods use the form YYYY-MM.";
+    const dimensions = parseDimensionFilter(dimText);
+    if (dimensions === null) found.dimensions = "Use ATTRIBUTE=value pairs separated by commas, such as DEPT=D100.";
+    const groupBy = parseGroupBy(groupText);
+    if (groupBy === null) found.groupBy = "List up to five distinct attributes separated by commas, such as DEPT, CC.";
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    setQuery({ ...draft, ledgerId: draft.ledgerId.trim() });
+    setQuery({
+      ...draft,
+      ledgerId: draft.ledgerId.trim(),
+      dimensions: dimensions && Object.keys(dimensions).length > 0 ? dimensions : undefined,
+      groupBy: groupBy && groupBy.length > 0 ? groupBy : undefined,
+    });
   }
 
   return (
@@ -74,6 +115,12 @@ export function TrialBalanceScreen() {
           <FormField id="tb-to" label="Period to" optional error={errors.periodTo}>
             {(c) => <Input {...c} placeholder="2026-12" value={draft.periodTo ?? ""} onChange={(e) => setDraft({ ...draft, periodTo: e.target.value || undefined })} invalid={Boolean(errors.periodTo)} />}
           </FormField>
+          <FormField id="tb-dims" label="Dimension filter" optional error={errors.dimensions} hint="Only combinations holding every value, for example DEPT=D100, CC=C1. Leave a value empty (CC=) for combinations without it.">
+            {(c) => <Input {...c} className={styles.mono} value={dimText} onChange={(e) => setDimText(e.target.value)} invalid={Boolean(errors.dimensions)} />}
+          </FormField>
+          <FormField id="tb-group" label="Group by dimensions" optional error={errors.groupBy} hint="Split each account by these attributes, for example DEPT, CC.">
+            {(c) => <Input {...c} className={styles.mono} value={groupText} onChange={(e) => setGroupText(e.target.value)} invalid={Boolean(errors.groupBy)} />}
+          </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">
               Show trial balance
@@ -85,7 +132,7 @@ export function TrialBalanceScreen() {
         <p className={styles.note}>Enter a ledger id to see its trial balance.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the trial balance" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
-          {(result.error as Error).message}
+          {problemText(result.error)}
         </Alert>
       ) : (
         <>
@@ -94,7 +141,7 @@ export function TrialBalanceScreen() {
               <div className={styles.entry}>
                 <dt className={styles.term}>Check</dt>
                 <dd className={styles.value} data-testid="tb-balanced">
-                  {result.data.balanced ? "Balanced" : "Not balanced"}
+                  {result.data.filtered ? "Not applicable to a dimension filter" : result.data.balanced ? "Balanced" : "Not balanced"}
                 </dd>
               </div>
               <div className={styles.entry}>
@@ -113,12 +160,12 @@ export function TrialBalanceScreen() {
           ) : null}
           <DataTable
             label="Trial balance"
-            columns={balanceColumns}
+            columns={columnsFor(query.groupBy ?? [])}
             rows={result.data?.rows ?? []}
-            getRowKey={(row) => row.account}
+            getRowKey={(row) => row.account + "|" + Object.values(row.dimensions ?? {}).join("|")}
             loading={result.isPending}
-            empty={{ title: "No balances", description: "Nothing has been posted to this ledger in the selected periods." }}
-            onRowOpen={(row) => query && navigate(transactionsLink(query, row.account))}
+            empty={{ title: "No balances", description: "Nothing has been posted to this ledger for the selected periods, accounts and dimensions." }}
+            onRowOpen={(row) => query && navigate(transactionsLink(query, row.account, row.dimensions))}
           />
           <p className={styles.note}>Open an account to see its posted lines.</p>
         </>

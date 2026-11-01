@@ -491,3 +491,47 @@ func TestPostgres_RealignmentSplitsALargePeriodIntoSeveralEntries(t *testing.T) 
 		t.Fatalf("after the reversal %v, want %v", got, before)
 	}
 }
+
+// FR-11.14 with FR-11.24: a trial balance grouped by department shows the realignment's move
+// from D100 to D150 as turnover on both combinations, and the reversal puts the net back.
+func TestPostgres_TrialBalanceByDimensionAfterRealignment(t *testing.T) {
+	e := realignSetup(t)
+	netOf := func() map[string]string {
+		t.Helper()
+		tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, PeriodFrom: "2026-01", PeriodTo: "2026-03",
+			AccountFrom: "6010", AccountTo: "6010", GroupBy: []string{"DEPT"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, r := range tb.Rows {
+			out[r.Dimensions["DEPT"]] = r.Debit + "|" + r.Credit + "|" + r.Net
+		}
+		return out
+	}
+	if got := fmt.Sprint(netOf()); got != fmt.Sprint(map[string]string{"": "7.00|0.00|7.00", "D100": "750.00|0.00|750.00", "D200": "30.00|0.00|30.00"}) {
+		t.Fatalf("before the run: %s", got)
+	}
+	run, _, err := e.store.CreateRealignment(e.ctx, realignRequest(e, "RA-TB-1"))
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	if _, err := e.store.PostRealignment(e.ctx, realignAction(e, run, "REORG")); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	want := map[string]string{"": "7.00|0.00|7.00", "D100": "750.00|750.00|0.00", "D150": "750.00|0.00|750.00", "D200": "30.00|0.00|30.00"}
+	if got := fmt.Sprint(netOf()); got != fmt.Sprint(want) {
+		t.Fatalf("after the run: %s, want %v", got, want)
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, GroupBy: []string{"DEPT"}})
+	if err != nil || !tb.Balanced {
+		t.Fatalf("the grouped ledger must still balance after the run: %+v %v", tb, err)
+	}
+	if _, err := e.store.ReverseRealignment(e.ctx, realignAction(e, run, "REORG")); err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	got := netOf()
+	if !strings.HasSuffix(got["D100"], "|750.00") || !strings.HasSuffix(got["D150"], "|0.00") {
+		t.Fatalf("after the reversal: %v", got)
+	}
+}

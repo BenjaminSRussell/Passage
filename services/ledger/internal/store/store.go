@@ -303,7 +303,24 @@ type Line struct {
 // BalanceFilter selects balances for a trial balance.
 type BalanceFilter struct {
 	LedgerID, PeriodFrom, PeriodTo, AccountFrom, AccountTo string
+	// Dimensions keeps the combinations that hold every attribute=value pair (FR-11.14);
+	// an empty value keeps the combinations without the attribute.
+	Dimensions map[string]string
+	// GroupBy splits each account row by the value of these dimension attributes
+	// (at most MaxBalanceGroupBy); a combination without the attribute groups under "".
+	GroupBy []string
 }
+
+// MaxBalanceGroupBy bounds the dimension attributes one balance inquiry groups by.
+const MaxBalanceGroupBy = 5
+
+// CodeBalanceTooManyRows refuses a grouped trial balance with more rows than maxBalanceRows.
+const CodeBalanceTooManyRows = "LEDGER_BALANCE_TOO_MANY_ROWS"
+
+// maxBalanceRows caps the rows of a grouped trial balance: a group_by on a
+// high-cardinality attribute is refused (422) rather than paged, because the
+// totals cover every row. A variable so tests can lower it.
+var maxBalanceRows = 10000
 
 // BalanceRow is one account's period-to-date turnover in the filter.
 type BalanceRow struct {
@@ -313,6 +330,8 @@ type BalanceRow struct {
 	Credit    string `json:"credit"`
 	Net       string `json:"net"`
 	LineCount int64  `json:"lineCount"`
+	// Dimensions holds the group_by attribute values of the row (empty when not grouped).
+	Dimensions map[string]string `json:"dimensions,omitempty"`
 }
 
 // TrialBalance is the account-level summary with totals.
@@ -324,6 +343,11 @@ type TrialBalance struct {
 	Credit   string       `json:"credit"`
 	Net      string       `json:"net"`
 	Balanced bool         `json:"balanced"`
+	// Filtered is true when a dimension filter was applied: the totals then cover part of
+	// the ledger, so Balanced only describes that part and need not be true.
+	Filtered bool `json:"filtered,omitempty"`
+	// GroupBy echoes the dimension attributes the rows are split by.
+	GroupBy []string `json:"groupBy,omitempty"`
 }
 
 // RebuildResult reports a balance rebuild (BR-11.7, simplified: no shadow table).

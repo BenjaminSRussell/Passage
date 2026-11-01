@@ -20,6 +20,8 @@ export const trialBalanceRowSchema = z.object({
   credit: z.string(),
   net: z.string(),
   lineCount: z.number(),
+  /** Values of the group_by attributes for this row (FR-11.14); absent when not grouped. */
+  dimensions: z.record(z.string(), z.string()).optional(),
 });
 
 export const trialBalanceSchema = z.object({
@@ -30,6 +32,9 @@ export const trialBalanceSchema = z.object({
   credit: z.string(),
   net: z.string(),
   balanced: z.boolean(),
+  /** True when a dimension filter was applied, so the totals cover part of the ledger. */
+  filtered: z.boolean().optional(),
+  groupBy: z.array(z.string()).optional(),
 });
 export type TrialBalance = z.infer<typeof trialBalanceSchema>;
 
@@ -124,6 +129,10 @@ export interface TrialBalanceQuery {
   periodTo?: string;
   accountFrom?: string;
   accountTo?: string;
+  /** Keep the combinations holding every attribute=value pair. */
+  dimensions?: Record<string, string>;
+  /** Split each account row by these dimension attributes (at most 5). */
+  groupBy?: string[];
 }
 
 async function readProblem(res: Response): Promise<LedgerApiError> {
@@ -153,6 +162,8 @@ export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = d
   if (q.periodTo) params.set("period_to", q.periodTo);
   if (q.accountFrom) params.set("account_from", q.accountFrom);
   if (q.accountTo) params.set("account_to", q.accountTo);
+  for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
+  if (q.groupBy && q.groupBy.length > 0) params.set("group_by", q.groupBy.join(","));
   return getJSON(`/api/v1/ledger/balances?${params.toString()}`, trialBalanceSchema, fetchImpl);
 }
 

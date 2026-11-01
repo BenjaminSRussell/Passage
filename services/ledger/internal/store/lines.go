@@ -13,7 +13,8 @@ import (
 // (FR-11.14). AccountFrom and AccountTo compare account numbers as text, as the
 // trial balance does. Dates are YYYY-MM-DD or empty. Voucher and SourceSystem
 // match exactly, as does DocumentID (the entry's source document). Dimensions
-// match the line's combination values exactly. After is the keyset position of
+// match the line's combination values exactly; an empty value matches lines
+// whose combination does not set the attribute. After is the keyset position of
 // the last line already returned.
 type LineFilter struct {
 	LedgerID     string
@@ -111,10 +112,9 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 	if f.DocumentID != "" {
 		where += " and e.document_id = " + arg(f.DocumentID) + "::uuid"
 	}
-	if len(f.Dimensions) > 0 {
-		// Containment: every requested attribute=value pair is on the combination.
-		where += " and d.dimensions @> " + arg(f.Dimensions) + "::jsonb"
-	}
+	// Containment: every requested attribute=value pair is on the combination
+	// (an empty value: the attribute is not set).
+	where += dimensionWhere(f.Dimensions, arg)
 	if f.After != nil {
 		where += " and (e.posting_sequence, l.line_number) > (" + arg(f.After.PostingSequence) + "::bigint, " + arg(f.After.LineNumber) + "::int)"
 	}

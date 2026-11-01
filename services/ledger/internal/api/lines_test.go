@@ -66,7 +66,7 @@ func TestListLines_ValidationStopsBeforeStore(t *testing.T) {
 		{"bad date", "ledger=" + testLedger + "&date_from=2026-13-40", "date_from"},
 		{"inverted date range", "ledger=" + testLedger + "&date_from=2026-03-31&date_to=2026-03-01", "date_to"},
 		{"bad dimension name", "ledger=" + testLedger + "&dim.bad-name=X", "dim.bad-name"},
-		{"empty dimension value", "ledger=" + testLedger + "&dim.DEPT=", "dim.DEPT"},
+		{"dimension value too long", "ledger=" + testLedger + "&dim.DEPT=" + strings.Repeat("D", 21), "dim.DEPT"},
 		{"repeated dimension", "ledger=" + testLedger + "&dim.DEPT=D100&dim.DEPT=D200", "dim.DEPT"},
 		{"voucher too long", "ledger=" + testLedger + "&voucher=" + strings.Repeat("V", 31), "voucher"},
 		{"limit above page cap", "ledger=" + testLedger + "&limit=5000", "limit"},
@@ -106,7 +106,7 @@ func TestListLines_PassesFilterAndReturnsCursor(t *testing.T) {
 		Next:  &store.LineCursor{PostingSequence: 7, LineNumber: 2},
 	}}
 	q := url.Values{
-		"ledger": {testLedger}, "account_from": {"6000"}, "account_to": {"6999"}, "dim.DEPT": {"D100"}, "dim.CC": {"C1"},
+		"ledger": {testLedger}, "account_from": {"6000"}, "account_to": {"6999"}, "dim.DEPT": {"D100"}, "dim.CC": {"C1"}, "dim.PROJECT": {""},
 		"date_from": {"2026-01-01"}, "date_to": {"2026-01-31"}, "voucher": {"GL-000042"}, "source_system": {"ap"},
 		"cursor": {"12.3"}, "limit": {"2"},
 	}
@@ -119,7 +119,7 @@ func TestListLines_PassesFilterAndReturnsCursor(t *testing.T) {
 		got.DateFrom != "2026-01-01" || got.DateTo != "2026-01-31" || got.Voucher != "GL-000042" || got.SourceSystem != "ap" {
 		t.Fatalf("filter = %+v", got)
 	}
-	if len(got.Dimensions) != 2 || got.Dimensions["DEPT"] != "D100" || got.Dimensions["CC"] != "C1" {
+	if v, set := got.Dimensions["PROJECT"]; len(got.Dimensions) != 3 || got.Dimensions["DEPT"] != "D100" || got.Dimensions["CC"] != "C1" || !set || v != "" {
 		t.Fatalf("dimensions = %v", got.Dimensions)
 	}
 	if got.After == nil || got.After.PostingSequence != 12 || got.After.LineNumber != 3 || got.Limit != 2 {

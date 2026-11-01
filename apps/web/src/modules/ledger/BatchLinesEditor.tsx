@@ -41,15 +41,24 @@ const ATTRIBUTE = /^[A-Z][A-Z0-9_]{0,19}$/;
 const AMOUNT = /^\d{1,14}(\.\d{1,6})?$/;
 const MICROS = 1_000_000n;
 
-/** Parses `DEPT=D100, CC=C200`; returns null when malformed. */
-export function parseDimensions(text: string): Record<string, string> | null {
+function parsePairs(text: string, allowEmpty: boolean): Record<string, string> | null {
   const out: Record<string, string> = {};
   for (const part of text.split(",").map((p) => p.trim()).filter(Boolean)) {
     const [attr, value, ...rest] = part.split("=").map((p) => p.trim());
-    if (rest.length > 0 || !attr || !value || !ATTRIBUTE.test(attr) || value.length > 20 || attr in out) return null;
+    if (rest.length > 0 || !attr || value === undefined || (!value && !allowEmpty) || !ATTRIBUTE.test(attr) || value.length > 20 || attr in out) return null;
     out[attr] = value;
   }
   return out;
+}
+
+/** Parses `DEPT=D100, CC=C200`; returns null when malformed. */
+export function parseDimensions(text: string): Record<string, string> | null {
+  return parsePairs(text, false);
+}
+
+/** Parses an inquiry filter such as `DEPT=D100, CC=`; an empty value means "the attribute is not set". */
+export function parseDimensionFilter(text: string): Record<string, string> | null {
+  return parsePairs(text, true);
 }
 
 /** Exact decimal amount in millionths (the service's numeric(20,6)); never a float. */

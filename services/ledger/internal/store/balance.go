@@ -2,19 +2,27 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	ledgerevents "github.com/BenjaminSRussell/passage/services/ledger/internal/events"
 )
 
 // TrialBalance sums the projection per account over the filter. Balanced is
 // true when total debits equal total credits and the net is zero (the
-// reconciliation check "sum of Balance.net = 0").
+// reconciliation check "sum of Balance.net = 0"). Dimension filters and
+// group_by attributes must be attributes of the ledger; they reach SQL only as
+// bind parameters. An empty filter value keeps the combinations without the
+// attribute, the same rows a group_by puts under the empty value.
 func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBalance, error) {
 	p, err := principalOf(ctx)
 	if err != nil {
@@ -26,14 +34,38 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 		if err != nil {
 			return err
 		}
+		if err := checkBalanceAttributes(l, f); err != nil {
+			return err
+		}
 		out.Currency = l.Currency
-		rows, err := tx.Query(ctx, `select a.account_number, a.name, sum(b.debit)::text, sum(b.credit)::text, sum(b.net)::text, sum(b.line_count)::bigint
-			from balance b join main_account a on a.tenant_id = b.tenant_id and a.id = b.main_account_id
+		args := []any{p.TenantID, f.LedgerID, f.PeriodFrom, f.PeriodTo, f.AccountFrom, f.AccountTo}
+		arg := func(v any) string {
+			args = append(args, v)
+			return "$" + strconv.Itoa(len(args))
+		}
+		where := dimensionWhere(f.Dimensions, arg)
+		out.Filtered = len(f.Dimensions) > 0
+		groupExprs := ""
+		for _, attr := range f.GroupBy {
+			groupExprs += ", coalesce(d.dimensions->>" + arg(attr) + "::text, '')"
+		}
+		// The combination join is only paid for when a dimension is asked for: every
+		// balance row has a combination (NOT NULL, foreign key), so it never drops rows.
+		join, limit := "", ""
+		if where != "" || len(f.GroupBy) > 0 {
+			join = " join dimension_combination d on d.tenant_id = b.tenant_id and d.id = b.dimension_combination_id"
+		}
+		if len(f.GroupBy) > 0 {
+			out.GroupBy = f.GroupBy
+			limit = " limit " + arg(maxBalanceRows+1)
+		}
+		rows, err := tx.Query(ctx, `select a.account_number, a.name, sum(b.debit)::text, sum(b.credit)::text, sum(b.net)::text, sum(b.line_count)::bigint`+groupExprs+`
+			from balance b join main_account a on a.tenant_id = b.tenant_id and a.id = b.main_account_id`+join+`
 			where b.tenant_id = $1 and b.ledger_id = $2 and b.currency_type = 'acct'
 				and ($3::text = '' or b.period_key >= $3::text) and ($4::text = '' or b.period_key <= $4::text)
-				and ($5::text = '' or a.account_number >= $5::text) and ($6::text = '' or a.account_number <= $6::text)
-			group by a.account_number, a.name order by a.account_number`,
-			p.TenantID, f.LedgerID, f.PeriodFrom, f.PeriodTo, f.AccountFrom, f.AccountTo)
+				and ($5::text = '' or a.account_number >= $5::text) and ($6::text = '' or a.account_number <= $6::text)`+where+`
+			group by a.account_number, a.name`+groupExprs+` order by a.account_number`+groupExprs+limit,
+			args...)
 		if err != nil {
 			return err
 		}
@@ -41,10 +73,25 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 		minor := money.MinorUnits(l.Currency)
 		debit, credit, net := decimal.Zero, decimal.Zero, decimal.Zero
 		for rows.Next() {
+			if len(out.Rows) == maxBalanceRows {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeBalanceTooManyRows, fmt.Sprintf(
+					"the grouping gives more than %d rows; narrow it with an account range, a period range or a dimension filter", maxBalanceRows))
+			}
 			var r BalanceRow
 			var d, c, n string
-			if err := rows.Scan(&r.Account, &r.Name, &d, &c, &n, &r.LineCount); err != nil {
+			groupVals := make([]string, len(f.GroupBy))
+			dest := []any{&r.Account, &r.Name, &d, &c, &n, &r.LineCount}
+			for i := range groupVals {
+				dest = append(dest, &groupVals[i])
+			}
+			if err := rows.Scan(dest...); err != nil {
 				return err
+			}
+			if len(f.GroupBy) > 0 {
+				r.Dimensions = make(map[string]string, len(f.GroupBy))
+				for i, attr := range f.GroupBy {
+					r.Dimensions[attr] = groupVals[i]
+				}
 			}
 			dv, cv, nv := decimal.RequireFromString(d), decimal.RequireFromString(c), decimal.RequireFromString(n)
 			debit, credit, net = debit.Add(dv), credit.Add(cv), net.Add(nv)
@@ -59,6 +106,57 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 		return nil
 	})
 	return out, err
+}
+
+// checkBalanceAttributes refuses dimension filters and group_by attributes the
+// ledger does not define (posting refuses them too, so they could only match nothing).
+func checkBalanceAttributes(l Ledger, f BalanceFilter) error {
+	known := make(map[string]bool, len(l.DimensionAttributes))
+	for _, a := range l.DimensionAttributes {
+		known[a] = true
+	}
+	fields := map[string]string{}
+	for attr := range f.Dimensions {
+		if !known[attr] {
+			fields["dim."+attr] = "is not a dimension attribute of the ledger"
+		}
+	}
+	for _, attr := range f.GroupBy {
+		if !known[attr] {
+			fields["group_by"] = attr + " is not a dimension attribute of the ledger"
+			break
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+	p.Errors = fields
+	return p
+}
+
+// dimensionWhere renders exact dimension filters on the combination alias d:
+// values are matched by containment, an empty value means the attribute is not
+// set. Attributes and values are bind parameters only.
+func dimensionWhere(dims map[string]string, arg func(any) string) string {
+	present := map[string]string{}
+	absent := make([]string, 0, len(dims))
+	for attr, v := range dims {
+		if v == "" {
+			absent = append(absent, attr)
+		} else {
+			present[attr] = v
+		}
+	}
+	where := ""
+	if len(present) > 0 {
+		where += " and d.dimensions @> " + arg(present) + "::jsonb"
+	}
+	if len(absent) > 0 {
+		sort.Strings(absent)
+		where += " and not (d.dimensions ?| " + arg(absent) + "::text[])"
+	}
+	return where
 }
 
 // rebuiltCTE recomputes the projection from the journal for one ledger.

@@ -774,6 +774,35 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 			fields[name] = "must be a period as YYYY-MM"
 		}
 	}
+	f.Dimensions = map[string]string{}
+	for key, values := range q {
+		attr, ok := strings.CutPrefix(key, "dim.")
+		if !ok {
+			continue
+		}
+		switch {
+		case !dimAttrRe.MatchString(attr):
+			fields[key] = "the attribute must be A-Z, digits or underscore, starting with a letter"
+		case len(values) != 1 || utf8.RuneCountInString(values[0]) > 20:
+			fields[key] = "must be given once, at most 20 characters (empty: the attribute is not set)"
+		default:
+			f.Dimensions[attr] = values[0]
+		}
+	}
+	if raw := q.Get("group_by"); raw != "" {
+		seen := map[string]bool{}
+		for _, attr := range strings.Split(raw, ",") {
+			if !dimAttrRe.MatchString(attr) || seen[attr] {
+				fields["group_by"] = "must list distinct dimension attributes (A-Z, digits, underscore) separated by commas"
+				break
+			}
+			seen[attr] = true
+			f.GroupBy = append(f.GroupBy, attr)
+		}
+		if len(f.GroupBy) > store.MaxBalanceGroupBy {
+			fields["group_by"] = "must list at most 5 dimension attributes"
+		}
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return

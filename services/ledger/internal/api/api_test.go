@@ -45,6 +45,8 @@ type fakeStore struct {
 	validate domain.Result
 	reasons  []store.ReasonCode
 	created  bool
+	// balanceFilter is the last trial balance filter the handler passed down.
+	balanceFilter store.BalanceFilter
 	// putReasons records the reason codes the handlers wrote.
 	putReasons []store.ReasonCode
 	// structures and dimValues answer the structure reads; putStructures and
@@ -136,7 +138,8 @@ func (f *fakeStore) ValidateEntry(_ context.Context, in store.PostInput) (domain
 	return f.validate, f.err
 }
 
-func (f *fakeStore) TrialBalance(context.Context, store.BalanceFilter) (store.TrialBalance, error) {
+func (f *fakeStore) TrialBalance(_ context.Context, bf store.BalanceFilter) (store.TrialBalance, error) {
+	f.balanceFilter = bf
 	return store.TrialBalance{}, f.err
 }
 
@@ -611,6 +614,24 @@ func TestTrialBalance_RequiresLedgerAndPeriodFormat(t *testing.T) {
 	}
 	if rec := call(h, http.MethodGet, "/v1/ledger/balances?ledger="+testLedger+"&period_from=2026-01&period_to=2026-03", "", dutyBalanceRead, nil); rec.Code != http.StatusOK {
 		t.Fatalf("valid query: %d", rec.Code)
+	}
+}
+
+func TestTrialBalance_DimensionFilterAndGroupBy(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	base := "/v1/ledger/balances?ledger=" + testLedger
+	if rec := call(h, http.MethodGet, base+"&dim.DEPT=D100&dim.CC=&group_by=CC,DEPT", "", dutyBalanceRead, nil); rec.Code != http.StatusOK {
+		t.Fatalf("valid dimension query: %d %s", rec.Code, rec.Body.String())
+	}
+	cc, set := fs.balanceFilter.Dimensions["CC"]
+	if fs.balanceFilter.Dimensions["DEPT"] != "D100" || !set || cc != "" || strings.Join(fs.balanceFilter.GroupBy, ",") != "CC,DEPT" {
+		t.Fatalf("filter not passed to the store: %+v", fs.balanceFilter)
+	}
+	for _, q := range []string{"&dim.dept=D1", "&dim.DEPT=" + strings.Repeat("D", 21), "&dim.DEPT=D1&dim.DEPT=D2", "&group_by=CC,CC", "&group_by=cc", "&group_by=CC,", "&group_by=A,B,C,D,E,F"} {
+		if rec := call(h, http.MethodGet, base+q, "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s must be refused, got %d", q, rec.Code)
+		}
 	}
 }
 

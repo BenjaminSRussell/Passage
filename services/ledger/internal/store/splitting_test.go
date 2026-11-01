@@ -264,3 +264,30 @@ func TestPostgres_SplittingRunsBeforeValidationRules(t *testing.T) {
 		t.Fatalf("unsplit payable: %v", err)
 	}
 }
+
+// FR-11.14 with FR-11.23: the lines splitting adds carry the department, so a trial balance
+// filtered to one department is balanced and a grouping by department nets to zero per department.
+func TestPostgres_TrialBalanceByDimensionAfterSplitting(t *testing.T) {
+	e, _ := splitSetup(t)
+	if _, err := e.store.PostEntry(e.ctx, splitInvoice(e, "SP-TB")); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, Dimensions: map[string]string{"DEPT": "D100"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tb.Filtered || !tb.Balanced || tb.Debit != "714.00" || len(tb.Rows) != 3 {
+		t.Fatalf("department D100 after splitting: %+v", tb)
+	}
+	tb, err = e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, GroupBy: []string{"DEPT"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nets := map[string]decimal.Decimal{}
+	for _, r := range tb.Rows {
+		nets[r.Dimensions["DEPT"]] = nets[r.Dimensions["DEPT"]].Add(decimal.RequireFromString(r.Net))
+	}
+	if len(nets) != 2 || !nets["D100"].IsZero() || !nets["D200"].IsZero() || !tb.Balanced {
+		t.Fatalf("department nets after splitting: %v (%+v)", nets, tb)
+	}
+}

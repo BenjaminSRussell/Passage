@@ -441,10 +441,21 @@ components:
               credit: { type: string }
               net: { type: string }
               lineCount: { type: integer, format: int64 }
+              dimensions:
+                type: object
+                description: Values of the group_by attributes for this row; absent when the query is not grouped.
+                additionalProperties: { type: string }
         debit: { type: string }
         credit: { type: string }
         net: { type: string }
         balanced: { type: boolean }
+        filtered:
+          type: boolean
+          description: True when a dim.{ATTRIBUTE} filter was applied, so the totals cover part of the ledger.
+        groupBy:
+          type: array
+          description: The dimension attributes the rows are split by.
+          items: { type: string }
     RebuildResult:
       type: object
       properties:
@@ -1298,6 +1309,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
+    BalanceProblem422:
+      description: LEDGER_BALANCE_TOO_MANY_ROWS, the grouping gives more than 10,000 rows; narrow it with an account, period or dimension filter
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     BatchProblem409:
       description: LEDGER_BATCH_STATE (the batch's status does not allow the action), LEDGER_BATCH_APPROVAL_REQUIRED, or an idempotency conflict on posting
       content:
@@ -2337,7 +2353,8 @@ paths:
         (posting sequence, line number). account_from/account_to compare account numbers as text
         (inclusive); date_from/date_to bound the posting date (inclusive); voucher and source_system
         match exactly; each dim.{ATTRIBUTE}=value (for example dim.DEPT=D100) must match the line's
-        combination, all of them together (each attribute once, values 1 to 20 characters; OpenAPI
+        combination, all of them together (each attribute once, values up to 20 characters; an empty
+        value, as in dim.CC=, keeps the lines whose combination does not set the attribute; OpenAPI
         cannot declare a dotted parameter family, so dim.* parameters are described here only).
         Pages are keyset: pass nextCursor back as cursor with the
         same filters. An unknown ledger, or one outside the caller's legal-entity scope, is 404.
@@ -2374,7 +2391,16 @@ paths:
       tags: [balances]
       operationId: trialBalance
       x-passage-duty: ledger.balance.read
-      description: Trial balance per account from the balance projection, for a period range and account range.
+      summary: Trial balance by account and dimension
+      description: >-
+        Trial balance per account from the balance projection, for a period range and account range, in the
+        ledger's accounting currency. Any query parameter of the form dim.{ATTRIBUTE}=value keeps the combinations
+        that hold that value (every pair must match; each attribute once, values up to 20 characters); an empty
+        value (dim.CC=) keeps the combinations that do not set the attribute. The response is then marked filtered
+        because its totals cover part of the ledger and need not balance. Filter and group_by attributes must be
+        dimension attributes of the ledger (400 otherwise). OpenAPI cannot declare a dotted parameter family, so
+        dim.* parameters are described here only. An unknown ledger, or one outside the caller's legal-entity
+        scope, is 404.
       parameters:
         - name: ledger
           in: query
@@ -2396,6 +2422,15 @@ paths:
           in: query
           required: false
           schema: { type: string }
+        - name: group_by
+          in: query
+          required: false
+          description: >-
+            Comma-separated dimension attributes (at most 5, for example DEPT,CC) that split each account row by
+            the value of those attributes; a combination without the attribute groups under an empty value.
+            This is the account by dimension inquiry (FR-11.14). A grouping of more than 10,000 rows is refused
+            with 422 LEDGER_BALANCE_TOO_MANY_ROWS; narrow it with an account, period or dimension filter.
+          schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}(,[A-Z][A-Z0-9_]{0,19}){0,4}$' }
       responses:
         "200":
           description: Trial balance
@@ -2406,6 +2441,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+        "422": { $ref: "#/components/responses/BalanceProblem422" }
   /v1/ledger/balances:rebuild:
     post:
       tags: [ops]

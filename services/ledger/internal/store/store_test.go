@@ -460,3 +460,83 @@ func TestIdempotencyRace_MapsKeyCollisionsOnly(t *testing.T) {
 		t.Fatal("nil must stay nil")
 	}
 }
+
+func TestPostgres_TrialBalanceByDimension(t *testing.T) {
+	e, _ := setup(t)
+	february := vendorInvoice(e.ledger.ID, "D-0", "1000.00")
+	february.PostingDate = time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
+	other := vendorInvoice(e.ledger.ID, "D-3", "7.00")
+	other.Lines[0].Dimensions = map[string]string{"DEPT": "D200", "CC": "C1"}
+	for _, in := range []PostInput{february, vendorInvoice(e.ledger.ID, "D-1", "100.00"), vendorInvoice(e.ledger.ID, "D-2", "40.00"), other} {
+		if _, err := e.store.PostEntry(e.ctx, in); err != nil {
+			t.Fatalf("post %s: %v", in.Key, err)
+		}
+	}
+	march := BalanceFilter{LedgerID: e.ledger.ID, PeriodFrom: "2026-03", PeriodTo: "2026-03"}
+
+	f := march
+	f.Dimensions = map[string]string{"DEPT": "D100"}
+	tb, err := e.store.TrialBalance(e.ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tb.Filtered || len(tb.Rows) != 1 || tb.Rows[0].Account != "6010" || tb.Rows[0].Debit != "140.00" || tb.Rows[0].LineCount != 2 || tb.Balanced {
+		t.Fatalf("filtered balance: %+v", tb)
+	}
+
+	// An empty value keeps the combinations without the attribute: the payable lines carry no DEPT.
+	f.Dimensions = map[string]string{"DEPT": ""}
+	if tb, err = e.store.TrialBalance(e.ctx, f); err != nil || len(tb.Rows) != 1 || tb.Rows[0].Account != "2100" || tb.Rows[0].Credit != "147.00" {
+		t.Fatalf("filter on a missing attribute: %+v %v", tb, err)
+	}
+
+	// Grouping keeps the period range: February's 1,000 is outside March.
+	f = march
+	f.GroupBy = []string{"DEPT", "CC"}
+	if tb, err = e.store.TrialBalance(e.ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if tb.Filtered || !tb.Balanced || tb.Debit != "147.00" || tb.Credit != "147.00" || strings.Join(tb.GroupBy, ",") != "DEPT,CC" {
+		t.Fatalf("grouped totals must equal the plain trial balance: %+v", tb)
+	}
+	got := map[string]string{}
+	for _, r := range tb.Rows {
+		got[r.Account+"/"+r.Dimensions["DEPT"]+"/"+r.Dimensions["CC"]] = r.Debit + "|" + r.Credit
+	}
+	want := map[string]string{"2100//": "0.00|147.00", "6010/D100/": "140.00|0.00", "6010/D200/C1": "7.00|0.00"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("grouped rows: got %v want %v", got, want)
+	}
+	plain, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID})
+	if err != nil || plain.Debit != "1147.00" || !plain.Balanced || plain.GroupBy != nil || plain.Rows[0].Dimensions != nil {
+		t.Fatalf("plain trial balance: %+v %v", plain, err)
+	}
+
+	// Attributes the ledger does not define are refused, not answered with an empty result.
+	for _, bad := range []BalanceFilter{
+		{LedgerID: e.ledger.ID, Dimensions: map[string]string{"PROJECT": "P1"}},
+		{LedgerID: e.ledger.ID, GroupBy: []string{"DEPT", "PROJECT"}},
+	} {
+		if _, err := e.store.TrialBalance(e.ctx, bad); !isProblem(err, http.StatusBadRequest, "COM-0001") {
+			t.Fatalf("unknown attribute %+v: %v", bad, err)
+		}
+	}
+
+	// A grouping with more rows than the cap is refused rather than truncated.
+	defer func(n int) { maxBalanceRows = n }(maxBalanceRows)
+	maxBalanceRows = 2
+	f = march
+	f.GroupBy = []string{"DEPT"}
+	if _, err := e.store.TrialBalance(e.ctx, f); !isProblem(err, http.StatusUnprocessableEntity, CodeBalanceTooManyRows) {
+		t.Fatalf("grouping over the cap: %v", err)
+	}
+	f.Dimensions = map[string]string{"DEPT": "D100"}
+	if tb, err := e.store.TrialBalance(e.ctx, f); err != nil || len(tb.Rows) != 1 {
+		t.Fatalf("a narrowed grouping under the cap: %+v %v", tb, err)
+	}
+
+	// Another legal entity's caller cannot read the ledger's balances at all.
+	if _, err := e.store.TrialBalance(principalCtx(e.tenant, ids.New()), f); !isProblem(err, http.StatusNotFound, "LEDGER_NOT_FOUND") {
+		t.Fatalf("out-of-scope caller: %v", err)
+	}
+}

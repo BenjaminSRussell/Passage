@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchJournalLines, LedgerApiError, type JournalLine, type JournalLineQuery } from "./api/client";
-import { parseDimensions } from "./BatchLinesEditor";
+import { parseDimensionFilter } from "./BatchLinesEditor";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
 
@@ -56,14 +56,14 @@ export function validateLineFilter(d: Draft): Partial<Record<keyof Draft, string
   if (d.dateTo && !DATE.test(d.dateTo)) e.dateTo = "Dates use the form YYYY-MM-DD.";
   if (!e.dateFrom && !e.dateTo && d.dateFrom && d.dateTo && d.dateTo < d.dateFrom) e.dateTo = "Must not be before Posting date from.";
   if (d.voucher.length > 30) e.voucher = "Vouchers are at most 30 characters.";
-  if (parseDimensions(d.dimensions) === null) e.dimensions = "Use ATTRIBUTE=value pairs separated by commas, such as DEPT=D100, CC=C1.";
+  if (parseDimensionFilter(d.dimensions) === null) e.dimensions = "Use ATTRIBUTE=value pairs separated by commas, such as DEPT=D100, CC=C1.";
   return e;
 }
 
 /** The API query for the filters in the address, or null while they are missing or invalid. */
 function queryFrom(d: Draft): JournalLineQuery | null {
   if (Object.keys(validateLineFilter(d)).length > 0) return null;
-  const dims = parseDimensions(d.dimensions) ?? {};
+  const dims = parseDimensionFilter(d.dimensions) ?? {};
   return {
     ledgerId: d.ledgerId.trim(),
     accountFrom: d.accountFrom || undefined,
@@ -175,7 +175,7 @@ export function LedgerLinesPage() {
           {field("dateFrom", "lq-date-from", "Posting date from", { optional: true, placeholder: "2026-01-01" })}
           {field("dateTo", "lq-date-to", "Posting date to", { optional: true, placeholder: "2026-01-31" })}
           {field("voucher", "lq-voucher", "Voucher", { optional: true, mono: true })}
-          {field("dimensions", "lq-dims", "Dimension values", { optional: true, hint: "For example DEPT=D100, CC=C1. Every pair must match.", mono: true })}
+          {field("dimensions", "lq-dims", "Dimension values", { optional: true, hint: "For example DEPT=D100, CC=C1. Every pair must match; an empty value (CC=) keeps lines without that attribute.", mono: true })}
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">
               Show lines
