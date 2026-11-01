@@ -311,3 +311,60 @@ func TestRegisterBatch_OrderLinkAndLegalEntityWrites(t *testing.T) {
 		t.Fatalf("%d batches stored, want 1 (err %v)", n, err)
 	}
 }
+
+// PickCandidates reads the disposition, expiry and current attribute values of
+// the stored batches, in the order asked, and the item's potency attribute.
+func TestPickCandidates_ReadsRegisterState(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	item, other := ids.New(), ids.New()
+	lo, hi := dec("40"), dec("60")
+	if _, _, err := s.DefineAttribute(ctx, store.AttributeDefinition{ItemID: item, Name: "assay", Kind: "numeric", Role: "potency", Min: &lo, Max: &hi}, store.Idem{Key: "pc-def", Fingerprint: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.DefineAttribute(ctx, store.AttributeDefinition{ItemID: item, Name: "expiry", Kind: "date"}, store.Idem{Key: "pc-def2", Fingerprint: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	a, b := register(t, s, item, "PC-1"), register(t, s, item, "PC-2")
+	foreign := register(t, s, other, "PC-9")
+	exp := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	if _, _, err := s.RecordAttributes(ctx, a.ID, map[string]domain.Value{"assay": num("52"), "expiry": {Date: &exp}}, 1, store.Idem{Key: "pc-rec", Fingerprint: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ChangeDisposition(ctx, b.ID, "on-hold", "awaiting retest", 1, store.Idem{Key: "pc-hold", Fingerprint: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	got, potency, err := s.PickCandidates(ctx, item, []store.OnHand{{BatchID: b.ID, Qty: dec("7")}, {BatchID: a.ID, Qty: dec("40")}})
+	if err != nil || potency != "assay" || len(got) != 2 {
+		t.Fatalf("got %+v potency %q err=%v", got, potency, err)
+	}
+	if got[0].Batch.ID != b.ID || got[0].BatchNumber != "PC-2" || got[0].Batch.Disposition != "on-hold" || got[0].Batch.Qty.String() != "7" {
+		t.Fatalf("first %+v", got[0])
+	}
+	v := got[1].Batch.Values
+	if got[1].Batch.Disposition != "available" || v["assay"].Num == nil || v["assay"].Num.String() != "52" || v["expiry"].Date == nil || !v["expiry"].Date.Equal(exp) {
+		t.Fatalf("second %+v", got[1])
+	}
+	if _, _, err := s.PickCandidates(ctx, item, []store.OnHand{{BatchID: foreign.ID, Qty: dec("1")}}); problemCode(err) != domain.CodeInvalid {
+		t.Fatalf("batch of another item: %v", err)
+	}
+	if _, _, err := s.PickCandidates(ctx, item, []store.OnHand{{BatchID: ids.New(), Qty: dec("1")}}); problemCode(err) != store.CodeBatchNotFound {
+		t.Fatalf("unknown batch: %v", err)
+	}
+	if _, _, err := s.PickCandidates(ctxFor(2, ""), item, []store.OnHand{{BatchID: a.ID, Qty: dec("1")}}); problemCode(err) != store.CodeBatchNotFound {
+		t.Fatalf("tenant 2: %v", err)
+	}
+	if _, _, err := s.PickCandidates(ctxFor(1, entityB), item, []store.OnHand{{BatchID: a.ID, Qty: dec("1")}}); problemCode(err) != store.CodeBatchNotFound {
+		t.Fatalf("other legal entity: %v", err)
+	}
+	if _, p, err := s.PickCandidates(ctx, other, nil); err != nil || p != "" {
+		t.Fatalf("item without potency attribute: %q %v", p, err)
+	}
+	// Only registered batches in the caller's scope are reported.
+	if got, err := s.RegisteredBatches(ctx, []string{b.ID, ids.New()}); err != nil || len(got) != 1 || got[0] != b.ID {
+		t.Fatalf("registered: %v %v", got, err)
+	}
+	if got, err := s.RegisteredBatches(ctxFor(1, entityB), []string{b.ID}); err != nil || len(got) != 0 {
+		t.Fatalf("registered, other legal entity: %v %v", got, err)
+	}
+}

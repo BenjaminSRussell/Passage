@@ -474,6 +474,20 @@ export interface PickingResult {
   overrideHeld: boolean;
 }
 
+export interface StoredPickingRequest {
+  itemId: string;
+  postingDate: string;
+  qty: string;
+  /** The attribute defaults to the item's potency attribute. */
+  potency?: { attribute?: string; min: string; max: string };
+  overrideReason?: string;
+  onHand: { batchId: string; qty: string }[];
+}
+
+export interface StoredPickingResult extends PickingResult {
+  batchNumbers: Record<string, string>;
+}
+
 export const REWORK_OUTPUT_DISPOSITIONS = ["quarantine", "on-hold", "available"] as const;
 export type ReworkOutputDisposition = (typeof REWORK_OUTPUT_DISPOSITIONS)[number];
 
@@ -501,6 +515,11 @@ export function checkAttributes(req: AttributesRequest): Promise<AttributesResul
 
 export function proposePicking(req: PickingRequest): Promise<PickingResult> {
   return post<PickingResult>("/batch-picking:proposal", req);
+}
+
+/** Picking from the stored batch register: disposition, expiry and potency are read, not sent. */
+export function proposeStoredPicking(req: StoredPickingRequest): Promise<StoredPickingResult> {
+  return post<StoredPickingResult>("/batch-picking:propose-stored", req);
 }
 
 export function previewRework(req: ReworkRequest): Promise<ReworkResult> {

@@ -150,6 +150,8 @@ type Store interface {
 	GetBatch(ctx context.Context, id string) (Batch, error)
 	RecordAttributes(ctx context.Context, id string, values map[string]domain.Value, version int, idem Idem) (AttributesResult, bool, error)
 	ChangeDisposition(ctx context.Context, id, to, reason string, version int, idem Idem) (Batch, bool, error)
+	PickCandidates(ctx context.Context, itemID string, onHand []OnHand) ([]PickCandidate, string, error)
+	RegisteredBatches(ctx context.Context, batchIDs []string) ([]string, error)
 	Ping(ctx context.Context) error
 }
 

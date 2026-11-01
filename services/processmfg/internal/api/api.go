@@ -88,7 +88,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCoProductAllocate)).Post("/v1/production/co-products:allocate", handle(allocateCoProducts))
 	a.registerBatchRecords(r)
 	registerBatches(r)
-	registerQuality(r)
+	a.registerQuality(r)
+	a.registerPickStored(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

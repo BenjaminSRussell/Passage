@@ -53,6 +53,11 @@ type fakeStore struct {
 	gotReason  string
 	gotItem    string
 	gotBatches store.BatchFilter
+	gotOnHand  []store.OnHand
+	cands      []store.PickCandidate
+	potency    string
+	registered []string
+	gotIDs     []string
 }
 
 func (f *fakeStore) CreateFormula(_ context.Context, in store.Formula, idem store.Idem) (store.Formula, bool, error) {
@@ -454,4 +459,25 @@ func TestCreateBatchOrder_RefusesACallerWithNoLegalEntityScope(t *testing.T) {
 	if rec.Code != http.StatusForbidden || problemOf(t, rec).Code != "AUTH-0003" || fs.gotOrder.FormulaID != "" {
 		t.Fatalf("no scope: %d %s", rec.Code, rec.Body)
 	}
+}
+
+func (f *fakeStore) PickCandidates(_ context.Context, itemID string, onHand []store.OnHand) ([]store.PickCandidate, string, error) {
+	f.gotItem = itemID
+	f.gotOnHand = onHand
+	want := map[string]bool{}
+	for _, oh := range onHand {
+		want[oh.BatchID] = true
+	}
+	var out []store.PickCandidate
+	for _, c := range f.cands {
+		if want[c.Batch.ID] {
+			out = append(out, c)
+		}
+	}
+	return out, f.potency, f.err
+}
+
+func (f *fakeStore) RegisteredBatches(_ context.Context, batchIDs []string) ([]string, error) {
+	f.gotIDs = batchIDs
+	return f.registered, f.err
 }

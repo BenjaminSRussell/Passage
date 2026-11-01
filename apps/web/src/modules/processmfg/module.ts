@@ -7,12 +7,13 @@ import { ApprovalCheckPage, ConsolidationPage, DerivationPage, MergePage, Requir
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
 import { FormulaDetailPage, FormulasPage, NewFormulaPage } from "./FormulaPages";
 import { ProcessHome } from "./pages";
+import { StoredPickingPage } from "./StoredPickingPage";
 
 const processmfg: PassageModule = {
   id: "processmfg",
   title: "Process manufacturing",
   description:
-    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking and rework, and the batch quality record with its disposition history.",
+    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking (from typed or stored batches) and rework, and the batch quality record with its disposition history.",
   routes: [
     { path: "/processmfg", element: createElement(ProcessHome), handle: { title: "Process manufacturing" } },
     { path: "/processmfg/formulas", element: createElement(FormulasPage), handle: { title: "Formulas" } },
@@ -34,6 +35,7 @@ const processmfg: PassageModule = {
     { path: "/processmfg/batch-record-check", element: createElement(ApprovalCheckPage), handle: { title: "Batch record approval check" } },
     { path: "/processmfg/batch-attributes", element: createElement(BatchAttributesPage), handle: { title: "Batch attributes" } },
     { path: "/processmfg/picking", element: createElement(PickingPage), handle: { title: "Batch picking" } },
+    { path: "/processmfg/picking-stored", element: createElement(StoredPickingPage), handle: { title: "Pick from stored batches" } },
     { path: "/processmfg/rework", element: createElement(ReworkPage), handle: { title: "Rework batch order" } },
   ],
   nav: [
@@ -51,6 +53,7 @@ const processmfg: PassageModule = {
     { label: "Batch record approval", to: "/processmfg/batch-record-check", duty: "production.batch-record.approve" },
     { label: "Batch attributes", to: "/processmfg/batch-attributes", duty: "production.batch-attribute.write" },
     { label: "Batch picking", to: "/processmfg/picking", duty: "production.batch-order.read" },
+    { label: "Pick from stored batches", to: "/processmfg/picking-stored", duty: "production.batch-order.read" },
     { label: "Rework", to: "/processmfg/rework", duty: "production.batch-order.write" },
   ],
 };

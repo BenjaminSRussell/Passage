@@ -279,7 +279,7 @@ export function PickingPage({ propose = defaultProposePicking }: { propose?: (re
     <div className={styles.stack}>
       <PageHeader
         title="Batch picking"
-        description="Propose the batches a line consumes: only available batches, the one expiring first first, and potency inside the line's band. Expired batches are used only with the Consume expired batch duty and a stated reason."
+        description="Propose the batches a line consumes: only available batches, the one expiring first first, and potency inside the line's band. Expired batches are used only with the Consume expired batch duty and a stated reason. This is a what-if over batches you describe; a batch in the batch register is refused here, so pick it from stored batches."
       />
       <form className={styles.stack} onSubmit={submit} noValidate>
         <Card title="Line">

@@ -452,7 +452,10 @@ paths:
         Excluded batches carry their code: PMF-0016 for a disposition other than available (AC-24.10), PMF-0003
         (BATCH_EXPIRED) for an expiry before the posting date (AC-24.4), PMF-0005 for potency outside the band or not
         recorded. Expired batches are eligible only when the caller holds production.batch.consume-expired and gives
-        overrideReason (at least 10 characters, else 400); they are flagged expiredOverride. Stores nothing.
+        overrideReason (at least 10 characters, else 400); they are flagged expiredOverride. Stores nothing. This is a
+        what-if preview for batches that are not in the batch register: a batch id the register holds in the caller's
+        scope is refused with 409 PMF-0112, because its disposition and expiry are on record; propose it with
+        batch-picking:propose-stored.
       x-passage-duty: production.batch-order.read
       requestBody:
         required: true
@@ -462,6 +465,33 @@ paths:
           description: The picked batches with the quantity taken from each, the excluded batches and the shortfall.
           content: { application/json: { schema: { $ref: '#/components/schemas/PickingResponse' } } }
         '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: A listed batch is in the batch register (PMF-0112); use batch-picking:propose-stored.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-picking:propose-stored:
+    post:
+      operationId: proposeStoredBatchPicking
+      summary: Propose the batches a line consumes from the stored batch register (FR-24.3, FR-24.5, FR-24.6)
+      description: >-
+        The same rules and codes as batch-picking:proposal (PMF-0016, PMF-0003, PMF-0005, the consume-expired override
+        of BR-24.10), but the disposition, expiry date and current attribute values of each batch are read from the
+        batch quality record, so a batch put on hold or past its expiry cannot be picked by leaving that out. The
+        register keeps no quantity, so the caller passes the on-hand quantity per batch. The potency attribute
+        defaults to the item's potency attribute. A batch that does not exist in the caller's scope is 404 PMF-0108;
+        a batch of another item is 400. Stores nothing.
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StoredPickingRequest' } } }
+      responses:
+        '200':
+          description: The picked batches, the excluded batches with their codes, the shortfall and the batch numbers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/StoredPickingResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: A listed batch does not exist (PMF-0108).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/production/rework-orders:preview:
     post:
@@ -1280,6 +1310,40 @@ components:
               detail: { type: string }
         shortfall: { $ref: '#/components/schemas/Decimal' }
         overrideHeld: { type: boolean }
+    StoredPickingRequest:
+      type: object
+      required: [itemId, postingDate, qty, onHand]
+      properties:
+        itemId: { type: string, format: uuid }
+        postingDate: { type: string, format: date }
+        qty: { $ref: '#/components/schemas/Quantity' }
+        potency:
+          type: object
+          required: [min, max]
+          properties:
+            attribute: { type: string, minLength: 1, maxLength: 40, description: Defaults to the item's potency attribute. }
+            min: { $ref: '#/components/schemas/Decimal' }
+            max: { $ref: '#/components/schemas/Decimal' }
+        overrideReason: { type: string, maxLength: 500, description: Audit reason for consuming expired batches (BR-24.10). }
+        onHand:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [batchId, qty]
+            properties:
+              batchId: { type: string, format: uuid }
+              qty: { $ref: '#/components/schemas/Decimal' }
+    StoredPickingResponse:
+      allOf:
+        - $ref: '#/components/schemas/PickingResponse'
+        - type: object
+          properties:
+            batchNumbers:
+              type: object
+              additionalProperties: { type: string }
+              description: Batch number of each listed batch id.
     ReworkRequest:
       type: object
       required: [batch, reworkQty, outputQty]

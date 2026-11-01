@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/domain"
 )
@@ -24,13 +26,18 @@ const (
 	maxReasonLen   = 500
 )
 
+// CodeBatchRegistered refuses the caller-supplied picking proposal for a batch
+// the batch register holds: its disposition and expiry are on record, so it is
+// proposed with batch-picking:propose-stored (not in the PRD catalog).
+const CodeBatchRegistered = "PMF-0112"
+
 // registerQuality mounts the slice-3 previews: the attribute check (FR-24.5),
 // the picking proposal (FR-24.3, FR-24.5, FR-24.6, BR-24.10) and the rework
-// plan (FR-24.18). Like slice 2 they store nothing until the wave-16 batch
-// store exists (see NOT-IMPLEMENTED.md).
-func registerQuality(r chi.Router) {
+// plan (FR-24.18). They store nothing; the picking proposal over the stored
+// batch register is pickstored.go.
+func (a *API) registerQuality(r chi.Router) {
 	r.With(authz.RequireDuty(DutyBatchAttributeWrite)).Post("/v1/production/batch-attributes:check", handle(checkAttributes))
-	r.With(authz.RequireDuty(DutyRead)).Post("/v1/production/batch-picking:proposal", proposePicking)
+	r.With(authz.RequireDuty(DutyRead)).Post("/v1/production/batch-picking:proposal", a.proposePicking)
 	r.With(authz.RequireDuty(DutyBatchOrderWrite)).Post("/v1/production/rework-orders:preview", handle(previewRework))
 }
 
@@ -151,20 +158,35 @@ type pickingResponse struct {
 }
 
 // proposePicking proposes the batches a line consumes (FR-24.3, FR-24.5,
-// FR-24.6): available batches only (on-hold, quarantine and rejected are
-// excluded with PMF-0016, AC-24.10), expiry first, potency inside the line's
-// band (PMF-0005), and expired batches excluded with PMF-0003 (AC-24.4) unless
-// the caller holds "Consume expired batch" and gives a reason of at least ten
-// characters (BR-24.10). Batches picked on the override are flagged, because
-// each override is an EBR exception (BR-24.15).
-func proposePicking(w http.ResponseWriter, r *http.Request) {
+// FR-24.6) from batches the caller describes: available batches only
+// (on-hold, quarantine and rejected are excluded with PMF-0016, AC-24.10),
+// expiry first, potency inside the line's band (PMF-0005), and expired
+// batches excluded with PMF-0003 (AC-24.4) unless the caller holds "Consume
+// expired batch" and gives a reason of at least ten characters (BR-24.10).
+// Batches picked on the override are flagged, because each override is an EBR
+// exception (BR-24.15). It is a what-if preview for batches that are not in
+// the batch register: a registered batch is refused with PMF-0112, so its
+// stored hold or expiry cannot be bypassed by restating it here.
+func (a *API) proposePicking(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
 	var in pickingRequest
 	if err := httpx.Decode(r, &in); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	batches, err := toBatches(in.Batches)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	if err := a.refuseRegistered(r.Context(), batches); err != nil {
+		fail(w, r, err)
+		return
+	}
 	p, _ := tenant.FromContext(r.Context())
-	out, err := pick(in, p.HasDuty(DutyConsumeExpired))
+	out, err := pickBatches(in, batches, p.HasDuty(DutyConsumeExpired))
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -172,7 +194,29 @@ func proposePicking(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-func pick(in pickingRequest, dutyHeld bool) (pickingResponse, error) {
+// refuseRegistered fails with PMF-0112 when any batch id is a batch of the
+// register in the caller's scope.
+func (a *API) refuseRegistered(ctx context.Context, batches []domain.Batch) error {
+	uuids := make([]string, 0, len(batches))
+	for _, b := range batches {
+		if id, ok := ids.Canonical(b.ID); ok {
+			uuids = append(uuids, id)
+		}
+	}
+	if len(uuids) == 0 {
+		return nil
+	}
+	found, err := a.store.RegisteredBatches(ctx, uuids)
+	if err != nil || len(found) == 0 {
+		return err
+	}
+	return httpx.NewProblem(http.StatusConflict, CodeBatchRegistered, fmt.Sprintf(
+		"batch %s is in the batch register; propose it with batch-picking:propose-stored so its stored disposition, expiry and attributes apply", found[0]))
+}
+
+// pickBatches applies the picking rules to batches already converted, whether
+// the caller passed them in or they were read from the batch register.
+func pickBatches(in pickingRequest, batches []domain.Batch, dutyHeld bool) (pickingResponse, error) {
 	posting, err := parseDate("postingDate", in.PostingDate)
 	if err != nil {
 		return pickingResponse{}, err
@@ -197,10 +241,6 @@ func pick(in pickingRequest, dutyHeld bool) (pickingResponse, error) {
 			return pickingResponse{}, invalidf("potency.min must not exceed potency.max")
 		}
 		line.Potency = &domain.PotencyBand{Attribute: b.Attribute, Min: b.Min, Max: b.Max}
-	}
-	batches, err := toBatches(in.Batches)
-	if err != nil {
-		return pickingResponse{}, err
 	}
 	// The override needs both the duty and a stated reason; a reason without
 	// the duty changes nothing, and expired batches stay excluded (PMF-0003).

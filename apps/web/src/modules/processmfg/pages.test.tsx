@@ -125,7 +125,7 @@ describe("processmfg module", () => {
     const { container } = renderAt("/processmfg");
     const areas = screen.getByRole("list", { name: "Process manufacturing areas" });
     expect(within(areas).getByRole("link", { name: "Open batch orders" })).toHaveAttribute("href", "/processmfg/batch-orders");
-    expect(within(areas).getAllByRole("link")).toHaveLength(14);
+    expect(within(areas).getAllByRole("link")).toHaveLength(15);
     expect(within(areas).getByRole("link", { name: "Open bulk consolidation" })).toHaveAttribute("href", "/processmfg/consolidation");
     expect(pageViolations(container)).toEqual([]);
   });

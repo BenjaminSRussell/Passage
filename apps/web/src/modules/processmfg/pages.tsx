@@ -16,6 +16,7 @@ const AREAS = [
   { to: "/processmfg/batch-record-check", title: "Batch record approval check", text: "Whether every review exception is dispositioned and signed (BR-24.15)." },
   { to: "/processmfg/batch-attributes", title: "Batch attributes", text: "Recorded values checked against the item's attribute definitions; values outside limits are flagged (FR-24.5)." },
   { to: "/processmfg/picking", title: "Batch picking", text: "Which batches a line consumes: disposition, expiry with the override, potency band, first expiry first (FR-24.6)." },
+  { to: "/processmfg/picking-stored", title: "Pick from stored batches", text: "The same picking rules over the batches of an item, with disposition, expiry and potency read from the batch register (FR-24.3, FR-24.5)." },
   { to: "/processmfg/rework", title: "Rework batch order", text: "The plan for reworking a batch: output batch, disposition, quality order and cost (FR-24.18)." },
 ];
 

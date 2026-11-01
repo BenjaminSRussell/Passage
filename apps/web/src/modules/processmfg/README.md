@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 to 3, 9 and 11)
+# processmfg web module (PSG-24 slices 1 to 3, 9, 11 and 12)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -26,7 +26,8 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/consolidation` | Bulk consolidation preview: bulk/pack relation and packed orders; bulk orders with the packing orders pegged to each (FR-24.17, BR-24.12) | `POST /api/v1/production/bulk-consolidation:preview` | `production.batch-order.write` |
 | `/processmfg/batch-record-check` | Batch record approval check: exceptions with disposition and signature; PMF-0014 while any is open (BR-24.15) | `POST /api/v1/production/batch-records:approve-check` | `production.batch-record.approve` |
 | `/processmfg/batch-attributes` | Batch attribute check: definitions (kind, min/max, enum options) with the recorded value; results with values outside limits flagged and counted as exceptions (FR-24.5) | `POST /api/v1/production/batch-attributes:check` | `production.batch-attribute.write` |
-| `/processmfg/picking` | Batch picking proposal: line (posting date, quantity, potency band, override reason) and candidate batches; picked batches FEFO with overridden ones flagged, excluded batches with PMF-0003, PMF-0005 or PMF-0016, shortfall, and a warning when the override duty is missing (FR-24.3, FR-24.5, FR-24.6, BR-24.10) | `POST /api/v1/production/batch-picking:proposal` | `production.batch-order.read` (override: `production.batch.consume-expired`) |
+| `/processmfg/picking` | Batch picking proposal: line (posting date, quantity, potency band, override reason) and candidate batches; picked batches FEFO with overridden ones flagged, excluded batches with PMF-0003, PMF-0005 or PMF-0016, shortfall, and a warning when the override duty is missing (FR-24.3, FR-24.5, FR-24.6, BR-24.10); a what-if for unregistered batches, since a batch of the register is refused with PMF-0112 | `POST /api/v1/production/batch-picking:proposal` | `production.batch-order.read` (override: `production.batch.consume-expired`) |
+| `/processmfg/picking-stored` | Pick from stored batches: item id lists its registered batches (loading, empty, error with retry), an on-hand quantity per batch, line quantity, optional potency band (the item's potency attribute) and override reason; picked batches by batch number, excluded batches with PMF-0003, PMF-0005 or PMF-0016, shortfall (FR-24.3, FR-24.6, AC-24.10) | `GET /batches?itemId=`, `POST /api/v1/production/batch-picking:propose-stored` | `production.batch-order.read` (override: `production.batch.consume-expired`) |
 | `/processmfg/rework` | Rework batch order plan: batch, quantity to rework, expected output and the FR-24.18 parameters; output batch, disposition, quality order, cost treatment and genealogy (AC-24.18) | `POST /api/v1/production/rework-orders:preview` | `production.batch-order.write` |
 
 Every command sends an `Idempotency-Key`, kept for the life of the form so a retried submit
