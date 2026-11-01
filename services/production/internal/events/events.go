@@ -156,6 +156,8 @@ type OrderCreatedData struct {
 	DeliveryDate *string `json:"deliveryDate"`
 	OriginType   string  `json:"originType"`
 	OriginID     *string `json:"originId"`
+	// ConfigurationID is the saved configuration of a SalesOrderLine order; null otherwise.
+	ConfigurationID *string `json:"configurationId"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20); null otherwise.
 	ReworkReference *ReworkReference `json:"reworkReference"`
 }

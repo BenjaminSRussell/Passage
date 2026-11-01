@@ -33,17 +33,18 @@ import (
 
 // Duties checked on the routes (PRD 4.21.17). Bundles and OPA data live in policies/ (wave 2).
 const (
-	DutyRead        = "production.order.read"           // View production orders
-	DutyWrite       = "production.order.write"          // Maintain production orders
-	DutyRelease     = "production.order.release"        // Release production orders
-	DutyJournalPost = "production.journal.post"         // Post production journals (report as finished)
-	DutyEnd         = "production.order.end"            // End production orders
-	DutyZeroOutput  = "production.order.zero-output"    // End production order with zero output
-	DutyCostRead    = "production.cost.read"            // View production costs
-	DutyOverConsume = "production.journal.over-consume" // Post production over-consumption
-	DutySetupRead   = "production.setup.read"           // View production setup
-	DutySetupWrite  = "production.setup.write"          // Maintain production setup
-	DutyRework      = "production.order.rework"         // Create rework orders (FR-21.20)
+	DutyRead            = "production.order.read"              // View production orders
+	DutyWrite           = "production.order.write"             // Maintain production orders
+	DutyRelease         = "production.order.release"           // Release production orders
+	DutyJournalPost     = "production.journal.post"            // Post production journals (report as finished)
+	DutyEnd             = "production.order.end"               // End production orders
+	DutyZeroOutput      = "production.order.zero-output"       // End production order with zero output
+	DutyCostRead        = "production.cost.read"               // View production costs
+	DutyOverConsume     = "production.journal.over-consume"    // Post production over-consumption
+	DutySetupRead       = "production.setup.read"              // View production setup
+	DutySetupWrite      = "production.setup.write"             // Maintain production setup
+	DutyRework          = "production.order.rework"            // Create rework orders (FR-21.20)
+	DutyCreateFromSales = "production.order.create-from-sales" // Create the order of a configured sales order line
 )
 
 const (
@@ -119,6 +120,7 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders", a.listOrders)
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/orders", a.createOrder)
+	r.With(authz.RequireDuty(DutyCreateFromSales)).Post("/v1/production/sales-line-orders", a.createFromSalesLine)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:bulk-status", a.bulkStatus)
 	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:merge", a.merge)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}", a.getOrder)
@@ -185,18 +187,20 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 // ---- create ----
 
 type createRequest struct {
-	LegalEntityID string                `json:"legalEntityId"`
-	ProductID     string                `json:"productId"`
-	SiteID        string                `json:"siteId"`
-	WarehouseID   string                `json:"warehouseId"`
-	ItemGroup     string                `json:"itemGroup"`
-	Currency      string                `json:"currency"`
-	Quantity      decimal.Decimal       `json:"quantity"`
-	DeliveryDate  *string               `json:"deliveryDate"`
-	OriginType    string                `json:"originType"`
-	OriginID      *string               `json:"originId"`
-	BOM           []domain.BOMComponent `json:"bom"`
-	Operations    []domain.Operation    `json:"operations"`
+	LegalEntityID string          `json:"legalEntityId"`
+	ProductID     string          `json:"productId"`
+	SiteID        string          `json:"siteId"`
+	WarehouseID   string          `json:"warehouseId"`
+	ItemGroup     string          `json:"itemGroup"`
+	Currency      string          `json:"currency"`
+	Quantity      decimal.Decimal `json:"quantity"`
+	DeliveryDate  *string         `json:"deliveryDate"`
+	OriginType    string          `json:"originType"`
+	OriginID      *string         `json:"originId"`
+	// ConfigurationID is the saved configuration a SalesOrderLine order is built to.
+	ConfigurationID *string               `json:"configurationId,omitempty"`
+	BOM             []domain.BOMComponent `json:"bom"`
+	Operations      []domain.Operation    `json:"operations"`
 	// ReworkReference names the original order, batch or serial of a rework
 	// order (FR-21.20); it implies originType Rework.
 	ReworkReference *domain.ReworkRef `json:"reworkReference"`
@@ -235,7 +239,15 @@ func quantityRules(minimum, maximum, multiple *decimal.Decimal, fields map[strin
 		Multiple: setting("multiple", multiple)}
 }
 
-func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
+func (a *API) createOrder(w http.ResponseWriter, r *http.Request) { a.create(w, r, false) }
+
+// createFromSalesLine creates the order of one configured sales order line:
+// originType SalesOrderLine, originId the line and configurationId the saved
+// configuration. The BOM and route are resolved from the configuration later (wave 9),
+// so no operations are required. The call is idempotent per line.
+func (a *API) createFromSalesLine(w http.ResponseWriter, r *http.Request) { a.create(w, r, true) }
+
+func (a *API) create(w http.ResponseWriter, r *http.Request, fromSalesLine bool) {
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -248,6 +260,9 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	if req.LegalEntityID == "" {
 		req.LegalEntityID = p.LegalEntityID
 	}
+	if fromSalesLine {
+		req.OriginType = domain.OriginSalesLine
+	}
 	if req.OriginType == "" {
 		req.OriginType = "Manual"
 		if req.ReworkReference != nil {
@@ -256,6 +271,16 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
+	if fromSalesLine && len(req.Operations) == 0 {
+		delete(fields, "operations")
+	}
+	if !fromSalesLine && (req.OriginType == domain.OriginSalesLine || req.ConfigurationID != nil) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "originType SalesOrderLine and configurationId are created only through /v1/production/sales-line-orders with "+DutyCreateFromSales))
+		return
+	}
+	if fromSalesLine && req.ConfigurationID == nil {
+		fields["configurationId"] = "is required"
+	}
 	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
 	if ids.Valid(req.LegalEntityID) && !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
@@ -299,7 +324,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
-		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
+		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID, ConfigurationID: req.ConfigurationID,
 		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
 	})
@@ -696,6 +721,16 @@ func validateCreate(req createRequest, fields map[string]string) {
 	}
 	if req.OriginID != nil && !ids.Valid(*req.OriginID) {
 		fields["originId"] = "must be a UUID"
+	}
+	if req.OriginType == domain.OriginSalesLine && req.OriginID == nil {
+		fields["originId"] = "is required for originType SalesOrderLine"
+	}
+	switch {
+	case req.ConfigurationID == nil:
+	case req.OriginType != domain.OriginSalesLine:
+		fields["configurationId"] = "is accepted only on a sales order line order (originType SalesOrderLine)"
+	case !ids.Valid(*req.ConfigurationID):
+		fields["configurationId"] = "must be a UUID"
 	}
 	if req.DeliveryDate != nil && !isDate(*req.DeliveryDate) {
 		fields["deliveryDate"] = "must be a date (YYYY-MM-DD)"

@@ -130,6 +130,19 @@ paths:
       responses:
         '200': { description: Feasible assignment. }
         '422': { description: Infeasible; IIS listed. }
+  /v1/product/saved-configurations/{id}:
+    get:
+      operationId: getSavedConfiguration
+      x-passage-duty: product.configuration.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: productId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The saved configuration, its model's master product and whether productId is that master or one of its variants.
+          content: { application/json: { schema: { type: object, required: [id, modelId, masterId, status, belongsToProduct], properties: { id: { type: string }, modelId: { type: string }, masterId: { type: string }, status: { type: string }, belongsToProduct: { type: boolean } } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PRD-CONFIGURATION-NOT-FOUND: no saved configuration with this id in the tenant.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/uom/convert:
     get:
       operationId: convertUnit

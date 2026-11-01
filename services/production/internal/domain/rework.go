@@ -9,6 +9,9 @@ import (
 // OriginRework is the origin type of a rework order (FR-21.20).
 const OriginRework = "Rework"
 
+// OriginSalesLine is the origin type of the order built for a configured sales order line.
+const OriginSalesLine = "SalesOrderLine"
+
 // CodeReworkReference is raised when a rework order's reference does not name
 // an order of the same product with enough reported output.
 const CodeReworkReference = "PRODUCTION_REWORK_REFERENCE_INVALID"
