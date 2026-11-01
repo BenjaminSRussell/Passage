@@ -78,7 +78,7 @@ func TestTransferThroughTransitWithShortClose(t *testing.T) {
 	}
 	wantStock(t, s, ctx, product, "W1", "100", "200")
 
-	shipped, err := s.ShipTransfer(ctx, o.ID, o.Version, shipDay, domain.NegativePolicy{})
+	shipped, err := s.ShipTransfer(ctx, o.ID, o.Version, nil, shipDay, domain.NegativePolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +87,8 @@ func TestTransferThroughTransitWithShortClose(t *testing.T) {
 	}
 	wantStock(t, s, ctx, product, "W1", "0", "0")
 	wantStock(t, s, ctx, product, "T1", "100", "200")
-	if _, err := s.ShipTransfer(ctx, o.ID, shipped.Version, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeTransferState {
-		t.Fatalf("ship twice: %v, want %s", err, domain.CodeTransferState)
+	if _, err := s.ShipTransfer(ctx, o.ID, shipped.Version, nil, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeTransferShipQty {
+		t.Fatalf("ship twice: %v, want %s", err, domain.CodeTransferShipQty)
 	}
 	if _, err := s.CancelTransfer(ctx, o.ID, shipped.Version); problemCode(err) != domain.CodeTransferCancel {
 		t.Fatalf("cancel in transit: %v, want %s", err, domain.CodeTransferCancel)
@@ -169,7 +169,7 @@ func TestOneStepTransferAndOverDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	one, err = s.ShipTransfer(ctx, one.ID, one.Version, shipDay, domain.NegativePolicy{})
+	one, err = s.ShipTransfer(ctx, one.ID, one.Version, nil, shipDay, domain.NegativePolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestOneStepTransferAndOverDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, err = s.ShipTransfer(ctx, two.ID, two.Version, shipDay, domain.NegativePolicy{})
+	two, err = s.ShipTransfer(ctx, two.ID, two.Version, nil, shipDay, domain.NegativePolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestTransferShipRespectsAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ShipTransfer(ctx, o.ID, o.Version, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeNegativePhysical {
+	if _, err := s.ShipTransfer(ctx, o.ID, o.Version, nil, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeNegativePhysical {
 		t.Fatalf("ship beyond available: %v, want %s", err, domain.CodeNegativePhysical)
 	}
 	again, err := s.GetTransfer(ctx, o.ID)
@@ -245,7 +245,7 @@ func TestTransferShipRespectsAvailability(t *testing.T) {
 	if outboxCount(t, admin, "dev.passage.inventory.transfer.shipped.v1") != 0 {
 		t.Fatal("a refused shipment emitted an event")
 	}
-	if _, err := s.ShipTransfer(ctx, o.ID, o.Version, shipDay, domain.NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}); err != nil {
+	if _, err := s.ShipTransfer(ctx, o.ID, o.Version, nil, shipDay, domain.NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}); err != nil {
 		t.Fatalf("ship with negative stock allowed: %v", err)
 	}
 	wantStock(t, s, ctx, product, "W1", "3", "3")
@@ -286,7 +286,7 @@ func TestTransferIdempotencyCancelAndScope(t *testing.T) {
 	if err != nil || cancelled.Status != domain.TransferCancelled {
 		t.Fatalf("cancel: %v %+v", err, cancelled)
 	}
-	if _, err := s.ShipTransfer(ctx, first.ID, cancelled.Version, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeTransferState {
+	if _, err := s.ShipTransfer(ctx, first.ID, cancelled.Version, nil, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeTransferState {
 		t.Fatalf("ship cancelled: %v, want %s", err, domain.CodeTransferState)
 	}
 	if _, err := s.CancelTransfer(ctx, first.ID, cancelled.Version); problemCode(err) != domain.CodeTransferState {
@@ -404,7 +404,7 @@ func TestListTransferLinesFiltersAndLateness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shipped, err := s.ShipTransfer(ctx, toShip.ID, toShip.Version, shipDay, domain.NegativePolicy{})
+	shipped, err := s.ShipTransfer(ctx, toShip.ID, toShip.Version, nil, shipDay, domain.NegativePolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestListTransferLinesFiltersAndLateness(t *testing.T) {
 		if r.Status == domain.TransferShipped {
 			want = domain.LateReceipt
 		}
-		if got, days := domain.TransferLineLateness(r.Status, r.Line, r.ShipDate, asOf, 7); got != want || days < 1 {
+		if got, days := domain.TransferLineLateness(r.Status, r.Line, r.ShipDate, r.PlannedReceipt, asOf, 7); got != want || days < 1 {
 			t.Errorf("%s: lateness %q %d days, want %q", r.Number, got, days, want)
 		}
 	}
@@ -491,5 +491,114 @@ func TestListTransferLinesFiltersAndLateness(t *testing.T) {
 	}
 	if rows := list(entityCtx(2, ids.New()), store.TransferLineFilter{}); len(rows) != 0 {
 		t.Fatalf("another tenant sees lines: %v", numbers(rows))
+	}
+}
+
+// Partial shipments: 100 EA ordered, 60 shipped, then 40. Each shipment moves its own
+// quantity and value; the line stays open until it is fully shipped and received; the
+// planned receipt date is stored and drives lateness; a replay of the create with another
+// planned date is an idempotency reuse.
+func TestTransferPartialShipmentsAndPlannedReceipt(t *testing.T) {
+	s, _, admin := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "100", "2", dims()))
+
+	in := transferOrder(ctx, product, "100", true)
+	in.PlannedReceipt = time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	o, _, err := s.CreateTransfer(ctx, "to-partial", in)
+	if err != nil || !o.PlannedReceipt.Equal(in.PlannedReceipt) {
+		t.Fatalf("create: %v planned %v", err, o.PlannedReceipt)
+	}
+	other := in
+	other.PlannedReceipt = time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	if _, _, err := s.CreateTransfer(ctx, "to-partial", other); problemCode(err) != store.CodeIdempotencyReuse {
+		t.Fatalf("replay with another planned date: %v, want %s", err, store.CodeIdempotencyReuse)
+	}
+	lineID := o.Lines[0].ID
+	ship := func(version int, qty string) (domain.TransferOrder, error) {
+		return s.ShipTransfer(ctx, o.ID, version, []store.TransferShipment{{LineID: lineID, Qty: dec(qty)}}, shipDay, domain.NegativePolicy{})
+	}
+	if _, err := ship(o.Version, "1.1234567"); problemCode(err) != domain.CodeUOMPrecision {
+		t.Fatalf("ship beyond the quantity precision: %v, want %s", err, domain.CodeUOMPrecision)
+	}
+	if _, err := ship(o.Version, "101"); problemCode(err) != domain.CodeTransferShipQty {
+		t.Fatalf("over-ship: %v, want %s", err, domain.CodeTransferShipQty)
+	}
+	first, err := ship(o.Version, "60")
+	if err != nil || first.Status != domain.TransferShipped || !first.Lines[0].ShippedQty.Equal(dec("60")) || !first.Lines[0].UnshippedQty().Equal(dec("40")) {
+		t.Fatalf("first shipment: %v %+v", err, first)
+	}
+	wantStock(t, s, ctx, product, "W1", "40", "80")
+	wantStock(t, s, ctx, product, "T1", "60", "120")
+
+	recv, err := s.ReceiveTransfer(ctx, o.ID, first.Version, []store.TransferReceipt{{LineID: lineID, Qty: dec("60")}}, shipDay, domain.NegativePolicy{})
+	if err != nil || recv.Status != domain.TransferPartial || recv.Lines[0].Closed {
+		t.Fatalf("receive the shipped 60: %v status %s closed %v", err, recv.Status, recv.Lines[0].Closed)
+	}
+	laterDay := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	second, err := s.ShipTransfer(ctx, o.ID, recv.Version, []store.TransferShipment{{LineID: lineID, Qty: dec("40")}}, laterDay, domain.NegativePolicy{})
+	if err != nil || !second.Lines[0].ShippedQty.Equal(dec("100")) || second.Status != domain.TransferPartial {
+		t.Fatalf("second shipment: %v %+v", err, second)
+	}
+	if !second.ShipDate.Equal(shipDay) {
+		t.Fatalf("order ship date %v after a later partial shipment, want the first shipment's %v", second.ShipDate, shipDay)
+	}
+	if n := outboxCount(t, admin, "dev.passage.inventory.transfer.shipped.v1"); n != 2 {
+		t.Fatalf("transfer.shipped events %d, want one per shipment", n)
+	}
+	var evt struct {
+		Lines []struct {
+			Qty        string `json:"qty"`
+			ShippedQty string `json:"shippedQty"`
+		} `json:"lines"`
+	}
+	eventData(t, admin, "dev.passage.inventory.transfer.shipped.v1", "'shipDate'", "2026-09-07", &evt)
+	if len(evt.Lines) != 1 || evt.Lines[0].Qty != "40" || evt.Lines[0].ShippedQty != "100" {
+		t.Fatalf("second transfer.shipped lines %+v, want qty 40 of shipped 100", evt.Lines)
+	}
+	if _, err := s.ShipTransfer(ctx, o.ID, second.Version, nil, shipDay, domain.NegativePolicy{}); problemCode(err) != domain.CodeTransferShipQty {
+		t.Fatalf("nothing left to ship: %v, want %s", err, domain.CodeTransferShipQty)
+	}
+	wantStock(t, s, ctx, product, "W1", "0", "0")
+	done, err := s.ReceiveTransfer(ctx, o.ID, second.Version, []store.TransferReceipt{{LineID: lineID, Qty: dec("40")}}, shipDay, domain.NegativePolicy{})
+	if err != nil || done.Status != domain.TransferReceived || !done.Lines[0].Closed {
+		t.Fatalf("receive the rest: %v %+v", err, done)
+	}
+	wantStock(t, s, ctx, product, "W2", "100", "200")
+	wantStock(t, s, ctx, product, "T1", "0", "0")
+	if n := transferTxnCount(t, admin, o.ID); n != 8 {
+		t.Fatalf("transactions %d, want 8 (two shipments and two receipts, a pair each)", n)
+	}
+}
+
+// With a planned receipt date, an open shipment is late once that date has passed, whatever
+// the allowance; without one the allowance after the ship date applies.
+func TestPlannedReceiptDateDrivesLateReceipt(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "20", "1", dims()))
+	in := transferOrder(ctx, product, "10", true)
+	in.PlannedReceipt = time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	o, _, err := s.CreateTransfer(ctx, "to-late-plan", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ShipTransfer(ctx, o.ID, o.Version, nil, shipDay, domain.NegativePolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	late := func(asOf time.Time) int {
+		rows, _, err := s.ListTransferLines(ctx, store.TransferLineFilter{LateOnly: true, AsOf: asOf, LateReceiptDays: 7})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+	if n := late(time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)); n != 0 {
+		t.Fatalf("due on the planned date: %d late lines, want 0 (the 7-day allowance has passed)", n)
+	}
+	if n := late(time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)); n != 1 {
+		t.Fatalf("a day after the planned date: %d late lines, want 1", n)
 	}
 }

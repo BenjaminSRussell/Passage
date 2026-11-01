@@ -15,6 +15,7 @@ const (
 	CodeTransferNotFound    = "INV-TRF-004" // unknown transfer order or line
 	CodeTransferShortClose  = "INV-TRF-005" // close-short beyond the underdelivery tolerance
 	CodeTransferState       = "INV-TRF-006" // the order or line is not in a state for the action
+	CodeTransferShipQty     = "INV-TRF-007" // ship quantity above the open quantity, or nothing left to ship
 )
 
 // Transfer order statuses (BR-16.13). DRAFT is not used yet: orders are created
@@ -68,6 +69,7 @@ type TransferOrder struct {
 	TransitWarehouse string
 	UseTransit       bool
 	ShipDate         time.Time // planned until shipped, then the actual ship date
+	PlannedReceipt   time.Time // zero when no receipt date was planned
 	ReceiptDate      time.Time // zero until the order is fully received
 	Version          int
 	CreatedAt        time.Time
@@ -122,6 +124,9 @@ func ValidateNewTransfer(o TransferOrder, maxScale int32) error {
 			return fail(CodeInvalid, "transit warehouse must differ from the shipping and receiving warehouses")
 		}
 	}
+	if !o.PlannedReceipt.IsZero() && o.PlannedReceipt.Before(o.ShipDate) {
+		return fail(CodeInvalid, "planned receipt date must not be before the ship date")
+	}
 	if len(o.Lines) == 0 {
 		return fail(CodeInvalid, "transfer order has no lines")
 	}
@@ -148,30 +153,97 @@ func ValidateNewTransfer(o TransferOrder, maxScale int32) error {
 	return nil
 }
 
-// CanShip reports whether the order may be shipped: only CREATED orders ship,
-// and they ship their full quantity.
+// CanShip reports whether the order may be shipped: a CREATED order ships, and
+// a shipped or partially received order ships again while a line still has
+// quantity left to ship (partial shipments, BR-16.13).
 func CanShip(o TransferOrder) error {
-	if o.Status != TransferCreated {
-		return fail(CodeTransferState, "transfer order in status %s cannot be shipped", o.Status)
+	switch o.Status {
+	case TransferCreated, TransferShipped, TransferPartial:
+		return nil
+	}
+	return fail(CodeTransferState, "transfer order in status %s cannot be shipped", o.Status)
+}
+
+// ShipQty is a quantity to ship on one line.
+type ShipQty struct {
+	LineID string
+	Qty    decimal.Decimal
+}
+
+// ValidateShipScale refuses a ship quantity with more decimals than maxScale
+// (INV-UOM precision), as on the order lines, so a shipment never moves a
+// quantity the line columns would round.
+func ValidateShipScale(req []ShipQty, maxScale int32) error {
+	for _, r := range req {
+		if !r.Qty.Equal(r.Qty.Truncate(maxScale)) {
+			return fail(CodeUOMPrecision, "ship quantity %s has more than %d decimals", r.Qty, maxScale)
+		}
 	}
 	return nil
 }
 
-// ApplyShip sets every line shipped in full. Without transit (one-step transfer,
-// SAP 301) the receipt happens at shipment, so lines are received and closed.
-func ApplyShip(o TransferOrder) TransferOrder {
+// UnshippedQty is the ordered quantity of the line not shipped yet; zero for a
+// closed line.
+func (l TransferLine) UnshippedQty() decimal.Decimal {
+	if l.Closed {
+		return decimal.Zero
+	}
+	if q := l.Qty.Sub(l.ShippedQty); q.IsPositive() {
+		return q
+	}
+	return decimal.Zero
+}
+
+// ApplyShip ships quantities on the order's lines and returns the order and the
+// quantity moved per line id. Without ship quantities every open line ships
+// what is left of it; with them each named line ships that quantity, at most
+// what is left (INV-TRF-007) and each line at most once. Without transit
+// (one-step transfer, SAP 301) the receipt happens at shipment, so the shipped
+// quantity is received and a fully shipped line closes.
+func ApplyShip(o TransferOrder, req []ShipQty) (TransferOrder, map[string]decimal.Decimal, error) {
+	want := map[string]decimal.Decimal{}
+	if len(req) == 0 {
+		for _, l := range o.Lines {
+			if q := l.UnshippedQty(); q.IsPositive() {
+				want[l.ID] = q
+			}
+		}
+	}
+	for _, r := range req {
+		if _, dup := want[r.LineID]; dup {
+			return o, nil, fail(CodeInvalid, "line %s is listed twice", r.LineID)
+		}
+		if !r.Qty.IsPositive() {
+			return o, nil, fail(CodeInvalid, "ship quantity must be positive")
+		}
+		want[r.LineID] = r.Qty
+	}
 	out := o
 	out.Lines = make([]TransferLine, len(o.Lines))
+	moved := map[string]decimal.Decimal{}
 	for i, l := range o.Lines {
-		l.ShippedQty = l.Qty
-		if !o.UseTransit {
-			l.ReceivedQty = l.Qty
-			l.Closed = true
+		if q, ok := want[l.ID]; ok {
+			if left := l.UnshippedQty(); q.GreaterThan(left) {
+				return o, nil, fail(CodeTransferShipQty, "line %d ships %s but only %s is left to ship", l.LineNo, q, left)
+			}
+			l.ShippedQty = l.ShippedQty.Add(q)
+			if !o.UseTransit {
+				l.ReceivedQty = l.ReceivedQty.Add(q)
+				l.Closed = !l.ShippedQty.LessThan(l.Qty)
+			}
+			moved[l.ID] = q
+			delete(want, l.ID)
 		}
 		out.Lines[i] = l
 	}
+	for id := range want {
+		return o, nil, fail(CodeTransferNotFound, "transfer line %s not found on this order", id)
+	}
+	if len(moved) == 0 {
+		return o, nil, fail(CodeTransferShipQty, "nothing left to ship on transfer order %s", o.Number)
+	}
 	out.Status = SettleTransferStatus(out)
-	return out
+	return out, moved, nil
 }
 
 // Receipt is a receipt booked on a transfer line: the line after it, and where
@@ -187,9 +259,11 @@ type Receipt struct {
 
 // ApplyReceive books a receipt of qty on a line that has shipped quantity.
 // Over-receipt beyond the overdelivery tolerance is INV-TRF-002. The line
-// closes when the shipped quantity is reached, or short when closeShort is set
-// and the shortfall is within the underdelivery tolerance (INV-TRF-005
-// otherwise); the shortfall then stays in transit.
+// closes when its whole ordered quantity has shipped and been received, or
+// short when closeShort is set and the shortfall against the ordered (or
+// shipped, when larger) quantity is within the underdelivery tolerance
+// (INV-TRF-005 otherwise); the shortfall in transit then stays in transit and
+// an unshipped remainder is not shipped.
 func ApplyReceive(l TransferLine, qty decimal.Decimal, closeShort bool) (Receipt, error) {
 	if l.Closed {
 		return Receipt{Line: l}, fail(CodeTransferState, "line %d is closed", l.LineNo)
@@ -207,13 +281,19 @@ func ApplyReceive(l TransferLine, qty decimal.Decimal, closeShort bool) (Receipt
 	out := Receipt{FromTransit: fromTransit, FromSource: qty.Sub(fromTransit)}
 	line := l
 	line.ReceivedQty = next
+	line.ShippedQty = l.ShippedQty.Add(out.FromSource)
+	fullyShipped := !line.ShippedQty.LessThan(l.Qty)
 	switch {
-	case !next.LessThan(l.ShippedQty):
-		line.ShippedQty = l.ShippedQty.Add(out.FromSource)
-		line.Closed = true
+	case !next.LessThan(line.ShippedQty) && (fullyShipped || !closeShort):
+		// A line shipped in part stays open for the rest of its quantity.
+		line.Closed = fullyShipped
 	case closeShort:
-		short := l.ShippedQty.Sub(next)
-		allowed := l.ShippedQty.Mul(l.UnderPct).Div(hundred)
+		// The shortfall is measured against the larger of the ordered and the
+		// shipped quantity, so closing a partly shipped line short also gives
+		// up its unshipped remainder only within the underdelivery tolerance.
+		base := decimal.Max(l.Qty, line.ShippedQty)
+		short := base.Sub(next)
+		allowed := base.Mul(l.UnderPct).Div(hundred)
 		if short.GreaterThan(allowed) {
 			return Receipt{Line: l}, fail(CodeTransferShortClose, "shortfall %s exceeds underdelivery tolerance %s %%", short, l.UnderPct)
 		}
@@ -297,21 +377,26 @@ const DefaultLateReceiptDays = 7
 // passed, mirroring "days in transit > N" of the stock in transit inquiry:
 //   - an order still CREATED is due on its planned ship date, so it is a late
 //     shipment from the day after;
-//   - an open shipment (not closed short, quantity still in transit) is due
-//     lateReceiptDays after its ship date, so it is a late receipt once it has
+//   - an open shipment (not closed short, quantity still in transit) is due on
+//     the planned receipt date when the order has one, else lateReceiptDays
+//     after its ship date, so it is a late receipt once it has
 //     been in transit longer than that.
 //
 // Received and cancelled orders, and lines closed short (in transit for
 // investigation, AC-16.11), are never late. The empty string means on time,
 // with zero days.
-func TransferLineLateness(orderStatus string, l TransferLine, shipDate, asOf time.Time, lateReceiptDays int) (string, int) {
+func TransferLineLateness(orderStatus string, l TransferLine, shipDate, plannedReceipt, asOf time.Time, lateReceiptDays int) (string, int) {
 	switch orderStatus {
 	case TransferCreated:
 		if days := InTransitDays(shipDate, asOf); days > 0 {
 			return LateShipment, days
 		}
 	case TransferShipped, TransferPartial:
-		if days := InTransitDays(shipDate, asOf) - lateReceiptDays; days > 0 && !l.Closed && l.InTransit().IsPositive() {
+		days := InTransitDays(shipDate, asOf) - lateReceiptDays
+		if !plannedReceipt.IsZero() {
+			days = InTransitDays(plannedReceipt, asOf) // a planned receipt date replaces the allowance
+		}
+		if days > 0 && !l.Closed && l.InTransit().IsPositive() {
 			return LateReceipt, days
 		}
 	}

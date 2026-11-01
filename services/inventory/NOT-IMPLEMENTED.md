@@ -159,6 +159,33 @@ test `TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative` proves availab
 availability under random place, whole-lot, release, release-by-source and issue sequences. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.
 
+PSG-1615 (wave 16 slice 15) adds partial shipments and a planned receipt date on transfer orders (FR-16.15, BR-16.13). `POST
+/v1/inventory/transfer-orders/{id}:ship` takes an optional `lines` array (`lineId`, `qty`): a shipment moves only
+the quantity named on each line, at most what is left to ship (`INV-TRF-007`) with at most 6 decimals (`INV-UOM-002`), each line once, an unknown line
+`INV-TRF-004`; without `lines` it ships what is left on every open line, so existing callers behave as before.
+A CREATED order ships first; a SHIPPED or PARTIALLY_RECEIVED order ships again while a line has quantity left,
+and an order with nothing left is `INV-TRF-007`. Each shipment is its own valued SOLD / PURCHASED pair set and
+its own `transfer.shipped` event (the event lines carry the quantity of that shipment and the line totals). The
+shipped quantity accumulates on the line; a line now closes on receipt only once its whole ordered quantity has
+shipped and been received (or closed short), and on a one-step transfer once fully shipped, so the order is
+RECEIVED only when every line is. Closing a line short measures the shortfall against the ordered quantity (the
+shipped quantity when larger), so a close-short on a partly shipped line gives up its unshipped remainder only
+within the underdelivery tolerance (`INV-TRF-005` otherwise). The order's `shipDate` is its first (earliest)
+shipment, so a later partial shipment does not restart the late-receipt clock of quantity already in transit;
+each shipment's own date is on its transactions and its `transfer.shipped` event. `unshippedQty` is on every transfer line. `plannedReceiptDate` (migration
+0016, one nullable column on `transfer_order`; no new table, so no new grant) is set on create (not before the
+ship date, part of the idempotency body check), is returned on the order and on the line inquiry, and replaces
+the `lateReceiptDays` allowance in the late-receipt test when present (late once the date has passed). No new
+duty or event type. Web: the transfer order page's Ship card is a per-line quantity form (default all that is
+left; less than that sends the lines and keeps the order open, with a validation of quantity above what is
+left), offered again while quantity is left; a "Left to ship" column and the planned receipt date on the order;
+a planned receipt date field on the new order form (checked against the ship date); a planned receipt column on
+the transfer line inquiry; the Receive card lists only lines with shipped quantity and says when closing short
+gives up quantity not shipped. The OpenAPI document has no FAIL lines on the documentation gates. Not built: the
+late-shipment test for the unshipped remainder of a partly shipped order (an order is only late-shipped while
+CREATED), cancelling or closing the unshipped remainder without a receipt, and the planned receipt date as a
+legal-entity default.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -203,7 +230,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 5 | Inventory status values and transitions | partial (slice 2) | BLOCKED and QUARANTINE are restricted: left out of available stock in the on-hand inquiry (`blocked` column), of reservations and of FEFO candidates. Other values remain free dimension values; the status transition matrix is not built. |
 | 6 | Transfer orders, in-transit warehouse, ship / receive, under/over-delivery, close-short | built (slice 3) | `POST` / `GET /transfer-orders`, `GET /transfer-orders/{id}`, `:ship`, `:receive`, `:cancel`. Two-step through a transit warehouse (`useTransit`, default) or one-step to the destination; optional receiving site (`toSiteId`). Each movement is a valued SOLD / PURCHASED pair (origin `TRANSFER_LINE`, reference = order id): the receipt carries the issue's running-average cost (BR-16.3), both legs are on the inventory account, so there is no GL entry (AC-16.11). Rows are locked in ascending order across all lines (BR-16.4); the shipping warehouse follows the negative policy, the transit warehouse never goes negative. Close-short within `underdeliveryPct` leaves the shortfall in transit (flagged in the inquiry); receipts beyond `overdeliveryPct` are `INV-TRF-002`; an allowed over-delivery is issued from the shipping warehouse. Cancel only before shipment (`INV-TRF-003`). Store tests: `TestTransferThroughTransitWithShortClose` (AC-16.11), `TestOneStepTransferAndOverDelivery`, `TestTransferShipRespectsAvailability`, `TestTransferIdempotencyCancelAndScope`. |
 | 6 | Transfer legs at DEDUCTED / RECEIVED (physical) status | by design until the status command exists | PRD FR-16.15 names a DEDUCTED issue and a RECEIVED receipt. Without `transactions:apply` and a financial update, physical-only legs would leave the value at the shipping warehouse (its running average and posted value wrong, the receiving warehouse valued at zero). Legs post at SOLD / PURCHASED like AX's financially updated transfer shipment; the cost-equality and no-GL rules hold. Revisit with wave 20 costing. |
-| 6 | Transfer order DRAFT status, header `delivery_terms` / `mode_of_delivery` / planned `receipt_date`, partial shipments, adding lines after creation, delete of CREATED orders | later slice of PSG-16 | Orders are created CREATED and ship in full; `ship_date` holds the planned date until shipped, then the actual one; `receipt_date` is set when the order is fully received. |
+| 6 | Transfer order DRAFT status, header `delivery_terms` / `mode_of_delivery`, adding lines after creation, delete of CREATED orders | later slice of PSG-16 | Orders are created CREATED; `ship_date` holds the planned date until shipped, then the latest actual one. Partial shipments and the planned `receipt_date` are built (slice 15); `receipt_date` (actual) is set when the order is fully received. |
 | 6 | ON_ORDER / ORDERED supply and demand pair at creation, and its cancellation | later slice of PSG-16 | The status commands exist (slice 6), but transfer orders do not register an ON_ORDER / ORDERED pair at creation yet; planning (wave 22) reads it. Creation posts nothing yet. |
 | 6 | Transit warehouse from warehouse master data (`transit_warehouse_id` per shipping warehouse, type TRANSIT), legal-entity `transfer_use_transit`, product tolerance defaults | handoff — wave 6 / wave 8 master data | The request carries `useTransit`, the transit warehouse and the per-line tolerances (default 0). |
 | 6 | "The transit dimension never carries reservations" (BR-16.13) | handoff — wave 6 (warehouse type TRANSIT) | Policy reservations do not know which warehouses are transit warehouses until the warehouse type is readable; do not reserve from transit warehouse codes. |
@@ -245,7 +272,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | FR-16.13 export and GL voucher drill-down | later slice of PSG-16 / handoff — wave 11 | Export is a web grid feature (wave 5 shell); `ledger_entry_id` stays null until the ledger Post exists. |
 | FR-16.14 opening balance load from AX / SAP extracts via wave 10 migration framework | handoff — wave 10 (migration framework) | Mapping rules belong to the migration pack; the OPENING_BALANCE journal it targets is built. |
 | FR-16.16 in-transit inquiry | built (slice 3) | `GET /transfers/in-transit` (see item 6). |
-| FR-16.15 transfer order overview report (3.16.14): orders-by-status counts, export and a scheduled late-shipment notification | later slice of PSG-16 / handoff — wave 15 (documents, export) | Slice 10 builds the cross-order line inquiry and the late overview (`GET /v1/inventory/transfer-order-lines`), with the overview's legal entity, date range and status filters. Lateness is derived: an unshipped order after its planned ship date, or a shipment in transit more than `lateReceiptDays` (default 7, not yet a legal-entity parameter); there is no planned receipt date on the order yet (see item 6), so a late receipt is measured from the ship date. The late summary on the page counts the lines listed. The orders-by-status counts are served by the workspace summary (slice 13); there is no export and no notification. |
+| FR-16.15 transfer order overview report (3.16.14): orders-by-status counts, export and a scheduled late-shipment notification | later slice of PSG-16 / handoff — wave 15 (documents, export) | Slice 10 builds the cross-order line inquiry and the late overview (`GET /v1/inventory/transfer-order-lines`), with the overview's legal entity, date range and status filters. Lateness is derived: an unshipped order after its planned ship date, or a shipment in transit more than `lateReceiptDays` (default 7, not yet a legal-entity parameter); a late receipt is measured from the order's planned receipt date when it has one (slice 15), else from the ship date. The late summary on the page counts the lines listed. The orders-by-status counts are served by the workspace summary (slice 13); there is no export and no notification. |
 | FR-16.17 customer consignment warehouse (`CUSTOMER_CONSIGNMENT`, `customer_id`, SAP MB58 report) | later slice of PSG-16 (documents in wave 27) | Warehouse type belongs to wave 6 master data; stock there stays legal-entity owned. |
 | FR-16.18 to FR-16.20 tag counting, ABC, segments | built (slices 3, 4, 5) | ABC classification by value (slice 3), tag counting (slice 4) and segments (slice 5) are built (item 8), with the gaps listed there. |
 | 3.16.1 valuation by product x site per item model group (running average across dimension sets) | handoff — wave 20 (costing) | Slice 1 values issues at the running average of the on-hand row being issued (one dimension set), the finest consistent level under the row lock. Wave 20 replaces it with the costing engine. |

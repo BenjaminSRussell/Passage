@@ -26,10 +26,11 @@ export interface TransferValues {
   useTransit: boolean;
   transitWarehouseId: string;
   shipDate: string;
+  plannedReceiptDate: string;
   lines: TransferLineValues[];
 }
 
-type HeaderField = "legalEntityId" | "fromWarehouseId" | "toWarehouseId" | "toSiteId" | "transitWarehouseId" | "shipDate" | "lines";
+type HeaderField = "legalEntityId" | "fromWarehouseId" | "toWarehouseId" | "toSiteId" | "transitWarehouseId" | "shipDate" | "plannedReceiptDate" | "lines";
 type LineField = "productId" | "qty" | "unit" | "underdeliveryPct" | "overdeliveryPct" | "site";
 
 export interface TransferErrors {
@@ -68,6 +69,10 @@ export function validateTransfer(values: TransferValues): TransferErrors {
       header.transitWarehouseId = "The transit warehouse must differ from the shipping and receiving warehouses.";
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(values.shipDate)) header.shipDate = "Enter the planned ship date.";
+  if (values.plannedReceiptDate !== "") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(values.plannedReceiptDate)) header.plannedReceiptDate = "Enter the planned receipt date.";
+    else if (values.plannedReceiptDate < values.shipDate) header.plannedReceiptDate = "The planned receipt date must not be before the ship date.";
+  }
   if (values.lines.length === 0) header.lines = "Add at least one line.";
   const lines = values.lines.map((line) => {
     const errors: Partial<Record<LineField, string>> = {};
@@ -101,7 +106,7 @@ function mapProblem(problem: Problem, lineCount: number): TransferErrors | null 
         out.lines[i][field] = message;
         found = true;
       }
-    } else if (["legalEntityId", "fromWarehouseId", "toWarehouseId", "toSiteId", "transitWarehouseId", "shipDate", "lines"].includes(name)) {
+    } else if (["legalEntityId", "fromWarehouseId", "toWarehouseId", "toSiteId", "transitWarehouseId", "shipDate", "plannedReceiptDate", "lines"].includes(name)) {
       out.header[name as HeaderField] = message;
       found = true;
     }
@@ -120,6 +125,7 @@ export function NewTransferPage() {
     useTransit: true,
     transitWarehouseId: "",
     shipDate: today(),
+    plannedReceiptDate: "",
     lines: [emptyLine()],
   });
   const [errors, setErrors] = useState<TransferErrors>({ header: {}, lines: [] });
@@ -153,6 +159,7 @@ export function NewTransferPage() {
           useTransit: values.useTransit,
           transitWarehouseId: values.transitWarehouseId.trim(),
           shipDate: values.shipDate,
+          plannedReceiptDate: values.plannedReceiptDate,
           lines: values.lines.map((line) => ({
             productId: line.productId.trim(),
             qty: line.qty.trim(),
@@ -197,6 +204,11 @@ export function NewTransferPage() {
             </FormField>
             <FormField id="to-ship-date" label="Planned ship date" error={he.shipDate}>
               {(control) => <Input {...control} type="date" value={values.shipDate} onChange={set("shipDate")} invalid={Boolean(he.shipDate)} />}
+            </FormField>
+            <FormField id="to-planned-receipt" label="Planned receipt date" optional hint="An open shipment is late once this date has passed." error={he.plannedReceiptDate}>
+              {(control) => (
+                <Input {...control} type="date" value={values.plannedReceiptDate} onChange={set("plannedReceiptDate")} invalid={Boolean(he.plannedReceiptDate)} />
+              )}
             </FormField>
             {values.useTransit ? (
               <FormField id="to-transit" label="Transit warehouse" hint="Shipped stock waits here until it is received." error={he.transitWarehouseId}>

@@ -40,6 +40,7 @@ type transferRequest struct {
 	TransitWarehouseID string                `json:"transitWarehouseId"`
 	UseTransit         *bool                 `json:"useTransit"`
 	ShipDate           string                `json:"shipDate"`
+	PlannedReceiptDate string                `json:"plannedReceiptDate"`
 	Lines              []transferLineRequest `json:"lines"`
 }
 
@@ -53,7 +54,13 @@ type transferLineRequest struct {
 }
 
 type shipRequest struct {
-	ShipDate string `json:"shipDate"`
+	ShipDate string            `json:"shipDate"`
+	Lines    []shipLineRequest `json:"lines"`
+}
+
+type shipLineRequest struct {
+	LineID string `json:"lineId"`
+	Qty    string `json:"qty"`
 }
 
 type receiveRequest struct {
@@ -79,6 +86,7 @@ type transferLineResponse struct {
 	InTransit        string            `json:"inTransit"`
 	UnderdeliveryPct string            `json:"underdeliveryPct"`
 	OverdeliveryPct  string            `json:"overdeliveryPct"`
+	UnshippedQty     string            `json:"unshippedQty"`
 	Closed           bool              `json:"closed"`
 }
 
@@ -93,6 +101,7 @@ type transferResponse struct {
 	TransitWarehouseID string                 `json:"transitWarehouseId,omitempty"`
 	UseTransit         bool                   `json:"useTransit"`
 	ShipDate           string                 `json:"shipDate"`
+	PlannedReceiptDate string                 `json:"plannedReceiptDate,omitempty"`
 	ReceiptDate        string                 `json:"receiptDate,omitempty"`
 	Version            int                    `json:"version"`
 	CreatedAt          time.Time              `json:"createdAt"`
@@ -210,6 +219,14 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fields["shipDate"] = "must be a date (YYYY-MM-DD)"
 	}
+	var plannedReceipt time.Time
+	if strings.TrimSpace(req.PlannedReceiptDate) != "" {
+		if plannedReceipt, err = time.Parse(dateFormat, strings.TrimSpace(req.PlannedReceiptDate)); err != nil {
+			fields["plannedReceiptDate"] = "must be a date (YYYY-MM-DD)"
+		} else if plannedReceipt.Before(shipDate) {
+			fields["plannedReceiptDate"] = "must not be before the ship date"
+		}
+	}
 	useTransit := true
 	if req.UseTransit != nil {
 		useTransit = *req.UseTransit
@@ -256,7 +273,7 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := domain.TransferOrder{LegalEntityID: req.LegalEntityID, FromWarehouse: req.FromWarehouseID, ToWarehouse: req.ToWarehouseID,
-		ToSite: req.ToSiteID, TransitWarehouse: req.TransitWarehouseID, UseTransit: useTransit, ShipDate: shipDate, Lines: lines}
+		ToSite: req.ToSiteID, TransitWarehouse: req.TransitWarehouseID, UseTransit: useTransit, ShipDate: shipDate, PlannedReceipt: plannedReceipt, Lines: lines}
 	out, replayed, err := a.store.CreateTransfer(r.Context(), key, in)
 	if err != nil {
 		a.failed(w, r, "create transfer order", err)
@@ -317,8 +334,10 @@ func optionalDate(raw string) (time.Time, bool) {
 	return d, err == nil
 }
 
-// shipTransfer ships the order in full; the body may name the ship date
-// (default today). If-Match carries the order version.
+// shipTransfer ships the order: the quantities in lines, or what is left on
+// every open line when there are none (a partial shipment names its lines).
+// The body may name the ship date (default today). If-Match carries the
+// order version.
 func (a *API) shipTransfer(w http.ResponseWriter, r *http.Request, id string) {
 	version, err := ifMatchVersion(r)
 	if err != nil {
@@ -337,7 +356,27 @@ func (a *API) shipTransfer(w http.ResponseWriter, r *http.Request, id string) {
 		fieldProblem(w, r, map[string]string{"shipDate": "must be a date (YYYY-MM-DD)"})
 		return
 	}
-	o, err := a.store.ShipTransfer(r.Context(), id, version, shipDate, a.post.Negative)
+	fields := map[string]string{}
+	if len(req.Lines) > maxReceiptLines {
+		fields["lines"] = fmt.Sprintf("must hold at most %d lines", maxReceiptLines)
+	}
+	ships := make([]store.TransferShipment, 0, len(req.Lines))
+	for i, l := range req.Lines {
+		prefix := fmt.Sprintf("lines[%d].", i)
+		if !ids.Valid(l.LineID) {
+			fields[prefix+"lineId"] = "must be a UUID"
+		}
+		qty, qErr := decimal.NewFromString(strings.TrimSpace(l.Qty))
+		if qErr != nil || !qty.IsPositive() {
+			fields[prefix+"qty"] = "must be a positive decimal number"
+		}
+		ships = append(ships, store.TransferShipment{LineID: l.LineID, Qty: qty})
+	}
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	o, err := a.store.ShipTransfer(r.Context(), id, version, ships, shipDate, a.post.Negative)
 	if err != nil {
 		a.failed(w, r, "ship transfer order", err)
 		return
@@ -545,10 +584,14 @@ func toTransferResponse(o domain.TransferOrder) transferResponse {
 	if !o.ReceiptDate.IsZero() {
 		out.ReceiptDate = o.ReceiptDate.Format(dateFormat)
 	}
+	if !o.PlannedReceipt.IsZero() {
+		out.PlannedReceiptDate = o.PlannedReceipt.Format(dateFormat)
+	}
 	for _, l := range o.Lines {
 		out.Lines = append(out.Lines, transferLineResponse{ID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID, Dimensions: l.Dims,
 			Unit: l.Unit, Qty: l.Qty.String(), ShippedQty: l.ShippedQty.String(), ReceivedQty: l.ReceivedQty.String(),
-			InTransit: l.InTransit().String(), UnderdeliveryPct: l.UnderPct.String(), OverdeliveryPct: l.OverPct.String(), Closed: l.Closed})
+			InTransit: l.InTransit().String(), UnderdeliveryPct: l.UnderPct.String(), OverdeliveryPct: l.OverPct.String(),
+			UnshippedQty: l.UnshippedQty().String(), Closed: l.Closed})
 	}
 	return out
 }
@@ -559,27 +602,28 @@ func writeTransfer(w http.ResponseWriter, status int, o domain.TransferOrder) {
 }
 
 type transferLineItem struct {
-	OrderID         string            `json:"orderId"`
-	LegalEntityID   string            `json:"legalEntityId"`
-	Number          string            `json:"number"`
-	OrderStatus     string            `json:"orderStatus"`
-	FromWarehouseID string            `json:"fromWarehouseId"`
-	ToWarehouseID   string            `json:"toWarehouseId"`
-	ShipDate        string            `json:"shipDate"`
-	LineID          string            `json:"lineId"`
-	LineNo          int               `json:"lineNo"`
-	ProductID       string            `json:"productId"`
-	Dimensions      map[string]string `json:"dimensions"`
-	Unit            string            `json:"unit"`
-	Qty             string            `json:"qty"`
-	ShippedQty      string            `json:"shippedQty"`
-	ReceivedQty     string            `json:"receivedQty"`
-	RemainingQty    string            `json:"remainingQty"`
-	InTransit       string            `json:"inTransit"`
-	DaysInTransit   int               `json:"daysInTransit"`
-	Closed          bool              `json:"closed"`
-	Late            string            `json:"late,omitempty"`
-	DaysLate        int               `json:"daysLate"`
+	OrderID            string            `json:"orderId"`
+	LegalEntityID      string            `json:"legalEntityId"`
+	Number             string            `json:"number"`
+	OrderStatus        string            `json:"orderStatus"`
+	FromWarehouseID    string            `json:"fromWarehouseId"`
+	ToWarehouseID      string            `json:"toWarehouseId"`
+	ShipDate           string            `json:"shipDate"`
+	PlannedReceiptDate string            `json:"plannedReceiptDate,omitempty"`
+	LineID             string            `json:"lineId"`
+	LineNo             int               `json:"lineNo"`
+	ProductID          string            `json:"productId"`
+	Dimensions         map[string]string `json:"dimensions"`
+	Unit               string            `json:"unit"`
+	Qty                string            `json:"qty"`
+	ShippedQty         string            `json:"shippedQty"`
+	ReceivedQty        string            `json:"receivedQty"`
+	RemainingQty       string            `json:"remainingQty"`
+	InTransit          string            `json:"inTransit"`
+	DaysInTransit      int               `json:"daysInTransit"`
+	Closed             bool              `json:"closed"`
+	Late               string            `json:"late,omitempty"`
+	DaysLate           int               `json:"daysLate"`
 }
 
 // listTransferLines answers the transfer order line inquiry and late overview (FR-16.15, 3.16.14).
@@ -649,13 +693,17 @@ func (a *API) listTransferLines(w http.ResponseWriter, r *http.Request) {
 	items := make([]transferLineItem, 0, len(rows))
 	for _, row := range rows {
 		l := row.Line
-		late, daysLate := domain.TransferLineLateness(row.Status, l, row.ShipDate, f.AsOf, f.LateReceiptDays)
+		late, daysLate := domain.TransferLineLateness(row.Status, l, row.ShipDate, row.PlannedReceipt, f.AsOf, f.LateReceiptDays)
 		inTransit := l.InTransit()
 		daysInTransit := 0
 		if inTransit.IsPositive() {
 			daysInTransit = domain.InTransitDays(row.ShipDate, f.AsOf)
 		}
-		items = append(items, transferLineItem{OrderID: row.OrderID, LegalEntityID: row.LegalEntityID, Number: row.Number, OrderStatus: row.Status,
+		planned := ""
+		if !row.PlannedReceipt.IsZero() {
+			planned = row.PlannedReceipt.Format(dateFormat)
+		}
+		items = append(items, transferLineItem{PlannedReceiptDate: planned, OrderID: row.OrderID, LegalEntityID: row.LegalEntityID, Number: row.Number, OrderStatus: row.Status,
 			FromWarehouseID: row.FromWarehouse, ToWarehouseID: row.ToWarehouse, ShipDate: row.ShipDate.Format(dateFormat), LineID: l.ID,
 			LineNo: l.LineNo, ProductID: l.ProductID, Dimensions: l.Dims, Unit: l.Unit, Qty: l.Qty.String(), ShippedQty: l.ShippedQty.String(),
 			ReceivedQty: l.ReceivedQty.String(), RemainingQty: domain.TransferLineRemaining(row.Status, l).String(), InTransit: inTransit.String(),

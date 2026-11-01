@@ -139,11 +139,17 @@ func TestApplyReceiveRefusesClosedLine(t *testing.T) {
 }
 
 func TestShipOneStepReceivesAtShipment(t *testing.T) {
-	o := ApplyShip(baseTransfer(false))
+	o, _, err := ApplyShip(baseTransfer(false), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if o.Status != TransferReceived || !o.Lines[0].Closed || !o.Lines[0].ReceivedQty.Equal(d("100")) {
 		t.Fatalf("one-step ship: status %s line %+v", o.Status, o.Lines[0])
 	}
-	transit := ApplyShip(baseTransfer(true))
+	transit, _, err := ApplyShip(baseTransfer(true), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if transit.Status != TransferShipped || transit.Lines[0].InTransit().Cmp(d("100")) != 0 {
 		t.Fatalf("two-step ship: status %s in transit %s", transit.Status, transit.Lines[0].InTransit())
 	}
@@ -160,7 +166,10 @@ func TestStatusAndCancelRules(t *testing.T) {
 	if err := CanCancel(o); err != nil {
 		t.Fatalf("created order should cancel: %v", err)
 	}
-	shipped := ApplyShip(o)
+	shipped, _, err := ApplyShip(o, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := CanCancel(shipped); codeOf(err) != CodeTransferCancel {
 		t.Fatalf("shipped order cancel: %v", err)
 	}
@@ -171,8 +180,15 @@ func TestStatusAndCancelRules(t *testing.T) {
 			t.Fatalf("cancel from %s: %v, want %s", status, err, CodeTransferState)
 		}
 	}
-	if err := CanShip(shipped); codeOf(err) != CodeTransferState {
-		t.Fatalf("ship twice: %v", err)
+	if _, _, err := ApplyShip(shipped, nil); codeOf(err) != CodeTransferShipQty {
+		t.Fatalf("ship twice: %v, want %s", err, CodeTransferShipQty)
+	}
+	for _, status := range []string{TransferCancelled, TransferReceived} {
+		done := o
+		done.Status = status
+		if err := CanShip(done); codeOf(err) != CodeTransferState {
+			t.Fatalf("ship from %s: %v, want %s", status, err, CodeTransferState)
+		}
 	}
 	partial := shipped
 	partial.Lines = []TransferLine{{Qty: d("100"), ShippedQty: d("100"), ReceivedQty: d("40")}}
@@ -216,11 +232,11 @@ func TestTransferLineLateness(t *testing.T) {
 		{"cancelled order", TransferCancelled, TransferLine{Qty: d("10")}, day(1), day(20), "", 0},
 	}
 	for _, c := range cases {
-		if got, days := TransferLineLateness(c.status, c.line, c.ship, c.asOf, DefaultLateReceiptDays); got != c.want || days != c.days {
+		if got, days := TransferLineLateness(c.status, c.line, c.ship, time.Time{}, c.asOf, DefaultLateReceiptDays); got != c.want || days != c.days {
 			t.Errorf("%s: got %q %d days, want %q %d", c.name, got, days, c.want, c.days)
 		}
 	}
-	if got, days := TransferLineLateness(TransferShipped, open, day(1), day(2), 0); got != LateReceipt || days != 1 {
+	if got, days := TransferLineLateness(TransferShipped, open, day(1), time.Time{}, day(2), 0); got != LateReceipt || days != 1 {
 		t.Errorf("zero allowance: got %q %d, want a late receipt one day overdue", got, days)
 	}
 }
@@ -241,5 +257,122 @@ func TestTransferLineRemaining(t *testing.T) {
 		if got := TransferLineRemaining(c.status, c.line); !got.Equal(d(c.want)) {
 			t.Errorf("%s: remaining %s, want %s", c.name, got, c.want)
 		}
+	}
+}
+
+func TestPlannedReceiptDateReplacesTheAllowance(t *testing.T) {
+	day := func(n int) time.Time { return time.Date(2026, 9, n, 0, 0, 0, 0, time.UTC) }
+	open := TransferLine{Qty: d("10"), ShippedQty: d("10"), ReceivedQty: d("4")}
+	// Shipped on the 1st, planned for the 20th: not late on the 15th although the 7-day allowance passed.
+	if got, days := TransferLineLateness(TransferShipped, open, day(1), day(20), day(15), DefaultLateReceiptDays); got != "" || days != 0 {
+		t.Errorf("before planned receipt: got %q %d", got, days)
+	}
+	if got, days := TransferLineLateness(TransferShipped, open, day(1), day(20), day(23), DefaultLateReceiptDays); got != LateReceipt || days != 3 {
+		t.Errorf("after planned receipt: got %q %d, want LATE_RECEIPT 3", got, days)
+	}
+}
+
+func partialOrder(transit bool) TransferOrder {
+	o := baseTransfer(transit)
+	o.Number = "TO-1"
+	o.Lines = []TransferLine{
+		{ID: "a", LineNo: 1, ProductID: "p", Unit: "EA", Qty: d("100"), UnderPct: d("10"), OverPct: d("0")},
+		{ID: "b", LineNo: 2, ProductID: "q", Unit: "EA", Qty: d("50"), UnderPct: d("0"), OverPct: d("0")},
+	}
+	return o
+}
+
+func TestPartialShipmentsAccumulateUntilTheLineIsShipped(t *testing.T) {
+	o := partialOrder(true)
+	o, moved, err := ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("60")}})
+	if err != nil || o.Status != TransferShipped || !moved["a"].Equal(d("60")) || len(moved) != 1 {
+		t.Fatalf("first shipment: status %s moved %v err %v", o.Status, moved, err)
+	}
+	if !o.Lines[0].UnshippedQty().Equal(d("40")) || !o.Lines[1].UnshippedQty().Equal(d("50")) {
+		t.Fatalf("unshipped %s / %s", o.Lines[0].UnshippedQty(), o.Lines[1].UnshippedQty())
+	}
+	if err := CanShip(o); err != nil {
+		t.Fatalf("a shipped order with quantity left should ship again: %v", err)
+	}
+	if _, _, err := ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("41")}}); codeOf(err) != CodeTransferShipQty {
+		t.Fatalf("over-ship: %v", err)
+	}
+	if _, _, err := ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("1")}, {LineID: "a", Qty: d("1")}}); codeOf(err) != CodeInvalid {
+		t.Fatalf("duplicate line: %v", err)
+	}
+	if _, _, err := ApplyShip(o, []ShipQty{{LineID: "zz", Qty: d("1")}}); codeOf(err) != CodeTransferNotFound {
+		t.Fatalf("unknown line: %v", err)
+	}
+	if _, _, err := ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("0")}}); codeOf(err) != CodeInvalid {
+		t.Fatalf("zero quantity: %v", err)
+	}
+	// Shipping with no quantities ships what is left on every line.
+	o, moved, err = ApplyShip(o, nil)
+	if err != nil || !moved["a"].Equal(d("40")) || !moved["b"].Equal(d("50")) {
+		t.Fatalf("ship the rest: moved %v err %v", moved, err)
+	}
+	if !o.Lines[0].ShippedQty.Equal(d("100")) || !o.Lines[1].ShippedQty.Equal(d("50")) {
+		t.Fatalf("shipped %s / %s", o.Lines[0].ShippedQty, o.Lines[1].ShippedQty)
+	}
+}
+
+func TestReceivingAllShippedKeepsAPartlyShippedLineOpen(t *testing.T) {
+	o, _, _ := ApplyShip(partialOrder(true), []ShipQty{{LineID: "a", Qty: d("60")}})
+	r, err := ApplyReceive(o.Lines[0], d("60"), false)
+	if err != nil || r.Line.Closed {
+		t.Fatalf("received the shipped 60 of 100: closed %v err %v", r.Line.Closed, err)
+	}
+	o.Lines[0] = r.Line
+	if got := SettleTransferStatus(o); got != TransferPartial {
+		t.Fatalf("status %s, want PARTIALLY_RECEIVED", got)
+	}
+	o, _, _ = ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("40")}})
+	r, err = ApplyReceive(o.Lines[0], d("40"), false)
+	if err != nil || !r.Line.Closed {
+		t.Fatalf("received the rest: closed %v err %v", r.Line.Closed, err)
+	}
+}
+
+func TestOneStepPartialShipmentClosesWhenFullyShipped(t *testing.T) {
+	o, _, err := ApplyShip(partialOrder(false), []ShipQty{{LineID: "a", Qty: d("100")}})
+	if err != nil || o.Status != TransferPartial || !o.Lines[0].Closed || o.Lines[1].Closed {
+		t.Fatalf("first shipment: status %s err %v lines %+v", o.Status, err, o.Lines)
+	}
+	if o.Lines[1].UnshippedQty().Equal(d("50")) == false {
+		t.Fatal("line b should have all 50 left")
+	}
+	o, _, err = ApplyShip(o, nil)
+	if err != nil || o.Status != TransferReceived {
+		t.Fatalf("second shipment: status %s err %v", o.Status, err)
+	}
+}
+
+func TestCloseShortOnAPartlyShippedLineCountsTheUnshippedRemainder(t *testing.T) {
+	o, _, _ := ApplyShip(partialOrder(true), []ShipQty{{LineID: "a", Qty: d("60")}}) // 100 ordered, 10% under
+	// Receiving the 60 in transit and closing short would give up 40 of 100: beyond 10%.
+	if _, err := ApplyReceive(o.Lines[0], d("60"), true); codeOf(err) != CodeTransferShortClose {
+		t.Fatalf("close short giving up 40 of 100: %v", err)
+	}
+	// 58 of 60 shipped with close short: 42 of 100 short, refused even though 2 of 60 is within 10%.
+	if _, err := ApplyReceive(o.Lines[0], d("58"), true); codeOf(err) != CodeTransferShortClose {
+		t.Fatalf("close short of a partial shipment: %v", err)
+	}
+	o, _, _ = ApplyShip(o, []ShipQty{{LineID: "a", Qty: d("32")}}) // 92 shipped, 8 left
+	r, err := ApplyReceive(o.Lines[0], d("92"), true)
+	if err != nil || !r.Line.Closed || !r.Line.InTransit().IsZero() || !r.Line.UnshippedQty().IsZero() {
+		t.Fatalf("closing short with 8 of 100 unshipped: closed %v in transit %s err %v", r.Line.Closed, r.Line.InTransit(), err)
+	}
+	// Without close short the same receipt keeps the line open for the 8 left.
+	if r, err = ApplyReceive(o.Lines[0], d("92"), false); err != nil || r.Line.Closed {
+		t.Fatalf("receipt without close short: closed %v err %v", r.Line.Closed, err)
+	}
+}
+
+func TestShipQuantityScaleFollowsTheUnitPrecision(t *testing.T) {
+	if err := ValidateShipScale([]ShipQty{{LineID: "a", Qty: d("1.25")}}, 2); err != nil {
+		t.Fatalf("two decimals at scale 2: %v", err)
+	}
+	if err := ValidateShipScale([]ShipQty{{LineID: "a", Qty: d("1")}, {LineID: "b", Qty: d("1.255")}}, 2); codeOf(err) != CodeUOMPrecision {
+		t.Fatalf("three decimals at scale 2: %v, want %s", err, CodeUOMPrecision)
 	}
 }

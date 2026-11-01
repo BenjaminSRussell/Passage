@@ -1109,16 +1109,23 @@ paths:
   /v1/inventory/transfer-orders/{id}:ship:
     post:
       operationId: shipTransferOrder
-      summary: Ship a CREATED order in full
+      summary: Ship a transfer order in full or in part (partial shipments)
       description: |
-        Moves every line from the shipping warehouse to the transit warehouse (two-step) or to the
-        receiving warehouse (one-step, which also receives and closes the lines) in one transaction:
+        Without lines, ships what is left on every open line. With lines, ships only the quantity
+        named on each (a partial shipment): at most what is left to ship on the line (INV-TRF-007) with at most 6 decimals (INV-UOM-002),
+        each line at most once, an unknown line INV-TRF-004. A CREATED order ships first; a SHIPPED or
+        PARTIALLY_RECEIVED order ships again while a line has quantity left, and an order with nothing
+        left to ship is INV-TRF-007. A line closes on receipt only once its whole ordered quantity has
+        shipped and been received (or closed short). Moves each shipped quantity from the shipping warehouse to the transit warehouse (two-step) or to the
+        receiving warehouse (one-step, which also receives the shipped quantity and closes each fully shipped line) in one transaction:
         a SOLD issue valued at the source's running average and a PURCHASED receipt carrying the
         same value (BR-16.3), so there is no GL entry. Every on-hand row is locked in ascending order
         first. The shipping warehouse follows the negative-stock policy (INV-NEG-001). shipDate
-        (default today) becomes the order's ship date and the transactions' date. Emits
+        (default today) is the date of this shipment's transactions and event; the order's shipDate is
+        its first (earliest) shipment, so a later partial shipment does not restart the late-receipt
+        clock of quantity already in transit. Emits
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
-        mismatch); an order not CREATED is INV-TRF-006.
+        mismatch); an order CANCELLED or RECEIVED is INV-TRF-006.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transfer.post
       parameters:
@@ -1132,6 +1139,17 @@ paths:
               additionalProperties: false
               properties:
                 shipDate: { type: string, format: date }
+                lines:
+                  type: array
+                  maxItems: 1000
+                  description: Quantities to ship; omit to ship what is left on every open line
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineId, qty]
+                    properties:
+                      lineId: { type: string, format: uuid }
+                      qty: { $ref: '#/components/schemas/Decimal' }
       responses:
         '200':
           description: Order after shipment
@@ -1154,9 +1172,11 @@ paths:
       summary: Book receipts against a shipped order
       description: |
         Each receipt moves its quantity from the transit warehouse to the receiving warehouse as a
-        valued pair. A line closes when its shipped quantity is reached, or short with closeShort
-        when the shortfall is within underdeliveryPct (INV-TRF-005 otherwise); the shortfall stays
-        in transit for investigation. Receiving more than shipped plus overdeliveryPct is
+        valued pair. A line closes when its whole ordered quantity has shipped and been received
+        (a partly shipped line stays open for the rest), or short with closeShort when the shortfall
+        against the ordered quantity (the shipped quantity when larger) is within underdeliveryPct
+        (INV-TRF-005 otherwise), which also gives up any unshipped remainder; the shortfall in transit
+        stays in transit for investigation. Receiving more than shipped plus overdeliveryPct is
         INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
         Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
@@ -1240,8 +1260,8 @@ paths:
         first, at most 1,000 (truncated is true when more matched). from and to bound the ship date
         (inclusive). A line is late once its due date is before asOf: a line of an order still CREATED is
         due on its planned ship date (LATE_SHIPMENT); a line of a SHIPPED or PARTIALLY_RECEIVED order with
-        quantity still in transit and not closed short is due lateReceiptDays after its ship date
-        (LATE_RECEIPT). daysLate counts the days past the due date and is 0 for a line on time. With
+        quantity still in transit and not closed short is due on the order's plannedReceiptDate when it has
+        one, otherwise lateReceiptDays after its ship date (LATE_RECEIPT). daysLate counts the days past the due date and is 0 for a line on time. With
         late=true only late lines are returned.
       x-passage-duty: inventory.read
       parameters:
@@ -2876,6 +2896,7 @@ components:
         transitWarehouseId: { type: string, maxLength: 60, description: Required when useTransit is true; ignored otherwise }
         useTransit: { type: boolean, default: true }
         shipDate: { type: string, format: date, description: Planned ship date }
+        plannedReceiptDate: { type: string, format: date, description: Planned receipt date, not before shipDate; when set an open shipment is late once it has passed }
         lines:
           type: array
           minItems: 1
@@ -2911,7 +2932,7 @@ components:
               closeShort: { type: boolean, default: false }
     TransferLine:
       type: object
-      required: [id, lineNo, productId, dimensions, unit, qty, shippedQty, receivedQty, inTransit, underdeliveryPct, overdeliveryPct, closed]
+      required: [id, lineNo, productId, dimensions, unit, qty, shippedQty, receivedQty, inTransit, underdeliveryPct, overdeliveryPct, unshippedQty, closed]
       properties:
         id: { type: string, format: uuid }
         lineNo: { type: integer }
@@ -2924,6 +2945,7 @@ components:
         inTransit: { $ref: '#/components/schemas/Decimal' }
         underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
         overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+        unshippedQty: { $ref: '#/components/schemas/Decimal', description: Ordered quantity not shipped yet; 0 once shipped or closed }
         closed: { type: boolean }
     TransferOrder:
       type: object
@@ -2938,7 +2960,8 @@ components:
         toSiteId: { type: string }
         transitWarehouseId: { type: string }
         useTransit: { type: boolean }
-        shipDate: { type: string, format: date, description: Planned until shipped, then the actual ship date }
+        shipDate: { type: string, format: date, description: 'Planned until shipped, then the actual date of the first shipment' }
+        plannedReceiptDate: { type: string, format: date, description: Planned receipt date when one was given }
         receiptDate: { type: string, format: date, description: Set when every line is closed }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -2970,6 +2993,7 @@ components:
         legalEntityId: { type: string, format: uuid }
         number: { type: string }
         orderStatus: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }
+        plannedReceiptDate: { type: string, format: date, description: Planned receipt date of the order, when it has one }
         fromWarehouseId: { type: string }
         toWarehouseId: { type: string }
         shipDate: { type: string, format: date, description: Planned until the order ships, then the actual ship date }

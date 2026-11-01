@@ -293,7 +293,7 @@ components:
         fromWarehouse: { type: string }
         toWarehouse: { type: string }
         transitWarehouse: { type: [string, 'null'], description: Null for a one-step transfer }
-        shipDate: { type: string, format: date }
+        shipDate: { type: string, format: date, description: 'On transfer.shipped the date of this shipment; on transfer.received the order''s ship date (its first shipment)' }
         receiptDate: { type: [string, 'null'], format: date, description: Date of this receipt; the ship date of a one-step shipment; null on a two-step shipment }
         lines:
           type: array

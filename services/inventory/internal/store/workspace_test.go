@@ -59,7 +59,7 @@ func TestWorkspaceSummaryCountsOpenWorkPerLegalEntity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ShipTransfer(ctx, shipped.ID, shipped.Version, shipDay, domain.NegativePolicy{}); err != nil {
+	if _, err := s.ShipTransfer(ctx, shipped.ID, shipped.Version, nil, shipDay, domain.NegativePolicy{}); err != nil {
 		t.Fatal(err)
 	}
 	// Reconciliation: USD was a difference yesterday and matches today (resolved);

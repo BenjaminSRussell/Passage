@@ -81,10 +81,10 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 		id := ids.New()
 		number := "TO-" + strings.ToUpper(strings.ReplaceAll(id, "-", "")[20:])
 		if _, err := tx.Exec(ctx, `insert into transfer_order (tenant_id, legal_entity_id, id, number, idempotency_key, status, from_warehouse,
-			to_warehouse, to_site, transit_warehouse, use_transit, ship_date)
-			values ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11)`,
+			to_warehouse, to_site, transit_warehouse, use_transit, ship_date, planned_receipt_date)
+			values ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12)`,
 			tp.TenantID, o.LegalEntityID, id, number, key, o.FromWarehouse, o.ToWarehouse, optionalText(o.ToSite), optionalText(o.TransitWarehouse),
-			o.UseTransit, o.ShipDate.Format(dateLayout)); err != nil {
+			o.UseTransit, o.ShipDate.Format(dateLayout), optionalDate(o.PlannedReceipt)); err != nil {
 			return scopeProblem(err)
 		}
 		for i, l := range o.Lines {
@@ -108,7 +108,7 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 func sameTransfer(stored, o domain.TransferOrder) bool {
 	if stored.LegalEntityID != o.LegalEntityID || stored.FromWarehouse != o.FromWarehouse || stored.ToWarehouse != o.ToWarehouse ||
 		stored.ToSite != o.ToSite || stored.UseTransit != o.UseTransit || stored.TransitWarehouse != o.TransitWarehouse ||
-		!stored.ShipDate.Equal(o.ShipDate) || len(stored.Lines) != len(o.Lines) {
+		!stored.ShipDate.Equal(o.ShipDate) || !stored.PlannedReceipt.Equal(o.PlannedReceipt) || len(stored.Lines) != len(o.Lines) {
 		return false
 	}
 	for i, l := range o.Lines {
@@ -186,13 +186,22 @@ func (s *Postgres) ListTransfers(ctx context.Context, status string) ([]domain.T
 	return out, err
 }
 
-// ShipTransfer ships a CREATED order in full on shipDate. Each line moves from
-// the shipping warehouse to the transit warehouse (or, for a one-step
-// transfer, to the receiving warehouse) as a valued SOLD / PURCHASED pair in
-// one transaction: the receipt carries the issue's cost (BR-16.3), both legs
-// are on the inventory account, so there is no GL entry (AC-16.11). The
-// shipping warehouse follows the negative policy neg.
-func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error) {
+// TransferShipment is one line of a :ship call: the quantity to ship on it.
+type TransferShipment struct {
+	LineID string
+	Qty    decimal.Decimal
+}
+
+// ShipTransfer ships an order on shipDate: the quantities named in ships, or,
+// with none, what is left on every open line. A CREATED order ships first, and
+// a shipped or partially received order ships again while a line has quantity
+// left (partial shipments, BR-16.13). Each shipped quantity moves from the
+// shipping warehouse to the transit warehouse (or, for a one-step transfer, to
+// the receiving warehouse) as a valued SOLD / PURCHASED pair in one
+// transaction: the receipt carries the issue's cost (BR-16.3), both legs are
+// on the inventory account, so there is no GL entry (AC-16.11). The shipping
+// warehouse follows the negative policy neg.
+func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, ships []TransferShipment, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error) {
 	tp, _ := tenant.FromContext(ctx)
 	var out domain.TransferOrder
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -203,20 +212,38 @@ func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shi
 		if err := domain.CanShip(o); err != nil {
 			return domainProblem(err)
 		}
-		next := domain.ApplyShip(o)
-		next.ShipDate = shipDate
-		if !next.UseTransit {
+		req := make([]domain.ShipQty, len(ships))
+		for i, sh := range ships {
+			req[i] = domain.ShipQty{LineID: sh.LineID, Qty: sh.Qty}
+		}
+		if err := domain.ValidateShipScale(req, s.rules.MaxScale); err != nil {
+			return domainProblem(err)
+		}
+		next, moved, err := domain.ApplyShip(o, req)
+		if err != nil {
+			return domainProblem(err)
+		}
+		// The order's ship date is its first (earliest) shipment, so a later
+		// partial shipment does not restart the late-receipt clock of quantity
+		// already in transit; each shipment's own date is on its transactions
+		// and its event.
+		if o.Status == domain.TransferCreated || shipDate.Before(o.ShipDate) {
+			next.ShipDate = shipDate
+		}
+		if !next.UseTransit && next.Status == domain.TransferReceived {
 			next.ReceiptDate = shipDate
 		}
-		moves := make([]stockMove, 0, len(next.Lines))
-		moved := map[string]decimal.Decimal{}
+		moves := make([]stockMove, 0, len(moved))
 		for _, l := range next.Lines {
+			qty, ok := moved[l.ID]
+			if !ok {
+				continue
+			}
 			to := o.TransitDims(l)
 			if !o.UseTransit {
 				to = o.DestinationDims(l)
 			}
-			moves = append(moves, stockMove{product: l.ProductID, unit: l.Unit, from: o.SourceDims(l), to: to, qty: l.Qty, neg: neg})
-			moved[l.ID] = l.Qty
+			moves = append(moves, stockMove{product: l.ProductID, unit: l.Unit, from: o.SourceDims(l), to: to, qty: qty, neg: neg})
 		}
 		doc := document{legalEntityID: o.LegalEntityID, date: shipDate, sourceType: sourceTransferLine, referenceID: o.ID}
 		if err := moveStockBatch(ctx, tx, tp.TenantID, doc, moves); err != nil {
@@ -228,7 +255,13 @@ func (s *Postgres) ShipTransfer(ctx context.Context, id string, version int, shi
 		if out, err = loadTransfer(ctx, tx, id, false); err != nil {
 			return err
 		}
-		return enqueue(ctx, tx, "transfer", o.ID, invevents.TransferShipped, tp.TenantID, transferData(out, moved, out.ReceiptDate))
+		eventDate := time.Time{}
+		if !next.UseTransit {
+			eventDate = shipDate
+		}
+		data := transferData(out, moved, eventDate)
+		data.ShipDate = shipDate.Format(dateLayout)
+		return enqueue(ctx, tx, "transfer", o.ID, invevents.TransferShipped, tp.TenantID, data)
 	})
 	return out, err
 }
@@ -496,7 +529,8 @@ func lockedTransfer(ctx context.Context, tx pgx.Tx, id string, version int) (dom
 }
 
 const transferColumns = `id::text, legal_entity_id::text, number, status, from_warehouse, to_warehouse, coalesce(to_site, ''),
-	coalesce(transit_warehouse, ''), use_transit, to_char(ship_date, 'YYYY-MM-DD'), to_char(receipt_date, 'YYYY-MM-DD'), version, created_at`
+	coalesce(transit_warehouse, ''), use_transit, to_char(ship_date, 'YYYY-MM-DD'), to_char(receipt_date, 'YYYY-MM-DD'), version, created_at,
+	to_char(planned_receipt_date, 'YYYY-MM-DD')`
 
 const transferLineColumns = `l.id::text, l.line_no, l.product_id::text, d.dims::text, l.unit, l.qty::text, l.shipped_qty::text,
 	l.received_qty::text, l.under_pct::text, l.over_pct::text, l.closed`
@@ -504,9 +538,9 @@ const transferLineColumns = `l.id::text, l.line_no, l.product_id::text, d.dims::
 func scanTransfer(row pgx.Row) (domain.TransferOrder, error) {
 	var o domain.TransferOrder
 	var ship string
-	var receipt *string
+	var receipt, planned *string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.Number, &o.Status, &o.FromWarehouse, &o.ToWarehouse, &o.ToSite, &o.TransitWarehouse,
-		&o.UseTransit, &ship, &receipt, &o.Version, &o.CreatedAt); err != nil {
+		&o.UseTransit, &ship, &receipt, &o.Version, &o.CreatedAt, &planned); err != nil {
 		return o, err
 	}
 	var err error
@@ -515,6 +549,11 @@ func scanTransfer(row pgx.Row) (domain.TransferOrder, error) {
 	}
 	if receipt != nil {
 		if o.ReceiptDate, err = time.Parse(dateLayout, *receipt); err != nil {
+			return o, err
+		}
+	}
+	if planned != nil {
+		if o.PlannedReceipt, err = time.Parse(dateLayout, *planned); err != nil {
 			return o, err
 		}
 	}
@@ -640,14 +679,15 @@ type TransferLineFilter struct {
 
 // TransferLineRow is one transfer order line with its order header.
 type TransferLineRow struct {
-	OrderID       string
-	LegalEntityID string
-	Number        string
-	Status        string
-	FromWarehouse string
-	ToWarehouse   string
-	ShipDate      time.Time
-	Line          domain.TransferLine
+	OrderID        string
+	LegalEntityID  string
+	Number         string
+	Status         string
+	FromWarehouse  string
+	ToWarehouse    string
+	ShipDate       time.Time
+	PlannedReceipt time.Time // zero when none
+	Line           domain.TransferLine
 }
 
 // maxTransferLineList caps the transfer order line inquiry.
@@ -663,7 +703,7 @@ func (s *Postgres) ListTransferLines(ctx context.Context, f TransferLineFilter) 
 	out := []TransferLineRow{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select o.id::text, o.legal_entity_id::text, o.number, o.status, o.from_warehouse, o.to_warehouse,
-			to_char(o.ship_date, 'YYYY-MM-DD'), `+transferLineColumns+`
+			to_char(o.ship_date, 'YYYY-MM-DD'), to_char(o.planned_receipt_date, 'YYYY-MM-DD'), `+transferLineColumns+`
 			from transfer_order_line l
 			join transfer_order o on o.tenant_id = l.tenant_id and o.id = l.transfer_order_id
 			join dimension_set d on d.tenant_id = l.tenant_id and d.hash = l.dimension_set_hash
@@ -677,7 +717,8 @@ func (s *Postgres) ListTransferLines(ctx context.Context, f TransferLineFilter) 
 			  and ($8::date is null or o.ship_date <= $8::date)
 			  and (not $9 or (o.status = 'CREATED' and o.ship_date < $10::date)
 			       or (o.status in ('SHIPPED', 'PARTIALLY_RECEIVED') and not l.closed and l.shipped_qty > l.received_qty
-			           and o.ship_date < $10::date - $11::int))
+			           and case when o.planned_receipt_date is not null then o.planned_receipt_date < $10::date
+			                    else o.ship_date < $10::date - $11::int end))
 			order by o.ship_date, o.number, l.line_no
 			limit $12`, tp.TenantID, f.LegalEntityID, f.Status, f.ProductID, f.FromWarehouse, f.ToWarehouse, f.From,
 			f.To, f.LateOnly, f.AsOf, f.LateReceiptDays, maxTransferLineList+1)
@@ -688,11 +729,17 @@ func (s *Postgres) ListTransferLines(ctx context.Context, f TransferLineFilter) 
 		for rows.Next() {
 			var r TransferLineRow
 			var ship string
-			if r.Line, err = scanTransferLine(rows, &r.OrderID, &r.LegalEntityID, &r.Number, &r.Status, &r.FromWarehouse, &r.ToWarehouse, &ship); err != nil {
+			var planned *string
+			if r.Line, err = scanTransferLine(rows, &r.OrderID, &r.LegalEntityID, &r.Number, &r.Status, &r.FromWarehouse, &r.ToWarehouse, &ship, &planned); err != nil {
 				return err
 			}
 			if r.ShipDate, err = time.Parse(dateLayout, ship); err != nil {
 				return err
+			}
+			if planned != nil {
+				if r.PlannedReceipt, err = time.Parse(dateLayout, *planned); err != nil {
+					return err
+				}
 			}
 			out = append(out, r)
 		}
@@ -705,4 +752,13 @@ func (s *Postgres) ListTransferLines(ctx context.Context, f TransferLineFilter) 
 		return out[:maxTransferLineList], true, nil
 	}
 	return out, false, nil
+}
+
+// optionalDate is the YYYY-MM-DD text of t, nil for the zero time.
+func optionalDate(t time.Time) *string {
+	if t.IsZero() {
+		return nil
+	}
+	s := t.Format(dateLayout)
+	return &s
 }

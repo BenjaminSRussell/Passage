@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,8 +39,8 @@ func (f *fakeStore) ListTransfers(context.Context, string) ([]domain.TransferOrd
 	return []domain.TransferOrder{{ID: ids.New(), Status: domain.TransferCreated, Version: 1}}, nil
 }
 
-func (f *fakeStore) ShipTransfer(_ context.Context, id string, version int, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error) {
-	f.transferVersion, f.shipDate, f.transferNegative = version, shipDate, neg
+func (f *fakeStore) ShipTransfer(_ context.Context, id string, version int, ships []store.TransferShipment, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error) {
+	f.transferVersion, f.shipDate, f.transferNegative, f.ships = version, shipDate, neg, ships
 	if f.err != nil {
 		return domain.TransferOrder{}, f.err
 	}
@@ -446,5 +447,43 @@ func TestTransferLinesInquiryRejectsBadFilters(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodGet, "/v1/inventory/transfer-order-lines", "", []string{"inventory.transfer.write"}, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without inventory.read: status %d", rec.Code)
+	}
+}
+
+func TestShipPartialLinesAndPlannedReceiptDate(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	path := transferOrdersPathForTest + "/" + ids.New() + ":ship"
+	headers := map[string]string{"If-Match": `"4"`}
+	lineID := ids.New()
+	rec := do(t, h, http.MethodPost, path, `{"shipDate":"2026-09-03","lines":[{"lineId":"`+lineID+`","qty":"2.5"}]}`, []string{"inventory.transfer.post"}, headers)
+	if rec.Code != http.StatusOK || len(fs.ships) != 1 || fs.ships[0].LineID != lineID || fs.ships[0].Qty.String() != "2.5" {
+		t.Fatalf("status %d ships %+v body %s", rec.Code, fs.ships, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, path, `{"lines":[{"lineId":"x","qty":"0"}]}`, []string{"inventory.transfer.post"}, headers)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad ship line: status %d, want 400", rec.Code)
+	}
+	p := decodeProblem(t, rec)
+	for _, f := range []string{"lines[0].lineId", "lines[0].qty"} {
+		if _, ok := p.Errors[f]; !ok {
+			t.Errorf("missing field error for %s: %v", f, p.Errors)
+		}
+	}
+
+	body := strings.Replace(transferBody, `"shipDate":"2026-09-01",`, `"shipDate":"2026-09-01","plannedReceiptDate":"2026-09-08",`, 1)
+	rec = do(t, h, http.MethodPost, transferOrdersPathForTest, body, []string{"inventory.transfer.write"}, map[string]string{"Idempotency-Key": "k-planned"})
+	if rec.Code != http.StatusCreated || fs.transferIn.PlannedReceipt.Format("2006-01-02") != "2026-09-08" || !strings.Contains(rec.Body.String(), `"plannedReceiptDate":"2026-09-08"`) {
+		t.Fatalf("create with planned receipt: status %d in %+v body %s", rec.Code, fs.transferIn, rec.Body.String())
+	}
+	for name, planned := range map[string]string{"before ship date": "2026-08-31", "not a date": "soon"} {
+		bad := strings.Replace(transferBody, `"shipDate":"2026-09-01",`, `"shipDate":"2026-09-01","plannedReceiptDate":"`+planned+`",`, 1)
+		rec = do(t, h, http.MethodPost, transferOrdersPathForTest, bad, []string{"inventory.transfer.write"}, map[string]string{"Idempotency-Key": "k-bad"})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("planned receipt %s: status %d, want 400", name, rec.Code)
+		}
+		if _, ok := decodeProblem(t, rec).Errors["plannedReceiptDate"]; !ok {
+			t.Errorf("planned receipt %s: no field error", name)
+		}
 	}
 }

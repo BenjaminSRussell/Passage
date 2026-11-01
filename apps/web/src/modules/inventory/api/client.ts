@@ -847,6 +847,8 @@ export interface TransferLine {
   inTransit: string;
   underdeliveryPct: string;
   overdeliveryPct: string;
+  /** Ordered quantity not shipped yet (partial shipments); 0 once shipped or closed. */
+  unshippedQty?: string;
   closed: boolean;
 }
 
@@ -861,6 +863,8 @@ export interface TransferOrder {
   transitWarehouseId?: string;
   useTransit: boolean;
   shipDate: string;
+  /** Planned receipt date when one was given; an open shipment is late once it has passed. */
+  plannedReceiptDate?: string;
   receiptDate?: string;
   version: number;
   createdAt: string;
@@ -884,6 +888,7 @@ export interface TransferInput {
   transitWarehouseId?: string;
   useTransit: boolean;
   shipDate: string;
+  plannedReceiptDate?: string;
   lines: TransferLineInput[];
 }
 
@@ -924,6 +929,7 @@ export async function createTransfer(input: TransferInput, key: string = newKey(
       return out;
     }),
   };
+  if (input.plannedReceiptDate?.trim()) body.plannedReceiptDate = input.plannedReceiptDate.trim();
   if (input.toSiteId?.trim()) body.toSiteId = input.toSiteId.trim();
   if (input.useTransit && input.transitWarehouseId?.trim()) body.transitWarehouseId = input.transitWarehouseId.trim();
   return (await send<TransferOrder>("/transfer-orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
@@ -938,13 +944,23 @@ export async function getTransfer(id: string, signal?: AbortSignal): Promise<Tra
   return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}`, {}, signal)).body;
 }
 
-/** Ships the whole order on shipDate at the version the screen shows (If-Match). */
-export async function shipTransfer(id: string, version: number, shipDate: string): Promise<TransferOrder> {
+export interface ShipLineInput {
+  lineId: string;
+  qty: string;
+}
+
+/**
+ * Ships on shipDate at the version the screen shows (If-Match): the quantities in `lines` (a
+ * partial shipment), or, without lines, what is left on every open line.
+ */
+export async function shipTransfer(id: string, version: number, shipDate: string, lines?: ShipLineInput[]): Promise<TransferOrder> {
+  const body: Record<string, unknown> = { shipDate };
+  if (lines && lines.length > 0) body.lines = lines;
   return (
     await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:ship`, {
       method: "POST",
       headers: { "If-Match": `"${version}"` },
-      body: JSON.stringify({ shipDate }),
+      body: JSON.stringify(body),
     })
   ).body;
 }
@@ -980,6 +996,7 @@ export interface TransferLineItem {
   toWarehouseId: string;
   /** Planned until the order ships, then the actual ship date. */
   shipDate: string;
+  plannedReceiptDate?: string;
   lineId: string;
   lineNo: number;
   productId: string;

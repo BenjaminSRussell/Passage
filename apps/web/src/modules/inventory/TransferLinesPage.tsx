@@ -22,6 +22,7 @@ const columns: DataTableColumn<TransferLineItem>[] = [
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "route", header: "Route", mono: true, render: (row) => `${row.fromWarehouseId} → ${row.toWarehouseId}` },
   { key: "shipDate", header: "Ship date", mono: true },
+  { key: "plannedReceiptDate", header: "Planned receipt", mono: true, render: (row) => row.plannedReceiptDate ?? dash },
   { key: "qty", header: "Ordered", align: "end", mono: true, render: (row) => `${row.qty} ${row.unit}` },
   { key: "shippedQty", header: "Shipped", align: "end", mono: true },
   { key: "receivedQty", header: "Received", align: "end", mono: true },

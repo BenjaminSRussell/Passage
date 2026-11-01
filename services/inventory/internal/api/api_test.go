@@ -70,6 +70,7 @@ type fakeStore struct {
 	receiptDate      time.Time
 	abcIn            store.AbcRunInput
 	transferNegative domain.NegativePolicy
+	ships            []store.TransferShipment
 
 	// slice 4: tags, reversal, rebuild (fake methods in tags_test.go)
 	tagKey          string
