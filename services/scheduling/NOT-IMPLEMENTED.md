@@ -257,13 +257,12 @@ so there is no legal-entity check beyond the tenant. Idempotent twice over:
 the `consumer_inbox` row for the event id (migration `0010`) and the override
 idempotency key `eam-downtime:{downtimeId}`, so a republished event with a new
 id books nothing more. The window is widened to whole minutes (start down, end
-up). Booked jobs the window overlaps are listed in the log and the
-`capacityoverride.created` event, not moved, as for the route. EAM's resource
-id must be a scheduling resource id. Deploy: `consumer.enabled` in the chart, a
+up) and split into consecutive spans of at most 31 days, keyed `eam-downtime:{id}` then `:{n}`. Booked jobs the window overlaps are listed in the log and the
+`capacityoverride.created` event, not moved, as for the route. EAM's `resourceId` is the asset's `production_resource_id`, which must be a scheduling resource id; EAM has no scheduling lookup, so it is not checked on asset save (documented in `asyncapi.yaml`) and a wrong one is dead-lettered. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-downtime"}` > 0 (a non-empty `passage.eam.downtime.dlq`); replay per `platform/go/eventing/README.md`. Deploy: `consumer.enabled` in the chart, a
 `KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`)
 whose secret (key `password`, plus the cluster CA as `ca.crt`) must be copied
 into the release namespace. Not built: planned downtime of RELEASED work
-orders (EAM D3) and a downtime longer than 31 days (parked, not split).
+orders (EAM D3).
 Web: capacity overrides list
 (by resource, remove) and create form (UTC times, reason, affected jobs shown
 after saving), linked from the resource detail screen and the navigation. The

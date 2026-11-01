@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,8 +48,8 @@ func (a *API) DowntimeConsumerHandlers() map[string]eventing.Handler {
 
 func (a *API) applyRecordedDowntime(ctx context.Context, _ pgx.Tx, evt events.Event) error {
 	actor, ok := tenant.FromContext(ctx)
-	if !ok || !actor.HasDuty(DutyDowntimeApply) || !strings.EqualFold(actor.TenantID, evt.TenantID) {
-		return eventing.Permanent(errors.New("downtime consumer has no principal for the event tenant"))
+	if !ok || !actor.HasDuty(DutyDowntimeApply) {
+		return eventing.Permanent(errors.New("downtime consumer has no principal"))
 	}
 	var data downtimeRecordedData
 	if err := json.Unmarshal(evt.Data, &data); err != nil {
@@ -60,23 +61,35 @@ func (a *API) applyRecordedDowntime(ctx context.Context, _ pgx.Tx, evt events.Ev
 		return eventing.Permanent(errors.New("downtime.recorded needs downtimeId, resourceId, from and to"))
 	}
 	start, end := from.UTC().Truncate(time.Minute), to.UTC().Add(time.Minute-time.Nanosecond).Truncate(time.Minute)
-	if !end.After(start) || end.Sub(start) > maxOverrideSpan {
-		return eventing.Permanent(errors.New("downtime window must be after its start and at most 31 days"))
+	if !end.After(start) {
+		return eventing.Permanent(errors.New("downtime window must end after its start"))
 	}
 	ctx, cancel := context.WithTimeout(ctx, downtimeApplyTimeout)
 	defer cancel()
-	sum := sha256.Sum256([]byte(strings.ToLower(data.ResourceID) + "|" + start.Format(time.RFC3339) + "|" + end.Format(time.RFC3339)))
-	res, created, err := a.store.CreateCapacityOverride(ctx, store.CapacityOverride{
-		ResourceID: strings.ToLower(data.ResourceID), Kind: domain.OverrideDowntime, StartAt: start, EndAt: end, Reason: "EAM work order " + data.WorkOrderID,
-	}, store.Idem{Key: downtimeKeyPrefix + strings.ToLower(data.DowntimeID), Fingerprint: hex.EncodeToString(sum[:])})
-	if err != nil {
-		var problem *httpx.Problem
-		if errors.As(err, &problem) && (problem.Status == http.StatusNotFound || problem.Status == http.StatusUnprocessableEntity) {
-			return eventing.Permanent(err)
+	resourceID, downtimeID := strings.ToLower(data.ResourceID), strings.ToLower(data.DowntimeID)
+	for n := 0; start.Before(end); n++ {
+		chunkEnd := start.Add(maxOverrideSpan)
+		if chunkEnd.After(end) {
+			chunkEnd = end
 		}
-		return fmt.Errorf("apply downtime: %w", err)
+		key := downtimeKeyPrefix + downtimeID
+		if n > 0 {
+			key += ":" + strconv.Itoa(n)
+		}
+		sum := sha256.Sum256([]byte(resourceID + "|" + start.Format(time.RFC3339) + "|" + chunkEnd.Format(time.RFC3339)))
+		res, created, err := a.store.CreateCapacityOverride(ctx, store.CapacityOverride{
+			ResourceID: resourceID, Kind: domain.OverrideDowntime, StartAt: start, EndAt: chunkEnd, Reason: "EAM work order " + data.WorkOrderID,
+		}, store.Idem{Key: key, Fingerprint: hex.EncodeToString(sum[:])})
+		if err != nil {
+			var problem *httpx.Problem
+			if errors.As(err, &problem) && (problem.Status == http.StatusNotFound || problem.Status == http.StatusUnprocessableEntity) {
+				return eventing.Permanent(err)
+			}
+			return fmt.Errorf("apply downtime: %w", err)
+		}
+		slog.InfoContext(ctx, "eam downtime applied to capacity", "overrideId", res.ID, "resourceId", res.ResourceID, "created", created, "part", n,
+			"affectedJobs", len(res.AffectedJobs), "downtimeId", data.DowntimeID, "tenantId", evt.TenantID, "eventId", evt.ID, "actor", actor.UserID)
+		start = chunkEnd
 	}
-	slog.InfoContext(ctx, "eam downtime applied to capacity", "overrideId", res.ID, "resourceId", res.ResourceID, "created", created,
-		"affectedJobs", len(res.AffectedJobs), "downtimeId", data.DowntimeID, "tenantId", evt.TenantID, "eventId", evt.ID, "actor", actor.UserID)
 	return nil
 }

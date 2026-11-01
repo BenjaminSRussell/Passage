@@ -150,20 +150,19 @@ func TestDowntimeConsumer_AnotherTenantsResourceIsNotFoundAndDeadLettered(t *tes
 	}
 	foreign := downtimeRecord(t, 1, ids.New(), testkit.TenantID(2), res.ID, ids.New(), monday(10), monday(12))
 	unknown := downtimeRecord(t, 2, ids.New(), testkit.TenantID(1), ids.New(), ids.New(), monday(10), monday(12))
-	tooLong := downtimeRecord(t, 3, ids.New(), testkit.TenantID(1), res.ID, ids.New(), monday(0), monday(0).Add(40*24*time.Hour))
-	good := downtimeRecord(t, 4, ids.New(), testkit.TenantID(1), res.ID, ids.New(), monday(10), monday(12))
+	good := downtimeRecord(t, 3, ids.New(), testkit.TenantID(1), res.ID, ids.New(), monday(10), monday(12))
 
-	src, dlq := run(foreign, unknown, tooLong, good)
+	src, dlq := run(foreign, unknown, good)
 
-	if len(dlq.sent) != 3 || dlq.sent[0].offset != 1 || dlq.sent[1].offset != 2 || dlq.sent[2].offset != 3 {
-		t.Fatalf("dead-lettered %+v, want offsets 1, 2 and 3", dlq.sent)
+	if len(dlq.sent) != 2 || dlq.sent[0].offset != 1 || dlq.sent[1].offset != 2 {
+		t.Fatalf("dead-lettered %+v, want offsets 1 and 2", dlq.sent)
 	}
 	for _, p := range dlq.sent {
 		if p.topic != "passage.eam.downtime.dlq" || p.reason != "permanent" {
 			t.Fatalf("parked %+v", p)
 		}
 	}
-	if len(src.acked) != 4 {
+	if len(src.acked) != 3 {
 		t.Fatalf("acked %v, want every offset so one poison event does not stall the partition", src.acked)
 	}
 	if n := count(`select count(*) from scheduling_capacity_override where tenant_id = $1::uuid`, testkit.TenantID(2)); n != 0 {
@@ -171,6 +170,31 @@ func TestDowntimeConsumer_AnotherTenantsResourceIsNotFoundAndDeadLettered(t *tes
 	}
 	if n := count(`select count(*) from scheduling_capacity_override where resource_id = $1::uuid`, res.ID); n != 1 {
 		t.Fatalf("%d overrides on the resource, want only the good event's", n)
+	}
+}
+
+func TestDowntimeConsumer_AFortyDayWindowIsSplitIntoSpansOfAtMost31Days(t *testing.T) {
+	st, run, count := newRig(t)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "planner", Duties: map[string]struct{}{}})
+	res, _, err := st.CreateResource(ctx, store.Resource{Code: "PRESS-1", Name: "Press", Finite: true, TimeZone: "UTC",
+		Shifts: []domain.Shift{{Weekday: time.Monday, StartMinute: 8 * 60, EndMinute: 16 * 60}}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID, downtimeID := ids.New(), ids.New()
+	long := downtimeRecord(t, 1, eventID, testkit.TenantID(1), res.ID, downtimeID, monday(0), monday(0).Add(40*24*time.Hour))
+	again := downtimeRecord(t, 2, ids.New(), testkit.TenantID(1), res.ID, downtimeID, monday(0), monday(0).Add(40*24*time.Hour))
+
+	_, dlq := run(long, again)
+
+	if len(dlq.sent) != 0 {
+		t.Fatalf("dead-lettered %+v", dlq.sent)
+	}
+	if n := count(`select count(*) from scheduling_capacity_override where resource_id = $1::uuid and end_at - start_at <= interval '31 days'`, res.ID); n != 2 {
+		t.Fatalf("%d spans, want 2 (31 + 9 days) after a republish", n)
+	}
+	if n := count(`select count(*) from scheduling_capacity_override where resource_id = $1::uuid and idempotency_key in ($2, $3)`, res.ID, "eam-downtime:"+downtimeID, "eam-downtime:"+downtimeID+":1"); n != 2 {
+		t.Fatalf("%d keyed spans, want the plain key and :1", n)
 	}
 }
 
