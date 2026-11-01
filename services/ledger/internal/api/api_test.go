@@ -61,6 +61,8 @@ type fakeStore struct {
 	linePage    store.LinePage
 	lineFilters []store.LineFilter
 	setInputs   []store.LedgerSetInput
+	listAfter   string
+	listNext    string
 	mappings    []store.AccountMapping
 	setPosts    []setPost
 }
@@ -277,12 +279,14 @@ func (f *fakeStore) GetLedgerSet(_ context.Context, id string) (store.LedgerSet,
 	return store.LedgerSet{ID: id}, f.err
 }
 
-func (f *fakeStore) ListLedgerSets(context.Context) ([]store.LedgerSet, error) {
-	return []store.LedgerSet{{ID: testSet}}, f.err
+func (f *fakeStore) ListLedgerSets(_ context.Context, after string) ([]store.LedgerSet, string, error) {
+	f.listAfter = after
+	return []store.LedgerSet{{ID: testSet}}, f.listNext, f.err
 }
 
-func (f *fakeStore) ListAccountMappings(_ context.Context, ledgerID string) ([]store.AccountMapping, error) {
-	return []store.AccountMapping{{LedgerID: ledgerID}}, f.err
+func (f *fakeStore) ListAccountMappings(_ context.Context, ledgerID, after string) ([]store.AccountMapping, string, error) {
+	f.listAfter = after
+	return []store.AccountMapping{{LedgerID: ledgerID}}, f.listNext, f.err
 }
 
 func (f *fakeStore) CreateAccountMapping(_ context.Context, in store.AccountMapping) (store.AccountMapping, error) {

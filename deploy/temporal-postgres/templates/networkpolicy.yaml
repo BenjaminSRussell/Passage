@@ -12,5 +12,10 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: temporal
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  {{- toYaml .Values.networkPolicy.clientComponents | nindent 18 }}
       ports:
         - { protocol: TCP, port: 5432 }

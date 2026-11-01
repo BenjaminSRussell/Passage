@@ -98,12 +98,16 @@ func (a *API) listLedgerSets(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
-	sets, err := a.store.ListLedgerSets(r.Context())
+	after, ok := pageCursor(w, r)
+	if !ok {
+		return
+	}
+	sets, next, err := a.store.ListLedgerSets(r.Context(), after)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": sets})
+	writePage(w, sets, next)
 }
 
 func (a *API) listAccountMappings(w http.ResponseWriter, r *http.Request) {
@@ -115,12 +119,33 @@ func (a *API) listAccountMappings(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found"))
 		return
 	}
-	mappings, err := a.store.ListAccountMappings(r.Context(), id)
+	after, ok := pageCursor(w, r)
+	if !ok {
+		return
+	}
+	mappings, next, err := a.store.ListAccountMappings(r.Context(), id, after)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": mappings})
+	writePage(w, mappings, next)
+}
+
+func pageCursor(w http.ResponseWriter, r *http.Request) (string, bool) {
+	cursor := r.URL.Query().Get("cursor")
+	if cursor != "" && !ids.Valid(cursor) {
+		validationFailed(w, r, map[string]string{"cursor": "is not a cursor returned by this endpoint"})
+		return "", false
+	}
+	return cursor, true
+}
+
+func writePage[T any](w http.ResponseWriter, items []T, next string) {
+	body := map[string]any{"items": items}
+	if next != "" {
+		body["nextCursor"] = next
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 type accountMappingRequest struct {

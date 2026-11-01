@@ -25,7 +25,7 @@ type Store interface {
 	List(ctx context.Context) ([]Entry, error)
 	Ping(ctx context.Context) error
 	RecordRelease(ctx context.Context, in Release, idempotencyKey string) (Release, error)
-	ListReleases(ctx context.Context, service, environment string) ([]Release, error)
+	ListReleases(ctx context.Context, service, environment, after string) ([]Release, string, error)
 }
 
 type Postgres struct{ pool *pgxpool.Pool }

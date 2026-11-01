@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -165,22 +166,22 @@ func TestPostgres_LedgerLinesForOneLedgerOnlyLeaveTheOthersEmpty(t *testing.T) {
 
 func TestPostgres_ListLedgerSetsAndAccountMappingsRespectScope(t *testing.T) {
 	e := setupLedgerSet(t)
-	sets, err := e.store.ListLedgerSets(e.ctx)
+	sets, _, err := e.store.ListLedgerSets(e.ctx, "")
 	if err != nil || len(sets) != 1 || sets[0].ID != e.set.ID || len(sets[0].LedgerIDs) != 3 {
 		t.Fatalf("sets: %+v %v", sets, err)
 	}
-	mappings, err := e.store.ListAccountMappings(e.ctx, e.local.ID)
+	mappings, _, err := e.store.ListAccountMappings(e.ctx, e.local.ID, "")
 	if err != nil || len(mappings) != 1 || mappings[0].SourceAccount != "6010" || mappings[0].TargetAccount != "7010" || mappings[0].EffectiveFrom != "2026-01-01" {
 		t.Fatalf("mappings: %+v %v", mappings, err)
 	}
-	if none, err := e.store.ListAccountMappings(e.ctx, e.tax.ID); err != nil || len(none) != 0 {
+	if none, _, err := e.store.ListAccountMappings(e.ctx, e.tax.ID, ""); err != nil || len(none) != 0 {
 		t.Fatalf("a ledger without mappings: %+v %v", none, err)
 	}
 	other := principalCtx(e.tenant, ids.New())
-	if sets, err := e.store.ListLedgerSets(other); err != nil || len(sets) != 0 {
+	if sets, _, err := e.store.ListLedgerSets(other, ""); err != nil || len(sets) != 0 {
 		t.Errorf("another legal entity sees sets: %+v %v", sets, err)
 	}
-	if _, err := e.store.ListAccountMappings(other, e.local.ID); problemCode(err) != "LEDGER_NOT_FOUND" {
+	if _, _, err := e.store.ListAccountMappings(other, e.local.ID, ""); problemCode(err) != "LEDGER_NOT_FOUND" {
 		t.Errorf("another legal entity must get 404 for the mappings: %v", err)
 	}
 }
@@ -204,5 +205,30 @@ func TestPostgres_LedgerLinesPostIsIdempotentAndRespectsLegalEntityScope(t *test
 	other := principalCtx(e.tenant, ids.New())
 	if _, err := e.store.PostSetEntry(other, e.set.ID, in); problemCode(err) != CodeSetNotFound {
 		t.Errorf("a caller scoped to another legal entity must not post ledger lines: %v", err)
+	}
+}
+
+func TestPostgres_ListAccountMappingsPagesByKeysetCursor(t *testing.T) {
+	e := setupLedgerSet(t)
+	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for i := range 101 {
+		m := AccountMapping{LedgerID: e.local.ID, SourceAccount: "6010", TargetAccount: "7010", EffectiveFrom: start.AddDate(0, 0, i).Format("2006-01-02")}
+		if _, err := e.store.CreateAccountMapping(e.ctx, m); err != nil {
+			t.Fatalf("mapping %d: %v", i, err)
+		}
+	}
+	first, next, err := e.store.ListAccountMappings(e.ctx, e.local.ID, "")
+	if err != nil || len(first) != 100 || next != first[99].ID {
+		t.Fatalf("first page: %d items, next %q, %v", len(first), next, err)
+	}
+	if _, _, err := e.store.ListAccountMappings(e.ctx, e.local.ID, ids.New()); problemCode(err) != "COM-0001" {
+		t.Fatalf("unknown mapping cursor: %v", err)
+	}
+	if _, _, err := e.store.ListLedgerSets(e.ctx, ids.New()); problemCode(err) != "COM-0001" {
+		t.Fatalf("unknown set cursor: %v", err)
+	}
+	second, next, err := e.store.ListAccountMappings(e.ctx, e.local.ID, next)
+	if err != nil || len(second) != 2 || next != "" || second[0].EffectiveFrom <= first[99].EffectiveFrom {
+		t.Fatalf("second page: %+v next %q %v", second, next, err)
 	}
 }
