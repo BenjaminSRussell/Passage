@@ -50,8 +50,14 @@ type Order struct {
 	QtyError      decimal.Decimal `json:"qtyError"`
 	Status        domain.Status   `json:"status"`
 	DeliveryDate  *string         `json:"deliveryDate,omitempty"`
-	OriginType    string          `json:"originType"`
-	OriginID      *string         `json:"originId,omitempty"`
+	// StartDate and EndDate are the dates `:schedule` gave the order (UTC dates of the first
+	// start and the last finish); absent while it is unscheduled. SchedulingMethod is the
+	// method of the last schedule, operations until one runs.
+	StartDate        *string                 `json:"startDate,omitempty"`
+	EndDate          *string                 `json:"endDate,omitempty"`
+	SchedulingMethod domain.SchedulingMethod `json:"schedulingMethod"`
+	OriginType       string                  `json:"originType"`
+	OriginID         *string                 `json:"originId,omitempty"`
 	// ConfigurationID is the saved configuration of a SalesOrderLine order.
 	ConfigurationID *string `json:"configurationId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
@@ -179,10 +185,14 @@ type Transition struct {
 	Error           decimal.Decimal
 	RAFTolerancePct decimal.Decimal
 	ZeroOutputDuty  bool
-	Actor           string
-	TraceID         string
-	IdempotencyKey  string
-	RequestHash     string
+	// Schedule carries the `:schedule` parameters; nil schedules forward from Now with the
+	// operations method. Now is the clock the default start reads (the API sets it).
+	Schedule       *ScheduleParams
+	Now            time.Time
+	Actor          string
+	TraceID        string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 // Store is what the API needs from persistence.
@@ -233,6 +243,7 @@ type Store interface {
 	PreviewOrderChange(ctx context.Context, id string) (ChangePreview, error)
 	ApplyOrderChange(ctx context.Context, in ChangeApply) (ChangeApplyResult, error)
 	DismissOrderChange(ctx context.Context, in ChangeDismiss) (OrderChange, error)
+	ListJobs(ctx context.Context, f JobFilter) (JobPage, error)
 }
 
 // Postgres is the production store.
@@ -479,10 +490,11 @@ func insertLines(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines
 func insertOperations(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ops []domain.Operation) error {
 	for _, op := range ops {
 		if _, err := tx.Exec(ctx, `insert into production_operation (tenant_id, order_id, oper_number, resource_id, setup_time_h, run_time_h_per, process_qty, scrap_pct,
-			labor_rate, overhead_rate, subcontract, subcontract_price)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			labor_rate, overhead_rate, subcontract, subcontract_price, queue_before_h, queue_after_h, transit_h)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			tenantID, orderID, op.OperNumber, op.ResourceID, op.SetupH.String(), op.RunHPer.String(), op.ProcessQty.String(), op.ScrapPct.String(),
-			op.LaborRate.String(), op.OverheadRate.String(), op.Subcontract, op.SubcontractPrice.String()); err != nil {
+			op.LaborRate.String(), op.OverheadRate.String(), op.Subcontract, op.SubcontractPrice.String(),
+			op.QueueBeforeH.String(), op.QueueAfterH.String(), op.TransitH.String()); err != nil {
 			return err
 		}
 	}
@@ -746,6 +758,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 	var out Order
 	replayed := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var sched *domain.Schedule
 		var loggedOrder, loggedHash string
 		err := tx.QueryRow(ctx, `select order_id::text, request_hash from production_status_log where tenant_id = $1 and idempotency_key = $2`,
 			p.TenantID, t.IdempotencyKey).Scan(&loggedOrder, &loggedHash)
@@ -820,6 +833,11 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			if err := replaceEstimate(ctx, tx, p.TenantID, t.OrderID); err != nil {
 				return err
 			}
+		case domain.CmdSchedule:
+			sched, err = scheduleOrder(ctx, tx, p.TenantID, h, t)
+			if err != nil {
+				return err
+			}
 		case domain.CmdResetStatus:
 			// FR-21.9: a reset reverses what the statuses it leaves posted.
 			if types := reversedBy(from, to); len(types) > 0 {
@@ -839,6 +857,13 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				if _, err := tx.Exec(ctx, `delete from production_cost_estimate where tenant_id = $1 and order_id = $2`, p.TenantID, t.OrderID); err != nil {
 					return err
 				}
+			}
+		}
+		// A reset to Estimated or Created, or a cancel, takes the schedule back: the jobs and the
+		// dates go, so the capacity they held is free again (wave 23 reads the jobs).
+		if from != to && (to == domain.Created || to == domain.Estimated || to == domain.Cancelled) {
+			if err := clearSchedule(ctx, tx, p.TenantID, t.OrderID); err != nil {
+				return err
 			}
 		}
 		if to == domain.Cancelled {
@@ -877,9 +902,15 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		}
 		if err := enqueue(ctx, tx, t.OrderID, prodevents.OrderStatusChanged, p.TenantID, t.Actor, prodevents.OrderStatusChangedData{
 			OrderID: t.OrderID, From: string(from), To: string(to), Quantity: out.Quantity.String(), QtyRAF: out.QtyRAF.String(),
-			QtyError: out.QtyError.String(), Actor: t.Actor, OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			QtyError: out.QtyError.String(), StartDate: out.StartDate, EndDate: out.EndDate, Actor: t.Actor,
+			OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		}); err != nil {
 			return err
+		}
+		if sched != nil {
+			if err := enqueueScheduled(ctx, tx, p.TenantID, out, t.Actor, "schedule", scheduleParams(t).Direction, *sched); err != nil {
+				return err
+			}
 		}
 		return enqueueSubcontractRequests(ctx, tx, p.TenantID, t.OrderID, t.Actor, requests)
 	})
@@ -950,10 +981,11 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
 		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified,
-		configuration_id::text
+		configuration_id::text, start_date::text, end_date::text, scheduling_method
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID,
+		&o.StartDate, &o.EndDate, &o.SchedulingMethod)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}
@@ -1003,7 +1035,7 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([]domain.Operation, error) {
 	rows, err := q.Query(ctx, `select oper_number, resource_id::text, setup_time_h::text, run_time_h_per::text, process_qty::text, scrap_pct::text,
 		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status,
-		po_requested_at, po_cancelled_at
+		po_requested_at, po_cancelled_at, queue_before_h::text, queue_after_h::text, transit_h::text, planned_start, planned_end
 		from production_operation where tenant_id = $1 and order_id = $2 order by oper_number`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -1012,11 +1044,12 @@ func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([
 	out := []domain.Operation{}
 	for rows.Next() {
 		var op domain.Operation
-		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status string
+		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status, qb, qa, transit string
 		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub,
-			&hours, &good, &bad, &status, &op.PORequestedAt, &op.POCancelledAt); err != nil {
+			&hours, &good, &bad, &status, &op.PORequestedAt, &op.POCancelledAt, &qb, &qa, &transit, &op.PlannedStart, &op.PlannedEnd); err != nil {
 			return nil, err
 		}
+		op.QueueBeforeH, op.QueueAfterH, op.TransitH = dec(qb), dec(qa), dec(transit)
 		op.HoursReported, op.QtyGood, op.QtyError, op.Status = dec(hours), dec(good), dec(bad), domain.OperStatus(status)
 		op.SetupH, op.RunHPer, op.ProcessQty, op.ScrapPct = dec(setup), dec(run), dec(proc), dec(scrap)
 		op.LaborRate, op.OverheadRate, op.SubcontractPrice = dec(labor), dec(oh), dec(sub)

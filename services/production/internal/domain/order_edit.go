@@ -70,6 +70,15 @@ type OperationEdit struct {
 	OverheadRate     *decimal.Decimal `json:"overheadRate,omitempty"`
 	Subcontract      *bool            `json:"subcontract,omitempty"`
 	SubcontractPrice *decimal.Decimal `json:"subcontractPrice,omitempty"`
+	QueueBeforeH     *decimal.Decimal `json:"queueBeforeH,omitempty"`
+	QueueAfterH      *decimal.Decimal `json:"queueAfterH,omitempty"`
+	TransitH         *decimal.Decimal `json:"transitH,omitempty"`
+}
+
+// HasFields reports whether the edit carries any field besides op and operNumber.
+func (e OperationEdit) HasFields() bool {
+	return e.ResourceID != nil || e.SetupH != nil || e.RunHPer != nil || e.ScrapPct != nil || e.LaborRate != nil || e.OverheadRate != nil ||
+		e.Subcontract != nil || e.SubcontractPrice != nil || e.QueueBeforeH != nil || e.QueueAfterH != nil || e.TransitH != nil
 }
 
 // OrderEdits is one request of edits: the line edits are applied first, in order,
@@ -307,8 +316,7 @@ func applyOperationEdit(ops *[]Operation, e OperationEdit, journaled map[int]boo
 		if at < 0 {
 			return a, missingOperation(e.OperNumber)
 		}
-		if e.ResourceID == nil && e.SetupH == nil && e.RunHPer == nil && e.ScrapPct == nil && e.LaborRate == nil &&
-			e.OverheadRate == nil && e.Subcontract == nil && e.SubcontractPrice == nil {
+		if !e.HasFields() {
 			return a, invalidEdit(fmt.Sprintf("operation %d: a change sets at least one field", e.OperNumber))
 		}
 		before := (*ops)[at]
@@ -336,7 +344,8 @@ func setOperationFields(op *Operation, e OperationEdit) {
 		from *decimal.Decimal
 		to   *decimal.Decimal
 	}{{e.SetupH, &op.SetupH}, {e.RunHPer, &op.RunHPer}, {e.ScrapPct, &op.ScrapPct}, {e.LaborRate, &op.LaborRate},
-		{e.OverheadRate, &op.OverheadRate}, {e.SubcontractPrice, &op.SubcontractPrice}} {
+		{e.OverheadRate, &op.OverheadRate}, {e.SubcontractPrice, &op.SubcontractPrice}, {e.QueueBeforeH, &op.QueueBeforeH},
+		{e.QueueAfterH, &op.QueueAfterH}, {e.TransitH, &op.TransitH}} {
 		if f.from != nil {
 			*f.to = *f.from
 		}
@@ -350,7 +359,8 @@ func checkOperation(op Operation) error {
 	if op.ResourceID == "" {
 		return invalidEdit(fmt.Sprintf("operation %d: resourceId is required", op.OperNumber))
 	}
-	for _, v := range []decimal.Decimal{op.SetupH, op.RunHPer, op.ScrapPct, op.LaborRate, op.OverheadRate, op.SubcontractPrice} {
+	for _, v := range []decimal.Decimal{op.SetupH, op.RunHPer, op.ScrapPct, op.LaborRate, op.OverheadRate, op.SubcontractPrice,
+		op.QueueBeforeH, op.QueueAfterH, op.TransitH} {
 		if v.IsNegative() {
 			return invalidEdit(fmt.Sprintf("operation %d: times, scrap, rates and price must not be negative", op.OperNumber))
 		}

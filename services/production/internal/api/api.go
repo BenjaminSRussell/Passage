@@ -63,6 +63,8 @@ const (
 	maxPageSize       = 200
 	readyTimeout      = 500 * time.Millisecond
 	maxCommandBody    = 64 << 10
+	// maxOrderJobs bounds the jobs of one order: five kinds of time on each of maxOperations.
+	maxOrderJobs = 5 * maxOperations
 )
 
 var (
@@ -154,6 +156,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/operations", a.operationsOverview)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals", a.journalInquiry)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/kpi", a.orderKPIs)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/jobs", a.listJobs)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/jobs", a.orderJobs)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/trigger-points", a.listTriggerPoints)
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
@@ -495,6 +499,12 @@ type commandRequest struct {
 	Quantity      *decimal.Decimal `json:"quantity"`
 	ErrorQuantity *decimal.Decimal `json:"errorQuantity"`
 	Status        domain.Status    `json:"status"`
+	// Method, Direction and At belong to :schedule: the scheduling method (operations or
+	// jobs), the direction (forward or backward) and the instant the plan starts at (forward)
+	// or finishes at (backward).
+	Method    domain.SchedulingMethod `json:"method"`
+	Direction domain.Direction        `json:"direction"`
+	At        *time.Time              `json:"at"`
 }
 
 func (a *API) transition(w http.ResponseWriter, r *http.Request) {
@@ -532,7 +542,7 @@ func (a *API) applyCommand(w http.ResponseWriter, r *http.Request, id string, cm
 		return
 	}
 	key, fields := idempotencyKey(r)
-	t := store.Transition{OrderID: id, IfMatch: ifMatch, Command: cmd, ZeroOutputDuty: p.HasDuty(DutyZeroOutput),
+	t := store.Transition{OrderID: id, IfMatch: ifMatch, Command: cmd, ZeroOutputDuty: p.HasDuty(DutyZeroOutput), Now: time.Now(),
 		RAFTolerancePct: a.cfg.RAFTolerancePct, Actor: p.UserID, TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key}
 	validateCommand(cmd, body, &t, fields)
 	if len(fields) > 0 {
@@ -540,6 +550,9 @@ func (a *API) applyCommand(w http.ResponseWriter, r *http.Request, id string, cm
 		return
 	}
 	t.RequestHash = commandHash(cmd, t.ResetTo, t.Good, t.Error)
+	if t.Schedule != nil {
+		t.RequestHash = hashOf(struct{ Command, Schedule any }{t.RequestHash, t.Schedule})
+	}
 	order, replayed, err := a.store.Transition(r.Context(), t)
 	if err != nil {
 		a.refuse(w, r, err)
@@ -570,6 +583,7 @@ func validateCommand(cmd domain.Command, body commandRequest, t *store.Transitio
 	} else if body.Quantity != nil || body.ErrorQuantity != nil {
 		fields["quantity"] = "is accepted only by :report-finished"
 	}
+	validateSchedule(cmd, body, t, fields)
 	if body.Status != "" {
 		switch {
 		case cmd != domain.CmdResetStatus:
@@ -580,6 +594,32 @@ func validateCommand(cmd domain.Command, body commandRequest, t *store.Transitio
 			t.ResetTo = body.Status
 		}
 	}
+}
+
+// validateSchedule reads the parameters of :schedule (method operations by default, direction
+// forward by default) and refuses them on any other command.
+func validateSchedule(cmd domain.Command, body commandRequest, t *store.Transition, fields map[string]string) {
+	if body.Method == "" && body.Direction == "" && body.At == nil {
+		return
+	}
+	if cmd != domain.CmdSchedule {
+		fields["method"] = "method, direction and at are accepted only by :schedule"
+		return
+	}
+	params := store.ScheduleParams{Method: body.Method, Direction: body.Direction, At: body.At}
+	if params.Method == "" {
+		params.Method = domain.MethodOperations
+	}
+	if params.Direction == "" {
+		params.Direction = domain.Forward
+	}
+	if !params.Method.Valid() {
+		fields["method"] = "must be operations or jobs"
+	}
+	if !params.Direction.Valid() {
+		fields["direction"] = "must be forward or backward"
+	}
+	t.Schedule = &params
 }
 
 // ---- helpers ----
@@ -854,11 +894,15 @@ func validateRouteSnapshot(ops []domain.Operation, fields map[string]string) {
 			fields[at+".resourceId"] = "must be a UUID"
 		}
 		for name, v := range map[string]decimal.Decimal{"setupTimeH": op.SetupH, "runTimeHPer": op.RunHPer, "scrapPct": op.ScrapPct,
-			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice} {
+			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice,
+			"queueBeforeH": op.QueueBeforeH, "queueAfterH": op.QueueAfterH, "transitH": op.TransitH} {
 			checkQuantity(at+"."+name, v, false, fields)
 		}
 		if !op.ProcessQty.IsZero() {
 			fields[at+".processQty"] = "is computed by the service"
+		}
+		if op.PlannedStart != nil || op.PlannedEnd != nil {
+			fields[at+".plannedStart"] = "the window of an operation is set by :schedule"
 		}
 		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
 			fields[at+".status"] = "hours, quantities and status are reported by route cards"

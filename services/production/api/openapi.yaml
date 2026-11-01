@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.15
+  version: 0.21.16
   description: |
     Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
@@ -29,6 +29,8 @@ info:
     Slice 10 adds order change management (FR-21.16, BR-21.12): OCM profiles, detection of the
     open orders an ECO's new BOM and route supersede, the worklist, the change preview with its
     change cost, and :apply and :dismiss.
+    Slice 18 adds scheduling with infinite capacity (BR-21.1): :schedule dates the route and
+    writes the order's jobs, which GET /v1/production/jobs and GET .../orders/{id}/jobs read.
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -210,6 +212,9 @@ components:
         overheadRate: { $ref: '#/components/schemas/Decimal' }
         subcontract: { type: boolean }
         subcontractPrice: { $ref: '#/components/schemas/Decimal', description: Vendor price per unit of the process quantity. }
+        queueBeforeH: { $ref: '#/components/schemas/Decimal', description: 'Hours the order waits before the operation; a queue-before job when above 0 (default 0).' }
+        queueAfterH: { $ref: '#/components/schemas/Decimal', description: 'Hours the order waits after the operation; a queue-after job when above 0 (default 0).' }
+        transitH: { $ref: '#/components/schemas/Decimal', description: 'Hours to move the order to the next operation; a transport job when above 0 (default 0).' }
     Operation:
       allOf:
         - $ref: '#/components/schemas/OperationInput'
@@ -220,6 +225,8 @@ components:
             qtyGood: { $ref: '#/components/schemas/Decimal' }
             qtyError: { $ref: '#/components/schemas/Decimal' }
             status: { type: string, enum: [open, started, finished] }
+            plannedStart: { type: string, format: date-time, readOnly: true, description: 'Start of the operation''s window (its queue-before included) set by :schedule; absent while the order is unscheduled. Not accepted on a request.' }
+            plannedEnd: { type: string, format: date-time, readOnly: true, description: 'End of the operation''s window (its transport included) set by :schedule.' }
             poRequestedAt: { type: string, format: date-time, readOnly: true, description: 'When release asked purchasing for the vendor PO of this subcontract operation (FR-21.10); absent before, and absent again once the request was withdrawn.' }
             poCancelledAt: { type: string, format: date-time, readOnly: true, description: 'When the request was withdrawn (subcontract.pocancelled): the order was cancelled or merged away, or an edit removed the operation, turned subcontracting off or changed the vendor. Cleared when a new request is raised.' }
     OrderLine:
@@ -331,11 +338,15 @@ components:
         Optional. `report-finished` requires `quantity` (good quantity, > 0) and accepts
         `errorQuantity`, and receipts the order's co-products and by-products in proportion
         to the good quantity (FR-21.14); `reset-status` accepts `status`, an earlier status to reset to
-        (default: the previous one). Other commands take no body.
+        (default: the previous one); `schedule` accepts `method`, `direction` and `at`. Other
+        commands take no body.
       properties:
         quantity: { $ref: '#/components/schemas/Decimal' }
         errorQuantity: { $ref: '#/components/schemas/Decimal' }
         status: { $ref: '#/components/schemas/Status' }
+        method: { type: string, enum: [operations, jobs], default: operations, description: ':schedule only. operations gives each operation one process job (setup and run together), jobs a setup job and a process job; queue and transport hours are their own jobs under both.' }
+        direction: { type: string, enum: [forward, backward], default: forward, description: ':schedule only. Forward starts the first operation at `at`, backward ends the last one at `at`.' }
+        at: { type: string, format: date-time, description: ':schedule only. The instant the plan starts at (forward, default now) or ends at (backward, default the end of the order''s delivery date, 23:59:59 UTC; a backward schedule without it needs a delivery date).' }
     Order:
       type: object
       properties:
@@ -352,6 +363,9 @@ components:
         qtyError: { $ref: '#/components/schemas/Decimal' }
         status: { $ref: '#/components/schemas/Status' }
         deliveryDate: { type: string, format: date }
+        startDate: { type: string, format: date, description: 'UTC date of the first start, set by :schedule; absent while the order is unscheduled.' }
+        endDate: { type: string, format: date, description: 'UTC date of the last finish, set by :schedule.' }
+        schedulingMethod: { type: string, enum: [operations, jobs], description: 'The method of the last :schedule; operations before one runs.' }
         originType: { type: string }
         originId: { type: string, format: uuid }
         configurationId: { type: string, format: uuid }
@@ -790,6 +804,9 @@ components:
         overheadRate: { $ref: '#/components/schemas/Decimal' }
         subcontract: { type: boolean }
         subcontractPrice: { $ref: '#/components/schemas/Decimal' }
+        queueBeforeH: { $ref: '#/components/schemas/Decimal' }
+        queueAfterH: { $ref: '#/components/schemas/Decimal' }
+        transitH: { $ref: '#/components/schemas/Decimal' }
     OrderEdits:
       type: object
       description: Line edits apply first, in order, then operation edits; 1 to 200 edits in all.
@@ -911,6 +928,36 @@ components:
               operations: { type: integer }
               amount: { $ref: '#/components/schemas/Decimal' }
         nextCursor: { type: string }
+    Job:
+      type: object
+      required: [id, orderId, orderNumber, orderStatus, legalEntityId, siteId, productId, operNumber, seq, jobType, resourceId, plannedStart, plannedEnd, plannedHours, status]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderStatus: { $ref: '#/components/schemas/Status' }
+        legalEntityId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        seq: { type: integer, minimum: 1, description: 'Position of the job within its operation.' }
+        jobType: { $ref: '#/components/schemas/JobType' }
+        resourceId: { type: string, format: uuid }
+        plannedStart: { type: string, format: date-time }
+        plannedEnd: { type: string, format: date-time }
+        plannedHours: { $ref: '#/components/schemas/Decimal' }
+        status: { type: string, enum: [planned, started, finished] }
+    JobType:
+      type: string
+      enum: [queue-before, setup, process, queue-after, transport]
+    JobPage:
+      type: object
+      required: [items, total, plannedHours]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Job' } }
+        total: { type: integer, description: Jobs over the whole filter. }
+        plannedHours: { $ref: '#/components/schemas/Decimal', description: Planned hours over the whole filter. }
+        nextCursor: { type: string, description: 'Id of the last job of the page; absent on the last page.' }
     OperationsOverviewRow:
       type: object
       required: [orderId, orderNumber, orderStatus, legalEntityId, siteId, productId, dueDate, operNumber, resourceId, subcontract, processQty, plannedHours, hoursReported, qtyGood, qtyError, operStatus]
@@ -1393,8 +1440,9 @@ paths:
         warehouse, currency, item group, rework reference and the BOM and route snapshot.
         The first order survives with the summed quantity, its lines and operations
         re-exploded and, once estimated, re-estimated; it emits
-        dev.passage.production.order.updated.v1. Every other order becomes Cancelled with
-        mergedIntoOrderId set, a `merge` status-log row and
+        dev.passage.production.order.updated.v1; a scheduled survivor is re-dated for the summed quantity
+        (dev.passage.production.order.scheduled.v1, reason redate). Every other order becomes Cancelled
+        with its jobs and dates removed, mergedIntoOrderId set, a `merge` status-log row and
         dev.passage.production.order.statuschanged.v1. Subcontracting (FR-21.10): the survivor's
         requested vendor POs change with the summed quantity
         (dev.passage.production.subcontract.pochanged.v1) and the requests of every order merged
@@ -1544,6 +1592,20 @@ paths:
         type rework, one per cost group, to the profile's reworkVarianceAccount. A reset that
         reverses the reports as finished detaches the order's as-built records (BR-21.14).
 
+        Scheduling (BR-21.1, infinite capacity): schedule dates the route. The operations run one
+        after the other in route order on a continuous clock, each as queue-before, setup, process
+        (run time × process quantity), queue-after and transport hours; there are no calendars or
+        capacities until wave 23. The body picks the method (operations or jobs), the direction
+        (forward or backward) and the instant (at). The order gets startDate and endDate, each
+        operation its plannedStart and plannedEnd, and the jobs are written
+        (dev.passage.production.order.scheduled.v1). A backward schedule without at needs a delivery
+        date, and a route of more than 100000 hours is refused (422 PRODUCTION_SCHEDULE_INPUT); an
+        order without operations is scheduled with no jobs at the instant. reset-status to Estimated
+        or Created and cancel remove the jobs and the dates. Dates are UTC: startDate and endDate are
+        the UTC dates of the first start and last finish, and the backward default is 23:59:59 UTC of
+        the delivery date (production has no site time zone). These are the infinite-capacity dates
+        of BR-21.1; finite scheduling (wave 23) is meant to replace them (see the AsyncAPI).
+
         Subcontracting (FR-21.10): release emits
         dev.passage.production.subcontract.porequested.v1 for each subcontract operation not
         requested before and stamps the operation's poRequestedAt, so a reset and second
@@ -1574,7 +1636,7 @@ paths:
         '404': { description: Unknown order or command (PRODUCTION_ORDER_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION (also a reset back before Started of an order that took part in a split transfer, BR-21.11); PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED, PRODUCTION_AS_BUILT_REQUIRED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_SCHEDULE_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED, PRODUCTION_AS_BUILT_REQUIRED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:split:
     post:
@@ -1588,7 +1650,8 @@ paths:
         BR-21.8; each keeps its setup) and, once estimated, re-estimated. Emits
         dev.passage.production.order.created.v1 for the new order and
         dev.passage.production.order.updated.v1 for the original, and writes a `split`
-        status-log row on both. Subcontracting (FR-21.10): the original's requested vendor POs
+        status-log row on both. A scheduled original keeps its schedule start; both orders are
+        re-dated from it for their quantities (dev.passage.production.order.scheduled.v1, reason redate). Subcontracting (FR-21.10): the original's requested vendor POs
         shrink (dev.passage.production.subcontract.pochanged.v1) and a Released or Started new
         order requests its own (…subcontract.porequested.v1). A Started order also moves its
         share of the posted consumption, route hours and WIP to the new order (BR-21.11): with r = splitQty ÷ order quantity,
@@ -1934,6 +1997,10 @@ paths:
         changed emits dev.passage.production.subcontract.pochanged.v1; one removed, turned off or
         moved to another vendor resource emits …subcontract.pocancelled.v1 (and, on a Released
         order, the new vendor is requested with …subcontract.porequested.v1).
+        Scheduling (slice 18): an edit of a scheduled order (one with startDate) re-dates it forward
+        from its schedule start with the changed route and emits
+        dev.passage.production.order.scheduled.v1 with reason redate; operation queue and transit
+        hours (queueBeforeH, queueAfterH, transitH) can be edited.
       x-passage-duty: production.order.write
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -2189,6 +2256,57 @@ paths:
               schema: { $ref: '#/components/schemas/OperationsOverview' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/jobs:
+    get:
+      operationId: getProductionJobs
+      summary: Dated jobs across orders
+      description: |
+        The jobs `:schedule` wrote (ProductionJob), ordered by planned start, with the order each
+        belongs to. resourceId and the from/to window give the load of one resource; a job is
+        in the window when it ends after from and starts before to. Total and plannedHours cover the
+        whole filter, not only the page. Jobs are planned with infinite capacity until wave 23.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: resourceId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: jobType, in: query, schema: { $ref: '#/components/schemas/JobType' } }
+        - { name: orderStatus, in: query, schema: { $ref: '#/components/schemas/Status' } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: Must be after from., schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: One page of jobs and the totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobPage' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/orders/{id}/jobs:
+    get:
+      operationId: getProductionOrderJobs
+      summary: Jobs of one order
+      description: The dated jobs of the order in route order; empty while the order is unscheduled.
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: The order's jobs and their planned hours.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, items, plannedHours]
+                properties:
+                  orderId: { type: string, format: uuid }
+                  items: { type: array, items: { $ref: '#/components/schemas/Job' } }
+                  plannedHours: { $ref: '#/components/schemas/Decimal' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: Unknown order (PRODUCTION_ORDER_NOT_FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/journals:
     get:
       operationId: getProductionJournalInquiry

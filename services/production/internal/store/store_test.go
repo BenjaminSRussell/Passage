@@ -289,14 +289,14 @@ func TestStore_Lifecycle(t *testing.T) {
 	}
 
 	// Events: created, one statuschanged per status change and per RAF (re-estimates emit none),
-	// one journal.posted per RAF journal, and order.settled at End.
+	// one order.scheduled at :schedule, one journal.posted per RAF journal, and order.settled at End.
 	counts := map[string]int{}
 	types := outboxTypes(t, pool, o.ID)
 	for _, typ := range types {
 		counts[typ]++
 	}
 	if types[0] != prodevents.OrderCreated || counts[prodevents.OrderCreated] != 1 || counts[prodevents.OrderStatusChanged] != 7 ||
-		counts[prodevents.JournalPosted] != 2 || counts[prodevents.OrderSettled] != 1 || len(types) != 11 {
+		counts[prodevents.JournalPosted] != 2 || counts[prodevents.OrderSettled] != 1 || counts[prodevents.OrderScheduled] != 1 || len(types) != 12 {
 		t.Fatalf("outbox: %v", types)
 	}
 }

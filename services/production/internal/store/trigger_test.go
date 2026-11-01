@@ -156,6 +156,13 @@ func TestTriggers_AC2113(t *testing.T) {
 		!r25.LaborRate.Equal(d("40")) || r25.Status != domain.OperOpen || !r25.HoursReported.IsZero() {
 		t.Fatalf("inserted operations: %+v %+v", r25, r26)
 	}
+	// AC-21.13 "scheduled forward": the dated route is re-dated with 25 and 26 between 20 and 30.
+	for i := 1; i < len(o.Operations); i++ {
+		prev, cur := o.Operations[i-1], o.Operations[i]
+		if prev.PlannedEnd == nil || cur.PlannedStart == nil || !cur.PlannedStart.Equal(*prev.PlannedEnd) {
+			t.Fatalf("operation %d does not follow %d after the insertion: %v %v", cur.OperNumber, prev.OperNumber, prev.PlannedEnd, cur.PlannedStart)
+		}
+	}
 	// The inserted operation takes route-card feedback like any other.
 	st.routeCard(HoursInput{OperNumber: 25, Hours: d("1.5"), QtyGood: d("3"), Finished: true})
 

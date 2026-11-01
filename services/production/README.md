@@ -6,7 +6,7 @@ as-built genealogy; slice 4 adds the bulk status update, and split and merge (sl
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
 order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds
-order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters; slice 17 adds the order housekeeping jobs and the journal proposal defaults.
+order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters; slice 17 adds the order housekeeping jobs and the journal proposal defaults; slice 18 adds scheduling with infinite capacity and the dated jobs.
 
 Slice 1:
 
@@ -394,6 +394,7 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_TRIGGER_POINT_FIRED` | 409 | Deleting a trigger point that fired |
 | `PRODUCTION_TRIGGER_FUNCTION_FAILED` | firing | Not a response: the reason a due trigger did nothing, on the firing and its event (PROD-0019) |
 | `PRODUCTION_BULK_PARTIAL` | 200 body | Some orders of a bulk status update failed; see `results` (PROD-0022) |
+| `PRODUCTION_SCHEDULE_INPUT` | 422 | `:schedule` cannot date the order: a backward schedule without `at` or a delivery date, or a route of more than 100000 hours |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
 | `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
 | `precondition_required` | 428 | If-Match is missing on a command, PATCH or profile replacement |
@@ -478,3 +479,44 @@ Slice 17:
   site's `staleOrderDays` (site row, else All row, else 90; 0 never). Auto-end: ReportedAsFinished
   with the whole quantity reported, no draft journal, at a site with `autoEndEnabled` (default
   off). Duties: `production.order.release` and `production.order.end`, the commands' own.
+
+Slice 18:
+
+- Scheduling with infinite capacity (BR-21.1 Estimated to Scheduled, migration `0017_scheduling.sql`).
+  `:schedule` takes an optional body `{method, direction, at}` and dates the route: the operations
+  run one after the other in route order on a continuous clock, each as queue-before, setup,
+  process (run time per unit x process quantity), queue-after and transport hours. The route
+  snapshot carries `queueBeforeH`, `queueAfterH` and `transitH` per operation (default 0). `forward`
+  (default) starts the first operation at `at` (default now); `backward` ends the last one at `at`
+  (default 23:59:59 UTC of the delivery date, which it then requires: 422
+  `PRODUCTION_SCHEDULE_INPUT`). Method `operations` (default) gives each operation one process job
+  (setup and run together); `jobs` a setup job and a process job. Jobs of zero hours are left out
+  except the process job. The order gets `startDate`, `endDate` and `schedulingMethod`, each
+  operation `plannedStart` and `plannedEnd` (queue and transit included), and the jobs
+  (`production_job`) are written in the same transaction as the status change, with
+  `order.scheduled.v1` after `order.statuschanged.v1` (which now carries `startDate` and `endDate`).
+  A reset to Estimated or Created and a cancel delete the jobs and clear the dates, so the next
+  `:schedule` replaces a schedule rather than adding to it. A bulk `schedule` uses the defaults.
+  An order without operations (a sales line order before its route is resolved) is scheduled with
+  no jobs at the instant; a route of more than 100000 hours is refused (`PRODUCTION_SCHEDULE_INPUT`).
+- Re-dating: a dated order whose route or quantities change is re-dated forward from its schedule
+  start (`schedule_start`) with its method, so the jobs always match the route: an order edit or an
+  applied order change (FR-21.18, FR-21.16; queue and transit hours are editable and part of the
+  ECO diff), a split (both orders; the new order copies the start and method, FR-21.15), a merge
+  (the survivor; orders merged away lose their jobs and dates) and trigger-inserted operations
+  (AC-21.13). Each re-date writes `order.scheduled.v1` with `reason: redate` and the whole new job
+  set (new job ids). A delivery date PATCH does not re-date.
+- Clock and time zone: a continuous UTC clock with no calendar (BR-21.1 asks for infinite capacity
+  only; calendars and finite capacity are wave 23, which replaces these dates). `startDate` and
+  `endDate` are UTC dates and the backward default ends at 23:59:59 UTC of the delivery date;
+  production has no site time zone, so a site far from UTC sees dates a day off near midnight. DST
+  does not change a duration on this clock.
+- Wave 23 hand-off: production's dates are the baseline until finite scheduling books the order.
+  The intended flow is `order.scheduled.v1` -> scheduling registers the operations and books them
+  (FR-23.11, per order on `:schedule`) -> `scheduling.orderdates.changed.v1` and `job.scheduled.v1`
+  -> production takes those dates and stops re-dating on its own. Neither consumer exists yet
+  (NOT-IMPLEMENTED of both services), so scheduling holds no production orders today and the two
+  services do not both date an order.
+- `GET /v1/production/jobs` (by resource, order, site, job type, order status and a from/to window,
+  keyset pages, totals over the filter) and `GET /v1/production/orders/{id}/jobs`; duty
+  `production.order.read`. `:schedule` keeps `production.order.write`.

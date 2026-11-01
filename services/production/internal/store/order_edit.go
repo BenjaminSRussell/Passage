@@ -147,6 +147,10 @@ func editOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in OrderEdit, 
 				return err
 			}
 		}
+		// The route changed under a dated order: its jobs and windows follow (slice 18).
+		if err := redateOrder(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {
+			return err
+		}
 		if out, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
 			return err
 		}
@@ -259,10 +263,11 @@ func writeEditedOperations(ctx context.Context, tx pgx.Tx, tenantID, orderID str
 			continue
 		}
 		if _, err := tx.Exec(ctx, `update production_operation set resource_id = $4, setup_time_h = $5, run_time_h_per = $6, process_qty = $7,
-				scrap_pct = $8, labor_rate = $9, overhead_rate = $10, subcontract = $11, subcontract_price = $12
+				scrap_pct = $8, labor_rate = $9, overhead_rate = $10, subcontract = $11, subcontract_price = $12,
+				queue_before_h = $13, queue_after_h = $14, transit_h = $15
 			where tenant_id = $1 and order_id = $2 and oper_number = $3`, tenantID, orderID, op.OperNumber, op.ResourceID, op.SetupH.String(),
 			op.RunHPer.String(), op.ProcessQty.String(), op.ScrapPct.String(), op.LaborRate.String(), op.OverheadRate.String(),
-			op.Subcontract, op.SubcontractPrice.String()); err != nil {
+			op.Subcontract, op.SubcontractPrice.String(), op.QueueBeforeH.String(), op.QueueAfterH.String(), op.TransitH.String()); err != nil {
 			return err
 		}
 	}

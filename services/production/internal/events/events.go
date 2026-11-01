@@ -12,10 +12,13 @@ var (
 	OrderCreated       = events.Type(Context, "order", "created", 1)
 	OrderUpdated       = events.Type(Context, "order", "updated", 1)
 	OrderStatusChanged = events.Type(Context, "order", "statuschanged", 1)
-	OrderSettled       = events.Type(Context, "order", "settled", 1)
-	JournalPosted      = events.Type(Context, "journal", "posted", 1)
-	AsBuiltAssigned    = events.Type(Context, "asbuilt", "assigned", 1)
-	AsBuiltDetached    = events.Type(Context, "asbuilt", "detached", 1)
+	// OrderScheduled reports `:schedule`: the order's dates and its dated jobs (FR-21.2, BR-21.1),
+	// for the scheduling and shop floor services.
+	OrderScheduled  = events.Type(Context, "order", "scheduled", 1)
+	OrderSettled    = events.Type(Context, "order", "settled", 1)
+	JournalPosted   = events.Type(Context, "journal", "posted", 1)
+	AsBuiltAssigned = events.Type(Context, "asbuilt", "assigned", 1)
+	AsBuiltDetached = events.Type(Context, "asbuilt", "detached", 1)
 	// OrderBOMEdited reports an order-specific BOM or route edit (FR-21.18).
 	OrderBOMEdited = events.Type(Context, "order", "bomedited", 1)
 	// TriggerPointFired reports a trigger point evaluated as due on route-card feedback
@@ -46,7 +49,7 @@ var (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
+	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderScheduled, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
 		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed, ParametersSaved}
 }
 
@@ -181,14 +184,55 @@ type OrderUpdatedData struct {
 
 // OrderStatusChangedData is the payload of order.statuschanged.v1.
 type OrderStatusChangedData struct {
-	OrderID    string `json:"orderId"`
-	From       string `json:"from"`
-	To         string `json:"to"`
-	Quantity   string `json:"quantity"`
-	QtyRAF     string `json:"qtyRaf"`
-	QtyError   string `json:"qtyError"`
-	Actor      string `json:"actor"`
-	OccurredAt string `json:"occurredAt"`
+	OrderID  string `json:"orderId"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Quantity string `json:"quantity"`
+	QtyRAF   string `json:"qtyRaf"`
+	QtyError string `json:"qtyError"`
+	// StartDate and EndDate are the order's scheduled dates; null while it is unscheduled.
+	StartDate  *string `json:"startDate"`
+	EndDate    *string `json:"endDate"`
+	Actor      string  `json:"actor"`
+	OccurredAt string  `json:"occurredAt"`
+}
+
+// ScheduledJob is one dated job of order.scheduled.v1. JobID is the ProductionJob id; a
+// re-date replaces the job set, so the ids of an order change with each event.
+type ScheduledJob struct {
+	JobID        string `json:"jobId"`
+	OperNumber   int    `json:"operNumber"`
+	Seq          int    `json:"seq"`
+	JobType      string `json:"jobType"`
+	ResourceID   string `json:"resourceId"`
+	PlannedStart string `json:"plannedStart"`
+	PlannedEnd   string `json:"plannedEnd"`
+	PlannedHours string `json:"plannedHours"`
+}
+
+// OrderScheduledData is the payload of order.scheduled.v1: how the order was scheduled and
+// the jobs it now has, in route order. Start and End are instants, StartDate and EndDate the
+// UTC dates of them. It is written by :schedule and again by each re-date of a dated order
+// (route edit, applied change, split, merge, trigger-inserted operation); Reason tells them apart
+// (`schedule` or `redate`) and Status is the order's status then.
+type OrderScheduledData struct {
+	OrderID          string         `json:"orderId"`
+	OrderNumber      string         `json:"orderNumber"`
+	LegalEntityID    string         `json:"legalEntityId"`
+	SiteID           string         `json:"siteId"`
+	Status           string         `json:"status"`
+	Reason           string         `json:"reason"`
+	SchedulingMethod string         `json:"schedulingMethod"`
+	Direction        string         `json:"direction"`
+	Start            string         `json:"start"`
+	End              string         `json:"end"`
+	StartDate        string         `json:"startDate"`
+	EndDate          string         `json:"endDate"`
+	DeliveryDate     *string        `json:"deliveryDate"`
+	Jobs             []ScheduledJob `json:"jobs"`
+	OrderVersion     int            `json:"orderVersion"`
+	Actor            string         `json:"actor"`
+	OccurredAt       string         `json:"occurredAt"`
 }
 
 // JournalLine is one posted line of journal.posted.v1: an issue of a BOM line,

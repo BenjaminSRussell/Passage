@@ -388,6 +388,10 @@ func perform(ctx context.Context, sp pgx.Tx, tenantID string, h orderHead, journ
 		if err := insertOperations(ctx, sp, tenantID, h.id, inserted); err != nil {
 			return err
 		}
+		// AC-21.13: the inserted operations are scheduled forward with the rest of a dated route.
+		if err := redateOrder(ctx, sp, tenantID, h.id, actor); err != nil {
+			return err
+		}
 		for _, op := range inserted {
 			f.InsertedOperations = append(f.InsertedOperations, op.OperNumber)
 		}

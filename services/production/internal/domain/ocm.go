@@ -147,8 +147,10 @@ func DiffSnapshot(lines []OrderLine, ops []Operation, nextLines []OrderLine, nex
 				delta.OperationsChanged++
 			}
 			res, setup, run, scrap, labor, oh, sub, price := n.ResourceID, n.SetupH, n.RunHPer, n.ScrapPct, n.LaborRate, n.OverheadRate, n.Subcontract, n.SubcontractPrice
+			qb, qa, transit := n.QueueBeforeH, n.QueueAfterH, n.TransitH
 			edits.Operations = append(edits.Operations, OperationEdit{Op: op, OperNumber: n.OperNumber, ResourceID: &res, SetupH: &setup,
-				RunHPer: &run, ScrapPct: &scrap, LaborRate: &labor, OverheadRate: &oh, Subcontract: &sub, SubcontractPrice: &price})
+				RunHPer: &run, ScrapPct: &scrap, LaborRate: &labor, OverheadRate: &oh, Subcontract: &sub, SubcontractPrice: &price,
+				QueueBeforeH: &qb, QueueAfterH: &qa, TransitH: &transit})
 		}
 		var gone []int
 		for _, o := range ops {
@@ -179,7 +181,8 @@ func lineDiffers(a, b OrderLine) bool {
 func operationDiffers(a, b Operation) bool {
 	return a.ResourceID != b.ResourceID || !a.SetupH.Equal(b.SetupH) || !a.RunHPer.Equal(b.RunHPer) || !a.ScrapPct.Equal(b.ScrapPct) ||
 		!a.LaborRate.Equal(b.LaborRate) || !a.OverheadRate.Equal(b.OverheadRate) || a.Subcontract != b.Subcontract ||
-		!a.SubcontractPrice.Equal(b.SubcontractPrice)
+		!a.SubcontractPrice.Equal(b.SubcontractPrice) || !a.QueueBeforeH.Equal(b.QueueBeforeH) || !a.QueueAfterH.Equal(b.QueueAfterH) ||
+		!a.TransitH.Equal(b.TransitH)
 }
 
 // ChangeCost is the cost of applying a change (BR-21.12): the delta of the

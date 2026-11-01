@@ -80,7 +80,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 46 {
+	if len(served) != 48 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string

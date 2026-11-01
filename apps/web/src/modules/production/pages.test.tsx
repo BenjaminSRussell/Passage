@@ -154,7 +154,7 @@ describe("Production order detail", () => {
     expect(totals).toHaveTextContent("Total 5450.00 USD");
     const log = await findTable({ name: "Status log" });
     await waitFor(() => expect(within(log).getByText("trace-abc")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Schedule" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Schedule order" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Re-estimate" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel order" })).toBeInTheDocument();
     expect(checkAxeAA(container)).toEqual([]);

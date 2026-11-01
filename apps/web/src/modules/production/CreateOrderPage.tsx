@@ -45,6 +45,10 @@ export interface OperationValues {
   runTimeHPer: string;
   laborRate: string;
   overheadRate: string;
+  /** Waiting and transport hours around the operation; absent means none. */
+  queueBeforeH?: string;
+  queueAfterH?: string;
+  transitH?: string;
 }
 
 export interface OrderValues {
@@ -82,6 +86,9 @@ const emptyOperation = (n: number): OperationValues => ({
   runTimeHPer: "",
   laborRate: "",
   overheadRate: "",
+  queueBeforeH: "",
+  queueAfterH: "",
+  transitH: "",
 });
 
 export const initialValues = (): OrderValues => ({
@@ -196,8 +203,8 @@ export function validateOrder(values: OrderValues): OrderErrors {
     if (!uuidPattern.test(op.resourceId.trim())) {
       errors[`operations.${i}.resourceId`] = "Enter the resource id (a UUID).";
     }
-    for (const key of ["setupTimeH", "runTimeHPer", "laborRate", "overheadRate"] as const) {
-      if (!optionalDecimal(op[key])) {
+    for (const key of ["setupTimeH", "runTimeHPer", "laborRate", "overheadRate", "queueBeforeH", "queueAfterH", "transitH"] as const) {
+      if (!optionalDecimal(op[key] ?? "")) {
         errors[`operations.${i}.${key}`] = "Enter a number with up to 6 decimals.";
       }
     }
@@ -245,6 +252,9 @@ export function toInput(values: OrderValues): CreateOrderInput {
       runTimeHPer: optional(op.runTimeHPer),
       laborRate: optional(op.laborRate),
       overheadRate: optional(op.overheadRate),
+      queueBeforeH: optional(op.queueBeforeH ?? ""),
+      queueAfterH: optional(op.queueAfterH ?? ""),
+      transitH: optional(op.transitH ?? ""),
     })),
     ...(values.coProducts.length > 0
       ? { coProducts: values.coProducts.map((co) => ({ lineNo: co.lineNo.trim(), type: co.type, itemId: co.itemId.trim(), qtyPer: co.qtyPer })) }
@@ -509,6 +519,9 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
                 {text(`po-operations-${i}-runTimeHPer`, "Run hours per unit", op.runTimeHPer, (v) => setOperation(i, { runTimeHPer: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-operations-${i}-laborRate`, "Labor rate", op.laborRate, (v) => setOperation(i, { laborRate: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-operations-${i}-overheadRate`, "Overhead rate", op.overheadRate, (v) => setOperation(i, { overheadRate: v }), { optional: true, inputMode: "decimal" })}
+                {text(`po-operations-${i}-queueBeforeH`, "Queue before hours", op.queueBeforeH ?? "", (v) => setOperation(i, { queueBeforeH: v }), { optional: true, inputMode: "decimal" })}
+                {text(`po-operations-${i}-queueAfterH`, "Queue after hours", op.queueAfterH ?? "", (v) => setOperation(i, { queueAfterH: v }), { optional: true, inputMode: "decimal" })}
+                {text(`po-operations-${i}-transitH`, "Transit hours", op.transitH ?? "", (v) => setOperation(i, { transitH: v }), { optional: true, inputMode: "decimal" })}
                 <Button variant="ghost" size="sm" onClick={() => set({ operations: values.operations.filter((_, j) => j !== i) })}>
                   Remove operation {i + 1}
                 </Button>

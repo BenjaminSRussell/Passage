@@ -135,6 +135,16 @@ type Operation struct {
 	Status           OperStatus      `json:"status,omitempty"`
 	PORequestedAt    *time.Time      `json:"poRequestedAt,omitempty"`
 	POCancelledAt    *time.Time      `json:"poCancelledAt,omitempty"`
+	// QueueBeforeH, QueueAfterH and TransitH are the waiting and transport hours the
+	// schedule places around the operation's setup and run. omitzero keeps the request
+	// hash and the JSON of a route without them as they were.
+	QueueBeforeH decimal.Decimal `json:"queueBeforeH,omitzero"`
+	QueueAfterH  decimal.Decimal `json:"queueAfterH,omitzero"`
+	TransitH     decimal.Decimal `json:"transitH,omitzero"`
+	// PlannedStart and PlannedEnd are the window `:schedule` gave the operation,
+	// queue and transit included; absent until the order is scheduled.
+	PlannedStart *time.Time `json:"plannedStart,omitempty"`
+	PlannedEnd   *time.Time `json:"plannedEnd,omitempty"`
 }
 
 // OperStatus is the feedback status of an operation: open until the first

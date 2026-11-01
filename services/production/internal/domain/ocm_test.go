@@ -165,3 +165,19 @@ func TestCheckChangeEligible(t *testing.T) {
 		}
 	}
 }
+
+// An ECO that changes only the queue or transit hours of an operation is a change, and applying it
+// carries the new hours to the order (they date the schedule).
+func TestDiffSnapshot_QueueAndTransitHours(t *testing.T) {
+	lines, ops := ocmOrder(t)
+	next := append([]Operation(nil), ops...)
+	next[1].QueueBeforeH, next[1].TransitH = dd("2"), dd("0.5")
+	edits, delta := DiffSnapshot(lines, ops, lines, next, false, true)
+	if delta.OperationsChanged != 1 || edits.Count() != 1 {
+		t.Fatalf("delta %+v", delta)
+	}
+	res, err := ApplyOrderEdits(lines, ops, dd("100"), edits, InUse{Lines: map[string]bool{}, Operations: map[int]bool{}})
+	if err != nil || !res.Operations[1].QueueBeforeH.Equal(dd("2")) || !res.Operations[1].TransitH.Equal(dd("0.5")) || !res.Operations[1].QueueAfterH.IsZero() {
+		t.Fatalf("%+v %v", res.Operations, err)
+	}
+}

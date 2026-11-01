@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.15
+  version: 0.21.16
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -19,7 +19,8 @@ info:
     operation.statuschanged reports an operation finished or reopened by its command (FR-21.6).
     orderchange.detected, .applied and .dismissed report order change management (FR-21.16): an
     open order whose BOM or route an ECO superseded, and what the planner did with the change.
-    parameters.saved reports the production parameters of a site created or replaced (PRD 4.21.13).
+    order.scheduled reports :schedule (infinite capacity): the order's dates and its dated jobs,
+    for scheduling (wave 23) and the shop floor (wave 25). parameters.saved reports the production parameters of a site created or replaced (PRD 4.21.13).
 channels:
   passage.production.order:
     address: passage.production.order
@@ -31,6 +32,8 @@ channels:
         $ref: '#/components/messages/orderUpdated'
       statuschanged:
         $ref: '#/components/messages/orderStatusChanged'
+      scheduled:
+        $ref: '#/components/messages/orderScheduled'
       settled:
         $ref: '#/components/messages/orderSettled'
       bomedited:
@@ -100,6 +103,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.order' }
     messages: [{ $ref: '#/channels/passage.production.order/messages/statuschanged' }]
+  onOrderScheduled:
+    action: send
+    channel: { $ref: '#/channels/passage.production.order' }
+    messages: [{ $ref: '#/channels/passage.production.order/messages/scheduled' }]
   onOrderSettled:
     action: send
     channel: { $ref: '#/channels/passage.production.order' }
@@ -203,7 +210,7 @@ components:
         same event per order it moves.
       payload:
         type: object
-        required: [orderId, from, to, quantity, qtyRaf, qtyError, actor, occurredAt]
+        required: [orderId, from, to, quantity, qtyRaf, qtyError, startDate, endDate, actor, occurredAt]
         properties:
           orderId: { type: string, format: uuid }
           from: { type: string }
@@ -211,9 +218,54 @@ components:
           quantity: { type: string }
           qtyRaf: { type: string }
           qtyError: { type: string }
+          startDate: { type: [string, 'null'], format: date, description: The order's scheduled start date; null while it is unscheduled. }
+          endDate: { type: [string, 'null'], format: date, description: The order's scheduled end date; null while it is unscheduled. }
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.order.statuschanged.v1
+    orderScheduled:
+      name: scheduled
+      title: Production order scheduled
+      description: |
+        Emitted by :schedule (reason schedule) in the same transaction as the jobs it writes, after the
+        statuschanged event of the same command, and again (reason redate) whenever a dated order's route
+        or quantities change: an order edit, an applied order change, a split (both orders), a merge (the
+        survivor) or a trigger-inserted operation. A re-date keeps the method and the schedule's start and
+        plans forward from it. Each event carries the order's whole job set with new job ids: a consumer
+        replaces what it held for the order. The jobs are dated with infinite capacity, one operation
+        after the other in route order on a continuous UTC clock with no calendar. Jobs of one operation
+        have seq 1, 2, ... in time order; a job of zero hours is left out except the process job; an
+        order without operations has no jobs and starts and ends at the same instant. A reset to
+        Estimated or Created, a cancel, or a merge into another order withdraws the schedule: that
+        statuschanged event carries null dates (a merged order announces nothing more).
+
+        Wave 23 hand-off: these dates are the infinite-capacity baseline that BR-21.1 asks of wave 21.
+        Finite-capacity scheduling (services/scheduling) is meant to take the order from this event and
+        book it on resource calendars; its dev.passage.scheduling.orderdates.changed.v1 and
+        job.scheduled.v1 then replace these dates (FR-23.10). Neither consumer is built yet (see
+        NOT-IMPLEMENTED of both services), so today these are the only dates an order has.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, siteId, status, reason, schedulingMethod, direction, start, end, startDate, endDate, deliveryDate, jobs, orderVersion, actor, occurredAt]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          siteId: { type: string, format: uuid }
+          status: { type: string, description: The order's status when the jobs were written. }
+          reason: { type: string, enum: [schedule, redate], description: 'schedule: the :schedule command; redate: a route or quantity change re-dated a dated order.' }
+          schedulingMethod: { type: string, enum: [operations, jobs] }
+          direction: { type: string, enum: [forward, backward], description: 'The direction of :schedule; a re-date is always forward.' }
+          start: { type: string, format: date-time, description: The first job's start. }
+          end: { type: string, format: date-time, description: The last job's end. }
+          startDate: { type: string, format: date, description: 'The UTC date of start (not the site''s local date; production has no site time zone).' }
+          endDate: { type: string, format: date, description: The UTC date of end. }
+          deliveryDate: { type: [string, 'null'], format: date }
+          jobs: { type: array, items: { $ref: '#/components/schemas/scheduledJob' } }
+          orderVersion: { type: integer }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.order.scheduled.v1
     orderSettled:
       name: settled
       title: Production order settled at End
@@ -550,6 +602,18 @@ components:
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.parameters.saved.v1
   schemas:
+    scheduledJob:
+      type: object
+      required: [jobId, operNumber, seq, jobType, resourceId, plannedStart, plannedEnd, plannedHours]
+      properties:
+        jobId: { type: string, format: uuid, description: The ProductionJob id (GET /v1/production/jobs); replaced at each re-date. }
+        operNumber: { type: integer }
+        seq: { type: integer }
+        jobType: { type: string, enum: [queue-before, setup, process, queue-after, transport] }
+        resourceId: { type: string, format: uuid }
+        plannedStart: { type: string, format: date-time }
+        plannedEnd: { type: string, format: date-time }
+        plannedHours: { type: string }
     reworkReference:
       type: object
       required: [type, id]

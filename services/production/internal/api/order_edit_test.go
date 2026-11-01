@@ -98,6 +98,9 @@ func TestEditOrder_Refusals(t *testing.T) {
 			status: http.StatusBadRequest, code: validationCode,
 			fields: []string{"lines[0].op", "lines[0].lineNo", "lines[0].itemId", "lines[0].qtyPer", "lines[0].flushing", "lines[1]", "lines[2]",
 				"operations[0].operNumber", "operations[0].resourceId", "operations[0].scrapPct", "operations[1]"}},
+		{name: "queue and transit hours", call: editCall(id, `{"operations":[{"op":"change","operNumber":10,"queueBeforeH":"-1","transitH":"0.1234567"},
+			{"op":"remove","operNumber":20,"queueAfterH":"1"}]}`, DutyWrite),
+			status: http.StatusBadRequest, code: validationCode, fields: []string{"operations[0].queueBeforeH", "operations[0].transitH", "operations[1]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

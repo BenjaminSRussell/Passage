@@ -114,6 +114,12 @@ export interface Operation {
   poRequestedAt?: string;
   /** When that request was withdrawn: order cancelled or merged, operation removed, subcontracting off or vendor changed. */
   poCancelledAt?: string;
+  queueBeforeH?: string;
+  queueAfterH?: string;
+  transitH?: string;
+  /** The window the schedule gave the operation, queue and transit included; absent until the order is scheduled. */
+  plannedStart?: string;
+  plannedEnd?: string;
 }
 
 export interface CostRow {
@@ -138,6 +144,10 @@ export interface ProductionOrder {
   qtyError: string;
   status: ProductionStatus;
   deliveryDate?: string;
+  /** UTC dates of the first start and last finish, set by scheduling; absent while unscheduled. */
+  startDate?: string;
+  endDate?: string;
+  schedulingMethod?: SchedulingMethod;
   originType: string;
   originId?: string;
   reworkReference?: ReworkReference;
@@ -212,6 +222,10 @@ export interface OperationInput {
   laborRate?: string;
   overheadRate?: string;
   scrapPct?: string;
+  /** Hours the order waits before the operation, after it, and to reach the next one; they become jobs when scheduled. */
+  queueBeforeH?: string;
+  queueAfterH?: string;
+  transitH?: string;
 }
 
 /** A co-product shares the order's cost by quantity; a by-product carries none (BR-9.12). */
@@ -496,6 +510,56 @@ export interface CommandBody {
   quantity?: string;
   errorQuantity?: string;
   status?: ProductionStatus;
+  /** Schedule only: how finely to cut the operations, the direction and the instant (RFC 3339). */
+  method?: SchedulingMethod;
+  direction?: ScheduleDirection;
+  at?: string;
+}
+
+export type SchedulingMethod = "operations" | "jobs";
+export type ScheduleDirection = "forward" | "backward";
+export const SCHEDULING_METHODS: SchedulingMethod[] = ["operations", "jobs"];
+
+export type JobType = "queue-before" | "setup" | "process" | "queue-after" | "transport";
+export const JOB_TYPES: JobType[] = ["queue-before", "setup", "process", "queue-after", "transport"];
+
+/** A dated slice of an operation written by :schedule. */
+export interface ProductionJob {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  orderStatus: ProductionStatus;
+  legalEntityId: string;
+  siteId: string;
+  productId: string;
+  operNumber: number;
+  seq: number;
+  jobType: JobType;
+  resourceId: string;
+  plannedStart: string;
+  plannedEnd: string;
+  plannedHours: string;
+  status: "planned" | "started" | "finished";
+}
+
+export interface JobPage {
+  items: ProductionJob[];
+  total: number;
+  plannedHours: string;
+  nextCursor?: string;
+}
+
+export interface JobsQuery {
+  resourceId?: string;
+  siteId?: string;
+  orderId?: string;
+  jobType?: JobType | "";
+  orderStatus?: ProductionStatus | "";
+  /** RFC 3339 instants; a job is in the window when it ends after from and starts before to. */
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 /** The outcome for one order of a bulk status update. */
@@ -1203,6 +1267,23 @@ export async function getOperationsOverview({ limit = 50, ...filter }: Operation
     totals: body.totals ?? { operations: 0, open: 0, started: 0, finished: 0, plannedHours: zero, hoursReported: zero, qtyGood: "0", qtyError: "0" },
     nextCursor: body.nextCursor,
   };
+}
+
+/** The dated jobs across orders, by planned start (the load of a resource over a window). */
+export async function getJobs({ limit = 50, ...filter }: JobsQuery = {}, signal?: AbortSignal): Promise<JobPage> {
+  const body = await requestAt<Partial<JobPage>>(`${root}/jobs?${query({ ...filter, limit })}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    total: body.total ?? 0,
+    plannedHours: body.plannedHours ?? "0",
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The jobs of one order in route order; empty while it is unscheduled. */
+export async function getOrderJobs(orderId: string, signal?: AbortSignal): Promise<ProductionJob[]> {
+  const body = await request<{ items?: ProductionJob[] }>(`/${encodeURIComponent(orderId)}/jobs`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
 }
 
 /** The production journals across orders, newest ids last (4.21.14). */

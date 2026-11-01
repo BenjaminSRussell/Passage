@@ -140,11 +140,11 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		// depends on it); every other split is origin Split from the original.
 		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
 				quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id,
-				status, split_from_order_id, order_bom_modified)
+				status, split_from_order_id, order_bom_modified, scheduling_method, schedule_start)
 			select tenant_id, $2, legal_entity_id, $3, product_id, site_id, warehouse_id, currency,
 				$4::numeric, delivery_date, case when origin_type = 'Rework' then 'Rework' else 'Split' end,
 				case when origin_type = 'Rework' then origin_id else id end, $5, $6, item_group, rework_reference_type, rework_reference_id,
-				status, id, order_bom_modified
+				status, id, order_bom_modified, scheduling_method, schedule_start
 			from production_order where tenant_id = $1 and id = $7`,
 			p.TenantID, newID, number, plan.SplitQty.String(), in.IdempotencyKey, in.RequestHash, in.OrderID); err != nil {
 			return err
@@ -177,6 +177,7 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 				}
 			}
 		}
+
 		for _, row := range []struct{ id, key string }{{in.OrderID, in.IdempotencyKey}, {newID, in.IdempotencyKey + "#" + newID}} {
 			if err := logCommand(ctx, tx, p.TenantID, h.legalEntityID, row.id, domain.CmdSplit, h.status, h.status, in.Actor, in.TraceID, row.key, in.RequestHash); err != nil {
 				return err
@@ -220,6 +221,19 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 			}
 			if out.New, err = loadOrder(ctx, tx, p.TenantID, newID); err != nil {
 				return err
+			}
+		}
+		// FR-21.15 carries the jobs: a dated original keeps its schedule start, and both orders are
+		// re-dated from it for their quantities (the new order copied the start and the method).
+		// After order.created and the transfer, so a consumer knows the new order first.
+		if out.Original.StartDate != nil {
+			for _, o := range []*Order{&out.Original, &out.New} {
+				if err := redateOrder(ctx, tx, p.TenantID, o.ID, in.Actor); err != nil {
+					return err
+				}
+				if *o, err = loadOrder(ctx, tx, p.TenantID, o.ID); err != nil {
+					return err
+				}
 			}
 		}
 		return enqueueUpdated(ctx, tx, p.TenantID, in.Actor, out.Original)
@@ -338,6 +352,10 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 				return err
 			}
 		}
+		// A dated survivor is re-dated for the merged quantity; the orders merged away give up their jobs.
+		if err := redateOrder(ctx, tx, p.TenantID, survivorID, in.Actor); err != nil {
+			return err
+		}
 		if err := logCommand(ctx, tx, p.TenantID, survivor.legalEntityID, survivorID, domain.CmdMerge, survivor.status, survivor.status,
 			in.Actor, in.TraceID, in.IdempotencyKey, in.RequestHash); err != nil {
 			return err
@@ -350,6 +368,9 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 				return err
 			}
 			if err := settleSubcontracts(ctx, tx, p.TenantID, id, in.Actor, cancelled, true); err != nil {
+				return err
+			}
+			if err := clearSchedule(ctx, tx, p.TenantID, id); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `update production_order set status = 'Cancelled', merged_into_order_id = $3, version = version + 1, updated_at = now()

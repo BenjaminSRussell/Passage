@@ -56,6 +56,7 @@ func TestAsyncAPIMatchesThePayloads(t *testing.T) {
 		{"orderCreated", OrderCreated, OrderCreatedData{}},
 		{"orderUpdated", OrderUpdated, OrderUpdatedData{}},
 		{"orderStatusChanged", OrderStatusChanged, OrderStatusChangedData{}},
+		{"orderScheduled", OrderScheduled, OrderScheduledData{}},
 		{"orderSettled", OrderSettled, OrderSettledData{}},
 		{"journalPosted", JournalPosted, JournalPostedData{}},
 		{"asBuiltAssigned", AsBuiltAssigned, AsBuiltData{}},

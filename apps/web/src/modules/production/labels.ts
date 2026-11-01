@@ -8,6 +8,7 @@ import type {
   CostGroup,
   EditOp,
   Flushing,
+  JobType,
   ListedJournalType,
   LoggedCommand,
   OperStatus,
@@ -16,6 +17,8 @@ import type {
   Proposal,
   ReworkReference,
   ReworkRefType,
+  ScheduleDirection,
+  SchedulingMethod,
   Tracking,
   TriggerField,
   TriggerFiring,
@@ -274,3 +277,24 @@ export const splitAllocationLabel: Record<SplitAllocation, string> = {
 };
 
 export const yesNo = (value: boolean) => (value ? "Yes" : "No");
+
+export const jobTypeLabel: Record<JobType, string> = {
+  "queue-before": "Queue before",
+  setup: "Setup",
+  process: "Process",
+  "queue-after": "Queue after",
+  transport: "Transport",
+};
+
+export const schedulingMethodLabel: Record<SchedulingMethod, string> = {
+  operations: "By operation (setup and run together)",
+  jobs: "By job (setup and run apart)",
+};
+
+export const directionLabel: Record<ScheduleDirection, string> = {
+  forward: "Forward from a start",
+  backward: "Backward from a finish",
+};
+
+/** A schedule instant as the UTC date and minute it falls on, for tables. */
+export const instant = (value: string): string => (value ? `${value.slice(0, 10)} ${value.slice(11, 16)}Z` : dash);

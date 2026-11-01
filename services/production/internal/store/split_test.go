@@ -356,7 +356,8 @@ func TestSplit_StartedOrderMovesConsumptionHoursAndWIP(t *testing.T) {
 		!last.Lines[0].Qty.Equal(d("-81.2")) || !nj[0].Lines[0].Qty.Equal(d("81.2")) {
 		t.Fatalf("transfer journals: %+v / %+v", last, nj)
 	}
-	if got := outboxTypes(t, pool, split.ID); !reflect.DeepEqual(got, []string{prodevents.OrderCreated, prodevents.JournalPosted}) {
+	// The new order of a dated original is dated too (slice 18), after it is known and its transfer posted.
+	if got := outboxTypes(t, pool, split.ID); !reflect.DeepEqual(got, []string{prodevents.OrderCreated, prodevents.JournalPosted, prodevents.OrderScheduled}) {
 		t.Fatalf("new order events: %v", got)
 	}
 	var payload json.RawMessage

@@ -72,6 +72,9 @@ type fakeStore struct {
 	operOutcome  store.OperationOutcome
 	operErr      error
 	hk           housekeepingFake
+	// scheduling jobs
+	jobFilters []store.JobFilter
+	jobPage    store.JobPage
 	// order change management (FR-21.16)
 	ocm    ocmFake
 	params paramsFake
@@ -340,6 +343,12 @@ func TestCreate_Validation(t *testing.T) {
 		{"client-set process quantity", func(m map[string]any) {
 			m["operations"] = []any{map[string]any{"operNumber": 10, "resourceId": ids.New(), "processQty": "5"}}
 		}, "k", "operations[0].processQty", http.StatusBadRequest, validationCode},
+		{"negative queue hours", func(m map[string]any) {
+			m["operations"] = []any{map[string]any{"operNumber": 10, "resourceId": ids.New(), "queueBeforeH": "-1"}}
+		}, "k", "operations[0].queueBeforeH", http.StatusBadRequest, validationCode},
+		{"client-set operation window", func(m map[string]any) {
+			m["operations"] = []any{map[string]any{"operNumber": 10, "resourceId": ids.New(), "plannedStart": "2026-11-02T08:00:00Z"}}
+		}, "k", "operations[0].plannedStart", http.StatusBadRequest, validationCode},
 		{"scrap of 100% on a line", func(m map[string]any) {
 			m["bom"] = []any{map[string]any{"lineNo": "10", "itemId": ids.New(), "qtyPer": "1", "scrapPct": "100"}}
 		}, "k", "", http.StatusUnprocessableEntity, domain.CodeInvalidInput},
@@ -407,6 +416,8 @@ func TestRoutes_EnforceDuties(t *testing.T) {
 		{http.MethodPost, "/v1/production/orders/" + id + "/as-built", DutyJournalPost},
 		{http.MethodGet, "/v1/production/as-built?finishedSerialOrBatch=S-1", DutyRead},
 		{http.MethodPost, "/v1/production/as-built/" + id + ":detach", DutyJournalPost},
+		{http.MethodGet, "/v1/production/jobs", DutyRead},
+		{http.MethodGet, "/v1/production/orders/" + id + "/jobs", DutyRead},
 	}
 	others := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead, DutySetupRead, DutySetupWrite, DutyOverConsume}
 	for _, tt := range tests {

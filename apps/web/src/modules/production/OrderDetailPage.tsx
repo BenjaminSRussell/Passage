@@ -47,6 +47,7 @@ import {
 import { AsBuiltPanel } from "./AsBuiltPanel";
 import { JournalsPanel } from "./JournalsPanel";
 import { OrderEditPanel } from "./OrderEditPanel";
+import { SchedulePanel } from "./SchedulePanel";
 import { SplitPanel } from "./SplitPanel";
 import { TriggerPointsPanel } from "./TriggerPointsPanel";
 import {
@@ -58,6 +59,7 @@ import {
   dash,
   describeReference,
   flushingLabel,
+  instant,
   isZero,
   loggedCommandLabel,
   negate,
@@ -114,6 +116,8 @@ const operationColumns: DataTableColumn<Operation>[] = [
   { key: "runTimeHPer", header: "Run h per unit", align: "end" },
   { key: "processQty", header: "Process qty", align: "end" },
   { key: "scrapPct", header: "Scrap %", align: "end" },
+  { key: "plannedStart", header: "Planned start", mono: true, render: (row) => (row.plannedStart ? instant(row.plannedStart) : dash) },
+  { key: "plannedEnd", header: "Planned end", mono: true, render: (row) => (row.plannedEnd ? instant(row.plannedEnd) : dash) },
   { key: "hoursReported", header: "Reported h", align: "end", render: (row) => row.hoursReported ?? "0" },
   { key: "status", header: "Feedback", render: (row) => operStatusLabel[row.status ?? "open"] ?? row.status },
   {
@@ -346,7 +350,10 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
   }
 
   const forward = nextCommand(current.status);
-  const commands = allowedCommands(current.status).filter((c) => c !== "report-finished" && c !== "reset-status");
+  // The schedule panel schedules an Estimated order with its options, so the plain action is not offered there.
+  const commands = allowedCommands(current.status).filter(
+    (c) => c !== "report-finished" && c !== "reset-status" && !(c === "schedule" && current.status === "Estimated"),
+  );
   const canReport = current.status === "Started" || current.status === "ReportedAsFinished";
   const targets = resetTargets(current.status);
   const unit = (value: string) => `${value} ${current.currency}`;
@@ -516,6 +523,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
           <Detail term="Reported as finished">{current.qtyRaf}</Detail>
           <Detail term="Error quantity">{current.qtyError}</Detail>
           <Detail term="Delivery date">{current.deliveryDate ?? dash}</Detail>
+          <Detail term="Scheduled">{current.startDate && current.endDate ? `${current.startDate} to ${current.endDate}` : dash}</Detail>
           <Detail term="Site" mono>
             {current.siteId}
           </Detail>
@@ -590,6 +598,8 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
           </p>
         ) : null}
       </Card>
+
+      <SchedulePanel order={current} busy={busy === "schedule"} onSchedule={(body) => void run("schedule", body)} />
 
       {canEditBOM(current.status) ? (
         <OrderEditPanel

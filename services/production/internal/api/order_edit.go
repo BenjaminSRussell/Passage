@@ -110,8 +110,7 @@ func validateOrderEdits(e domain.OrderEdits) map[string]string {
 		if op.Op == domain.EditAdd && op.ResourceID == nil {
 			fields[at] = "an added operation needs resourceId"
 		}
-		if op.Op == domain.EditRemove && (op.ResourceID != nil || op.SetupH != nil || op.RunHPer != nil || op.ScrapPct != nil ||
-			op.LaborRate != nil || op.OverheadRate != nil || op.Subcontract != nil || op.SubcontractPrice != nil) {
+		if op.Op == domain.EditRemove && op.HasFields() {
 			fields[at] = "a removal carries operNumber only"
 		}
 		optional(at+".setupTimeH", op.SetupH)
@@ -120,6 +119,9 @@ func validateOrderEdits(e domain.OrderEdits) map[string]string {
 		optional(at+".laborRate", op.LaborRate)
 		optional(at+".overheadRate", op.OverheadRate)
 		optional(at+".subcontractPrice", op.SubcontractPrice)
+		optional(at+".queueBeforeH", op.QueueBeforeH)
+		optional(at+".queueAfterH", op.QueueAfterH)
+		optional(at+".transitH", op.TransitH)
 	}
 	return fields
 }
