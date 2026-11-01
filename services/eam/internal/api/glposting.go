@@ -2,8 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -108,6 +110,7 @@ func (h *Handler) savePostingProfile(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", fmt.Sprintf("%q", strconv.Itoa(saved.Version)))
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -163,9 +166,11 @@ type glAccountOut struct {
 }
 
 type glReconciliationOut struct {
-	Currency   string         `json:"currency"`
-	Reconciled bool           `json:"reconciled"`
-	Accounts   []glAccountOut `json:"accounts"`
+	Currency   string          `json:"currency"`
+	Reconciled bool            `json:"reconciled"`
+	Unbooked   store.OrderList `json:"unbookedWorkOrders"`
+	NoEntity   store.OrderList `json:"workOrdersWithoutEntity"`
+	Accounts   []glAccountOut  `json:"accounts"`
 }
 
 func (h *Handler) glReconciliation(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +203,7 @@ func (h *Handler) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
+	out := glReconciliationOut{Currency: rec.Currency, Reconciled: rec.Reconciled, Unbooked: rec.Unbooked, NoEntity: rec.NoEntity, Accounts: make([]glAccountOut, 0, len(rec.Accounts))}
 	for _, a := range rec.Accounts {
 		mu := money.MinorUnits(rec.Currency)
 		out.Accounts = append(out.Accounts, glAccountOut{Account: a.Account, Subledger: a.Subledger.StringFixed(mu), GL: a.GL.StringFixed(mu), Difference: a.Difference.StringFixed(mu)})

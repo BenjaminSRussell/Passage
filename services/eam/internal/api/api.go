@@ -32,6 +32,7 @@ const (
 	DutyInquire         = "EamInquire"
 	DutyPermitIssuer    = "EamPermitIssuer"
 	DutySetupAdmin      = "EamSetupAdmin"
+	DutyGLPost          = "EamGlPost"
 	// DutyStructureMaintain covers functional locations and asset placement.
 	DutyStructureMaintain = "EamStructureMaintain"
 )
@@ -147,7 +148,7 @@ func (h *Handler) router() chi.Router {
 		// Work order costs in the general ledger (FR-44.11).
 		r.With(authz.RequireDuty(DutyInquire)).Get("/posting-profiles", h.listPostingProfiles)
 		r.With(authz.RequireDuty(DutySetupAdmin)).Put("/posting-profiles", h.savePostingProfile)
-		r.With(authz.RequireDuty(DutyPlanner)).Post("/gl-postings", h.postGL)
+		r.With(authz.RequireDuty(DutyGLPost)).Post("/gl-postings", h.postGL)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/gl-reconciliation", h.glReconciliation)
 	})
 	return r

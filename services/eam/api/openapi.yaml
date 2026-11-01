@@ -917,7 +917,7 @@ paths:
       x-passage-duty: EamSetupAdmin
       description: |
         Creates (no If-Match) or replaces (If-Match with the version) the profile of a legal entity and work order type; ALL is the
-        wildcard. Work order cost is booked as parts expense / parts offset and labor expense / labor offset.
+        wildcard. The response carries the new version as its ETag. Work order cost is booked as parts expense / parts offset and labor expense / labor offset.
       requestBody:
         required: true
         content:
@@ -932,13 +932,16 @@ paths:
   /v1/eam/gl-postings:
     post:
       operationId: postWorkOrderCostsToGL
-      x-passage-duty: EamPlanner
+      x-passage-duty: EamGlPost
       description: |
         Books the parts and labor cost of completed and closed work orders of one currency (optionally one site or one work order) in the
         general ledger: one balanced entry per order for the cost not yet booked, keyed by order and booking number so a retry returns the same
         entry. A cost that changed after booking is booked as a delta. An order the ledger refuses (a closed period, for one) is listed under
         failed with the ledger's problem code and is retried by the next run. At most 200 orders per run (more is true when others wait).
-        Work orders carry no legal entity yet, so the caller names the entity the cost is booked under (it must be in the caller's scope). Only work orders created under that legal entity (recorded from the creating caller's single entity scope; older orders have none and are not booked) are booked. Signs only ledger.entry.post.
+        legalEntityId defaults to the caller's entity and must be in the caller's scope. A work order takes its legal entity from its asset when it is
+        created (the asset takes the creating caller's single entity scope; creating an order for an asset without one is refused with EAM-GL-004), and only
+        orders of that entity are booked. Each booking is stored as a pending booking before the ledger is called and resent unchanged until the ledger confirms
+        it; a rejection other than a closed period drops it so the next run rebuilds it from the current profile. Signs only ledger.entry.post.
       requestBody:
         required: true
         content:
@@ -986,7 +989,9 @@ paths:
       x-passage-duty: EamInquire
       description: |
         Per account the service booked on (up to periodTo, YYYY-MM): the net of its GL subledger, the general ledger's balance of the
-        account and the difference (GL minus subledger). reconciled is true when every difference is zero.
+        account and the difference (GL minus subledger). unbookedWorkOrders counts (and numbers the first 100 of) the entity's completed or closed orders whose cost
+        is not fully booked; workOrdersWithoutEntity does the same for orders with no legal entity, which no ledger receives. reconciled is true when every
+        difference is zero and both lists are empty.
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
@@ -1003,6 +1008,8 @@ paths:
                 properties:
                   currency: { type: string }
                   reconciled: { type: boolean }
+                  unbookedWorkOrders: { $ref: "#/components/schemas/OrderList" }
+                  workOrdersWithoutEntity: { $ref: "#/components/schemas/OrderList" }
                   accounts:
                     type: array
                     items:
@@ -1054,6 +1061,11 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    OrderList:
+      type: object
+      properties:
+        count: { type: integer }
+        numbers: { type: array, items: { type: string } }
     PostingProfileInput:
       type: object
       required: [partsExpenseAccount, laborExpenseAccount, partsOffsetAccount, laborOffsetAccount]

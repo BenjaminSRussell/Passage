@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 const (
 	MaxGLGroupsPerRun = 200
 	CodeGLFailed      = "AST-0601"
+	CodeGLUnmapped    = "AST-0603"
 	allClasses        = "ALL"
 )
 
@@ -153,7 +155,7 @@ func resolveProfile(profiles []PostingProfile, class string) PostingProfile {
 
 // glNet is the net debit (credit when negative) per account of one journal: the cost and accumulated depreciation movements on the class accounts, and the
 // counter account that balances them by transaction type. A disposal books the proceeds and takes the rest as gain or loss.
-func glNet(p PostingProfile, typ string, cost, accumulated, proceeds decimal.Decimal, net map[string]decimal.Decimal) {
+func glNet(p PostingProfile, typ string, cost, accumulated, proceeds decimal.Decimal, net map[string]decimal.Decimal) error {
 	add := func(account string, v decimal.Decimal) { net[account] = net[account].Add(v) }
 	add(p.Cost, cost)
 	add(p.Accumulated, accumulated.Neg())
@@ -175,9 +177,12 @@ func glNet(p PostingProfile, typ string, cost, accumulated, proceeds decimal.Dec
 		add(p.Impairment, nbv.Neg())
 	case "Revaluation":
 		add(p.Revaluation, nbv.Neg())
-	default:
+	case "Transfer", "Split":
 		add(p.TransferClearing, nbv.Neg())
+	default:
+		return fmt.Errorf("asset transaction type %q has no GL journal", typ)
 	}
+	return nil
 }
 
 type GLPostRequest struct {
@@ -279,17 +284,19 @@ func (s *Postgres) unbookedGroups(ctx context.Context, tx pgx.Tx, tenantID strin
 	return out, more, rows.Err()
 }
 
-func (g *glGroup) entry(in GLPostRequest, profiles []PostingProfile) (ledgerclient.Entry, bool) {
+func (g *glGroup) entry(in GLPostRequest, profiles []PostingProfile) (ledgerclient.Entry, bool, error) {
 	mu := money.MinorUnits(in.Currency)
 	net := map[string]decimal.Decimal{}
 	placeholder := false
 	for _, x := range g.txs {
 		p := resolveProfile(profiles, x.class)
 		placeholder = placeholder || p.Placeholder
-		glNet(p, x.typ, x.cost.Round(mu), x.accumulated.Round(mu), x.proceeds.Round(mu), net)
+		if err := glNet(p, x.typ, x.cost.Round(mu), x.accumulated.Round(mu), x.proceeds.Round(mu), net); err != nil {
+			return ledgerclient.Entry{}, false, err
+		}
 	}
 	e := ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: g.key, PostingDate: g.txs[0].date, Currency: in.Currency,
-		IdempotencyKey: g.source + ":" + g.key, SourceType: g.source}
+		IdempotencyKey: g.source + ":" + g.key + ":" + in.BookCode + ":" + in.Currency, SourceType: g.source}
 	accounts := make([]string, 0, len(net))
 	for a := range net {
 		accounts = append(accounts, a)
@@ -300,62 +307,165 @@ func (g *glGroup) entry(in GLPostRequest, profiles []PostingProfile) (ledgerclie
 			e.Lines = append(e.Lines, ledgerclient.Line{Account: a, Credit: v.IsNegative(), Amount: v.Abs()})
 		}
 	}
-	return e, placeholder
+	return e, placeholder, nil
 }
 
-func (s *Postgres) markBooked(ctx context.Context, tenantID string, in GLPostRequest, g *glGroup, entryID string) error {
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		for _, x := range g.txs {
-			if _, err := tx.Exec(ctx, `insert into asset_gl_entry (tenant_id, transaction_id, legal_entity_id, journal_entry_id, posting_date)
-				values ($1, $2, $3, nullif($4, '')::uuid, $5::date) on conflict do nothing`, tenantID, x.id, in.LegalEntityID, entryID, x.date); err != nil {
-				return err
+type pendingLine struct {
+	Account string `json:"account"`
+	Credit  bool   `json:"credit"`
+	Amount  string `json:"amount"`
+}
+
+// staged is a booking whose payload is stored: the one to send, new or left by an earlier attempt.
+type staged struct {
+	group       *glGroup
+	entry       ledgerclient.Entry
+	txIDs       []string
+	placeholder bool
+}
+
+func txIDs(g *glGroup) []string {
+	out := make([]string, len(g.txs))
+	for i, x := range g.txs {
+		out[i] = x.id
+	}
+	return out
+}
+
+func linesOf(e ledgerclient.Entry) []pendingLine {
+	out := make([]pendingLine, len(e.Lines))
+	for i, l := range e.Lines {
+		out[i] = pendingLine{Account: l.Account, Credit: l.Credit, Amount: l.Amount.String()}
+	}
+	return out
+}
+
+// stage stores the booking of every group before the ledger is called. A group with a pending booking resends it unchanged; a group whose entry has no
+// lines is only linked as booked. A group that cannot be mapped to accounts is returned with its error and stores nothing.
+func (s *Postgres) stage(ctx context.Context, tenantID string, in GLPostRequest, groups []*glGroup) (out []staged, failed []GLFailed, err error) {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		profiles, err := loadProfiles(ctx, tx, tenantID, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		for _, g := range groups {
+			entry, placeholder, gerr := g.entry(in, profiles)
+			if gerr != nil {
+				slog.ErrorContext(ctx, "assets GL booking cannot be mapped", "document", g.key, "err", gerr, "correlationId", middleware.GetReqID(ctx))
+				failed = append(failed, GLFailed{Document: g.key, Code: CodeGLUnmapped})
+				continue
+			}
+			var pending struct {
+				ledgerID, date string
+				lines          []pendingLine
+				ids            []string
+			}
+			perr := tx.QueryRow(ctx, `select ledger_id::text, posting_date::text, lines, transaction_ids::text[] from asset_pending_booking where tenant_id = $1 and idempotency_key = $2`,
+				tenantID, entry.IdempotencyKey).Scan(&pending.ledgerID, &pending.date, &pending.lines, &pending.ids)
+			switch {
+			case perr == nil:
+				entry.LedgerID, entry.PostingDate, entry.Lines = pending.ledgerID, pending.date, nil
+				for _, l := range pending.lines {
+					entry.Lines = append(entry.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: decimal.RequireFromString(l.Amount)})
+				}
+				out = append(out, staged{group: g, entry: entry, txIDs: pending.ids, placeholder: placeholder})
+			case !errors.Is(perr, pgx.ErrNoRows):
+				return perr
+			case len(entry.Lines) == 0:
+				if err := linkBooked(ctx, tx, tenantID, in.LegalEntityID, g, ""); err != nil {
+					return err
+				}
+			default:
+				raw, err := json.Marshal(linesOf(entry))
+				if err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `insert into asset_pending_booking (tenant_id, idempotency_key, legal_entity_id, ledger_id, book_code, currency, source_type, document_id, posting_date, lines, transaction_ids)
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11::uuid[])`, tenantID, entry.IdempotencyKey, in.LegalEntityID, in.LedgerID, in.BookCode, in.Currency,
+					entry.SourceType, entry.DocumentID, entry.PostingDate, raw, txIDs(g)); err != nil {
+					return err
+				}
+				out = append(out, staged{group: g, entry: entry, txIDs: txIDs(g), placeholder: placeholder})
 			}
 		}
 		return nil
 	})
+	return out, failed, err
 }
 
-// PostToGL books the transactions of one book code that are not in the general ledger yet: one entry per depreciation run (all its books) and one per
-// other transaction (acquisition, adjustment, revaluation, impairment, disposal, transfer), keyed by run or transaction so a retry returns the same entry.
+func linkBooked(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, g *glGroup, entryID string) error {
+	for _, x := range g.txs {
+		if _, err := tx.Exec(ctx, `insert into asset_gl_entry (tenant_id, transaction_id, legal_entity_id, journal_entry_id, posting_date)
+			values ($1, $2, $3, nullif($4, '')::uuid, $5::date) on conflict do nothing`, tenantID, x.id, legalEntityID, entryID, x.date); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// confirm links the transactions to the entry the ledger accepted and drops the pending booking, in one transaction.
+func (s *Postgres) confirm(ctx context.Context, tenantID string, in GLPostRequest, st staged, entryID string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `delete from asset_pending_booking where tenant_id = $1 and idempotency_key = $2`, tenantID, st.entry.IdempotencyKey); err != nil {
+			return err
+		}
+		return linkBooked(ctx, tx, tenantID, in.LegalEntityID, st.group, entryID)
+	})
+}
+
+func (s *Postgres) discard(ctx context.Context, tenantID, key string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from asset_pending_booking where tenant_id = $1 and idempotency_key = $2`, tenantID, key)
+		return err
+	})
+}
+
+// PostToGL books the transactions of one book code and currency that are not in the general ledger yet: one entry per depreciation run (all its books
+// of that currency) and one per other transaction (acquisition, adjustment, revaluation, impairment, disposal, transfer), keyed by run or transaction,
+// book code and currency. Each entry is stored as a pending booking before the ledger is called and resent unchanged until the ledger confirms it, so a
+// retry returns the same entry even if the profile changed; a refusal other than a closed period drops it so the next run rebuilds it.
 // A group the ledger refuses is reported and the rest go on.
 func (s *Postgres) PostToGL(ctx context.Context, ledger ledgerclient.Ledger, in GLPostRequest) (GLPostResult, error) {
 	p := principal(ctx)
 	var groups []*glGroup
-	var profiles []PostingProfile
 	more := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
-		if groups, more, err = s.unbookedGroups(ctx, tx, p.TenantID, in); err != nil {
-			return err
-		}
-		profiles, err = loadProfiles(ctx, tx, p.TenantID, in.LegalEntityID)
+		groups, more, err = s.unbookedGroups(ctx, tx, p.TenantID, in)
 		return err
 	})
 	if err != nil {
 		return GLPostResult{}, err
 	}
-	res := GLPostResult{Booked: []GLBooked{}, Failed: []GLFailed{}, More: more}
-	for _, g := range groups {
-		entry, placeholder := g.entry(in, profiles)
-		entryID := ""
-		if len(entry.Lines) > 0 {
-			if entryID, err = ledger.Post(ctx, entry); err != nil {
-				code := ledgerclient.CodeOf(err)
-				if code == "" {
-					code = CodeGLFailed
-				}
-				slog.ErrorContext(ctx, "assets GL booking failed", "document", g.key, "key", entry.IdempotencyKey, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
-				res.Failed = append(res.Failed, GLFailed{Document: g.key, Code: code})
-				continue
+	toSend, failed, err := s.stage(ctx, p.TenantID, in, groups)
+	if err != nil {
+		return GLPostResult{}, err
+	}
+	res := GLPostResult{Booked: []GLBooked{}, Failed: failed, More: more}
+	if res.Failed == nil {
+		res.Failed = []GLFailed{}
+	}
+	for _, st := range toSend {
+		entryID, err := ledger.Post(ctx, st.entry)
+		if err != nil {
+			code := ledgerclient.CodeOf(err)
+			if code == "" {
+				code = CodeGLFailed
 			}
-		}
-		if err := s.markBooked(ctx, p.TenantID, in, g, entryID); err != nil {
-			slog.ErrorContext(ctx, "assets GL booking not recorded", "document", g.key, "entryId", entryID, "err", err, "correlationId", middleware.GetReqID(ctx))
-			res.Failed = append(res.Failed, GLFailed{Document: g.key, Code: CodeGLFailed})
+			if ledgerclient.Rejected(err) && code != ledgerclient.CodePeriodClosed {
+				if derr := s.discard(ctx, p.TenantID, st.entry.IdempotencyKey); derr != nil {
+					slog.ErrorContext(ctx, "assets pending booking not dropped", "key", st.entry.IdempotencyKey, "err", derr, "correlationId", middleware.GetReqID(ctx))
+				}
+			}
+			slog.ErrorContext(ctx, "assets GL booking failed", "document", st.group.key, "key", st.entry.IdempotencyKey, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
+			res.Failed = append(res.Failed, GLFailed{Document: st.group.key, Code: code})
 			continue
 		}
-		if entryID != "" {
-			res.Booked = append(res.Booked, GLBooked{Document: g.key, EntryID: entryID, Lines: len(entry.Lines), Transaction: len(g.txs), Placeholder: placeholder})
+		if err := s.confirm(ctx, p.TenantID, in, st, entryID); err != nil {
+			slog.ErrorContext(ctx, "assets GL booking not recorded", "document", st.group.key, "entryId", entryID, "err", err, "correlationId", middleware.GetReqID(ctx))
+			res.Failed = append(res.Failed, GLFailed{Document: st.group.key, Code: CodeGLFailed})
+			continue
 		}
+		res.Booked = append(res.Booked, GLBooked{Document: st.group.key, EntryID: entryID, Lines: len(st.entry.Lines), Transaction: len(st.txIDs), Placeholder: st.placeholder})
 	}
 	return res, nil
 }

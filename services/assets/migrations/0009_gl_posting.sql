@@ -35,12 +35,39 @@ CREATE TABLE IF NOT EXISTS asset_gl_entry (
   FOREIGN KEY (tenant_id, transaction_id) REFERENCES asset_transaction (tenant_id, id)
 );
 
+-- A booking is written here, in the transaction that decides it, before the ledger is called; retries resend exactly this payload and the row is
+-- deleted when the ledger has confirmed it and asset_gl_entry links its transactions.
+CREATE TABLE IF NOT EXISTS asset_pending_booking (
+  tenant_id uuid NOT NULL,
+  idempotency_key text NOT NULL,
+  legal_entity_id uuid NOT NULL,
+  ledger_id uuid NOT NULL,
+  book_code text NOT NULL,
+  currency char(3) NOT NULL,
+  source_type text NOT NULL,
+  document_id text NOT NULL,
+  posting_date date NOT NULL,
+  lines jsonb NOT NULL,
+  transaction_ids uuid[] NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, idempotency_key)
+);
+
 ALTER TABLE asset_posting_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE asset_posting_profile FORCE ROW LEVEL SECURITY;
 CREATE POLICY asset_posting_profile_tenant_access ON asset_posting_profile AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 CREATE POLICY asset_posting_profile_legal_entity_scope ON asset_posting_profile AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
+ALTER TABLE asset_pending_booking ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_pending_booking FORCE ROW LEVEL SECURITY;
+CREATE POLICY asset_pending_booking_tenant_access ON asset_pending_booking AS PERMISSIVE
+  USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY asset_pending_booking_legal_entity_scope ON asset_pending_booking AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
@@ -58,6 +85,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON asset_posting_profile TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON asset_gl_entry TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON asset_pending_booking TO passage_app';
   END IF;
 END
 $$;

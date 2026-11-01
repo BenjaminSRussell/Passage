@@ -20,7 +20,7 @@ import (
 
 const (
 	apiEntity  = "00000000-0000-0000-0000-0000000000e1"
-	glDuties   = "EamAssetMaintain,EamPlanner,EamTechnician,EamInquire,EamSetupAdmin"
+	glDuties   = "EamAssetMaintain,EamPlanner,EamTechnician,EamInquire,EamSetupAdmin,EamGlPost"
 	apiTenant  = 61
 	otherEntID = "00000000-0000-0000-0000-0000000000e2"
 )
@@ -39,12 +39,13 @@ func TestGL_ValidationAndAuthorizationBeforeTheStore(t *testing.T) {
 		name, method, path, body, duties string
 		status                           int
 	}{
-		{"post needs the planner duty", http.MethodPost, "/v1/eam/gl-postings", `{}`, "EamInquire", http.StatusForbidden},
+		{"post needs the GL post duty", http.MethodPost, "/v1/eam/gl-postings", `{}`, "EamInquire", http.StatusForbidden},
+		{"the planner duty cannot book", http.MethodPost, "/v1/eam/gl-postings", `{}`, "EamPlanner", http.StatusForbidden},
 		{"profile needs the setup duty", http.MethodPut, "/v1/eam/posting-profiles", `{}`, "EamPlanner", http.StatusForbidden},
-		{"post without a ledger", http.MethodPost, "/v1/eam/gl-postings", `{"currency":"USD"}`, "EamPlanner", http.StatusBadRequest},
-		{"post with a bad currency", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"usd"}`, "EamPlanner", http.StatusBadRequest},
-		{"post for another legal entity", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","legalEntityId":"` + otherEntID + `"}`, "EamPlanner", http.StatusBadRequest},
-		{"post with a bad site", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","siteId":"x"}`, "EamPlanner", http.StatusBadRequest},
+		{"post without a ledger", http.MethodPost, "/v1/eam/gl-postings", `{"currency":"USD"}`, "EamGlPost", http.StatusBadRequest},
+		{"post with a bad currency", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"usd"}`, "EamGlPost", http.StatusBadRequest},
+		{"post for another legal entity", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","legalEntityId":"` + otherEntID + `"}`, "EamGlPost", http.StatusBadRequest},
+		{"post with a bad site", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","siteId":"x"}`, "EamGlPost", http.StatusBadRequest},
 		{"profile with a bad type", http.MethodPut, "/v1/eam/posting-profiles", `{"workOrderType":"NOPE","partsExpenseAccount":"1","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "EamSetupAdmin", http.StatusBadRequest},
 		{"profile with a bad account", http.MethodPut, "/v1/eam/posting-profiles", `{"partsExpenseAccount":"a b","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "EamSetupAdmin", http.StatusBadRequest},
 		{"reconciliation needs a period as YYYY-MM", http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId=" + ledgerID + "&currency=USD&periodTo=2026-13", ``, "EamInquire", http.StatusBadRequest},
@@ -106,11 +107,11 @@ func TestGL_HTTPFlowProfileBookingAndReconciliation(t *testing.T) {
 		map[string]string{"If-Match": `"` + strconv.Itoa(version) + `"`}), http.StatusOK, &wo)
 
 	profile := `{"workOrderType":"ALL","partsExpenseAccount":"6100","laborExpenseAccount":"6110","partsOffsetAccount":"1400","laborOffsetAccount":"5900"}`
-	if rec := send(http.MethodPut, "/v1/eam/posting-profiles", profile, "p1", nil); rec.Code != http.StatusCreated {
+	if rec := send(http.MethodPut, "/v1/eam/posting-profiles", profile, "p1", nil); rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("create profile: %d %s", rec.Code, rec.Body)
 	}
 	expectCode(t, send(http.MethodPut, "/v1/eam/posting-profiles", profile, "p2", nil), http.StatusPreconditionRequired, "precondition_required")
-	if rec := send(http.MethodPut, "/v1/eam/posting-profiles", profile, "p3", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK {
+	if rec := send(http.MethodPut, "/v1/eam/posting-profiles", profile, "p3", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("replace profile: %d %s", rec.Code, rec.Body)
 	}
 	var list struct {
@@ -129,11 +130,13 @@ func TestGL_HTTPFlowProfileBookingAndReconciliation(t *testing.T) {
 		t.Fatalf("booked %+v", posted)
 	}
 	var rec struct {
-		Reconciled bool `json:"reconciled"`
+		Reconciled bool                `json:"reconciled"`
+		Unbooked   struct{ Count int } `json:"unbookedWorkOrders"`
+		NoEntity   struct{ Count int } `json:"workOrdersWithoutEntity"`
 		Accounts   []struct{ Account, Subledger, GL, Difference string }
 	}
 	decodeInto(t, send(http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId="+ledgerID+"&currency=USD&periodTo=2026-10", ``, "", nil), http.StatusOK, &rec)
-	if !rec.Reconciled || len(rec.Accounts) != 4 || rec.Accounts[0].Account != "1400" || rec.Accounts[0].GL != "-350.00" || rec.Accounts[2].Account != "6100" || rec.Accounts[2].GL != "350.00" || rec.Accounts[3].Subledger != "360.00" {
+	if !rec.Reconciled || rec.Unbooked.Count != 0 || rec.NoEntity.Count != 0 || len(rec.Accounts) != 4 || rec.Accounts[0].Account != "1400" || rec.Accounts[0].GL != "-350.00" || rec.Accounts[2].Account != "6100" || rec.Accounts[2].GL != "350.00" || rec.Accounts[3].Subledger != "360.00" {
 		t.Fatalf("reconciliation %+v", rec)
 	}
 

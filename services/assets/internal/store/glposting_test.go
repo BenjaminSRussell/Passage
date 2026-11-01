@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -115,7 +116,7 @@ func TestGL_DisposalsAndDepreciationAreBookedAndReconcile(t *testing.T) {
 		t.Fatalf("TAX booking (acquisition and the run): %+v %v", res, err)
 	}
 	for _, e := range fake.Entries() {
-		if e.SourceType == "asset-depreciation-run" && (len(e.Lines) != 2 || !e.Lines[0].Amount.Equal(d("2000"))) {
+		if e.SourceType == "asset-depreciation-run" && (len(e.Lines) != 2 || !e.Lines[0].Amount.Equal(d("2000")) || !strings.HasSuffix(e.IdempotencyKey, ":TAX:USD")) {
 			t.Fatalf("a run is one entry of expense against accumulated depreciation: %+v", e)
 		}
 	}
@@ -248,5 +249,79 @@ func TestGL_TheClientSignsOnlyTheDutyEachCallNeeds(t *testing.T) {
 	}
 	if d := seen["GET /v1/ledger/balances"]; len(d) != 1 || d[0] != ledgerclient.DutyBalanceRead {
 		t.Errorf("reconciliation duties %v", d)
+	}
+}
+
+type flakyLedger struct {
+	ledgerclient.Ledger
+	posts []ledgerclient.Entry
+	err   error
+}
+
+func (f *flakyLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	f.posts = append(f.posts, e)
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.Ledger.Post(ctx, e)
+}
+
+func TestGL_ARetryResendsTheStoredPayloadEvenAfterTheProfileChanged(t *testing.T) {
+	s, le, _ := glScenario(t)
+	_, _, ctx := setup(t)
+	fl := &flakyLedger{Ledger: ledgerclient.NewFake(), err: &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}}
+	req := store.GLPostRequest{LegalEntityID: le, LedgerID: ids.New(), BookCode: "TAX", Currency: "USD"}
+	if res, err := s.PostToGL(ctx, fl, req); err != nil || len(res.Failed) != 2 {
+		t.Fatalf("outage: %+v %v", res, err)
+	}
+	if _, _, err := s.SavePostingProfile(ctx, store.PostingProfile{LegalEntityID: le, ClassCode: "ALL", Cost: "1601", Accumulated: "1691", DepreciationExpense: "6901", Impairment: "6911",
+		Revaluation: "3401", AcquisitionClearing: "2291", Proceeds: "1291", Gain: "7201", Loss: "7211", TransferClearing: "1696"}, 0, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	first := append([]ledgerclient.Entry(nil), fl.posts...)
+	fl.err, fl.posts = nil, nil
+	if res, err := s.PostToGL(ctx, fl, req); err != nil || len(res.Booked) != 2 || len(fl.posts) != 2 {
+		t.Fatalf("retry: %+v %v", res, err)
+	}
+	for _, e := range fl.posts {
+		for _, f := range first {
+			if f.IdempotencyKey == e.IdempotencyKey && (f.Lines[0].Account != e.Lines[0].Account || !f.Lines[0].Amount.Equal(e.Lines[0].Amount) || f.PostingDate != e.PostingDate) {
+				t.Fatalf("a retry must resend the stored payload: %+v vs %+v", f, e)
+			}
+		}
+		for _, l := range e.Lines {
+			if l.Account == "1601" || l.Account == "6901" {
+				t.Fatalf("the new profile must not rewrite a pending booking: %+v", e)
+			}
+		}
+	}
+}
+
+func TestGL_ARunCoversOneCurrencyAndItsEntryKeyNamesBookAndCurrency(t *testing.T) {
+	s, _, ctx := setup(t)
+	le := ids.New()
+	for _, c := range []struct{ number, currency string }{{"FA-USD", "USD"}, {"FA-EUR", "EUR"}} {
+		a := newAsset(t, s, ctx, le, c.number)
+		if _, err := s.AddBook(ctx, a.ID, store.Book{BookCode: "IFRS", Currency: c.currency, Method: "StraightLine", ServiceLifePeriods: 60, Convention: "None",
+			InServiceDate: day("2026-01-01"), Cost: d("6000"), SalvageValue: d("0")}, "b-"+c.number); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.ProposeRun(ctx, store.RunInput{LegalEntityID: le, BookCode: "IFRS", Period: "2026-01"}, "run-two-currencies"); problemCode(err) != domain.CodeInvalidDepreciation {
+		t.Fatalf("a run with two currencies must be refused, got %v", err)
+	}
+	fake := ledgerclient.NewFake()
+	for _, cur := range []string{"USD", "EUR"} {
+		res, err := s.PostToGL(ctx, fake, store.GLPostRequest{LegalEntityID: le, LedgerID: ids.New(), BookCode: "IFRS", Currency: cur})
+		if err != nil || len(res.Failed) != 0 || len(res.Booked) != 1 {
+			t.Fatalf("%s acquisition: %+v %v", cur, res, err)
+		}
+	}
+	keys := map[string]bool{}
+	for _, e := range fake.Entries() {
+		if !strings.HasSuffix(e.IdempotencyKey, ":IFRS:"+e.Currency) || keys[e.IdempotencyKey] {
+			t.Fatalf("key %q must name book and currency and be unique", e.IdempotencyKey)
+		}
+		keys[e.IdempotencyKey] = true
 	}
 }

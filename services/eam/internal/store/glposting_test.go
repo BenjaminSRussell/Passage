@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -149,8 +150,8 @@ func TestGLPosting_ARefusedEntryStaysUnbookedAndRetriesToTheSameKey(t *testing.T
 		t.Fatalf("refused: %+v", res)
 	}
 	rec, err := f.s.ReconcileGL(f.ctx, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
-	if err != nil || !rec.Reconciled || len(rec.Accounts) != 0 {
-		t.Fatalf("nothing booked on either side: %+v %v", rec, err)
+	if err != nil || rec.Reconciled || rec.Unbooked.Count != 1 || len(rec.Accounts) != 0 {
+		t.Fatalf("the refused order is reported as unbooked: %+v %v", rec, err)
 	}
 	f.fake.FailPosts(nil)
 	if res = f.post(); len(res.Booked) != 1 || len(res.Failed) != 0 || len(f.fake.Entries()) != 1 {
@@ -284,27 +285,129 @@ func TestGLPosting_AppRoleBooksWithoutBypassingRLSOrRewritingTheSubledger(t *tes
 	}
 }
 
-func TestGLPosting_OnlyOrdersOfTheLegalEntityAreBooked(t *testing.T) {
+func TestGLPosting_OrdersTakeTheLegalEntityOfTheirAssetAndOnlyThatEntityBooksThem(t *testing.T) {
 	f := newGLFixture(t, 7109)
 	f.order(domain.TypeInspection, "20.00", "", "")
 	other := "00000000-0000-0000-0000-0000000000e2"
 	otherCtx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7109), LegalEntityID: other, UserID: "u2", Duties: map[string]struct{}{"EamPlanner": {}}})
-	wo, err := f.s.CreateWorkOrder(otherCtx, WorkOrder{AssetID: f.asset, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-other-le")
+	a2, err := f.s.CreateAsset(otherCtx, Asset{Name: "Fan", AssetType: "FAN", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-asset-e2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.setParts(wo.ID, "999.00")
+	if _, err := f.s.ActivateAsset(otherCtx, a2.ID, a2.Version); err != nil {
+		t.Fatal(err)
+	}
+	g := &glFixture{t: t, pool: f.pool, s: f.s, ctx: otherCtx, asset: a2.ID, ledger: f.ledger, fake: f.fake, n: 50}
+	g.order(domain.TypeInspection, "999.00", "", "")
+	if res := f.post(); len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("20")) {
+		t.Fatalf("entity e1 must book only its own order: %+v", res)
+	}
+	res, err := f.s.PostWorkOrderCosts(otherCtx, f.fake, GLPostRequest{LegalEntityID: other, LedgerID: f.ledger, Currency: "USD"})
+	if err != nil || len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("1019")) {
+		t.Fatalf("entity e2 books its own order: %+v %v", res, err)
+	}
+}
+
+func TestGLPosting_AnAssetWithoutALegalEntityCannotTakeWorkOrders(t *testing.T) {
+	f := newGLFixture(t, 7110)
+	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{"EamPlanner": {}}})
+	a, err := f.s.CreateAsset(unscoped, Asset{Name: "Press", AssetType: "PRESS", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-asset-none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.ActivateAsset(unscoped, a.ID, a.Version); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.CreateWorkOrder(unscoped, WorkOrder{AssetID: a.ID, Type: domain.TypeInspection, Priority: 3, Currency: "USD"}, "gl-no-le")
+	var prob *httpx.Problem
+	if !errors.As(err, &prob) || prob.Code != CodeNoEntity || prob.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestGLPosting_ReconciliationNamesUnbookedAndEntitylessOrders(t *testing.T) {
+	f := newGLFixture(t, 7111)
+	booked := f.order(domain.TypeInspection, "20.00", "", "")
+	f.post()
+	late := f.order(domain.TypeInspection, "30.00", "", "")
+	orphan := f.order(domain.TypeInspection, "40.00", "", "")
 	if err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(f.ctx, `update work_order set status = 'COMPLETED', actual_start = now(), actual_end = now() where id = $1`, wo.ID)
+		_, err := tx.Exec(f.ctx, `update work_order set legal_entity_id = null where id = $1`, orphan.ID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if res := f.post(); len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("20")) {
-		t.Fatalf("entity e1 must book only its own order: %+v", res)
+	rec, err := f.s.ReconcileGL(f.ctx, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
+	if err != nil || rec.Reconciled || rec.Unbooked.Count != 1 || rec.Unbooked.Numbers[0] != late.Number || rec.NoEntity.Count != 1 || rec.NoEntity.Numbers[0] != orphan.Number {
+		t.Fatalf("%+v %v (booked %s)", rec, err, booked.Number)
 	}
-	res, err := f.s.PostWorkOrderCosts(f.ctx, f.fake, GLPostRequest{LegalEntityID: other, LedgerID: f.ledger, Currency: "USD"})
-	if err != nil || len(res.Booked) != 1 || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("1019")) {
-		t.Fatalf("entity e2 books its own order: %+v %v", res, err)
+	if res := f.post(); len(res.Booked) != 1 {
+		t.Fatalf("only the order with an entity is booked: %+v", res)
+	}
+	if rec, err = f.s.ReconcileGL(f.ctx, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"}); err != nil || rec.Unbooked.Count != 0 || rec.Reconciled || rec.NoEntity.Count != 1 {
+		t.Fatalf("an order without an entity keeps the reconciliation open: %+v %v", rec, err)
+	}
+}
+
+type recordingLedger struct {
+	ledgerclient.Ledger
+	posts []ledgerclient.Entry
+	err   error
+}
+
+func (r *recordingLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	r.posts = append(r.posts, e)
+	if r.err != nil {
+		return "", r.err
+	}
+	return r.Ledger.Post(ctx, e)
+}
+
+func TestGLPosting_ARetryResendsTheStoredPayloadEvenAfterTheProfileChanged(t *testing.T) {
+	f := newGLFixture(t, 7112)
+	wo := f.order(domain.TypeInspection, "50.00", "", "")
+	rl := &recordingLedger{Ledger: f.fake, err: &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}}
+	req := GLPostRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"}
+	if res, err := f.s.PostWorkOrderCosts(f.ctx, rl, req); err != nil || len(res.Failed) != 1 {
+		t.Fatalf("outage: %+v %v", res, err)
+	}
+	var pending int
+	if err := dbx.WithTenantTx(f.ctx, f.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(f.ctx, `select count(*) from eam_pending_booking where work_order_id = $1`, wo.ID).Scan(&pending)
+	}); err != nil || pending != 1 {
+		t.Fatalf("the booking must be stored before the ledger answers: %d %v", pending, err)
+	}
+	if _, _, err := f.s.SavePostingProfile(f.ctx, PostingProfile{LegalEntityID: glLegalEntity, WorkOrderType: "ALL", PartsExpense: "6999", LaborExpense: "6998", PartsOffset: "1999", LaborOffset: "5999"}, 0, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	f.setParts(wo.ID, "75.00")
+	rl.err = nil
+	res, err := f.s.PostWorkOrderCosts(f.ctx, rl, req)
+	if err != nil || len(res.Booked) != 1 || len(rl.posts) != 2 {
+		t.Fatalf("retry: %+v %v posts %d", res, err, len(rl.posts))
+	}
+	first, second := rl.posts[0], rl.posts[1]
+	if first.IdempotencyKey != second.IdempotencyKey || first.PostingDate != second.PostingDate || len(second.Lines) != 2 || second.Lines[0].Account != PlaceholderProfile.PartsExpense || !second.Lines[0].Amount.Equal(dd("50")) {
+		t.Fatalf("the retry must resend the first payload: %+v vs %+v", first, second)
+	}
+	if res = f.post(); len(res.Booked) != 1 || !f.net("6999").Equal(dd("25")) || !f.net(PlaceholderProfile.PartsExpense).Equal(dd("50")) {
+		t.Fatalf("the later cost change is booked as a delta on the new profile: %+v", res)
+	}
+}
+
+func TestGLPosting_ADefinitiveRejectionDropsThePendingBookingSoItIsRebuilt(t *testing.T) {
+	f := newGLFixture(t, 7113)
+	f.order(domain.TypeInspection, "50.00", "", "")
+	rl := &recordingLedger{Ledger: f.fake, err: &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_UNKNOWN"}}
+	req := GLPostRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"}
+	if res, err := f.s.PostWorkOrderCosts(f.ctx, rl, req); err != nil || len(res.Failed) != 1 || res.Failed[0].Code != "LEDGER_ACCOUNT_UNKNOWN" {
+		t.Fatalf("rejection: %+v %v", res, err)
+	}
+	if _, _, err := f.s.SavePostingProfile(f.ctx, PostingProfile{LegalEntityID: glLegalEntity, WorkOrderType: "ALL", PartsExpense: "6100", LaborExpense: "6110", PartsOffset: "1400", LaborOffset: "5900"}, 0, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	rl.err = nil
+	if res, err := f.s.PostWorkOrderCosts(f.ctx, rl, req); err != nil || len(res.Booked) != 1 || !f.net("6100").Equal(dd("50")) {
+		t.Fatalf("rebuilt from the corrected profile: %+v %v", res, err)
 	}
 }

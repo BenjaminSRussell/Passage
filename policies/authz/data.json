@@ -722,6 +722,7 @@
       {"resource": "/v1/eam/counters/*/rules", "methods": ["POST"]}
     ]},
     "EamCounterRegister": {"permissions": [{"resource": "/v1/eam/counters/*/readings", "methods": ["POST"]}]},
+    "EamGlPost": {"permissions": [{"resource": "/v1/eam/gl-postings", "methods": ["POST"]}]},
     "EamInquire": {"permissions": [
       {"resource": "/v1/eam/assets", "methods": ["GET"]},
       {"resource": "/v1/eam/assets/*", "methods": ["GET"]},
