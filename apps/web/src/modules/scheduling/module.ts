@@ -5,6 +5,7 @@ import { CampaignProposalsPage } from "./CampaignProposalsPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CapacityBlockDetailPage } from "./CapacityBlockDetailPage";
 import { CapacityBlocksPage } from "./CapacityBlocksPage";
+import { CapacityLoadJobsPage } from "./CapacityLoadJobsPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
 import { CapacityOverridesPage } from "./CapacityOverridesPage";
 import { CleanoutRulesPage } from "./CleanoutRulesPage";
@@ -35,10 +36,11 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
+    { path: "/scheduling/load/jobs", element: createElement(CapacityLoadJobsPage), handle: { title: "Capacity load detail" } },
     { path: "/scheduling/runs", element: createElement(RunsPage), handle: { title: "Schedule runs" } },
     { path: "/scheduling/runs/new", element: createElement(NewRunPage), handle: { title: "Start a schedule run" } },
     { path: "/scheduling/runs/:id", element: createElement(RunDetailPage), handle: { title: "Schedule run" } },

@@ -314,10 +314,31 @@ network detail gains a rename and end-date form. No
 new duty. A network end date cannot be cleared and block windows cannot be
 edited (see the tables below).
 
+Slice 16 builds capacity load by day and its drill-down (FR-23.9, PRD 4.23.14).
+`GET /capacity-load?period=day&from&days&resourceIds` (days 1-93, default 14)
+returns open and booked minutes and load % per local day of each resource's
+calendar time zone (BR-23.7), so a shift is never split at 00:00 UTC and a DST
+day has 23 or 25 hours; days carry no bottleneck flag (FR-23.9 flags weeks).
+Every item now has `period`, `periodStart` and the UTC instants `start` and
+`end` of its bucket; week items keep `weekStart`. `GET /capacity-load/jobs?resourceId&from&to`
+(RFC 3339, at most 93 days; duty `scheduling.read`) lists the primary and
+secondary (BR-23.4) bookings of the resource that overlap the range, with
+`minutesInRange`, so a cell's booked minutes can be traced to its jobs (at most
+1,000, then `truncated`). No migration, no event, no new duty. Web: the load
+page gains a Weeks/Days period selector and a Jobs link per row, and a new
+detail page `/scheduling/load/jobs` lists the jobs with loading, empty and
+error states; each Jobs link passes the bucket's `start` and `end`. Weeks stay
+Monday 00:00 UTC weeks as built in slice 3, so for a resource outside UTC the
+seven days of a week do not add up exactly to that week.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
-No file outside the wave 23 ownership entry was changed, so there are no
-moved-out handoff rows.
+No file outside the wave 23 ownership entry was changed. One handoff from
+slice 16 lies outside it:
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | handoff | The policy bundle is outside this wave's paths, and the existing row `/v1/scheduling/capacity-load` does not match the sub-path, so the gateway's OPA check denies the drill-down until the row is added. The service enforces `scheduling.read` itself; no new duty (issue #313 needs nothing for this slice). |
 
 ## Ticket deliverables
 
@@ -337,7 +358,8 @@ moved-out handoff rows.
 | 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |
 | 2 | *Override scheduling constraints* duty to commit a move with violations | later slice of PSG-23 | Every violation blocks the commit. |
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
-| 3 | Load by resource group and by day; drill-down to jobs; US week numbering | later slice of PSG-23 | Groups come from wave 9. |
+| 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
+| 3 | Load by resource group; US week numbering; weeks in the resource's time zone | later slice of PSG-23 | Groups come from wave 9; weeks start Monday 00:00 UTC (slice 3). |
 | 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | later slice of PSG-23 | Load is computed on read, so it is never stale; the event needs episode state and is not declared in AsyncAPI yet. |
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |

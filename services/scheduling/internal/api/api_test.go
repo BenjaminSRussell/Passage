@@ -29,14 +29,15 @@ var (
 // fakeStore answers the Store interface from canned values and records the
 // last move and firm requests so tests can assert what reached the store.
 type fakeStore struct {
-	conflict *domain.Conflict
-	replay   bool
-	err      error
-	lastMove store.MoveRequest
-	lastIdem store.Idem
-	lastLoad store.LoadFilter
-	lastOps  store.OperationFilter
-	lastOp   store.Operation
+	conflict  *domain.Conflict
+	replay    bool
+	err       error
+	lastMove  store.MoveRequest
+	lastIdem  store.Idem
+	lastLoad  store.LoadFilter
+	lastDaily store.DailyLoadFilter
+	lastOps   store.OperationFilter
+	lastOp    store.Operation
 
 	// slice 2
 	campaign     store.Campaign

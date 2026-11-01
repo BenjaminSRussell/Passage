@@ -498,18 +498,29 @@ paths:
   /v1/scheduling/capacity-load:
     get:
       operationId: listCapacityLoad
-      summary: Booked versus open minutes per resource and week, with bottleneck flags
+      summary: Booked versus open minutes per resource and week or day, with weekly bottleneck flags
       x-passage-duty: scheduling.read
       parameters:
+        - name: period
+          in: query
+          required: false
+          description: Bucket size. `week` (default) buckets by Monday-start UTC weeks and flags bottlenecks; `day` buckets by local day of each resource's calendar time zone (BR-23.7) and never flags (FR-23.9).
+          schema: { type: string, enum: [week, day], default: week }
         - name: from
           in: query
           required: false
-          description: Date (YYYY-MM-DD); defaults to today.
+          description: Date (YYYY-MM-DD); defaults to today. Weeks start on the Monday of this date, days on this date.
           schema: { type: string, format: date }
         - name: weeks
           in: query
           required: false
+          description: Number of weeks when `period` is `week`.
           schema: { type: integer, minimum: 1, maximum: 53, default: 4 }
+        - name: days
+          in: query
+          required: false
+          description: Number of local days when `period` is `day`.
+          schema: { type: integer, minimum: 1, maximum: 93, default: 14 }
         - name: resourceIds
           in: query
           required: false
@@ -517,7 +528,7 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Weekly load (weeks start Monday 00:00 UTC)
+          description: Load per resource and period (weeks start Monday 00:00 UTC, days start at local midnight of the resource's time zone)
           content:
             application/json:
               schema:
@@ -528,6 +539,43 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/LoadItem' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/capacity-load/jobs:
+    get:
+      operationId: listCapacityLoadJobs
+      summary: Jobs booked on a resource in a range, the drill-down behind a capacity load cell
+      description: Primary and secondary bookings (BR-23.4) of one resource that overlap the range, earliest first, at most 1,000 (then `truncated` is true). `minutesInRange` is the part of each segment inside the range.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          description: Resource UUID.
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: true
+          description: Range start, RFC 3339.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          description: Range end (exclusive), RFC 3339, after `from` and at most 93 days later.
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Booked segments in the range
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LoadJob' }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/networks:
     post:
       operationId: createNetwork
@@ -1476,11 +1524,30 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         firmed: { type: boolean }
+    LoadJob:
+      type: object
+      required: [jobId, orderId, operNumber, segment, role, start, end, minutesInRange, finite, firmed, lateMinutes]
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        segment: { type: integer }
+        role: { type: string, enum: [primary, secondary] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        minutesInRange: { type: integer }
+        finite: { type: boolean }
+        firmed: { type: boolean }
+        lateMinutes: { type: integer }
     LoadItem:
       type: object
       properties:
         resourceId: { type: string, format: uuid }
-        weekStart: { type: string, format: date }
+        period: { type: string, enum: [week, day] }
+        periodStart: { type: string, format: date, description: "First day of the bucket: a Monday for weeks, the local date of the resource for days." }
+        weekStart: { type: string, format: date, description: Present on week items only; equals periodStart. }
+        start: { type: string, format: date-time, description: 'First instant of the bucket in UTC; with `end`, the range to pass to capacity-load/jobs.' }
+        end: { type: string, format: date-time, description: Instant after the bucket in UTC (a DST day is 23 or 25 hours). }
         openMinutes: { type: integer }
         bookedMinutes: { type: integer }
         loadPct: { type: number }

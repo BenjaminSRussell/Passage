@@ -73,3 +73,62 @@ func WeekStart(t time.Time) time.Time {
 func LoadIntervals(r Resource, from time.Time, weeks int) []Interval {
 	return r.Open(WeekStart(from).AddDate(0, 0, -1), weeks*7+2)
 }
+
+// DayLoad is booked versus open minutes for one resource in one local day of
+// its calendar time zone (BR-23.7: calendars are defined in site time). Day is
+// local midnight; [Start, End) are the UTC instants of the day, 23 or 25 hours
+// long on a DST change. Days carry no bottleneck flag: FR-23.9 flags weeks only.
+type DayLoad struct {
+	ResourceID    string
+	Day           time.Time
+	Start         time.Time
+	End           time.Time
+	OpenMinutes   int
+	BookedMinutes int
+	LoadPct       float64
+}
+
+// DailyLoad reports `days` local days of load for one resource, the first
+// being the calendar date of from (read as a date, whatever its zone) in the
+// resource's time zone. iv must cover every open interval of those days (see
+// DayIntervals).
+func DailyLoad(r Resource, iv []Interval, booked []Busy, from time.Time, days int) []DayLoad {
+	loc := r.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	y, m, d := from.Date()
+	out := make([]DayLoad, days)
+	for n := range out {
+		day := time.Date(y, m, d+n, 0, 0, 0, 0, loc)
+		start, end := day.UTC(), time.Date(y, m, d+n+1, 0, 0, 0, 0, loc).UTC()
+		l := DayLoad{ResourceID: r.ID, Day: day, Start: start, End: end}
+		for _, i := range iv {
+			l.OpenMinutes += overlapMinutes(i.Start, i.End, start, end)
+		}
+		for _, b := range booked {
+			l.BookedMinutes += overlapMinutes(b.Start, b.End, start, end)
+		}
+		if l.OpenMinutes > 0 {
+			l.LoadPct = float64(l.BookedMinutes) * 100 / float64(l.OpenMinutes)
+		}
+		out[n] = l
+	}
+	return out
+}
+
+// DayIntervals materializes the open intervals of the `days` local days
+// DailyLoad reports for from, overrides applied.
+func DayIntervals(r Resource, from time.Time, days int) []Interval {
+	loc := r.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	y, m, d := from.Date()
+	return r.Open(time.Date(y, m, d, 0, 0, 0, 0, loc), days)
+}
+
+// ClippedMinutes is the part of [start, end) inside [from, to) in whole minutes.
+func ClippedMinutes(start, end, from, to time.Time) int {
+	return overlapMinutes(start, end, from, to)
+}

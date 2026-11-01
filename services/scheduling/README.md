@@ -212,7 +212,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` per bar) | `scheduling.read` |
 | POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
-| GET | `/v1/scheduling/capacity-load?from&weeks&resourceIds` | `scheduling.read` |
+| GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
+| GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |

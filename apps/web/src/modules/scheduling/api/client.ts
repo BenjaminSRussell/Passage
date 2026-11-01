@@ -204,10 +204,18 @@ export interface Firm {
   firmed: boolean;
 }
 
+export type LoadPeriod = "week" | "day";
+
 export interface LoadItem {
   resourceId: string;
-  /** Monday of the ISO week, YYYY-MM-DD. */
-  weekStart: string;
+  period?: LoadPeriod;
+  /** First day of the bucket, YYYY-MM-DD: a Monday for weeks. */
+  periodStart?: string;
+  /** Monday of the ISO week, YYYY-MM-DD; week items only. */
+  weekStart?: string;
+  /** UTC instants bounding the bucket, [start, end): the drill-down range. */
+  start?: string;
+  end?: string;
   openMinutes: number;
   bookedMinutes: number;
   loadPct: number;
@@ -366,6 +374,39 @@ export function firmJob(jobId: string, firmed: boolean, key: string = newKey()):
 
 export function fetchCapacityLoad(from: string, weeks: number, resourceIds: string[] = [], signal?: AbortSignal): Promise<LoadItem[]> {
   return items<LoadItem>(`/capacity-load${query({ from, weeks, resourceIds: resourceIds.join(",") })}`, signal);
+}
+
+/** Load per local day of each resource's calendar time zone (FR-23.9, BR-23.7); days are never flagged as bottlenecks. */
+export function fetchDailyLoad(from: string, days: number, resourceIds: string[] = [], signal?: AbortSignal): Promise<LoadItem[]> {
+  return items<LoadItem>(`/capacity-load${query({ period: "day", from, days, resourceIds: resourceIds.join(",") })}`, signal);
+}
+
+/** One booked segment behind a load cell (PRD 4.23.14 Capacity load detail). */
+export interface LoadJob {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  segment: number;
+  role: "primary" | "secondary";
+  start: string;
+  end: string;
+  minutesInRange: number;
+  finite: boolean;
+  firmed: boolean;
+  lateMinutes: number;
+}
+
+export interface LoadJobs {
+  items: LoadJob[];
+  truncated: boolean;
+}
+
+export async function fetchLoadJobs(resourceId: string, from: string, to: string, signal?: AbortSignal): Promise<LoadJobs> {
+  const body = await send<Partial<LoadJobs>>(`/capacity-load/jobs${query({ resourceId, from, to })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return { items: body.items, truncated: body.truncated === true };
 }
 
 // Slice 2: resource networks, setup matrices, cleanout rules, capacity blocks

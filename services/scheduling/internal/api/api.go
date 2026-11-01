@@ -148,7 +148,11 @@ type moveResponse struct {
 
 type loadItem struct {
 	ResourceID    string  `json:"resourceId"`
-	WeekStart     string  `json:"weekStart"`
+	Period        string  `json:"period"`
+	PeriodStart   string  `json:"periodStart"`
+	WeekStart     string  `json:"weekStart,omitempty"`
+	Start         string  `json:"start"`
+	End           string  `json:"end"`
 	OpenMinutes   int     `json:"openMinutes"`
 	BookedMinutes int     `json:"bookedMinutes"`
 	LoadPct       float64 `json:"loadPct"`
@@ -172,6 +176,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:move", a.moveJob)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load/jobs", a.capacityLoadJobs)
 
 	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)
@@ -736,6 +741,15 @@ func (a *API) capacityLoad(w http.ResponseWriter, r *http.Request) {
 		}
 		from = parsed
 	}
+	period := q.Get("period")
+	if period != "" && period != "week" && period != "day" {
+		invalid(w, r, map[string]string{"period": "must be week or day"})
+		return
+	}
+	if period == "day" {
+		a.dailyLoad(w, r, from)
+		return
+	}
 	weeks := 4
 	if raw := q.Get("weeks"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -758,10 +772,70 @@ func (a *API) capacityLoad(w http.ResponseWriter, r *http.Request) {
 	a.loads.Add(1)
 	items := make([]loadItem, 0, len(loads))
 	for _, l := range loads {
-		items = append(items, loadItem{ResourceID: l.ResourceID, WeekStart: l.WeekStart.Format(time.DateOnly), OpenMinutes: l.OpenMinutes,
+		items = append(items, loadItem{ResourceID: l.ResourceID, Period: "week", PeriodStart: l.WeekStart.Format(time.DateOnly),
+			WeekStart: l.WeekStart.Format(time.DateOnly), Start: l.WeekStart.Format(time.RFC3339), End: l.WeekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+			OpenMinutes:   l.OpenMinutes,
 			BookedMinutes: l.BookedMinutes, LoadPct: math.Round(l.LoadPct*10) / 10, Bottleneck: l.Bottleneck})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// dailyLoad answers capacity-load?period=day: `days` local days of each
+// resource's calendar time zone from the date `from` (default 14, at most 93).
+// Days carry no bottleneck flag (FR-23.9).
+func (a *API) dailyLoad(w http.ResponseWriter, r *http.Request, from time.Time) {
+	days := 14
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > store.MaxLoadDays {
+			invalid(w, r, map[string]string{"days": fmt.Sprintf("must be 1 to %d", store.MaxLoadDays)})
+			return
+		}
+		days = n
+	}
+	resourceIDs, ok := uuidList(w, r, "resourceIds")
+	if !ok {
+		return
+	}
+	loads, err := a.store.DailyCapacityLoad(r.Context(), store.DailyLoadFilter{ResourceIDs: resourceIDs, From: from, Days: days})
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.loads.Add(1)
+	items := make([]loadItem, 0, len(loads))
+	for _, l := range loads {
+		items = append(items, loadItem{ResourceID: l.ResourceID, Period: "day", PeriodStart: l.Day.Format(time.DateOnly),
+			Start: l.Start.UTC().Format(time.RFC3339), End: l.End.UTC().Format(time.RFC3339), OpenMinutes: l.OpenMinutes,
+			BookedMinutes: l.BookedMinutes, LoadPct: math.Round(l.LoadPct*10) / 10})
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// capacityLoadJobs lists the jobs booked on a resource in [from, to): the
+// drill-down behind a capacity load cell (PRD 4.23.14 Capacity load detail).
+func (a *API) capacityLoadJobs(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	id := strings.ToLower(q.Get("resourceId"))
+	if !ids.Valid(id) {
+		invalid(w, r, map[string]string{"resourceId": "must be a resource UUID"})
+		return
+	}
+	from, errFrom := time.Parse(time.RFC3339, q.Get("from"))
+	to, errTo := time.Parse(time.RFC3339, q.Get("to"))
+	if errFrom != nil || errTo != nil || !to.After(from) || to.Sub(from) > store.MaxLoadDays*24*time.Hour {
+		invalid(w, r, map[string]string{"from": fmt.Sprintf("from and to are RFC 3339 times, to after from, at most %d days apart", store.MaxLoadDays)})
+		return
+	}
+	items, truncated, err := a.store.LoadJobs(r.Context(), id, from.UTC(), to.UTC())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
 // uuidList parses an optional comma list of UUIDs from the query string.

@@ -243,6 +243,7 @@ type Store interface {
 	MoveJob(ctx context.Context, req MoveRequest, idem Idem) (MoveOutcome, bool, error)
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
+	LoadStore
 	SetupStore
 	PegStore
 	OverrideStore
@@ -629,46 +630,58 @@ func (s *Postgres) FirmJob(ctx context.Context, jobID string, firmed bool, idem 
 // shows as load above 100%.
 func (s *Postgres) CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error) {
 	out := []domain.WeekLoad{}
-	rids := f.ResourceIDs
-	if rids == nil {
-		rids = []string{}
-	}
 	from := domain.WeekStart(f.From)
 	to := from.AddDate(0, 0, 7*f.Weeks)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		resources, _, err := loadResources(ctx, tx)
+		resources, byResource, err := loadResourcesBooked(ctx, tx, f.ResourceIDs, from, to)
 		if err != nil {
 			return err
-		}
-		rows, err := tx.Query(ctx, `select resource_id::text, job_id::text, start_at, end_at from scheduled_job
-			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))
-			union all
-			select resource_id::text, job_id::text, start_at, end_at from scheduled_job_secondary
-			where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))`, from, to, len(rids) == 0, rids)
-		if err != nil {
-			return err
-		}
-		booked, err := scanBusy(rows)
-		if err != nil {
-			return err
-		}
-		byResource := map[string][]domain.Busy{}
-		for _, b := range booked {
-			byResource[b.ResourceID] = append(byResource[b.ResourceID], b)
-		}
-		wanted := map[string]bool{}
-		for _, id := range rids {
-			wanted[id] = true
 		}
 		for _, r := range resources {
-			if len(wanted) > 0 && !wanted[r.ID] {
-				continue
-			}
 			out = append(out, domain.WeeklyLoad(r, domain.LoadIntervals(r, from, f.Weeks), byResource[r.ID], from, f.Weeks, f.ThresholdPct, f.Consecutive)...)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// loadResourcesBooked reads the selected resources (all when none are named) and the
+// primary and secondary bookings that overlap [from, to), grouped by resource.
+func loadResourcesBooked(ctx context.Context, tx pgx.Tx, rids []string, from, to time.Time) ([]domain.Resource, map[string][]domain.Busy, error) {
+	if rids == nil {
+		rids = []string{}
+	}
+	resources, _, err := loadResources(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.Query(ctx, `select resource_id::text, job_id::text, start_at, end_at from scheduled_job
+		where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))
+		union all
+		select resource_id::text, job_id::text, start_at, end_at from scheduled_job_secondary
+		where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))`, from, to, len(rids) == 0, rids)
+	if err != nil {
+		return nil, nil, err
+	}
+	booked, err := scanBusy(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	byResource := map[string][]domain.Busy{}
+	for _, b := range booked {
+		byResource[b.ResourceID] = append(byResource[b.ResourceID], b)
+	}
+	wanted := map[string]bool{}
+	for _, id := range rids {
+		wanted[id] = true
+	}
+	kept := resources[:0:0]
+	for _, r := range resources {
+		if len(wanted) == 0 || wanted[r.ID] {
+			kept = append(kept, r)
+		}
+	}
+	return kept, byResource, nil
 }
 
 // Gantt returns the segments overlapping [from, to) on the given resources
