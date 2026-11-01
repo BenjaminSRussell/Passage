@@ -162,7 +162,7 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| `policies/authz/data.json`: resource rows for `/v1/ledger/recurring-journals`, `/recurring-journals/*` (GET under `ledger.journal.read`; PUT and POST under `ledger.journal.write`) | handoff | The policy bundle is outside this wave's paths. The service enforces `ledger.journal.read` and `ledger.journal.write`, both already seeded. No new duty was added (issue #313 needs nothing for this slice). |
+| `policies/authz/data.json`: resource rows for `/v1/ledger/recurring-journals`, `/recurring-journals/*` (GET under `ledger.journal.read`; PUT and POST under `ledger.journal.write`) | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/recurring-journals`, `/recurring-journals/*` and `/recurring-journals/*/runs` are rows of `ledger.journal.read`; PUT `/recurring-journals/*` and POST `/recurring-journals/*/pause`, `/resume` and `/generate` are rows of `ledger.journal.write`. |
 | Kafka topic `passage.ledger.recurring` for `dev.passage.ledger.recurring.generated.v1` | handoff | Eventing backbone (`deploy/`) owner; add it next to `passage.ledger.journal` and `passage.ledger.batch`. |
 | Gateway route for `/api/v1/ledger/recurring-journals` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 
@@ -170,8 +170,8 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| New duties `ledger.clearing.write` (Clear open items), `ledger.clearing.reset` (Reset clearings) and `ledger.clearing.rules` (Maintain clearing rules) | handoff | Enforced in the service with `authz.RequireDuty`. `policies/authz/data.json` is outside this wave's paths: seed them under issue #313 (Accounting senior and Treasury accountant for write; Accounting supervisor for reset; Accounting manager for rules, per PRD 2.11.17). The web nav items are gated on the existing `ledger.journal.read`; the pages' actions rely on the service's 403 until the duties are seeded. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/open-items`, `/clearings`, `/clearings:simulate`, `/clearings/*`, `/ledgers/*/open-item-accounts/*`, `/ledgers/*/tolerance-groups/*` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; `PUT open-item-accounts` under `ledger.account.write`; the clearing writes under the three new duties). |
+| New duties `ledger.clearing.write` (Clear open items), `ledger.clearing.reset` (Reset clearings) and `ledger.clearing.rules` (Maintain clearing rules) | done (seeded in `policies/authz/data.json`) | `ledger.clearing.write`, `ledger.clearing.reset` and `ledger.clearing.rules` are seeded with `/v1/ledger/...` resources (the earlier seeding had left off the `/v1/ledger` prefix). Role mappings (Accounting senior, Treasury accountant, Accounting supervisor, Accounting manager) belong to edge-identity. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/open-items`, `/clearings`, `/clearings:simulate`, `/clearings/*`, `/ledgers/*/open-item-accounts/*`, `/ledgers/*/tolerance-groups/*` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/open-items`, `/clearings`, `/clearings/*`, `/ledgers/*/open-item-accounts`, `/ledgers/*/tolerance-groups[/*]` under `ledger.journal.read`; PUT `/ledgers/*/open-item-accounts/*` under `ledger.account.write`; POST `/clearings` and `/clearings:simulate` under `ledger.clearing.write`; POST `/clearings/*/reset` under `ledger.clearing.reset`; PUT `/ledgers/*/tolerance-groups/*` under `ledger.clearing.rules`. |
 | Kafka topic `passage.ledger.openitem` for `dev.passage.ledger.openitem.cleared.v1` | handoff | Eventing backbone (`deploy/`) owner; add it next to `passage.ledger.journal`. The PRD names the event `open-item.cleared`; the platform naming rule allows only letters and digits in the entity, so the type is `openitem`. Consumers (bank reconciliation wave 36, AP/AR waves 19/30) must subscribe to that spelling. |
 | Gateway route for `/api/v1/ledger/open-items` and `/api/v1/ledger/clearings` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 
@@ -179,8 +179,8 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| New duty `ledger.clearing.run` (Run automatic clearing) | handoff | Enforced in the service with `authz.RequireDuty` on `POST /auto-clearing:run`; `ledger.clearing.rules` (already handed off for slice 8) now also guards `PUT /ledgers/{ledger}/auto-clearing-rules/{id}`. `policies/authz/data.json` is outside this wave's paths: seed `ledger.clearing.run` under issue #313 (Accounting supervisor and Finance batch operator, per the PRD). The web nav items are gated on `ledger.journal.read`, which exists. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/auto-clearing:run`, `/auto-clearing-runs[/*]`, `/ledgers/*/auto-clearing-rules[/*]` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; the rule PUT under `ledger.clearing.rules`; the run under `ledger.clearing.run`). |
+| New duty `ledger.clearing.run` (Run automatic clearing) | done (seeded in `policies/authz/data.json`) | `ledger.clearing.run` carries POST `/v1/ledger/auto-clearing:run`; `ledger.clearing.rules` carries PUT `/v1/ledger/ledgers/*/auto-clearing-rules/*`. Role mappings belong to edge-identity. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/auto-clearing:run`, `/auto-clearing-runs[/*]`, `/ledgers/*/auto-clearing-rules[/*]` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/auto-clearing-runs[/*]` and `/ledgers/*/auto-clearing-rules[/*]` under `ledger.journal.read`; the rule PUT under `ledger.clearing.rules`; the run under `ledger.clearing.run`. |
 | Gateway route for `/api/v1/ledger/auto-clearing:run`, `/auto-clearing-runs` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 | Temporal schedule `gl-auto-clear` (daily 02:00, one run per ledger, rule and date) | handoff | Workflow runtime (wave 4) owner; per the PRD's run id per (ledger, rule, date) it calls `POST /auto-clearing:run` once per active rule with `ruleId`, mode `clear` and an `Idempotency-Key` of `gl-auto-clear:{rule}:{date}`, so the per-rule 20-minute timeout can apply. The kafka topic is the existing `passage.ledger.openitem`. |
 
@@ -188,8 +188,8 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| New duty `ledger.rules.write` (Maintain validation and derivation rules) | handoff | Enforced in the service with `authz.RequireDuty` on the lookup table and derivation strategy writes and on activation. `policies/authz/data.json` is outside this wave's paths: seed it under issue #313 (Accounting manager and Finance systems analyst, per PRD §2.11.17). The web nav items are gated on the existing `ledger.journal.read`. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/lookup-tables[/*]` and `/derivation-strategies[/*]`, `/derivation-strategies/*/activate` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; PUT and POST under `ledger.rules.write`). |
+| New duty `ledger.rules.write` (Maintain validation and derivation rules) | done (seeded in `policies/authz/data.json`) | `ledger.rules.write` is seeded with PUT `/v1/ledger/ledgers/*/lookup-tables/*` and `/derivation-strategies/*` and POST `/derivation-strategies/*/activate`. Role mappings belong to edge-identity. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/lookup-tables[/*]` and `/derivation-strategies[/*]`, `/derivation-strategies/*/activate` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/ledgers/*/lookup-tables[/*]` and `/derivation-strategies[/*]` under `ledger.journal.read`; the PUTs and the activate POST under `ledger.rules.write`. |
 | Kafka topic `passage.ledger.rules` for `dev.passage.ledger.rules.changed.v1` | handoff | Eventing backbone (`deploy/`) owner; add it next to `passage.ledger.journal`. Consumers that cache rules should subscribe. |
 | Gateway route for `/api/v1/ledger/ledgers/{ledger}/lookup-tables` and `/derivation-strategies` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 
@@ -197,7 +197,7 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/splitting-rules[/*]` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; PUT under `ledger.rules.write`). The duty `ledger.rules.write` is the one already handed off for slice 10 (issue #313); this slice adds no new duty. The web nav item is gated on `ledger.journal.read`. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/splitting-rules[/*]` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/ledgers/*/splitting-rules[/*]` under `ledger.journal.read`; PUT `/splitting-rules/*` under `ledger.rules.write`. |
 | Kafka topic `passage.ledger.rules` carries `rules.changed.v1` with the new kind `splitting_rule` | handoff | Eventing backbone (`deploy/`) owner; the topic from slice 10 is reused, consumers that cache rules should handle the new kind. |
 | Gateway route for `/api/v1/ledger/ledgers/{ledger}/splitting-rules` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 
@@ -205,8 +205,8 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| Duty `ledger.rules.write` for validation rule writes | handoff | No new duty: the writes reuse `ledger.rules.write`, already handed off in slice 10 for issue #313 (Accounting manager and Finance systems analyst, per PRD §2.11.17). The reads use `ledger.journal.read`. The web nav item is gated on `ledger.journal.read`. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/validation-rules[/*]` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; PUT under `ledger.rules.write`). |
+| Duty `ledger.rules.write` for validation rule writes | done (seeded in `policies/authz/data.json`) | PUT `/v1/ledger/ledgers/*/validation-rules/*` is a row of `ledger.rules.write`; the reads are rows of `ledger.journal.read`. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/validation-rules[/*]` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/ledgers/*/validation-rules[/*]` under `ledger.journal.read`; PUT `/validation-rules/*` under `ledger.rules.write`. |
 | Kafka topic `passage.ledger.rules` carries `rules.changed.v1` with kind `validation_rule` | handoff | Eventing backbone (`deploy/`) owner; no new topic. Consumers that cache rules should handle the new kind. |
 | Gateway route for `/api/v1/ledger/ledgers/{ledger}/validation-rules` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
 
@@ -214,8 +214,8 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| New duty `ledger.realignment.run` (Run dimension realignment) | handoff | Enforced in the service with `authz.RequireDuty` on `POST /ledgers/{ledger}/realignments` and its `:post`, `:reverse` and `:cancel` actions. `policies/authz/data.json` is outside this wave's paths: seed it under issue #313 (Financial controller, per PRD §2.11.17). The reads use `ledger.journal.read`, which the web nav item is gated on. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/realignments[/*]` | handoff | Policy bundle is outside this wave's paths (GET under `ledger.journal.read`; POST under `ledger.realignment.run`). |
+| New duty `ledger.realignment.run` (Run dimension realignment) | done (seeded in `policies/authz/data.json`) | `ledger.realignment.run` is seeded with POST `/v1/ledger/ledgers/*/realignments` and `/realignments/*:post`, `:reverse` and `:cancel`. The Financial controller role mapping belongs to edge-identity. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/realignments[/*]` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/ledgers/*/realignments[/*]` under `ledger.journal.read`; the POSTs under `ledger.realignment.run`. |
 | Kafka topic `passage.ledger.realignment` for `dev.passage.ledger.realignment.completed.v1` | handoff | Eventing backbone (`deploy/`) owner; add it next to `passage.ledger.rules`. Reporting and the wave 15 audit trail consume it. |
 | Wave 15 audit trail: `kind = realignment_run` | handoff | Wave 15 reads `journal_entry.is_realignment` and `realignment_run_id` (migration 0020) or the event above. |
 | Gateway route for `/api/v1/ledger/ledgers/{ledger}/realignments` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |
@@ -224,7 +224,7 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| Duty `ledger.structure.write` for advanced rule writes | handoff | No new duty: the writes reuse `ledger.structure.write` (PRD "Maintain account structures", which names advanced-rules), already enforced for account structures and already seeded in `policies/authz/data.json`. The reads use `ledger.journal.read`, which the web nav item is gated on. |
-| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/advanced-rules[/*]` | handoff | Policy bundle is outside this wave's paths. The seeded `ledger.structure.write` grants only `PUT /v1/ledger/ledgers/*/account-structures/*`, so the OPA decision refuses `PUT .../advanced-rules/*` until the row `{"resource": "/v1/ledger/ledgers/*/advanced-rules/*", "methods": ["PUT"]}` is added; the reads need `/v1/ledger/ledgers/*/advanced-rules` and `/v1/ledger/ledgers/*/advanced-rules/*` (GET) under `ledger.journal.read`. |
+| Duty `ledger.structure.write` for advanced rule writes | done (seeded in `policies/authz/data.json`) | No new duty: PUT `/v1/ledger/ledgers/*/advanced-rules/*` is a row of `ledger.structure.write` (PRD "Maintain account structures", which names advanced-rules); the reads are rows of `ledger.journal.read`, which the web nav item is gated on. |
+| `policies/authz/data.json` resource rows for `/v1/ledger/ledgers/*/advanced-rules[/*]` | done (seeded in `policies/authz/data.json`) | GET `/v1/ledger/ledgers/*/advanced-rules[/*]` under `ledger.journal.read`; PUT `/advanced-rules/*` under `ledger.structure.write`. |
 | Kafka topic `passage.ledger.rules` carries `rules.changed.v1` with kind `advanced_rule` | handoff | Eventing backbone (`deploy/`) owner; no new topic. Consumers that cache structures should handle the new kind. |
 | Gateway route for `/api/v1/ledger/ledgers/{ledger}/advanced-rules` | handoff | Gateway owner, if routes are listed per path rather than by the `/api/v1/ledger` prefix. |

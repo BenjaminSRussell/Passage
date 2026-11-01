@@ -368,8 +368,8 @@ from slices 16 and 17 lie outside it:
 
 | Item | Status | Reason |
 |---|---|---|
-| `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | handoff | The policy bundle is outside this wave's paths, and the existing row `/v1/scheduling/capacity-load` does not match the sub-path, so the gateway's OPA check denies the drill-down until the row is added. The service enforces `scheduling.read` itself; no new duty (issue #313 needs nothing for this slice). |
-| `policies/authz/data.json`: resource rows `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` (GET) under `scheduling.read` | handoff | Neither is in the policy bundle (outside this wave's paths); the existing `/v1/scheduling/runs/*` row may not match the two-segment sub-path, and `/late-orders` has no row, so the gateway's OPA check can deny both until they are added. The service enforces `scheduling.read` itself; no new duty. |
+| `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/capacity-load/jobs` is a row of `scheduling.read`. |
+| `policies/authz/data.json`: resource rows `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` are rows of `scheduling.read`. |
 
 ## Ticket deliverables
 
