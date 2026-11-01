@@ -1024,6 +1024,91 @@ export function respondToProposal(input: ProposalResponseInput, key: string = ne
   return json<ProposalResponse>("/product-proposals:respond", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
 }
 
+export interface AlternativeRuleInput {
+  legalEntityId: string;
+  orderedProductId: string;
+  alternativeProductId: string;
+  /** Absent for every customer of the legal entity. */
+  customerId?: string;
+  /** 1 to 99; 1 is offered first. */
+  priority?: number;
+  /** First and last requested date the rule applies to (YYYY-MM-DD). */
+  validFrom?: string;
+  validTo?: string;
+}
+
+/** An alternative item rule (FR-27.13). */
+export interface AlternativeRule extends AlternativeRuleInput {
+  id: string;
+  priority: number;
+}
+
+export interface AlternativeRuleFilter {
+  legalEntityId?: string;
+  orderedProductId?: string;
+}
+
+export interface AlternativePromise {
+  promisedDate?: string;
+  complete: boolean;
+  backorder: Decimal;
+  source: string;
+  schedule: AtpScheduleLine[];
+}
+
+export interface AlternativeEvaluationInput {
+  legalEntityId: string;
+  customerId?: string;
+  productId: string;
+  quantity: Decimal;
+  requested: string;
+  /** ATP buckets of the ordered product. */
+  periods: AtpPeriod[];
+  /** ATP buckets of the alternatives to check. */
+  alternatives?: { productId: string; periods: AtpPeriod[] }[];
+}
+
+export interface AlternativeOffer {
+  ruleId: string;
+  alternativeProductId: string;
+  priority: number;
+  /** Quantity, at most the requested one, that ships by the requested date. */
+  availableOnDate: Decimal;
+  coversQuantity: boolean;
+  promise: AlternativePromise;
+}
+
+export interface AlternativeEvaluation {
+  ordered: { productId: string; availableOnDate: Decimal; coversQuantity: boolean; promise: AlternativePromise };
+  /** True when the ordered product cannot ship the whole quantity by the requested date. */
+  needed: boolean;
+  offers: AlternativeOffer[];
+  /** Applicable alternatives that came without ATP buckets. */
+  unchecked: { ruleId: string; alternativeProductId: string; priority: number }[];
+}
+
+export async function listAlternativeRules(filter: AlternativeRuleFilter = {}, signal?: AbortSignal): Promise<AlternativeRule[]> {
+  const body = await json<{ items?: AlternativeRule[] }>(
+    `/alternative-item-rules${query({ legalEntityId: filter.legalEntityId, orderedProductId: filter.orderedProductId, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function createAlternativeRule(input: AlternativeRuleInput): Promise<AlternativeRule> {
+  return json<AlternativeRule>("/alternative-item-rules", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteAlternativeRule(id: string): Promise<void> {
+  await send(`/alternative-item-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** The alternatives that can ship what the ordered product cannot by the requested date (FR-27.13); nothing is stored. */
+export function evaluateAlternatives(input: AlternativeEvaluationInput, signal?: AbortSignal): Promise<AlternativeEvaluation> {
+  return json<AlternativeEvaluation>("/alternative-items:evaluate", { method: "POST", body: JSON.stringify(input) }, signal);
+}
+
 export interface AllocationQuotaInput {
   legalEntityId: string;
   productId: string;

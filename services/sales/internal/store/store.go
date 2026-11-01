@@ -279,6 +279,9 @@ type Store interface {
 	ListProposalRules(ctx context.Context, f ProposalRuleFilter) ([]domain.ProposalRule, error)
 	DeleteProposalRule(ctx context.Context, id string) error
 	RecordProposalResponse(ctx context.Context, in NewProposalResponse) (ProposalResponse, bool, error)
+	CreateAlternativeRule(ctx context.Context, in domain.AlternativeRule, actor string) (domain.AlternativeRule, error)
+	ListAlternativeRules(ctx context.Context, f AlternativeRuleFilter) ([]domain.AlternativeRule, error)
+	DeleteAlternativeRule(ctx context.Context, id string) error
 	CreateAllocationQuota(ctx context.Context, in NewAllocationQuota) (AllocationQuota, bool, error)
 	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
 	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)

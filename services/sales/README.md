@@ -150,6 +150,9 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET / PATCH | `/v1/sales/allocation-quotas/{id}` | `sales.order.read` / `sales.allocation.maintain` | One quota with its draw history; change the quantity under `If-Match` (below the consumed quantity is `SLS-0036`) |
 | POST | `/v1/sales/product-proposals:evaluate` | `sales.order.read` | Stateless: the products to propose for the products being committed, excluding those already on the order |
 | POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
+| GET / POST | `/v1/sales/alternative-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) by ordered product and priority; create a rule (ordered product, alternative, optional customer, `priority` 1 to 99, optional `validFrom` / `validTo`; one per ordered product, customer or all customers, and alternative, else `SLS-0055`) |
+| DELETE | `/v1/sales/alternative-item-rules/{id}` | `sales.listing.maintain` | Remove a rule (`SLS-0113` when absent) |
+| POST | `/v1/sales/alternative-items:evaluate` | `sales.order.read` | Stateless: when the ordered product cannot ship the whole quantity by the requested date, the applicable alternatives that can, each with its available quantity and promise, from ATP buckets in the request |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
 ## Rules implemented
@@ -264,6 +267,17 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   customer; nothing is added to the order. `POST /product-proposals:respond`
   (`Idempotency-Key`) records the user's accept or decline, and the rule list
   returns each rule's accepted and declined counts, the acceptance rate.
+- **FR-27.13** alternative items: a rule names a product to offer in place of
+  an ordered product, for one customer or every customer of the legal entity,
+  with a priority (1 first) and optional validity days judged on the requested
+  date (`sales.listing.maintain`). `POST /alternative-items:evaluate` is
+  stateless: it places the quantity against the ordered product's buckets and,
+  when less than the whole quantity ships by the requested date, against the
+  buckets of each applicable alternative (a customer's own rule wins over the
+  rule for every customer). Offers that cover the whole quantity come first,
+  then by priority, then by quantity; an alternative with only later supply is
+  no offer, and one sent without buckets is listed as `unchecked`. Nothing is
+  stored and no line changes.
 - **BR-27.10** intake: a repeat of `(channel, externalRef)` with the same body
   returns the original order with 200; a different body is a conflict.
 - **BR-27.6** optimistic concurrency with `If-Match` and the version column.
@@ -301,6 +315,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0032` | 422 | Selected quotation lines are not open (already converted, unknown or repeated) or none remain |
 | `SLS-0033` | 409 | A supplementary item rule for the parent, customer (or all customers) and item exists |
 | `SLS-0034` | 409 | A product proposal rule for the ordered product, customer (or all customers) and proposed product exists |
+| `SLS-0055` | 409 | An alternative item rule for the ordered product, customer (or all customers) and alternative product exists |
 | `SLS-0035` | 409 | An allocation quota for the product and customer (or all customers) already covers part of the period |
 | `SLS-0036` | 409 | Allocation quota set below the consumed quantity |
 | `SLS-0037` | 422 | The order is not CONFIRMED or is a JOURNAL order (BR-27.7), the line is past RESERVED, or the line is a supplementary line, so it cannot be promised |
@@ -334,6 +349,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0110` | 404 | Scheduling release not found |
 | `SLS-0111` | 404 | Backorder run not found |
 | `SLS-0112` | 404 | Change request not found |
+| `SLS-0113` | 404 | Alternative item rule not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

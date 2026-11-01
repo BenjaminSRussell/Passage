@@ -20,6 +20,7 @@ import { OrderDetailPage } from "./OrderDetailPage";
 import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
+import { AlternativeItemsPage, NewAlternativeRulePage } from "./AlternativeItemsPage";
 import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
 import { ParametersPage } from "./ParametersPage";
 import { PromiseLinePage } from "./PromiseLinePage";
@@ -72,6 +73,8 @@ const sales: PassageModule = {
     { path: "/sales/supplementary-items", element: createElement(SupplementaryRulesPage) },
     { path: "/sales/supplementary-items/new", element: createElement(NewSupplementaryRulePage), handle: { title: "New supplementary item rule" } },
     { path: "/sales/product-proposals", element: createElement(ProposalRulesPage) },
+    { path: "/sales/alternative-items", element: createElement(AlternativeItemsPage) },
+    { path: "/sales/alternative-items/new", element: createElement(NewAlternativeRulePage), handle: { title: "New alternative item rule" } },
     { path: "/sales/parameters", element: createElement(ParametersPage), handle: { title: "Sales parameters" } },
     { path: "/sales/allocation-quotas", element: createElement(AllocationQuotasPage) },
     { path: "/sales/allocation-quotas/new", element: createElement(NewAllocationQuotaPage), handle: { title: "New allocation quota" } },
@@ -95,6 +98,7 @@ const sales: PassageModule = {
     { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },
     { label: "Supplementary items", to: "/sales/supplementary-items", duty: "sales.order.read" },
     { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
+    { label: "Alternative items", to: "/sales/alternative-items", duty: "sales.order.read" },
     { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
     { label: "Sales parameters", to: "/sales/parameters", duty: "sales.order.read" },
   ],

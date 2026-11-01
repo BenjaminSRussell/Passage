@@ -176,6 +176,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyListing)).Delete(proposalRules+"/{id}", a.deleteProposalRule)
 	r.With(authz.RequireDuty(dutyRead)).Post(proposalEval, a.evaluateProposals)
 	r.With(requireAny(dutyWrite, dutyIntake)).Post(proposalRespond, a.respondToProposal)
+	a.registerAlternatives(r)
 	r.With(authz.RequireDuty(dutyAllocation)).Post(allocationQuota, a.createAllocationQuota)
 	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota, a.listAllocationQuotas)
 	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota+"/{id}", a.getAllocationQuota)
