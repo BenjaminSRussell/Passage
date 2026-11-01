@@ -302,10 +302,9 @@ Withdraw action, and the order change screen reports a cancellation sent for
 approval. The OpenAPI and AsyncAPI documents pass the doc gates with no FAIL
 lines.
 
-Route row handoff for #313 (outside this wave's paths): add
-`POST /v1/sales/change-requests/{id}:withdraw` to the route rows of
-`policies/authz/data.json` with the existing duty `sales.order.write`. No new
-duty was added.
+Route row for #313: done, `POST /v1/sales/change-requests/*:withdraw` is
+seeded in `policies/authz/data.json` under the existing duty
+`sales.order.write`. No new duty was added.
 
 ## Ticket deliverables
 

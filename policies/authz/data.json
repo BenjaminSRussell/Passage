@@ -84,6 +84,7 @@
       {"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/charts/*/accounts", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-entries/*", "methods": ["GET"]},
+      {"resource": "/v1/ledger/journal-entries/*/attachments", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-lines", "methods": ["GET"]},
       {"resource": "/v1/ledger/reason-codes", "methods": ["GET"]},
       {"resource": "/v1/ledger/reason-codes/*", "methods": ["GET"]},
@@ -97,6 +98,7 @@
       {"resource": "/v1/ledger/journal-names/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["GET"]},
+      {"resource": "/v1/ledger/journal-batches/*/attachments", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/cells/*/*/lines", "methods": ["GET"]},
@@ -149,6 +151,7 @@
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["PATCH"]},
       {"resource": "/v1/ledger/journal-batches/*/submit", "methods": ["POST"]},
       {"resource": "/v1/ledger/journal-batches/*/cancel", "methods": ["POST"]},
+      {"resource": "/v1/ledger/journal-batches/*/attachments/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/ledger/recurring-journals/*", "methods": ["PUT"]},
       {"resource": "/v1/ledger/recurring-journals/*/pause", "methods": ["POST"]},
       {"resource": "/v1/ledger/recurring-journals/*/resume", "methods": ["POST"]},
@@ -294,7 +297,9 @@
     ]},
     "inventory.consignment.write": {"permissions": [
       {"resource": "/v1/inventory/consignment-orders", "methods": ["POST"]},
-      {"resource": "/v1/inventory/consignment-orders/*:receive", "methods": ["POST"]}
+      {"resource": "/v1/inventory/consignment-orders/*:receive", "methods": ["POST"]},
+      {"resource": "/v1/inventory/consignment-orders/*:close", "methods": ["POST"]},
+      {"resource": "/v1/inventory/consignment-orders/*:cancel", "methods": ["POST"]}
     ]},
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
@@ -333,7 +338,9 @@
       {"resource": "/v1/procurement/requisition-lines", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisitions:consolidate", "methods": ["POST"]},
       {"resource": "/v1/procurement/pricing/lookup", "methods": ["GET"]},
-      {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan", "methods": ["PUT", "DELETE"]}
+      {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/procurement/purchase-orders/*/lines/*/delivery-schedule", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/procurement/purchase-orders/*/lines/*/delivery-schedule/rows/*/confirmation", "methods": ["PUT"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
@@ -349,6 +356,8 @@
       {"resource": "/v1/procurement/purchase-orders/*/versions/*/diff", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*/invoicing-plans", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-orders/*/delivery-schedules", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-orders/*/lines/*/delivery-schedule", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders:reprice", "methods": ["POST"], "note": "Preview only; the apply path is re-checked in services/purchasing/internal/api/reprice.go (requireRepriceDuty needs PurchaseOrderConfirm)."},
       {"resource": "/v1/procurement/scheduling-agreements", "methods": ["GET"]},
       {"resource": "/v1/procurement/scheduling-agreements/*", "methods": ["GET"]},
@@ -1646,10 +1655,12 @@
       {"resource": "/v1/engineering/calendars/*:generate", "methods": ["POST"]},
       {"resource": "/v1/engineering/capabilities", "methods": ["POST"]},
       {"resource": "/v1/engineering/resource-groups", "methods": ["POST"]},
-      {"resource": "/v1/engineering/resources", "methods": ["POST"]}
+      {"resource": "/v1/engineering/resources", "methods": ["POST"]},
+      {"resource": "/v1/engineering/resources/*", "methods": ["PUT", "DELETE"]}
     ]},
     "engineering.route.write": {"permissions": [
       {"resource": "/v1/engineering/route-versions", "methods": ["POST"]},
+      {"resource": "/v1/engineering/route-versions/*", "methods": ["PUT"]},
       {"resource": "/v1/engineering/route-versions/*:activate", "methods": ["POST"]},
       {"resource": "/v1/engineering/route-versions/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/engineering/route-versions/*:copy", "methods": ["POST"]}
@@ -2182,7 +2193,8 @@
       {"resource": "/v1/production/orders/*", "methods": ["PATCH"]},
       {"resource": "/v1/production/orders/*/bom", "methods": ["PATCH"]},
       {"resource": "/v1/production/orders/*:estimate", "methods": ["POST"]},
-      {"resource": "/v1/production/orders/*:schedule", "methods": ["POST"]}
+      {"resource": "/v1/production/orders/*:schedule", "methods": ["POST"]},
+      {"resource": "/v1/production/orders/*:apply-finite-dates", "methods": ["POST"]}
     ]},
     "production.order.zero-output": {"flag": true, "permissions": []},
     "production.setup.read": {"permissions": [
@@ -2299,7 +2311,8 @@
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
       {"resource": "/v1/sales/orders/*", "methods": ["PATCH"]},
       {"resource": "/v1/sales/orders/*/lines/*:promise", "methods": ["POST"]},
-      {"resource": "/v1/sales/product-proposals:respond", "methods": ["POST"]}
+      {"resource": "/v1/sales/product-proposals:respond", "methods": ["POST"]},
+      {"resource": "/v1/sales/change-requests/*:withdraw", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [{"resource": "/v1/sales/parameters", "methods": ["PUT"]}]},
     "sales.quotation.maintain": {"permissions": [

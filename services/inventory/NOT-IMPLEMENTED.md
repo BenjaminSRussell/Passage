@@ -255,9 +255,8 @@ quantity, so ending it has no supply to release; `consignment.closed` is there f
 `TestCancelConsignmentEndsAnUntouchedOrder`. The reason is also bounded in the table (1 to 200 characters or null). Web: the consignment order page shows a Close order or Cancel order card (reason,
 confirmation dialog) to holders of `inventory.consignment.write`, hides the receipt form once the order has ended, and shows who
 ended it and why; the list filters by Closed and Cancelled. No new duty. The OpenAPI and AsyncAPI documents have no FAIL lines on
-the documentation gates. Handoff for #313 / the policy bundle: `policies/authz/data.json` has route rows for
-`/v1/inventory/consignment-orders/*:receive` only; add `POST /v1/inventory/consignment-orders/*:close` and `:cancel` under
-`inventory.consignment.write` (no new duty). Not built: reopening an ended order,
+the documentation gates. Policy bundle (#313): done, `inventory.consignment.write` in `policies/authz/data.json` carries
+`POST /v1/inventory/consignment-orders/*:close` and `:cancel` next to `*:receive` (no new duty). Not built: reopening an ended order,
 reversing a close, a planning (wave 22) consumer of `consignment.closed`, and closing by age.
 
 Every other item in the ticket and PRD 3.16 is listed here.
