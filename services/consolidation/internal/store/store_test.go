@@ -132,7 +132,7 @@ func TestCreateRun_RoundTripAndEvent(t *testing.T) {
 	}
 	evts := outboxTypes(t, pool, ctx)
 	if len(evts) != 1 || evts[0]["_type"] != "dev.passage.consol.run.completed.v1" || evts[0]["runId"] != rec.ID ||
-		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "38000" || evts[0]["eliminationCount"] != float64(16) {
+		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "38000.00" || evts[0]["currency"] != "USD" || evts[0]["eliminationCount"] != float64(16) {
 		t.Fatalf("outbox = %v", evts)
 	}
 }
@@ -267,6 +267,13 @@ func TestRunData_IsImmutable(t *testing.T) {
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
 			t.Errorf("%q = %v; want the immutability trigger (55000)", stmt, err)
+		}
+	}
+	for _, table := range []string{"consolidation_run", "consolidation_balance", "consolidation_entry", "consolidation_statement_line"} {
+		_, err := pool.Exec(ctx, "truncate "+table+" cascade")
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+			t.Errorf("truncate %s = %v; want the immutability trigger (55000)", table, err)
 		}
 	}
 	if got, err := s.GetRun(ctx, rec.ID); err != nil || len(got.Entries) != 16 {

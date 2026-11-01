@@ -83,7 +83,7 @@ the IAS 21 treatment of the eliminations is an open accountant question
 | `GET /v1/consol/runs` (filter `groupId`, `period`, newest first, cursor), `GET /v1/consol/runs/{id}` (balances and eliminations), `GET /v1/consol/runs/{id}/statements` (duty `ConsolidationView`) | `internal/api/runs.go` | built, tests |
 | Rerun of a group, period and currency is the next version; stored rows are never updated or deleted (triggers raise 55000; `passage_app` has INSERT and SELECT only) | `migrations/0001_runs.sql`, `0002_grants.sql` | built, tests |
 | Event `dev.passage.consol.run.completed.v1` through the outbox in the run's transaction | `internal/events` | built, test |
-| Row-level security on the tenant GUC `passage.tenant_id` (the same scope the service has today); the group is a column and a filter, not a legal-entity policy, because a group spans legal entities | `migrations/0001_runs.sql` | built, tests as `passage_app` |
+| Row-level security on the tenant GUC `passage.tenant_id`; the group is a column and a filter, not a legal-entity policy. All four run routes are all-entity only (403 CNS-0923 for a legal-entity-scoped caller) until group membership is stored | `migrations/0001_runs.sql` | built, tests as `passage_app` |
 
 Statement lines (group currency): `net_assets` has the opening and closing net
 assets, unit net income, CTA and its NCI and group shares; `income` has unit
@@ -137,7 +137,7 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | CNS-0908 | Group cost unknown for some layers; margin fallback used (warning in the profit-in-inventory preview) |
 | CNS-0909 | Top-side journal at or above the approval threshold needs approval (warning in the group journal check) |
 | CNS-0910 | Move from an existing equity interest to control is a step acquisition, not supported (domain guard) |
-| CNS-0921 / CNS-0922 | No run with that id for the tenant (404) / Idempotency-Key reused with different inputs (409). Not in the PRD catalog; proposed for the catalog owner |
+| CNS-0921 / CNS-0922 / CNS-0923 | No run with that id for the tenant (404) / Idempotency-Key reused with different inputs (409) / run routes need all-entity scope (403). Not in the PRD catalog; proposed for the catalog owner |
 | AUTH-0001 / AUTH-0003 | Missing tenant / missing duty |
 | CNS-0920 | Bargain purchase: investment cost below the subsidiary's net assets at acquisition. Not in the PRD catalog; proposed for the catalog owner |
 

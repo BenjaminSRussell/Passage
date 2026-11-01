@@ -14,6 +14,7 @@ type RunCompletedData struct {
 	RunID            string `json:"runId"`
 	GroupID          string `json:"groupId"`
 	Period           string `json:"period"`
+	Currency         string `json:"currency"`
 	Version          int    `json:"version"`
 	UnitCount        int    `json:"unitCount"`
 	EliminationCount int    `json:"eliminationCount"`

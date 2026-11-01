@@ -48,6 +48,10 @@ func runsAPI(t *testing.T) *api.API {
 }
 
 func call(a *api.API, method, path, tenant, duties, key, body string) *httptest.ResponseRecorder {
+	return callAs(a, false, method, path, tenant, duties, key, body)
+}
+
+func callAs(a *api.API, leScoped bool, method, path, tenant, duties, key, body string) *httptest.ResponseRecorder {
 	r := httpx.NewRouter()
 	a.Register(r)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -57,6 +61,12 @@ func call(a *api.API, method, path, tenant, duties, key, body string) *httptest.
 		req.Header.Set("X-Passage-Tenant", tenant)
 	}
 	if duties != "" {
+		if !leScoped {
+			duties += ",org.switcher.all_scope,tenant.administer"
+			req.Header.Set("X-Passage-LegalEntity-Scope", "ALL")
+		} else {
+			req.Header.Set("X-Passage-Legal-Entity", "00000000-0000-0000-0000-0000000000e1")
+		}
 		req.Header.Set("X-Passage-Duties", duties)
 	}
 	if key != "" {
@@ -170,5 +180,28 @@ func TestRuns_OtherTenantSeesNothing(t *testing.T) {
 	var list struct{ Items []runOut }
 	if err := json.Unmarshal(call(a, http.MethodGet, runsPath, other, api.DutyView, "", "").Body.Bytes(), &list); err != nil || len(list.Items) != 0 {
 		t.Fatalf("other tenant list = %+v err=%v", list, err)
+	}
+}
+
+func TestRuns_LegalEntityScopedCallersAreRefused(t *testing.T) {
+	a := runsAPI(t)
+	started := created[runOut](t, call(a, http.MethodPost, runsPath, tenantID, api.DutyRun, "k1", runBody))
+	cases := []struct{ method, path, duty, key, body string }{
+		{http.MethodPost, runsPath, api.DutyRun, "k2", runBody},
+		{http.MethodGet, runsPath, api.DutyView, "", ""},
+		{http.MethodGet, runsPath + "/" + started.ID, api.DutyView, "", ""},
+		{http.MethodGet, runsPath + "/" + started.ID + "/statements", api.DutyView, "", ""},
+	}
+	for _, c := range cases {
+		rec := callAs(a, true, c.method, c.path, tenantID, c.duty+",org.switcher.all_scope,tenant.administer", c.key, c.body)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "CNS-0923") {
+			t.Errorf("%s %s as a legal-entity caller = %d %s", c.method, c.path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := call(a, http.MethodGet, runsPath, tenantID, api.DutyView, "", ""); rec.Code != http.StatusOK {
+		t.Errorf("an all-entity caller = %d", rec.Code)
+	}
+	if rec := callAs(a, false, http.MethodGet, runsPath, tenantID, api.DutyView, "", ""); rec.Code != http.StatusOK {
+		t.Errorf("all-entity read = %d", rec.Code)
 	}
 }

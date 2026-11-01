@@ -27,6 +27,7 @@ const (
 	CodeBargainPurchase  = "CNS-0920"
 	CodeRunNotFound      = "CNS-0921"
 	CodeIdempotencyReuse = "CNS-0922"
+	CodeRunScope         = "CNS-0923"
 )
 
 func invalid(detail string) error { return &Error{Code: CodeInvalid, Detail: detail} }

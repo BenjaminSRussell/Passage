@@ -1,9 +1,11 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 
 	"github.com/shopspring/decimal"
 )
@@ -169,4 +171,60 @@ func withUnit(unit string, err error) error {
 		return &Error{Code: de.Code, Detail: "unit " + unit + ": " + de.Detail}
 	}
 	return err
+}
+
+// RulesVersion names the elimination and translation rules a run was computed
+// with. It is part of the inputs hash, so a rule change never matches an older run.
+const RulesVersion = "consol-rules-1"
+
+const hashScale = 6
+
+type canonicalUnit struct {
+	ID               string `json:"id"`
+	OwnershipPct     string `json:"ownershipPct"`
+	Closing          string `json:"closing"`
+	Average          string `json:"average"`
+	Opening          string `json:"opening"`
+	Historical       string `json:"historical"`
+	ICSales          string `json:"icSales"`
+	ICCost           string `json:"icCost"`
+	UnsoldShare      string `json:"unsoldShare"`
+	ICReceivable     string `json:"icReceivable"`
+	PayableGroup     string `json:"payableGroup"`
+	ShareCapital     string `json:"shareCapital"`
+	PreAcqRE         string `json:"preAcqRe"`
+	InvestmentCost   string `json:"investmentCost"`
+	NetIncome        string `json:"netIncome"`
+	SellerIsSub      bool   `json:"sellerIsSubsidiary"`
+	OpeningNetAssets string `json:"openingNetAssets"`
+	ClosingNetAssets string `json:"closingNetAssets"`
+}
+
+type canonicalInput struct {
+	Rules    string          `json:"rules"`
+	GroupID  string          `json:"groupId"`
+	Period   string          `json:"period"`
+	Currency string          `json:"currency"`
+	Units    []canonicalUnit `json:"units"`
+}
+
+// Canonical returns the inputs as stable JSON: units sorted by id, every
+// decimal at a fixed scale, and the rules version. Equal inputs give equal
+// bytes whatever the unit order or decimal spelling.
+func (in RunInput) Canonical() ([]byte, error) {
+	units := make([]canonicalUnit, 0, len(in.Units))
+	for _, u := range in.Units {
+		f := func(d decimal.Decimal) string { return d.StringFixed(hashScale) }
+		p := u.Pair
+		units = append(units, canonicalUnit{
+			ID: u.ID, OwnershipPct: f(p.OwnershipPct), Closing: f(p.Rates.Closing), Average: f(p.Rates.Average),
+			Opening: f(p.Rates.Opening), Historical: f(p.Rates.Historical), ICSales: f(p.ICSales), ICCost: f(p.ICCost),
+			UnsoldShare: f(p.UnsoldShare), ICReceivable: f(p.ICReceivable), PayableGroup: f(p.PayableGroup),
+			ShareCapital: f(p.ShareCapital), PreAcqRE: f(p.PreAcqRE), InvestmentCost: f(p.InvestmentCost),
+			NetIncome: f(p.NetIncome), SellerIsSub: p.SellerIsSubsidiary,
+			OpeningNetAssets: f(u.OpeningNetAssets), ClosingNetAssets: f(u.ClosingNetAssets),
+		})
+	}
+	sort.Slice(units, func(i, j int) bool { return units[i].ID < units[j].ID })
+	return json.Marshal(canonicalInput{Rules: RulesVersion, GroupID: in.GroupID, Period: in.Period, Currency: in.Currency, Units: units})
 }

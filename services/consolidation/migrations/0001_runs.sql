@@ -1,6 +1,6 @@
 -- Wave 40 AC4: stored consolidation runs (FR-40.10, FR-40.11). A run is the
 -- header plus its balances, elimination entries and statement lines; all four
--- tables are append-only (triggers reject UPDATE and DELETE; the application
+-- tables are append-only (triggers reject UPDATE, DELETE and TRUNCATE; the application
 -- role is granted INSERT and SELECT only). A rerun of a group and period is a
 -- new version, never an overwrite. Every table carries tenant_id and is
 -- tenant-scoped by row-level security (dbx.RLSPolicy); the group is a column,
@@ -105,6 +105,7 @@ DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['consolidation_run', 'consolidation_balance', 'consolidation_entry', 'consolidation_statement_line'] LOOP
     EXECUTE format('CREATE TRIGGER %I_immutable BEFORE UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION consolidation_reject_change()', t, t);
+    EXECUTE format('CREATE TRIGGER %I_no_truncate BEFORE TRUNCATE ON %I FOR EACH STATEMENT EXECUTE FUNCTION consolidation_reject_change()', t, t);
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format($p$CREATE POLICY %I_tenant_access ON %I AS PERMISSIVE

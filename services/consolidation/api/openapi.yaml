@@ -328,7 +328,8 @@ paths:
         is immutable. A second run for the same group, period and currency is
         the next version; nothing is overwritten. The IAS 21 treatment of the
         eliminations is an open accountant question (issue 349) and the run
-        stores what the engine produces. Publishes
+        stores what the engine produces. All run routes need all-entity scope
+        (403 CNS-0923 for a legal-entity-scoped caller). Publishes
         dev.passage.consol.run.completed.v1 through the outbox.
       x-passage-duty: ConsolidationRun
       parameters:

@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
@@ -99,7 +100,7 @@ func (s *Postgres) CreateRun(ctx context.Context, in domain.RunInput, res domain
 	if createdBy == "" {
 		return RunRecord{}, false, errors.New("store: principal has neither user nor service")
 	}
-	raw, err := json.Marshal(in)
+	raw, err := in.Canonical()
 	if err != nil {
 		return RunRecord{}, false, err
 	}
@@ -171,7 +172,8 @@ func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in do
 	}
 	evt, err := events.New(coevents.RunCompleted, coevents.Source, rec.ID, tenantID, coevents.RunCompletedData{
 		RunID: rec.ID, GroupID: rec.GroupID, Period: rec.Period, Version: rec.Version,
-		UnitCount: rec.UnitCount, EliminationCount: rec.EliminationCount, CTAAmount: rec.CTA.String(),
+		Currency: rec.Currency, UnitCount: rec.UnitCount, EliminationCount: rec.EliminationCount,
+		CTAAmount: rec.CTA.StringFixed(money.MinorUnits(rec.Currency)),
 	})
 	if err != nil {
 		return RunRecord{}, err

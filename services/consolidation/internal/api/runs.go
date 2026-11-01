@@ -10,9 +10,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/store"
 )
@@ -105,6 +107,20 @@ func toRunResponse(rec store.RunRecord) runResponse {
 	}
 }
 
+// allEntityScope admits only callers that see every legal entity: no
+// legal-entity claim and either the all-entity duty (reads) or tenant.administer
+// (the write path drops the all-entity duty). A run spans a group's entities,
+// and group membership is not stored yet, so a legal-entity-scoped caller
+// would otherwise read or create consolidated figures of entities it cannot see.
+func allEntityScope(w http.ResponseWriter, r *http.Request) bool {
+	p, _ := tenant.FromContext(r.Context())
+	if p.LegalEntityID == "" && (dbx.LegalEntityScopes(p) == "*" || tenant.IsTenantAdmin(p)) {
+		return true
+	}
+	httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeRunScope, "consolidation runs need all-entity scope: a caller scoped to legal entities cannot use them until group membership is stored"))
+	return false
+}
+
 func runID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "id")
 	if !ids.Valid(id) {
@@ -117,7 +133,7 @@ func runID(w http.ResponseWriter, r *http.Request) (string, bool) {
 // startRun computes the run with the existing rules and stores it as the next
 // version of its group, period and currency.
 func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
-	if !guard(w, r) {
+	if !guard(w, r) || !allEntityScope(w, r) {
 		return
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -185,7 +201,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
-	if !guard(w, r) {
+	if !guard(w, r) || !allEntityScope(w, r) {
 		return
 	}
 	q := r.URL.Query()
@@ -222,7 +238,7 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
-	if !guard(w, r) {
+	if !guard(w, r) || !allEntityScope(w, r) {
 		return
 	}
 	id, ok := runID(w, r)
@@ -246,7 +262,7 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getRunStatements(w http.ResponseWriter, r *http.Request) {
-	if !guard(w, r) {
+	if !guard(w, r) || !allEntityScope(w, r) {
 		return
 	}
 	id, ok := runID(w, r)

@@ -26,12 +26,13 @@ components:
       title: Consolidation run stored (FR-40.10)
       payload:
         type: object
-        required: [runId, groupId, period, version, unitCount, eliminationCount, ctaAmount]
+        required: [runId, groupId, period, currency, version, unitCount, eliminationCount, ctaAmount]
         properties:
           runId: { type: string, format: uuid }
           groupId: { type: string }
           period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+          currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
           version: { type: integer, minimum: 1, description: Per group, period and currency; a rerun is the next version }
           unitCount: { type: integer, minimum: 1 }
           eliminationCount: { type: integer, minimum: 0 }
-          ctaAmount: { type: string, description: Sum of the unit CTA in group currency, a decimal }
+          ctaAmount: { type: string, description: Sum of the unit CTA in group currency at its minor unit, as the API returns it }

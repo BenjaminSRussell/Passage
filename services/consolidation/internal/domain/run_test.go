@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -104,5 +105,29 @@ func TestComputeRun_Rejects(t *testing.T) {
 	var de *Error
 	if !errors.As(err, &de) || de.Code != CodeBargainPurchase || de.Detail[:7] != "unit S4" {
 		t.Errorf("bargain error = %v, want CNS-0920 naming the unit", err)
+	}
+}
+
+func TestRunInput_CanonicalIgnoresOrderAndDecimalSpelling(t *testing.T) {
+	a, b := psUnit("S1"), psUnit("S2")
+	respelled := psUnit("S1")
+	respelled.Pair.ICSales = dec("100000.000")
+	respelled.Pair.OwnershipPct = dec("80.0")
+	first, err := psRun(a, b).Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := psRun(b, respelled).Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("canonical forms differ:\n%s\n%s", first, second)
+	}
+	changed := psUnit("S1")
+	changed.Pair.NetIncome = dec("150000.01")
+	third, _ := psRun(changed, b).Canonical()
+	if string(first) == string(third) || !strings.Contains(string(first), RulesVersion) {
+		t.Fatalf("a changed amount must change the form, and the rules version must be in it: %s", third)
 	}
 }
