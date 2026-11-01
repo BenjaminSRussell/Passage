@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -139,46 +140,86 @@ func (s *Postgres) CloseRemainder(ctx context.Context, id string, version int, i
 			if err := checkVersion(sh, version); err != nil {
 				return sh, err
 			}
-			next, closed, err := domain.CloseRemainder(sh.Status, lineQtys(sh))
-			if err != nil {
-				return sh, mapDomain(err)
-			}
-			lines := []fulevents.ClosedLine{}
-			for i := range sh.Lines {
-				l := &sh.Lines[i]
-				c := closed[i]
-				if !c.Closed.IsPositive() {
-					continue
-				}
-				if _, err := tx.Exec(ctx, `update shipment_line set qty_closed = qty_closed + $3, closed_at = now(),
-					qty_planned = qty_shipped, qty_picked = qty_shipped, qty_packed = qty_shipped
-					where tenant_id = $1 and id = $2`, p.TenantID, l.ID, c.Closed); err != nil {
-					return sh, err
-				}
-				lines = append(lines, fulevents.ClosedLine{OrderLineID: l.OrderLineID, Qty: c.Closed.String(), PickedUnpacked: c.PickedUnpacked.String()})
-				l.Closed = l.Closed.Add(c.Closed)
-				l.Planned, l.Picked, l.Packed = l.Shipped, l.Shipped, l.Shipped
-			}
-			// Entries that never shipped go with the closed remainder: their
-			// serials are free again and the line keeps only what shipped.
-			if _, err := tx.Exec(ctx, `delete from pick_tracking where tenant_id = $1 and shipment_id = $2 and packing_slip_id is null`,
-				p.TenantID, sh.ID); err != nil {
-				return sh, err
-			}
-			for i := range sh.Lines {
-				sh.Lines[i].Tracking = shippedEntries(sh.Lines[i].Tracking)
-			}
-			if err := bumpShipment(ctx, tx, p.TenantID, &sh, next); err != nil {
-				return sh, err
-			}
-			return sh, enqueue(ctx, tx, sh.ID, fulevents.ShipmentClosed, p.TenantID, fulevents.ShipmentClosedData{
-				ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, Lines: lines,
-			})
+			_, err = closeRemainderTx(ctx, tx, p.TenantID, &sh, nil)
+			return sh, err
 		})
 		out = res
 		return err
 	})
 	return out, err
+}
+
+// closeRemainderTx closes the open remainder of sh inside tx. With backorderDate
+// set it also moves the remainder to a new RELEASED shipment of the same order
+// and warehouse planned for that date, and returns it; shipment.closed names the
+// new shipment so sales keeps the order lines open.
+func closeRemainderTx(ctx context.Context, tx pgx.Tx, tenantID string, sh *Shipment, backorderDate *time.Time) (*Shipment, error) {
+	next, closed, err := domain.CloseRemainder(sh.Status, lineQtys(*sh))
+	if err != nil {
+		return nil, mapDomain(err)
+	}
+	lines := []fulevents.ClosedLine{}
+	for i := range sh.Lines {
+		l := &sh.Lines[i]
+		c := closed[i]
+		if !c.Closed.IsPositive() {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `update shipment_line set qty_closed = qty_closed + $3, closed_at = now(),
+			qty_planned = qty_shipped, qty_picked = qty_shipped, qty_packed = qty_shipped
+			where tenant_id = $1 and id = $2`, tenantID, l.ID, c.Closed); err != nil {
+			return nil, err
+		}
+		lines = append(lines, fulevents.ClosedLine{OrderLineID: l.OrderLineID, Qty: c.Closed.String(), PickedUnpacked: c.PickedUnpacked.String()})
+		l.Closed = l.Closed.Add(c.Closed)
+		l.Planned, l.Picked, l.Packed = l.Shipped, l.Shipped, l.Shipped
+	}
+	// Entries that never shipped go with the closed remainder: their
+	// serials are free again and the line keeps only what shipped.
+	if _, err := tx.Exec(ctx, `delete from pick_tracking where tenant_id = $1 and shipment_id = $2 and packing_slip_id is null`,
+		tenantID, sh.ID); err != nil {
+		return nil, err
+	}
+	for i := range sh.Lines {
+		sh.Lines[i].Tracking = shippedEntries(sh.Lines[i].Tracking)
+	}
+	if err := bumpShipment(ctx, tx, tenantID, sh, next); err != nil {
+		return nil, err
+	}
+	data := fulevents.ShipmentClosedData{ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, Lines: lines}
+	var backorder *Shipment
+	if backorderDate != nil {
+		b, err := insertBackorder(ctx, tx, tenantID, *sh, closed, *backorderDate)
+		if err != nil {
+			return nil, err
+		}
+		sh.BackorderID = &b.ID
+		data.BackorderShipmentID = b.ID
+		backorder = &b
+	}
+	return backorder, enqueue(ctx, tx, sh.ID, fulevents.ShipmentClosed, tenantID, data)
+}
+
+// insertBackorder creates the shipment that takes over the remainder closed on
+// sh: the lines that owed quantity, planned for the closed quantity.
+func insertBackorder(ctx context.Context, tx pgx.Tx, tenantID string, sh Shipment, closed []domain.ClosedQty, date time.Time) (Shipment, error) {
+	group := domain.ReleaseGroup{OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, ShipDate: date}
+	carrier := ""
+	if sh.CarrierCode != nil {
+		carrier = *sh.CarrierCode
+	}
+	for _, b := range domain.BackorderLines(closed) {
+		l := sh.Lines[b.LineIndex]
+		zone := ""
+		if l.Zone != nil {
+			zone = *l.Zone
+		}
+		group.Lines = append(group.Lines, domain.ReleaseLine{OrderID: sh.OrderID, OrderLineID: l.OrderLineID, CustomerID: sh.CustomerID,
+			LegalEntityID: sh.LegalEntityID, WarehouseID: sh.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: b.Qty,
+			CarrierCode: carrier, Zone: zone, TrackingRequired: l.TrackingRequired})
+	}
+	origin := sh.ID
+	return insertReleased(ctx, tx, tenantID, group, &origin)
 }
 
 // asnData builds the advance ship notice (FR-28.9) for slip from the shipment's
@@ -240,4 +281,12 @@ func optional(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// deref maps nil to "".
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

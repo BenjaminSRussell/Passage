@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { cancelPackingSlip, describeProblem, getPackingSlip, newKey, type JournalEntry, type PackagingFeeLine, type PackingSlip, type Problem } from "./api/client";
 import { SlipStatusBadge } from "./badges";
@@ -8,6 +8,12 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 type SlipLine = PackingSlip["lines"][number];
+
+/** What the warehouse's short pick action did to the shipment's remainder when this slip posted (FR-28.8); passed from the post. */
+export interface PostedRemainder {
+  remainderAction?: PackingSlip["remainderAction"];
+  backorderShipmentId?: string;
+}
 
 const lineColumns: DataTableColumn<SlipLine>[] = [
   { key: "orderLineId", header: "Order line", mono: true, render: (row) => shortId(row.orderLineId) },
@@ -36,6 +42,7 @@ const feeColumns: DataTableColumn<PackagingFeeLine>[] = [
 export function PackingSlipDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const posted = (useLocation().state ?? {}) as PostedRemainder;
   const state = useLoad((signal) => getPackingSlip(id, signal), id);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -99,6 +106,17 @@ export function PackingSlipDetailPage() {
           </>
         }
       />
+      {posted.remainderAction === "CANCEL_REMAINDER" ? (
+        <Alert tone="info" title="Remainder closed" live="status">
+          This slip left quantity still to ship, and the warehouse closes such a remainder: the shipment is now Shipped at what has shipped.
+        </Alert>
+      ) : null}
+      {posted.remainderAction === "REMAINDER_BACKORDER" && posted.backorderShipmentId ? (
+        <Alert tone="info" title="Remainder moved to a backorder shipment" live="status">
+          This slip left quantity still to ship, and the warehouse backorders such a remainder: it moved to{" "}
+          <Link to={`/fulfillment/shipments/${posted.backorderShipmentId}`}>the backorder shipment</Link>, released and ready to pick.
+        </Alert>
+      ) : null}
       {confirming ? (
         <Alert
           tone="warning"

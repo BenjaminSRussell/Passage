@@ -87,6 +87,24 @@ export interface ShipmentSummary {
 export interface Shipment extends Omit<ShipmentSummary, "lineCount"> {
   lines: ShipmentLine[];
   containers: Container[];
+  /** The shipment this one took its quantity from (a backorder shipment). */
+  backorderOfId?: string | null;
+  /** The backorder shipment that took over this shipment's closed remainder. */
+  backorderId?: string | null;
+}
+
+/** FR-28.8: what happens to the open remainder once a slip has shipped part of a shipment. */
+export type ShortPickAction = "KEEP_OPEN" | "CANCEL_REMAINDER" | "REMAINDER_BACKORDER";
+export const SHORT_PICK_ACTIONS: ShortPickAction[] = ["KEEP_OPEN", "CANCEL_REMAINDER", "REMAINDER_BACKORDER"];
+
+export interface WarehouseSetting {
+  warehouseId: string;
+  /** The legal entity the warehouse belongs to; null when no shipment or saved setting names it yet. */
+  legalEntityId: string | null;
+  shortPickAction: ShortPickAction;
+  /** 0 when no setting is saved for the warehouse. */
+  version: number;
+  updatedAt: string | null;
 }
 
 export interface JournalEntry {
@@ -124,6 +142,9 @@ export interface PackingSlip extends PackingSlipSummary {
   lines: { orderLineId: string; shipmentLineId: string; qty: string; costAmount: string; costSnapshotId: string }[];
   journal: JournalEntry[];
   packagingFees: PackagingFeeLine[];
+  /** On the post response only: the warehouse's short pick action closed or moved the open remainder. */
+  remainderAction?: "CANCEL_REMAINDER" | "REMAINDER_BACKORDER";
+  backorderShipmentId?: string;
 }
 
 export interface ContainerType {
@@ -604,6 +625,31 @@ export function unnestContainer(shipmentId: string, containerId: string, version
 /** Closes the open remainder of a partially shipped shipment at what shipped (FR-28.8, CANCEL_REMAINDER). */
 export function closeShipmentRemainder(id: string, version: number, key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:close-remainder`, undefined, key, version);
+}
+
+/** Moves the open remainder to a new backorder shipment (FR-28.8, REMAINDER_BACKORDER); the date plans the new shipment. */
+export function backorderShipmentRemainder(
+  id: string,
+  version: number,
+  input: { plannedShipDate?: string },
+  key: string,
+): Promise<{ shipment: Shipment; backorder: Shipment }> {
+  return command(`${shipmentPath(id)}:backorder-remainder`, input, key, version);
+}
+
+export function listWarehouseSettings(signal?: AbortSignal): Promise<WarehouseSetting[]> {
+  return items<WarehouseSetting>("/warehouse-settings", signal);
+}
+
+/** Sets the short pick action of a warehouse of a legal entity; version is the one read (0 when none is saved). */
+export function saveWarehouseSetting(
+  warehouseId: string,
+  version: number,
+  input: { shortPickAction: ShortPickAction; legalEntityId: string },
+  key: string,
+): Promise<WarehouseSetting> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<WarehouseSetting>(`/warehouse-settings/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
 /** Read-only workbench preview: the waves the create would make now (FR-28.13). */

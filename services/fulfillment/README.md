@@ -198,6 +198,21 @@ A container returns `parentContainerId` (its pallet) and `childContainerIds`
 until the pallet is dissolved (FUL-0056). The pallet ships with its cartons and
 the ASN gives each carton its `parent_sscc`.
 
+## Endpoints (slice 13)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| GET | `/v1/fulfillment/warehouse-settings` | WarehouseView | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; KEEP_OPEN at version 0 when none is saved |
+| GET | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseView | One warehouse; ETag carries the version (0 when none is saved) |
+| PUT | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseRelease | Idempotency-Key, If-Match (0 when none is saved); body `shortPickAction` (KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER) and `legalEntityId`; FUL-0057 when the warehouse belongs to another legal entity; `warehousesetting.changed` |
+| POST | `/v1/fulfillment/shipments/{id}:backorder-remainder` | WarehouseRelease | Idempotency-Key, If-Match; optional `plannedShipDate`; the rules of `:close-remainder`, and the closed quantity moves to a new RELEASED shipment (`backorderOfId`); `shipment.closed` with `backorder_shipment_id`, then `shipment.released` with `backorder_of` |
+
+The setting is per warehouse and scoped by its legal entity. When a packing slip
+posts and leaves the shipment PARTIALLY_SHIPPED, the action runs in the same
+transaction: KEEP_OPEN (default) leaves the remainder for a re-pick,
+CANCEL_REMAINDER closes it, REMAINDER_BACKORDER moves it to a backorder shipment;
+the post response names it (`remainderAction`, `backorderShipmentId`).
+
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or
 with another body is `idempotency_key_reuse`. Concurrent requests with one key
@@ -242,6 +257,7 @@ Codes raised in this slice:
 | `FUL-0055` | A wave cannot close: a line of a live shipment is still to pick (422) |
 | `FUL-0054` | Container not found on the shipment (404) |
 | `FUL-0056` | Container nesting refused: a carton is not CLOSED, already on a pallet or a pallet itself; the container is not a pallet; or a nested container is unpacked (422) |
+| `FUL-0057` | Warehouse setting saved under a legal entity the warehouse does not belong to (its saved setting or its shipments name another one, or it is outside the caller's scope) (422) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |
 | `conflict_version` | `If-Match` does not match the current version (412) |

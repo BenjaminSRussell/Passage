@@ -41,6 +41,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    WarehouseId:
+      name: warehouseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     WaveId:
       name: id
       in: path
@@ -137,6 +142,24 @@ components:
         containers:
           type: array
           items: { $ref: "#/components/schemas/Container" }
+        backorderOfId: { type: [string, "null"], format: uuid, description: "The shipment this one took its quantity from (a backorder shipment)." }
+        backorderId: { type: [string, "null"], format: uuid, description: "The backorder shipment that took over this shipment's closed remainder." }
+    ShortPickAction:
+      type: string
+      enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER]
+      description: >
+        What happens to the open remainder once a slip has shipped part of a shipment
+        (FR-28.8): KEEP_OPEN re-picks it on the shipment (default), CANCEL_REMAINDER
+        closes it, REMAINDER_BACKORDER moves it to a new backorder shipment.
+    WarehouseSetting:
+      type: object
+      required: [warehouseId, legalEntityId, shortPickAction, version]
+      properties:
+        warehouseId: { type: string, format: uuid }
+        legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its shipments; null when neither is known." }
+        shortPickAction: { $ref: "#/components/schemas/ShortPickAction" }
+        version: { type: integer, minimum: 0, description: "0 when no setting is saved." }
+        updatedAt: { type: [string, "null"], format: date-time }
     ShipmentLine:
       type: object
       properties:
@@ -217,6 +240,8 @@ components:
           type: array
           description: Statistical packaging fee lines (BR-28.12); not journal lines. Negative on a reversing slip.
           items: { $ref: "#/components/schemas/PackagingFeeLine" }
+        remainderAction: { type: string, enum: [CANCEL_REMAINDER, REMAINDER_BACKORDER], description: "On the post response only: the warehouse's short pick action closed or moved the shipment's open remainder." }
+        backorderShipmentId: { type: string, format: uuid, description: "On the post response only, with REMAINDER_BACKORDER: the new shipment." }
     PackagingFeeLine:
       type: object
       required: [countryCode, period, materialCode, weightKg, ratePerKg, feeAmount, currency]
@@ -1260,6 +1285,129 @@ paths:
         "409": { description: "FUL-0021 no open remainder, nothing shipped yet, or packed quantity waiting to ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:backorder-remainder:
+    post:
+      operationId: backorderShipmentRemainder
+      summary: Move the open remainder of a partially shipped shipment to a new backorder shipment (FR-28.8)
+      description: >
+        The same rules as closing the remainder (PARTIALLY_SHIPPED, or its remainder
+        being picked, after at least one slip has shipped and with nothing packed
+        waiting to ship). Every line shrinks to the quantity that shipped, the
+        shipment becomes SHIPPED, and the quantity given up moves to a new RELEASED
+        shipment of the same order, customer, warehouse and carrier, planned for
+        plannedShipDate (today when absent). The new shipment points back through
+        backorderOfId and the original through backorderId. shipment.closed names the
+        new shipment (backorder_shipment_id) so sales keeps the order lines open, and
+        shipment.released announces the new one. The body may be an empty object.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                plannedShipDate: { type: string, format: date, description: "Planned ship date of the backorder shipment; today when absent." }
+      responses:
+        "200":
+          description: The original shipment (SHIPPED, ETag carries its new version) and the backorder shipment
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shipment, backorder]
+                properties:
+                  shipment: { $ref: "#/components/schemas/Shipment" }
+                  backorder: { $ref: "#/components/schemas/Shipment" }
+        "400": { description: "FUL-0050 validation (plannedShipDate), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 no open remainder, nothing shipped yet, or packed quantity waiting to ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/warehouse-settings:
+    get:
+      operationId: listWarehouseSettings
+      summary: Short pick action per warehouse (FR-28.8)
+      description: >
+        Every warehouse the caller sees shipments or a saved setting for (both are
+        scoped by legal entity). A warehouse without a saved setting reads KEEP_OPEN
+        at version 0.
+      x-passage-duty: WarehouseView
+      responses:
+        "200":
+          description: Warehouse settings, ordered by warehouse
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WarehouseSetting" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/warehouse-settings/{warehouseId}:
+    get:
+      operationId: getWarehouseSetting
+      summary: Read the short pick action of one warehouse
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+      responses:
+        "200":
+          description: The setting; ETag carries its version (0 when none is saved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WarehouseSetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: saveWarehouseSetting
+      summary: Set the short pick action of a warehouse (FR-28.8)
+      description: >
+        KEEP_OPEN leaves a partially shipped shipment open for a re-pick (default).
+        CANCEL_REMAINDER closes the open remainder and REMAINDER_BACKORDER moves it to a new
+        shipment, both as soon as a packing slip leaves a remainder open; a shipment
+        that cannot close (a line is packed and waiting to ship) is left as it is.
+        The response of the post names the action taken. If-Match carries the version
+        read, 0 when none is saved. legalEntityId is the legal entity the warehouse
+        belongs to; the setting is scoped by it, and a legal entity other than the
+        saved one or the one of the warehouse's shipments is refused (FUL-0057).
+        Publishes warehousesetting.changed.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [shortPickAction, legalEntityId]
+              properties:
+                shortPickAction: { $ref: "#/components/schemas/ShortPickAction" }
+                legalEntityId: { type: string, format: uuid, description: "The legal entity the warehouse belongs to." }
+      responses:
+        "200":
+          description: The saved setting; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WarehouseSetting" }
+        "400": { description: "FUL-0050 validation (If-Match, shortPickAction, legalEntityId), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers/{cid}:unpack:
     post:

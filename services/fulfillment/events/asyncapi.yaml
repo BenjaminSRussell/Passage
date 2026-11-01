@@ -41,6 +41,11 @@ channels:
     messages:
       shipmentClosed:
         $ref: "#/components/messages/ShipmentClosed"
+  warehouseSettingChanged:
+    address: passage.fulfillment.warehousesetting
+    messages:
+      warehouseSettingChanged:
+        $ref: "#/components/messages/WarehouseSettingChanged"
   pickTracked:
     address: passage.fulfillment.pick
     messages:
@@ -117,6 +122,11 @@ operations:
     channel: { $ref: "#/channels/shipmentClosed" }
     messages:
       - $ref: "#/channels/shipmentClosed/messages/shipmentClosed"
+  publishWarehouseSettingChanged:
+    action: send
+    channel: { $ref: "#/channels/warehouseSettingChanged" }
+    messages:
+      - $ref: "#/channels/warehouseSettingChanged/messages/warehouseSettingChanged"
   publishPickTracked:
     action: send
     channel: { $ref: "#/channels/pickTracked" }
@@ -169,7 +179,9 @@ components:
       title: Shipment released
       summary: >
         An order was released to the warehouse as a shipment (FR-28.1). Inventory
-        reserves and picking starts from it.
+        reserves and picking starts from it. A backorder shipment (short pick action
+        REMAINDER_BACKORDER) names the shipment it took the remainder from in
+        backorder_of: its lines are not a new release of the order lines.
       contentType: application/json
       payload:
         type: object
@@ -179,6 +191,7 @@ components:
           shipment_number: { type: string }
           order_id: { type: string, format: uuid }
           warehouse: { type: string, format: uuid }
+          backorder_of: { type: string, format: uuid, description: "Set on a backorder shipment: the shipment whose closed remainder it took over (shipment.closed with backorder_shipment_id)." }
           lines:
             type: array
             items:
@@ -294,10 +307,13 @@ components:
       name: dev.passage.fulfillment.shipment.closed.v1
       title: Shipment remainder closed
       summary: >
-        The open remainder of a partially shipped shipment was closed (FR-28.8,
-        CANCEL_REMAINDER). Inventory releases the reservation of the closed
-        quantity and returns picked stock that was never packed; sales may cancel
-        or re-order the remainder.
+        The open remainder of a partially shipped shipment was closed (FR-28.8: by
+        hand, or by the short pick action CANCEL_REMAINDER or REMAINDER_BACKORDER
+        when a packing slip posts). Inventory releases the reservation still held
+        for the closed quantity (the backordered part of a short pick was already
+        released on pick.confirmed, so it is not released twice) and returns picked
+        stock that was never packed; sales cancels the remainder, or keeps the order
+        lines open when backorder_shipment_id names the shipment that took it over.
       contentType: application/json
       payload:
         type: object
@@ -307,6 +323,7 @@ components:
           shipment_number: { type: string }
           order_id: { type: string, format: uuid }
           warehouse: { type: string, format: uuid }
+          backorder_shipment_id: { type: string, format: uuid, description: "Set when the remainder moved to a new shipment (short pick action REMAINDER_BACKORDER): sales keeps the order lines open." }
           lines:
             type: array
             items:
@@ -316,6 +333,22 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string, description: The planned quantity that will not ship. }
                 picked_unpacked: { type: string, description: The part of qty that was picked but never packed and goes back to stock. }
+    WarehouseSettingChanged:
+      name: dev.passage.fulfillment.warehousesetting.changed.v1
+      title: Warehouse short pick action changed
+      summary: >
+        The short pick action of a warehouse was saved (FR-28.8): KEEP_OPEN,
+        CANCEL_REMAINDER or REMAINDER_BACKORDER.
+      contentType: application/json
+      payload:
+        type: object
+        required: [warehouse, legal_entity_id, short_pick_action, previous_short_pick_action, version]
+        properties:
+          warehouse: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          short_pick_action: { type: string, enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER] }
+          previous_short_pick_action: { type: string, enum: [KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER] }
+          version: { type: integer, minimum: 1 }
     PickTracked:
       name: dev.passage.fulfillment.pick.tracked.v1
       title: Pick tracking captured

@@ -54,9 +54,12 @@ const (
 	CodeWaveConflict       = "FUL-0053"
 	CodeContainerNotFound  = "FUL-0054"
 	CodeNesting            = "FUL-0056"
-	CodeVersion            = "conflict_version"
-	CodeIdempotencyReuse   = "idempotency_key_reuse"
-	eventSource            = "fulfillment"
+	// CodeWarehouseLegalEntity refuses a warehouse setting saved for a legal
+	// entity the warehouse does not belong to.
+	CodeWarehouseLegalEntity = "FUL-0057"
+	CodeVersion              = "conflict_version"
+	CodeIdempotencyReuse     = "idempotency_key_reuse"
+	eventSource              = "fulfillment"
 )
 
 // Shipment is the aggregate returned by the API.
@@ -74,6 +77,11 @@ type Shipment struct {
 	Version         int                   `json:"version"`
 	Lines           []ShipmentLine        `json:"lines"`
 	Containers      []Container           `json:"containers"`
+	// BackorderOfID is the shipment this one took its quantity from, and
+	// BackorderID the shipment that took over this one's closed remainder
+	// (short pick action BACKORDER).
+	BackorderOfID *string `json:"backorderOfId"`
+	BackorderID   *string `json:"backorderId"`
 }
 
 // ShipmentSummary is one row of the shipments list (delivery monitor, section 5.28.14).
@@ -172,6 +180,12 @@ type PackingSlip struct {
 	// PackagingFees are the statistical packaging fee lines (BR-28.12). They
 	// are not journal lines; a reversing slip carries them negated.
 	PackagingFees []PackagingFeeLine `json:"packagingFees"`
+	// RemainderAction is the warehouse's short pick action when posting this
+	// slip closed (CANCEL_REMAINDER) or moved (BACKORDER) the shipment's open
+	// remainder, and BackorderShipmentID the new shipment; both only on the
+	// response of the post.
+	RemainderAction     string `json:"remainderAction,omitempty"`
+	BackorderShipmentID string `json:"backorderShipmentId,omitempty"`
 }
 
 // PackingSlipSummary is one row of the packing slip journal (section 5.28.14).
@@ -478,7 +492,7 @@ func (s *Postgres) RunRelease(ctx context.Context, warehouseID string, groups []
 				if len(open.Lines) == 0 {
 					continue
 				}
-				sh, err := insertReleased(ctx, tx, p.TenantID, open)
+				sh, err := insertReleased(ctx, tx, p.TenantID, open, nil)
 				if err != nil {
 					return ReleaseResult{}, err
 				}
@@ -594,7 +608,7 @@ func (s *Postgres) GetPackingSlip(ctx context.Context, id string) (PackingSlip, 
 	return slip, err
 }
 
-func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.ReleaseGroup) (Shipment, error) {
+func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.ReleaseGroup, backorderOf *string) (Shipment, error) {
 	first := g.Lines[0]
 	seq, err := nextNumber(ctx, tx, tenantID, "SH")
 	if err != nil {
@@ -604,7 +618,7 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 		ID: ids.New(), ShipmentNumber: fmt.Sprintf("SH-%07d", seq), LegalEntityID: first.LegalEntityID,
 		WarehouseID: g.WarehouseID, OrderID: g.OrderID, CustomerID: first.CustomerID,
 		Status: domain.StatusReleased, PlannedShipDate: g.ShipDate, Version: 1,
-		Lines: []ShipmentLine{}, Containers: []Container{},
+		Lines: []ShipmentLine{}, Containers: []Container{}, BackorderOfID: backorderOf,
 	}
 	// The API refuses lines of one order with different carriers, so any line names it.
 	for _, l := range g.Lines {
@@ -613,9 +627,9 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 			break
 		}
 	}
-	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, carrier_code)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID,
-		string(sh.Status), sh.PlannedShipDate, sh.CarrierCode); err != nil {
+	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, carrier_code, backorder_of_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID,
+		string(sh.Status), sh.PlannedShipDate, sh.CarrierCode, backorderOf); err != nil {
 		return Shipment{}, err
 	}
 	refs := []fulevents.LineRef{}
@@ -632,6 +646,7 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 	}
 	if err := enqueue(ctx, tx, sh.ID, fulevents.ShipmentReleased, tenantID, fulevents.ShipmentReleasedData{
 		ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, Lines: refs,
+		BackorderOf: deref(backorderOf),
 	}); err != nil {
 		return Shipment{}, err
 	}
@@ -651,9 +666,10 @@ func (s *Postgres) GetShipment(ctx context.Context, id string) (Shipment, error)
 func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	var sh Shipment
 	var status string
-	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, carrier_code, version
+	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, carrier_code, version, backorder_of_id,
+		(select b.id from shipment b where b.backorder_of_id = shipment.id)
 		from shipment where id = $1`, id).Scan(&sh.ID, &sh.ShipmentNumber, &sh.LegalEntityID, &sh.WarehouseID, &sh.OrderID, &sh.CustomerID, &status, &sh.PlannedShipDate,
-		&sh.ActualShipDate, &sh.CarrierCode, &sh.Version)
+		&sh.ActualShipDate, &sh.CarrierCode, &sh.Version, &sh.BackorderOfID, &sh.BackorderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sh, httpx.NewProblem(http.StatusNotFound, CodeShipmentNotFound, "shipment not found")
 	}
@@ -1011,6 +1027,18 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 				if err := enqueue(ctx, tx, sh.ID, fulevents.ASNIssued, p.TenantID, asn); err != nil {
 					return PackingSlip{}, err
 				}
+			}
+			// The warehouse's short pick action decides what happens to a
+			// remainder this slip left open (FR-28.8).
+			action, backorder, err := applyShortPickAction(ctx, tx, p.TenantID, &sh)
+			if err != nil {
+				return PackingSlip{}, err
+			}
+			if action != "" {
+				slip.RemainderAction = string(action)
+			}
+			if backorder != nil {
+				slip.BackorderShipmentID = backorder.ID
 			}
 			return slip, nil
 		})

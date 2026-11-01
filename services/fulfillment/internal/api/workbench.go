@@ -51,6 +51,7 @@ func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/tracking", a.listTracking)
 	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}/tracking", a.recordTracking)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
+	a.routesRemainder(r)
 }
 
 // ---- DTOs ----------------------------------------------------------------------

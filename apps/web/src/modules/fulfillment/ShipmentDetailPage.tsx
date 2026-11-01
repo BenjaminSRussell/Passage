@@ -7,6 +7,8 @@ import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REAS
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { canUnnest, NestForm, UnnestButton } from "./PalletForm";
+import { BackorderRemainderPanel } from "./BackorderPanel";
+import type { PostedRemainder } from "./PackingSlipDetailPage";
 import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
 import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
@@ -138,6 +140,21 @@ export function ShipmentDetailPage() {
       </Card>
       {canCancelShipment(shipment) ? <CancelShipmentPanel key={`cancel-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canCloseRemainder(shipment) ? <CloseRemainderPanel key={`close-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
+      {canCloseRemainder(shipment) ? <BackorderRemainderPanel key={`backorder-${shipment.id}`} shipment={shipment} onDone={state.reload} /> : null}
+      {shipment.backorderOfId || shipment.backorderId ? (
+        <Alert tone="info" title="Backorder shipment">
+          {shipment.backorderOfId ? (
+            <>
+              This shipment holds the remainder of <Link to={`/fulfillment/shipments/${shipment.backorderOfId}`}>an earlier shipment</Link> of the same order.{" "}
+            </>
+          ) : null}
+          {shipment.backorderId ? (
+            <>
+              The remainder of this shipment moved to <Link to={`/fulfillment/shipments/${shipment.backorderId}`}>its backorder shipment</Link>.
+            </>
+          ) : null}
+        </Alert>
+      ) : null}
       {shipment.status === "PARTIALLY_SHIPPED" ? (
         <Alert tone="info" title="Partially shipped">
           A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity. If the remainder will not ship, close it instead.
@@ -172,7 +189,7 @@ export function ShipmentDetailPage() {
         />
       ) : null}
       {canPack ? <PackForm key={`pack-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
-      {canPost ? <PostForm key={`post-${shipment.version}`} shipment={shipment} onPosted={(slip) => navigate(`/fulfillment/packing-slips/${slip.id}`)} /> : null}
+      {canPost ? <PostForm key={`post-${shipment.version}`} shipment={shipment} onPosted={(slip) => navigate(`/fulfillment/packing-slips/${slip.id}`, { state: { remainderAction: slip.remainderAction, backorderShipmentId: slip.backorderShipmentId } satisfies PostedRemainder })} /> : null}
       <NestForm key={`nest-${shipment.version}`} shipment={shipment} onDone={state.reload} />
       <Card title="Containers">
         <DataTable

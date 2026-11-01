@@ -22,6 +22,7 @@ import (
 // WorkbenchStore is the shipment cancellation, picking workbench (FR-28.13)
 // and carrier tracking (FR-28.10) part of the store.
 type WorkbenchStore interface {
+	RemainderStore
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	CloseRemainder(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	UnpackContainer(ctx context.Context, id string, version int, containerID string, idem Idem) (Shipment, error)

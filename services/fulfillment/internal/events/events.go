@@ -25,13 +25,15 @@ var (
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
+
+	WarehouseSettingChanged = events.Type(Context, "warehousesetting", "changed", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged,
 	}
 }
 
@@ -87,6 +89,19 @@ type ShipmentClosedData struct {
 	OrderID        string       `json:"order_id"`
 	WarehouseID    string       `json:"warehouse"`
 	Lines          []ClosedLine `json:"lines"`
+	// BackorderShipmentID is set when the remainder moved to a new shipment
+	// (short pick action REMAINDER_BACKORDER): sales keeps the order lines open.
+	BackorderShipmentID string `json:"backorder_shipment_id,omitempty"`
+}
+
+// WarehouseSettingChangedData is published when a warehouse's short pick action
+// is saved (FR-28.8).
+type WarehouseSettingChangedData struct {
+	WarehouseID         string `json:"warehouse"`
+	LegalEntityID       string `json:"legal_entity_id"`
+	ShortPickAction     string `json:"short_pick_action"`
+	PreviousShortAction string `json:"previous_short_pick_action"`
+	Version             int    `json:"version"`
 }
 
 // WaveCreatedData is published for each wave the picking workbench creates
@@ -180,6 +195,10 @@ type ShipmentReleasedData struct {
 	OrderID        string    `json:"order_id"`
 	WarehouseID    string    `json:"warehouse"`
 	Lines          []LineRef `json:"lines"`
+	// BackorderOf is set on a backorder shipment (short pick action
+	// REMAINDER_BACKORDER): the shipment whose closed remainder it took over.
+	// Sales must not count its lines as released a second time.
+	BackorderOf string `json:"backorder_of,omitempty"`
 }
 
 type PickLine struct {
