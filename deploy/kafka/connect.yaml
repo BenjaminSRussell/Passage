@@ -30,6 +30,16 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.receiving.erspriceconfirmation, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.eam.downtime, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.eam.workorder, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.eam.counter, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.eam.permit, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.eam.request, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -223,6 +233,55 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.receiving.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# EAM writes aggregate_type downtime, workorder, counter, permit and request to its outbox; the route below makes each one
+# passage.eam.<aggregate_type>. dev.passage.eam.downtime.recorded.v1 is the only downtime aggregate event, so scheduling
+# reads passage.eam.downtime alone. The ACLs above are literal per aggregate_type (a new one needs an entry) and never
+# cover passage.eam.downtime.dlq.
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_eam has REPLICATION; the dev Postgres init grants it CONNECT on passage_eam only and revokes CONNECT from PUBLIC there.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-eam
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-eam:username}
+    database.password: ${secrets:kafka/debezium-cdc-eam:password}
+    database.dbname: passage_eam
+    topic.prefix: passage.eam
+    slot.name: passage_outbox_eam
+    publication.name: passage_outbox_eam
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.eam.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     key.converter: org.apache.kafka.connect.storage.StringConverter

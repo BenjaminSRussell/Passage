@@ -26,7 +26,7 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	if err := run(context.Background(), os.Getenv, os.Args); err != nil {
 		slog.Error("scheduling stopped", "err", err)
 		os.Exit(1)
 	}
@@ -43,7 +43,11 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "scheduling")
 }
 
-func run(ctx context.Context, getenv func(string) string) error {
+func run(ctx context.Context, getenv func(string) string, args []string) error {
+	consume := len(args) > 1 && args[1] == "consume"
+	if len(args) > 1 && !consume {
+		return fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the downtime.recorded consumer)", args[1])
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -57,7 +61,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	if getenv("MIGRATE_ON_START") == "true" {
+	if getenv("MIGRATE_ON_START") == "true" && !consume {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
@@ -67,6 +71,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// the nearest-neighbour sequence and report SCHED-0006 UNAVAILABLE.
 	if c := optimizer.NewClient(getenv("SCHED_OPT_URL")); c != nil {
 		a.WithSequencer(c)
+	}
+	if consume {
+		return runConsumer(ctx, getenv, a, pool)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

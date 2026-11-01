@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	DefaultMaxAttempts = 5
-	maxBackoff         = 30 * time.Second
+	DefaultMaxAttempts = 10
+	baseBackoff        = time.Second
+	maxBackoff         = 2 * time.Minute
 
 	reasonDecode    = "decode"
 	reasonPermanent = "permanent"
@@ -100,7 +101,7 @@ func NewConsumer(src Source, dlq DeadLetterSink, inbox Inbox, cfg Config) (*Cons
 }
 
 func ExponentialBackoff(attempt int) time.Duration {
-	return min(time.Duration(1<<min(attempt, 10))*100*time.Millisecond, maxBackoff)
+	return min(baseBackoff<<min(attempt, 7), maxBackoff)
 }
 
 func (c *Consumer) Metrics() *Metrics { return &c.metrics }

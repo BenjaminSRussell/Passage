@@ -94,7 +94,7 @@ func (s *Postgres) RecordDowntime(ctx context.Context, woID string, in DowntimeI
 		if _, err := tx.Exec(ctx, `update work_order set downtime_minutes = downtime_minutes + $3, updated_at = now() where tenant_id = $1 and id = $2`, t, woID, minutes); err != nil {
 			return err
 		}
-		if err := enqueue(ctx, tx, t, "workorder", woID, eamevents.DowntimeRecorded, eamevents.DowntimeRecordedData{
+		if err := enqueue(ctx, tx, t, "downtime", woID, eamevents.DowntimeRecorded, eamevents.DowntimeRecordedData{
 			DowntimeID: id, ResourceID: resource, WorkOrderID: woID, AssetID: cur.AssetID,
 			From: in.From.UTC().Format(time.RFC3339Nano), To: in.To.UTC().Format(time.RFC3339Nano), Minutes: minutes}); err != nil {
 			return err
