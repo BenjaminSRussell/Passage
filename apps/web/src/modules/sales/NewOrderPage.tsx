@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
+import { emptyOneTime, OneTimeFields, validateOneTime, type OneTimeValues } from "./OneTimeFields";
 import { LinesEditor } from "./LinesEditor";
 import { OrderProposals } from "./OrderProposals";
 import styles from "./pages.module.css";
@@ -21,6 +22,8 @@ export interface OrderValues {
   externalRef: string;
   customerGroup: string;
   listingOverrideReason: string;
+  /** Present for a one-time customer order (FR-27.22): the walk-in buyer. */
+  oneTime?: OneTimeValues;
   lines: LineValues[];
 }
 
@@ -43,6 +46,7 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
   if (group.length > 80) errors.customerGroup = "Use at most 80 characters.";
   const override = values.listingOverrideReason.trim();
   if (override.length > 500) errors.listingOverrideReason = "Use at most 500 characters.";
+  const oneTime = values.oneTime ? validateOneTime(values.oneTime, errors) : undefined;
   const lines = validateLines(values.lines, errors);
   if (Object.keys(errors).length > 0) return { errors };
   return {
@@ -57,6 +61,7 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
       ...(ref ? { externalRef: ref } : {}),
       ...(group ? { customerGroup: group } : {}),
       ...(override ? { listingOverrideReason: override } : {}),
+      ...(oneTime ? { oneTime } : {}),
       lines,
     },
   };
@@ -115,7 +120,7 @@ export function NewOrderPage() {
     }
   }
 
-  const header = (name: keyof Omit<OrderValues, "lines" | "orderType">, label: string, hint?: string, extra: { type?: string; mono?: boolean; optional?: boolean } = {}) => (
+  const header = (name: keyof Omit<OrderValues, "lines" | "orderType" | "oneTime">, label: string, hint?: string, extra: { type?: string; mono?: boolean; optional?: boolean } = {}) => (
     <FormField id={`order-${name}`} label={label} hint={hint} error={errors[name]} optional={extra.optional}>
       {(control) => (
         <Input
@@ -158,10 +163,21 @@ export function NewOrderPage() {
           {header("externalRef", "Customer reference", "For example the customer's PO number.", { optional: true })}
           {header("customerGroup", "Customer group", "Applies group listing entries, for example EU-RETAIL.", { optional: true })}
           {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
+          <FormField id="order-oneTime" label="One-time customer" hint="Walk-in buyer sold to the shared one-time account, with the name and address on the invoice." optional>
+            {(control) => (
+              <Input
+                {...control}
+                type="checkbox"
+                checked={values.oneTime !== undefined}
+                onChange={(e) => update({ oneTime: e.target.checked ? emptyOneTime : undefined })}
+              />
+            )}
+          </FormField>
+          {values.oneTime ? <OneTimeFields values={values.oneTime} errors={errors} onChange={(oneTime) => update({ oneTime })} /> : null}
           <LinesEditor lines={values.lines} errors={errors} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} />
           {failure ? (
             <div className={styles.formActions}>
-              <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : "Could not save the order"} live="alert">
+              <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : failure.code === "SLS-0016" ? "The order is over the one-time order limit" : "Could not save the order"} live="alert">
                 {failure.message} ({failure.code})
               </Alert>
             </div>

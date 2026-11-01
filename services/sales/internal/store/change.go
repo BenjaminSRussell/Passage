@@ -239,7 +239,7 @@ func hasActiveHold(o Order, holdType string) bool {
 func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out Order
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err
@@ -290,6 +290,11 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		if len(diff) == 0 {
 			out = o
 			return nil
+		}
+		if o.isOneTime() && o.NetTotal.GreaterThan(oldTotal) {
+			if err := checkOneTimeLimitTx(ctx, tx, p.TenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
+				return err
+			}
 		}
 		reallocate := map[int]bool{}
 		for _, l := range o.Lines {
@@ -370,7 +375,7 @@ func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reas
 		return Order{}, problem(http.StatusUnprocessableEntity, CodeInvalidChange, "reason is too long")
 	}
 	var out Order
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err

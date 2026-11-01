@@ -72,6 +72,29 @@ func TestParameters_PutDutyVersionAndValidation(t *testing.T) {
 	}
 }
 
+func TestParameters_OneTimeLimit(t *testing.T) {
+	path := parameters + "?legalEntityId=" + testLE
+	s := &parametersStore{}
+	withLimit := func(extra string) string { return validParameters[:len(validParameters)-1] + "," + extra + "}" }
+	for name, tc := range map[string]struct{ body, field string }{
+		"amount without currency": {withLimit(`"oneTimeOrderLimit":"2500.00"`), "oneTimeOrderLimit"},
+		"currency without amount": {withLimit(`"oneTimeOrderLimitCurrency":"USD"`), "oneTimeOrderLimit"},
+		"not a decimal":           {withLimit(`"oneTimeOrderLimit":"lots","oneTimeOrderLimitCurrency":"USD"`), "oneTimeOrderLimit"},
+		"negative":                {withLimit(`"oneTimeOrderLimit":"-1","oneTimeOrderLimitCurrency":"USD"`), "oneTimeOrderLimit"},
+		"bad currency":            {withLimit(`"oneTimeOrderLimit":"10","oneTimeOrderLimitCurrency":"usd"`), "oneTimeOrderLimitCurrency"},
+	} {
+		rec := serveBody(t, s, http.MethodPut, path, tc.body, principal(dutyParameter), map[string]string{"If-Match": `"0"`})
+		if rec.Code != http.StatusBadRequest || s.puts != 0 || !strings.Contains(rec.Body.String(), tc.field) {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	rec := serveBody(t, s, http.MethodPut, path, withLimit(`"oneTimeOrderLimit":"2500.00","oneTimeOrderLimitCurrency":"GBP"`), principal(dutyParameter), map[string]string{"If-Match": `"0"`})
+	if rec.Code != http.StatusOK || s.saved.OneTimeOrderLimit == nil || s.saved.OneTimeOrderLimit.String() != "2500" || *s.saved.OneTimeOrderLimitCurrency != "GBP" ||
+		!strings.Contains(rec.Body.String(), `"oneTimeOrderLimit":"2500"`) {
+		t.Fatalf("put with a limit: %d %s saved %+v", rec.Code, rec.Body.String(), s.saved)
+	}
+}
+
 func TestParameters_RequiresLegalEntityInScope(t *testing.T) {
 	if rec := serve(t, &parametersStore{}, http.MethodGet, parameters, allScopePrincipal(dutyRead), nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("no legal entity: %d", rec.Code)

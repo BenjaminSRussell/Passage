@@ -31,7 +31,12 @@ go run ./cmd/sales
 ```
 
 Environment: `DATABASE_URL` (required), `MIGRATE_ON_START`, `HTTP_ADDR`
-(default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
+(default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`),
+`FIELDCRYPT_KEYS_FILE` (or `FIELDCRYPT_KEYS`) and `FIELDCRYPT_CURRENT_KEY_ID`
+(platform field encryption: `id=base64(32 bytes)` pairs; they seal the buyer of
+a one-time customer order and key its idempotency fingerprint. Unset, one-time
+orders are refused with 503 `SLS-0054`; in the chart, `fieldCrypt.keysSecret`
+mounts the keys file and `fieldCrypt.currentKeyId` names the current key).
 
 ## Test
 
@@ -90,7 +95,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup |
+| POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup; optional `oneTime` {name, line1, city, postalCode, country, taxId} makes it a one-time customer order held to `one_time_order_limit` (`SLS-0016`); the buyer is sealed at rest and needs field encryption keys (`SLS-0054`) |
 | GET | `/v1/sales/orders` | `sales.order.read` | Newest first; `status`, `customerId`, `hold` (orders with an ACTIVE hold of the type), `cursor`, `limit` |
 | GET | `/v1/sales/orders/{id}` | `sales.order.read` | ETag = version |
 | POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold; draws allocation quota per line (`SLS-0013` warning when a line moves to a later period, 422 when none can cover it) |
@@ -280,6 +285,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0013` | 422 / warning | Allocation for a line is exhausted (FR-27.16, BR-27.15): 422 on a confirm or change when no period from the requested one on has enough left; a warning in `warnings[]` when the line moved to a later period, and when a CREDIT release could not confirm the order (the hold is still released) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
 | `SLS-0015` | 200 (warning) | Backorder run preview would deconfirm lines (`warningCode`) |
+| `SLS-0016` | 422 | One-time customer order over the one-time order limit (FR-27.22), on create, on a change that raises the total and on confirm; a CREDIT release that would confirm such an order releases the hold and returns it as a warning |
 | `SLS-0019` | 422 | Order not confirmable in its current state |
 | `SLS-0021` | 422 | Order has an active hold that blocks this action |
 | `SLS-0022` | 422 | Hold is not ACTIVE |
@@ -314,6 +320,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0051` | 409 | Production already has an order for the line made for another product or configuration |
 | `SLS-0052` | 422 | The agreement is closed: no release, schedule release, revision or second close |
 | `SLS-0053` | 422 | Agreement commitment revised below the quantity already released |
+| `SLS-0054` | 503 | One-time customer order while the service has no field encryption keys (`FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_CURRENT_KEY_ID`): the buyer is never stored or returned in clear |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |

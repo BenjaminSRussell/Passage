@@ -38,6 +38,15 @@ func TestBuildOrder_Table(t *testing.T) {
 		{name: "lowercase currency", mutate: func(r *createOrderRequest) { r.Currency = "usd" }, wantField: "currency"},
 		{name: "bad channel", mutate: func(r *createOrderRequest) { r.Channel = "web shop!" }, wantField: "channel"},
 		{name: "non-decimal unit price", mutate: func(r *createOrderRequest) { r.Lines[0].UnitPrice = "ten" }, wantField: "lines[0].unitPrice"},
+		{name: "one-time order without a buyer name", mutate: func(r *createOrderRequest) {
+			r.OneTime = &domain.OneTimeParty{Line1: "Hauptstr. 1", City: "Berlin", PostalCode: "10115", Country: "DE"}
+		}, wantField: "oneTime.name"},
+		{name: "one-time order with a bad country", mutate: func(r *createOrderRequest) {
+			r.OneTime = &domain.OneTimeParty{Name: "Walk-in Buyer GmbH", Line1: "Hauptstr. 1", City: "Berlin", PostalCode: "10115", Country: "Germany"}
+		}, wantField: "oneTime.country"},
+		{name: "valid one-time order", mutate: func(r *createOrderRequest) {
+			r.OneTime = &domain.OneTimeParty{Name: "Walk-in Buyer GmbH", Line1: "Hauptstr. 1", City: "Berlin", PostalCode: "10115", Country: "DE", TaxID: "DE123456789"}
+		}, wantNetSum: "21"},
 		{name: "non-decimal quantity", mutate: func(r *createOrderRequest) { r.Lines[0].Quantity = "two" }, wantField: "lines[0].quantity"},
 	}
 	for _, tc := range tests {

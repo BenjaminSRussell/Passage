@@ -27,6 +27,9 @@ export interface ParameterValues {
   creditReleaseValidityDays: string;
   creditHoldSlaBusinessDays: string;
   defaultOrderType: DefaultOrderType;
+  /** Optional: empty means the defaults (5,000 USD, 4,500 EUR). */
+  oneTimeOrderLimit?: string;
+  oneTimeOrderLimitCurrency?: string;
 }
 
 export function parameterValues(p: SalesParametersInput): ParameterValues {
@@ -36,6 +39,8 @@ export function parameterValues(p: SalesParametersInput): ParameterValues {
     creditReleaseValidityDays: String(p.creditReleaseValidityDays),
     creditHoldSlaBusinessDays: String(p.creditHoldSlaBusinessDays),
     defaultOrderType: p.defaultOrderType,
+    oneTimeOrderLimit: p.oneTimeOrderLimit ?? "",
+    oneTimeOrderLimitCurrency: p.oneTimeOrderLimitCurrency ?? "",
   };
 }
 
@@ -52,10 +57,18 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
   if (!inRange(v.quotationProbabilityDefault, 0, 100)) errors.quotationProbabilityDefault = "Enter a whole percentage from 0 to 100.";
   if (!inRange(v.creditReleaseValidityDays, 1, 30)) errors.creditReleaseValidityDays = "Enter a whole number of days from 1 to 30.";
   if (!inRange(v.creditHoldSlaBusinessDays, 1, 10)) errors.creditHoldSlaBusinessDays = "Enter a whole number of business days from 1 to 10.";
+  const limit = (v.oneTimeOrderLimit ?? "").trim();
+  const limitCurrency = (v.oneTimeOrderLimitCurrency ?? "").trim();
+  if ((limit === "") !== (limitCurrency === "")) errors.oneTimeOrderLimit = "Enter the limit and its currency together, or leave both empty.";
+  else if (limit !== "") {
+    if (!/^\d+(\.\d{1,2})?$/.test(limit)) errors.oneTimeOrderLimit = "Enter an amount of 0 or more with at most 2 decimal places.";
+    if (!/^[A-Z]{3}$/.test(limitCurrency)) errors.oneTimeOrderLimitCurrency = "Enter a three-letter ISO currency code, such as USD.";
+  }
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
     input: {
+      ...(limit !== "" ? { oneTimeOrderLimit: limit, oneTimeOrderLimitCurrency: limitCurrency } : {}),
       quotationExpiryDays: Number(v.quotationExpiryDays),
       quotationProbabilityDefault: Number(v.quotationProbabilityDefault),
       creditReleaseValidityDays: Number(v.creditReleaseValidityDays),
@@ -108,7 +121,7 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
     }
   }
 
-  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType">, label: string, hint: string) => (
+  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType" | "oneTimeOrderLimit" | "oneTimeOrderLimitCurrency">, label: string, hint: string) => (
     <FormField id={`param-${name}`} label={label} hint={hint} error={errors[name]}>
       {(control) => (
         <Input {...control} inputMode="numeric" value={values[name]} readOnly={!canSave} onChange={(e) => setValues({ ...values, [name]: e.target.value })} invalid={Boolean(errors[name])} />
@@ -125,6 +138,16 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
           {whole("quotationProbabilityDefault", "Default win probability, %", "Applies to a quotation created without a probability, 0 to 100.")}
           {whole("creditReleaseValidityDays", "Credit release validity, days", "How long a released CREDIT hold keeps covering its order, 1 to 30 (BR-27.4).")}
           {whole("creditHoldSlaBusinessDays", "Credit hold SLA, business days", "The release queue marks a hold waiting past this many Monday-to-Friday days, 1 to 10.")}
+          <FormField id="param-oneTimeOrderLimit" label="One-time order limit" hint="The most a one-time customer order may be worth. Empty: 5,000 USD and 4,500 EUR; other currencies then cannot place one-time orders." error={errors.oneTimeOrderLimit} optional>
+            {(control) => (
+              <Input {...control} inputMode="decimal" value={values.oneTimeOrderLimit ?? ""} readOnly={!canSave} onChange={(e) => setValues({ ...values, oneTimeOrderLimit: e.target.value })} invalid={Boolean(errors.oneTimeOrderLimit)} />
+            )}
+          </FormField>
+          <FormField id="param-oneTimeOrderLimitCurrency" label="One-time limit currency" error={errors.oneTimeOrderLimitCurrency} optional>
+            {(control) => (
+              <Input {...control} value={values.oneTimeOrderLimitCurrency ?? ""} readOnly={!canSave} onChange={(e) => setValues({ ...values, oneTimeOrderLimitCurrency: e.target.value.toUpperCase() })} invalid={Boolean(errors.oneTimeOrderLimitCurrency)} />
+            )}
+          </FormField>
           <FormField id="param-defaultOrderType" label="Default order type" hint="Used by an order created without a type." error={errors.defaultOrderType}>
             {(control) => (
               <Select {...control} value={values.defaultOrderType} disabled={!canSave} onChange={(e) => setValues({ ...values, defaultOrderType: e.target.value as DefaultOrderType })}>

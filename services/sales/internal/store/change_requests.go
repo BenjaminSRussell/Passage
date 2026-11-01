@@ -237,7 +237,7 @@ func (s *Postgres) ListChangeRequests(ctx context.Context, f ChangeRequestFilter
 func (s *Postgres) ApproveChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (ChangeDecision, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ChangeDecision
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out.Order, func(tx pgx.Tx) error {
 		r, err := loadChangeRequest(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err

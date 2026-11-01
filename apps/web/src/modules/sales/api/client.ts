@@ -111,6 +111,19 @@ export interface CreditEvaluation {
   rules: CreditRule[];
 }
 
+/** The walk-in buyer of a one-time customer order (FR-27.22): kept on the order header for the invoice. */
+export interface OneTimeParty {
+  name: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  region?: string;
+  postalCode: string;
+  /** ISO 3166 alpha-2. */
+  country: string;
+  taxId?: string;
+}
+
 export interface Order {
   /** Set only on the 202 result of a change that was stored for approval instead of applied. */
   pendingChange?: ChangeRequest;
@@ -126,6 +139,8 @@ export interface Order {
   channel: string;
   externalRef?: string;
   customerGroup?: string;
+  /** Set only on a one-time customer order (FR-27.22). */
+  oneTime?: OneTimeParty;
   netTotal: Decimal;
   version: number;
   creditCheck?: CreditEvaluation;
@@ -175,6 +190,8 @@ export interface NewOrder {
   externalRef?: string;
   customerGroup?: string;
   listingOverrideReason?: string;
+  /** Makes the order a one-time customer order held to the one-time order limit (SLS-0016). */
+  oneTime?: OneTimeParty;
   lines: NewOrderLine[];
 }
 
@@ -558,6 +575,9 @@ export interface SalesParametersInput {
   creditReleaseValidityDays: number;
   creditHoldSlaBusinessDays: number;
   defaultOrderType: DefaultOrderType;
+  /** The most a one-time order may be worth, in oneTimeOrderLimitCurrency; both absent: 5,000 USD and 4,500 EUR. */
+  oneTimeOrderLimit?: Decimal;
+  oneTimeOrderLimitCurrency?: string;
 }
 
 /** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */

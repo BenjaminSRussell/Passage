@@ -599,6 +599,8 @@ components:
         credit_release_validity_days: {type: integer, minimum: 1, maximum: 30}
         credit_hold_sla_business_days: {type: integer, minimum: 1, maximum: 10}
         default_order_type: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION]}
+        one_time_order_limit: {type: string, description: the one-time order limit as a decimal string; absent when the defaults apply}
+        one_time_order_limit_currency: {type: string, pattern: "^[A-Z]{3}$"}
         actor: {type: string}
         version: {type: integer, description: version after the change}
     AllocationQuotaData:
@@ -668,6 +670,15 @@ components:
               configuration_id: {type: string, format: uuid, description: the saved configuration of a configured line; production builds the line to it (absent on ordinary lines)}
         net_total: {type: string}
         version: {type: integer}
+        one_time:
+          type: object
+          description: >-
+            present on a one-time customer order (FR-27.22), absent otherwise. The walk-in buyer's name, address and tax id
+            are personal data kept sealed in sales and are not carried on the bus; the invoice and open item read them from
+            GET /v1/sales/orders/{id} (sales.order.read).
+          required: [country]
+          properties:
+            country: {type: string, pattern: "^[A-Z]{2}$", description: the buyer's ISO 3166 alpha-2 country}
     OrderChangedData:
       type: object
       required: [order_id, version, reason, actor, diff, repromised_lines]

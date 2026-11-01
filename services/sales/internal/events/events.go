@@ -244,6 +244,15 @@ type OrderConfirmedData struct {
 	Lines      []ConfirmedLine `json:"lines"`
 	NetTotal   string          `json:"net_total"`
 	Version    int             `json:"version"`
+	// OneTime marks a one-time customer order (FR-27.22); absent otherwise.
+	OneTime *OneTimeRef `json:"one_time,omitempty"`
+}
+
+// OneTimeRef is the one_time member of order.confirmed. The buyer's name,
+// address and tax id are personal data kept sealed in sales and are not put on
+// the bus: the invoice and open item read them from GET /v1/sales/orders/{id}.
+type OneTimeRef struct {
+	Country string `json:"country"`
 }
 
 // OrderHoldData is the data member of orderhold.applied.v1 and released.v1.
@@ -334,8 +343,11 @@ type ParametersChangedData struct {
 	CreditReleaseValidityDays   int    `json:"credit_release_validity_days"`
 	CreditHoldSLABusinessDays   int    `json:"credit_hold_sla_business_days"`
 	DefaultOrderType            string `json:"default_order_type"`
-	Actor                       string `json:"actor"`
-	Version                     int    `json:"version"`
+	// OneTimeOrderLimit and its currency are absent when the defaults apply.
+	OneTimeOrderLimit         *string `json:"one_time_order_limit,omitempty"`
+	OneTimeOrderLimitCurrency *string `json:"one_time_order_limit_currency,omitempty"`
+	Actor                     string  `json:"actor"`
+	Version                   int     `json:"version"`
 }
 
 // OrderChangeRequestedData is the data member of orderchange.requested.v1: a

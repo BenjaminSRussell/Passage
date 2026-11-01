@@ -38,17 +38,20 @@ type orderLineRequest struct {
 // listingOverrideReason is required, with duty sales.order.approve, to accept a
 // line the product listing denies (FR-27.15).
 type createOrderRequest struct {
-	LegalEntityID         string             `json:"legalEntityId"`
-	CustomerID            string             `json:"customerId"`
-	InvoiceAccountID      string             `json:"invoiceAccountId"`
-	OrderType             string             `json:"orderType"`
-	Currency              string             `json:"currency"`
-	RequestedShipDate     string             `json:"requestedShipDate"`
-	Channel               string             `json:"channel"`
-	ExternalRef           *string            `json:"externalRef"`
-	CustomerGroup         *string            `json:"customerGroup,omitempty"`
-	ListingOverrideReason string             `json:"listingOverrideReason,omitempty"`
-	Lines                 []orderLineRequest `json:"lines"`
+	LegalEntityID         string  `json:"legalEntityId"`
+	CustomerID            string  `json:"customerId"`
+	InvoiceAccountID      string  `json:"invoiceAccountId"`
+	OrderType             string  `json:"orderType"`
+	Currency              string  `json:"currency"`
+	RequestedShipDate     string  `json:"requestedShipDate"`
+	Channel               string  `json:"channel"`
+	ExternalRef           *string `json:"externalRef"`
+	CustomerGroup         *string `json:"customerGroup,omitempty"`
+	ListingOverrideReason string  `json:"listingOverrideReason,omitempty"`
+	// OneTime makes the order a one-time customer order (FR-27.22): the
+	// walk-in buyer's name, address and tax id, held to one_time_order_limit.
+	OneTime *domain.OneTimeParty `json:"oneTime,omitempty"`
+	Lines   []orderLineRequest   `json:"lines"`
 }
 
 // confirmResponse is the order with the confirmation outcome.
@@ -96,12 +99,17 @@ func buildOrder(req createOrderRequest) (store.NewOrder, map[string]string) {
 	if len(req.ListingOverrideReason) > maxOverrideReason {
 		f["listingOverrideReason"] = fmt.Sprintf("must be at most %d characters", maxOverrideReason)
 	}
+	if req.OneTime != nil {
+		for k, v := range req.OneTime.Validate() {
+			f["oneTime."+k] = v
+		}
+	}
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		f["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
 	}
 	in := store.NewOrder{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: req.InvoiceAccountID,
 		OrderType: orderType, Currency: req.Currency, RequestedShipDate: req.RequestedShipDate, Channel: channel, ExternalRef: req.ExternalRef,
-		CustomerGroup: req.CustomerGroup, ListingOverrideReason: req.ListingOverrideReason}
+		CustomerGroup: req.CustomerGroup, ListingOverrideReason: req.ListingOverrideReason, OneTime: req.OneTime}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		line, ok := buildLine(i, l, f, path)

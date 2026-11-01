@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
@@ -32,7 +31,7 @@ func (s *Postgres) ApplyHold(ctx context.Context, orderID string, version int, i
 		return Order{}, problem(http.StatusUnprocessableEntity, CodeHoldNotApplicable, fmt.Sprintf("a %s hold cannot be applied by hand", in.HoldType))
 	}
 	var out Order
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, orderID, true)
 		if err != nil {
 			return err

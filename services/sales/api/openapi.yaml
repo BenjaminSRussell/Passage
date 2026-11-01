@@ -92,7 +92,18 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
-        "422": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: >-
+            validation of the lines, SLS-0011 PRODUCT_NOT_LISTED, SLS-0013 allocation, SLS-0016 a one-time order (oneTime)
+            whose net total is over the one-time order limit, or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "503":
+          description: SLS-0054 a one-time order (oneTime) while the service has no field encryption keys; nothing is stored
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/orders/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -109,6 +120,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Order"}
         "404": {$ref: "#/components/responses/Problem"}
+        "503":
+          description: SLS-0054 a one-time order while the service has no field encryption keys to open its buyer
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
     patch:
       summary: Change an order's header or lines; creates a new version with a field-level diff and re-prices changed lines (FR-27.9)
       description: >-
@@ -190,7 +206,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it; SLS-0013 allocation is exhausted for a line in every later period
+          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0016 a one-time order is over the one-time order limit; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it; SLS-0013 allocation is exhausted for a line in every later period
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -2113,11 +2129,33 @@ components:
             With duty sales.order.approve, accepts lines the product listing denies (FR-27.15);
             each accepted line is logged in listingOverrides. Without it a denied line is
             422 SLS-0011 PRODUCT_NOT_LISTED.
+        oneTime:
+          allOf: [{$ref: "#/components/schemas/OneTimeParty"}]
+          description: >-
+            Makes this a one-time customer order (FR-27.22): the walk-in buyer's name, address and tax id are kept on the
+            header, sealed at rest (field encryption), and returned on the order for the invoice and open item to read;
+            order.confirmed carries only the country. The Idempotency-Key fingerprint of such a request is a keyed MAC.
+            Without field encryption keys the service refuses one-time orders, and any call that returns a one-time order,
+            with 503 SLS-0054. customerId is the legal entity's shared one-time account. The net total may not exceed the one-time order limit of the sales parameters (5,000 USD or
+            4,500 EUR when none is saved), on create, on a change that raises it and on confirm: 422 SLS-0016.
         lines:
           type: array
           minItems: 1
           maxItems: 2000
           items: {$ref: "#/components/schemas/OrderLineRequest"}
+    OneTimeParty:
+      type: object
+      description: The document-level party of a one-time customer order (FR-27.22).
+      required: [name, line1, city, postalCode, country]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 140}
+        line1: {type: string, minLength: 1, maxLength: 100}
+        line2: {type: string, maxLength: 100}
+        city: {type: string, minLength: 1, maxLength: 100}
+        region: {type: string, maxLength: 100}
+        postalCode: {type: string, minLength: 1, maxLength: 20}
+        country: {type: string, pattern: "^[A-Z]{2}$", description: ISO 3166 alpha-2}
+        taxId: {type: string, maxLength: 40}
     ApplyHoldRequest:
       type: object
       required: [holdType, reasonCode]
@@ -2350,6 +2388,7 @@ components:
         channel: {type: string}
         externalRef: {type: string}
         customerGroup: {type: string}
+        oneTime: {allOf: [{$ref: "#/components/schemas/OneTimeParty"}], description: set only on a one-time customer order (FR-27.22)}
         netTotal: {$ref: "#/components/schemas/Money"}
         version: {type: integer, minimum: 0}
         creditCheck: {$ref: "#/components/schemas/CreditEvaluation"}
@@ -2475,7 +2514,7 @@ components:
         updatedAt: {type: string, format: date-time}
     SalesParametersRequest:
       type: object
-      description: every value is required; the PUT replaces them all. Names are the PRD 5.27.13 parameter names.
+      description: every value except the one-time order limit is required; the PUT replaces them all. Names are the PRD 5.27.13 parameter names.
       required: [quotationExpiryDays, quotationProbabilityDefault, creditReleaseValidityDays, creditHoldSlaBusinessDays, defaultOrderType]
       properties:
         quotationExpiryDays: {type: integer, minimum: 1, maximum: 365, description: validity in days of a quotation created without validUntil (quotation_expiry_days)}
@@ -2483,6 +2522,8 @@ components:
         creditReleaseValidityDays: {type: integer, minimum: 1, maximum: 30, description: how long a CREDIT release stays valid (credit_release_validity_days, BR-27.4)}
         creditHoldSlaBusinessDays: {type: integer, minimum: 1, maximum: 10, description: "business days (Monday to Friday) a hold may wait for release; the queue reports slaDueAt (credit_hold_sla_business_days, FR-27.8)"}
         defaultOrderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION], description: order type of an order created without one (default_order_type)}
+        oneTimeOrderLimit: {allOf: [{$ref: "#/components/schemas/Money"}], description: "the most a one-time customer order may be worth, in oneTimeOrderLimitCurrency, 0 or more with 2 decimal places (one_time_order_limit, FR-27.22); optional, sent together with the currency; absent: 5,000 USD and 4,500 EUR, and no other currency may place one-time orders"}
+        oneTimeOrderLimitCurrency: {type: string, pattern: "^[A-Z]{3}$"}
     SalesParameters:
       allOf:
         - $ref: "#/components/schemas/SalesParametersRequest"

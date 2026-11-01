@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/api"
@@ -68,7 +69,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("PRODUCT_URL, PRODUCTION_URL or the service signing key is unset: configured order lines are refused (SLS-0048) and production cannot be planned (SLS-0050)")
 	}
 	up := upstream.New(getenv("PRODUCT_URL"), getenv("PRODUCTION_URL"), signer)
-	a := api.New(store.New(pool)).WithConfigurations(up).WithProduction(up)
+	keys, err := fieldcrypt.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("field encryption keys: %w", err)
+	}
+	if keys == nil {
+		slog.Warn("FIELDCRYPT_KEYS is unset: one-time customer orders are refused (SLS-0054)")
+	}
+	a := api.New(store.New(pool).WithFieldCrypt(keys)).WithConfigurations(up).WithProduction(up)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

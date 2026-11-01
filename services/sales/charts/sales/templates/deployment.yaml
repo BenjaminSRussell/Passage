@@ -19,6 +19,16 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- if .Values.fieldCrypt.keysSecret }}
+        fsGroup: 65532
+        {{- end }}
+      {{- if .Values.fieldCrypt.keysSecret }}
+      volumes:
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+      {{- end }}
       containers:
         - name: sales
           {{- if .Values.image.digest }}
@@ -65,6 +75,12 @@ spec:
               value: {{ .Values.upstream.productUrl | quote }}
             - name: PRODUCTION_URL
               value: {{ .Values.upstream.productionUrl | quote }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+          volumeMounts:
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

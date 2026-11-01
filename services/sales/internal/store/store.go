@@ -18,6 +18,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
@@ -36,6 +37,8 @@ const (
 	CodeNotConfirmable     = "SLS-0019"
 	CodeHoldBlocks         = "SLS-0021"
 	CodeHoldNotActive      = "SLS-0022"
+	CodeOneTimeLimit       = "SLS-0016"
+	CodeFieldCryptMissing  = "SLS-0054"
 	CodeHoldNotApplicable  = "SLS-0028"
 	CodeAgreementNotValid  = "SLS-0029"
 	CodeAgreementClosed    = "SLS-0052"
@@ -127,6 +130,10 @@ type Order struct {
 	Lines             []Line            `json:"lines"`
 	Holds             []Hold            `json:"holds"`
 	ListingOverrides  []ListingOverride `json:"listingOverrides"`
+	// OneTime is the walk-in buyer of a one-time order (FR-27.22), opened from
+	// its sealed column for the response; absent on an ordinary order.
+	OneTime *domain.OneTimeParty `json:"oneTime,omitempty"`
+	oneTime *sealedParty
 	// Warnings is set only on the result of a create (including a replay),
 	// a quotation conversion or an agreement release.
 	Warnings []Notice `json:"warnings,omitempty"`
@@ -155,6 +162,13 @@ type NewOrder struct {
 	// CustomerGroup stands in for the w7 customer group until the party lookup
 	// exists; GROUP listing entries apply only when it is given (BR-27.13).
 	CustomerGroup *string
+	// OneTime makes the order a one-time customer order (FR-27.22): the party
+	// is sealed on the header and the order is held to one_time_order_limit.
+	OneTime *domain.OneTimeParty
+	// oneTimeSealed and sameRequest are set by sealOneTime: the envelope that
+	// is stored, and the replay check against a keyed request hash.
+	oneTimeSealed []byte
+	sameRequest   func(stored string) bool
 	// OrderDate is the day listing validity is evaluated on (BR-27.13).
 	OrderDate time.Time
 	// Actor is the caller; CanOverrideListing and ListingOverrideReason come from
@@ -289,7 +303,10 @@ type Store interface {
 }
 
 // Postgres implements Store on a pool whose role is subject to RLS.
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool  *pgxpool.Pool
+	crypt *fieldcrypt.Keys
+}
 
 // New returns a Postgres store.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
@@ -318,9 +335,12 @@ func versionConflict() error {
 // created=false; a different body is refused (BR-27.10).
 func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, error) {
 	p, _ := tenant.FromContext(ctx)
+	if err := s.sealOneTime(p.TenantID, &in); err != nil {
+		return Order{}, false, err
+	}
 	var out Order
 	created := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
 		existing, found, err := findIntake(ctx, tx, p.TenantID, in)
 		if err != nil {
 			return err
@@ -358,6 +378,13 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	if err != nil {
 		return Order{}, err
 	}
+	var oneTimeCountry *string
+	if in.OneTime != nil {
+		if in.oneTimeSealed == nil {
+			return Order{}, errors.New("one-time party is not sealed")
+		}
+		oneTimeCountry = &in.OneTime.Country
+	}
 	overrideJSON, err := json.Marshal(overrides)
 	if err != nil {
 		return Order{}, err
@@ -378,11 +405,18 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	for _, l := range supplementary {
 		net = net.Add(l.LineNet)
 	}
+	if in.OneTime != nil {
+		if err := checkOneTimeLimitTx(ctx, tx, tenantID, in.LegalEntityID, net, in.Currency); err != nil {
+			return Order{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `insert into sales_order (tenant_id, id, legal_entity_id, order_number, customer_id, invoice_account_id, order_type, status, currency,
-			requested_ship_date, net_total, channel, external_ref, idempotency_key, request_hash, listing_overrides, customer_group)
-		values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14, $15::jsonb, $16)`,
+			requested_ship_date, net_total, channel, external_ref, idempotency_key, request_hash, listing_overrides, customer_group,
+			one_time_party_sealed, one_time_country)
+		values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14, $15::jsonb, $16, $17, $18)`,
 		tenantID, id, in.LegalEntityID, domain.FormatOrderNumber(seq), in.CustomerID, in.InvoiceAccountID, in.OrderType, in.Currency,
-		in.RequestedShipDate, net.String(), in.Channel, in.ExternalRef, in.IdempotencyKey, in.RequestHash, string(overrideJSON), in.CustomerGroup); err != nil {
+		in.RequestedShipDate, net.String(), in.Channel, in.ExternalRef, in.IdempotencyKey, in.RequestHash, string(overrideJSON), in.CustomerGroup,
+		in.oneTimeSealed, oneTimeCountry); err != nil {
 		return Order{}, err
 	}
 	lineIDs := make(map[int]string, len(in.Lines))
@@ -426,7 +460,7 @@ func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (O
 	if err != nil {
 		return Order{}, false, err
 	}
-	if hash == in.RequestHash {
+	if hash == in.RequestHash || (in.sameRequest != nil && in.sameRequest(hash)) {
 		order, err := loadOrder(ctx, tx, tenantID, id, false)
 		return order, true, err
 	}
@@ -453,7 +487,7 @@ func nextSequence(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, seque
 func (s *Postgres) GetOrder(ctx context.Context, id string) (Order, error) {
 	p, _ := tenant.FromContext(ctx)
 	var o Order
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &o, func(tx pgx.Tx) error {
 		var err error
 		o, err = loadOrder(ctx, tx, p.TenantID, id, false)
 		return err
@@ -466,17 +500,18 @@ func orderNotFound() error { return problem(http.StatusNotFound, CodeOrderNotFou
 func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Order, error) {
 	q := `select id::text, legal_entity_id::text, order_number, customer_id::text, invoice_account_id::text, order_type, status, currency::text,
 			requested_ship_date::text, channel, external_ref, customer_group, net_total::text, version, request_hash, credit_check_result::text,
-			listing_overrides::text, created_at, updated_at
+			listing_overrides::text, one_time_party_sealed, one_time_country::text, created_at, updated_at
 		from sales_order where tenant_id = $1 and id = $2`
 	if lock {
 		q += " for update"
 	}
 	var o Order
 	var net, overrides string
-	var creditCheck *string
+	var creditCheck, oneTimeCountry *string
+	var oneTimeSealed []byte
 	err := tx.QueryRow(ctx, q, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.CustomerID, &o.InvoiceAccountID, &o.OrderType,
 		&o.Status, &o.Currency, &o.RequestedShipDate, &o.Channel, &o.ExternalRef, &o.CustomerGroup, &net, &o.Version, &o.RequestHash, &creditCheck, &overrides,
-		&o.CreatedAt, &o.UpdatedAt)
+		&oneTimeSealed, &oneTimeCountry, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, orderNotFound()
 	}
@@ -490,6 +525,9 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	o.ListingOverrides = []ListingOverride{}
 	if err := json.Unmarshal([]byte(overrides), &o.ListingOverrides); err != nil {
 		return Order{}, err
+	}
+	if oneTimeSealed != nil && oneTimeCountry != nil {
+		o.oneTime = &sealedParty{envelope: oneTimeSealed, country: *oneTimeCountry}
 	}
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
@@ -568,7 +606,7 @@ func firstFailedRule(ev domain.CreditEvaluation) string {
 func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var res ConfirmResult
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &res.Order, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err
@@ -586,6 +624,13 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 					code = CodeCreditHold
 				}
 				return problem(http.StatusUnprocessableEntity, code, "an active "+h.HoldType+" hold blocks confirmation")
+			}
+		}
+		// Checked before credit, so an order over the limit is refused rather
+		// than held; confirmOrderTx checks again for the release path.
+		if o.isOneTime() {
+			if err := checkOneTimeLimitTx(ctx, tx, p.TenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
+				return err
 			}
 		}
 		eval, err := evaluateCreditTx(ctx, tx, p.TenantID, o, now)
@@ -658,6 +703,11 @@ func applyCreditHoldTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 // it to a later period (FR-27.16), moves the order to CONFIRMED
 // and writes order.confirmed in the same transaction.
 func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (Order, error) {
+	if o.isOneTime() {
+		if err := checkOneTimeLimitTx(ctx, tx, tenantID, o.LegalEntityID, o.NetTotal, o.Currency); err != nil {
+			return Order{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `update sales_order_line set confirmed_ship_date = requested_ship_date
 		where tenant_id = $1 and order_id = $2 and line_status <> 'CANCELLED'`, tenantID, o.ID); err != nil {
 		return Order{}, err
@@ -685,8 +735,14 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 		lines = append(lines, salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(),
 			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID})
 	}
-	err = enqueue(ctx, tx, "order", o.ID, salesevents.OrderConfirmed, tenantID, salesevents.OrderConfirmedData{
-		OrderID: o.ID, CustomerID: o.CustomerID, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version})
+	data := salesevents.OrderConfirmedData{
+		OrderID: o.ID, CustomerID: o.CustomerID, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
+	if confirmed.isOneTime() {
+		// The buyer's name, address and tax id stay in sales (sealed); the
+		// event marks the order and gives the country only.
+		data.OneTime = &salesevents.OneTimeRef{Country: confirmed.oneTime.country}
+	}
+	err = enqueue(ctx, tx, "order", o.ID, salesevents.OrderConfirmed, tenantID, data)
 	return confirmed, err
 }
 
@@ -697,7 +753,7 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ConfirmResult
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out.Order, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, orderID, true)
 		if err != nil {
 			return err
@@ -747,18 +803,20 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 		// The credit decision stands even when allocation quota cannot cover the
 		// order: the confirmation runs under a savepoint, and an SLS-0013 refusal
 		// rolls back only the confirmation, so the hold is released and the order
-		// stays unconfirmed with the refusal as a warning (FR-27.16).
+		// stays unconfirmed with the refusal as a warning (FR-27.16). A one-time
+		// order over its limit (SLS-0016, the limit lowered since the hold was
+		// placed) is treated the same way.
 		sp, err := tx.Begin(ctx)
 		if err != nil {
 			return err
 		}
 		confirmed, err := confirmOrderTx(ctx, sp, p.TenantID, released)
 		var refused *httpx.Problem
-		if errors.As(err, &refused) && refused.Code == CodeAllocationExhausted {
+		if errors.As(err, &refused) && (refused.Code == CodeAllocationExhausted || refused.Code == CodeOneTimeLimit) {
 			if err := sp.Rollback(ctx); err != nil {
 				return err
 			}
-			released.Warnings = []Notice{{Code: CodeAllocationExhausted, Message: refused.Detail}}
+			released.Warnings = []Notice{{Code: refused.Code, Message: refused.Detail}}
 			out = ConfirmResult{Order: released}
 			return nil
 		}

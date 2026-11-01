@@ -240,7 +240,7 @@ func allocationFloor(ctx context.Context, tx pgx.Tx, tenantID, lineID string) (s
 func (s *Postgres) PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PromiseResult
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.orderTx(ctx, p.TenantID, &out.Order, func(tx pgx.Tx) error {
 		o, err := loadOrder(ctx, tx, p.TenantID, orderID, true)
 		if err != nil {
 			return err

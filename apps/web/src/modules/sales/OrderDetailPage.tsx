@@ -275,6 +275,24 @@ export function OrderDetailPage() {
           ))}
         </dl>
       </Card>
+      {order.oneTime ? (
+        <Card title="One-time customer">
+          <dl className={styles.details}>
+            {(
+              [
+                ["Buyer", order.oneTime.name],
+                ["Address", [order.oneTime.line1, order.oneTime.line2, `${order.oneTime.postalCode} ${order.oneTime.city}`, order.oneTime.region, order.oneTime.country].filter(Boolean).join(", ")],
+                ["Tax id", order.oneTime.taxId ?? dash],
+              ] as [string, string][]
+            ).map(([term, value]) => (
+              <div key={term} className={styles.entry}>
+                <dt className={styles.term}>{term}</dt>
+                <dd className={styles.value}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      ) : null}
       <DataTable label="Order lines" columns={lineColumns} rows={order.lines} getRowKey={(l) => l.id} empty={{ title: "No lines" }} />
       {order.status === "CONFIRMED" ? <OrderSchedule order={order} /> : null}
       <Card title="Holds">

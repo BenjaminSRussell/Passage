@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -30,16 +31,24 @@ type SalesParameters struct {
 func loadParameters(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) (SalesParameters, error) {
 	out := SalesParameters{LegalEntityID: legalEntityID, Parameters: domain.DefaultParameters()}
 	var updatedAt time.Time
+	var oneTimeLimit *string
 	err := tx.QueryRow(ctx, `select quotation_expiry_days, quotation_probability_default, credit_release_validity_days,
-			credit_hold_sla_business_days, default_order_type, version, updated_by, updated_at
+			credit_hold_sla_business_days, default_order_type, one_time_order_limit::text, one_time_order_limit_currency, version, updated_by, updated_at
 		from sales_parameter where tenant_id = $1 and legal_entity_id = $2`, tenantID, legalEntityID).
 		Scan(&out.QuotationExpiryDays, &out.QuotationProbabilityDefault, &out.CreditReleaseValidityDays,
-			&out.CreditHoldSLABusinessDays, &out.DefaultOrderType, &out.Version, &out.UpdatedBy, &updatedAt)
+			&out.CreditHoldSLABusinessDays, &out.DefaultOrderType, &oneTimeLimit, &out.OneTimeOrderLimitCurrency, &out.Version, &out.UpdatedBy, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
 	if err != nil {
 		return out, err
+	}
+	if oneTimeLimit != nil {
+		limit, err := decimal.NewFromString(*oneTimeLimit)
+		if err != nil {
+			return out, err
+		}
+		out.OneTimeOrderLimit = &limit
 	}
 	out.UpdatedAt = &updatedAt
 	return out, nil
@@ -90,19 +99,25 @@ func (s *Postgres) PutParameters(ctx context.Context, in SalesParameters, versio
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var stored int
 		var err error
+		var limit *string
+		if in.OneTimeOrderLimit != nil {
+			l := in.OneTimeOrderLimit.StringFixed(2)
+			limit = &l
+		}
 		if version == 0 {
 			err = tx.QueryRow(ctx, `insert into sales_parameter (tenant_id, legal_entity_id, quotation_expiry_days, quotation_probability_default,
-					credit_release_validity_days, credit_hold_sla_business_days, default_order_type, updated_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict do nothing returning version`,
+					credit_release_validity_days, credit_hold_sla_business_days, default_order_type, one_time_order_limit, one_time_order_limit_currency, updated_by)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10) on conflict do nothing returning version`,
 				p.TenantID, in.LegalEntityID, in.QuotationExpiryDays, in.QuotationProbabilityDefault, in.CreditReleaseValidityDays,
-				in.CreditHoldSLABusinessDays, in.DefaultOrderType, actor).Scan(&stored)
+				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, actor).Scan(&stored)
 		} else {
 			err = tx.QueryRow(ctx, `update sales_parameter set quotation_expiry_days = $3, quotation_probability_default = $4,
-					credit_release_validity_days = $5, credit_hold_sla_business_days = $6, default_order_type = $7, updated_by = $8,
+					credit_release_validity_days = $5, credit_hold_sla_business_days = $6, default_order_type = $7,
+					one_time_order_limit = $8::numeric, one_time_order_limit_currency = $9, updated_by = $10,
 					version = version + 1, updated_at = now()
-				where tenant_id = $1 and legal_entity_id = $2 and version = $9 returning version`,
+				where tenant_id = $1 and legal_entity_id = $2 and version = $11 returning version`,
 				p.TenantID, in.LegalEntityID, in.QuotationExpiryDays, in.QuotationProbabilityDefault, in.CreditReleaseValidityDays,
-				in.CreditHoldSLABusinessDays, in.DefaultOrderType, actor, version).Scan(&stored)
+				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, actor, version).Scan(&stored)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return versionConflict()
@@ -117,7 +132,8 @@ func (s *Postgres) PutParameters(ctx context.Context, in SalesParameters, versio
 		return enqueue(ctx, tx, "parameters", in.LegalEntityID, salesevents.ParametersChanged, p.TenantID, salesevents.ParametersChangedData{
 			LegalEntityID: in.LegalEntityID, QuotationExpiryDays: out.QuotationExpiryDays, QuotationProbabilityDefault: out.QuotationProbabilityDefault,
 			CreditReleaseValidityDays: out.CreditReleaseValidityDays, CreditHoldSLABusinessDays: out.CreditHoldSLABusinessDays,
-			DefaultOrderType: out.DefaultOrderType, Actor: actor, Version: out.Version})
+			DefaultOrderType: out.DefaultOrderType, OneTimeOrderLimit: limit, OneTimeOrderLimitCurrency: out.OneTimeOrderLimitCurrency,
+			Actor: actor, Version: out.Version})
 	})
 	return out, err
 }

@@ -50,3 +50,11 @@ serviceIdentity:
 upstream:
   productUrl: "http://product:8080"
   productionUrl: "http://production:8080"
+
+# Field encryption (platform fieldcrypt) for the buyer of a one-time customer
+# order: keysSecret is a Secret with a "keys" entry of id=base64(32 bytes)
+# lines, mounted as FIELDCRYPT_KEYS_FILE; currentKeyId names the sealing key.
+# Unset, one-time orders are refused (503 SLS-0054).
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""
