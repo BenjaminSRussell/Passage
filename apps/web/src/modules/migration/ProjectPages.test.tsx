@@ -261,6 +261,114 @@ describe("project detail", () => {
   });
 });
 
+describe("project runs", () => {
+  const SPEC = "0195f0a0-0000-7000-8000-0000000000b1";
+  const projectRun = {
+    id: "0195f0a0-0000-7000-8000-0000000000f1",
+    sourceSystem: "ax2012",
+    mode: "rehearsal",
+    entity: "customer",
+    status: "partial",
+    dryRun: false,
+    mappingVersion: 1,
+    projectId: axProject.id,
+    counts: { extracted: 3, mapped: 2, created: 2, updated: 0, unchanged: 0, rejected: 1, warned: 0 },
+    rejects: [],
+    warnings: [],
+    absent: [],
+    createdAt: "2026-10-30T09:00:00Z",
+  };
+
+  it("lists the runs under a migrate project and offers Start run", async () => {
+    handler = (url) => (url.pathname.endsWith("/migration-runs") ? json(200, { items: [projectRun] }) : json(200, axProject));
+    renderAt(`/migration/projects/${axProject.id}`);
+    const table = await findTable({ name: "Project runs" });
+    expect(within(table).getByText("customer")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.pathname.endsWith("/migration-runs") && c.url.searchParams.get("projectId") === axProject.id)).toBe(true);
+    expect(screen.getByRole("link", { name: "Start run" })).toHaveAttribute("href", `/migration/runs/new?project=${axProject.id}`);
+  });
+
+  it("shows the empty and error states, and hides Start run for an archived project or without the duty", async () => {
+    handler = (url) => (url.pathname.endsWith("/migration-runs") ? json(200, { items: [] }) : json(200, { ...axProject, status: "archived" }));
+    renderAt(`/migration/projects/${axProject.id}`);
+    expect(await screen.findByText("No runs under this project yet")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Start run" })).not.toBeInTheDocument();
+  });
+
+  it("shows an error when the runs cannot be loaded", async () => {
+    handler = (url) => (url.pathname.endsWith("/migration-runs") ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, axProject));
+    renderAt(`/migration/projects/${axProject.id}`);
+    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+  });
+
+  it("starts a run under the preselected project with the project's source system", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(202, { run: projectRun });
+      if (url.pathname.endsWith("/mapping-specs")) return json(200, { items: [{ id: SPEC, entity: "customer", version: 1, checksum: "ab", fieldCount: 2, testCount: 1, createdAt: "2026-10-30T09:00:00Z" }] });
+      if (url.pathname.endsWith("/data-templates")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/projects")) return json(200, { items: [{ ...axProject, sourceSystem: "sap_s4" }] });
+      return json(200, projectRun);
+    };
+    renderAt(`/migration/runs/new?project=${axProject.id}`);
+    await screen.findByRole("option", { name: "customer v1" });
+    await screen.findByRole("option", { name: "AX customers" });
+    expect(screen.getByLabelText("Project (optional)")).toHaveValue(axProject.id);
+    expect(screen.getByLabelText("Source system")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Mapping spec"), { target: { value: SPEC } });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await screen.findByText("its migration project");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ projectId: axProject.id, sourceSystem: "sap_s4", mappingSpecId: SPEC });
+  });
+
+  it("shows the service's refusal when the project already has an active run", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(409, { code: "MIG-RUN-ACTIVE", detail: "Run 0195f0a0-0000-7000-8000-0000000000f9 is already active for this project; wait for it to finish" });
+      if (url.pathname.endsWith("/mapping-specs")) return json(200, { items: [{ id: SPEC, entity: "customer", version: 1, checksum: "ab", fieldCount: 2, testCount: 1, createdAt: "2026-10-30T09:00:00Z" }] });
+      if (url.pathname.endsWith("/data-templates")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/projects")) return json(200, { items: [axProject] });
+      return json(404, {});
+    };
+    renderAt(`/migration/runs/new?project=${axProject.id}`);
+    await screen.findByRole("option", { name: "AX customers" });
+    fireEvent.change(await screen.findByLabelText("Mapping spec"), { target: { value: SPEC } });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    expect(await screen.findByText(/already active for this project.*MIG-RUN-ACTIVE/)).toBeInTheDocument();
+  });
+
+  it("still starts a run without a project when projects cannot be loaded", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(202, { run: { ...projectRun, projectId: undefined } });
+      if (url.pathname.endsWith("/mapping-specs")) return json(200, { items: [{ id: SPEC, entity: "customer", version: 1, checksum: "ab", fieldCount: 2, testCount: 1, createdAt: "2026-10-30T09:00:00Z" }] });
+      if (url.pathname.endsWith("/data-templates")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/projects")) return json(500, { code: "COM-0500", detail: "boom" });
+      return json(200, { ...projectRun, projectId: undefined });
+    };
+    renderAt("/migration/runs/new");
+    await screen.findByText(/Projects could not be loaded/);
+    fireEvent.change(await screen.findByLabelText("Mapping spec"), { target: { value: SPEC } });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")).toBeDefined());
+    expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("projectId");
+  });
+
+  it("keeps the project from the link when the project list cannot be loaded", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(202, { run: projectRun });
+      if (url.pathname.endsWith("/mapping-specs")) return json(200, { items: [{ id: SPEC, entity: "customer", version: 1, checksum: "ab", fieldCount: 2, testCount: 1, createdAt: "2026-10-30T09:00:00Z" }] });
+      if (url.pathname.endsWith("/data-templates")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/projects")) return json(500, { code: "COM-0500", detail: "boom" });
+      return json(200, projectRun);
+    };
+    renderAt(`/migration/runs/new?project=${axProject.id}`);
+    expect(await screen.findByText(/the run starts under the project from the link/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Project (optional)")).toHaveValue(axProject.id);
+    fireEvent.change(await screen.findByLabelText("Mapping spec"), { target: { value: SPEC } });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")).toBeDefined());
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ projectId: axProject.id });
+  });
+});
+
 describe("key rewrite rules", () => {
   function rulesHandler(stored: KeyRewriteRules) {
     handler = (url, init) => {

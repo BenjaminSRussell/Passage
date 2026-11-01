@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -316,5 +317,123 @@ func TestProjects_StoreFailureIsAProblem(t *testing.T) {
 	s.SaveErr = http.ErrAbortHandler
 	if rec := do(r, http.MethodPost, projectsPath, copyBody, writeDuties, true); rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "abort") {
 		t.Fatalf("store failure = %d %s", rec.Code, rec.Body)
+	}
+}
+
+const axProjectBody = `{"name":"AX customers","projectType":"migrate","sourceSystem":"ax2012"}`
+
+type blockingExtractor struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockingExtractor) Extract(context.Context, string) ([]domain.Record, error) {
+	close(b.started)
+	<-b.release
+	return records(), nil
+}
+
+func runWithProject(project string) string {
+	return strings.Replace(body, `"mode"`, `"projectId":"`+project+`","mode"`, 1)
+}
+
+func TestProjectRuns_RecordProjectFilterAndInheritOnRerun(t *testing.T) {
+	r, _ := newProjectRouter()
+	pj := decodeProject(t, do(r, http.MethodPost, projectsPath, axProjectBody, writeDuties, true))
+	rec := do(r, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true)
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"projectId":"`+pj.ID+`"`) {
+		t.Fatalf("project run = %d %s", rec.Code, rec.Body)
+	}
+	first := decode(t, rec)
+	// a free project can run again, and an unlinked run does not appear under the project
+	if rec := do(r, http.MethodPost, runsPath, body, duties, true); rec.Code != http.StatusAccepted {
+		t.Fatalf("unlinked run = %d %s", rec.Code, rec.Body)
+	}
+	again := do(r, http.MethodPost, runsPath+"/"+first.Run.ID+":rerun", "", duties, true)
+	if again.Code != http.StatusAccepted || !strings.Contains(again.Body.String(), `"projectId":"`+pj.ID+`"`) {
+		t.Fatalf("rerun must keep the project: %d %s", again.Code, again.Body)
+	}
+	list := do(r, http.MethodGet, runsPath+"?projectId="+pj.ID, "", duties, true)
+	if list.Code != http.StatusOK || strings.Count(list.Body.String(), `"projectId"`) != 2 {
+		t.Fatalf("filtered list = %d %s", list.Code, list.Body)
+	}
+	if rec := do(r, http.MethodGet, runsPath+"?projectId=nope", "", duties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad projectId filter = %d", rec.Code)
+	}
+}
+
+func TestProjectRuns_Refusals(t *testing.T) {
+	r, _ := newProjectRouter()
+	pj := decodeProject(t, do(r, http.MethodPost, projectsPath, axProjectBody, writeDuties, true))
+	cp := createCopy(t, r)
+	for name, c := range map[string]struct {
+		payload string
+		status  int
+		code    string
+	}{
+		"malformed id":    {runWithProject("nope"), http.StatusBadRequest, `"projectId"`},
+		"unknown project": {runWithProject("00000000-0000-7000-8000-00000000ffff"), http.StatusUnprocessableEntity, "MIG-PROJECT-UNKNOWN"},
+		"copy project":    {runWithProject(cp.ID), http.StatusUnprocessableEntity, "MIG-PROJECT-NOT-MIGRATE"},
+		"other system":    {strings.Replace(runWithProject(pj.ID), "ax2012", "sap_s4", 1), http.StatusBadRequest, `"sourceSystem"`},
+	} {
+		rec := do(r, http.MethodPost, runsPath, c.payload, duties, true)
+		if rec.Code != c.status || !strings.Contains(rec.Body.String(), c.code) {
+			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	archived := `{"version":1,"status":"archived"}`
+	if rec := do(r, http.MethodPatch, projectsPath+"/"+pj.ID, archived, writeDuties, true); rec.Code != http.StatusOK {
+		t.Fatalf("archive = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(r, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "MIG-PROJECT-ARCHIVED") {
+		t.Fatalf("archived project = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestProjectRuns_SecondStartWhileRunningIsConflictAndClaimReleases(t *testing.T) {
+	s := store.NewMem()
+	ex := blockingExtractor{started: make(chan struct{}), release: make(chan struct{})}
+	slow := router(s, ex, domain.NewMemLoader())
+	pj := decodeProject(t, do(slow, http.MethodPost, projectsPath, axProjectBody, writeDuties, true))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- do(slow, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true) }()
+	<-ex.started
+	rec := do(slow, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "MIG-RUN-ACTIVE") {
+		t.Fatalf("second start = %d %s", rec.Code, rec.Body)
+	}
+	conflict := rec.Body.String()
+	close(ex.release)
+	first := <-done
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first run = %d %s", first.Code, first.Body)
+	}
+	// BR-10.2: the 409 names the active run, and that is the id the run is recorded under when it finishes
+	if id := decode(t, first).Run.ID; !strings.Contains(conflict, "Run "+id+" is already active") {
+		t.Fatalf("409 %s does not name the active run %s", conflict, id)
+	}
+	fast := router(s, rowsExtractor{records()}, domain.NewMemLoader())
+	if rec := do(fast, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true); rec.Code != http.StatusAccepted {
+		t.Fatalf("claim must be released after the run: %d %s", rec.Code, rec.Body)
+	}
+}
+
+type panickingExtractor struct{}
+
+func (panickingExtractor) Extract(context.Context, string) ([]domain.Record, error) {
+	panic("extractor bug")
+}
+
+func TestProjectRuns_ClaimReleasedWhenTheRunFailsOrPanics(t *testing.T) {
+	s := store.NewMem()
+	free := router(s, rowsExtractor{records()}, domain.NewMemLoader())
+	pj := decodeProject(t, do(free, http.MethodPost, projectsPath, axProjectBody, writeDuties, true))
+	for name, ex := range map[string]domain.Extractor{"failure": failingExtractor{}, "panic": panickingExtractor{}} {
+		if rec := do(router(s, ex, domain.NewMemLoader()), http.MethodPost, runsPath, runWithProject(pj.ID), duties, true); rec.Code < 500 {
+			t.Fatalf("%s run = %d %s", name, rec.Code, rec.Body)
+		}
+		if rec := do(free, http.MethodPost, runsPath, runWithProject(pj.ID), duties, true); rec.Code != http.StatusAccepted {
+			t.Fatalf("claim must be released after a %s: %d %s", name, rec.Code, rec.Body)
+		}
 	}
 }

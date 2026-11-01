@@ -9,6 +9,7 @@ import {
   getKeyRewriteRules,
   getProject,
   listProjects,
+  listRuns,
   newKey,
   previewKeyRewrite,
   replaceKeyRewriteRules,
@@ -16,12 +17,14 @@ import {
   type KeyRewrite,
   type KeyRewritePreview,
   type MigrationProject,
+  type MigrationRun,
   type Problem,
 } from "./api/client";
 import {
   checkRewriteRules,
   cutoverInput,
   formatDateTime,
+  MODE_LABELS,
   parseProjectEdit,
   parseProjectForm,
   PROJECT_TYPE_LABELS,
@@ -30,6 +33,7 @@ import {
   type ProjectEditForm,
   type ProjectForm,
 } from "./domain";
+import { DUTY_RUN } from "./RunPages";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -337,11 +341,56 @@ export function ProjectDetailPage() {
         </Alert>
       ) : null}
       <DetailsCard project={project} canEdit={canWrite && project.status === "active"} onSaved={state.set} />
+      {project.projectType === "migrate" ? <ProjectRunsCard project={project} /> : null}
       {project.projectType === "copy" ? <RewriteRulesCard project={project} canWrite={canWrite} onSaved={state.reload} /> : null}
       <Link className={buttonClassName("ghost")} to="/migration/projects">
         Back to projects
       </Link>
     </div>
+  );
+}
+
+const runColumns: DataTableColumn<MigrationRun>[] = [
+  { key: "createdAt", header: "Started", render: (row) => formatDateTime(row.createdAt) },
+  { key: "entity", header: "Entity", mono: true },
+  { key: "mode", header: "Mode", render: (row) => `${MODE_LABELS[row.mode] ?? row.mode}${row.dryRun ? " (dry run)" : ""}` },
+  { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
+  { key: "loaded", header: "Loaded", align: "end", render: (row) => row.counts.created + row.counts.updated },
+  { key: "rejected", header: "Rejected", align: "end", render: (row) => row.counts.rejected },
+];
+
+/** The runs started under a migrate project. Only one run can be active per project, so a start can answer 409. */
+function ProjectRunsCard({ project }: { project: MigrationProject }) {
+  const navigate = useNavigate();
+  const canRun = holdsDuty(usePrincipalDuties(), DUTY_RUN);
+  const state = useLoad((signal) => listRuns({ projectId: project.id }, signal), project.id);
+  return (
+    <Card
+      title="Runs"
+      actions={
+        canRun && project.status === "active" ? (
+          <Link className={buttonClassName("primary", "sm")} to={`/migration/runs/new?project=${project.id}`}>
+            Start run
+          </Link>
+        ) : undefined
+      }
+    >
+      {state.error ? (
+        <Alert tone="danger" title="Could not load the project's runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      ) : (
+        <DataTable
+          label="Project runs"
+          columns={runColumns}
+          rows={state.data ?? []}
+          getRowKey={(row) => row.id}
+          loading={state.loading}
+          empty={{ title: "No runs under this project yet", description: "Start a run from a published mapping spec to see counts and rejects here." }}
+          onRowOpen={(row) => navigate(`/migration/runs/${row.id}`)}
+        />
+      )}
+    </Card>
   );
 }
 

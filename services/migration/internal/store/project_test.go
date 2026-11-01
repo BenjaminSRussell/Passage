@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -142,6 +144,150 @@ func exerciseProjects(t *testing.T, s store.Store, one, two context.Context, ten
 	if _, _, err := s.SaveProject(two, copyProject("Renamed"), ""); err != nil {
 		t.Fatal(err)
 	}
+}
+
+const (
+	runA = "00000000-0000-7000-8000-0000000000c1"
+	runB = "00000000-0000-7000-8000-0000000000c2"
+)
+
+func exerciseProjectRuns(t *testing.T, s store.Store, one, two context.Context, tenantAware bool) {
+	ax, _, err := s.SaveProject(one, store.Project{Name: "AX run", Type: domain.ProjectMigrate, SourceSystem: "ax2012", Status: domain.ProjectActive}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr, err := s.BeginProjectRun(one, ax.ID, runA)
+	if err != nil || pr.ID != ax.ID {
+		t.Fatalf("begin = %+v %v", pr, err)
+	}
+	_, err = s.BeginProjectRun(one, ax.ID, runB)
+	problemStatus(t, err, 409, store.CodeRunActive)
+	var p *httpx.Problem
+	if errors.As(err, &p); !strings.Contains(p.Detail, runA) {
+		t.Fatalf("the 409 must name the active run %s: %q", runA, p.Detail)
+	}
+	if tenantAware {
+		_, err := s.BeginProjectRun(two, ax.ID, runB)
+		problemStatus(t, err, 404, store.CodeProjectNotFound)
+	}
+	// a run that does not hold the claim cannot release it
+	if err := s.EndProjectRun(one, ax.ID, runB); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.BeginProjectRun(one, ax.ID, runB)
+	problemStatus(t, err, 409, store.CodeRunActive)
+	run, err := s.SaveRun(one, store.Run{ID: runA, SourceSystem: "ax2012", Mode: "rehearsal", Entity: "customer", MappingVersion: 1, Mapping: []byte(`{}`), ProjectID: ax.ID, Report: domain.Report{Status: domain.StatusSucceeded}}, "")
+	if err != nil || run.ID != runA || run.ProjectID != ax.ID {
+		t.Fatalf("save under the claimed id = %+v %v", run, err)
+	}
+	if err := s.EndProjectRun(one, ax.ID, runA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginProjectRun(one, ax.ID, runB); err != nil {
+		t.Fatalf("a released project must be claimable: %v", err)
+	}
+	if err := s.EndProjectRun(one, ax.ID, runB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveRun(one, store.Run{SourceSystem: "ax2012", Mode: "rehearsal", Entity: "customer", MappingVersion: 1, Mapping: []byte(`{}`), Report: domain.Report{Status: domain.StatusSucceeded}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.ListRuns(one, store.RunFilter{ProjectID: ax.ID})
+	if err != nil || len(listed) != 1 || listed[0].ID != run.ID {
+		t.Fatalf("project filter = %+v %v", listed, err)
+	}
+	if all, _ := s.ListRuns(one, store.RunFilter{}); len(all) != 2 {
+		t.Fatalf("unfiltered runs = %d", len(all))
+	}
+	_, err = s.BeginProjectRun(one, "00000000-0000-7000-8000-00000000ffff", runB)
+	problemStatus(t, err, 404, store.CodeProjectNotFound)
+
+	// of many concurrent starts exactly one takes the claim
+	const starts = 8
+	var wg sync.WaitGroup
+	results := make(chan error, starts)
+	for i := range starts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.BeginProjectRun(one, ax.ID, fmt.Sprintf("00000000-0000-7000-8000-0000000001%02d", i))
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	won := 0
+	for err := range results {
+		if err == nil {
+			won++
+		} else if !errors.As(err, &p) || p.Code != store.CodeRunActive {
+			t.Fatalf("concurrent start: %v", err)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("concurrent starts that took the claim = %d, want 1", won)
+	}
+
+	archived := ax.Version
+	if _, err := s.UpdateProject(one, ax.ID, archived, func(p *store.Project) error { p.Status = domain.ProjectArchived; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.BeginProjectRun(one, ax.ID, runB)
+	problemStatus(t, err, 409, store.CodeProjectArchived)
+}
+
+func TestPostgres_ProjectRunsClaimAndFilter(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t) // the app role proves the claim needs no grant beyond 0006
+	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
+	drop()
+	t.Cleanup(drop)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	exerciseProjectRuns(t, store.New(pool), principalContext(1), principalContext(2), true)
+}
+
+// A claim whose run died without releasing it lapses after the abandonment window, judged on the database clock,
+// and the run that held it can no longer clear the claim the next run took.
+func TestPostgres_AbandonedProjectClaimLapses(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
+	drop()
+	t.Cleanup(drop)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s, one := store.New(pool), principalContext(1)
+	ax, _, err := s.SaveProject(one, store.Project{Name: "AX stale", Type: domain.ProjectMigrate, SourceSystem: "ax2012", Status: domain.ProjectActive}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginProjectRun(one, ax.ID, runA); err != nil {
+		t.Fatal(err)
+	}
+	age := func(by string) {
+		t.Helper()
+		if _, err := admin.Exec(ctx, `update migration.project set active_run_started_at = now() - $2::interval where id = $1`, ax.ID, by); err != nil {
+			t.Fatal(err)
+		}
+	}
+	age("39 minutes")
+	_, err = s.BeginProjectRun(one, ax.ID, runB)
+	problemStatus(t, err, 409, store.CodeRunActive)
+	age("41 minutes")
+	if _, err := s.BeginProjectRun(one, ax.ID, runB); err != nil {
+		t.Fatalf("an abandoned claim must lapse: %v", err)
+	}
+	if err := s.EndProjectRun(one, ax.ID, runA); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.BeginProjectRun(one, ax.ID, "00000000-0000-7000-8000-0000000000c3")
+	problemStatus(t, err, 409, store.CodeRunActive)
+}
+
+func TestMem_ProjectRunsClaimAndFilter(t *testing.T) {
+	exerciseProjectRuns(t, store.NewMem(), principalContext(1), principalContext(2), false)
 }
 
 func TestPostgres_ProjectsAndRewriteRulesUnderRLS(t *testing.T) {

@@ -40,6 +40,8 @@ const (
 	CodeDeferred        = "MIG-PARALLEL-RUN-DEFERRED"
 	CodeSpecUnknown     = "MIG-SPEC-UNKNOWN"
 	CodeTemplateUnknown = "MIG-TEMPLATE-UNKNOWN"
+	CodeProjectUnknown  = "MIG-PROJECT-UNKNOWN"
+	CodeProjectType     = "MIG-PROJECT-NOT-MIGRATE"
 	codeKeyReuse        = "idempotency_key_reuse"
 )
 
@@ -77,6 +79,8 @@ type createRunRequest struct {
 	MappingSpecID string          `json:"mappingSpecId"`
 	// DataTemplateID applies a published data template's defaults before mapping (FR-10.18).
 	DataTemplateID string `json:"dataTemplateId"`
+	// ProjectID ties the run to a migrate project (BR-10.2: one active run per project).
+	ProjectID string `json:"projectId"`
 }
 
 type publishSpecRequest struct {
@@ -111,6 +115,7 @@ type runView struct {
 	MappingVersion int                     `json:"mappingVersion"`
 	MappingSpecID  string                  `json:"mappingSpecId,omitempty"`
 	DataTemplateID string                  `json:"dataTemplateId,omitempty"`
+	ProjectID      string                  `json:"projectId,omitempty"`
 	ParentRunID    string                  `json:"parentRunId,omitempty"`
 	Counts         counts                  `json:"counts"`
 	Rejects        []domain.RowReject      `json:"rejects"`
@@ -250,7 +255,39 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		}
 		tmpl, templateID = &t, stored.ID
 	}
-	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: raw, MappingSpecID: specID, DataTemplateID: templateID}, mapping, tmpl, nil)
+	if req.ProjectID != "" {
+		if !a.checkRunProject(w, r, req) {
+			return
+		}
+	}
+	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: raw, MappingSpecID: specID, DataTemplateID: templateID, ProjectID: req.ProjectID}, mapping, tmpl, nil)
+}
+
+// checkRunProject answers false after writing the problem when the project cannot take this run: unknown (422), not
+// a migrate project (422) or reading from another source system (400). An archived project is refused by the claim.
+func (a *API) checkRunProject(w http.ResponseWriter, r *http.Request, req createRunRequest) bool {
+	pr, err := a.store.GetProject(r.Context(), req.ProjectID)
+	if err != nil {
+		var p *httpx.Problem
+		if errors.As(err, &p) && p.Status == http.StatusNotFound {
+			p = httpx.NewProblem(http.StatusUnprocessableEntity, CodeProjectUnknown, "projectId names no migration project")
+			p.Errors = map[string]string{"projectId": "no migration project has this id"}
+			err = p
+		} else {
+			a.logFailure(r, "load project for run failed", err)
+		}
+		fail(w, r, err)
+		return false
+	}
+	if pr.Type != domain.ProjectMigrate {
+		fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeProjectType, "only a migrate project takes extract-and-load runs"))
+		return false
+	}
+	if pr.SourceSystem != req.SourceSystem {
+		fail(w, r, validation(map[string]string{"sourceSystem": "must be the project's source system, " + pr.SourceSystem}))
+		return false
+	}
+	return true
 }
 
 func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +321,7 @@ func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, MappingSpecID: prev.MappingSpecID, DataTemplateID: prev.DataTemplateID, ParentRunID: prev.ID}
+	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, MappingSpecID: prev.MappingSpecID, DataTemplateID: prev.DataTemplateID, ProjectID: prev.ProjectID, ParentRunID: prev.ID}
 	a.execute(w, r, next, mapping, tmpl, &prev.Report)
 }
 
@@ -318,6 +355,25 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 		}
 		fail(w, r, err)
 		return
+	}
+	if run.ProjectID != "" {
+		// The run's id is fixed now so the claim names it (the 409 for a second start carries it) and only this
+		// run can release it. The deferred release runs on every return and on a panic, on a context the run
+		// deadline cannot cancel; a process that dies mid-run leaves a claim that lapses after the abandonment window.
+		run.ID = ids.New()
+		if _, err := a.store.BeginProjectRun(ctx, run.ProjectID, run.ID); err != nil {
+			var p *httpx.Problem
+			if !errors.As(err, &p) { // a refusal (404, 409) is the caller's to handle, not a service failure
+				a.logFailure(r, "claiming project for run failed", err)
+			}
+			fail(w, r, err)
+			return
+		}
+		defer func() {
+			if err := a.store.EndProjectRun(context.WithoutCancel(ctx), run.ProjectID, run.ID); err != nil {
+				a.logFailure(r, "releasing project claim failed", err)
+			}
+		}()
 	}
 	started := time.Now()
 	slog.InfoContext(ctx, "migration run started", "correlationId", middleware.GetReqID(ctx), "entity", run.Entity, "sourceSystem", run.SourceSystem, "mode", run.Mode, "dryRun", run.DryRun, "parentRunId", run.ParentRunID)
@@ -376,7 +432,11 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(map[string]string{"status": "must be one of succeeded, partial, failed"}))
 		return
 	}
-	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), Limit: limit})
+	if pid := q.Get("projectId"); pid != "" && !ids.Valid(pid) {
+		fail(w, r, validation(map[string]string{"projectId": "must be a UUID"}))
+		return
+	}
+	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), ProjectID: q.Get("projectId"), Limit: limit})
 	if err != nil {
 		a.logFailure(r, "list migration runs failed", err)
 		fail(w, r, err)
@@ -537,7 +597,7 @@ func view(run store.Run) runView {
 	rep := run.Report
 	v := runView{
 		ID: run.ID, SourceSystem: run.SourceSystem, Mode: run.Mode, Entity: run.Entity, Status: rep.Status, DryRun: run.DryRun,
-		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, DataTemplateID: run.DataTemplateID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
+		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, DataTemplateID: run.DataTemplateID, ProjectID: run.ProjectID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
 		Reconciliation: rep.Reconciliation, CreatedAt: run.CreatedAt,
 		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Templated: rep.Templated, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
 	}
@@ -555,7 +615,7 @@ func view(run store.Run) runView {
 
 func sameRequest(a, b store.Run) bool {
 	return a.SourceSystem == b.SourceSystem && a.Mode == b.Mode && a.Entity == b.Entity && a.DryRun == b.DryRun && a.ParentRunID == b.ParentRunID &&
-		a.MappingVersion == b.MappingVersion && a.MappingSpecID == b.MappingSpecID && a.DataTemplateID == b.DataTemplateID
+		a.MappingVersion == b.MappingVersion && a.MappingSpecID == b.MappingSpecID && a.DataTemplateID == b.DataTemplateID && a.ProjectID == b.ProjectID
 }
 
 func validateRun(req createRunRequest) map[string]string {
@@ -576,6 +636,9 @@ func validateRun(req createRunRequest) map[string]string {
 	}
 	if req.DataTemplateID != "" && !ids.Valid(req.DataTemplateID) {
 		fields["dataTemplateId"] = "must be a UUID"
+	}
+	if req.ProjectID != "" && !ids.Valid(req.ProjectID) {
+		fields["projectId"] = "must be a UUID"
 	}
 	return fields
 }

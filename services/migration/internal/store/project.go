@@ -26,6 +26,11 @@ const (
 	CodeProjectName     = "MIG-PROJECT-NAME-EXISTS"
 	CodeVersionConflict = "MIG-VERSION-CONFLICT"
 	CodeProjectArchived = "MIG-PROJECT-ARCHIVED"
+	CodeRunActive       = "MIG-RUN-ACTIVE"
+
+	// activeRunStale is how long a project claim holds before it counts as abandoned: the 35-minute run deadline
+	// plus a margin.
+	activeRunStale = 40 * time.Minute
 )
 
 // Project is a migration project row (EN-064).
@@ -296,10 +301,103 @@ func (s *Postgres) ReplaceRewriteRules(ctx context.Context, projectID string, ve
 	return out, err
 }
 
+// BeginProjectRun claims the project for the run that will be saved as runID (BR-10.2). The claim is one
+// conditional update, so of two concurrent starts exactly one passes: the second waits on the row lock and then
+// re-checks the condition against the committed claim. Staleness is judged on the database clock, never the
+// caller's. When the update matches nothing, a second read says why: unknown project, archived, or another run's
+// claim (whose run id the 409 names).
+func (s *Postgres) BeginProjectRun(ctx context.Context, projectID, runID string) (Project, error) {
+	p, _ := tenant.FromContext(ctx)
+	if !ids.Valid(projectID) {
+		return Project{}, projectNotFound()
+	}
+	var out Project
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := scanProject(tx.QueryRow(ctx, `update migration.project set active_run_id = $3, active_run_started_at = now()
+			where tenant_id = $1 and id = $2 and status = 'active'
+			and (active_run_id is null or active_run_started_at < now() - make_interval(secs => $4))
+			returning `+projectColumns, p.TenantID, projectID, runID, activeRunStale.Seconds()))
+		if err == nil {
+			out = cur
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var status string
+		var active *string
+		err = tx.QueryRow(ctx, `select status, active_run_id::text from migration.project where tenant_id = $1 and id = $2`, p.TenantID, projectID).Scan(&status, &active)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return projectNotFound()
+		case err != nil:
+			return err
+		case status == domain.ProjectArchived:
+			return ProjectArchived()
+		case active != nil:
+			return runActive(*active)
+		}
+		return errors.New("migration project claim matched no row for an unknown reason")
+	})
+	return out, err
+}
+
+// EndProjectRun releases the claim runID holds. It clears nothing when the claim has gone stale and another run has
+// taken it since, and releasing a project that holds no claim is not an error.
+func (s *Postgres) EndProjectRun(ctx context.Context, projectID, runID string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update migration.project set active_run_id = null, active_run_started_at = null
+			where tenant_id = $1 and id = $2 and active_run_id = $3`, p.TenantID, projectID, runID)
+		return err
+	})
+}
+
+func runActive(runID string) error {
+	return httpx.NewProblem(http.StatusConflict, CodeRunActive, "Run "+runID+" is already active for this project; wait for it to finish")
+}
+
+type memClaim struct {
+	runID string
+	at    time.Time
+}
+
 type memProjects struct {
-	mu    sync.Mutex
-	items []Project
-	byKey map[string]string
+	mu     sync.Mutex
+	items  []Project
+	byKey  map[string]string
+	active map[string]memClaim
+}
+
+func (m *Mem) BeginProjectRun(_ context.Context, projectID, runID string) (Project, error) {
+	st := m.pj()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	i := slices.IndexFunc(st.items, func(c Project) bool { return c.ID == projectID })
+	if i < 0 {
+		return Project{}, projectNotFound()
+	}
+	if st.items[i].Status == domain.ProjectArchived {
+		return Project{}, ProjectArchived()
+	}
+	if c, ok := st.active[projectID]; ok && time.Since(c.at) < activeRunStale {
+		return Project{}, runActive(c.runID)
+	}
+	if st.active == nil {
+		st.active = map[string]memClaim{}
+	}
+	st.active[projectID] = memClaim{runID: runID, at: time.Now()}
+	return st.items[i], nil
+}
+
+func (m *Mem) EndProjectRun(_ context.Context, projectID, runID string) error {
+	st := m.pj()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.active[projectID].runID == runID {
+		delete(st.active, projectID)
+	}
+	return nil
 }
 
 func (m *Mem) pj() *memProjects {

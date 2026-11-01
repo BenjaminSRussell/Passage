@@ -42,9 +42,10 @@ type MappingSpec struct {
 }
 
 type RunFilter struct {
-	Entity string
-	Status string
-	Limit  int
+	Entity    string
+	Status    string
+	ProjectID string
+	Limit     int
 }
 
 func clampLimit(n int) int {
@@ -65,6 +66,7 @@ type Run struct {
 	ParentRunID    string          `json:"parentRunId,omitempty"`
 	MappingSpecID  string          `json:"mappingSpecId,omitempty"`
 	DataTemplateID string          `json:"dataTemplateId,omitempty"`
+	ProjectID      string          `json:"projectId,omitempty"`
 	Report         domain.Report   `json:"report"`
 	CreatedAt      time.Time       `json:"createdAt"`
 }
@@ -74,6 +76,11 @@ type Store interface {
 	RunByKey(ctx context.Context, idempotencyKey string) (Run, bool, error)
 	GetRun(ctx context.Context, id string) (Run, error)
 	ListRuns(ctx context.Context, f RunFilter) ([]Run, error)
+	// BeginProjectRun claims a project for the run that will be saved as runID (BR-10.2): 404 for an unknown
+	// project, 409 MIG-PROJECT-ARCHIVED for an archived one and 409 MIG-RUN-ACTIVE, naming the other run, while
+	// another run holds a claim younger than the abandonment window. EndProjectRun releases runID's claim only.
+	BeginProjectRun(ctx context.Context, projectID, runID string) (Project, error)
+	EndProjectRun(ctx context.Context, projectID, runID string) error
 	// SaveMappingSpec stores an immutable mapping version. created is false when the same
 	// (entity, version) already holds the same checksum; a different checksum is a conflict.
 	SaveMappingSpec(ctx context.Context, spec MappingSpec, idempotencyKey string) (saved MappingSpec, created bool, err error)
@@ -121,12 +128,12 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 func (s *Postgres) Xref() domain.XrefStore { return pgXref{s.pool} }
 
-const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), coalesce(data_template_id::text, ''), report, created_at`
+const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), coalesce(data_template_id::text, ''), report, created_at, coalesce(project_id::text, '')`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var report []byte
-	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &r.DataTemplateID, &report, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &r.DataTemplateID, &report, &r.CreatedAt, &r.ProjectID); err != nil {
 		return Run{}, err
 	}
 	return r, json.Unmarshal(report, &r.Report)
@@ -134,7 +141,7 @@ func scanRun(row pgx.Row) (Run, error) {
 
 func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) (Run, error) {
 	p, _ := tenant.FromContext(ctx)
-	var key, parent, specID, templateID *string
+	var key, parent, specID, templateID, projectID *string
 	if idempotencyKey != "" {
 		key = &idempotencyKey
 	}
@@ -147,17 +154,22 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 	if run.DataTemplateID != "" {
 		templateID = &run.DataTemplateID
 	}
+	if run.ProjectID != "" {
+		projectID = &run.ProjectID
+	}
 	report, err := json.Marshal(run.Report)
 	if err != nil {
 		return Run{}, err
 	}
-	run.ID = ids.New()
+	if run.ID == "" {
+		run.ID = ids.New() // a project run arrives with the id its claim was taken under
+	}
 	replayed := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id, data_template_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id, data_template_id, project_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			on conflict (tenant_id, idempotency_key) do nothing`,
-			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID, templateID)
+			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID, templateID, projectID)
 		if err != nil {
 			return err
 		}
@@ -238,7 +250,8 @@ func (s *Postgres) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+runColumns+` from migration.run
 			where tenant_id = $1 and ($2 = '' or entity = $2) and ($3 = '' or status = $3)
-			order by created_at desc, id desc limit $4`, p.TenantID, f.Entity, f.Status, clampLimit(f.Limit))
+			and ($4 = '' or project_id = nullif($4, '')::uuid)
+			order by created_at desc, id desc limit $5`, p.TenantID, f.Entity, f.Status, f.ProjectID, clampLimit(f.Limit))
 		if err != nil {
 			return err
 		}
@@ -521,7 +534,10 @@ func (m *Mem) SaveRun(_ context.Context, run Run, idempotencyKey string) (Run, e
 	if id, ok := m.byKey[idempotencyKey]; ok && idempotencyKey != "" {
 		return m.find(id), nil
 	}
-	run.ID, run.CreatedAt = ids.New(), time.Now().UTC()
+	if run.ID == "" {
+		run.ID = ids.New()
+	}
+	run.CreatedAt = time.Now().UTC()
 	m.runs = append(m.runs, run)
 	if idempotencyKey != "" {
 		m.byKey[idempotencyKey] = run.ID
@@ -563,7 +579,7 @@ func (m *Mem) ListRuns(_ context.Context, f RunFilter) ([]Run, error) {
 	var out []Run
 	for i := len(m.runs) - 1; i >= 0 && len(out) < clampLimit(f.Limit); i-- {
 		r := m.runs[i]
-		if (f.Entity == "" || r.Entity == f.Entity) && (f.Status == "" || r.Report.Status == f.Status) {
+		if (f.Entity == "" || r.Entity == f.Entity) && (f.Status == "" || r.Report.Status == f.Status) && (f.ProjectID == "" || r.ProjectID == f.ProjectID) {
 			out = append(out, r)
 		}
 	}

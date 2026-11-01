@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { createRun, describeProblem, getRun, listLedger, listRuns, listSpecs, listTemplates, newKey, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
+import { createRun, describeProblem, getRun, listLedger, listProjects, listRuns, listSpecs, listTemplates, newKey, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
 import { formatDateTime, MODE_LABELS, MODES, RUN_STATUSES, SOURCE_LABELS, SOURCE_SYSTEMS } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -93,6 +93,8 @@ export function NewRunPage() {
   const [specId, setSpecId] = useState(search.get("spec") ?? "");
   const [templateId, setTemplateId] = useState("");
   const templates = useLoad((signal) => listTemplates(undefined, signal), "templates");
+  const [projectId, setProjectId] = useState(search.get("project") ?? "");
+  const projects = useLoad((signal) => listProjects({ projectType: "migrate", status: "active" }, signal), "run-projects");
   const [error, setError] = useState("");
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,6 +106,13 @@ export function NewRunPage() {
   const templateOptions = (Array.isArray(templates.data) ? templates.data : []).filter((t) => !chosenEntity || t.entity === chosenEntity);
   // A template chosen before the spec changed to another entity no longer applies, so it is dropped, not sent.
   const chosenTemplate = templateOptions.some((t) => t.id === templateId) ? templateId : "";
+  // Projects are optional, so a failed project load never blocks starting a run. A project fixes the source system.
+  const projectOptions = projects.data?.items ?? [];
+  const chosenProject = projectOptions.find((p) => p.id === projectId);
+  // A project named by the link but missing from the loaded list (the list failed, or it is past the first page) is
+  // still sent: dropping it would start the run outside the project the user came from. The service checks it.
+  const linkedOnly = projectId !== "" && !chosenProject && !projects.loading;
+  const effectiveSource = chosenProject?.sourceSystem ?? sourceSystem;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -115,7 +124,7 @@ export function NewRunPage() {
     setError("");
     setBusy(true);
     try {
-      const run = await createRun({ sourceSystem, mode, dryRun, mappingSpecId: specId, ...(chosenTemplate ? { dataTemplateId: chosenTemplate } : {}) }, key.current);
+      const run = await createRun({ sourceSystem: effectiveSource, mode, dryRun, mappingSpecId: specId, ...(chosenTemplate ? { dataTemplateId: chosenTemplate } : {}), ...(projectId ? { projectId } : {}) }, key.current);
       navigate(`/migration/runs/${run.id}`);
     } catch (e) {
       setFailure(describeProblem(e));
@@ -163,9 +172,32 @@ export function NewRunPage() {
                 </Select>
               )}
             </FormField>
-            <FormField id="run-source" label="Source system">
+            <FormField
+              id="run-project"
+              label="Project (optional)"
+              hint={
+                projects.error
+                  ? linkedOnly
+                    ? "Projects could not be loaded; the run starts under the project from the link."
+                    : "Projects could not be loaded; the run starts without one."
+                  : "Only one run can be active per project at a time."
+              }
+            >
               {(control) => (
-                <Select {...control} value={sourceSystem} onChange={(event) => setSourceSystem(event.target.value as MigrationRun["sourceSystem"])}>
+                <Select {...control} value={projects.loading ? "" : projectId} disabled={projects.loading} onChange={(event) => setProjectId(event.target.value)}>
+                  <option value="">No project</option>
+                  {linkedOnly ? <option value={projectId}>Project from the link</option> : null}
+                  {projectOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField id="run-source" label="Source system" hint={chosenProject ? "Set by the project." : undefined}>
+              {(control) => (
+                <Select {...control} value={effectiveSource} disabled={Boolean(chosenProject)} onChange={(event) => setSourceSystem(event.target.value as MigrationRun["sourceSystem"])}>
                   {SOURCE_SYSTEMS.map((s) => (
                     <option key={s} value={s}>
                       {SOURCE_LABELS[s]}
@@ -354,6 +386,11 @@ export function RunDetailPage() {
       {run.mappingSpecId ? (
         <p>
           Mapping <Link to={`/migration/specs/${run.mappingSpecId}`}>{run.entity} v{run.mappingVersion}</Link>.
+        </p>
+      ) : null}
+      {run.projectId ? (
+        <p>
+          Run under <Link to={`/migration/projects/${run.projectId}`}>its migration project</Link>.
         </p>
       ) : null}
       {run.dataTemplateId ? <TemplateLineage runId={run.id} templateId={run.dataTemplateId} /> : null}

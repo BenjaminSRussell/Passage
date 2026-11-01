@@ -44,6 +44,8 @@ export interface MigrationRun {
   mappingVersion: number;
   mappingSpecId?: string;
   dataTemplateId?: string;
+  /** The migrate project the run belongs to, when it was started under one. */
+  projectId?: string;
   parentRunId?: string;
   counts: { extracted: number; mapped: number; created: number; updated: number; unchanged: number; templated?: number; rejected: number; warned: number };
   rejects: { sourceKey: string; rejects: RowIssue[] }[];
@@ -97,6 +99,8 @@ export interface CreateRunInput {
   mappingSpecId: string;
   /** Omitted when no data template applies. */
   dataTemplateId?: string;
+  /** Omitted for a run outside any project; a project allows one active run at a time (BR-10.2). */
+  projectId?: string;
 }
 
 export function newKey(): string {
@@ -133,7 +137,7 @@ function query(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-export const listRuns = (filter: { entity?: string; status?: string }, signal?: AbortSignal) =>
+export const listRuns = (filter: { entity?: string; status?: string; projectId?: string }, signal?: AbortSignal) =>
   items<MigrationRun>(`/migration-runs${query(filter)}`, signal);
 
 export const getRun = (id: string, signal?: AbortSignal) => send<MigrationRun>(`/migration-runs/${encodeURIComponent(id)}`, {}, signal);

@@ -10,11 +10,12 @@ paths:
     get:
       operationId: listMigrationRuns
       summary: List migration runs
-      description: Newest first, optionally filtered by entity and status. Callers must be tenant-wide.
+      description: Newest first, optionally filtered by entity, status and project. Callers must be tenant-wide.
       x-passage-duty: migration.run
       parameters:
         - { name: entity, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string, enum: [succeeded, partial, failed] } }
+        - { name: projectId, in: query, description: Only runs started under this migration project., schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
@@ -40,8 +41,11 @@ paths:
         '501':
           description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-RUN-ACTIVE, another run holds the project (one active run per project, BR-10.2); the detail names that run's id, which the run is recorded under when it finishes (GET answers 404 until then), and a claim older than 40 minutes counts as abandoned; MIG-PROJECT-ARCHIVED, the project is archived. No backend is called for an archived project and the run is not recorded.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request. No backend is called.
+          description: MIG-PROJECT-UNKNOWN, projectId names no migration project; MIG-PROJECT-NOT-MIGRATE, only a migrate project takes runs; MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request. No backend is called.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-runs/{id}:
@@ -72,6 +76,9 @@ paths:
           headers:
             Location: { schema: { type: string } }
           content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRunAccepted' } } }
+        '409':
+          description: MIG-RUN-ACTIVE, the original run's project already has a run executing (the detail names it); MIG-PROJECT-ARCHIVED, the project is archived.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/mapping-specs:
     get:
@@ -483,6 +490,7 @@ components:
         mapping: { type: object, description: Mapping DSL document with entity, version and fields. }
         mappingSpecId: { type: string, format: uuid, description: A published mapping spec to run instead of an inline mapping. }
         dataTemplateId: { type: string, format: uuid, description: A published data template whose defaults fill absent source fields before mapping. It must be for the mapping's entity and default only mapping targets filled from a source column. }
+        projectId: { type: string, format: uuid, description: A migrate project to run under. Its source system must equal sourceSystem, it must be active, and only one run per project executes at a time (409 MIG-RUN-ACTIVE). Omit for a run outside any project. }
     MigrationRunAccepted:
       type: object
       required: [jobId, statusUrl, estimatedCompletionSeconds, run]
@@ -505,6 +513,7 @@ components:
         parentRunId: { type: string, format: uuid }
         mappingSpecId: { type: string, format: uuid }
         dataTemplateId: { type: string, format: uuid, description: The data template the run applied, kept on re-runs. }
+        projectId: { type: string, format: uuid, description: The migrate project the run belongs to, kept on re-runs. }
         counts:
           type: object
           required: [extracted, mapped, created, updated, unchanged, templated, rejected, warned]
