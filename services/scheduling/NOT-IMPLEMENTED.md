@@ -242,6 +242,28 @@ those jobs are not moved automatically, the planner moves them or runs the
 schedule again. Until then every Gantt bar that lies outside its resource's
 open capacity, calendar and overrides applied, carries `outsideCapacity`
 (SCHED-0002) and the workspace outlines it and badges it in the jobs table.
+EAM downtime (PSG-44, #44 AC4): `scheduling consume` reads
+`dev.passage.eam.downtime.recorded.v1` from `passage.eam.downtime` (the
+`outbox-eam` connector in `deploy/kafka/connect.yaml`) and books a `downtime`
+override on the resource named by the event, through the same store call as
+the route. It runs as `service:scheduling-downtime` (`tenant.ServicePrincipal`;
+duty table `service_principals` in `policies/authz/data.json`, holding only
+`scheduling.downtime.apply`, which is also seeded for the one overrides POST
+route). The tenant comes from the event; the resource is read under that
+tenant's RLS, so a resource of another tenant or an unknown one is not found
+and the event is dead-lettered to `passage.eam.downtime.dlq` at once (so are
+bad data and a window over 31 days). Scheduling has no legal-entity column,
+so there is no legal-entity check beyond the tenant. Idempotent twice over:
+the `consumer_inbox` row for the event id (migration `0010`) and the override
+idempotency key `eam-downtime:{downtimeId}`, so a republished event with a new
+id books nothing more. The window is widened to whole minutes (start down, end
+up). Booked jobs the window overlaps are listed in the log and the
+`capacityoverride.created` event, not moved, as for the route. EAM's resource
+id must be a scheduling resource id. Deploy: `consumer.enabled` in the chart, a
+`KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`)
+whose secret (key `password`, plus the cluster CA as `ca.crt`) must be copied
+into the release namespace. Not built: planned downtime of RELEASED work
+orders (EAM D3) and a downtime longer than 31 days (parked, not split).
 Web: capacity overrides list
 (by resource, remove) and create form (UTC times, reason, affected jobs shown
 after saving), linked from the resource detail screen and the navigation. The

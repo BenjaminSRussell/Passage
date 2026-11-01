@@ -67,7 +67,7 @@ work outside the owned paths).
 | AC-44.2 | built | `TestPlans40_SimulatedYear` (store): the 40 plans of `testdata/eam-plans-40` (10 each of TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER on 14 counters) run 365 simulated days through the database; all 474 generated work orders (when generated, due date, due reading) and every line's final state equal `reference_plans.py` (python3 -I, exact rationals) within 0 days / 0 units. The fixture found the month-end bug fixed with `TestAddInterval_MonthEnd`: Jan 31 + 1 month was Mar 3, not Feb 28 (32/40 plans matched before the fix). Shift factors, merge window and release tolerance (BR-44.1 (a), (e), (f)) are not built, so the fixture does not use them. |
 | AC-44.3 | partial (GL: handoff to ledger) | `TestWorkOrderCost50_ReconcilesAssetKPIAndEvents`: order 1 is 350.00 parts + 8 h at 45.00 = 710.00, and over 50 orders the asset cost history, the cost KPI and the `workorder.completed` events reconcile to the reference. The GL posting to the maintenance expense account is not built; parts are written on the order because wave-16 part issue is not built. |
 | AC-44.4 | partial | Breach creates one request in the reading transaction and dedupes while it is open and within the cooldown (store tests). `TestIoTStream_BreachToRequestLatency` measures ingest to request + outbox event at 10 readings/s on a local stack (p95 well under 5 s); production latency through the wave-25 bridge is not measured. |
-| AC-44.5 | handoff (wave 23) | Slice 2 records downtime windows on the production resource and emits `downtime.recorded` in the same transaction (`TestDowntime_BR445`). Zeroing M-12's capacity is wave 23's consumer; planned downtime of RELEASED orders is not built (D3). |
+| AC-44.5 | handoff (wave 23) | Slice 2 records downtime windows on the production resource and emits `downtime.recorded` in the same transaction (`TestDowntime_BR445`). Wave 23's consumer is built (`scheduling consume`, #44): it books a downtime capacity override for the window; planned downtime of RELEASED orders is not built (D3). |
 | AC-44.6 | built | Store test: EAM-CTR-001. |
 | AC-44.7 | later slice of PSG-44 | Needs checklists. |
 | AC-44.8 | built | Domain test and store test (`TestAssetKPI_AC448`): MTBF of 900 h for 3 failures in 2,700 h of uptime. |
@@ -82,7 +82,7 @@ work outside the owned paths).
 
 Ticket acceptance criteria: AC1 built (AC-44.2 above). AC2 partial: the asset side
 reconciles, the GL posting is a ledger handoff (see D3 above).
-AC3 partial: met on a local stack, production latency open (see D4). AC4 handoff (wave 23 consumes `downtime.recorded`; see AC-44.5). AC5 satisfied by this file. AC6
+AC3 partial: met on a local stack, production latency open (see D4). AC4 built: scheduling consumes `downtime.recorded` from `passage.eam.downtime` (see AC-44.5); EAM's outbox is relayed by the `outbox-eam` Debezium connector. AC5 satisfied by this file. AC6
 satisfied for the Go module; the web checks pass.
 
 ## Other gaps in slice 1

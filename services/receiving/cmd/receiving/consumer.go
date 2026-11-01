@@ -2,14 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -25,43 +19,7 @@ const (
 )
 
 func kafkaConfig(getenv func(string) string) (kafka.Config, error) {
-	brokers := strings.FieldsFunc(getenv("KAFKA_BROKERS"), func(r rune) bool { return r == ',' || r == ' ' })
-	if len(brokers) == 0 {
-		return kafka.Config{}, errors.New("KAFKA_BROKERS is required")
-	}
-	cfg := kafka.Config{
-		Brokers: brokers, Group: addrOr(getenv("KAFKA_GROUP"), defaultConsumerGroup), Topics: []string{api.ReceiptPostedTopic},
-		ClientID: "receiving-ers", Username: getenv("KAFKA_USERNAME"), Password: getenv("KAFKA_PASSWORD"),
-	}
-	if file := getenv("KAFKA_PASSWORD_FILE"); file != "" {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			return kafka.Config{}, fmt.Errorf("read KAFKA_PASSWORD_FILE: %w", err)
-		}
-		cfg.Password = strings.TrimSpace(string(raw))
-	}
-	if cfg.Username != "" && cfg.Password == "" {
-		return kafka.Config{}, errors.New("KAFKA_USERNAME needs KAFKA_PASSWORD or KAFKA_PASSWORD_FILE")
-	}
-	if ca := getenv("KAFKA_TLS_CA_FILE"); ca != "" {
-		pem, err := os.ReadFile(ca)
-		if err != nil {
-			return kafka.Config{}, fmt.Errorf("read KAFKA_TLS_CA_FILE: %w", err)
-		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(pem) {
-			return kafka.Config{}, errors.New("KAFKA_TLS_CA_FILE holds no certificate")
-		}
-		cfg.TLS = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
-	}
-	return cfg, nil
-}
-
-func addrOr(value, fallback string) string {
-	if value != "" {
-		return value
-	}
-	return fallback
+	return kafka.ConfigFromEnv(getenv, defaultConsumerGroup, "receiving-ers", []string{api.ReceiptPostedTopic})
 }
 
 func runConsumer(ctx context.Context, getenv func(string) string, a *api.API, pool *pgxpool.Pool) error {

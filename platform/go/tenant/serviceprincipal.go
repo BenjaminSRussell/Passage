@@ -18,7 +18,8 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // duties listed. policies/authz/data.json "service_principals" mirrors it and a
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
-	"receiving-ers": {"VendorInvoicePost"},
+	"receiving-ers":       {"VendorInvoicePost"},
+	"scheduling-downtime": {"scheduling.downtime.apply"},
 }
 
 func ServicePrincipalTable() map[string][]string {
