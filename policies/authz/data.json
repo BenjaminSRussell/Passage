@@ -637,10 +637,15 @@
       {"resource": "/v1/consol/ic-differences:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/profit-in-inventory:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/reclassification-runs:preview", "methods": ["POST"]},
+      {"resource": "/v1/consol/runs", "methods": ["POST"]},
       {"resource": "/v1/consol/translations:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/validations:preview", "methods": ["POST"]}
     ]},
-    "ConsolidationView": {"flag": true, "permissions": []},
+    "ConsolidationView": {"permissions": [
+      {"resource": "/v1/consol/runs", "methods": ["GET"]},
+      {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
+    ]},
     "CopilotUse": {"permissions": [
       {"resource": "/api/v1/copilot/chat", "methods": ["POST"]},
       {"resource": "/api/v1/knowledge/search", "methods": ["POST"]},

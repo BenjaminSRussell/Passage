@@ -33,7 +33,7 @@ func runErrors(t *testing.T, path string, cases []errCase) {
 	t.Helper()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(api.New(), path, tenantID, c.duties, c.body)
+			rec := do(api.New(nil), path, tenantID, c.duties, c.body)
 			var p problemBody
 			_ = json.Unmarshal(rec.Body.Bytes(), &p)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
@@ -64,7 +64,7 @@ const profitBody = `{"currency":"EUR","sellerMarginPct":"10","layers":[
 ]}`
 
 func TestPreviewProfitInInventory_AC4012(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	only := `{"currency":"EUR","layers":[{"id":"RCPT-0042","quantity":"40","legalUnitCost":"120.00","groupUnitCost":"100.00"}]}`
 	got := decode[struct {
 		Layers        []struct{ ID, Basis, Profit string }
@@ -110,7 +110,7 @@ func TestPreviewEquityMethod_AC4014(t *testing.T) {
 		ShareOfProfit, UnrecognizedLoss, ClosingCarrying string
 		Entries                                          []entryOut
 		Balanced                                         bool
-	}](t, do(api.New(), equityPath, tenantID, api.DutyRun, equityBody))
+	}](t, do(api.New(nil), equityPath, tenantID, api.DutyRun, equityBody))
 	if got.ShareOfProfit != "60000.00" || got.ClosingCarrying != "340000.00" || got.UnrecognizedLoss != "0.00" || !got.Balanced {
 		t.Fatalf("equity method = %+v", got)
 	}
@@ -141,7 +141,7 @@ func TestPreviewEquityMethod_Errors(t *testing.T) {
 
 func TestPreviewDivestiture(t *testing.T) {
 	body := `{"currency":"USD","proceeds":"500000","netAssetsCarrying":"300000","goodwill":"50000","nciCarrying":"20000","ctaRecycled":"10000"}`
-	got := decode[struct{ CarryingAmount, Gain string }](t, do(api.New(), divestPath, tenantID, api.DutyRun, body))
+	got := decode[struct{ CarryingAmount, Gain string }](t, do(api.New(nil), divestPath, tenantID, api.DutyRun, body))
 	// 500,000 − (300,000 + 50,000 − 20,000) + 10,000 = 180,000.
 	if got.CarryingAmount != "330000.00" || got.Gain != "180000.00" {
 		t.Fatalf("divestiture = %+v", got)
@@ -158,7 +158,7 @@ const icDiffBody = `{"currency":"USD","pairs":[
 ]}`
 
 func TestPreviewICDifferences_BR4015(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	got := decode[struct {
 		Threshold, TaskStatus string
 		Pairs                 []struct {
@@ -222,7 +222,7 @@ type validationOut struct {
 }
 
 func TestPreviewValidation_AC4015(t *testing.T) {
-	got := decode[validationOut](t, do(api.New(), validationsPath, tenantID, api.DutyRun, validationBody))
+	got := decode[validationOut](t, do(api.New(nil), validationsPath, tenantID, api.DutyRun, validationBody))
 	if got.GroupTranslation != "Blocked" || len(got.Units) != 2 {
 		t.Fatalf("response = %+v; want group translation Blocked", got)
 	}
@@ -235,7 +235,7 @@ func TestPreviewValidation_AC4015(t *testing.T) {
 	}
 
 	fixed := strings.Replace(validationBody, `"1012.00"`, `"1000.00"`, 1)
-	got = decode[validationOut](t, do(api.New(), validationsPath, tenantID, api.DutyRun, fixed))
+	got = decode[validationOut](t, do(api.New(nil), validationsPath, tenantID, api.DutyRun, fixed))
 	if got.GroupTranslation != "NotStarted" || got.Units[0].Status != "Completed" {
 		t.Fatalf("balanced group = %+v; a warning must not block translation", got)
 	}

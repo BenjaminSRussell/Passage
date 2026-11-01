@@ -1,4 +1,4 @@
-# consolidation (wave 40, PSG-40, slices 1-3)
+# consolidation (wave 40, PSG-40, slices 1-3 and stored runs)
 
 Financial consolidation of a legal-entity group: IAS 21 translation with CTA,
 the elimination entries E1–E6 with the non-controlling interest (NCI) share,
@@ -69,6 +69,29 @@ web page. Still nothing is stored, posted or published.
 | Group journal check `POST /v1/consol/group-journals:preview` (duty `ConsolidationJournal`; CNS-0909 is a warning because nothing is posted) | `internal/api/slice3.go` | built, tests |
 | Web pages: `/consolidation/dividends`, `/consolidation/reclassification`, `/consolidation/group-journals` | `apps/web/src/modules/consolidation` | built, vitest |
 
+## Stored runs (wave 40 AC4)
+
+A run computes the IAS 21 translation and the E1–E5 eliminations of each
+subsidiary unit of a group with the rules above, derives the group statements
+from them and stores everything. Rules and rates are not changed by storing:
+the IAS 21 treatment of the eliminations is an open accountant question
+(issue 349) and the run keeps what the engine produces.
+
+| Area | Code | Status |
+|---|---|---|
+| `POST /v1/consol/runs` (duty `ConsolidationRun`, `Idempotency-Key` required): run header (group, period, currency, version, status `completed`, inputs hash, `created_by`), unit balances, eliminations and statement lines inserted in one transaction | `internal/store`, `internal/api/runs.go` | built, tests |
+| `GET /v1/consol/runs` (filter `groupId`, `period`, newest first, cursor), `GET /v1/consol/runs/{id}` (balances and eliminations), `GET /v1/consol/runs/{id}/statements` (duty `ConsolidationView`) | `internal/api/runs.go` | built, tests |
+| Rerun of a group, period and currency is the next version; stored rows are never updated or deleted (triggers raise 55000; `passage_app` has INSERT and SELECT only) | `migrations/0001_runs.sql`, `0002_grants.sql` | built, tests |
+| Event `dev.passage.consol.run.completed.v1` through the outbox in the run's transaction | `internal/events` | built, test |
+| Row-level security on the tenant GUC `passage.tenant_id` (the same scope the service has today); the group is a column and a filter, not a legal-entity policy, because a group spans legal entities | `migrations/0001_runs.sql` | built, tests as `passage_app` |
+
+Statement lines (group currency): `net_assets` has the opening and closing net
+assets, unit net income, CTA and its NCI and group shares; `income` has unit
+net income, the E3 unrealized-profit adjustment, consolidated net income, NCI
+profit (E5 less the E3 NCI share) and the profit attributable to owners. These
+are a first derivation from the engine entries, not an accountant-reviewed
+statement layout; the wave-15 designer renders printed statements.
+
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -77,22 +100,26 @@ Remaining deliverables and acceptance criteria are listed in
 ```
 cd services/consolidation
 go run ./cmd/consolidation         # HTTP_ADDR defaults to :8080
-go test ./...                      # no database needed
+go test ./...                      # database tests skip without PASSAGE_TEST_DATABASE_URL
+                                   # (RLS and grant tests also need PASSAGE_TEST_APP_DATABASE_URL)
 go vet ./...
 ```
 
-The service reads only `HTTP_ADDR` and `ADMIN_ADDR` (default `:9090`,
-serving `/metrics`) in these slices. `DATABASE_URL` and the
-migrator URL are wired when the store slice lands.
+The service needs `DATABASE_URL` and reads `HTTP_ADDR`, `ADMIN_ADDR`
+(default `:9090`, serving `/metrics`) and `MIGRATE_ON_START=true` (dev only;
+stage and prod apply `migrations/` before the rollout).
 
 ## Layout
 
 ```
-cmd/consolidation/       entrypoint (JSON slog, router, serve)
+cmd/consolidation/       entrypoint (JSON slog, database, router, serve)
 internal/domain/         pure rules, no I/O
 internal/api/            HTTP handlers and DTOs
+internal/store/          Postgres runs, idempotency keys and outbox
+internal/events/         event types and payloads
+migrations/              SQL migrations (runs, grants)
 api/openapi.yaml         OpenAPI 3.1 for every exposed endpoint
-events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 to 3)
+events/asyncapi.yaml     AsyncAPI 3 (consol.run.completed)
 charts/consolidation/    Helm chart
 ```
 
@@ -110,13 +137,14 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | CNS-0908 | Group cost unknown for some layers; margin fallback used (warning in the profit-in-inventory preview) |
 | CNS-0909 | Top-side journal at or above the approval threshold needs approval (warning in the group journal check) |
 | CNS-0910 | Move from an existing equity interest to control is a step acquisition, not supported (domain guard) |
+| CNS-0921 / CNS-0922 | No run with that id for the tenant (404) / Idempotency-Key reused with different inputs (409). Not in the PRD catalog; proposed for the catalog owner |
 | AUTH-0001 / AUTH-0003 | Missing tenant / missing duty |
 | CNS-0920 | Bargain purchase: investment cost below the subsidiary's net assets at acquisition. Not in the PRD catalog; proposed for the catalog owner |
 
 ## Dependencies
 
-Only the platform module and what it already pulls in (chi, shopspring/decimal,
-pgregory.net/rapid for tests).
+The platform module, chi, shopspring/decimal and pgx (already used by the
+other stored services).
 
 ## Wave reference
 

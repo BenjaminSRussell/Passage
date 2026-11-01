@@ -1,13 +1,37 @@
 asyncapi: 3.0.0
 info:
   title: Passage Consolidation events
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Wave 40, slice 1 publishes no events: the elimination and translation
-    previews change no state. dev.passage.consol.run.completed.v1, unit.released.v1 and
-    validation.failed.v1 (PRD 7.40.5) arrive with the run and monitor slices,
-    each with its schema in this file.
-channels: {}
-operations: {}
+    Events published by the consolidation service through the outbox, in the
+    same transaction as the state change. CloudEvents 1.0 envelope from
+    platform/go/events; source /passage/consolidation. The payload below is the
+    data member. unit.released.v1 and validation.failed.v1 (PRD 7.40.5) arrive
+    with the monitor slice.
+defaultContentType: application/cloudevents+json
+channels:
+  runCompleted:
+    address: passage.consol.run
+    messages:
+      runCompleted:
+        $ref: "#/components/messages/RunCompleted"
+operations:
+  publishRunCompleted:
+    action: send
+    channel: { $ref: "#/channels/runCompleted" }
 components:
-  messages: {}
+  messages:
+    RunCompleted:
+      name: dev.passage.consol.run.completed.v1
+      title: Consolidation run stored (FR-40.10)
+      payload:
+        type: object
+        required: [runId, groupId, period, version, unitCount, eliminationCount, ctaAmount]
+        properties:
+          runId: { type: string, format: uuid }
+          groupId: { type: string }
+          period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+          version: { type: integer, minimum: 1, description: Per group, period and currency; a rerun is the next version }
+          unitCount: { type: integer, minimum: 1 }
+          eliminationCount: { type: integer, minimum: 0 }
+          ctaAmount: { type: string, description: Sum of the unit CTA in group currency, a decimal }

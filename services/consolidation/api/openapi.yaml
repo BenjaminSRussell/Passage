@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage Consolidation
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Wave 40, slices 1 to 3. Stateless consolidation calculators: the E1–E5
     elimination entries for one parent and subsidiary and the E6 dividend
@@ -11,8 +11,9 @@ info:
     gain (FR-40.18), the two-sided IC elimination with threshold (BR-40.15),
     the unit validation rules with the monitor gate (FR-40.20), the
     reclassification dry run (FR-40.17, BR-40.14) and the top-side group
-    journal check (FR-40.19, BR-40.18). Nothing is stored. Groups, collection,
-    runs, consolidated trial balances, posted reclassifications, posted
+    journal check (FR-40.19, BR-40.18). The previews store nothing. Runs are
+    stored (start, list, get, statements). Groups, collection,
+    consolidated trial balances over collected data, posted reclassifications, posted
     top-side journals and the stored monitor are later slices of PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
     /api/v1/consol/..., which rewrites to these paths and sets the tenant and
     duty headers.
@@ -316,6 +317,134 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /v1/consol/runs:
+    post:
+      operationId: startConsolidationRun
+      summary: Compute and store a consolidation run for a group, period and currency (FR-40.10)
+      description: |
+        Translates every unit under IAS 21 and builds its E1–E5 eliminations
+        with the same rules as the previews, then stores the header, the unit
+        balances, the eliminations and the statements in one transaction. A run
+        is immutable. A second run for the same group, period and currency is
+        the next version; nothing is overwritten. The IAS 21 treatment of the
+        eliminations is an open accountant question (issue 349) and the run
+        stores what the engine produces. Publishes
+        dev.passage.consol.run.completed.v1 through the outbox.
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRunRequest'
+      responses:
+        '201':
+          description: The stored run, or the stored response of an earlier request with the same Idempotency-Key (Idempotent-Replayed true)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: CNS-0922 the Idempotency-Key was used with different inputs
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: CNS-0920 bargain purchase, CNS-0903 an unbalanced rule
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      operationId: listConsolidationRuns
+      summary: List the tenant's runs, newest first (FR-40.10)
+      x-passage-duty: ConsolidationView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: groupId, in: query, schema: { type: string } }
+        - { name: period, in: query, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+        - { name: after, in: query, description: nextCursor of the previous page, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/runs/{id}:
+    get:
+      operationId: getConsolidationRun
+      summary: One run with its unit balances and eliminations (FR-40.11)
+      x-passage-duty: ConsolidationView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The stored run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: CNS-0921 no run with this id for the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/consol/runs/{id}/statements:
+    get:
+      operationId: getConsolidationRunStatements
+      summary: The statements of one run (FR-40.11)
+      x-passage-duty: ConsolidationView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The net assets and income statements of the run, in group currency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatements'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: CNS-0921 no run with this id for the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /healthz:
     get:
       operationId: healthz
@@ -347,6 +476,21 @@ components:
       description: Set by the gateway; comma-separated duties of the caller
       schema:
         type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client key, at most 255 characters; a retry with the same key and inputs replays the stored response for the tenant
+      schema:
+        type: string
+        maxLength: 255
+    RunID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Problem:
       description: RFC 9457 problem details (COM-0001 validation, AUTH-0001 no tenant, AUTH-0003 missing duty)
@@ -783,3 +927,90 @@ components:
         errors:
           type: object
           additionalProperties: { type: string }
+    StartRunRequest:
+      type: object
+      additionalProperties: false
+      required: [groupId, period, currency, units]
+      properties:
+        groupId: { type: string, minLength: 1, maxLength: 64 }
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        units:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            allOf:
+              - $ref: '#/components/schemas/EliminationRequest'
+            type: object
+            required: [id, openingNetAssets, closingNetAssets]
+            description: Each unit takes the elimination inputs; rates.opening is required, currency defaults to the group currency and must equal it, and netIncome is the unit's net income for translation
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              openingNetAssets: { $ref: '#/components/schemas/Decimal' }
+              closingNetAssets: { $ref: '#/components/schemas/Decimal' }
+    Run:
+      type: object
+      required: [id, groupId, period, currency, version, status, inputsHash, createdBy, unitCount, eliminationCount, ctaAmount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string }
+        period: { type: string }
+        currency: { type: string }
+        version: { type: integer, minimum: 1, description: Per group, period and currency }
+        status: { type: string, enum: [completed] }
+        inputsHash: { type: string, description: SHA-256 of the run inputs }
+        createdBy: { type: string }
+        unitCount: { type: integer }
+        eliminationCount: { type: integer }
+        ctaAmount: { $ref: '#/components/schemas/Decimal', description: Sum of the unit CTA in group currency }
+        createdAt: { type: string, format: date-time }
+    RunList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Run' }
+        nextCursor: { type: string, format: uuid }
+    RunDetail:
+      allOf:
+        - $ref: '#/components/schemas/Run'
+        - type: object
+          required: [balances, eliminations]
+          properties:
+            balances:
+              type: array
+              items:
+                type: object
+                required: [unit, account, amount]
+                properties:
+                  unit: { type: string }
+                  account: { type: string, enum: [OPENING_NET_ASSETS, NET_INCOME, CTA, CLOSING_NET_ASSETS, CTA_NCI_SHARE, CTA_GROUP_SHARE] }
+                  amount: { $ref: '#/components/schemas/Decimal' }
+            eliminations:
+              type: array
+              items:
+                type: object
+                required: [unit, rule, account, debit, credit]
+                properties:
+                  unit: { type: string }
+                  rule: { type: string, enum: [E1, E2, E3, E4, E5] }
+                  account: { type: string }
+                  debit: { $ref: '#/components/schemas/Decimal' }
+                  credit: { $ref: '#/components/schemas/Decimal' }
+    RunStatements:
+      allOf:
+        - $ref: '#/components/schemas/Run'
+        - type: object
+          required: [statements]
+          properties:
+            statements:
+              type: array
+              items:
+                type: object
+                required: [statement, line, amount]
+                properties:
+                  statement: { type: string, enum: [net_assets, income] }
+                  line: { type: string }
+                  amount: { $ref: '#/components/schemas/Decimal' }

@@ -25,6 +25,8 @@ const (
 	CodeGroupCostUnknown = "CNS-0908"
 	CodeChangeOfControl  = "CNS-0910"
 	CodeBargainPurchase  = "CNS-0920"
+	CodeRunNotFound      = "CNS-0921"
+	CodeIdempotencyReuse = "CNS-0922"
 )
 
 func invalid(detail string) error { return &Error{Code: CodeInvalid, Detail: detail} }
