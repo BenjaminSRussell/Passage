@@ -489,11 +489,16 @@ func (s *Postgres) SubmitBatch(ctx context.Context, id string, version int, toda
 		if err != nil {
 			return err
 		}
+		lines, _, splitViol, err := applySplitting(ctx, tx, p.TenantID, ledger, accounts, in.Source.Type, lines)
+		if err != nil {
+			return err
+		}
 		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), lines)
 		if err != nil {
 			return err
 		}
 		res := domain.ValidateEntry(rules, accounts, in.PostingDate, today, lines)
+		res.Violations = append(res.Violations, splitViol...)
 		outcome, err := applyValidationRules(ctx, tx, p.TenantID, ledger, in, accounts, lines)
 		if err != nil {
 			return err

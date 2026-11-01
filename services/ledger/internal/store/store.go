@@ -103,6 +103,9 @@ type Store interface {
 	ListValidationRules(ctx context.Context, ledgerID string) ([]domain.ValidationRule, error)
 	GetValidationRule(ctx context.Context, ledgerID, id string) (domain.ValidationRule, error)
 	PutValidationRule(ctx context.Context, ledgerID, id string, lockVersion int, in domain.ValidationRule) (domain.ValidationRule, bool, error)
+	ListSplittingRules(ctx context.Context, ledgerID string) ([]domain.SplittingRule, error)
+	GetSplittingRule(ctx context.Context, ledgerID, id string) (domain.SplittingRule, error)
+	PutSplittingRule(ctx context.Context, ledgerID, id string, version int, in domain.SplittingRule) (domain.SplittingRule, bool, error)
 	Ping(ctx context.Context) error
 }
 

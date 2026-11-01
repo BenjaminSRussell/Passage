@@ -143,6 +143,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerAutoClearing(r)
 		a.registerDerivation(r)
 		a.registerValidationRules(r)
+		a.registerSplitting(r)
 	})
 }
 
@@ -709,6 +710,8 @@ type validateResponse struct {
 	Currency string             `json:"currency"`
 	Debit    string             `json:"debit"`
 	Credit   string             `json:"credit"`
+	// Splitting lists the lines document splitting changed or created (FR-11.23).
+	Splitting []domain.SplitTrace `json:"splitting"`
 }
 
 // validateEntry is the dry run: every violation in one response, no writes.
@@ -741,6 +744,7 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 	if out.Warnings == nil {
 		out.Warnings = []domain.Violation{}
 	}
+	out.Splitting = append([]domain.SplitTrace{}, res.Splitting...)
 	for _, l := range res.Lines {
 		out.Lines = append(out.Lines, validatedLine{Index: l.Index, Account: l.Account.Number, DisplayName: l.DisplayName,
 			DimensionCombinationID: hex.EncodeToString(l.CombinationID), Dimensions: l.Dimensions,

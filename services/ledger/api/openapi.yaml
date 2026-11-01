@@ -406,6 +406,10 @@ components:
         currency: { type: string }
         debit: { type: string }
         credit: { type: string }
+        splitting:
+          type: array
+          items: { $ref: "#/components/schemas/SplitTrace" }
+          description: Lines document splitting changed or created (FR-11.23); empty when no rule applies
     TrialBalance:
       type: object
       properties:
@@ -1062,6 +1066,38 @@ components:
         lockVersion: { type: integer, description: Optimistic-concurrency counter, also the ETag }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    SplittingRuleBody:
+      type: object
+      required: [sourceType, splittingDimensions, active]
+      properties:
+        sourceType: { type: string, minLength: 1, maxLength: 60, description: The source type of the entries the rule applies to, for example vendor_invoice }
+        splittingDimensions: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: Dimension attributes of the ledger that lines inherit }
+        zeroBalanceClearingAccount: { type: string, description: "Postable balance-sheet account (asset, liability or equity, not a reconciliation account) that takes the zero-balance clearing lines; required for entries whose splitting keys do not net to zero" }
+        defaultSplittingValue: { type: object, additionalProperties: { type: string }, description: Value per splitting dimension for lines when no line carries one }
+        active: { type: boolean, description: An inactive rule is kept but not applied }
+    SplittingRule:
+      type: object
+      required: [id, ledgerId, sourceType, splittingDimensions, defaultSplittingValue, active, version]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        sourceType: { type: string }
+        splittingDimensions: { type: array, items: { type: string } }
+        zeroBalanceClearingAccount: { type: string }
+        defaultSplittingValue: { type: object, additionalProperties: { type: string } }
+        active: { type: boolean }
+        version: { type: integer, description: Counts replacements; also the ETag }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SplitTrace:
+      type: object
+      required: [lineIndex, sourceIndex, kind, dimensions, amount]
+      properties:
+        lineIndex: { type: integer, description: Index of the line after splitting; the first part of a split line keeps its original index }
+        sourceIndex: { type: integer, description: Index of the requested line it came from; -1 for a clearing line }
+        kind: { type: string, enum: [inherited, default, clearing], description: inherited from carrying lines, set from the default value, or a zero-balance clearing line }
+        dimensions: { type: object, additionalProperties: { type: string }, description: The splitting dimension values the line received }
+        amount: { type: string, description: Decimal string in the ledger currency }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -1114,6 +1150,8 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     ValidationRuleProblem409:
       description: LEDGER_VALIDATION_RULE_NAME_DUPLICATE (the name is used by another rule of the ledger) or LEDGER_VALIDATION_RULE_LIMIT (a ledger has at most 200 rules)
+    SplittingProblem409:
+      description: LEDGER_SPLITTING_RULE_DUPLICATE, a rule for this source type already exists on the ledger
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1182,6 +1220,9 @@ components:
       schema: { type: string, example: '"2"' }
     LookupETag:
       description: The lookup table version as an entity tag, for If-Match on the next replacement
+      schema: { type: string, example: '"2"' }
+    SplittingETag:
+      description: The splitting rule version as an entity tag, for If-Match on the next replacement
       schema: { type: string, example: '"2"' }
     StrategyETag:
       description: The derivation strategy lockVersion as an entity tag, for If-Match on the next change
@@ -3247,6 +3288,104 @@ paths:
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/splitting-rules:
+    get:
+      tags: [derivation]
+      operationId: listSplittingRules
+      summary: List the document splitting rules of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Splitting rules by source type (FR-11.23).
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The splitting rules of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SplittingRule" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/splitting-rules/{id}:
+    get:
+      tags: [derivation]
+      operationId: getSplittingRule
+      summary: Get a document splitting rule
+      x-passage-duty: ledger.journal.read
+      description: One splitting rule; its version is in the ETag header.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The splitting rule
+          headers:
+            ETag: { $ref: "#/components/headers/SplittingETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SplittingRule" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [derivation]
+      operationId: putSplittingRule
+      summary: Create or replace a document splitting rule
+      x-passage-duty: ledger.rules.write
+      description: |
+        Document splitting (FR-11.23, BR-11.15) for entries of one source type. Lines that carry none of
+        the splitting dimensions inherit them from the carrying lines in proportion to the carrying lines'
+        absolute net amounts per dimension tuple, rounded to the currency's minor units so the parts add up
+        to the line (the units left by rounding go to the largest remainders); a line that carries only some of the dimensions takes the rest from
+        defaultSplittingValue (LEDGER_SPLIT_NO_SOURCE when there is none). Zero-balance clearing lines on
+        zeroBalanceClearingAccount then make every dimension tuple net to zero
+        (LEDGER_SPLIT_CLEARING_ACCOUNT_MISSING when one is needed and none is set). Splitting runs after
+        derivation and before account, structure and validation-rule checks, only on entries that balance and
+        whose amounts fit the currency's minor unit, in posting, validation, ledger-set postings, clearing
+        difference entries and batch submit; reversals copy the posted lines. The clearing account must be a
+        postable asset, liability or equity account that is not a reconciliation account.
+        One rule exists per ledger and source type. A replace is checked against If-Match when sent
+        (412 LEDGER_VERSION_CONFLICT); repeating a PUT with the same content returns 200 with the version
+        unchanged and announces nothing. Otherwise announces dev.passage.ledger.rules.changed.v1 with kind
+        splitting_rule.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The rule version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SplittingRuleBody" }
+      responses:
+        "200":
+          description: Rule replaced, or unchanged when the content is the same
+          headers:
+            ETag: { $ref: "#/components/headers/SplittingETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SplittingRule" }
+        "201":
+          description: Rule created
+          headers:
+            ETag: { $ref: "#/components/headers/SplittingETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SplittingRule" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/SplittingProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/Problem422" }
   /v1/ledger/ledgers/{ledger}/derivation-strategies:

@@ -25,6 +25,8 @@ import { AutoClearingRulesPage } from "./AutoClearingRulesPage";
 import { EditAutoClearingRulePage, NewAutoClearingRulePage } from "./AutoClearingRuleFormPage";
 import { LookupTablesPage } from "./LookupTablesPage";
 import { EditLookupTablePage, NewLookupTablePage } from "./LookupTableFormPage";
+import { SplittingRulesPage } from "./SplittingRulesPage";
+import { EditSplittingRulePage, NewSplittingRulePage } from "./SplittingRuleFormPage";
 import { DerivationStrategiesPage } from "./DerivationStrategiesPage";
 import { DerivationStrategyPage, NewDerivationStrategyPage } from "./DerivationStrategyPage";
 import { ValidationRulesPage } from "./ValidationRulesPage";
@@ -34,7 +36,7 @@ import { AutoClearingRunDetailPage, AutoClearingRunPage } from "./AutoClearingRu
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules and default description templates.",
+  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules, document splitting rules and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -60,6 +62,9 @@ const ledger: PassageModule = {
     { path: "/ledger/lookup-tables", element: createElement(LookupTablesPage), handle: { title: "Lookup tables" } },
     { path: "/ledger/lookup-tables/new", element: createElement(NewLookupTablePage), handle: { title: "New lookup table" } },
     { path: "/ledger/lookup-tables/:id", element: createElement(EditLookupTablePage), handle: { title: "Lookup table" } },
+    { path: "/ledger/splitting-rules", element: createElement(SplittingRulesPage), handle: { title: "Document splitting" } },
+    { path: "/ledger/splitting-rules/new", element: createElement(NewSplittingRulePage), handle: { title: "New splitting rule" } },
+    { path: "/ledger/splitting-rules/:id", element: createElement(EditSplittingRulePage), handle: { title: "Splitting rule" } },
     { path: "/ledger/derivation-strategies", element: createElement(DerivationStrategiesPage), handle: { title: "Derivation strategies" } },
     { path: "/ledger/derivation-strategies/new", element: createElement(NewDerivationStrategyPage), handle: { title: "New derivation strategy version" } },
     { path: "/ledger/derivation-strategies/:version", element: createElement(DerivationStrategyPage), handle: { title: "Derivation strategy" } },
@@ -98,6 +103,7 @@ const ledger: PassageModule = {
     { label: "Derivation strategies", to: "/ledger/derivation-strategies", duty: "ledger.journal.read" },
     { label: "Lookup tables", to: "/ledger/lookup-tables", duty: "ledger.journal.read" },
     { label: "Validation rules", to: "/ledger/validation-rules", duty: "ledger.journal.read" },
+    { label: "Document splitting", to: "/ledger/splitting-rules", duty: "ledger.journal.read" },
     { label: "Description templates", to: "/ledger/description-templates", duty: "ledger.journal.read" },
   ],
 };

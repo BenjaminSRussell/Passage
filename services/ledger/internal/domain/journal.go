@@ -136,6 +136,8 @@ type Result struct {
 	Derivation map[int][]DerivationTrace
 	// Warnings are the failures of validation rules with severity warning (FR-11.21); they never refuse the entry.
 	Warnings []Violation
+	// Splitting lists the lines document splitting changed or created (FR-11.23); filled by the store.
+	Splitting []SplitTrace
 }
 
 // Valid reports whether the entry may be posted.

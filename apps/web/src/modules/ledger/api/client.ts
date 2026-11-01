@@ -1215,6 +1215,53 @@ export function putLookupTable(ledgerId: string, id: string, input: LookupTableI
   );
 }
 
+/** Document splitting rule (FR-11.23): the dimensions lines inherit for one source type, and the zero-balance clearing account. */
+export const splittingRuleSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  sourceType: z.string(),
+  splittingDimensions: z.array(z.string()),
+  zeroBalanceClearingAccount: z.string().optional(),
+  defaultSplittingValue: z.record(z.string(), z.string()),
+  active: z.boolean(),
+  version: z.number(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type SplittingRule = z.infer<typeof splittingRuleSchema>;
+
+export interface SplittingRuleInput {
+  sourceType: string;
+  splittingDimensions: string[];
+  zeroBalanceClearingAccount?: string;
+  defaultSplittingValue: Record<string, string>;
+  active: boolean;
+}
+
+const splittingListSchema = z.object({ items: z.array(splittingRuleSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/splitting-rules. */
+export async function fetchSplittingRules(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<SplittingRule[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/splitting-rules`, splittingListSchema, fetchImpl)).items;
+}
+
+/** GET .../splitting-rules/{id}. */
+export function fetchSplittingRule(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<SplittingRule> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/splitting-rules/${encodeURIComponent(id)}`, splittingRuleSchema, fetchImpl);
+}
+
+/** PUT .../splitting-rules/{id}: creates, or replaces the rule at `version` (If-Match) when given. */
+export function putSplittingRule(ledgerId: string, id: string, input: SplittingRuleInput, version?: number, fetchImpl: FetchLike = defaultFetch): Promise<SplittingRule> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/splitting-rules/${encodeURIComponent(id)}`,
+    splittingRuleSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
 export const DERIVATION_KINDS = ["table_lookup", "move", "clear", "constant"] as const;
 export type DerivationKind = (typeof DERIVATION_KINDS)[number];
 export const CONDITION_OPS = ["eq", "ne", "in", "blank", "notblank"] as const;

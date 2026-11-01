@@ -188,7 +188,8 @@ func nonNilConditions(cs []domain.RuleCondition) []domain.RuleCondition {
 }
 
 // applyValidationRules runs the validation rule stage of the posting pipeline
-// (FR-11.21) over the derived lines, after structure validation.
+// (FR-11.21) over the derived and split lines (FR-11.22, FR-11.23), after structure
+// validation; LINE_COUNT and TOTAL_DEBIT include the lines document splitting added.
 func applyValidationRules(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, in PostInput,
 	accounts map[string]domain.Account, lines []domain.LineInput) (domain.RuleOutcome, error) {
 	rules, err := queryValidationRules(ctx, tx, tenantID, ledger.ID, true)

@@ -111,11 +111,16 @@ func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger
 	if err != nil {
 		return Entry{}, nil, err
 	}
+	derived, _, splitViol, err := applySplitting(ctx, tx, tenantID, ledger, accounts, in.Source.Type, derived)
+	if err != nil {
+		return Entry{}, nil, err
+	}
 	rules, err := withStructures(ctx, tx, tenantID, ledger.ID, in.rules(ledger), derived)
 	if err != nil {
 		return Entry{}, nil, err
 	}
 	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, derived)
+	res.Violations = append(res.Violations, splitViol...)
 	outcome, err := applyValidationRules(ctx, tx, tenantID, ledger, in, accounts, derived)
 	if err != nil {
 		return Entry{}, nil, err
@@ -573,12 +578,18 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 		if err != nil {
 			return err
 		}
+		lines, splits, splitViol, err := applySplitting(ctx, tx, p.TenantID, ledger, accounts, in.Source.Type, lines)
+		if err != nil {
+			return err
+		}
 		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), lines)
 		if err != nil {
 			return err
 		}
 		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, lines)
 		res.Derivation = traces
+		res.Violations = append(res.Violations, splitViol...)
+		res.Splitting = splits
 		outcome, err := applyValidationRules(ctx, tx, p.TenantID, ledger, in, accounts, lines)
 		if err != nil {
 			return err

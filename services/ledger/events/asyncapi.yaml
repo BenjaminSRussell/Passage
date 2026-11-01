@@ -55,8 +55,8 @@ channels:
   rulesChanged:
     address: passage.ledger.rules
     description: |
-      A derivation strategy was activated or a lookup table was replaced (FR-11.22), written to the
-      outbox in the same transaction (aggregate type derivation_strategy or lookup_table). Posting
+      A derivation strategy was activated or a lookup table or splitting rule was replaced (FR-11.22, FR-11.23), written to the
+      outbox in the same transaction (aggregate type derivation_strategy, lookup_table or splitting_rule). Posting
       caches invalidate on it.
     messages:
       rulesChanged:
@@ -254,7 +254,7 @@ components:
     RulesChanged:
       name: dev.passage.ledger.rules.changed.v1
       title: Ledger rules changed
-      summary: A derivation strategy was activated, a lookup table was replaced or a validation rule was saved.
+      summary: A derivation strategy was activated, a lookup table or document splitting rule was replaced, or a validation rule was saved.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -269,7 +269,7 @@ components:
             required: [ledgerId, kind, id, version, actor]
             properties:
               ledgerId: { type: string, format: uuid }
-              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule] }
+              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule, splitting_rule] }
               id: { type: string, format: uuid }
               version: { type: integer, description: Strategy version number, the lookup table replacement counter or the validation rule lockVersion }
               actor: { type: string, description: User who activated, replaced or saved }

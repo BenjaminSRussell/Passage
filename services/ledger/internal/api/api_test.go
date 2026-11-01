@@ -33,6 +33,7 @@ type fakeStore struct {
 	auto     autoFake
 	deriv    derivationFake
 	vrules   validationFake
+	split    splittingFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error
