@@ -24,6 +24,28 @@ import { SkillsPage } from "./SkillsPage";
 import { TeamMemberPage } from "./TeamMemberPage";
 import { WorkerDetailPage } from "./WorkerDetailPage";
 import { WorkersPage } from "./WorkersPage";
+import { AnswerQuestionnairePage, MyQuestionnairesPage } from "./MyQuestionnairesPage";
+import { CandidatePage } from "./CandidatePage";
+import { ChecklistPage, TasksPage, WorkerChecklistsPage } from "./ChecklistsPage";
+import { ChecklistTemplatesPage, NewChecklistTemplatePage } from "./ChecklistTemplatesPage";
+import { CompCycleDetailPage, CompCyclesPage } from "./CompCyclesPage";
+import { CompensationPlansPage, NewCompensationPlanPage } from "./CompensationPlansPage";
+import { IncidentDetailPage, IncidentsPage } from "./IncidentsPage";
+import { JobDetailPage, JobsPage } from "./JobsPage";
+import { OutstandingLoansPage, WorkerLoansPage } from "./LoansPage";
+import { NewCompCyclePage } from "./NewCompCyclePage";
+import { NewIncidentPage } from "./NewIncidentPage";
+import { NewJobPage } from "./NewJobPage";
+import { NewPersonnelActionPage } from "./NewPersonnelActionPage";
+import { NewQuestionnairePage } from "./NewQuestionnairePage";
+import { OfferPage } from "./OfferPage";
+import { OshaPage } from "./OshaPage";
+import { PersonnelActionDetailPage, PersonnelActionsPage } from "./PersonnelActionsPage";
+import { QuestionnaireDetailPage, QuestionnairesPage } from "./QuestionnairesPage";
+import { RequisitionDetailPage } from "./RequisitionDetailPage";
+import { NewRequisitionPage, RequisitionsPage } from "./RequisitionsPage";
+import { ScheduleResultsPage } from "./ScheduleResultsPage";
+import { WorksheetPage } from "./WorksheetPage";
 
 const hr: PassageModule = {
   id: "hr",
@@ -53,6 +75,40 @@ const hr: PassageModule = {
     { path: "/hr/courses/new", element: createElement(NewCoursePage), handle: { title: "New course" } },
     { path: "/hr/courses/sessions/:id", element: createElement(CourseSessionPage), handle: { title: "Course session" } },
     { path: "/hr/courses/:id", element: createElement(CourseDetailPage), handle: { title: "Course" } },
+    { path: "/hr/actions", element: createElement(PersonnelActionsPage), handle: { title: "Personnel actions", duty: "HcmActionMaintain" } },
+    { path: "/hr/actions/new", element: createElement(NewPersonnelActionPage), handle: { title: "Submit personnel action", duty: "HcmActionMaintain" } },
+    { path: "/hr/actions/:id", element: createElement(PersonnelActionDetailPage), handle: { title: "Personnel action", duty: "HcmActionMaintain" } },
+    { path: "/hr/jobs", element: createElement(JobsPage), handle: { title: "Jobs", duty: "HcmOrgInquire" } },
+    { path: "/hr/jobs/new", element: createElement(NewJobPage), handle: { title: "New job", duty: "HcmCompAdmin" } },
+    { path: "/hr/jobs/:id", element: createElement(JobDetailPage), handle: { title: "Job", duty: "HcmOrgInquire" } },
+    { path: "/hr/compensation/plans", element: createElement(CompensationPlansPage), handle: { title: "Compensation plans", duty: "HcmCompAdmin" } },
+    { path: "/hr/compensation/plans/new", element: createElement(NewCompensationPlanPage), handle: { title: "New compensation plan", duty: "HcmCompAdmin" } },
+    { path: "/hr/compensation/cycles", element: createElement(CompCyclesPage), handle: { title: "Compensation cycles", duty: "HcmCompAdmin" } },
+    { path: "/hr/compensation/cycles/new", element: createElement(NewCompCyclePage), handle: { title: "New compensation cycle", duty: "HcmCompAdmin" } },
+    { path: "/hr/compensation/cycles/:id", element: createElement(CompCycleDetailPage), handle: { title: "Compensation cycle", duty: "HcmCompAdmin" } },
+    { path: "/hr/compensation/cycles/:id/worksheets/:managerId", element: createElement(WorksheetPage), handle: { title: "Manager worksheet", duty: "HcmCompAdmin" } },
+    { path: "/hr/requisitions", element: createElement(RequisitionsPage), handle: { title: "Requisitions", duty: "HcmRecruitMaintain" } },
+    { path: "/hr/requisitions/new", element: createElement(NewRequisitionPage), handle: { title: "New requisition", duty: "HcmRecruitMaintain" } },
+    { path: "/hr/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition", duty: "HcmRecruitMaintain" } },
+    { path: "/hr/candidates/:id", element: createElement(CandidatePage), handle: { title: "Candidate", duty: "HcmRecruitMaintain" } },
+    { path: "/hr/offers/:id", element: createElement(OfferPage), handle: { title: "Offer", duty: "HcmRecruitMaintain" } },
+    { path: "/hr/incidents", element: createElement(IncidentsPage), handle: { title: "Incident register", duty: "HcmIncidentAdmin" } },
+    { path: "/hr/incidents/new", element: createElement(NewIncidentPage), handle: { title: "Report an incident", duty: "HcmIncidentReport" } },
+    { path: "/hr/incidents/osha", element: createElement(OshaPage), handle: { title: "OSHA logs", duty: "HcmIncidentAdmin" } },
+    { path: "/hr/incidents/:id", element: createElement(IncidentDetailPage), handle: { title: "Incident", duty: "HcmIncidentAdmin" } },
+    { path: "/hr/loaned-items", element: createElement(OutstandingLoansPage), handle: { title: "Outstanding loans", duty: "HcmWorkerInquire" } },
+    { path: "/hr/workers/:id/loaned-items", element: createElement(WorkerLoansPage), handle: { title: "Loaned items", duty: "HcmWorkerInquire" } },
+    { path: "/hr/checklist-templates", element: createElement(ChecklistTemplatesPage), handle: { title: "Checklist templates", duty: "HcmSetupAdmin" } },
+    { path: "/hr/checklist-templates/new", element: createElement(NewChecklistTemplatePage), handle: { title: "New checklist template", duty: "HcmSetupAdmin" } },
+    { path: "/hr/workers/:id/checklists", element: createElement(WorkerChecklistsPage), handle: { title: "Worker checklists", duty: "HcmWorkerInquire" } },
+    { path: "/hr/checklists/:id", element: createElement(ChecklistPage), handle: { title: "Checklist", duty: "HcmWorkerInquire" } },
+    { path: "/hr/tasks", element: createElement(TasksPage), handle: { title: "Tasks", duty: "HcmWorkerInquire" } },
+    { path: "/hr/questionnaires", element: createElement(QuestionnairesPage), handle: { title: "Questionnaires", duty: "HcmQuestionnaireAdmin" } },
+    { path: "/hr/questionnaires/new", element: createElement(NewQuestionnairePage), handle: { title: "New questionnaire", duty: "HcmQuestionnaireAdmin" } },
+    { path: "/hr/questionnaires/schedules/:id/results", element: createElement(ScheduleResultsPage), handle: { title: "Questionnaire results", duty: "HcmQuestionnaireAdmin" } },
+    { path: "/hr/questionnaires/:id", element: createElement(QuestionnaireDetailPage), handle: { title: "Questionnaire", duty: "HcmQuestionnaireAdmin" } },
+    { path: "/hr/my/questionnaires", element: createElement(MyQuestionnairesPage), handle: { title: "My questionnaires", duty: "EssQuestionnaire" } },
+    { path: "/hr/my/questionnaires/:id", element: createElement(AnswerQuestionnairePage), handle: { title: "Answer questionnaire", duty: "EssQuestionnaire" } },
     { path: "/hr/my/profile", element: createElement(MyProfilePage), handle: { title: "My profile", duty: "EssBase" } },
     { path: "/hr/my/team", element: createElement(MyTeamPage), handle: { title: "My team", duty: "MssBase" } },
     { path: "/hr/my/team/:id", element: createElement(TeamMemberPage), handle: { title: "Team member", duty: "MssBase" } },
@@ -67,6 +123,18 @@ const hr: PassageModule = {
     { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
     { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
     { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
+    { label: "Personnel actions", to: "/hr/actions", duty: "HcmActionMaintain" },
+    { label: "Jobs", to: "/hr/jobs", duty: "HcmOrgInquire" },
+    { label: "Compensation plans", to: "/hr/compensation/plans", duty: "HcmCompAdmin" },
+    { label: "Compensation cycles", to: "/hr/compensation/cycles", duty: "HcmCompAdmin" },
+    { label: "Requisitions", to: "/hr/requisitions", duty: "HcmRecruitMaintain" },
+    { label: "Incidents", to: "/hr/incidents", duty: "HcmIncidentAdmin" },
+    { label: "Report an incident", to: "/hr/incidents/new", duty: "HcmIncidentReport" },
+    { label: "Outstanding loans", to: "/hr/loaned-items", duty: "HcmWorkerInquire" },
+    { label: "Checklist templates", to: "/hr/checklist-templates", duty: "HcmSetupAdmin" },
+    { label: "Tasks", to: "/hr/tasks", duty: "HcmWorkerInquire" },
+    { label: "Questionnaires", to: "/hr/questionnaires", duty: "HcmQuestionnaireAdmin" },
+    { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "EssQuestionnaire" },
     { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
     { label: "My team", to: "/hr/my/team", duty: "MssBase" },
   ],

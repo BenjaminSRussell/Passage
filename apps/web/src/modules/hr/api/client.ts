@@ -148,6 +148,7 @@ export class HrApiError extends Error {
 }
 
 export interface Problem {
+  status?: number;
   code: string;
   message: string;
   fields: Record<string, string>;
@@ -155,9 +156,9 @@ export interface Problem {
 
 export function describeProblem(error: unknown): Problem {
   if (error instanceof HrApiError) {
-    return { code: error.code, message: error.message, fields: error.fields };
+    return { status: error.status, code: error.code, message: error.message, fields: error.fields };
   }
-  return { code: "COM-0001", message: error instanceof Error ? error.message : "Request failed", fields: {} };
+  return { status: 0, code: "COM-0001", message: error instanceof Error ? error.message : "Request failed", fields: {} };
 }
 
 async function toError(res: Response): Promise<HrApiError> {
@@ -184,7 +185,7 @@ export async function page<T>(path: string, signal?: AbortSignal): Promise<Page<
   return body;
 }
 
-function query(params: Record<string, string | undefined>): string {
+export function query(params: Record<string, string | undefined>): string {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") q.set(key, value);
@@ -193,14 +194,14 @@ function query(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-const id = (value: string) => encodeURIComponent(value);
+export const id = (value: string) => encodeURIComponent(value);
 
 /** A fresh Idempotency-Key; reuse one per form so a retried submit cannot create two. */
 export function newKey(): string {
   return crypto.randomUUID();
 }
 
-function post<T>(path: string, body: unknown, key: string): Promise<T> {
+export function post<T>(path: string, body: unknown, key: string): Promise<T> {
   return send<T>(path, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
 
