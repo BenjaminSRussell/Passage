@@ -56,6 +56,11 @@ channels:
     messages:
       networkUpdated:
         $ref: '#/components/messages/NetworkUpdated'
+  orderImport:
+    address: passage.scheduling.orderimport
+    messages:
+      orderImportRecorded:
+        $ref: '#/components/messages/OrderImportRecorded'
 operations:
   publishRunCompleted:
     action: send
@@ -123,8 +128,26 @@ operations:
     messages:
       - $ref: '#/channels/network/messages/networkUpdated'
     summary: A resource network was renamed or ended
+  publishOrderImportRecorded:
+    action: send
+    channel: { $ref: '#/channels/orderImport' }
+    messages:
+      - $ref: '#/channels/orderImport/messages/orderImportRecorded'
+    summary: A production order dated by wave 21 was received and its operations registered for scheduling
 components:
   messages:
+    OrderImportRecorded:
+      title: Production order imported
+      summary: >-
+        Scheduling received a production order.scheduled.v1 event and registered, updated or removed the order's
+        operations; lists the operations it could not register and whether the next run must place the order again.
+        Events with reason `schedule` or `redate` are imported; an event with reason `finite` (production applying
+        scheduling's own finite-capacity dates back onto the order, wave 21) is ignored and publishes nothing, so the
+        two services do not loop.
+      name: dev.passage.scheduling.orderimport.recorded.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/OrderImportRecordedData'
     CapacityBlockUpdated:
       title: Capacity block updated
       summary: A capacity block's priority, condition or active flag changed; runs and moves after the event use the new values, and it lists the booked jobs the resource's blocks now keep out.
@@ -296,6 +319,38 @@ components:
           type: array
           description: Booked jobs from the change on that lie inside a block they may not use; they stay where they are until moved or rescheduled.
           items: { type: string, format: uuid }
+    OrderImportRecordedData:
+      type: object
+      required: [orderId, orderNumber, orderVersion, reason, status, operations, skipped, removedOperNumbers, keptFirmedOperNumbers, replanRequired]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderVersion: { type: integer, description: The production order version of the event that was imported. }
+        reason: { type: string, enum: [schedule, redate] }
+        status: { type: string, enum: [imported, partial, rejected], description: 'imported: every operation registered; partial: some were left out; rejected: none could be registered.' }
+        operations:
+          type: array
+          items:
+            type: object
+            required: [operationId, operNumber, minutes, resourceIds, change]
+            properties:
+              operationId: { type: string, format: uuid }
+              operNumber: { type: integer }
+              minutes: { type: integer }
+              resourceIds: { type: array, items: { type: string, format: uuid } }
+              change: { type: string, enum: [created, updated, unchanged] }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [operNumber, code, detail]
+            properties:
+              operNumber: { type: integer }
+              code: { type: string, enum: [no-process-job, too-long, setup-too-long, unknown-resource, bad-hours] }
+              detail: { type: string }
+        removedOperNumbers: { type: array, items: { type: integer }, description: Operations that left the route and were deleted with their jobs. }
+        keptFirmedOperNumbers: { type: array, items: { type: integer }, description: Operations a firmed job holds; the event did not change them. }
+        replanRequired: { type: boolean, description: True when a changed operation lost its jobs and the next run must place it again. }
     NetworkUpdatedData:
       type: object
       required: [networkId, code, name, activeFrom, activeTo, version]

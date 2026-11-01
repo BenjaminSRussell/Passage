@@ -196,6 +196,59 @@ Slice 10:
   reports SCHED-0003 on the order's last operation. Orders without a due date
   are placed forward.
 
+## Production order intake (slice 18, FR-23.10)
+
+> **Real orders are not imported yet.** Production's jobs name engineering
+> (wave 09) resource ids, and scheduling resources have ids of their own, so
+> until resources are mapped (the wave 9 handoff in `NOT-IMPLEMENTED.md`)
+> every operation of a real order is left out as `unknown-resource` and the
+> order is listed as `rejected`. The intake also does not start until its
+> service principal is seeded (see below). Both are handoffs, not defaults.
+
+`scheduling consume` runs a second consumer, `scheduling-order-import`, next
+to the EAM downtime one: its own Kafka group (`KAFKA_ORDER_GROUP`, default
+`scheduling-order-import`) on `passage.production.order`, its own dead-letter
+topic `passage.production.order.dlq`, and its own service principal
+`service:scheduling-order-import`, which must hold `scheduling.order.import`
+(the handler refuses any other principal, the downtime one included). The
+principal table lives in `platform/go/tenant` and `policies/authz/data.json`;
+until it lists that principal, the consumer logs a warning and does not start,
+and the downtime consumer runs alone. A new group starts at the earliest
+retained offset, so orders dated before the principal is seeded are read once
+it is.
+
+For each `dev.passage.production.order.scheduled.v1` (`reason` `schedule` or
+`redate`; an event with `reason` `finite`, which production writes when it
+applies scheduling's own finite-capacity dates back onto the order, is
+acknowledged and ignored, recording and publishing nothing, so the two
+services do not loop), each route operation becomes the scheduling operation with the same
+order id and number: the process hours are its minutes (rounded up, at least
+1), the setup hours its route setup minutes, the resources of its process jobs
+its candidates in order of appearance (only those that are scheduling
+resources); queue and transport jobs are ignored. The first operation is ready
+no earlier than the order's baseline start. The delivery date is the due
+instant of every operation: the end of that day (the next local midnight) in
+the time zone of the preferred resource of the order's last registered
+operation, where the order finishes (resources carry no site yet, so the site
+time zone cannot be used); UTC when no operation is registered.
+
+A re-dated order updates the operations already held: an operation whose
+minutes, setup, candidates or dates changed loses its non-firmed jobs and is
+open again (`replanRequired`; the next run places it), an operation that left
+the route is deleted with its jobs, and an operation a firmed job holds is
+left as it is. An operation that is in the event but can no longer be
+registered keeps its previous registration and is listed as left out. Imports
+of one order are serialized by a transaction advisory lock, and an event whose
+`orderVersion` is below the stored one changes nothing, so redeliveries and
+reordering cannot roll an order back. Operations that cannot be registered
+(`no-process-job`, `bad-hours`, `too-long` over 100,000 minutes,
+`setup-too-long` over a week, `unknown-resource`) are recorded on the order's
+`scheduling_order_import` row, never failing the event; only an event that
+cannot be decoded (no order id, start, end, version or reason, a resource id
+that is not a UUID) is dead-lettered. `GET /order-imports` and
+`GET /order-imports/{orderId}` answer what happened, and
+`orderimport.recorded` is published for every applied event.
+
 ## API
 
 All routes need the tenant headers set by the gateway; duties in brackets.
@@ -216,6 +269,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
 | GET | `/v1/scheduling/runs/{id}/kpis` | `scheduling.read` |
 | GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
+| GET | `/v1/scheduling/order-imports?status&limit` | `scheduling.read` |
+| GET | `/v1/scheduling/order-imports/{orderId}` | `scheduling.read` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |
@@ -254,6 +309,7 @@ The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
 | `dev.passage.scheduling.campaign.started.v1` | a campaign starts and is frozen |
 | `dev.passage.scheduling.campaign.completed.v1` | a started campaign is completed |
 | `dev.passage.scheduling.campaign.cancelled.v1` | a campaign is cancelled; carries the released order ids and whether the cleanout counter was given back |
+| `dev.passage.scheduling.orderimport.recorded.v1` | a production order event was applied: the operations created, updated or unchanged, the ones left out and why, removed and firmed-kept operation numbers, `replanRequired` |
 
 The PRD names the last one `passage.scheduling.order.dates-changed.v1`; the
 platform naming rule allows no hyphen in the verb, so the entity is
@@ -301,6 +357,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0121` | 422 | The peg would make the parent order depend on its own dependent |
 | `SCHED-0122` | 404 | Order peg not found |
 | `SCHED-0130` | 404 | Capacity override not found |
+| `SCHED-0131` | 404 | No production order with that id has been received |
 | `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
 | `SCHED-0124` | 412 | If-Match is stale: the resource changed since it was read |
 | `SCHED-0125` | 422 | Complete needs a started campaign |
@@ -319,6 +376,8 @@ the violations.
 | `SCHED_HORIZON_DAYS` | 365 | 30-730 |
 | `SCHED_BOTTLENECK_PCT` | 90 | 50-200 |
 | `SCHED_BOTTLENECK_WEEKS` | 3 | 1-12 |
+| `KAFKA_BROKERS`, `KAFKA_USERNAME`, `KAFKA_PASSWORD(_FILE)`, `KAFKA_TLS_CA_FILE` | | `consume` only; shared by both consumers |
+| `KAFKA_GROUP` / `KAFKA_ORDER_GROUP` | `scheduling-downtime` / `scheduling-order-import` | `consume` only: the downtime and the order intake groups |
 | `SCHED_OPT_URL` | empty | scheduler-opt base URL for cp-sat campaigns; empty keeps nearest-neighbour (SCHED-0006 UNAVAILABLE) |
 
 ## Run and test

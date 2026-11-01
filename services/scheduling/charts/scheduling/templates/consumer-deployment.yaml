@@ -49,6 +49,8 @@ spec:
               value: {{ required "consumer.kafka.brokers is required" .Values.consumer.kafka.brokers | quote }}
             - name: KAFKA_GROUP
               value: {{ .Values.consumer.kafka.group | quote }}
+            - name: KAFKA_ORDER_GROUP
+              value: {{ .Values.consumer.kafka.orderGroup | quote }}
             - name: KAFKA_USERNAME
               value: {{ .Values.consumer.kafka.username | quote }}
             - name: KAFKA_PASSWORD_FILE

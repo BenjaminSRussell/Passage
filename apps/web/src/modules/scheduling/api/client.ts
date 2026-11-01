@@ -470,6 +470,55 @@ export async function fetchLateOrders(minLateMinutes: number, signal?: AbortSign
   return { items: body.items, truncated: body.truncated === true };
 }
 
+/** Why an operation of a production order was not registered (or was left as it was). */
+export const ORDER_IMPORT_SKIP_LABELS: Record<string, string> = {
+  "no-process-job": "No process job",
+  "too-long": "Process time too long",
+  "setup-too-long": "Setup time too long",
+  "unknown-resource": "Resource not in scheduling",
+  "bad-hours": "Hours not a number",
+  firmed: "Held by a firmed job",
+};
+
+export interface OrderImportSkipped {
+  operNumber: number;
+  code: string;
+  detail: string;
+}
+
+/** A production order received from wave 21 and what became of its operations (FR-23.10). */
+export interface OrderImport {
+  orderId: string;
+  orderNumber: string;
+  orderVersion: number;
+  reason: "schedule" | "redate";
+  eventId: string;
+  status: "imported" | "partial" | "rejected";
+  operationsTotal: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  removed: number;
+  keptFirmed: number;
+  skipped: OrderImportSkipped[];
+  replanRequired: boolean;
+  orderStart: string | null;
+  orderEnd: string | null;
+  receivedAt: string;
+}
+
+export async function listOrderImports(status: string, signal?: AbortSignal): Promise<OrderImport[]> {
+  const body = await send<{ items?: OrderImport[] }>(`/order-imports${query({ status, limit: "200" })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return body.items;
+}
+
+export function getOrderImport(orderId: string, signal?: AbortSignal): Promise<OrderImport> {
+  return send<OrderImport>(`/order-imports/${encodeURIComponent(orderId)}`, {}, signal);
+}
+
 // Slice 2: resource networks, setup matrices, cleanout rules, capacity blocks
 // and campaigns (FR-23.13 to FR-23.17). Decimals travel as strings.
 

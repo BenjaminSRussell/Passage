@@ -22,6 +22,7 @@ func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 		"dev.passage.scheduling.resource.updated.v1":         true,
 		"dev.passage.scheduling.capacityblock.updated.v1":    true,
 		"dev.passage.scheduling.network.updated.v1":          true,
+		"dev.passage.scheduling.orderimport.recorded.v1":     true,
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {

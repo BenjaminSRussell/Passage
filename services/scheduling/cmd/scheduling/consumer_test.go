@@ -57,6 +57,14 @@ func (d *fakeDLQ) Send(_ context.Context, topic string, r eventing.Record, reaso
 
 func newRig(t *testing.T) (*store.Postgres, func(records ...eventing.Record) (*fakeSource, *fakeDLQ), func(sql string, args ...any) int) {
 	t.Helper()
+	st, _, run, count := newRigWith(t, (*api.API).DowntimeConsumerHandlers)
+	return st, run, count
+}
+
+// newRigWith runs the given handlers on a consumer named after the downtime
+// principal, the one consumer name the service principal table knows today.
+func newRigWith(t *testing.T, handlers func(*api.API) map[string]eventing.Handler) (*store.Postgres, *api.API, func(records ...eventing.Record) (*fakeSource, *fakeDLQ), func(sql string, args ...any) int) {
+	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
@@ -68,7 +76,7 @@ func newRig(t *testing.T) (*store.Postgres, func(records ...eventing.Record) (*f
 		t.Cleanup(cancel)
 		src, dlq := &fakeSource{queue: records, cancel: cancel}, &fakeDLQ{}
 		c, err := eventing.NewConsumer(src, dlq, eventing.NewPgInbox(app), eventing.Config{
-			Name: api.DowntimeConsumerName, Idempotent: true, Handlers: a.DowntimeConsumerHandlers(),
+			Name: api.DowntimeConsumerName, Idempotent: true, Handlers: handlers(a),
 			DeadLetterTopic: api.DowntimeRecordedTopic + deadLetterSuffix, MaxAttempts: 2, Backoff: func(int) time.Duration { return 0 },
 		})
 		if err != nil {
@@ -86,7 +94,7 @@ func newRig(t *testing.T) (*store.Postgres, func(records ...eventing.Record) (*f
 		}
 		return n
 	}
-	return st, run, count
+	return st, a, run, count
 }
 
 func downtimeRecord(t *testing.T, offset int64, eventID, tenantID, resourceID, downtimeID string, from, to time.Time) eventing.Record {
@@ -222,6 +230,17 @@ func TestKafkaConfig(t *testing.T) {
 	}
 	if cfg.Password != "s3cret" || cfg.Group != "scheduling-downtime" || len(cfg.Topics) != 1 || cfg.Topics[0] != "passage.eam.downtime" {
 		t.Fatalf("config = %+v", cfg)
+	}
+	orders, err := orderKafkaConfig(env(map[string]string{"KAFKA_BROKERS": "a:9093", "KAFKA_GROUP": "downtime-override", "KAFKA_USERNAME": "scheduling-consumer", "KAFKA_PASSWORD_FILE": passwordFile}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orders.Group != "scheduling-order-import" || orders.Password != "s3cret" || len(orders.Topics) != 1 || orders.Topics[0] != "passage.production.order" {
+		t.Fatalf("order config = %+v, want its own group (KAFKA_GROUP is the downtime consumer's) on passage.production.order", orders)
+	}
+	orders, err = orderKafkaConfig(env(map[string]string{"KAFKA_BROKERS": "a:9093", "KAFKA_ORDER_GROUP": "orders-blue"}))
+	if err != nil || orders.Group != "orders-blue" {
+		t.Fatalf("order config = %+v err=%v, want KAFKA_ORDER_GROUP to set the group", orders, err)
 	}
 	if _, err := kafkaConfig(env(nil)); err == nil {
 		t.Fatal("accepted a config without brokers")

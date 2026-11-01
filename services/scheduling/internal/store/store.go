@@ -251,6 +251,7 @@ type Store interface {
 	ResourceUpdateStore
 	SetupUpdateStore
 	CampaignStore
+	OrderImportStore
 	Ping(ctx context.Context) error
 }
 

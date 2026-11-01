@@ -361,15 +361,68 @@ linked to a run), the site filter (resources carry no site yet, see the sites
 handoff below) and sales lines as pegged demand (pegs link orders to orders,
 see the AC-23.3 handoff).
 
+Slice 18 builds the intake of wave 21 production orders (FR-23.10, ticket
+deliverable 5). **Two handoffs below keep it from importing real orders
+today:** (a) it does not start until its service principal
+`service:scheduling-order-import` with duty `scheduling.order.import` is
+seeded, and (b) production's jobs name engineering (wave 09) resource ids,
+which are not scheduling resource ids, so every operation of a real order is
+left out as `unknown-resource` and the order shows as `rejected` until
+resources are mapped (wave 9 handoff, deliverable 1 below).
+`scheduling consume` runs a second consumer, `scheduling-order-import`, with
+its own Kafka group (`KAFKA_ORDER_GROUP`), principal, duty and dead-letter
+topic `passage.production.order.dlq`, reading
+`dev.passage.production.order.scheduled.v1` from `passage.production.order`;
+the handler refuses any principal without `scheduling.order.import` (the
+downtime principal included). Events with reason `finite` (wave 21 slice 20:
+production applying scheduling's own finite-capacity dates) are acknowledged
+and ignored, recording nothing, so the services do not loop. It registers each route operation of the order
+as a scheduling operation: the process hours become the operation's minutes
+(rounded up to a whole minute, at least 1), the setup hours its route setup
+minutes, the resources of its process jobs its candidates in order, the first
+operation is ready no earlier than the order's baseline start, and the
+delivery date is the due instant of every operation: the next local midnight
+after it in the time zone of the preferred resource of the order's last
+registered operation (resources carry no site yet, so the site's zone is not
+available; UTC when none is registered). Queue and transport jobs are not
+modelled and are ignored. A re-dated order (`reason: redate`) updates the
+operations it already holds; an operation whose minutes, setup, candidates or
+dates changed loses its non-firmed jobs and is open again (`replanRequired`,
+the next run places it), an operation that left the route is deleted with its
+jobs, and an operation a firmed job holds is never touched. An operation still
+in the event that can no longer be registered keeps its previous registration
+and is listed as left out. Imports of one order are serialized by a
+transaction advisory lock (also before its first row exists), and an event
+older than the stored `orderVersion` changes nothing, so a redelivery or an
+out-of-order delivery after a rebalance cannot roll the order back; production
+keys the topic by order id, so one order's events share a partition.
+Operations that cannot be registered (no process job, hours not a number, more
+than 100,000 process minutes or a week of setup, or no resource of the
+operation is a scheduling resource) are left out and recorded, never failing
+the event; only an undecodable event is dead-lettered.
+Migration `0013_order_imports.sql` adds `scheduling_order_import` (one row per
+order: the latest event, outcome, counts, the skipped operations; RLS, grants
+SELECT, INSERT, UPDATE). `GET /order-imports` (status, limit) and
+`GET /order-imports/{orderId}` (duty `scheduling.read`) answer it;
+`orderimport.recorded` goes through the outbox with the operations registered
+and the ones left out. Web: Production orders received (list with a result
+filter) and the order detail with the operations not registered, linked from
+the navigation. New duty: `scheduling.order.import`, held only by the service
+principal (no route or page action uses it). The OpenAPI and AsyncAPI specs
+have no FAIL lines on the doc gates.
 Everything else in the ticket and PRD 4.23 is listed here.
 
-No file outside the wave 23 ownership entry was changed. Two handoffs
-from slices 16 and 17 lie outside it:
+No file outside the wave 23 ownership entry was changed. These handoffs
+from slices 16, 17 and 18 lie outside it:
 
 | Item | Status | Reason |
 |---|---|---|
 | `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/capacity-load/jobs` is a row of `scheduling.read`. |
 | `policies/authz/data.json`: resource rows `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` are rows of `scheduling.read`. |
+| `policies/authz/data.json`: resource rows `/v1/scheduling/order-imports` and `/v1/scheduling/order-imports/*` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | Both GET routes are rows of `scheduling.read`. |
+| `platform/go/tenant/serviceprincipal.go` `servicePrincipals` and `policies/authz/data.json` `service_principals` (kept equal by `TestServicePrincipalTableMatchesPolicyData`): add `"scheduling-order-import": ["scheduling.order.import"]`; seed the duty `scheduling.order.import` (no resource rows: no route uses it) | handoff — platform / policy owner (#313) | Without it the order intake consumer logs a warning at start and does not run; it never borrows the downtime principal. Once seeded it starts on its own group at the earliest retained offset. |
+| `deploy/kafka/scheduling-consumer.yaml`: ACLs for `KafkaUser` `scheduling-consumer`: Read, Describe on topic `passage.production.order` and group `scheduling-order-import`; Write, Describe on `passage.production.order.dlq`; a `KafkaTopic` `passage.production.order.dlq` like the downtime one. `deploy/kafka/connect.yaml`: an outbox connector for `passage_production` publishing `passage.production.<aggregate_type>` keyed by aggregate id | handoff — deploy owner (#313) | No production outbox connector exists yet, so nothing reaches `passage.production.order`. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-order-import"}` > 0. |
+| Mapping production (engineering, wave 09) resource ids to scheduling resources | handoff — wave 9 / wave 23 resources | Scheduling resources get their own ids (`POST /resources`), so a real order's jobs name resources scheduling does not know and are recorded as `unknown-resource`; a resource created with the engineering id, or a mapping table fed by wave 9, is needed before the intake does anything for real orders. |
 
 ## Ticket deliverables
 
@@ -378,7 +431,7 @@ from slices 16 and 17 lie outside it:
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
-| 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
+| 1 | Duration from route times and efficiency (BR-23.1) | partial (slice 18) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); efficiency % of the scheduling resource is not applied. |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
@@ -395,7 +448,7 @@ from slices 16 and 17 lie outside it:
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
-| 5 | Operations fed from wave 21 production orders and jobs instead of the API | handoff — wave 21 (production orders) | Slice 1 registers operations through its own API; a consumer of wave 21 events is not built. |
+| 5 | Operations fed from wave 21 production orders and jobs instead of the API | built (slice 18) for `order.scheduled.v1` | `POST /operations` stays for manual entry. Not built: withdrawing an order's operations when production resets or cancels it (its `statuschanged` event carries null dates), order priority, quantities, the order's attributes and campaign key, and mapping production resource ids to scheduling resources (the event's `resourceId` must already be a scheduling resource id, otherwise the operation is recorded as left out). |
 | 6 | Resource networks: definition, edges, edge rules (FR-23.13, BR-23.11 wait check) | built | `POST/GET /v1/scheduling/networks`; `domain.ResourceNetwork` (`Successors` in transfer-time order, `ChainAllowed`, `WaitOK`). |
 | 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |

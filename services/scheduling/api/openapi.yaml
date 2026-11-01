@@ -634,6 +634,59 @@ paths:
                     items: { $ref: '#/components/schemas/LateOrder' }
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/order-imports:
+    get:
+      operationId: listOrderImports
+      summary: Production orders received from wave 21 and what became of their operations
+      description: >
+        Scheduling consumes `dev.passage.production.order.scheduled.v1` and registers each route operation of the
+        order as an operation to schedule (process hours as minutes, rounded up; setup hours as route setup; the
+        resources of the process jobs as candidates; the delivery date as the due date). This lists the latest
+        event of each order, most recent first, with the operations that could not be registered and why.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only orders with this outcome.
+          schema: { type: string, enum: [imported, partial, rejected] }
+        - name: limit
+          in: query
+          required: false
+          description: At most this many orders.
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Received production orders, most recent first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderImport' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/order-imports/{orderId}:
+    get:
+      operationId: getOrderImport
+      summary: One received production order with its skipped operations
+      description: What scheduling did with the latest `order.scheduled.v1` of the production order, including each skipped operation and its reason.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The production order id.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The received production order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderImport' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/networks:
     post:
       operationId: createNetwork
@@ -1623,6 +1676,35 @@ components:
         operations: { type: integer }
         firmed: { type: boolean, description: True when any job of the order is firmed. }
         dependentOrders: { type: integer, description: "Pegged demand: orders pegged to consume this order's output, which its lateness delays in turn." }
+    OrderImport:
+      type: object
+      required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderVersion: { type: integer, description: The production order version of the latest event; an older event is ignored. }
+        reason: { type: string, enum: [schedule, redate] }
+        eventId: { type: string }
+        status: { type: string, enum: [imported, partial, rejected], description: 'imported: every operation registered; partial: some left out; rejected: none registered.' }
+        operationsTotal: { type: integer, description: Operations in the event. }
+        created: { type: integer }
+        updated: { type: integer, description: Operations whose minutes, setup, resources or dates changed; their jobs were dropped. }
+        unchanged: { type: integer }
+        removed: { type: integer, description: Operations that left the route and were deleted. }
+        keptFirmed: { type: integer, description: Operations a firmed job holds, left as they were. }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [operNumber, code, detail]
+            properties:
+              operNumber: { type: integer }
+              code: { type: string, enum: [no-process-job, too-long, setup-too-long, unknown-resource, bad-hours, firmed] }
+              detail: { type: string }
+        replanRequired: { type: boolean, description: True when a changed operation lost its jobs and the next schedule run must place it. }
+        orderStart: { type: string, format: date-time, nullable: true, description: The baseline start from production. }
+        orderEnd: { type: string, format: date-time, nullable: true }
+        receivedAt: { type: string, format: date-time }
     LoadJob:
       type: object
       required: [jobId, orderId, operNumber, segment, role, start, end, minutesInRange, finite, firmed, lateMinutes]

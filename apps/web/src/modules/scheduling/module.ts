@@ -23,6 +23,8 @@ import { NewOrderPegPage } from "./NewOrderPegPage";
 import { NewResourcePage } from "./NewResourcePage";
 import { NewRunPage } from "./NewRunPage";
 import { OperationsPage } from "./OperationsPage";
+import { OrderImportDetailPage } from "./OrderImportDetailPage";
+import { OrderImportsPage } from "./OrderImportsPage";
 import { OrderPegsPage } from "./OrderPegsPage";
 import { ResourceDetailPage } from "./ResourceDetailPage";
 import { ResourcesPage } from "./ResourcesPage";
@@ -37,7 +39,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, run utilization and lateness measures, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, late orders, production orders received from wave 21, run utilization and lateness measures, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -52,6 +54,8 @@ const scheduling: PassageModule = {
     { path: "/scheduling/resources/:id/edit", element: createElement(EditResourcePage), handle: { title: "Edit resource" } },
     { path: "/scheduling/operations", element: createElement(OperationsPage), handle: { title: "Operations" } },
     { path: "/scheduling/operations/new", element: createElement(NewOperationPage), handle: { title: "New operation" } },
+    { path: "/scheduling/order-imports", element: createElement(OrderImportsPage), handle: { title: "Production orders received" } },
+    { path: "/scheduling/order-imports/:orderId", element: createElement(OrderImportDetailPage), handle: { title: "Production order" } },
     { path: "/scheduling/order-pegs", element: createElement(OrderPegsPage), handle: { title: "Order pegs" } },
     { path: "/scheduling/order-pegs/new", element: createElement(NewOrderPegPage), handle: { title: "New order peg" } },
     { path: "/scheduling/campaigns", element: createElement(CampaignsPage), handle: { title: "Campaigns" } },
@@ -79,6 +83,7 @@ const scheduling: PassageModule = {
     { label: "Schedule runs", to: "/scheduling/runs", duty: "scheduling.read" },
     { label: "Resources", to: "/scheduling/resources", duty: "scheduling.read" },
     { label: "Operations", to: "/scheduling/operations", duty: "scheduling.read" },
+    { label: "Production orders", to: "/scheduling/order-imports", duty: "scheduling.read" },
     { label: "Order pegs", to: "/scheduling/order-pegs", duty: "scheduling.read" },
     { label: "Campaigns", to: "/scheduling/campaigns", duty: "scheduling.read" },
     { label: "Campaign proposals", to: "/scheduling/campaign-proposals", duty: "scheduling.read" },

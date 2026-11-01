@@ -42,6 +42,9 @@ consumer:
   kafka:
     brokers: ""
     group: scheduling-downtime
+    # The production order intake's own group (slice 18); it starts only once
+    # service:scheduling-order-import is seeded in the service principal table.
+    orderGroup: scheduling-order-import
     username: scheduling-consumer
     secret: ""
   resources:

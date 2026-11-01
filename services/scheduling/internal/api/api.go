@@ -181,6 +181,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
 
+	// Slice 18: production orders received from wave 21 (FR-23.10).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports", a.listOrderImports)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports/{orderId}", a.getOrderImport)
+
 	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity-overrides", a.listCapacityOverrides)

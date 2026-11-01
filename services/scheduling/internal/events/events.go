@@ -25,11 +25,13 @@ var (
 
 	CapacityBlockUpdated = events.Type(Context, "capacityblock", "updated", 1)
 	NetworkUpdated       = events.Type(Context, "network", "updated", 1)
+
+	OrderImportRecorded = events.Type(Context, "orderimport", "recorded", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded}
 }
 
 type RunCompletedData struct {
@@ -176,4 +178,36 @@ type NetworkUpdatedData struct {
 	ActiveFrom string  `json:"activeFrom"`
 	ActiveTo   *string `json:"activeTo"`
 	Version    int     `json:"version"`
+}
+
+// OrderImportOperation is one operation registered for a production order.
+type OrderImportOperation struct {
+	OperationID string   `json:"operationId"`
+	OperNumber  int      `json:"operNumber"`
+	Minutes     int      `json:"minutes"`
+	ResourceIDs []string `json:"resourceIds"`
+	// Change is created, updated or unchanged.
+	Change string `json:"change"`
+}
+
+// OrderImportSkipped is an operation left out of the import.
+type OrderImportSkipped struct {
+	OperNumber int    `json:"operNumber"`
+	Code       string `json:"code"`
+	Detail     string `json:"detail"`
+}
+
+// OrderImportRecordedData is what scheduling did with an
+// order.scheduled.v1 event of production (FR-23.10).
+type OrderImportRecordedData struct {
+	OrderID            string                 `json:"orderId"`
+	OrderNumber        string                 `json:"orderNumber"`
+	OrderVersion       int                    `json:"orderVersion"`
+	Reason             string                 `json:"reason"`
+	Status             string                 `json:"status"`
+	Operations         []OrderImportOperation `json:"operations"`
+	Skipped            []OrderImportSkipped   `json:"skipped"`
+	RemovedOperNumbers []int                  `json:"removedOperNumbers"`
+	KeptFirmed         []int                  `json:"keptFirmedOperNumbers"`
+	ReplanRequired     bool                   `json:"replanRequired"`
 }

@@ -15,6 +15,8 @@ describe("scheduling module", () => {
         "/scheduling",
         "/scheduling/load",
         "/scheduling/late-orders",
+        "/scheduling/order-imports",
+        "/scheduling/order-imports/:orderId",
         "/scheduling/runs",
         "/scheduling/runs/new",
         "/scheduling/runs/:id",
