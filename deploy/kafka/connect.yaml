@@ -16,7 +16,19 @@ spec:
       # Literal on purpose: a new metadata aggregate type routes to a new topic and needs its own ACL entry here.
       - resource: {type: topic, name: passage.metadata.entity, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
-      - resource: {type: topic, name: passage.receiving., patternType: prefix}
+      - resource: {type: topic, name: passage.receiving.receipt, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.vendorinvoice, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.invoiceadjustment, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.settlement, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.ersvendor, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.auditpolicy, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.receiving.erspriceconfirmation, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
@@ -174,6 +186,8 @@ spec:
 # Receiving writes aggregate_type "receipt" (and invoice, settlement, ...) to its outbox; events.Topic maps
 # dev.passage.receiving.receipt.posted.v1 to passage.receiving.receipt, the topic the receipt.posted consumer reads.
 # snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# The debezium user's ACLs are literal per receiving aggregate_type (a new one needs an entry above) and never cover passage.receiving.receipt.dlq.
+# debezium_cdc has REPLICATION, which can decode any database it may connect to; the dev Postgres init revokes CONNECT from PUBLIC so it reaches only passage_receiving.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaConnector
 metadata:

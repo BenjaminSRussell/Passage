@@ -64,6 +64,7 @@ type Config struct {
 	Name            string
 	Handlers        map[string]Handler
 	DeadLetterTopic string
+	Idempotent      bool
 	MaxAttempts     int
 	Backoff         func(attempt int) time.Duration
 	Log             *slog.Logger
@@ -143,7 +144,7 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 	}
 	actorCtx := tenant.With(ctx, actor)
 	for attempt := 1; ; attempt++ {
-		applied, err := c.inbox.Once(actorCtx, c.cfg.Name, evt.ID, func(tx pgx.Tx) error { return handler.Handle(actorCtx, tx, evt) })
+		applied, err := c.apply(actorCtx, handler, evt)
 		if err == nil {
 			c.count(applied)
 			log.InfoContext(ctx, "event handled", "applied", applied)
@@ -168,6 +169,19 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 		case <-time.After(c.cfg.Backoff(attempt)):
 		}
 	}
+}
+
+func (c *Consumer) apply(ctx context.Context, handler Handler, evt events.Event) (bool, error) {
+	if !c.cfg.Idempotent {
+		return c.inbox.Once(ctx, c.cfg.Name, evt.ID, func(tx pgx.Tx) error { return handler.Handle(ctx, tx, evt) })
+	}
+	if seen, err := c.inbox.Seen(ctx, c.cfg.Name, evt.ID); err != nil || seen {
+		return false, err
+	}
+	if err := handler.Handle(ctx, nil, evt); err != nil {
+		return false, err
+	}
+	return true, c.inbox.Record(ctx, c.cfg.Name, evt.ID)
 }
 
 func (c *Consumer) count(applied bool) {

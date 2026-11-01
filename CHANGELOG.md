@@ -11,8 +11,9 @@ release may change public APIs.
 ### Added
 
 - `platform/go/eventing` is the shared at-least-once CloudEvents consumer (franz-go, structured and
-  binary decoding, `consumer_inbox` dedupe in the handler's transaction, bounded retry, dead-letter
-  topic, metrics) and `tenant.ServicePrincipal` the narrow-duty background actor
+  binary decoding, `consumer_inbox` dedupe by event id, bounded retry, dead-letter topic, metrics;
+  a handler that calls other services runs outside the inbox transaction and relies on its own
+  idempotency key) and `tenant.ServicePrincipal` the narrow-duty background actor
   (`service_principals` in `policies/authz/data.json`). `receiving consume` settles ERS receipts
   from `receipt.posted` as `service:receiving-ers`, fed by a new `outbox-receiving` Debezium
   connector (#97, #106).

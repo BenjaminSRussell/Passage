@@ -85,6 +85,15 @@ func (i *fakeInbox) Once(ctx context.Context, consumer, eventID string, effect f
 	return true, nil
 }
 
+func (i *fakeInbox) Seen(_ context.Context, consumer, eventID string) (bool, error) {
+	return i.seen[consumer+"/"+eventID], nil
+}
+
+func (i *fakeInbox) Record(_ context.Context, consumer, eventID string) error {
+	i.seen[consumer+"/"+eventID] = true
+	return nil
+}
+
 type harness struct {
 	src   *fakeSource
 	dlq   *fakeDLQ
@@ -95,12 +104,17 @@ type harness struct {
 
 func newHarness(t *testing.T, handle func(h *harness, attempt int) error) (*harness, *eventing.Consumer, context.Context) {
 	t.Helper()
+	return newHarnessWith(t, false, handle)
+}
+
+func newHarnessWith(t *testing.T, idempotent bool, handle func(h *harness, attempt int) error) (*harness, *eventing.Consumer, context.Context) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	h := &harness{src: &fakeSource{cancel: cancel}, dlq: &fakeDLQ{}, inbox: &fakeInbox{seen: map[string]bool{}}}
 	attempt := 0
 	c, err := eventing.NewConsumer(h.src, h.dlq, h.inbox, eventing.Config{
-		Name: "receiving-ers", DeadLetterTopic: "passage.receiving.receipt.dlq", MaxAttempts: 3, Backoff: func(int) time.Duration { return 0 },
+		Name: "receiving-ers", Idempotent: idempotent, DeadLetterTopic: "passage.receiving.receipt.dlq", MaxAttempts: 3, Backoff: func(int) time.Duration { return 0 },
 		Handlers: map[string]eventing.Handler{eventType: eventing.HandlerFunc(func(ctx context.Context, _ pgx.Tx, evt events.Event) error {
 			attempt++
 			p, _ := tenant.FromContext(ctx)
@@ -273,5 +287,24 @@ func TestNewConsumerRefusesIncompleteOrUnknownPrincipal(t *testing.T) {
 	}
 	if _, err := eventing.NewConsumer(src, dlq, inbox, eventing.Config{Name: "root", DeadLetterTopic: "x", Handlers: handlers}); !errors.Is(err, tenant.ErrUnknownServicePrincipal) {
 		t.Fatalf("unknown principal err = %v", err)
+	}
+}
+
+func TestIdempotentModeRunsTheHandlerOutsideATransactionAndRecordsAfterSuccess(t *testing.T) {
+	h, c, ctx := newHarnessWith(t, true, func(_ *harness, attempt int) error {
+		if attempt == 1 {
+			return errors.New("ledger unavailable")
+		}
+		return nil
+	})
+	h.src.queue = []eventing.Record{record(t, 1, "e1", eventType, tenantA), record(t, 2, "e1", eventType, tenantA)}
+	if err := run(t, c, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.ran) != 2 {
+		t.Fatalf("handler ran %d times, want the failed attempt and one success (the duplicate is skipped)", len(h.ran))
+	}
+	if !h.inbox.seen["receiving-ers/e1"] || len(h.dlq.sent) != 0 || len(h.src.committed) != 2 {
+		t.Fatalf("seen %v parked %v committed %v", h.inbox.seen, h.dlq.sent, h.src.committed)
 	}
 }

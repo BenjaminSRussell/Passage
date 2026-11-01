@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 )
@@ -55,4 +56,14 @@ func ServicePrincipal(name, tenantID, legalEntityID string) (Principal, error) {
 		held[d] = struct{}{}
 	}
 	return Principal{TenantID: tid, LegalEntityID: le, UserID: ServiceActor(name), Duties: held}, nil
+}
+
+func IsServiceActor(id string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(id)), ServiceActorPrefix)
+}
+
+func isKnownServiceActor(id string) bool {
+	name, ok := strings.CutPrefix(id, ServiceActorPrefix)
+	_, known := servicePrincipals[name]
+	return ok && known
 }

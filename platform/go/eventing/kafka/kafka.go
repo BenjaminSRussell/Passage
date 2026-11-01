@@ -38,7 +38,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(cfg.Brokers...), kgo.ConsumerGroup(cfg.Group), kgo.ConsumeTopics(cfg.Topics...),
-		kgo.DisableAutoCommit(), kgo.FetchIsolationLevel(kgo.ReadCommitted()), kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.DisableAutoCommit(), kgo.BlockRebalanceOnPoll(), kgo.FetchIsolationLevel(kgo.ReadCommitted()), kgo.RequiredAcks(kgo.AllISRAcks()),
 	}
 	if cfg.ClientID != "" {
 		opts = append(opts, kgo.ClientID(cfg.ClientID))
@@ -61,6 +61,7 @@ func (c *Client) Close() { c.cl.Close() }
 func (c *Client) Ping(ctx context.Context) error { return c.cl.Ping(ctx) }
 
 func (c *Client) Poll(ctx context.Context) ([]eventing.Record, error) {
+	c.cl.AllowRebalance()
 	fetches := c.cl.PollFetches(ctx)
 	if fetches.IsClientClosed() {
 		return nil, errors.New("kafka client closed")

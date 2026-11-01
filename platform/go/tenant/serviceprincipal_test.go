@@ -3,6 +3,8 @@ package tenant_test
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"testing"
@@ -68,6 +70,32 @@ func TestServicePrincipalTableMatchesPolicyData(t *testing.T) {
 			if d == tenant.DutyAllScope || d == tenant.DutyTenantAdmin {
 				t.Errorf("%s holds privileged duty %q", name, d)
 			}
+		}
+	}
+}
+
+func TestHTTPUserHeaderCannotClaimAServiceActor(t *testing.T) {
+	for user, want := range map[string]int{"service:receiving-ers": 401, "  Service:anything": 401, "warehouse-user": 200, "": 200} {
+		reached := false
+		h := tenant.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+		req := httptest.NewRequest(http.MethodPost, "/v1/x", nil)
+		req.Header.Set(tenant.HeaderTenant, spTenant)
+		req.Header.Set(tenant.HeaderUser, user)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != want || reached != (want == 200) {
+			t.Errorf("user %q: status %d reached %v, want %d", user, rec.Code, reached, want)
+		}
+	}
+}
+
+func TestServiceTokenActMustBeAKnownServiceActor(t *testing.T) {
+	f := newFixture(t)
+	for act, ok := range map[string]bool{"service:receiving-ers": true, "service:evil": false, "SERVICE:receiving-ers": false, "warehouse-user": true} {
+		f.principal.UserID = act
+		_, err := f.verifier.Verify(f.mint(t, "ledger"))
+		if (err == nil) != ok {
+			t.Errorf("act %q: err = %v, want accepted=%v", act, err, ok)
 		}
 	}
 }

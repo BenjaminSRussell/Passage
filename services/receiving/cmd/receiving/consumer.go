@@ -75,7 +75,7 @@ func runConsumer(ctx context.Context, getenv func(string) string, a *api.API, po
 	}
 	defer client.Close()
 	consumer, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{
-		Name: api.ErsConsumerName, Handlers: a.ErsConsumerHandlers(), DeadLetterTopic: api.ReceiptPostedTopic + deadLetterSuffix, Log: slog.Default(),
+		Name: api.ErsConsumerName, Idempotent: true, Handlers: a.ErsConsumerHandlers(), DeadLetterTopic: api.ReceiptPostedTopic + deadLetterSuffix, Log: slog.Default(),
 	})
 	if err != nil {
 		return err

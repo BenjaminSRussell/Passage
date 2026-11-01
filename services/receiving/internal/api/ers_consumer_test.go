@@ -56,8 +56,8 @@ func TestErsConsumer_SettlesAPostedReceiptOnceAndRecordsTheServiceActor(t *testi
 	}
 	id := invoiceIDFromEvents(t, rg)
 	code, body := rg.release(id, "service:receiving-ers")
-	if code != http.StatusForbidden || !strings.Contains(body, domain.CodeAuditSelfRelease) {
-		t.Fatalf("the service actor released its own invoice: %d %s", code, body)
+	if code != http.StatusUnauthorized || !strings.Contains(body, "invalid user") {
+		t.Fatalf("a request claiming the service actor was not refused: %d %s", code, body)
 	}
 	if code, body := rg.release(id, "auditor"); code != http.StatusOK {
 		t.Fatalf("a different person must be able to release: %d %s", code, body)
@@ -144,5 +144,27 @@ func TestErsConsumer_RefusesBadEventsPermanently(t *testing.T) {
 	}
 	if len(rg.ledger.Entries) != 0 {
 		t.Fatalf("bad events posted %d entries", len(rg.ledger.Entries))
+	}
+}
+
+func TestErsConsumer_AnEventForAnotherTenantOrLegalEntitySettlesNothing(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-1", 10, 4)
+	evt := rg.receiptPostedEvent(t)
+
+	otherTenant := evt
+	otherTenant.TenantID = testkit.TenantID(2)
+	if err := rg.consume(otherTenant); !eventing.IsPermanent(err) {
+		t.Fatalf("other tenant err = %v, want a permanent not-found", err)
+	}
+
+	otherEntity := evt
+	otherEntity.Data = []byte(strings.Replace(string(evt.Data), legalEntityID, "12121212-1212-4212-8212-121212121212", 1))
+	if err := rg.consume(otherEntity); err != nil && !eventing.IsPermanent(err) {
+		t.Fatalf("other legal entity err = %v", err)
+	}
+	if len(rg.ledger.Entries) != 1 || grirStatus(t, rg) != "OPEN" {
+		t.Fatalf("a mismatched event settled: ledger entries %d GR/IR %s", len(rg.ledger.Entries), grirStatus(t, rg))
 	}
 }
