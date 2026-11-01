@@ -244,6 +244,21 @@ func TestPostSetEntry_WithoutLedgerLinesKeepsTheLegacyHash(t *testing.T) {
 	}
 }
 
+func TestListLedgerSetsAndAccountMappingsPage(t *testing.T) {
+	fs := &fakeStore{listNext: testSet}
+	h := server(fs)
+	for _, path := range []string{"/v1/ledger/ledger-sets", "/v1/ledger/ledgers/" + testLedger + "/account-mappings"} {
+		fs.listAfter = ""
+		rec := call(h, http.MethodGet, path+"?cursor="+testSet, "", dutyRead, nil)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"nextCursor":"`+testSet+`"`) || fs.listAfter != testSet {
+			t.Errorf("%s: status %d after %q: %s", path, rec.Code, fs.listAfter, rec.Body.String())
+		}
+		if rec := call(h, http.MethodGet, path+"?cursor=nope", "", dutyRead, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: malformed cursor: status %d", path, rec.Code)
+		}
+	}
+}
+
 func TestListLedgerSetsAndAccountMappings(t *testing.T) {
 	h := server(&fakeStore{})
 	for _, path := range []string{"/v1/ledger/ledger-sets", "/v1/ledger/ledgers/" + testLedger + "/account-mappings"} {

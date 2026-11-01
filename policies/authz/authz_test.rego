@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -519,6 +519,16 @@ test_inventory_hold_duties_open_only_their_routes if {
 
 granted_duty_known(duty) if data.duties[duty]
 
+test_service_principals_hold_only_known_unprivileged_duties if {
+	every _, duties in data.service_principals {
+		count(duties) > 0
+		every duty in duties {
+			granted_duty_known(duty)
+			not duty in {"org.switcher.all_scope", "tenant.administer"}
+		}
+	}
+}
+
 test_service_grants_allow_only_their_declared_routes if {
 	every _, targets in data.service_grants {
 		every _, duties in targets {
@@ -556,6 +566,7 @@ test_service_grants_allow_only_their_declared_routes if {
 	data.service_grants.receiving.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
 	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
 	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
+	data.service_grants.hr.numbering == ["numbering.sequence.allocate"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
 		every duty in grant {
 			not allowed(duty, "POST", "/v1/ledger/validate")

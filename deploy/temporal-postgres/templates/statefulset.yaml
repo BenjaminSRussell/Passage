@@ -27,6 +27,7 @@ spec:
           image: {{ .Values.image | quote }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
           env:
@@ -39,12 +40,27 @@ spec:
           readinessProbe:
             exec:
               command: [pg_isready, -U, temporal, -d, temporal]
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, temporal, -d, temporal]
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, temporal, -d, temporal]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
             - { name: credentials, mountPath: /run/secrets/temporal-database, readOnly: true }
       volumes:
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
         - name: credentials
           secret: { secretName: temporal-database, defaultMode: 0440 }
   volumeClaimTemplates:
@@ -52,6 +68,9 @@ spec:
         name: data
       spec:
         accessModes: [ReadWriteOnce]
+        {{- with .Values.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
         resources:
           requests:
             storage: {{ .Values.persistence.size }}

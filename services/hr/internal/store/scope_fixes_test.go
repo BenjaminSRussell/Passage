@@ -322,12 +322,12 @@ func TestWorksheetSubmitSeesBudgetUsedInOtherEntities(t *testing.T) {
 	if _, err := s.SaveWorksheet(all, cycle.ID, managerB.ID, []WorksheetRowInput{{WorkerID: inB.ID, Rating: 3, ProposedPct: "5"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SubmitWorksheet(all, cycle.ID, managerB.ID); err != nil {
+	if _, err := s.SubmitWorksheet(all, cycle.ID, managerB.ID, false); err != nil {
 		t.Fatalf("entity B submit at exactly the budget: %v", err)
 	}
 	if _, err := s.SaveWorksheet(inA, cycle.ID, managerA.ID, []WorksheetRowInput{{WorkerID: inAWorker.ID, Rating: 3, ProposedPct: "3"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SubmitWorksheet(inA, cycle.ID, managerA.ID)
+	_, err = s.SubmitWorksheet(inA, cycle.ID, managerA.ID, false)
 	requireCode(t, err, domain.CodeCompOverBudget)
 }

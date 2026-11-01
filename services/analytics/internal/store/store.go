@@ -75,6 +75,10 @@ func (s *Postgres) RecordReconciliation(ctx context.Context, in domain.Reconcili
 	var out domain.Reconciliation
 	changed := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text, 0))`,
+			p.TenantID+"/"+in.LegalEntityID+"/"+in.MetricID+"/"+in.Date); err != nil {
+			return err
+		}
 		existing, err := scanRecon(tx.QueryRow(ctx, `select `+reconColumns+` from metric_reconciliation
 			where tenant_id = $1 and legal_entity_id = $2 and metric_id = $3 and recon_date = $4::date`,
 			p.TenantID, in.LegalEntityID, in.MetricID, in.Date))

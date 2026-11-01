@@ -3,7 +3,9 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -68,20 +70,20 @@ func TestReleases_RecordListAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	all, err := s.ListReleases(ctx, "", "")
+	all, _, err := s.ListReleases(ctx, "", "", "")
 	if err != nil || len(all) != 4 {
 		t.Fatalf("list all = %d, %v; want 4 (replay must not add a row)", len(all), err)
 	}
 	if all[0].Environment != "prod" {
 		t.Fatalf("newest first, got %+v", all[0])
 	}
-	if stage, _ := s.ListReleases(ctx, "hello-ledger", "stage"); len(stage) != 3 {
+	if stage, _, _ := s.ListReleases(ctx, "hello-ledger", "stage", ""); len(stage) != 3 {
 		t.Fatalf("stage filter = %d, want 3", len(stage))
 	}
-	if other, _ := s.ListReleases(ctx, "other-service", ""); len(other) != 0 {
+	if other, _, _ := s.ListReleases(ctx, "other-service", "", ""); len(other) != 0 {
 		t.Fatalf("service filter = %d, want 0", len(other))
 	}
-	if otherTenant, err := s.ListReleases(principal(2, "x"), "", ""); err != nil || len(otherTenant) != 4 {
+	if otherTenant, _, err := s.ListReleases(principal(2, "x"), "", "", ""); err != nil || len(otherTenant) != 4 {
 		t.Fatalf("releases are platform-level and visible to any caller with the duty, got %d, %v", len(otherTenant), err)
 	}
 
@@ -285,5 +287,94 @@ func TestReleases_PreviousDigestMustContinueTheRecordedChain(t *testing.T) {
 	replay, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "")
 	if err != nil || !replay.ChainBreak {
 		t.Fatalf("unkeyed repeat is a new row and a new break, got %+v, %v", replay, err)
+	}
+}
+
+func TestReleases_ChainBreakEventCarriesTheExpectedDigest(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	digestC := "sha256:" + strings.Repeat("c", 64)
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), ""); err != nil {
+		t.Fatal(err)
+	}
+	broken, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestC, digestA), "")
+	if err != nil || !broken.ChainBreak || broken.ExpectedPreviousDigest != digestB {
+		t.Fatalf("want a break expecting %s, got %+v, %v", digestB, broken, err)
+	}
+	var flagged bool
+	var expected string
+	if err := admin.QueryRow(context.Background(), `select (payload->'data'->>'chain_break')::boolean, payload->'data'->>'expected_previous_digest' from outbox where aggregate_id = $1`, broken.ID).Scan(&flagged, &expected); err != nil || !flagged || expected != digestB {
+		t.Fatalf("event chain_break = %v expected = %q, %v", flagged, expected, err)
+	}
+}
+
+func TestReleases_ConcurrentRecordsChainThroughTheLock(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), ""); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 8
+	var wg sync.WaitGroup
+	results := make([]store.Release, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			next := fmt.Sprintf("sha256:%064x", i+1)
+			r, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, next, digestB), "")
+			if err != nil {
+				t.Error(err)
+			}
+			results[i] = r
+		}()
+	}
+	wg.Wait()
+	breaks := 0
+	for _, r := range results {
+		if r.ChainBreak {
+			breaks++
+		}
+	}
+	if breaks != writers-1 {
+		t.Fatalf("all writers claim %s as previous: exactly one chains cleanly, got %d breaks of %d", digestB, breaks, writers)
+	}
+}
+
+func TestReleases_ListPaginatesWithAKeysetCursor(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	const total = 103
+	for i := range total {
+		in := release("stage", store.ActionPromote, fmt.Sprintf("sha256:%064x", i+1), fmt.Sprintf("sha256:%064x", i))
+		if _, err := s.RecordRelease(ctx, in, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, next, err := s.ListReleases(ctx, "", "", "")
+	if err != nil || len(first) != 100 || next != first[99].ID {
+		t.Fatalf("first page = %d, next = %q, %v", len(first), next, err)
+	}
+	second, next, err := s.ListReleases(ctx, "", "", next)
+	if err != nil || len(second) != total-100 || next != "" {
+		t.Fatalf("second page = %d, next = %q, %v", len(second), next, err)
+	}
+	if second[0].ID == first[99].ID {
+		t.Fatalf("pages overlap")
+	}
+	if _, _, err := s.ListReleases(ctx, "", "", ids.New()); !errors.Is(err, store.ErrUnknownCursor) {
+		t.Fatalf("unknown cursor: err = %v, want ErrUnknownCursor", err)
 	}
 }

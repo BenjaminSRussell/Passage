@@ -205,3 +205,21 @@ export function validityLabel(months: number): string {
   if (months <= 0) return "Does not expire";
   return `${months} month${months === 1 ? "" : "s"} after the session ends`;
 }
+
+/** Orders two decimal strings ("-1.5", "0.80") without floats: negative when a < b, 0 when equal. */
+export function compareDecimal(a: string, b: string): number {
+  const places = Math.max(a.split(".")[1]?.length ?? 0, b.split(".")[1]?.length ?? 0);
+  const units = (value: string) => {
+    const negative = value.trim().startsWith("-");
+    const [whole, frac = ""] = value.trim().replace(/^-/, "").split(".");
+    const magnitude = BigInt(whole) * 10n ** BigInt(places) + BigInt(frac.padEnd(places, "0") || "0");
+    return negative ? -magnitude : magnitude;
+  };
+  const diff = units(a) - units(b);
+  return diff < 0n ? -1 : diff > 0n ? 1 : 0;
+}
+
+/** A signed decimal string with at most `places` decimals ("-2.5"), checked without floats. */
+export function validSigned(raw: string, places: number): boolean {
+  return new RegExp(`^-?\\d{1,8}(?:\\.\\d{1,${places}})?$`).test(raw.trim());
+}

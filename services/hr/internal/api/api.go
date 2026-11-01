@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
 
@@ -51,6 +52,7 @@ var (
 // API holds the store and the counters rendered at /metrics.
 type API struct {
 	store                *store.Postgres
+	sequence             Sequencer
 	workersCreated       atomic.Int64
 	employments          atomic.Int64
 	assignments          atomic.Int64
@@ -89,8 +91,18 @@ type API struct {
 	questionnaireAnswers atomic.Int64
 }
 
+// Sequencer allocates the next formatted number of a numbering sequence.
+type Sequencer interface {
+	Next(ctx context.Context, code, idempotencyKey string) (string, error)
+}
+
 // New builds the API over a store.
-func New(s *store.Postgres) *API { return &API{store: s} }
+func New(s *store.Postgres) *API { return &API{store: s, sequence: numbering.Unavailable{}} }
+
+func (a *API) WithSequencer(s Sequencer) *API {
+	a.sequence = s
+	return a
+}
 
 // Register mounts every HR route on r, each behind its duty.
 func (a *API) Register(r chi.Router) {
