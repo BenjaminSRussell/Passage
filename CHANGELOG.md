@@ -17,6 +17,11 @@ release may change public APIs.
   (`service_principals` in `policies/authz/data.json`). `receiving consume` settles ERS receipts
   from `receipt.posted` as `service:receiving-ers`, fed by a new `outbox-receiving` Debezium
   connector (#97, #106).
+- `scheduling consume` closes a production resource's capacity for EAM downtime: it reads
+  `downtime.recorded` from `passage.eam.downtime` (new `outbox-eam` connector, `debezium_cdc_eam`
+  role and `passage_eam` database in the dev Postgres) as `service:scheduling-downtime`, holding
+  only `scheduling.downtime.apply`, and books a downtime capacity override idempotently (#44).
+  `kafka.ConfigFromEnv` now holds the consumer's Kafka settings for both services.
 
 ### Security
 

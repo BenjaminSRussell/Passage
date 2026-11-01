@@ -2142,6 +2142,9 @@
       {"resource": "/v1/scheduling/resources/*/capacity-overrides", "methods": ["POST"]},
       {"resource": "/v1/scheduling/resources/*/capacity-overrides/*", "methods": ["DELETE"]}
     ]},
+    "scheduling.downtime.apply": {"permissions": [
+      {"resource": "/v1/scheduling/resources/*/capacity-overrides", "methods": ["POST"]}
+    ]},
     "scheduling.read": {"permissions": [
       {"resource": "/v1/scheduling/campaign-proposals", "methods": ["GET"]},
       {"resource": "/v1/scheduling/campaigns", "methods": ["GET"]},
@@ -2368,6 +2371,7 @@
     }
   },
   "service_principals": {
-    "receiving-ers": ["VendorInvoicePost"]
+    "receiving-ers": ["VendorInvoicePost"],
+    "scheduling-downtime": ["scheduling.downtime.apply"]
   }
 }

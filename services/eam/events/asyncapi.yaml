@@ -165,7 +165,7 @@ components:
         source: { type: string, enum: [MANUAL, IOT] }
     DowntimeRecorded:
       type: object
-      description: A production resource stop booked on a work order (BR-44.5); wave 23 makes it a capacity exception for [from, to).
+      description: A production resource stop booked on a work order (BR-44.5); wave 23 makes it a capacity exception for [from, to). resourceId is the scheduling resource id and equals the asset's production_resource_id; EAM stores it unchecked, so scheduling dead-letters an event whose resource it does not have.
       required: [downtimeId, resourceId, workOrderId, assetId, from, to, minutes]
       properties:
         downtimeId: { type: string, format: uuid }
