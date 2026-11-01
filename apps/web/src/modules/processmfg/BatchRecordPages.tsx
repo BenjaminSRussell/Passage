@@ -42,6 +42,7 @@ import {
   type RecordedValue,
   type StoredAttributeDefinition,
 } from "./api/client";
+import { GenealogyCard } from "./GenealogyCard";
 import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -535,6 +536,7 @@ export function BatchDetailPage() {
           empty={{ title: "No disposition changes", description: "The batch still has the disposition it was registered with." }}
         />
       </Card>
+      <GenealogyCard batchId={batch.id} />
       <Card title="Attribute history">
         <DataTable
           label="Attribute history"

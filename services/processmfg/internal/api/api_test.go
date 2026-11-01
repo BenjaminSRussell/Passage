@@ -144,6 +144,14 @@ func (f *fakeStore) ChangeDisposition(_ context.Context, _, to, reason string, v
 	return f.batch, !f.replay, f.err
 }
 
+func (f *fakeStore) MergeBatches(context.Context, store.MergeInput, store.Idem) (store.MergeResult, bool, error) {
+	return store.MergeResult{}, false, f.err
+}
+
+func (f *fakeStore) GetGenealogy(context.Context, string) (store.Genealogy, error) {
+	return store.Genealogy{}, f.err
+}
+
 func (f *fakeStore) Ping(context.Context) error { return f.err }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

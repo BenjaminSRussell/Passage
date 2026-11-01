@@ -72,6 +72,7 @@ const defs: StoredAttributeDefinition[] = [
 function serve(current: Batch) {
   handler = (url, init) => {
     if (url.pathname.endsWith("/batch-attribute-definitions")) return { status: 200, body: { items: defs } };
+    if (url.pathname.endsWith(`/batches/${BATCH}/genealogy`)) return { status: 200, body: { batchId: BATCH, parents: [], children: [] } };
     if (url.pathname.endsWith(`/batches/${BATCH}`)) return { status: 200, body: current };
     if (url.pathname.endsWith("/attributes") && init.method === "PUT") {
       return {

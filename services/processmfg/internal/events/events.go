@@ -25,12 +25,14 @@ const (
 	BatchAttributesRecorded = "dev.passage.production.batch.attributesrecorded.v1"
 	// BatchDispositionChanged is written when a batch's disposition changes (AC-24.10).
 	BatchDispositionChanged = "dev.passage.production.batch.dispositionchanged.v1"
+	// BatchMerged is written when stored batches are merged into a new one (FR-24.16).
+	BatchMerged = "dev.passage.production.batch.merged.v1"
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{FormulaCreated, BatchOrderCreated, BatchOrderRescaled, BatchOrderStateChanged, CoProductAllocated,
-		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged}
+		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged}
 }
 
 // FormulaCreatedData is the payload of FormulaCreated.
@@ -184,4 +186,29 @@ type BatchDispositionChangedData struct {
 	// SegregationConflict: the same user recorded attributes on this batch (PRD 4.24.17).
 	SegregationConflict bool `json:"segregationConflict"`
 	Version             int  `json:"version"`
+}
+
+// MergedParent is one source batch of a merge.
+type MergedParent struct {
+	BatchID     string `json:"batchId"`
+	BatchNumber string `json:"batchNumber"`
+	Qty         string `json:"qty"`
+	UnitCost    string `json:"unitCost"`
+}
+
+// BatchMergedData is the payload of BatchMerged: the new batch, its quantity
+// and weighted-average cost per unit, the warehouse and catch-weight unit the
+// parents share (where inventory posts the transfers), and the parents.
+type BatchMergedData struct {
+	BatchID       string         `json:"batchId"`
+	LegalEntityID string         `json:"legalEntityId"`
+	ItemID        string         `json:"itemId"`
+	BatchNumber   string         `json:"batchNumber"`
+	Disposition   string         `json:"disposition"`
+	WarehouseID   string         `json:"warehouseId"`
+	CWUnit        string         `json:"cwUnit,omitempty"`
+	ExpiryDate    string         `json:"expiryDate,omitempty"`
+	Qty           string         `json:"qty"`
+	UnitCost      string         `json:"unitCost"`
+	Parents       []MergedParent `json:"parents"`
 }

@@ -630,3 +630,51 @@ export function changeBatchDisposition(
 ): Promise<Batch> {
   return post<Batch>(`/batches/${encodeURIComponent(id)}:disposition`, input, key);
 }
+
+export interface MergeSourceInput {
+  batchId: string;
+  version: number;
+  warehouseId: string;
+  cwUnit?: string;
+  qty: string;
+  unitCost: string;
+}
+
+export interface StoredMergeRequest {
+  targetBatchNumber: string;
+  sources: MergeSourceInput[];
+  mergeOverride?: string[];
+}
+
+export interface GenealogyLink {
+  batchId: string;
+  batchNumber: string;
+  itemId: string;
+  relation: "merge";
+  qty: string;
+  unitCost: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface StoredMergeResult {
+  batch: Batch;
+  qty: string;
+  unitCost: string;
+  parents: GenealogyLink[];
+}
+
+export interface Genealogy {
+  batchId: string;
+  parents: GenealogyLink[];
+  children: GenealogyLink[];
+}
+
+/** FR-24.16: merges stored batches into a new batch; reuse one key per form submit so a retry cannot merge twice. */
+export function mergeStoredBatches(input: StoredMergeRequest, key: string = newKey()): Promise<StoredMergeResult> {
+  return post<StoredMergeResult>("/batches:merge", input, key);
+}
+
+export function getBatchGenealogy(id: string, signal?: AbortSignal): Promise<Genealogy> {
+  return send<Genealogy>(`/batches/${encodeURIComponent(id)}/genealogy`, {}, signal);
+}

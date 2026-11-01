@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Process Manufacturing
-  version: 0.4.0
+  version: 0.5.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11): formulas, batch orders
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11 to 13): formulas, batch orders
     scaled from a formula snapshot, the potency, catch-weight and co-product
     allocation calculators (slice 1), the batch derivation, merge, consolidation,
     customer requirement and EBR approval previews (slice 2), and the batch
     attribute check, the picking proposal and the rework plan (slice 3), and the
-    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11). Routes
+    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11), and the merge of stored batches with its genealogy (slice 13). Routes
     match the handlers in internal/api (checked by internal/api/openapi_test.go).
     Errors are RFC 9457 problem details (application/problem+json) with a stable
     `code`; see README.md. The gateway routes /api/v1/production/* paths listed
@@ -684,6 +684,51 @@ paths:
           description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches:merge:
+    post:
+      operationId: mergeBatches
+      summary: Merge stored batches into a new batch (FR-24.16, AC-24.12)
+      description: Reads the disposition and recorded attribute values of the source batches from the batch register, applies the merge rule of batch-merge:preview (numbers quantity-weighted, dates earliest, text must agree unless listed in mergeOverride), registers the target with the merged values checked against the item's definitions and the earliest expiry, and writes one genealogy row per source. The register keeps no quantity or cost, so the caller gives them per source with the version it read. Each source's version moves by one, so a second merge or a disposition change from the version read before is refused as stale; a source stays registered and can be merged again from its new version (a partial merge). Writes dev.passage.production.batch.merged.v1 in the same transaction; the inventory transfers are posted by services/inventory from that event.
+      x-passage-duty: production.batch.merge
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MergeStoredRequest' } } }
+      responses:
+        '201':
+          description: 'The new batch at version 1 with its merged attributes, the total quantity, the weighted cost per unit and the parents. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/MergeStoredResult' } } }
+        '400':
+          description: COM-0001 for a malformed body, fewer than two sources, a repeated batch or an attribute value the item's definitions refuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0108 when a source batch is not in the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when a source version is stale; PMF-0109 when the target batch number already exists for the item.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0006 when the sources differ in item, legal entity, warehouse, catch-weight unit, disposition, the kind of an attribute, or a text attribute that is not merge-override; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches/{id}/genealogy:
+    get:
+      operationId: getBatchGenealogy
+      summary: Where a batch was merged from and where it went (FR-24.16)
+      description: Parents are the batches this one was merged from, children the batches it went into, each with the quantity and cost per unit it contributed.
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The parents and children of the batch.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Genealogy' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Id:
@@ -800,6 +845,50 @@ components:
         attributes: { type: array, items: { $ref: '#/components/schemas/BatchAttribute' }, description: The latest value of each attribute; on the detail only. }
         attributeHistory: { type: array, items: { $ref: '#/components/schemas/BatchAttribute' }, description: Every recorded value, newest first, at most 500; on the detail only. }
         dispositions: { type: array, items: { $ref: '#/components/schemas/DispositionChange' }, description: Newest first; on the detail only. }
+    MergeSource:
+      type: object
+      required: [batchId, version, warehouseId, qty, unitCost]
+      properties:
+        batchId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1, description: The batch version the caller read; the merge moves it by one. }
+        warehouseId: { type: string, minLength: 1, maxLength: 80, description: Sources in different warehouses are refused. }
+        cwUnit: { type: string, maxLength: 80, description: Catch-weight unit; sources must share it. }
+        qty: { $ref: '#/components/schemas/Decimal', description: Quantity merged, from inventory. }
+        unitCost: { $ref: '#/components/schemas/Decimal', description: Cost per unit, from inventory. }
+    MergeStoredRequest:
+      type: object
+      required: [targetBatchNumber, sources]
+      properties:
+        targetBatchNumber: { type: string, minLength: 1, maxLength: 40 }
+        sources: { type: array, minItems: 2, maxItems: 50, items: { $ref: '#/components/schemas/MergeSource' } }
+        mergeOverride: { type: array, items: { type: string }, description: Text attributes allowed to differ. }
+    GenealogyLink:
+      type: object
+      required: [batchId, batchNumber, itemId, relation, qty, unitCost, createdBy, createdAt]
+      properties:
+        batchId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        itemId: { type: string, format: uuid }
+        relation: { type: string, enum: [merge] }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    MergeStoredResult:
+      type: object
+      required: [batch, qty, unitCost, parents]
+      properties:
+        batch: { $ref: '#/components/schemas/BatchRecord' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        parents: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
+    Genealogy:
+      type: object
+      required: [batchId, parents, children]
+      properties:
+        batchId: { type: string, format: uuid }
+        parents: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
+        children: { type: array, items: { $ref: '#/components/schemas/GenealogyLink' } }
     AttributeCheck:
       type: object
       required: [name, pass]
