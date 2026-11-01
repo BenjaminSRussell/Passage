@@ -590,6 +590,7 @@ func (s *Postgres) PostBatch(ctx context.Context, in PostBatchInput) (EntryResul
 	}
 	var out EntryResult
 	attempted := false
+	s.warmPeriods(ctx, warmBatchQuery, in.ID, domain.ManualSourceSystem)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		cur, err := getBatchTx(ctx, tx, p.TenantID, in.ID, true)
 		if err != nil {

@@ -112,10 +112,10 @@ off. It reads the previous day's `revenue` per legal entity from Cube
 (`CUBE_URL`, `CUBE_API_TOKEN`; a NULL, or an entity Cube returns no row for,
 counts as 0) and from the ledger (`LEDGER_URL`, signed service token with duties
 `ledger.entry.lookup` and `ledger.ledger.lookup`; credits minus debits of the
-accounts in `ANALYTICS_RECON_REVENUE_ACCOUNTS`, `FROM-TO`, for each
+accounting-currency amounts (`amountAcct`) of the accounts in `ANALYTICS_RECON_REVENUE_ACCOUNTS`, `FROM-TO`, for each
 `legalEntityId=ledgerId` pair in `ANALYTICS_RECON_LEDGERS`), then records each
 entity through `RecordReconciliation` (tolerance 0.005, trust counter,
-`metric.reconciled`). A failed day logs `ANA-0104`. A failed read records
+`metric.reconciled`). The Cube token's `tenantId` must equal the tenant and must not be expired (checked at start, expiry logged). A failed day logs `ANA-0104`. A failed read records
 nothing and the next run is the next 02:00. Every replica runs the loop; the
 store is idempotent for identical values.
 

@@ -301,6 +301,7 @@ func (s *Postgres) PostSetEntry(ctx context.Context, setID string, in PostInput)
 		return EntryResult{}, err
 	}
 	var out EntryResult
+	s.warmPeriods(ctx, warmSetQuery, setID, in.PostingDate.Format(time.DateOnly), in.Source.System)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = postSetTx(ctx, tx, p.TenantID, setID, in)
 		return err

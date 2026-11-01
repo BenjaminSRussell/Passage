@@ -28,6 +28,21 @@ func newReconJob(getenv func(string) string, st *store.Postgres) (*recon.Job, er
 			return nil, fmt.Errorf("%s is required when ANALYTICS_RECON_TENANT_ID is set", key)
 		}
 	}
+	tokenTenant, expires, err := recon.InspectToken(getenv("CUBE_API_TOKEN"))
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(tokenTenant, tenantID) {
+		return nil, fmt.Errorf("CUBE_API_TOKEN is for tenant %q, not ANALYTICS_RECON_TENANT_ID %q", tokenTenant, tenantID)
+	}
+	if !expires.IsZero() && !expires.After(time.Now()) {
+		return nil, fmt.Errorf("CUBE_API_TOKEN expired at %s", expires.Format(time.RFC3339))
+	}
+	if expires.IsZero() {
+		slog.Warn("CUBE_API_TOKEN has no expiry")
+	} else {
+		slog.Info("revenue reconciliation Cube token", "expires", expires.Format(time.RFC3339))
+	}
 	loc := time.UTC
 	if name := getenv("ANALYTICS_RECON_TZ"); name != "" {
 		var err error

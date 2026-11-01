@@ -210,7 +210,7 @@ components:
     LedgerLine:
       type: object
       description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
-      required: [id, entryId, voucher, postingSequence, postingDate, lineNumber, account, displayName, debitCredit, amount, currency, negativePosting, sourceSystem, sourceType, sourceId, traceId]
+      required: [id, entryId, voucher, postingSequence, postingDate, lineNumber, account, displayName, debitCredit, amount, amountAcct, currency, negativePosting, sourceSystem, sourceType, sourceId, traceId]
       properties:
         id: { type: string, format: uuid }
         entryId: { type: string, format: uuid }
@@ -225,6 +225,7 @@ components:
           additionalProperties: { type: string }
         debitCredit: { type: string, enum: [D, C] }
         amount: { type: string, description: Decimal at the currency's minor-unit scale }
+        amountAcct: { type: string, description: Amount in the ledger's accounting currency at that currency's scale, always positive (the sign is debitCredit) }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         negativePosting: { type: boolean }
         text: { type: string, description: Line text }
@@ -1745,6 +1746,12 @@ paths:
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
         idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
         are new requests.
+
+        Period control: with CLOSE_URL configured, every posting path (this one, validate, reversal,
+        batch submit and post, ledger-set post) asks the close service for the posting date's period status
+        and answers 422 LEDGER_PERIOD_CLOSED unless the status is open. Flag duty ledger.period.postclosed
+        overrides a closed or on_hold period only; permanently_closed and never_opened always refuse. A close
+        service that cannot confirm the status gives 503 LEDGER_PERIOD_STATUS_UNAVAILABLE and nothing is posted.
 
         Posting to a ledger that is a non-leading member of a ledger set also needs the duty
         ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003. POST

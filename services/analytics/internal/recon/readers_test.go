@@ -108,8 +108,8 @@ func ledgerReader(t *testing.T, url string) *LedgerReader {
 func TestLedgerReader_SumsCreditsMinusDebitsAcrossPages(t *testing.T) {
 	var seen []string
 	srv := ledgerServer(t, map[string]string{
-		"":    `{"items":[{"debitCredit":"C","amount":"100.10"},{"debitCredit":"D","amount":"0.05"}],"nextCursor":"7.2"}`,
-		"7.2": `{"items":[{"debitCredit":"C","amount":"0.01"}]}`,
+		"":    `{"items":[{"debitCredit":"C","amountAcct":"100.10"},{"debitCredit":"D","amountAcct":"0.05"}],"nextCursor":"7.2"}`,
+		"7.2": `{"items":[{"debitCredit":"C","amountAcct":"0.01"}]}`,
 	}, &seen)
 	defer srv.Close()
 	got, err := ledgerReader(t, srv.URL).Revenue(jobContext(), "2026-03-10")

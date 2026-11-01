@@ -91,3 +91,50 @@ func TestStatus_UnreachableAndUnsignedFail(t *testing.T) {
 		t.Fatal("a missing signing key must fail")
 	}
 }
+
+func TestStatus_CachesPerLedgerModuleAndDateForThirtySeconds(t *testing.T) {
+	calls := 0
+	c, ctx, le, ledgerID := fixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"status":"open"}`))
+	})
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	ask := func(source string, date time.Time) {
+		t.Helper()
+		if _, err := c.Status(ctx, le, ledgerID, date, source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask("ap", postingDate)
+	ask("ap", postingDate)
+	if calls != 1 {
+		t.Fatalf("calls %d, want the second answer from cache", calls)
+	}
+	ask("ar", postingDate)
+	ask("ap", postingDate.AddDate(0, 0, 1))
+	if calls != 3 {
+		t.Fatalf("calls %d, a different module or date must not share an entry", calls)
+	}
+	now = now.Add(CacheTTL + time.Second)
+	ask("ap", postingDate)
+	if calls != 4 {
+		t.Fatalf("calls %d, an expired entry must be fetched again", calls)
+	}
+}
+
+func TestStatus_DoesNotCacheFailures(t *testing.T) {
+	calls := 0
+	c, ctx, le, ledgerID := fixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	for i := 0; i < 2; i++ {
+		if _, err := c.Status(ctx, le, ledgerID, postingDate, "ap"); err == nil {
+			t.Fatal("want an error")
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("calls %d, failures must not be cached", calls)
+	}
+}

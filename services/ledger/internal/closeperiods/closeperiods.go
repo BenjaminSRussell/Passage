@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -25,12 +26,23 @@ const (
 	dutyPeriodCheck = "period.check"
 	codeNoPeriod    = "CLOSE-0005"
 	maxResponseSize = 1 << 20
+	CacheTTL        = 30 * time.Second
+	maxCacheEntries = 10000
 )
 
 type Client struct {
 	baseURL string
 	http    *http.Client
 	signer  *tenant.ServiceSigner
+	now     func() time.Time
+
+	mu    sync.Mutex
+	cache map[string]cached
+}
+
+type cached struct {
+	status  string
+	expires time.Time
 }
 
 func New(baseURL string, httpClient *http.Client, signer *tenant.ServiceSigner) *Client {
@@ -39,10 +51,30 @@ func New(baseURL string, httpClient *http.Client, signer *tenant.ServiceSigner) 
 	}
 	noRedirect := *httpClient
 	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: &noRedirect, signer: signer}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: &noRedirect, signer: signer, now: time.Now, cache: map[string]cached{}}
 }
 
 func (c *Client) Status(ctx context.Context, legalEntityID, ledgerID string, postingDate time.Time, sourceSystem string) (string, error) {
+	key := ledgerID + "|" + sourceSystem + "|" + postingDate.Format(time.DateOnly)
+	c.mu.Lock()
+	hit, ok := c.cache[key]
+	c.mu.Unlock()
+	if ok && c.now().Before(hit.expires) {
+		return hit.status, nil
+	}
+	status, err := c.fetch(ctx, legalEntityID, ledgerID, postingDate, sourceSystem)
+	if err == nil {
+		c.mu.Lock()
+		if len(c.cache) >= maxCacheEntries {
+			c.cache = map[string]cached{}
+		}
+		c.cache[key] = cached{status: status, expires: c.now().Add(CacheTTL)}
+		c.mu.Unlock()
+	}
+	return status, err
+}
+
+func (c *Client) fetch(ctx context.Context, legalEntityID, ledgerID string, postingDate time.Time, sourceSystem string) (string, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return "", errors.New("close: no principal in context")

@@ -54,6 +54,7 @@ func (s *Postgres) PostEntry(ctx context.Context, in PostInput) (EntryResult, er
 		return EntryResult{}, err
 	}
 	var out EntryResult
+	s.warmPeriods(ctx, warmEntryQuery, in.LedgerID, in.PostingDate.Format(time.DateOnly), in.Source.System)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = postEntryTx(ctx, tx, p.TenantID, in)
 		return err
@@ -142,6 +143,11 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 		return EntryResult{}, err
 	}
 	var out EntryResult
+	override := ""
+	if in.PostingDate != nil {
+		override = in.PostingDate.Format(time.DateOnly)
+	}
+	s.warmPeriods(ctx, warmReversalQuery, in.EntryID, override)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = reverseEntryTx(ctx, tx, p.TenantID, in)
 		return err
@@ -199,10 +205,10 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		}
 	}
 	var orig struct {
-		voucher, postingDate, documentID string
+		voucher, postingDate, documentID, sourceSystem string
 	}
-	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text from journal_entry where tenant_id = $1 and id = $2`,
-		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID); err != nil {
+	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text, source_system from journal_entry where tenant_id = $1 and id = $2`,
+		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID, &orig.sourceSystem); err != nil {
 		return out, err
 	}
 	var reversingVoucher string
@@ -223,11 +229,12 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 	if in.PostingDate != nil {
 		postingDate = *in.PostingDate
 	}
-	v, err := periodViolations(ctx, ledger, postingDate, reversalSourceSystem)
-	if err != nil {
-		return out, err
+	v := domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today)
+	if len(v) == 0 {
+		if v, err = periodViolations(ctx, ledger, postingDate, orig.sourceSystem); err != nil {
+			return out, err
+		}
 	}
-	v = append(v, domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today)...)
 	reason, err := loadReason(ctx, tx, tenantID, in.ReasonCode)
 	if err != nil {
 		return out, err
@@ -564,11 +571,13 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 			return err
 		}
 		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, lines)
-		closed, err := periodViolations(ctx, ledger, in.PostingDate, in.Source.System)
-		if err != nil {
-			return err
+		if res.Valid() {
+			closed, err := periodViolations(ctx, ledger, in.PostingDate, in.Source.System)
+			if err != nil {
+				return err
+			}
+			res.Violations = closed
 		}
-		res.Violations = append(res.Violations, closed...)
 		res.Derivation = traces
 		return nil
 	})

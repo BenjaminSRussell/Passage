@@ -54,6 +54,9 @@ spec:
 {{- end }}
 {{- end }}
             - { name: CLOSE_URL, value: {{ .Values.closeUrl | quote }} }
+{{- if .Values.periodCheck }}
+            - { name: LEDGER_PERIOD_CHECK, value: {{ .Values.periodCheck | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.publicKeys }}
             - name: PASSAGE_SERVICE_PUBLIC_KEYS
               value: {{ .Values.serviceIdentity.publicKeys | quote }}

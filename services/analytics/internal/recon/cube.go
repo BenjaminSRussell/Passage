@@ -3,6 +3,7 @@ package recon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,4 +99,26 @@ func nullableDecimal(raw json.RawMessage) (*decimal.Decimal, error) {
 		return nil, err
 	}
 	return &d, nil
+}
+
+func InspectToken(token string) (tenantID string, expires time.Time, err error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", time.Time{}, fmt.Errorf("CUBE_API_TOKEN is not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("CUBE_API_TOKEN payload: %w", err)
+	}
+	var claims struct {
+		TenantID string `json:"tenantId"`
+		Exp      int64  `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", time.Time{}, fmt.Errorf("CUBE_API_TOKEN payload: %w", err)
+	}
+	if claims.Exp != 0 {
+		expires = time.Unix(claims.Exp, 0).UTC()
+	}
+	return claims.TenantID, expires, nil
 }

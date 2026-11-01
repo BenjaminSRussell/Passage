@@ -102,7 +102,7 @@ func (l *LedgerReader) Revenue(ctx context.Context, day string) ([]GLRevenue, er
 			var lines struct {
 				Items []struct {
 					DebitCredit string `json:"debitCredit"`
-					Amount      string `json:"amount"`
+					Amount      string `json:"amountAcct"`
 				} `json:"items"`
 				NextCursor string `json:"nextCursor"`
 			}

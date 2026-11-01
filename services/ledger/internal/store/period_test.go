@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
@@ -35,7 +37,7 @@ func withDuty(e env, duty string) context.Context {
 }
 
 func TestPostgres_CloseStatusRefusesEveryPostingPath(t *testing.T) {
-	for _, status := range []string{"closed", "permanently_closed", "never_opened"} {
+	for _, status := range []string{"closed", "permanently_closed", "never_opened", "on_hold"} {
 		t.Run(status, func(t *testing.T) {
 			e := setupLedgerSet(t)
 			putName(t, e.env, "GJ", JournalName{Active: true})
@@ -90,10 +92,9 @@ func TestPostgres_CloseStatusRefusesEveryPostingPath(t *testing.T) {
 	}
 }
 
-func TestPostgres_CloseStatusOpenOnHoldOrUnregisteredPosts(t *testing.T) {
+func TestPostgres_CloseStatusOpenOrUnregisteredPosts(t *testing.T) {
 	cases := map[string]*fakeGate{
 		"open":         {status: "open"},
-		"on_hold":      {status: "on_hold"},
 		"unregistered": {err: ErrNoFiscalPeriod},
 	}
 	for name, gate := range cases {
@@ -109,19 +110,58 @@ func TestPostgres_CloseStatusOpenOnHoldOrUnregisteredPosts(t *testing.T) {
 	}
 }
 
-func TestPostgres_ClosePeriodDutyHolderPostsIntoClosedPeriod(t *testing.T) {
+func TestPostgres_ClosePeriodDutyOverridesClosedAndOnHoldOnly(t *testing.T) {
+	for status, allowed := range map[string]bool{"closed": true, "on_hold": true, "permanently_closed": false, "never_opened": false} {
+		t.Run(status, func(t *testing.T) {
+			e, _ := setup(t)
+			holder := WithPeriodGate(withDuty(e, DutyPostClosedPeriod), &fakeGate{status: status})
+			_, err := e.store.PostEntry(holder, vendorInvoice(e.ledger.ID, "ADJ-1", "10.00"))
+			if allowed && err != nil {
+				t.Fatalf("holder post into %s: %v", status, err)
+			}
+			if !allowed {
+				requirePeriodClosed(t, "holder PostEntry into "+status, err)
+			}
+			other := WithPeriodGate(e.ctx, &fakeGate{status: status})
+			_, err = e.store.PostEntry(other, vendorInvoice(e.ledger.ID, "ADJ-2", "10.00"))
+			requirePeriodClosed(t, "PostEntry without duty into "+status, err)
+		})
+	}
+}
+
+func TestPostgres_CloseIsNotAskedAboutAnInvalidEntry(t *testing.T) {
 	e, _ := setup(t)
-	gate := &fakeGate{status: "closed"}
-	holder := WithPeriodGate(withDuty(e, DutyPostClosedPeriod), gate)
-	if _, err := e.store.PostEntry(holder, vendorInvoice(e.ledger.ID, "ADJ-1", "10.00")); err != nil {
-		t.Fatalf("holder post: %v", err)
+	gate := &fakeGate{status: "open"}
+	in := vendorInvoice(e.ledger.ID, "BAD-1", "10.00")
+	in.Lines[1].Amount = in.Lines[1].Amount.Add(decimal.NewFromInt(1))
+	res, err := e.store.ValidateEntry(WithPeriodGate(e.ctx, gate), in)
+	if err != nil || res.Valid() {
+		t.Fatalf("want local violations, got %+v %v", res, err)
 	}
 	if len(gate.calls) != 0 {
-		t.Fatalf("a duty holder must not need the close service: %+v", gate.calls)
+		t.Fatalf("close was asked about an entry that already failed: %+v", gate.calls)
 	}
-	other := WithPeriodGate(e.ctx, gate)
-	_, err := e.store.PostEntry(other, vendorInvoice(e.ledger.ID, "ADJ-2", "10.00"))
-	requirePeriodClosed(t, "PostEntry without duty", err)
+}
+
+func TestPostgres_ReversalAsksAboutTheOriginalSourceModule(t *testing.T) {
+	e, _ := setup(t)
+	orig, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "REV-SRC", "10.00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &fakeGate{status: "open"}
+	hash, _ := domain.HashPayload("reverse src")
+	if _, err := e.store.ReverseEntry(WithPeriodGate(e.ctx, gate), ReverseInput{EntryID: orig.Entries[0].ID, Key: "REV-SRC-1", Hash: hash, Today: testToday, TraceID: testTrace}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range gate.calls {
+		if c.sourceSystem != "ap" {
+			t.Fatalf("reversal asked about module %q, want the original's ap", c.sourceSystem)
+		}
+	}
+	if len(gate.calls) == 0 {
+		t.Fatal("the gate was never asked")
+	}
 }
 
 func TestPostgres_CloseUnreachableFailsClosed(t *testing.T) {

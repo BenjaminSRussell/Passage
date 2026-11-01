@@ -1,8 +1,17 @@
 package main
 
 import (
+	"encoding/base64"
+	"fmt"
 	"testing"
+	"time"
 )
+
+func cubeToken(tenantID string, exp time.Time) string {
+	enc := base64.RawURLEncoding.EncodeToString
+	claims := fmt.Sprintf(`{"tenantId":%q,"exp":%d}`, tenantID, exp.Unix())
+	return enc([]byte(`{"alg":"HS256"}`)) + "." + enc([]byte(claims)) + ".sig"
+}
 
 const (
 	reconTenant = "00000000-0000-0000-0000-000000000001"
@@ -14,7 +23,7 @@ func env(m map[string]string) func(string) string { return func(k string) string
 
 func fullEnv() map[string]string {
 	return map[string]string{
-		"ANALYTICS_RECON_TENANT_ID": reconTenant, "CUBE_URL": "http://cube", "CUBE_API_TOKEN": "t", "LEDGER_URL": "http://ledger",
+		"ANALYTICS_RECON_TENANT_ID": reconTenant, "CUBE_URL": "http://cube", "CUBE_API_TOKEN": cubeToken(reconTenant, time.Now().Add(time.Hour)), "LEDGER_URL": "http://ledger",
 		"ANALYTICS_RECON_LEDGERS": reconEntity + "=" + reconLedger, "ANALYTICS_RECON_REVENUE_ACCOUNTS": "4000-4999",
 		"PASSAGE_SERVICE_NAME": "analytics", "PASSAGE_SERVICE_SIGNING_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	}
@@ -42,6 +51,17 @@ func TestNewReconJob_RejectsIncompleteOrMalformedConfig(t *testing.T) {
 		delete(m, key)
 		if _, err := newReconJob(env(m), nil); err == nil {
 			t.Fatalf("missing %s must fail", key)
+		}
+	}
+	for name, token := range map[string]string{
+		"wrong tenant": cubeToken("00000000-0000-0000-0000-000000000002", time.Now().Add(time.Hour)),
+		"expired":      cubeToken(reconTenant, time.Now().Add(-time.Minute)),
+		"not a jwt":    "token",
+	} {
+		m := fullEnv()
+		m["CUBE_API_TOKEN"] = token
+		if _, err := newReconJob(env(m), nil); err == nil {
+			t.Fatalf("%s token must fail", name)
 		}
 	}
 	for key, bad := range map[string]string{
