@@ -165,6 +165,7 @@ func TestPackingSlipLedgerContract_CogsMatrix(t *testing.T) {
 			for _, l := range sh.Lines {
 				cost[l.ID] = store.Cost{UnitCost: dq(unit[l.OrderLineID]), CostSnapshotID: "snap-" + label[l.OrderLineID]}
 			}
+			setCogsPolicy(t, s, ctx, le, c.CogsAtShipment)
 			in := store.PostInput{PostingDate: today(), Currency: c.Currency, CogsAtShipment: c.CogsAtShipment, Costs: cost}
 			packed := pickAndPack(t, s, ctx, sh)
 			slip, err := s.PostPackingSlip(ctx, sh.ID, packed.Shipment.Version, in, idem("post"))

@@ -270,24 +270,25 @@ describe("shipment detail", () => {
     server.handler = (url, init) => {
       if (init.method === "POST" && url.pathname.endsWith(":post-packing-slip")) return json(201, slip);
       if (url.pathname === `/api/v1/fulfillment/packing-slips/${SLIP}`) return json(200, slip);
+      if (url.pathname.includes("/legal-entity-settings/")) return json(200, { legalEntityId: ID, cogsAtShipment: false, asnEnabled: false, version: 0, updatedAt: null });
       return base(url, init);
     };
     renderAt(`/fulfillment/shipments/${SH}`);
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "12.50" } });
     fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "snap-1" } });
+    expect(await screen.findByText(/delivered not invoiced \(Dr 1405\), the legal entity's policy/)).toBeInTheDocument();
     const preview = screen.getByRole("table", { name: "Journal preview" });
     expect(within(preview).getByText("1405").closest("tr")?.textContent).toContain("125.00 USD");
     expect(within(preview).getByText("1400").closest("tr")?.textContent).toContain("125.00 USD");
 
-    fireEvent.click(screen.getByLabelText("Post cost of goods sold at shipment"));
-    expect(within(screen.getByRole("table", { name: "Journal preview" })).getByText("5000")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Post cost of goods sold at shipment"));
+    expect(screen.queryByLabelText("Post cost of goods sold at shipment")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     expect(await screen.findByRole("heading", { name: "Packing slip PS-0000001" })).toBeInTheDocument();
     const call = posts(":post-packing-slip")[0];
     expect(header(call, "If-Match")).toBe('"5"');
-    expect(call.body).toMatchObject({ currency: "USD", cogsAtShipment: false, costs: [{ shipmentLineId: LINE, unitCost: "12.50", costSnapshotId: "snap-1" }] });
+    expect(call.body).toMatchObject({ currency: "USD", costs: [{ shipmentLineId: LINE, unitCost: "12.50", costSnapshotId: "snap-1" }] });
+    expect(call.body).not.toHaveProperty("cogsAtShipment");
   });
 
   it("explains a version conflict", async () => {

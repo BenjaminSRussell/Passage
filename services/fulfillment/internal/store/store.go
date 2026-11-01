@@ -57,9 +57,17 @@ const (
 	// CodeWarehouseLegalEntity refuses a warehouse setting saved for a legal
 	// entity the warehouse does not belong to.
 	CodeWarehouseLegalEntity = "FUL-0057"
-	CodeVersion              = "conflict_version"
-	CodeIdempotencyReuse     = "idempotency_key_reuse"
-	eventSource              = "fulfillment"
+	// CodeLegalEntityScope refuses a legal entity setting saved for a legal
+	// entity outside the caller's scope.
+	CodeLegalEntityScope = "FUL-0058"
+	// CodeCogsPolicy refuses a packing slip post whose cogsAtShipment contradicts
+	// the cogs_at_shipment policy of the shipment's legal entity.
+	CodeCogsPolicy = "FUL-0059"
+	// CodeDutyMissing is the kernel code of a refusal for a missing duty.
+	CodeDutyMissing      = "AUTH-0003"
+	CodeVersion          = "conflict_version"
+	CodeIdempotencyReuse = "idempotency_key_reuse"
+	eventSource          = "fulfillment"
 )
 
 // Shipment is the aggregate returned by the API.
@@ -264,6 +272,12 @@ type PostInput struct {
 	// EmitASN publishes the advance ship notice of the containers that ship
 	// with this slip (FR-28.9).
 	EmitASN bool
+	// CogsFromSetting and AsnFromSetting say the request named no value: the
+	// legal entity setting of the shipment decides (false when none is saved).
+	// A named CogsAtShipment must equal the setting (FUL-0059); a named EmitASN
+	// overrides it.
+	CogsFromSetting bool
+	AsnFromSetting  bool
 }
 
 // Idem is the Idempotency-Key and the hash of the request body.
@@ -939,6 +953,23 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			if sh.Status != domain.StatusPacked {
 				return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatus, domain.ErrStatusNotPacked.Error())
+			}
+			// cogs_at_shipment is the legal entity's accounting policy (BR-28.1): a post
+			// takes it, and a request that names the other value is refused rather
+			// than booking this one slip on another COGS timing. asn_enabled is only
+			// the default of the ASN output, which a post may turn on or off.
+			le, err := loadLegalEntitySetting(ctx, tx, sh.LegalEntityID, false)
+			if err != nil {
+				return PackingSlip{}, err
+			}
+			if in.CogsFromSetting {
+				in.CogsAtShipment = le.CogsAtShipment
+			} else if in.CogsAtShipment != le.CogsAtShipment {
+				return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeCogsPolicy,
+					fmt.Sprintf("cogsAtShipment %t contradicts the legal entity's posting policy (cogs_at_shipment %t); omit it to post per the policy", in.CogsAtShipment, le.CogsAtShipment))
+			}
+			if in.AsnFromSetting {
+				in.EmitASN = le.AsnEnabled
 			}
 			var postLines []domain.PostingLine
 			slip := PackingSlip{ID: ids.New(), ShipmentID: sh.ID, OrderID: sh.OrderID,

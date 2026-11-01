@@ -107,6 +107,18 @@ export interface WarehouseSetting {
   updatedAt: string | null;
 }
 
+/** Packing slip posting defaults of a legal entity (section 5.28.13). */
+export interface LegalEntitySetting {
+  legalEntityId: string;
+  /** The COGS posting policy (BR-28.1): every packing slip books Dr 5000 instead of Dr 1405. */
+  cogsAtShipment: boolean;
+  /** A post that does not name asnEnabled publishes the advance ship notice. */
+  asnEnabled: boolean;
+  /** 0 when no setting is saved (both flags false). */
+  version: number;
+  updatedAt: string | null;
+}
+
 export interface JournalEntry {
   account: string;
   /** Signed decimal: debits positive, credits negative. */
@@ -355,10 +367,14 @@ export interface ReleaseResult {
 export interface PostInput {
   postingDate: string;
   currency: string;
-  cogsAtShipment: boolean;
+  /**
+   * Must equal the legal entity's cogs_at_shipment policy (FUL-0059 otherwise); omit it to post per the
+   * policy, as the post form does.
+   */
+  cogsAtShipment?: boolean;
   /** Ship-to country whose packaging fee rates apply; omit for no packaging fee. */
   countryCode?: string;
-  /** Publish the advance ship notice of this slip's containers (FR-28.9). */
+  /** Publish the advance ship notice of this slip's containers (FR-28.9); omit to take the legal entity setting. */
   asnEnabled?: boolean;
   costs: { shipmentLineId: string; unitCost: string; costSnapshotId: string }[];
 }
@@ -650,6 +666,31 @@ export function saveWarehouseSetting(
 ): Promise<WarehouseSetting> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
   return send<WarehouseSetting>(`/warehouse-settings/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+/** The ledger setup duty that changing cogs_at_shipment needs (the service enforces it). */
+export const DUTY_COGS_POLICY = "ledger.setup.write";
+
+export function listLegalEntitySettings(signal?: AbortSignal): Promise<LegalEntitySetting[]> {
+  return items<LegalEntitySetting>("/legal-entity-settings", signal);
+}
+
+export function getLegalEntitySetting(legalEntityId: string, signal?: AbortSignal): Promise<LegalEntitySetting> {
+  return send<LegalEntitySetting>(`/legal-entity-settings/${encodeURIComponent(legalEntityId)}`, {}, signal);
+}
+
+/**
+ * Sets the posting settings of a legal entity; version is the one read (0 when none is saved). Changing
+ * cogsAtShipment needs the ledger setup duty (DUTY_COGS_POLICY) on top of WarehouseRelease.
+ */
+export function saveLegalEntitySetting(
+  legalEntityId: string,
+  version: number,
+  input: { cogsAtShipment: boolean; asnEnabled: boolean },
+  key: string,
+): Promise<LegalEntitySetting> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<LegalEntitySetting>(`/legal-entity-settings/${encodeURIComponent(legalEntityId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
 /** Read-only workbench preview: the waves the create would make now (FR-28.13). */

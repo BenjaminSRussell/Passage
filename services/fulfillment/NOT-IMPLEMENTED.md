@@ -259,6 +259,39 @@ and `/fulfillment/warehouse-settings` lists and saves the action with the legal 
 is introduced (`WarehouseRelease`, `WarehouseView`), so there is nothing new for #313. The OpenAPI
 and AsyncAPI have zero FAIL lines on the doc gates.
 
+Slice 14 adds the posting settings per legal entity (section 5.28.13: `cogs_at_shipment`, `asn_enabled`).
+Migration 0015 adds `legal_entity_setting` (tenant and restrictive legal-entity policies; granted
+SELECT, INSERT, UPDATE to `passage_app`), the legal-entity sibling of slice 13's per-warehouse
+`warehouse_setting` (same shape: one row per scope key, `version`, `updated_at`, default read at
+version 0, `<entity>setting.changed` with the previous values); the other legal-entity parameters of
+section 5.28.13 (`consolidation_enabled`, `gs1_company_prefix`, `packaging_fee_billable`, `rtp_*`,
+`dni_check_time`) belong on this table when they are built. `GET /legal-entity-settings` lists every
+legal entity the caller sees shipments or a saved setting for (both flags false at version 0 when none
+is saved), and `GET` and `PUT /legal-entity-settings/{legalEntityId}` (`WarehouseView`,
+`WarehouseRelease`; `If-Match` with the version read, 0 for none; `Idempotency-Key`; body
+`cogsAtShipment` and `asnEnabled`, both required) read and save it. A save for a legal entity outside
+the caller's scope is refused with FUL-0058. `dev.passage.fulfillment.legalentitysetting.changed.v1`
+(with the previous values) goes through the outbox.
+
+`cogs_at_shipment` is an accounting policy (BR-28.1: physical posting to 1405 or COGS at shipment), not
+a per-slip choice. Every `:post-packing-slip` takes the policy of the shipment's legal entity inside the
+post transaction (false, Dr 1405, when none is saved, which is what every post did before); a request
+that names the other value is refused with FUL-0059 (a request naming the same value posts, so existing
+callers that send `false` are unchanged). Changing the policy needs the ledger setup duty
+`ledger.setup.write` (already seeded, held by finance) on top of `WarehouseRelease`, checked in the
+store against the saved value (403 AUTH-0003); a save that only changes `asn_enabled` needs
+`WarehouseRelease` alone. `asn_enabled` is the default of the ASN output: a post that omits `asnEnabled`
+takes it, one that names it keeps its own value (an operational choice, not a posting one).
+
+Store tests (Postgres, as the application role: default, versioned save, replay, event, tenant and
+legal-entity isolation, the duty for a COGS change, the post taking the settings, the ASN override and
+the FUL-0059 refusal), API tests and web tests cover it. The post form on the shipment detail shows the
+COGS policy as text (it is not editable and not sent) and previews the journal with it, and presets the
+ASN checkbox from the setting and sends the poster's choice; `/fulfillment/legal-entity-settings` lists
+and saves the settings, with the COGS checkbox disabled for a user without `ledger.setup.write`. No new
+duty is introduced (`WarehouseView`, `WarehouseRelease`, `ledger.setup.write` are all seeded), so there
+is nothing new for #313. The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
+
 ## Deliverables (PRD section 5.28 and ticket PSG-28)
 
 | # | Deliverable | Status | Reason |
@@ -274,7 +307,7 @@ and AsyncAPI have zero FAIL lines on the doc gates.
 | D2 | Packing slip posting: inventory deduction and COGS journal | partial | Journal (both BR-28.1 stocked rows), `PS-` numbering gap-free per legal entity, containers marked SHIPPED, and the event are built. Inventory deduction is a handoff (see above). Ledger post is a handoff. |
 | D2 | Cancellation with mirror journal and reversal_of | built | A reversing slip carries negative quantities, costs and journal amounts; the shipment returns to PACKED and its containers to CLOSED; an INVOICED slip is refused with FUL-0010. Inventory mirror is a handoff. Billing (wave 29) sets INVOICED. |
 | D3 | Carrier abstraction (rate, label, manifest, track) with EasyPost/Shippo/file adapters | handoff to `carrier-gateway` (TS service) and later slice of PSG-28 | carrier-gateway is a separate deployable outside `services/fulfillment/`. Its owner must build it. |
-| D3 | ASN output (`dev.passage.fulfillment.asn.issued.v1`) | partial | Built: the post publishes `asn.issued` with the slip, the carrier and the containers of that slip with their SSCCs and order-line quantities when the request sets `asnEnabled`. Not built: the `asn_enabled` legal-entity setting and the `fulfillment.asn` flag (the caller decides per post), the tracking number (no carrier label yet), the SSCC hierarchy (no nesting). EDI 856/DESADV mapping is wave 35. |
+| D3 | ASN output (`dev.passage.fulfillment.asn.issued.v1`) | partial | Built: the post publishes `asn.issued` with the slip, the carrier and the containers of that slip with their SSCCs and order-line quantities when the request sets `asnEnabled` or, if it omits it, the legal entity's `asn_enabled` setting is on (slice 14; a request naming `asnEnabled` overrides the setting). Not built: the `fulfillment.asn` feature flag, the tracking number (no carrier label yet), the SSCC hierarchy (no nesting). EDI 856/DESADV mapping is wave 35. |
 | D4 | Drop-ship linked to PO, vendor confirm, COGS at PO cost (Dr 5000 / Cr 2110) | later slice of PSG-28 | Needs PO links (wave 17). The `drop_ship` event and vendor-confirm endpoint are not built. |
 | D4 | Partial shipments and delivery schedule lines | partial | Built: `PARTIALLY_SHIPPED` until every line has shipped its planned quantity, re-pick of the remainder, several slips per shipment with per-slip containers and returnables. Built in slice 7: closing the remainder by hand (`:close-remainder`, see above). Built in slice 13: moving the remainder to a new backorder shipment, by hand or by the warehouse setting. Not built: schedule lines (a shipment line is one order line; FR-28.8 schedule lines need wave 27 VBEP-style lines), and the order-level status (sales, wave 27, reads `packingslip.posted`). |
 | D5 | Tracking visible to the customer portal; `tracking-updated` event; tracking poll and webhook | partial | Built: `POST /shipments/{id}/tracking` (carrier-gateway after its HMAC check, or a manual entry, BR-28.9) stores one event per provider event key and publishes `tracking.updated`; `GET /shipments/{id}/tracking`; DELIVERED moves a SHIPPED shipment to DELIVERED; the tracking card on the shipment detail. Not built: the 30-minute poll and the `/webhooks/carriers/{provider}` HMAC webhook (handoff to carrier-gateway), the portal screen and the `Portal` duty on the GET (handoff to the customer portal app). |
@@ -345,7 +378,9 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Health `/healthz`, `/readyz` | built | Kernel `httpx.NewRouter` default. |
 | Rate-limit and `X-Passage-Api-Build` headers | handoff to kernel `httpx` | |
 | Event type naming | deviation | Events use `dev.passage.fulfillment.packingslip.*` (the kernel accepts one segment per name part). The PRD uses `passage.fulfillment.packing-slip.*`, which is not a valid kernel type. |
-| Config `COGS_AT_SHIPMENT` per legal entity | later slice of PSG-28 | Slice 1 takes `cogsAtShipment` per request. |
+| Config `COGS_AT_SHIPMENT` per legal entity | built (slice 14) | `cogs_at_shipment` is a legal entity setting every post follows; a post naming the other value is FUL-0059. Changing it needs `ledger.setup.write` on top of `WarehouseRelease`. The PRD names no duty for section 5.28.13 parameters; `ledger.setup.write` is the existing ledger posting setup duty. The process-wide `COGS_AT_SHIPMENT=false` of section 5.28.10 is the default of an unsaved legal entity and is not an environment variable. The open question of section 5.28.12 (default `true` for migrated SAP entities) is for the migration factory (wave 49) to set per legal entity through this API. |
+| Route permissions for `/v1/fulfillment/legal-entity-settings` (GET under `WarehouseView`, `legal-entity-settings/*` GET under `WarehouseView` and PUT under `WarehouseRelease`) and slice 13's `/v1/fulfillment/warehouse-settings` (same pattern) in `policies/authz/data.json` | handoff to the authz policy owner | The service enforces the duties itself; the OPA route rows are outside this wave's paths. Until they are seeded, a gateway that consults OPA for these paths denies them. |
+| Billing (wave 29) reading the COGS timing of each slip | handoff to billing (wave 29) | A legal entity may change its policy while slips are uninvoiced. Billing must decide what to reverse at invoice from each slip's own journal (1405 or 5000 lines, in `packingslip.posted`), never from the current setting. |
 | `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | deviation | Slice 1 has one prefix per process. It is not per legal entity. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
 | SSCC register columns `printed_at` and "reused flag" (section 5.28.14) | deviation | Labels are rendered on request and not stored (`label_ref` is not built, see D1), so there is no print time; the register returns `issuedAt` instead. An SSCC cannot be reused (unique per tenant), so a reused flag would always be false; the register returns `noReuseUntil` instead. |

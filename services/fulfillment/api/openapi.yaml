@@ -46,6 +46,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    LegalEntityId:
+      name: legalEntityId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     WaveId:
       name: id
       in: path
@@ -159,6 +164,15 @@ components:
         legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its shipments; null when neither is known." }
         shortPickAction: { $ref: "#/components/schemas/ShortPickAction" }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved." }
+        updatedAt: { type: [string, "null"], format: date-time }
+    LegalEntitySetting:
+      type: object
+      required: [legalEntityId, cogsAtShipment, asnEnabled, version]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        cogsAtShipment: { type: boolean, description: "The legal entity's COGS posting policy (BR-28.1): every packing slip books Dr 5000 (cost of goods sold) instead of Dr 1405 (delivered not invoiced). A post cannot override it." }
+        asnEnabled: { type: boolean, description: "A post that does not name asnEnabled publishes the advance ship notice." }
+        version: { type: integer, minimum: 0, description: "0 when no setting is saved (both flags false)." }
         updatedAt: { type: [string, "null"], format: date-time }
     ShipmentLine:
       type: object
@@ -650,9 +664,9 @@ paths:
               properties:
                 postingDate: { type: string, format: date }
                 currency: { type: string, pattern: '^[A-Z]{3}$' }
-                cogsAtShipment: { type: boolean, default: false }
+                cogsAtShipment: { type: boolean, description: "Dr 5000 instead of Dr 1405. This is the legal entity's cogs_at_shipment policy (false when none is saved): omit it, or name the same value; another value is refused with FUL-0059." }
                 countryCode: { type: string, pattern: '^[A-Z]{2}$', description: "Ship-to country whose packaging fee rates apply (FR-28.14). Omit to post no packaging fee." }
-                asnEnabled: { type: boolean, default: false, description: "Publish dev.passage.fulfillment.asn.issued.v1 for this slip (FR-28.9)." }
+                asnEnabled: { type: boolean, description: "Publish dev.passage.fulfillment.asn.issued.v1 for this slip (FR-28.9). Omit to take the legal entity setting (false when none is saved)." }
                 costs:
                   type: array
                   items:
@@ -672,7 +686,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED, FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED, FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -1408,6 +1422,83 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/legal-entity-settings:
+    get:
+      operationId: listLegalEntitySettings
+      summary: Posting settings per legal entity (section 5.28.13)
+      description: >
+        Every legal entity the caller sees shipments or a saved setting for (both are
+        scoped by legal entity). A legal entity without a saved setting reads
+        cogsAtShipment and asnEnabled false at version 0.
+      x-passage-duty: WarehouseView
+      responses:
+        "200":
+          description: Legal entity settings, ordered by legal entity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/LegalEntitySetting" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/legal-entity-settings/{legalEntityId}:
+    get:
+      operationId: getLegalEntitySetting
+      summary: Read the posting settings of one legal entity
+      description: A legal entity without a saved setting (or outside the caller's scope) reads both flags false at version 0.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/LegalEntityId" }
+      responses:
+        "200":
+          description: The setting; ETag carries its version (0 when none is saved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalEntitySetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: saveLegalEntitySetting
+      summary: Set the packing slip posting defaults of a legal entity
+      description: >
+        cogsAtShipment is the legal entity's COGS posting policy (BR-28.1): every
+        post-packing-slip takes it and a post naming the other value is refused
+        (FUL-0059). Changing it is an accounting policy change and needs the
+        ledger.setup.write duty as well (403 AUTH-0003 without it); a save that keeps
+        it needs only WarehouseRelease. asnEnabled is the default of a post that does
+        not name asnEnabled. Both flags are required. If-Match carries the version
+        read, 0 when none is saved. A legal entity outside the caller's legal-entity
+        scope is refused (FUL-0058). Publishes legalentitysetting.changed.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/LegalEntityId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cogsAtShipment, asnEnabled]
+              properties:
+                cogsAtShipment: { type: boolean }
+                asnEnabled: { type: boolean }
+      responses:
+        "200":
+          description: The saved setting; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalEntitySetting" }
+        "400": { description: "FUL-0050 validation (If-Match, cogsAtShipment, asnEnabled), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { description: "AUTH-0003 WarehouseRelease missing, or cogsAtShipment changed without ledger.setup.write", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0058 the legal entity is outside your scope, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers/{cid}:unpack:
     post:

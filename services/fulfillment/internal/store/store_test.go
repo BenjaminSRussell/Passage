@@ -230,6 +230,7 @@ func TestPostPackingSlip_CogsAtShipment(t *testing.T) {
 	s, _ := setup(t)
 	ctx := ctxFor(2, "")
 	f := released(t, s, ctx, 3)
+	setCogsPolicy(t, s, ctx, f.legalEntity, true)
 	packed := pickAndPack(t, s, ctx, f.shipment)
 	slip, err := s.PostPackingSlip(ctx, f.shipment.ID, packed.Shipment.Version,
 		store.PostInput{PostingDate: today(), Currency: "EUR", CogsAtShipment: true, Costs: costs(f.shipment, "2.005")}, idem("post"))

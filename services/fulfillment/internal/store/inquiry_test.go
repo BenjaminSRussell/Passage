@@ -23,6 +23,7 @@ func shipTo(t *testing.T, s *store.Postgres, ctx context.Context, legalEntity, c
 		t.Fatalf("RunRelease: %+v, %v", res, err)
 	}
 	sh := res.Shipments[0]
+	setCogsPolicy(t, s, ctx, legalEntity, cogsAtShipment)
 	packed := pickAndPack(t, s, ctx, sh)
 	slip, err := s.PostPackingSlip(ctx, sh.ID, packed.Shipment.Version, store.PostInput{PostingDate: today().AddDate(0, 0, -postingDaysAgo),
 		Currency: "USD", CogsAtShipment: cogsAtShipment, Costs: costs(sh, unitCost)}, idem("post"))

@@ -2,12 +2,13 @@
 // packing rule (FR-28.15), pack a container (FR-28.3) and post the packing slip
 // (FR-28.4). Each form keeps one
 // Idempotency-Key until its values change, and sends the shipment version as If-Match.
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button, Card, DataTable, FormField, Input, Select, type DataTableColumn } from "../../shell/ui";
 import {
   confirmPick,
   autoPack,
   describeProblem,
+  getLegalEntitySetting,
   packContainer,
   postPackingSlip,
   type AutoPackResult,
@@ -331,9 +332,24 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   const toShip = (l: ShipmentLine) => subtractDecimal(l.qtyPacked, l.qtyShipped);
   const [postingDate, setPostingDate] = useState(today());
   const [currency, setCurrency] = useState("USD");
-  const [cogsAtShipment, setCogsAtShipment] = useState(false);
   const [countryCode, setCountryCode] = useState("");
   const [asnEnabled, setAsnEnabled] = useState(false);
+  // cogs_at_shipment is the legal entity's COGS posting policy (BR-28.1): the form shows it and previews the
+  // journal with it but never sends it, so the post books per the saved policy (a named contrary value is
+  // FUL-0059). asn_enabled presets the ASN checkbox once it loads; a value the poster already changed stays.
+  const [cogsPolicy, setCogsPolicy] = useState<boolean | null>(null);
+  const asnTouched = useRef(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    getLegalEntitySetting(shipment.legalEntityId, controller.signal).then(
+      (setting) => {
+        setCogsPolicy(setting.cogsAtShipment);
+        if (!asnTouched.current) setAsnEnabled(setting.asnEnabled);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, [shipment.legalEntityId]);
   const [costs, setCosts] = useState<Record<string, CostValues>>(() => Object.fromEntries(open.map((l) => [l.id, { unitCost: "", costSnapshotId: "" }])));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -351,7 +367,9 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   const preview: PreviewRow[] =
     priced.length === open.length && open.length > 0
       ? [
-          { account: cogsAtShipment ? "5000" : "1405", description: cogsAtShipment ? "Cost of goods sold" : "Delivered not invoiced", debit: `${total} ${currency}`, credit: "" },
+          cogsPolicy === null
+            ? { account: "1405 / 5000", description: "Per the legal entity's COGS policy", debit: `${total} ${currency}`, credit: "" }
+            : { account: cogsPolicy ? "5000" : "1405", description: cogsPolicy ? "Cost of goods sold" : "Delivered not invoiced", debit: `${total} ${currency}`, credit: "" },
           { account: "1400", description: "Inventory", debit: "", credit: `${total} ${currency}` },
         ]
       : [];
@@ -378,9 +396,8 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         {
           postingDate,
           currency: currency.trim(),
-          cogsAtShipment,
           ...(countryCode.trim() ? { countryCode: countryCode.trim() } : {}),
-          ...(asnEnabled ? { asnEnabled: true } : {}),
+          asnEnabled,
           costs: open.map((l) => ({ shipmentLineId: l.id, unitCost: costs[l.id].unitCost.trim(), costSnapshotId: costs[l.id].costSnapshotId.trim() })),
         },
         key.current(),
@@ -409,11 +426,15 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         <FormField id="post-country" label="Ship-to country" hint="Applies that country's packaging fee rates (statistical, not journaled). Empty: no packaging fee." error={errors.countryCode} optional>
           {(control) => <Input {...control} maxLength={2} value={countryCode} invalid={Boolean(errors.countryCode)} onChange={(event) => { setCountryCode(event.target.value.toUpperCase()); key.renew(); }} />}
         </FormField>
-        <FormField id="post-cogs" label="Post cost of goods sold at shipment" hint="Off: Dr 1405 delivered-not-invoiced (default). On: Dr 5000 COGS.">
-          {(control) => <Input {...control} type="checkbox" checked={cogsAtShipment} onChange={(event) => { setCogsAtShipment(event.target.checked); key.renew(); }} />}
-        </FormField>
-        <FormField id="post-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of this slip for EDI (FR-28.9).">
-          {(control) => <Input {...control} type="checkbox" checked={asnEnabled} onChange={(event) => { setAsnEnabled(event.target.checked); key.renew(); }} />}
+        <p className={styles.note} id="post-cogs">
+          {cogsPolicy === null
+            ? "Cost of goods sold posts per the legal entity's policy, which could not be read."
+            : cogsPolicy
+              ? "Cost of goods sold posts at shipment (Dr 5000), the legal entity's policy."
+              : "The slip posts to delivered not invoiced (Dr 1405), the legal entity's policy."}
+        </p>
+        <FormField id="post-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of this slip for EDI (FR-28.9). Preset from the legal entity setting.">
+          {(control) => <Input {...control} type="checkbox" checked={asnEnabled} onChange={(event) => { asnTouched.current = true; setAsnEnabled(event.target.checked); key.renew(); }} />}
         </FormField>
         {open.map((l) => (
           <fieldset key={l.id} className={styles.valueGroup}>

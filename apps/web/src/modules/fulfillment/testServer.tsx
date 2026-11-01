@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { PrincipalProvider } from "../../shell/principal";
 import fulfillment from "./module";
 
 export type Reply = { status: number; body: unknown };
@@ -41,15 +42,18 @@ export function useFakeServer() {
   });
 }
 
-export function renderAt(path: string) {
+/** Renders the module route at path; duties are the signed-in principal's (none by default). */
+export function renderAt(path: string, duties: readonly string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        {fulfillment.routes.map((route) => (
-          <Route key={route.path} path={route.path} element={route.element} />
-        ))}
-      </Routes>
-    </MemoryRouter>,
+    <PrincipalProvider duties={duties}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {fulfillment.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </PrincipalProvider>,
   );
 }
 

@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { BackordersPage } from "./BackordersPage";
 import { ContainerTypesPage } from "./ContainerTypesPage";
 import { DeliveredNotInvoicedPage } from "./DeliveredNotInvoicedPage";
+import { LegalEntitySettingsPage } from "./LegalEntitySettingsPage";
 import { PackagingFeesPage } from "./PackagingFeesPage";
 import { PackingRulesPage } from "./PackingRulesPage";
 import { PackingSlipDetailPage } from "./PackingSlipDetailPage";
@@ -45,6 +46,7 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/packaging-fees", element: createElement(PackagingFeesPage), handle: { title: "Packaging fees" } },
     { path: "/fulfillment/returnable-packaging", element: createElement(ReturnablePackagingPage), handle: { title: "Returnable packaging" } },
     { path: "/fulfillment/warehouse-settings", element: createElement(WarehouseSettingsPage), handle: { title: "Warehouse settings" } },
+    { path: "/fulfillment/legal-entity-settings", element: createElement(LegalEntitySettingsPage), handle: { title: "Posting settings" } },
     { path: "/fulfillment/returnable-aging", element: createElement(ReturnableAgingPage), handle: { title: "Returnable packaging aging" } },
   ],
   nav: [
@@ -65,6 +67,7 @@ const fulfillment: PassageModule = {
     { label: "Returnable packaging", to: "/fulfillment/returnable-packaging", duty: "WarehouseView" },
     { label: "Returnable aging", to: "/fulfillment/returnable-aging", duty: "WarehouseView" },
     { label: "Warehouse settings", to: "/fulfillment/warehouse-settings", duty: "WarehouseView" },
+    { label: "Posting settings", to: "/fulfillment/legal-entity-settings", duty: "WarehouseView" },
   ],
 };
 

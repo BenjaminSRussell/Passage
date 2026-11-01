@@ -153,10 +153,11 @@ type packDTO struct {
 type postRequest struct {
 	PostingDate    string `json:"postingDate"`
 	Currency       string `json:"currency"`
-	CogsAtShipment bool   `json:"cogsAtShipment"`
+	CogsAtShipment *bool  `json:"cogsAtShipment"`
 	CountryCode    string `json:"countryCode"`
 	// AsnEnabled publishes the advance ship notice with this posting (FR-28.9).
-	AsnEnabled bool      `json:"asnEnabled"`
+	// Omitted, cogsAtShipment and asnEnabled take the legal entity's setting.
+	AsnEnabled *bool     `json:"asnEnabled"`
 	Costs      []costDTO `json:"costs"`
 }
 
@@ -413,8 +414,9 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 		}
 		costs[c.ShipmentLineID] = store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
 	}
-	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment,
-		CountryCode: req.CountryCode, Costs: costs, EmitASN: req.AsnEnabled}
+	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment != nil && *req.CogsAtShipment,
+		CountryCode: req.CountryCode, Costs: costs, EmitASN: req.AsnEnabled != nil && *req.AsnEnabled,
+		CogsFromSetting: req.CogsAtShipment == nil, AsnFromSetting: req.AsnEnabled == nil}
 	slip, err := a.store.PostPackingSlip(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)

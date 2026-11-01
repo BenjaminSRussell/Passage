@@ -26,14 +26,15 @@ var (
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
 
-	WarehouseSettingChanged = events.Type(Context, "warehousesetting", "changed", 1)
+	WarehouseSettingChanged   = events.Type(Context, "warehousesetting", "changed", 1)
+	LegalEntitySettingChanged = events.Type(Context, "legalentitysetting", "changed", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged,
 	}
 }
 
@@ -102,6 +103,18 @@ type WarehouseSettingChangedData struct {
 	ShortPickAction     string `json:"short_pick_action"`
 	PreviousShortAction string `json:"previous_short_pick_action"`
 	Version             int    `json:"version"`
+}
+
+// LegalEntitySettingChangedData is published when the posting settings of a
+// legal entity are saved (section 5.28.13): the packing slip posting default
+// (cogs_at_shipment) and the ASN default (asn_enabled).
+type LegalEntitySettingChangedData struct {
+	LegalEntityID          string `json:"legal_entity_id"`
+	CogsAtShipment         bool   `json:"cogs_at_shipment"`
+	AsnEnabled             bool   `json:"asn_enabled"`
+	PreviousCogsAtShipment bool   `json:"previous_cogs_at_shipment"`
+	PreviousAsnEnabled     bool   `json:"previous_asn_enabled"`
+	Version                int    `json:"version"`
 }
 
 // WaveCreatedData is published for each wave the picking workbench creates

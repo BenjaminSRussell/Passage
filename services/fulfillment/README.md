@@ -213,6 +213,23 @@ transaction: KEEP_OPEN (default) leaves the remainder for a re-pick,
 CANCEL_REMAINDER closes it, REMAINDER_BACKORDER moves it to a backorder shipment;
 the post response names it (`remainderAction`, `backorderShipmentId`).
 
+## Endpoints (slice 14)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| GET | `/v1/fulfillment/legal-entity-settings` | WarehouseView | The posting defaults of every legal entity the caller sees shipments or a saved setting for; both flags false at version 0 when none is saved |
+| GET | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | WarehouseView | One legal entity; ETag carries the version (0 when none is saved) |
+| PUT | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | WarehouseRelease (+ `ledger.setup.write` to change `cogsAtShipment`) | Idempotency-Key, If-Match (0 when none is saved); body `cogsAtShipment` and `asnEnabled`, both required; FUL-0058 outside the caller's legal-entity scope; 403 AUTH-0003 for a `cogsAtShipment` change without `ledger.setup.write`; `legalentitysetting.changed` |
+
+`cogs_at_shipment` and `asn_enabled` (section 5.28.13) are per legal entity.
+`cogs_at_shipment` is the COGS posting policy (BR-28.1): every
+`:post-packing-slip` of the legal entity takes it (false, Dr 1405, when none is
+saved), and a request that names the other value is refused with FUL-0059, so a
+poster cannot book one slip on another COGS timing. Changing it is an accounting
+policy change and needs the ledger setup duty `ledger.setup.write` on top of
+`WarehouseRelease`. `asn_enabled` is only the default of the ASN output: a
+request that omits `asnEnabled` takes it, one that names it keeps its own value.
+
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or
 with another body is `idempotency_key_reuse`. Concurrent requests with one key
@@ -258,6 +275,8 @@ Codes raised in this slice:
 | `FUL-0054` | Container not found on the shipment (404) |
 | `FUL-0056` | Container nesting refused: a carton is not CLOSED, already on a pallet or a pallet itself; the container is not a pallet; or a nested container is unpacked (422) |
 | `FUL-0057` | Warehouse setting saved under a legal entity the warehouse does not belong to (its saved setting or its shipments name another one, or it is outside the caller's scope) (422) |
+| `FUL-0058` | Legal entity setting saved for a legal entity outside the caller's legal-entity scope (422) |
+| `FUL-0059` | Packing slip post names a `cogsAtShipment` that contradicts the legal entity's `cogs_at_shipment` policy (422) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |
 | `conflict_version` | `If-Match` does not match the current version (412) |
