@@ -20,7 +20,7 @@ const (
 const dividendBody = `{"currency":"USD","ownershipPct":"80","rate":"1.10","amount":"50000"}`
 
 func TestPreviewDividends_E6(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	rec := do(a, dividendsPath, tenantID, api.DutyRun, dividendBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
@@ -84,7 +84,7 @@ const reclassBody = `{
 }`
 
 func TestPreviewReclassification_AC4013(t *testing.T) {
-	rec := do(api.New(), reclassPath, tenantID, api.DutyRun, reclassBody)
+	rec := do(api.New(nil), reclassPath, tenantID, api.DutyRun, reclassBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -114,7 +114,7 @@ func TestPreviewReclassification_AC4013(t *testing.T) {
 	}
 
 	none := strings.Replace(reclassBody, `"5000.00"`, `"-5000.00"`, 1)
-	rec = do(api.New(), reclassPath, tenantID, api.DutyRun, strings.Replace(none, `"-250.00"`, `"250.00"`, 1))
+	rec = do(api.New(nil), reclassPath, tenantID, api.DutyRun, strings.Replace(none, `"-250.00"`, `"250.00"`, 1))
 	got.ReversalDate = ""
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK || len(got.Lines) != 0 || len(got.Applied) != 0 || got.ReversalDate != "" {
 		t.Fatalf("nothing to move: status %d body %s", rec.Code, rec.Body.String())
@@ -155,7 +155,7 @@ type journalOut struct {
 }
 
 func TestPreviewGroupJournal_ApprovalAndCarryForward(t *testing.T) {
-	rec := do(api.New(), groupJournalsPath, tenantID, api.DutyJournal, journalBody)
+	rec := do(api.New(nil), groupJournalsPath, tenantID, api.DutyJournal, journalBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -170,7 +170,7 @@ func TestPreviewGroupJournal_ApprovalAndCarryForward(t *testing.T) {
 	}
 
 	small := strings.NewReplacer(`"120000.00"`, `"900.00"`, `"carryForward":true`, `"carryForward":false`, `"documentType":"Adjustment"`, `"documentType":"CoI","unitId":"S1"`).Replace(journalBody)
-	rec = do(api.New(), groupJournalsPath, tenantID, api.DutyJournal, small)
+	rec = do(api.New(nil), groupJournalsPath, tenantID, api.DutyJournal, small)
 	got = journalOut{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -180,7 +180,7 @@ func TestPreviewGroupJournal_ApprovalAndCarryForward(t *testing.T) {
 	}
 
 	cumulative := strings.Replace(journalBody, `"Adjustment"`, `"Cumulative"`, 1)
-	rec = do(api.New(), groupJournalsPath, tenantID, api.DutyJournal, strings.Replace(cumulative, `"120000.00"`, `"5.00"`, 2))
+	rec = do(api.New(nil), groupJournalsPath, tenantID, api.DutyJournal, strings.Replace(cumulative, `"120000.00"`, `"5.00"`, 2))
 	got = journalOut{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !got.ContinuesPastYearEnd {
 		t.Fatalf("cumulative: status %d body %s", rec.Code, rec.Body.String())

@@ -1,6 +1,6 @@
 apiVersion: v2
 name: consolidation
-description: Passage financial consolidation (wave 40, slice 1; stateless previews)
+description: Passage financial consolidation (wave 40; runs stored in Postgres, stateless previews)
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.4.0"

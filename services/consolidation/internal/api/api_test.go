@@ -51,7 +51,7 @@ func do(a *api.API, path, tenant, duties, body string) *httptest.ResponseRecorde
 }
 
 func TestPreviewEliminations_PSExample(t *testing.T) {
-	rec := do(api.New(), eliminationsPath, tenantID, api.DutyRun, psBody)
+	rec := do(api.New(nil), eliminationsPath, tenantID, api.DutyRun, psBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -84,16 +84,16 @@ func TestPreviewEliminations_PSExample(t *testing.T) {
 }
 
 func TestPreviewEliminations_Authorization(t *testing.T) {
-	if rec := do(api.New(), eliminationsPath, tenantID, "", psBody); rec.Code != http.StatusForbidden {
+	if rec := do(api.New(nil), eliminationsPath, tenantID, "", psBody); rec.Code != http.StatusForbidden {
 		t.Fatalf("without duty status = %d; want 403", rec.Code)
 	}
-	if rec := do(api.New(), eliminationsPath, tenantID, api.DutyView, psBody); rec.Code != http.StatusForbidden {
+	if rec := do(api.New(nil), eliminationsPath, tenantID, api.DutyView, psBody); rec.Code != http.StatusForbidden {
 		t.Fatalf("view duty may not compute eliminations: status = %d; want 403", rec.Code)
 	}
-	if rec := do(api.New(), eliminationsPath, "", api.DutyRun, psBody); rec.Code != http.StatusUnauthorized {
+	if rec := do(api.New(nil), eliminationsPath, "", api.DutyRun, psBody); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("without tenant status = %d; want 401", rec.Code)
 	}
-	if rec := do(api.New(), eliminationsPath, "", api.DutyRun, `{"currency":"usd"}`); rec.Code != http.StatusUnauthorized {
+	if rec := do(api.New(nil), eliminationsPath, "", api.DutyRun, `{"currency":"usd"}`); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("without tenant an invalid body must still be 401, not validated: status = %d", rec.Code)
 	}
 }
@@ -114,7 +114,7 @@ func TestPreviewEliminations_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(api.New(), eliminationsPath, tenantID, api.DutyRun, c.body)
+			rec := do(api.New(nil), eliminationsPath, tenantID, api.DutyRun, c.body)
 			var p struct {
 				Code   string            `json:"code"`
 				Errors map[string]string `json:"errors"`
@@ -128,7 +128,7 @@ func TestPreviewEliminations_Errors(t *testing.T) {
 }
 
 func TestPreviewTranslation_AC406(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	rec := do(a, translationsPath, tenantID, api.DutyRun, ac406Body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
@@ -166,7 +166,7 @@ func TestPreviewTranslation_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(api.New(), translationsPath, tenantID, api.DutyRun, c.body)
+			rec := do(api.New(nil), translationsPath, tenantID, api.DutyRun, c.body)
 			var p struct {
 				Code   string            `json:"code"`
 				Errors map[string]string `json:"errors"`

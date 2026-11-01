@@ -5,8 +5,10 @@
 // unrealized profit per IC receipt layer (FR-40.16), the equity method and
 // divestiture gain (FR-40.18), the two-sided IC elimination with threshold
 // (BR-40.15), the unit validation rules with the monitor gate (FR-40.20), the
-// reclassification dry run (FR-40.17) or the top-side journal check (FR-40.19). Nothing is stored; runs, versions and the consolidated dataset
-// are later slices.
+// reclassification dry run (FR-40.17) or the top-side journal check (FR-40.19).
+// The previews store nothing. Consolidation runs are stored: a run computes the
+// translation and E1–E5 eliminations of its units and keeps the balances,
+// entries and statements as an immutable version.
 package api
 
 import (
@@ -46,6 +48,8 @@ var (
 
 // API serves the consolidation routes and counts what it computes for /metrics.
 type API struct {
+	runs                 RunStore
+	runsCompleted        atomic.Int64
 	eliminationPreviews  atomic.Int64
 	translationPreviews  atomic.Int64
 	profitPreviews       atomic.Int64
@@ -58,8 +62,8 @@ type API struct {
 	groupJournalPreviews atomic.Int64
 }
 
-// New returns the API.
-func New() *API { return &API{} }
+// New returns the API over the run store. The preview routes do not touch it.
+func New(runs RunStore) *API { return &API{runs: runs} }
 
 // route is one duty-guarded endpoint; api/openapi.yaml lists the same table.
 type route struct {
@@ -79,6 +83,10 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/consol/dividends:preview", DutyRun, a.previewDividends},
 		{http.MethodPost, "/v1/consol/reclassification-runs:preview", DutyRun, a.previewReclassification},
 		{http.MethodPost, "/v1/consol/group-journals:preview", DutyJournal, a.previewGroupJournal},
+		{http.MethodPost, "/v1/consol/runs", DutyRun, a.startRun},
+		{http.MethodGet, "/v1/consol/runs", DutyView, a.listRuns},
+		{http.MethodGet, "/v1/consol/runs/{id}", DutyView, a.getRun},
+		{http.MethodGet, "/v1/consol/runs/{id}/statements", DutyView, a.getRunStatements},
 	}
 }
 
@@ -96,6 +104,7 @@ func (a *API) Metrics() http.Handler {
 		counter := func(name, help string, v int64) {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
 		}
+		counter("consolidation_runs_completed_total", "Consolidation runs stored.", a.runsCompleted.Load())
 		counter("consolidation_elimination_previews_total", "Elimination previews computed.", a.eliminationPreviews.Load())
 		counter("consolidation_translation_previews_total", "Unit translation previews computed.", a.translationPreviews.Load())
 		counter("consolidation_profit_in_inventory_previews_total", "Unrealized profit layer previews computed.", a.profitPreviews.Load())
@@ -328,8 +337,13 @@ func problemFrom(err error) error {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeInvalid {
+		switch de.Code {
+		case domain.CodeInvalid:
 			status = http.StatusBadRequest
+		case domain.CodeRunNotFound:
+			status = http.StatusNotFound
+		case domain.CodeIdempotencyReuse:
+			status = http.StatusConflict
 		}
 		return httpx.NewProblem(status, de.Code, de.Detail)
 	}
