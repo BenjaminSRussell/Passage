@@ -404,6 +404,9 @@ func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reas
 		if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, p.TenantID, id); err != nil {
 			return err
 		}
+		if err := returnAgreementTx(ctx, tx, p.TenantID, o, actor, now); err != nil {
+			return err
+		}
 		next := o.Version + 1
 		if _, err := tx.Exec(ctx, `update sales_order set status = 'CANCELLED', version = $3, updated_at = $4 where tenant_id = $1 and id = $2`,
 			p.TenantID, id, next, now); err != nil {

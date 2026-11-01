@@ -104,6 +104,9 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | DELETE | `/v1/sales/product-listings/{id}` | `sales.listing.maintain` | Remove an entry |
 | GET / POST | `/v1/sales/agreements` | `sales.order.read` / `sales.agreement.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`); create with `Idempotency-Key`, numbered `SA-` |
 | GET | `/v1/sales/agreements/{id}` | `sales.order.read` | With remaining quantity and release history |
+| PATCH | `/v1/sales/agreements/{id}` | `sales.agreement.maintain` | `If-Match`; revise `commitmentQty` (not below the released quantity, `SLS-0053`), `unitPrice` (later releases only), `cumTolerance`, `validFrom`/`validTo` (empty clears) with an optional `reason`; a closed agreement is `SLS-0052`; a version with the field diff; emits `agreement.changed` |
+| POST | `/v1/sales/agreements/{id}:close` | `sales.agreement.maintain` | `If-Match`; `reason` required; CLOSED takes no more releases, schedule releases or revisions (`SLS-0052`); emits `agreement.closed` |
+| GET | `/v1/sales/agreements/{id}/versions` | `sales.order.read` | Revisions, the close and quantity returned by cancelled orders, newest first, with each entry's diff |
 | POST | `/v1/sales/agreements/{id}:release-order` | `sales.agreement.maintain` | `Idempotency-Key`; creates a DRAFT order at the agreement price and decrements the commitment atomically; emits `agreement.released` |
 | GET / POST | `/v1/sales/agreements/{id}/schedule-releases` | `sales.order.read` / `sales.agreement.maintain` | Releases newest first; store a FORECAST or JIT release (`Idempotency-Key`, `releaseNo`, `cumReceived`, `buckets`): ACCEPTED replaces the previous release's open lines, a cumulative mismatch beyond the agreement tolerance is stored HELD (`CUM_QTY_MISMATCH`, `SLS-0014`) and changes nothing; refused with `SLS-0029` outside the agreement's validity; emits `schedulerelease.received` |
 | GET | `/v1/sales/agreements/{id}/schedule-releases/{releaseId}` | `sales.order.read` | The release with its schedule lines |
@@ -182,6 +185,13 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   validity period (`SLS-0029`), creates the DRAFT order (channel `AGREEMENT`)
   and stores the release in the same transaction. At the commitment the
   agreement is EXHAUSTED. Overdelivery is 0 until the parameter table exists.
+  Slice 14: a PATCH revises the commitment (never below the released
+  quantity), price, validity and tolerance under the row lock; `:close` ends
+  it early with a reason (CLOSED, no releases or schedule releases). Cancelling
+  an order a release created gives the release's quantity back to the
+  commitment in the cancellation transaction, once per release
+  (`agreement_return`); EXHAUSTED becomes ACTIVE again, CLOSED stays CLOSED.
+  A revised price applies to later releases only.
 - **FR-27.9 change approval** (slice 13): a customer can be switched to
   `approvalRequired` (`customer_change_policy`, per legal entity and customer;
   off when never saved). A PATCH of a CONFIRMED order of such a customer by a
@@ -302,6 +312,8 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0049` | 422 | `:plan-production` on an order that is not CONFIRMED |
 | `SLS-0050` | 502/503 | The production service could not plan a line (or is not configured); the lines planned before it are kept, retry |
 | `SLS-0051` | 409 | Production already has an order for the line made for another product or configuration |
+| `SLS-0052` | 422 | The agreement is closed: no release, schedule release, revision or second close |
+| `SLS-0053` | 422 | Agreement commitment revised below the quantity already released |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |

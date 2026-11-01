@@ -106,7 +106,15 @@ describe("Scheduling releases", () => {
     expect(within(table).getByText("R-17")).toBeInTheDocument();
     expect(within(table).getByText("R-16")).toBeInTheDocument();
     expect(await screen.findByText("1200 EA")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "New release" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("offers no new release on a closed agreement", async () => {
+    handler = (url) => (url.pathname.endsWith("/schedule-releases") ? { status: 200, body: { items: [] } } : { status: 200, body: { ...agreement, status: "CLOSED" }, etag: '"4"' });
+    renderAt(`/sales/agreements/${AGREEMENT_ID}/schedule-releases`);
+    expect(await screen.findByRole("heading", { name: "Scheduling releases for SA-0000007" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "New release" })).not.toBeInTheDocument();
   });
 
   it("shows the empty state and the error state with a retry", async () => {

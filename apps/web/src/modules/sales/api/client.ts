@@ -26,7 +26,7 @@ export type ListingScope = (typeof LISTING_SCOPES)[number];
 export const LISTING_TYPES = ["DENY", "ALLOW"] as const;
 export type ListingType = (typeof LISTING_TYPES)[number];
 
-export const AGREEMENT_STATUSES = ["ACTIVE", "EXHAUSTED"] as const;
+export const AGREEMENT_STATUSES = ["ACTIVE", "EXHAUSTED", "CLOSED"] as const;
 export type AgreementStatus = (typeof AGREEMENT_STATUSES)[number];
 
 export const LIMIT_TYPES = ["NONE", "BALANCE", "BALANCE_PACKING_SLIP", "BALANCE_ALL"] as const;
@@ -216,6 +216,8 @@ export interface AgreementRelease {
   orderNumber: string;
   actor: string;
   releasedAt: string;
+  /** Set when the order was cancelled and the quantity went back to the commitment. */
+  returnedAt?: string;
 }
 
 export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance">> {
@@ -230,6 +232,10 @@ export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "
   cumTolerance?: Decimal;
   cumShipped?: Decimal;
   cumResetDate?: string;
+  /** Set when the agreement was closed early. */
+  closeReason?: string;
+  closedBy?: string;
+  closedAt?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -669,6 +675,41 @@ export function releaseAgreementOrder(id: string, input: ReleaseOrderInput, key:
     body: JSON.stringify(input),
     headers: { "Idempotency-Key": key },
   });
+}
+
+/** A partial change of an agreement; an empty validFrom or validTo clears that bound. */
+export interface AgreementRevisionInput {
+  commitmentQty?: Decimal;
+  unitPrice?: Decimal;
+  cumTolerance?: Decimal;
+  validFrom?: string;
+  validTo?: string;
+  reason?: string;
+}
+
+/** One entry of an agreement's history: a revision, the close, or quantity returned by a cancelled order. */
+export interface AgreementVersion {
+  version: number;
+  kind: "REVISED" | "CLOSED" | "RETURNED";
+  actor: string;
+  reason: string;
+  diff: FieldChange[];
+  changedAt: string;
+}
+
+/** Revises the commitment, price, validity or tolerance at the agreement's ETag (FR-27.10). */
+export function reviseAgreement(id: string, etag: string, input: AgreementRevisionInput): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+/** Closes the agreement early at its ETag; it takes no more releases. */
+export function closeAgreement(id: string, etag: string, reason: string): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${encodeURIComponent(id)}:close`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
+export async function listAgreementVersions(id: string, signal?: AbortSignal): Promise<AgreementVersion[]> {
+  const body = await json<{ items?: AgreementVersion[] }>(`/agreements/${encodeURIComponent(id)}/versions`, {}, signal);
+  return body.items ?? [];
 }
 
 export const QUOTATION_STATUSES = ["DRAFT", "SENT", "CONVERTED", "LOST", "EXPIRED", "CANCELLED"] as const;

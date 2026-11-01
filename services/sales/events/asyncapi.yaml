@@ -47,6 +47,21 @@ channels:
     messages:
       agreementReleased:
         $ref: "#/components/messages/AgreementReleased"
+  agreementChanged:
+    address: passage.sales.agreement
+    messages:
+      agreementChanged:
+        $ref: "#/components/messages/AgreementChanged"
+  agreementClosed:
+    address: passage.sales.agreement
+    messages:
+      agreementClosed:
+        $ref: "#/components/messages/AgreementClosed"
+  agreementReturned:
+    address: passage.sales.agreement
+    messages:
+      agreementReturned:
+        $ref: "#/components/messages/AgreementReturned"
   scheduleReleaseReceived:
     address: passage.sales.schedulerelease
     messages:
@@ -200,6 +215,24 @@ operations:
     summary: One release drew quantity against a sales agreement commitment and created a DRAFT order, in the same transaction (FR-27.10). Consumers - planning, analytics, key account reporting.
     messages:
       - {$ref: "#/channels/agreementReleased/messages/agreementReleased"}
+  publishAgreementChanged:
+    action: send
+    channel: {$ref: "#/channels/agreementChanged"}
+    summary: An agreement was revised (commitment, price, validity or cumulative tolerance); carries the field-level diff and the new status (FR-27.10). Consumers - planning (commitment forecast), key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementChanged/messages/agreementChanged"}
+  publishAgreementClosed:
+    action: send
+    channel: {$ref: "#/channels/agreementClosed"}
+    summary: An agreement was closed early with a reason; it takes no more releases (FR-27.10). Consumers - planning, key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementClosed/messages/agreementClosed"}
+  publishAgreementReturned:
+    action: send
+    channel: {$ref: "#/channels/agreementReturned"}
+    summary: A cancelled order gave the quantity of its release back to the agreement commitment, in the cancellation transaction (BR-27.9). Consumers - planning, key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementReturned/messages/agreementReturned"}
   publishOrderChanged:
     action: send
     channel: {$ref: "#/channels/orderChanged"}
@@ -334,6 +367,30 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AgreementReleasedData"
+    AgreementChanged:
+      name: dev.passage.sales.agreement.changed.v1
+      title: Sales agreement changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementLifecycleData"
+    AgreementClosed:
+      name: dev.passage.sales.agreement.closed.v1
+      title: Sales agreement closed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementLifecycleData"
+    AgreementReturned:
+      name: dev.passage.sales.agreement.returned.v1
+      title: Sales agreement quantity returned
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementLifecycleData"
     ScheduleReleaseReceived:
       name: dev.passage.sales.schedulerelease.received.v1
       title: Scheduling release received
@@ -675,6 +732,36 @@ components:
         remaining_qty: {type: string, description: commitment less released quantity}
         status: {type: string, enum: [ACTIVE, EXHAUSTED]}
         version: {type: integer, description: the agreement version after the release}
+        actor: {type: string}
+    AgreementLifecycleData:
+      type: object
+      required: [agreement_id, agreement_number, legal_entity_id, customer_id, product_id, commitment_qty, released_qty, remaining_qty, unit_price, status, diff, version, actor]
+      properties:
+        agreement_id: {type: string, format: uuid}
+        agreement_number: {type: string, example: SA-0000001}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        commitment_qty: {type: string, description: commitment after the change (decimal string)}
+        released_qty: {type: string, description: released quantity after the change}
+        remaining_qty: {type: string, description: commitment less released quantity}
+        unit_price: {type: string, description: agreed price after the change; applies to later releases}
+        status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}
+        diff:
+          type: array
+          description: changed fields (commitmentQty, unitPrice, cumTolerance, validFrom, validTo, releasedQty, status)
+          items:
+            type: object
+            required: [line_no, field, old, new]
+            properties:
+              line_no: {type: integer, description: always 0, the fields are agreement fields}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+        reason: {type: string, description: the close reason or the cancelled order that returned quantity}
+        sales_order_id: {type: string, format: uuid, description: returned only; the cancelled order}
+        returned_qty: {type: string, description: returned only; quantity given back}
+        version: {type: integer, description: the agreement version after the change}
         actor: {type: string}
     BackorderRunCommittedData:
       type: object

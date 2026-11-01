@@ -16,6 +16,9 @@ var (
 	OrderChanged         = events.Type(Context, "order", "changed", 1)
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
 	AgreementReleased    = events.Type(Context, "agreement", "released", 1)
+	AgreementChanged     = events.Type(Context, "agreement", "changed", 1)
+	AgreementClosed      = events.Type(Context, "agreement", "closed", 1)
+	AgreementReturned    = events.Type(Context, "agreement", "returned", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
 	QuotationExpired     = events.Type(Context, "quotation", "expired", 1)
 	AllocationQuotaSet   = events.Type(Context, "allocationquota", "created", 1)
@@ -40,6 +43,7 @@ var (
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
+		AgreementChanged, AgreementClosed, AgreementReturned,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, ChangePolicyChanged}
@@ -156,6 +160,30 @@ type AgreementReleasedData struct {
 	Status          string `json:"status"`
 	Version         int    `json:"version"`
 	Actor           string `json:"actor"`
+}
+
+// AgreementLifecycleData is the data member of agreement.changed.v1,
+// .closed.v1 and .returned.v1 (FR-27.10). diff lists the changed fields of a
+// revision (changed) or the released quantity (returned); reason is the close
+// reason or the cancellation that returned quantity; sales_order_id and
+// returned_qty are set on returned only.
+type AgreementLifecycleData struct {
+	AgreementID     string        `json:"agreement_id"`
+	AgreementNumber string        `json:"agreement_number"`
+	LegalEntityID   string        `json:"legal_entity_id"`
+	CustomerID      string        `json:"customer_id"`
+	ProductID       string        `json:"product_id"`
+	Commitment      string        `json:"commitment_qty"`
+	Released        string        `json:"released_qty"`
+	Remaining       string        `json:"remaining_qty"`
+	UnitPrice       string        `json:"unit_price"`
+	Status          string        `json:"status"`
+	Diff            []FieldChange `json:"diff"`
+	Reason          string        `json:"reason,omitempty"`
+	SalesOrderID    string        `json:"sales_order_id,omitempty"`
+	ReturnedQty     string        `json:"returned_qty,omitempty"`
+	Version         int           `json:"version"`
+	Actor           string        `json:"actor"`
 }
 
 // FieldChange is one entry of order.changed's diff. line_no is 0 for a header

@@ -38,6 +38,8 @@ const (
 	CodeHoldNotActive      = "SLS-0022"
 	CodeHoldNotApplicable  = "SLS-0028"
 	CodeAgreementNotValid  = "SLS-0029"
+	CodeAgreementClosed    = "SLS-0052"
+	CodeCommitmentBelow    = "SLS-0053"
 	CodeOrderNotFound      = "SLS-0100"
 	CodeHoldNotFound       = "SLS-0101"
 	CodeProfileNotFound    = "SLS-0102"
@@ -239,6 +241,9 @@ type Store interface {
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]Agreement, error)
 	GetAgreement(ctx context.Context, id string) (Agreement, error)
 	ReleaseAgreement(ctx context.Context, id string, in AgreementRelease, now time.Time) (ReleaseResult, bool, error)
+	ReviseAgreement(ctx context.Context, id string, version int, in AgreementRevision, actor string, now time.Time) (Agreement, error)
+	CloseAgreement(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Agreement, error)
+	ListAgreementVersions(ctx context.Context, id string) ([]AgreementVersion, error)
 	CreateScheduleRelease(ctx context.Context, in NewScheduleRelease, now time.Time) (ScheduleRelease, bool, error)
 	ListScheduleReleases(ctx context.Context, agreementID string, limit int) ([]ScheduleRelease, error)
 	GetScheduleRelease(ctx context.Context, agreementID, id string) (ScheduleRelease, error)

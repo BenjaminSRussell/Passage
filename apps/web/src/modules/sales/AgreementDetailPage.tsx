@@ -11,6 +11,7 @@ import {
   type Problem,
   type ReleaseOrderInput,
 } from "./api/client";
+import { AgreementLifecycle } from "./AgreementLifecycle";
 import { DECIMAL, formatDateTime, money, supplementaryNote, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -42,6 +43,7 @@ const releaseColumns: DataTableColumn<AgreementRelease>[] = [
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "orderNumber", header: "Order", mono: true, render: (r) => <Link to={`/sales/orders/${r.salesOrderId}`}>{r.orderNumber}</Link> },
   { key: "actor", header: "By" },
+  { key: "returnedAt", header: "Returned", render: (r) => (r.returnedAt ? formatDateTime(r.returnedAt) : "—") },
 ];
 
 /** One agreement with its commitment, release history and the release-order form (FR-27.10). */
@@ -119,6 +121,7 @@ export function AgreementDetailPage() {
   ];
   const mono = new Set(["Customer", "Invoice account", "Product", "Legal entity"]);
   const exhausted = agreement.status === "EXHAUSTED";
+  const closed = agreement.status === "CLOSED";
 
   const field = (name: keyof ReleaseValues, label: string, extra: { type?: string; mono?: boolean; decimal?: boolean; hint?: string } = {}) => (
     <FormField id={`release-${name}`} label={label} hint={extra.hint} error={errors[name]}>
@@ -163,7 +166,9 @@ export function AgreementDetailPage() {
         </dl>
       </Card>
       <Card title="Release an order">
-        {exhausted ? (
+        {closed ? (
+          <EmptyState compact headingLevel={3} title="Agreement closed" description="A closed agreement takes no more releases." />
+        ) : exhausted ? (
           <EmptyState compact headingLevel={3} title="Commitment used up" description="Every committed unit has been released. Create a new agreement to commit more." />
         ) : (
           <form className={styles.form} onSubmit={submit} noValidate aria-label="Release an order">
@@ -200,6 +205,7 @@ export function AgreementDetailPage() {
           <EmptyState compact headingLevel={3} title="No releases yet" description="Each release creates a draft order and appears here." />
         )}
       </Card>
+      <AgreementLifecycle agreement={agreement} etag={state.data.etag} onChanged={state.reload} />
     </div>
   );
 }

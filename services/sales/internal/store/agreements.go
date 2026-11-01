@@ -63,10 +63,14 @@ type Agreement struct {
 	CumTolerance decimal.Decimal `json:"cumTolerance"`
 	CumShipped   decimal.Decimal `json:"cumShipped"`
 	CumResetDate *string         `json:"cumResetDate,omitempty"`
-	Version      int             `json:"version"`
-	CreatedBy    string          `json:"createdBy"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
+	// CloseReason, ClosedBy and ClosedAt are set when the agreement was closed early.
+	CloseReason *string    `json:"closeReason,omitempty"`
+	ClosedBy    *string    `json:"closedBy,omitempty"`
+	ClosedAt    *time.Time `json:"closedAt,omitempty"`
+	Version     int        `json:"version"`
+	CreatedBy   string     `json:"createdBy"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 	// Releases is the release history, newest first; filled only on a single read.
 	Releases []AgreementReleaseRecord `json:"releases,omitempty"`
 }
@@ -79,6 +83,9 @@ type AgreementReleaseRecord struct {
 	OrderNumber  string          `json:"orderNumber"`
 	Actor        string          `json:"actor"`
 	ReleasedAt   time.Time       `json:"releasedAt"`
+	// ReturnedAt is set when the order was cancelled and the quantity went back
+	// to the commitment.
+	ReturnedAt *time.Time `json:"returnedAt,omitempty"`
 }
 
 // AgreementFilter narrows the agreement list. Empty fields match everything;
@@ -115,13 +122,13 @@ func agreementNotFound() error {
 
 const agreementColumns = `id::text, legal_entity_id::text, agreement_number, customer_id::text, invoice_account_id::text, product_id::text,
 	unit, unit_price::text, currency::text, commitment_qty::text, released_qty::text, status, valid_from::text, valid_to::text, version,
-	created_by, created_at, updated_at, cum_tolerance::text, cum_shipped::text, cum_reset_date::text`
+	created_by, created_at, updated_at, cum_tolerance::text, cum_shipped::text, cum_reset_date::text, close_reason, closed_by, closed_at`
 
 func scanAgreement(row pgx.Row) (Agreement, error) {
 	var a Agreement
 	var price, commitment, released, tol, shipped string
 	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.AgreementNumber, &a.CustomerID, &a.InvoiceAccountID, &a.ProductID, &a.Unit, &price,
-		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &tol, &shipped, &a.CumResetDate); err != nil {
+		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &tol, &shipped, &a.CumResetDate, &a.CloseReason, &a.ClosedBy, &a.ClosedAt); err != nil {
 		return Agreement{}, err
 	}
 	a.CumTolerance = decimal.RequireFromString(tol)
@@ -234,8 +241,9 @@ func (s *Postgres) GetAgreement(ctx context.Context, id string) (Agreement, erro
 }
 
 func loadReleases(ctx context.Context, tx pgx.Tx, tenantID, agreementID string) ([]AgreementReleaseRecord, error) {
-	rows, err := tx.Query(ctx, `select r.id::text, r.quantity::text, r.sales_order_id::text, o.order_number, r.actor, r.released_at
+	rows, err := tx.Query(ctx, `select r.id::text, r.quantity::text, r.sales_order_id::text, o.order_number, r.actor, r.released_at, x.returned_at
 		from agreement_release r join sales_order o on o.tenant_id = r.tenant_id and o.id = r.sales_order_id
+		left join agreement_return x on x.tenant_id = r.tenant_id and x.release_id = r.id
 		where r.tenant_id = $1 and r.agreement_id = $2 order by r.released_at desc, r.id desc`, tenantID, agreementID)
 	if err != nil {
 		return nil, err
@@ -245,7 +253,7 @@ func loadReleases(ctx context.Context, tx pgx.Tx, tenantID, agreementID string) 
 	for rows.Next() {
 		var r AgreementReleaseRecord
 		var qty string
-		if err := rows.Scan(&r.ID, &qty, &r.SalesOrderID, &r.OrderNumber, &r.Actor, &r.ReleasedAt); err != nil {
+		if err := rows.Scan(&r.ID, &qty, &r.SalesOrderID, &r.OrderNumber, &r.Actor, &r.ReleasedAt, &r.ReturnedAt); err != nil {
 			return nil, err
 		}
 		r.Quantity = decimal.RequireFromString(qty)
@@ -287,6 +295,9 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 		a, err := loadAgreement(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err
+		}
+		if a.Status == domain.AgreementClosed {
+			return agreementClosed(a)
 		}
 		from, err := parseDay(a.ValidFrom)
 		if err != nil {

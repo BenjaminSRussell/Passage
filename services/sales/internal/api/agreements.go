@@ -166,8 +166,8 @@ func (a *API) listAgreements(w http.ResponseWriter, r *http.Request) {
 	if f.CustomerID != "" && !ids.Valid(f.CustomerID) {
 		fields["customerId"] = "must be a UUID"
 	}
-	if f.Status != "" && f.Status != domain.AgreementActive && f.Status != domain.AgreementExhausted {
-		fields["status"] = "must be ACTIVE or EXHAUSTED"
+	if f.Status != "" && f.Status != domain.AgreementActive && f.Status != domain.AgreementExhausted && f.Status != domain.AgreementClosed {
+		fields["status"] = "must be ACTIVE, EXHAUSTED or CLOSED"
 	}
 	limit, ok := pageLimit(q.Get("limit"))
 	if !ok {

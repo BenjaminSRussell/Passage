@@ -246,6 +246,9 @@ func (s *Postgres) CreateScheduleRelease(ctx context.Context, in NewScheduleRele
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if a.Status == domain.AgreementClosed {
+			return agreementClosed(a)
+		}
 		from, err := parseDay(a.ValidFrom)
 		if err != nil {
 			return err

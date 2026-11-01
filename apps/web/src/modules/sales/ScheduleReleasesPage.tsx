@@ -109,9 +109,11 @@ export function ScheduleReleasesPage() {
             <Link className={buttonClassName("ghost")} to={`/sales/agreements/${id}`}>
               Back to agreement
             </Link>
-            <Link className={buttonClassName("primary")} to={`/sales/agreements/${id}/schedule-releases/new`}>
-              New release
-            </Link>
+            {a?.status === "CLOSED" ? null : (
+              <Link className={buttonClassName("primary")} to={`/sales/agreements/${id}/schedule-releases/new`}>
+                New release
+              </Link>
+            )}
           </>
         }
       />

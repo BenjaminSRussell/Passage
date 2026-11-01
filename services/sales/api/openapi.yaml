@@ -321,7 +321,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/LegalEntityQuery"
         - {name: customerId, in: query, schema: {type: string, format: uuid}}
-        - {name: status, in: query, schema: {type: string, enum: [ACTIVE, EXHAUSTED]}}
+        - {name: status, in: query, schema: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
         "200":
@@ -387,6 +387,101 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/SalesAgreement"}
         "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      summary: Revise an agreement's commitment, price, validity or cumulative tolerance at its ETag (FR-27.10)
+      description: >-
+        Every body field is optional but at least one is required; an empty validFrom or validTo clears that bound.
+        The commitment cannot fall below the quantity already released (SLS-0053); it is EXHAUSTED when the commitment
+        equals the released quantity and ACTIVE otherwise. A new price applies to later releases only, orders already
+        created keep their price. The revision, its field-level diff and agreement.changed.v1 commit together. A request
+        that changes nothing returns the agreement without a new version.
+      operationId: reviseSalesAgreement
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgreementRevisionRequest"}
+      responses:
+        "200":
+          description: the agreement after the revision
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0053 the commitment is below the released quantity, or SLS-0052 the agreement is closed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}:close:
+    post:
+      summary: Close an agreement early at its ETag with a reason; it then takes no more releases or changes (FR-27.10)
+      description: >-
+        Quantity already released stays released and its orders are untouched. A closed agreement refuses releases,
+        schedule releases and revisions with SLS-0052. agreement.closed.v1 is written in the same transaction.
+      operationId: closeSalesAgreement
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: the closed agreement
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0052 the agreement is already closed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}/versions:
+    get:
+      summary: An agreement's history, newest first, with the field-level diff of each revision, close and returned quantity
+      operationId: listSalesAgreementVersions
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: up to 200 entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/AgreementVersion"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
   /v1/sales/agreements/{id}:release-order:
     post:
       summary: >-
@@ -423,7 +518,7 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "422":
           description: >-
-            SLS-0008 AGREEMENT_EXHAUSTED (AC-27.9), SLS-0029 outside the validity period,
+            SLS-0008 AGREEMENT_EXHAUSTED (AC-27.9), SLS-0029 outside the validity period, SLS-0052 the agreement is closed,
             SLS-0011 PRODUCT_NOT_LISTED, or idempotency_key_reuse
           content:
             application/problem+json:
@@ -491,7 +586,7 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "422":
-          description: SLS-0026 negative, unordered or decreasing buckets, SLS-0029 the agreement is not valid on the receipt date, or idempotency_key_reuse
+          description: SLS-0026 negative, unordered or decreasing buckets, SLS-0029 the agreement is not valid on the receipt date, SLS-0052 the agreement is closed, or idempotency_key_reuse
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -2095,9 +2190,12 @@ components:
         commitmentQty: {$ref: "#/components/schemas/Money"}
         releasedQty: {$ref: "#/components/schemas/Money"}
         remainingQty: {$ref: "#/components/schemas/Money"}
-        status: {type: string, enum: [ACTIVE, EXHAUSTED]}
+        status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
+        closeReason: {type: string, description: set when the agreement was closed early}
+        closedBy: {type: string}
+        closedAt: {type: string, format: date-time}
         version: {type: integer, minimum: 1}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
@@ -2179,6 +2277,36 @@ components:
         orderNumber: {type: string}
         actor: {type: string}
         releasedAt: {type: string, format: date-time}
+        returnedAt: {type: string, format: date-time, description: set when the order was cancelled and the quantity went back to the commitment}
+    AgreementRevisionRequest:
+      type: object
+      minProperties: 1
+      properties:
+        commitmentQty: {$ref: "#/components/schemas/Money", description: not below the released quantity}
+        unitPrice: {$ref: "#/components/schemas/Money", description: applies to later releases only}
+        cumTolerance: {$ref: "#/components/schemas/Money"}
+        validFrom: {type: string, description: a date such as 2027-03-04, or empty to clear}
+        validTo: {type: string, description: a date such as 2027-03-04, or empty to clear}
+        reason: {type: string, maxLength: 500}
+    AgreementVersion:
+      type: object
+      required: [version, kind, actor, reason, diff, changedAt]
+      properties:
+        version: {type: integer, description: the agreement version the entry produced}
+        kind: {type: string, enum: [REVISED, CLOSED, RETURNED]}
+        actor: {type: string}
+        reason: {type: string}
+        changedAt: {type: string, format: date-time}
+        diff:
+          type: array
+          items:
+            type: object
+            required: [lineNo, field, old, new]
+            properties:
+              lineNo: {type: integer}
+              field: {type: string, example: commitmentQty}
+              old: {type: string}
+              new: {type: string}
     AgreementReleaseRequest:
       type: object
       required: [quantity, siteId, warehouseId, requestedShipDate]

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
 )
@@ -307,5 +309,85 @@ func TestDeleteListing(t *testing.T) {
 	}
 	if rec := serveBody(t, s, http.MethodDelete, productListings+"/"+id, "", principal(dutyRead), nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without sales.listing.maintain: status %d", rec.Code)
+	}
+}
+
+type lifecycleStore struct {
+	fakeStore
+	revision store.AgreementRevision
+	version  int
+	reason   string
+	err      error
+}
+
+func (s *lifecycleStore) ReviseAgreement(_ context.Context, id string, version int, in store.AgreementRevision, _ string, _ time.Time) (store.Agreement, error) {
+	s.revision, s.version = in, version
+	return store.Agreement{ID: id, Version: version + 1}, s.err
+}
+
+func (s *lifecycleStore) CloseAgreement(_ context.Context, id string, version int, reason, _ string, _ time.Time) (store.Agreement, error) {
+	s.reason, s.version = reason, version
+	return store.Agreement{ID: id, Version: version + 1, Status: "CLOSED"}, s.err
+}
+
+func (s *lifecycleStore) ListAgreementVersions(_ context.Context, _ string) ([]store.AgreementVersion, error) {
+	return []store.AgreementVersion{{Version: 3, Kind: "REVISED"}}, nil
+}
+
+// TestReviseAgreement covers PATCH /agreements/{id}: If-Match is required, at
+// least one field, decimals and dates are validated, the request reaches the
+// store and the response ETag is the new version.
+func TestReviseAgreement(t *testing.T) {
+	path := agreements + "/" + ids.New()
+	p := principal(dutyAgreement)
+	s := &lifecycleStore{}
+	if rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1500"}`, p, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: %d", rec.Code)
+	}
+	for _, body := range []string{`{}`, `{"commitmentQty":"0"}`, `{"unitPrice":"1.00001"}`, `{"validTo":"soon"}`, `{"cumTolerance":"-1"}`} {
+		if rec := serveBody(t, s, http.MethodPatch, path, body, p, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status %d", body, rec.Code)
+		}
+	}
+	rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1500","unitPrice":"15","validTo":"","reason":"deal"}`, p, map[string]string{"If-Match": `"2"`})
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"3"` || s.version != 2 {
+		t.Fatalf("status %d etag %s body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	r := s.revision
+	if r.Commitment == nil || !r.Commitment.Equal(decimal.NewFromInt(1500)) || r.UnitPrice == nil || r.ValidTo == nil || *r.ValidTo != "" || r.ValidFrom != nil || r.Reason != "deal" {
+		t.Fatalf("store got %+v", r)
+	}
+	if rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1500"}`, principal(dutyRead), map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("read duty must not revise: %d", rec.Code)
+	}
+	s.err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeCommitmentBelow, "below")
+	if rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1"}`, p, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("store refusal: %d", rec.Code)
+	}
+}
+
+// TestCloseAgreement covers :close (If-Match, reason required, duty) and the
+// version history read.
+func TestCloseAgreement(t *testing.T) {
+	id := ids.New()
+	path := agreements + "/" + id + ":close"
+	p := principal(dutyAgreement)
+	s := &lifecycleStore{}
+	if rec := serveBody(t, s, http.MethodPost, path, `{"reason":"x"}`, p, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: %d", rec.Code)
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, `{"reason":""}`, p, map[string]string{"If-Match": `"4"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty reason: %d", rec.Code)
+	}
+	rec := serveBody(t, s, http.MethodPost, path, `{"reason":"customer left"}`, p, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"5"` || s.reason != "customer left" || s.version != 4 {
+		t.Fatalf("status %d etag %s", rec.Code, rec.Header().Get("ETag"))
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, `{"reason":"x"}`, principal(dutyRead), map[string]string{"If-Match": `"4"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("read duty must not close: %d", rec.Code)
+	}
+	rec = serveBody(t, s, http.MethodGet, agreements+"/"+id+"/versions", "", principal(dutyRead), nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"REVISED"`) {
+		t.Fatalf("versions: %d %s", rec.Code, rec.Body.String())
 	}
 }

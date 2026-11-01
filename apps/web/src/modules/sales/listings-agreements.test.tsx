@@ -268,7 +268,7 @@ describe("Sales agreements", () => {
     expect(post?.url.pathname).toBe(`/api/v1/sales/agreements/${AGREEMENT_ID}:release-order`);
     expect(post?.headers.get("Idempotency-Key")).toBeTruthy();
     expect(post?.body).toEqual({ quantity: "40", siteId: SITE, warehouseId: WAREHOUSE, requestedShipDate: "2027-04-15" });
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBe(2));
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && !c.url.pathname.endsWith("/versions")).length).toBe(2));
   });
 
   it("explains AGREEMENT_EXHAUSTED and hides the form once the commitment is used up", async () => {

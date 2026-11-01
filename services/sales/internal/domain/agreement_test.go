@@ -54,8 +54,6 @@ func TestReleaseAgreement_Table(t *testing.T) {
 }
 
 // errAny marks a case where any error is acceptable.
-var errAny = errors.New("any error")
-
 // TestReleaseAgreement_NeverOverdraws is a property: however releases are
 // sequenced, released quantity never exceeds the commitment.
 func TestReleaseAgreement_NeverOverdraws(t *testing.T) {
@@ -115,5 +113,85 @@ func TestAgreementValidOn(t *testing.T) {
 func TestFormatAgreementNumber(t *testing.T) {
 	if got := FormatAgreementNumber(42); got != "SA-0000042" {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func sp(s string) *string { return &s }
+
+func dp(n int) *decimal.Decimal { v := d(n); return &v }
+
+func TestReviseAgreement_Table(t *testing.T) {
+	cur := AgreementState{Commitment: d(1000), Released: d(600), UnitPrice: d(12), CumTolerance: d(0), ValidFrom: sp("2027-01-01"), ValidTo: sp("2027-12-31"), Status: AgreementActive}
+	cases := []struct {
+		name    string
+		cur     AgreementState
+		rev     AgreementRevision
+		err     error
+		status  string
+		fields  []string
+		commit  int
+		validTo *string
+	}{
+		{name: "raise commitment", cur: cur, rev: AgreementRevision{Commitment: dp(1500)}, status: AgreementActive, fields: []string{"commitmentQty"}, commit: 1500, validTo: sp("2027-12-31")},
+		{name: "cut to released exhausts", cur: cur, rev: AgreementRevision{Commitment: dp(600)}, status: AgreementExhausted, fields: []string{"commitmentQty", "status"}, commit: 600, validTo: sp("2027-12-31")},
+		{name: "below released refused", cur: cur, rev: AgreementRevision{Commitment: dp(599)}, err: ErrCommitmentBelowReleased},
+		{name: "exhausted reopens on raise", cur: AgreementState{Commitment: d(600), Released: d(600), UnitPrice: d(12), Status: AgreementExhausted},
+			rev: AgreementRevision{Commitment: dp(700)}, status: AgreementActive, fields: []string{"commitmentQty", "status"}, commit: 700},
+		{name: "price and tolerance", cur: cur, rev: AgreementRevision{UnitPrice: dp(13), CumTolerance: dp(5)}, status: AgreementActive, fields: []string{"unitPrice", "cumTolerance"}, commit: 1000, validTo: sp("2027-12-31")},
+		{name: "same values change nothing", cur: cur, rev: AgreementRevision{Commitment: dp(1000), UnitPrice: dp(12), ValidTo: sp("2027-12-31")}, status: AgreementActive, commit: 1000, validTo: sp("2027-12-31")},
+		{name: "clear validTo", cur: cur, rev: AgreementRevision{ValidTo: sp("")}, status: AgreementActive, fields: []string{"validTo"}, commit: 1000},
+		{name: "validTo before validFrom", cur: cur, rev: AgreementRevision{ValidTo: sp("2026-12-31")}, err: ErrInvalidValidity},
+		{name: "closed refused", cur: AgreementState{Commitment: d(10), Status: AgreementClosed}, rev: AgreementRevision{Commitment: dp(20)}, err: ErrAgreementClosed},
+		{name: "zero commitment refused", cur: cur, rev: AgreementRevision{Commitment: dp(0)}, err: errAny},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			next, diff, err := ReviseAgreement(c.cur, c.rev)
+			if c.err == errAny {
+				if err == nil {
+					t.Fatal("want an error")
+				}
+				return
+			}
+			if err != c.err {
+				t.Fatalf("err %v, want %v", err, c.err)
+			}
+			if err != nil {
+				return
+			}
+			if next.Status != c.status || !next.Commitment.Equal(d(c.commit)) || (c.validTo != nil && dayText(next.ValidTo) != *c.validTo) {
+				t.Fatalf("next %+v", next)
+			}
+			var got []string
+			for _, f := range diff {
+				got = append(got, f.Field)
+			}
+			if len(got) != len(c.fields) {
+				t.Fatalf("diff %v, want %v", got, c.fields)
+			}
+			for i := range got {
+				if got[i] != c.fields[i] {
+					t.Fatalf("diff %v, want %v", got, c.fields)
+				}
+			}
+		})
+	}
+}
+
+var errAny = errors.New("any error")
+
+func TestReturnToAgreement(t *testing.T) {
+	next, status, err := ReturnToAgreement(d(1000), d(1000), d(400), AgreementExhausted)
+	if err != nil || !next.Equal(d(600)) || status != AgreementActive {
+		t.Fatalf("exhausted agreement reopens: %s %s %v", next, status, err)
+	}
+	if _, status, err = ReturnToAgreement(d(1000), d(600), d(100), AgreementClosed); err != nil || status != AgreementClosed {
+		t.Fatalf("closed stays closed: %s %v", status, err)
+	}
+	if _, _, err = ReturnToAgreement(d(1000), d(50), d(100), AgreementActive); err == nil {
+		t.Fatal("returning more than was released must fail")
+	}
+	if _, _, err = ReturnToAgreement(d(1000), d(50), d(0), AgreementActive); err == nil {
+		t.Fatal("a zero return must fail")
 	}
 }
