@@ -297,6 +297,9 @@ func withStructures(ctx context.Context, tx pgx.Tx, tenantID, ledgerID string, r
 	if err != nil {
 		return domain.Rules{}, err
 	}
+	if err := attachAdvancedRules(ctx, tx, tenantID, ledgerID, structs); err != nil {
+		return domain.Rules{}, err
+	}
 	r.Structures = structs
 	r.DimensionValues = map[string]domain.DimensionValue{}
 	used := usedValues(lines)

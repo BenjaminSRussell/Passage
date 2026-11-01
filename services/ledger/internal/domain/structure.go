@@ -63,6 +63,9 @@ type Structure struct {
 	Segments      []string     `json:"segments"`
 	AccountFilter []string     `json:"accountFilter"`
 	Constraints   []Constraint `json:"constraints"`
+	// AdvancedRules are the rules of this version (FR-11.16); the store fills them when it
+	// loads the active structures for posting.
+	AdvancedRules []AdvancedRule `json:"-"`
 }
 
 // Constraint limits one segment. Under maps MAIN_ACCOUNT or earlier segments to
@@ -282,7 +285,7 @@ func EffectiveVersions(structs []Structure, date time.Time) []Structure {
 // (FR-11.3): of the versions in effect, the first (by priority, then name)
 // whose main-account filter admits the account. A later version of a structure
 // replaces the earlier one entirely, so narrowing its filter never falls back
-// to the superseded version. Advanced rules (FR-11.16) are not applied here.
+// to the superseded version. Advanced rules (FR-11.16) are applied by checkStructure.
 func SelectStructure(structs []Structure, account string, date time.Time) (Structure, bool) {
 	for _, s := range EffectiveVersions(structs, date) {
 		if accountMatches(s.AccountFilter, account) {
@@ -389,6 +392,11 @@ func checkStructure(structs []Structure, account string, dims map[string]string,
 	if !found {
 		return []Violation{{Code: CodeStructureNotFound, Field: "lines.account",
 			Message: fmt.Sprintf("no active account structure covers account %s on %s", account, date.Format(time.DateOnly))}}, ""
+	}
+	s, within := s.WithAdvancedRules(account, dims)
+	if !within {
+		return []Violation{{Code: CodeAdvancedRuleSegmentLimit, Field: "lines.account",
+			Message: fmt.Sprintf("advanced rules add more than %d segments for account %s", MaxDimensionAttributes, account)}}, s.ID
 	}
 	var out []Violation
 	for _, f := range CheckSegments(s, account, dims) {

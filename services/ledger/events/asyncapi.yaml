@@ -292,7 +292,7 @@ components:
     RulesChanged:
       name: dev.passage.ledger.rules.changed.v1
       title: Ledger rules changed
-      summary: A derivation strategy was activated, a lookup table or document splitting rule was replaced, or a validation rule was saved.
+      summary: A derivation strategy was activated, a lookup table or document splitting rule was replaced, or a validation rule or advanced rule was saved.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -301,13 +301,13 @@ components:
           type: { const: dev.passage.ledger.rules.changed.v1 }
           source: { const: /passage/ledger/ledger }
           tenantid: { type: string, format: uuid }
-          subject: { type: string, format: uuid, description: Strategy row id, lookup table id or validation rule id }
+          subject: { type: string, format: uuid, description: Strategy row id, lookup table id, validation rule id or advanced rule id }
           data:
             type: object
             required: [ledgerId, kind, id, version, actor]
             properties:
               ledgerId: { type: string, format: uuid }
-              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule, splitting_rule] }
+              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule, advanced_rule, splitting_rule] }
               id: { type: string, format: uuid }
-              version: { type: integer, description: Strategy version number, the lookup table replacement counter or the validation rule lockVersion }
+              version: { type: integer, description: Strategy version number, the lookup table replacement counter or the validation rule or advanced rule lockVersion }
               actor: { type: string, description: User who activated, replaced or saved }

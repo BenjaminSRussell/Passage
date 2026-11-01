@@ -1387,6 +1387,49 @@ export function putValidationRule(ledgerId: string, id: string, input: Validatio
   );
 }
 
+/** Advanced rule structure (FR-11.16): when a line matches the filter, its segments and constraint rows join the account structure. */
+export const advancedRuleSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  structureId: z.string(),
+  name: z.string(),
+  priority: z.number().int(),
+  accounts: z.array(z.string()),
+  dimensions: z.record(z.string(), z.string()),
+  segments: z.array(z.string()),
+  constraints: z.array(constraintSchema),
+  lockVersion: z.number(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type AdvancedRule = z.infer<typeof advancedRuleSchema>;
+
+export type AdvancedRuleInput = Pick<AdvancedRule, "structureId" | "name" | "priority" | "accounts" | "dimensions" | "segments" | "constraints">;
+
+const advancedRuleListSchema = z.object({ items: z.array(advancedRuleSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/advanced-rules, by structure version, priority and name. */
+export async function fetchAdvancedRules(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<AdvancedRule[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/advanced-rules`, advancedRuleListSchema, fetchImpl)).items;
+}
+
+/** GET .../advanced-rules/{id}. */
+export function fetchAdvancedRule(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<AdvancedRule> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/advanced-rules/${encodeURIComponent(id)}`, advancedRuleSchema, fetchImpl);
+}
+
+/** PUT .../advanced-rules/{id}: creates, or replaces the rule at `lockVersion` (If-Match) when given. */
+export function putAdvancedRule(ledgerId: string, id: string, input: AdvancedRuleInput, lockVersion?: number, fetchImpl: FetchLike = defaultFetch): Promise<AdvancedRule> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/advanced-rules/${encodeURIComponent(id)}`,
+    advancedRuleSchema,
+    fetchImpl,
+    input,
+    lockVersion ? ifMatch(lockVersion) : {},
+  );
+}
+
 /** Dimension realignment (FR-11.24): a restatement of posted balances from old to new dimension values. */
 export const REALIGNMENT_STATUSES = ["proposed", "posted", "reversed", "cancelled"] as const;
 export type RealignmentStatus = (typeof REALIGNMENT_STATUSES)[number];

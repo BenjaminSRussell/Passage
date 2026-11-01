@@ -31,6 +31,8 @@ import { DerivationStrategiesPage } from "./DerivationStrategiesPage";
 import { DerivationStrategyPage, NewDerivationStrategyPage } from "./DerivationStrategyPage";
 import { ValidationRulesPage } from "./ValidationRulesPage";
 import { EditValidationRulePage, NewValidationRulePage } from "./ValidationRuleFormPage";
+import { AdvancedRulesPage } from "./AdvancedRulesPage";
+import { EditAdvancedRulePage, NewAdvancedRulePage } from "./AdvancedRuleFormPage";
 import { RealignmentsPage } from "./RealignmentsPage";
 import { NewRealignmentPage } from "./RealignmentFormPage";
 import { RealignmentPage } from "./RealignmentPage";
@@ -39,7 +41,7 @@ import { AutoClearingRunDetailPage, AutoClearingRunPage } from "./AutoClearingRu
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules, document splitting rules, dimension realignment runs and default description templates.",
+  description: "Universal journal: manual journal batches with approval, recurring journals, open items with manual and automatic clearing, clearing rules, tolerance groups, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, advanced rule structures, dimension values, dimension derivation strategies with lookup tables, user-defined validation rules, document splitting rules, dimension realignment runs and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -86,6 +88,9 @@ const ledger: PassageModule = {
     { path: "/ledger/structures", element: createElement(StructuresPage), handle: { title: "Account structures" } },
     { path: "/ledger/structures/new", element: createElement(NewStructurePage), handle: { title: "New account structure" } },
     { path: "/ledger/structures/:id", element: createElement(EditStructurePage), handle: { title: "Account structure" } },
+    { path: "/ledger/advanced-rules", element: createElement(AdvancedRulesPage), handle: { title: "Advanced rules" } },
+    { path: "/ledger/advanced-rules/new", element: createElement(NewAdvancedRulePage), handle: { title: "New advanced rule" } },
+    { path: "/ledger/advanced-rules/:id", element: createElement(EditAdvancedRulePage), handle: { title: "Advanced rule" } },
     { path: "/ledger/dimension-values", element: createElement(DimensionValuesPage), handle: { title: "Dimension values" } },
     { path: "/ledger/description-templates", element: createElement(DescriptionTemplatesPage), handle: { title: "Description templates" } },
     { path: "/ledger/description-templates/new", element: createElement(NewDescriptionTemplatePage), handle: { title: "New description template" } },
@@ -105,6 +110,7 @@ const ledger: PassageModule = {
     { label: "Journal names", to: "/ledger/journal-names", duty: "ledger.journal.read" },
     { label: "Reason codes", to: "/ledger/reason-codes", duty: "ledger.journal.read" },
     { label: "Account structures", to: "/ledger/structures", duty: "ledger.journal.read" },
+    { label: "Advanced rules", to: "/ledger/advanced-rules", duty: "ledger.journal.read" },
     { label: "Dimension values", to: "/ledger/dimension-values", duty: "ledger.journal.read" },
     { label: "Derivation strategies", to: "/ledger/derivation-strategies", duty: "ledger.journal.read" },
     { label: "Lookup tables", to: "/ledger/lookup-tables", duty: "ledger.journal.read" },

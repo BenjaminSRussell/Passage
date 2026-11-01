@@ -24,6 +24,7 @@ tags:
   - name: clearing
   - name: derivation
   - name: validation
+  - name: advanced-rules
   - name: ops
 components:
   parameters:
@@ -487,6 +488,50 @@ components:
           type: array
           maxItems: 500
           items: { $ref: "#/components/schemas/StructureConstraint" }
+    AdvancedRuleBody:
+      type: object
+      description: |
+        An advanced rule structure (FR-11.16). When a line's main account matches `accounts` and every
+        `dimensions` condition matches the line, `segments` and `constraints` are appended to the account
+        structure governing the line, in `priority` order (lowest first, then name), up to 20 segments in all.
+        When several matching rules carry rows for the same segment, the most specific row governs; on a
+        tie the structure's own row wins, then the row of the rule applied first.
+      required: [structureId, name, segments]
+      properties:
+        structureId: { type: string, format: uuid, description: The account structure version the rule belongs to; it must be a draft, and the rule governs postings once that version is active }
+        name: { type: string, pattern: '^[A-Za-z0-9_.-]{1,60}$', description: Unique within the structure version }
+        priority: { type: integer, minimum: 0, default: 0 }
+        accounts:
+          type: array
+          maxItems: 50
+          description: Main account tokens that admit a line (account number, from..to range or *); empty admits every account, but then `dimensions` must not be empty
+          items: { type: string }
+        dimensions:
+          type: object
+          description: Conditions per dimension attribute of the ledger that must all match the line (an exact value, a from..to range, `*` for any value or `blank`)
+          additionalProperties: { type: string }
+        segments:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: Dimension attributes added after the structure's own segments; none may already be a segment of the structure
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+        constraints:
+          type: array
+          maxItems: 500
+          description: Constraint rows over the added segments, with the semantics of the structure's rows
+          items: { $ref: "#/components/schemas/StructureConstraint" }
+    AdvancedRule:
+      allOf:
+        - $ref: "#/components/schemas/AdvancedRuleBody"
+        - type: object
+          required: [id, ledgerId, lockVersion]
+          properties:
+            id: { type: string, format: uuid }
+            ledgerId: { type: string, format: uuid }
+            lockVersion: { type: integer, minimum: 1, description: Counts the changes; it is the entity tag }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     Structure:
       allOf:
         - $ref: "#/components/schemas/StructureBody"
@@ -1224,6 +1269,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    AdvancedRuleProblem409:
+      description: LEDGER_STRUCTURE_LOCKED (the structure version is not a draft), LEDGER_ADVANCED_RULE_NAME_DUPLICATE (the name is used by another rule of the structure version) or LEDGER_ADVANCED_RULE_LIMIT (a structure version has at most 100 rules)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     ValidationRuleProblem409:
       description: LEDGER_VALIDATION_RULE_NAME_DUPLICATE (the name is used by another rule of the ledger) or LEDGER_VALIDATION_RULE_LIMIT (a ledger has at most 200 rules)
     SplittingProblem409:
@@ -1302,6 +1352,9 @@ components:
       schema: { type: string, example: '"2"' }
     StrategyETag:
       description: The derivation strategy lockVersion as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
+    AdvancedRuleETag:
+      description: The advanced rule lockVersion as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"2"' }
     ValidationRuleETag:
       description: The validation rule lockVersion as an entity tag, for If-Match on the next change
@@ -3769,6 +3822,103 @@ paths:
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/DerivationProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /v1/ledger/ledgers/{ledger}/advanced-rules:
+    get:
+      tags: [advanced-rules]
+      operationId: listAdvancedRules
+      summary: List the advanced rules of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Every advanced rule of the ledger, by structure version, priority and name; structureId narrows the list to one structure version.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: structureId, in: query, required: false, description: Only the rules of this account structure version, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The advanced rules of the ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AdvancedRule" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/advanced-rules/{id}:
+    get:
+      tags: [advanced-rules]
+      operationId: getAdvancedRule
+      summary: Get one advanced rule
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The rule; its lockVersion is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/AdvancedRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdvancedRule" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [advanced-rules]
+      operationId: putAdvancedRule
+      summary: Create or replace an advanced rule
+      x-passage-duty: ledger.structure.write
+      description: |
+        Creates (201) or replaces (200) an advanced rule of a draft account structure version (FR-11.16,
+        AC-11.18). When a line matches the filter, the rule's segments and constraint rows are appended to
+        the structure that governs the line; for example "accounts 5000..5999 and DEPT = D100 add PROJECT
+        (required)" makes a line on 5100/D100 without PROJECT fail with LEDGER_DIMENSION_REQUIRED, while a
+        line on 5100/D200 posts without it. Rules share the structure version's activation: a version that
+        is active or retired is 409 LEDGER_STRUCTURE_LOCKED, so change a rule by creating a new structure
+        version. A replace is checked against If-Match when sent and cannot move the rule to another
+        structure version. Re-sending the stored content changes nothing (same lockVersion, no event), also
+        once the version is active. Definition problems (unknown attribute, a segment the structure already has,
+        a malformed token, more than 20 segments in all) are 422 with every violation, under
+        LEDGER_ADVANCED_RULE_INVALID or LEDGER_ADVANCED_RULE_SEGMENT_LIMIT. Announces
+        dev.passage.ledger.rules.changed.v1 with kind advanced_rule.
+      parameters:
+        - { name: ledger, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: If-Match
+          in: header
+          required: false
+          description: The lockVersion last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdvancedRuleBody" }
+      responses:
+        "200":
+          description: Rule replaced
+          headers:
+            ETag: { $ref: "#/components/headers/AdvancedRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdvancedRule" }
+        "201":
+          description: Rule created
+          headers:
+            ETag: { $ref: "#/components/headers/AdvancedRuleETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdvancedRule" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/AdvancedRuleProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/Problem422" }
   /v1/ledger/ledgers/{ledger}/validation-rules:

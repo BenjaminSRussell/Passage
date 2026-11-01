@@ -33,6 +33,7 @@ type fakeStore struct {
 	auto     autoFake
 	deriv    derivationFake
 	vrules   validationFake
+	arules   advancedFake
 	split    splittingFake
 	realign  realignFake
 	posted   []store.PostInput

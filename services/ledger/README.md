@@ -221,7 +221,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.balance.read` | `GET /balances` |
 | `ledger.balance.rebuild` | `POST /balances:rebuild` |
 | `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
-| `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
+| `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}`, `PUT /ledgers/{ledger}/advanced-rules/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
 | `ledger.setup.write` | `PUT /description-templates/{id}`, `PUT /journal-names/{code}` (PRD duty "Maintain ledger setup") |
 | `ledger.clearing.write` | `POST /clearings`, `POST /clearings:simulate` (PRD duty "Clear open items"; not yet in the policy bundle, issue #313) |

@@ -44,7 +44,8 @@ type RealignmentCompletedData struct {
 // RulesChangedData is the payload of dev.passage.ledger.rules.changed.v1. Kind is
 // derivation_strategy (ID is the strategy row, Version its version number) or
 // lookup_table (ID is the table, Version its replacement counter) or
-// validation_rule (ID is the rule, Version its lockVersion) or splitting_rule (ID is the
+// validation_rule (ID is the rule, Version its lockVersion) or advanced_rule (ID is the rule,
+// Version its lockVersion) or splitting_rule (ID is the
 // rule, Version its replacement counter).
 type RulesChangedData struct {
 	LedgerID string `json:"ledgerId"`
