@@ -80,6 +80,9 @@ var serviceGrants = map[string]map[string][]string{
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
 	},
+	"hr": {
+		"numbering": {"numbering.sequence.allocate"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.

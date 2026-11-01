@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strings"
@@ -456,12 +457,20 @@ func (a *API) applyDueActions(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	res, err := a.store.ApplyDueActions(r.Context(), domain.AsOfDay(time.Now()))
+	res, err := a.SweepDueActions(r.Context())
 	if err != nil {
 		a.fail(w, r, "apply due personnel actions", err)
 		return
 	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (a *API) SweepDueActions(ctx context.Context) (store.ApplyResult, error) {
+	res, err := a.store.ApplyDueActions(ctx, domain.AsOfDay(time.Now()))
+	if err != nil {
+		return res, err
+	}
 	a.personnel.actionsApplied.Add(int64(res.Applied))
 	a.personnel.actionsFailed.Add(int64(res.Failed))
-	httpx.JSON(w, http.StatusOK, res)
+	return res, nil
 }

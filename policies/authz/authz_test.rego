@@ -539,6 +539,7 @@ test_service_grants_allow_only_their_declared_routes if {
 	data.service_grants.receiving.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
 	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
 	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
+	data.service_grants.hr.numbering == ["numbering.sequence.allocate"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
 		every duty in grant {
 			not allowed(duty, "POST", "/v1/ledger/validate")

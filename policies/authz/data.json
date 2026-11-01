@@ -995,7 +995,9 @@
     ]},
     "MssApprove": {"permissions": [
       {"resource": "/v1/hr/absence/requests/*/decide", "methods": ["POST"]},
-      {"resource": "/v1/hr/courses/registrations/*/approve", "methods": ["POST"]}
+      {"resource": "/v1/hr/courses/registrations/*/approve", "methods": ["POST"]},
+      {"resource": "/v1/hr/me/compensation/cycles/*/worksheet", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/hr/me/compensation/cycles/*/worksheet/submit", "methods": ["POST"]}
     ]},
     "MssBase": {"permissions": [
       {"resource": "/v1/hr/me/team", "methods": ["GET"]},
@@ -2330,6 +2332,9 @@
       "payables": ["payment-run.execute"]
     },
     "party": {
+      "numbering": ["numbering.sequence.allocate"]
+    },
+    "hr": {
       "numbering": ["numbering.sequence.allocate"]
     }
   }

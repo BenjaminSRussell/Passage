@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
+
+const requisitionSequence = "REQ"
 
 func (a *API) registerRecruitment(r chi.Router) {
 	recruit := r.With(authz.RequireDuty(dutyRecruitMaintain))
@@ -57,8 +60,9 @@ func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	in := store.Requisition{RequisitionNumber: strings.ToUpper(strings.TrimSpace(req.RequisitionNumber)), PositionID: req.PositionID,
 		HiringManagerWorkerID: req.HiringManagerWorkerID, AllowOverfill: req.AllowOverfill}
-	if !personnelNumber.MatchString(in.RequisitionNumber) {
-		fields["requisitionNumber"] = "must be 1 to 20 characters of A-Z, 0-9 or -"
+	generate := in.RequisitionNumber == ""
+	if !generate && !personnelNumber.MatchString(in.RequisitionNumber) {
+		fields["requisitionNumber"] = "must be 1 to 20 characters of A-Z, 0-9 or -, or omitted to take the next number from the REQ sequence"
 	}
 	if !ids.Valid(req.PositionID) {
 		fields["positionId"] = "must be a UUID"
@@ -80,7 +84,24 @@ func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	out, inserted, err := a.store.CreateRequisition(r.Context(), in, r.Header.Get(idempotencyKey))
+	key := r.Header.Get(idempotencyKey)
+	if generate {
+		numberingKey := key
+		if numberingKey == "" {
+			numberingKey = ids.New()
+		}
+		formatted, err := a.sequence.Next(r.Context(), requisitionSequence, numberingKey)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if in.RequisitionNumber = strings.ToUpper(formatted); !personnelNumber.MatchString(in.RequisitionNumber) {
+			logFailure(r, "requisition number allocation", errors.New("numbering issued "+formatted))
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, "HCM-REQ-NUMBER-INVALID", "the REQ sequence issued a number outside 1 to 20 characters of A-Z, 0-9 or -"))
+			return
+		}
+	}
+	out, inserted, err := a.store.CreateRequisition(r.Context(), in, key)
 	if err != nil {
 		a.fail(w, r, "create requisition", err)
 		return

@@ -29,9 +29,13 @@ func (a *API) registerCompCycles(r chi.Router) {
 	admin.Get("/v1/hr/compensation/cycles/{id}", notFound(a.getCycle))
 	admin.Post("/v1/hr/compensation/cycles/{id}/advance", notFound(a.advanceCycle))
 	admin.Post("/v1/hr/compensation/cycles/{id}/apply", notFound(a.applyCycle))
-	admin.Put("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.saveWorksheet))
-	admin.Get("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.getWorksheet))
-	admin.Post("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}/submit", notFound(a.submitWorksheet))
+	admin.Put("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.asAdmin(a.saveWorksheet)))
+	admin.Get("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.asAdmin(a.getWorksheet)))
+	admin.Post("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}/submit", notFound(a.asAdmin(a.submitWorksheet)))
+	mss := r.With(authz.RequireDuty(dutyMssApprove))
+	mss.Put("/v1/hr/me/compensation/cycles/{id}/worksheet", notFound(a.asManager(a.saveWorksheet)))
+	mss.Get("/v1/hr/me/compensation/cycles/{id}/worksheet", notFound(a.asManager(a.getWorksheet)))
+	mss.Post("/v1/hr/me/compensation/cycles/{id}/worksheet/submit", notFound(a.asManager(a.submitWorksheet)))
 }
 
 type cycleRequest struct {
@@ -176,11 +180,69 @@ func managerParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, true
 }
 
-func (a *API) saveWorksheet(w http.ResponseWriter, r *http.Request, cycleID string) {
-	manager, ok := managerParam(w, r)
-	if !ok {
+type worksheetAccess struct {
+	managerID    string
+	onlyReports  bool
+	reportLookup func(workerIDs []string) (map[string]bool, error)
+}
+
+type worksheetHandler func(w http.ResponseWriter, r *http.Request, cycleID string, wa worksheetAccess)
+
+func (a *API) asAdmin(next worksheetHandler) func(http.ResponseWriter, *http.Request, string) {
+	return func(w http.ResponseWriter, r *http.Request, cycleID string) {
+		if manager, ok := managerParam(w, r); ok {
+			next(w, r, cycleID, worksheetAccess{managerID: manager})
+		}
+	}
+}
+
+func (a *API) asManager(next worksheetHandler) func(http.ResponseWriter, *http.Request, string) {
+	return func(w http.ResponseWriter, r *http.Request, cycleID string) {
+		self, err := a.store.SelfWorkerID(r.Context())
+		if err != nil {
+			a.failStore(w, r, "resolve own worker", err)
+			return
+		}
+		at := today()
+		next(w, r, cycleID, worksheetAccess{managerID: self, onlyReports: true, reportLookup: func(workerIDs []string) (map[string]bool, error) {
+			return a.store.DirectReportsAmong(r.Context(), self, workerIDs, at)
+		}})
+	}
+}
+
+func (wa worksheetAccess) visible(rows []store.WorksheetRow) ([]store.WorksheetRow, error) {
+	if !wa.onlyReports {
+		return rows, nil
+	}
+	workerIDs := make([]string, len(rows))
+	for i, row := range rows {
+		workerIDs[i] = row.WorkerID
+	}
+	reports, err := wa.reportLookup(workerIDs)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]store.WorksheetRow, 0, len(rows))
+	for _, row := range rows {
+		if reports[row.WorkerID] {
+			kept = append(kept, row)
+		}
+	}
+	return kept, nil
+}
+
+func (a *API) writeWorksheet(w http.ResponseWriter, r *http.Request, wa worksheetAccess, op string, rows []store.WorksheetRow, err error) {
+	if err == nil {
+		rows, err = wa.visible(rows)
+	}
+	if err != nil {
+		a.fail(w, r, op, err)
 		return
 	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.WorksheetRow]{Items: rows})
+}
+
+func (a *API) saveWorksheet(w http.ResponseWriter, r *http.Request, cycleID string, wa worksheetAccess) {
 	var req worksheetRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -214,36 +276,37 @@ func (a *API) saveWorksheet(w http.ResponseWriter, r *http.Request, cycleID stri
 		validationFailed(w, r, fields)
 		return
 	}
-	rows, err := a.store.SaveWorksheet(r.Context(), cycleID, manager, in)
-	if err != nil {
-		a.fail(w, r, "save worksheet", err)
-		return
+	if wa.onlyReports {
+		reports, err := wa.reportLookup(workerIDsOf(in))
+		if err != nil {
+			a.fail(w, r, "check worksheet reports", err)
+			return
+		}
+		for _, row := range in {
+			if !reports[row.WorkerID] {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeWorkerNotFound, "worker not found"))
+				return
+			}
+		}
 	}
-	httpx.JSON(w, http.StatusOK, listResponse[store.WorksheetRow]{Items: rows})
+	rows, err := a.store.SaveWorksheet(r.Context(), cycleID, wa.managerID, in)
+	a.writeWorksheet(w, r, wa, "save worksheet", rows, err)
 }
 
-func (a *API) getWorksheet(w http.ResponseWriter, r *http.Request, cycleID string) {
-	manager, ok := managerParam(w, r)
-	if !ok {
-		return
+func workerIDsOf(in []store.WorksheetRowInput) []string {
+	workerIDs := make([]string, len(in))
+	for i, row := range in {
+		workerIDs[i] = row.WorkerID
 	}
-	rows, err := a.store.GetWorksheet(r.Context(), cycleID, manager)
-	if err != nil {
-		a.fail(w, r, "get worksheet", err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, listResponse[store.WorksheetRow]{Items: rows})
+	return workerIDs
 }
 
-func (a *API) submitWorksheet(w http.ResponseWriter, r *http.Request, cycleID string) {
-	manager, ok := managerParam(w, r)
-	if !ok {
-		return
-	}
-	rows, err := a.store.SubmitWorksheet(r.Context(), cycleID, manager)
-	if err != nil {
-		a.fail(w, r, "submit worksheet", err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, listResponse[store.WorksheetRow]{Items: rows})
+func (a *API) getWorksheet(w http.ResponseWriter, r *http.Request, cycleID string, wa worksheetAccess) {
+	rows, err := a.store.GetWorksheet(r.Context(), cycleID, wa.managerID)
+	a.writeWorksheet(w, r, wa, "get worksheet", rows, err)
+}
+
+func (a *API) submitWorksheet(w http.ResponseWriter, r *http.Request, cycleID string, wa worksheetAccess) {
+	rows, err := a.store.SubmitWorksheet(r.Context(), cycleID, wa.managerID)
+	a.writeWorksheet(w, r, wa, "submit worksheet", rows, err)
 }

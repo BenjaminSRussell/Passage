@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -21,8 +22,23 @@ type myProfile struct {
 	AsOf store.AsOfView `json:"asOf"`
 }
 
+type teamWorker struct {
+	ID              string    `json:"id"`
+	PersonnelNumber string    `json:"personnelNumber"`
+	WorkerType      string    `json:"workerType"`
+	LegalName       string    `json:"legalName"`
+	PreferredName   *string   `json:"preferredName,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+func teamWorkerOf(w store.Worker) teamWorker {
+	return teamWorker{ID: w.ID, PersonnelNumber: w.PersonnelNumber, WorkerType: w.WorkerType, LegalName: w.LegalName,
+		PreferredName: w.PreferredName, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt}
+}
+
 type teamMemberView struct {
-	store.Worker
+	teamWorker
 	AsOf store.AsOfView `json:"asOf"`
 }
 
@@ -89,7 +105,11 @@ func (a *API) myTeam(w http.ResponseWriter, r *http.Request) {
 		a.failStore(w, r, "list team", err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, listResponse[store.Worker]{Items: page.Items, NextCursor: cursor(page.NextAfter)})
+	items := make([]teamWorker, len(page.Items))
+	for i, worker := range page.Items {
+		items[i] = teamWorkerOf(worker)
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[teamWorker]{Items: items, NextCursor: cursor(page.NextAfter)})
 }
 
 // teamMember is GET /v1/hr/me/team/{id} (MssBase): a direct report's record
@@ -121,7 +141,7 @@ func (a *API) teamMember(w http.ResponseWriter, r *http.Request, id string) {
 		a.failStore(w, r, "team member as-of", err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, teamMemberView{Worker: worker, AsOf: view})
+	httpx.JSON(w, http.StatusOK, teamMemberView{teamWorker: teamWorkerOf(worker), AsOf: view})
 }
 
 // listTeamAbsenceRequests answers the absence queue for a manager who is not
@@ -145,8 +165,11 @@ func (a *API) listTeamAbsenceRequests(w http.ResponseWriter, r *http.Request, f 
 // notFoundCode as 404, the same as one that does not exist. Callers without
 // MssApprove pass through to the handler's own-data check.
 func (a *API) allowTeamWorker(w http.ResponseWriter, r *http.Request, workerID, notFoundCode, notFoundDetail string) bool {
-	p := caller(r)
-	if !p.HasDuty(dutyMssApprove) || p.HasDuty(dutyAbsenceAdmin) {
+	return a.confineToTeam(w, r, caller(r).HasDuty(dutyAbsenceAdmin), workerID, notFoundCode, notFoundDetail)
+}
+
+func (a *API) confineToTeam(w http.ResponseWriter, r *http.Request, tenantWide bool, workerID, notFoundCode, notFoundDetail string) bool {
+	if !caller(r).HasDuty(dutyMssApprove) || tenantWide {
 		return true
 	}
 	self, err := a.store.SelfWorkerID(r.Context())

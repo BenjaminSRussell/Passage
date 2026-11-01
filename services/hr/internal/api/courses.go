@@ -467,6 +467,16 @@ func (a *API) registerForSession(w http.ResponseWriter, r *http.Request, id stri
 
 // approveRegistration is POST /v1/hr/courses/registrations/{id}/approve (MssApprove).
 func (a *API) approveRegistration(w http.ResponseWriter, r *http.Request, id string) {
+	if tenantWide := caller(r).HasDuty(dutyLearningAdmin); !tenantWide {
+		workerID, err := a.store.RegistrationWorker(r.Context(), id)
+		if err != nil {
+			a.failStore(w, r, "resolve registration worker", err)
+			return
+		}
+		if !a.confineToTeam(w, r, tenantWide, workerID, store.CodeRegistrationNotFound, "registration not found") {
+			return
+		}
+	}
 	reg, err := a.store.ApproveRegistration(r.Context(), id)
 	if err != nil {
 		logFailure(r, "approve course registration", err)
