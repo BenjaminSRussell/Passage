@@ -10,6 +10,8 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/eam/internal/domain"
 	eamevents "github.com/BenjaminSRussell/passage/services/eam/internal/events"
@@ -24,9 +26,10 @@ import (
 // over a completion window, and the sum of the workorder.completed events (the
 // feed a ledger posting would consume) must equal the reference to the cent and
 // reconcile with each other. Order 1 is AC-44.3: 350.00 + 8 h x 45.00 = 710.00.
-// The GL posting itself (FR-44.11, ledger.Post to the maintenance expense
-// account) is not built, so no GL balance is checked; parts are written on the
-// order as the wave-16 issue would, since part issue is not built either.
+// The same 50 orders are then booked in a fake general ledger (FR-44.11): the
+// maintenance expense accounts must net to the asset cost history and to the
+// reference, and the GL reconciliation must show no difference. Parts are
+// written on the order as the wave-16 issue would, since part issue is not built.
 func TestWorkOrderCost50_ReconcilesAssetKPIAndEvents(t *testing.T) {
 	var fx struct {
 		Assets []string `json:"assets"`
@@ -189,5 +192,38 @@ func TestWorkOrderCost50_ReconcilesAssetKPIAndEvents(t *testing.T) {
 	if !grand.Equal(dec(want.GrandTotal)) {
 		t.Fatalf("grand total %s, want %s", grand, want.GrandTotal)
 	}
+
+	fake, ledgerID := ledgerclient.NewFake(), ids.New()
+	le := "00000000-0000-0000-0000-0000000000e1"
+	if _, _, err := s.SavePostingProfile(ctx, PostingProfile{LegalEntityID: le, WorkOrderType: "ALL", PartsExpense: "6100", LaborExpense: "6110", PartsOffset: "1400", LaborOffset: "5900"}, 0, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	wantParts, wantLabor, costed := decimal.Zero, decimal.Zero, 0
+	for _, o := range want.Orders {
+		wantParts, wantLabor = wantParts.Add(dec(o.Parts)), wantLabor.Add(dec(o.Labor))
+		if !dec(o.Parts).Add(dec(o.Labor)).IsZero() {
+			costed++
+		}
+	}
+	booked, err := s.PostWorkOrderCosts(ctx, fake, GLPostRequest{LegalEntityID: le, LedgerID: ledgerID, Currency: "USD"})
+	if err != nil || len(booked.Failed) != 0 || len(booked.Booked) != costed || booked.More || costed != len(fx.Orders)-1 {
+		t.Fatalf("booking: %d of %d costed orders, failed %v, more %v, %v", len(booked.Booked), costed, booked.Failed, booked.More, err)
+	}
+	for acct, net := range map[string]decimal.Decimal{"6100": wantParts, "6110": wantLabor, "1400": wantParts.Neg(), "5900": wantLabor.Neg()} {
+		if b, _ := fake.Balance(ctx, ledgerclient.BalanceQuery{LedgerID: ledgerID, Account: acct}); !b.Net().Equal(net) {
+			t.Errorf("GL account %s nets %s, want %s", acct, b.Net(), net)
+		}
+	}
+	if gl := wantParts.Add(wantLabor); !gl.Equal(grand) {
+		t.Errorf("GL maintenance expense %s, asset cost history %s", gl, grand)
+	}
+	rec, err := s.ReconcileGL(ctx, fake, GLReconcileRequest{LegalEntityID: le, LedgerID: ledgerID, Currency: "USD"})
+	if err != nil || !rec.Reconciled || len(rec.Accounts) != 4 {
+		t.Fatalf("GL reconciliation: %+v %v", rec, err)
+	}
+	if again, err := s.PostWorkOrderCosts(ctx, fake, GLPostRequest{LegalEntityID: le, LedgerID: ledgerID, Currency: "USD"}); err != nil || len(again.Booked) != 0 || len(fake.Entries()) != costed {
+		t.Fatalf("a second run books nothing: %+v %v", again, err)
+	}
+
 	t.Logf("eam-wo-cost-50: 50 orders, %d events; asset histories, KPI window and events reconcile to %s", eventCount, grand.StringFixed(2))
 }

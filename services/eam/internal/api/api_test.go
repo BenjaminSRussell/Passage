@@ -34,10 +34,11 @@ func call(t *testing.T, h http.Handler, method, path, body string, headers map[s
 
 func headers(duties string) map[string]string {
 	return map[string]string{
-		"X-Passage-Tenant": testkit.TenantID(1),
-		"X-Passage-Duties": duties,
-		"Idempotency-Key":  "key-1",
-		"X-Passage-User":   "user-1",
+		"X-Passage-Tenant":       testkit.TenantID(1),
+		"X-Passage-Duties":       duties,
+		"Idempotency-Key":        "key-1",
+		"X-Passage-User":         "user-1",
+		"X-Passage-Legal-Entity": "00000000-0000-0000-0000-0000000000e1",
 	}
 }
 

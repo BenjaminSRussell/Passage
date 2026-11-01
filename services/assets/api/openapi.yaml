@@ -1309,6 +1309,162 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+  /v1/assets/gl-postings:
+    post:
+      summary: Book asset transactions and depreciation runs in the general ledger (D2j)
+      operationId: postAssetsToGL
+      x-passage-duty: AssetPostJournal
+      description: |
+        Books the transactions of one book code and currency that are not in the general ledger yet: one entry per depreciation run (all its books)
+        and one per other transaction (acquisition, adjustment, revaluation, impairment, disposal, transfer or split). Cost and accumulated depreciation
+        move on the class accounts of the posting profile; the counter account is the acquisition clearing, depreciation expense, impairment,
+        revaluation or transfer clearing account, and a disposal books the proceeds with the remainder as gain or loss. Entries are keyed by run or
+        transaction, so a retry returns the same entry. A group the ledger refuses (a closed period, for one) is listed under failed with the
+        ledger's problem code and retried by the next run. At most 200 groups per run (more is true when others wait). Signs only ledger.entry.post.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId, bookCode, currency]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                ledgerId: { type: string, format: uuid }
+                bookCode: { type: string }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+      responses:
+        "200":
+          description: What was booked and what the ledger refused
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [booked, failed, more]
+                properties:
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document: { type: string, description: The run id or the transaction id. }
+                        entryId: { type: string, format: uuid }
+                        lines: { type: integer }
+                        transactions: { type: integer }
+                        placeholderProfile: { type: boolean }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document: { type: string }
+                        code: { type: string, description: "The ledger's problem code, or AST-0601." }
+                  more: { type: boolean }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/gl-reconciliation:
+    get:
+      summary: Reconcile the register to the general ledger (AC4)
+      operationId: getAssetsGLReconciliation
+      x-passage-duty: AssetView
+      description: |
+        For one book code, per class cost and accumulated depreciation account: the register's balance (accumulated depreciation enters negative),
+        the general ledger's balance of the account and the difference (GL minus register). unposted counts the transactions not booked yet.
+        reconciled is true when every difference is zero.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: bookCode, in: query, required: true, schema: { type: string } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+      responses:
+        "200":
+          description: The reconciliation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, bookCode, reconciled, unposted, accounts]
+                properties:
+                  currency: { type: string }
+                  bookCode: { type: string }
+                  reconciled: { type: boolean }
+                  unposted: { type: integer }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        account: { type: string }
+                        subledger: { type: string }
+                        gl: { type: string }
+                        difference: { type: string }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/posting-profiles:
+    get:
+      summary: Posting profiles of a legal entity and the placeholder default
+      operationId: listAssetPostingProfiles
+      x-passage-duty: AssetView
+      description: |
+        The profiles by asset class (ALL is the wildcard) and the built-in placeholder that applies when a legal entity has none
+        (cost 1500, accumulated depreciation 1590, depreciation expense 6800, impairment 6810, revaluation 3300, acquisition clearing 2190,
+        proceeds 1190, gain 7100, loss 7110, transfer clearing 1595), to be replaced by the accountant.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Profiles and the placeholder
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, placeholder]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AssetPostingProfile" } }
+                  placeholder: { $ref: "#/components/schemas/AssetPostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    put:
+      summary: Create or replace a posting profile
+      operationId: saveAssetPostingProfile
+      x-passage-duty: AssetConfigure
+      description: Creates the profile (no If-Match) or replaces it (If-Match with the version) for a legal entity and class.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetPostingProfile" }
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssetPostingProfile" }
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssetPostingProfile" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
 components:
   headers:
     ETag:
@@ -1374,6 +1530,26 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    AssetPostingProfile:
+      type: object
+      required: [costAccount, accumulatedDepreciationAccount, depreciationExpenseAccount, impairmentAccount, revaluationAccount, acquisitionClearingAccount, proceedsAccount, gainAccount, lossAccount, transferClearingAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        classCode: { type: string, default: ALL }
+        costAccount: { type: string }
+        accumulatedDepreciationAccount: { type: string }
+        depreciationExpenseAccount: { type: string }
+        impairmentAccount: { type: string }
+        revaluationAccount: { type: string }
+        acquisitionClearingAccount: { type: string }
+        proceedsAccount: { type: string }
+        gainAccount: { type: string }
+        lossAccount: { type: string }
+        transferClearingAccount: { type: string }
+        version: { type: integer }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        placeholder: { type: boolean }
     Problem:
       type: object
       required: [type, title, status, code]

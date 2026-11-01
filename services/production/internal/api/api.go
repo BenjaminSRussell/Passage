@@ -26,6 +26,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/production/internal/store"
@@ -65,8 +66,9 @@ const (
 )
 
 var (
-	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
-	originTypes  = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true}
+	currencyCode  = regexp.MustCompile(`^[A-Z]{3}$`)
+	periodPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
+	originTypes   = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true}
 	// listOriginTypes adds Split, which only a split sets (FR-21.15).
 	listOriginTypes = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true, domain.OriginSplit: true}
 	commands        = map[string]domain.Command{
@@ -107,6 +109,9 @@ type API struct {
 	moved    atomic.Int64
 	refused  atomic.Int64
 	posted   atomic.Int64
+	glBooked atomic.Int64
+	gl       store.GLBooks
+	ledger   ledgerclient.Ledger
 }
 
 // New returns the API over st.
@@ -156,6 +161,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/ocm-profiles", a.listOCMProfiles)
 	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/ocm-profiles", a.saveOCMProfile)
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/order-changes:detect", a.detectChanges)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/gl-postings:run", a.postToGL)
+	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/wip-reconciliation", a.wipReconciliation)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes", a.listChanges)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes/{id}", a.getChange)
 	r.Post("/v1/production/order-changes/{id}", a.changeCommand)
@@ -170,6 +177,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP production_idempotent_replays_total Requests answered from a stored Idempotency-Key.\n# TYPE production_idempotent_replays_total counter\nproduction_idempotent_replays_total %d\n", a.replayed.Load())
 		fmt.Fprintf(w, "# HELP production_transitions_refused_total Commands and journal posts refused by the state machine, a guard or a precondition.\n# TYPE production_transitions_refused_total counter\nproduction_transitions_refused_total %d\n", a.refused.Load())
 		fmt.Fprintf(w, "# HELP production_journals_posted_total Production journals posted through :post.\n# TYPE production_journals_posted_total counter\nproduction_journals_posted_total %d\n", a.posted.Load())
+		fmt.Fprintf(w, "# HELP production_gl_entries_booked_total General-ledger entries booked from the WIP subledger.\n# TYPE production_gl_entries_booked_total counter\nproduction_gl_entries_booked_total %d\n", a.glBooked.Load())
 	})
 }
 

@@ -80,7 +80,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 42 {
+	if len(served) != 44 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -124,7 +124,7 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse", domain.CodeAsBuiltRequired, domain.CodeOrderQuantity, domain.CodeOperationState,
 		store.CodeOperationNotFound, DutyApplyChange, store.CodeChangeNotFound, domain.CodeChangeNoDelta, domain.CodeChangeResolved,
-		domain.CodeChangeNotEligible, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE"} {
+		domain.CodeChangeNotEligible, "minimumQty", "maximumQty", "PRODUCTION_ESTIMATE_ON_CREATE", CodeGLUnavailable, store.CodeGLFailed} {
 		if !strings.Contains(spec, name) {
 			t.Errorf("openapi.yaml does not mention %s", name)
 		}

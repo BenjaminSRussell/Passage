@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -67,6 +68,13 @@ func getWorkOrder(ctx context.Context, tx pgx.Tx, t, id string, lock bool) (Work
 // is never warranty covered. The number comes from the work-order sequence,
 // allocated last in the transaction.
 func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key string, now time.Time) (string, error) {
+	var legalEntity *string
+	if err := tx.QueryRow(ctx, `select legal_entity_id::text from asset where tenant_id = $1 and id = $2`, t, in.AssetID).Scan(&legalEntity); err != nil {
+		return "", notFound(err, "asset")
+	}
+	if legalEntity == nil {
+		return "", problem(http.StatusUnprocessableEntity, CodeNoEntity, "the asset has no legal entity, so its work order cost could not be booked in a ledger; create the asset under one legal entity scope")
+	}
 	at := now
 	if in.DueAt != nil {
 		at = *in.DueAt
@@ -83,10 +91,10 @@ func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key
 	}
 	id := ids.New()
 	_, err := tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
-	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key)
-	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key, legal_entity_id)
+	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		t, id, in.AssetID, in.Type, in.Priority, in.PlanLineID, in.RequestID, optStr(in.JobType), in.Currency,
-		in.DueAt, warrantyID, warrantyID != nil, optStr(key))
+		in.DueAt, warrantyID, warrantyID != nil, optStr(key), legalEntity)
 	return id, err
 }
 

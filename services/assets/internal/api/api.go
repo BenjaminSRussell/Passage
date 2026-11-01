@@ -24,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/assets/internal/domain"
@@ -66,6 +67,9 @@ var (
 
 // API holds the store and counters used by /metrics.
 type API struct {
+	gl       store.GLBooks
+	ledger   ledgerclient.Ledger
+	glBooked atomic.Int64
 	store    store.Store
 	now      func() time.Time
 	created  atomic.Int64
@@ -141,6 +145,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyConfigure)).Post("/v1/assets/group-assets", a.createGroupAsset)
 		r.With(requireAny(DutyView, DutyConfigure)).Get("/v1/assets/group-assets", a.listGroupAssets)
 		r.With(requireAny(DutyView, DutyConfigure)).Get("/v1/assets/group-assets/{id}", a.getGroupAsset)
+		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/assets/gl-postings", a.postToGL)
+		r.With(authz.RequireDuty(DutyView)).Get("/v1/assets/gl-reconciliation", a.glReconciliation)
+		r.With(authz.RequireDuty(DutyView)).Get("/v1/assets/posting-profiles", a.listPostingProfiles)
+		r.With(authz.RequireDuty(DutyConfigure)).Put("/v1/assets/posting-profiles", a.savePostingProfile)
 	})
 }
 

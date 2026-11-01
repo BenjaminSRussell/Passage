@@ -15,5 +15,8 @@ resources:
   limits: { cpu: 500m, memory: 256Mi }
 serviceMonitor: { enabled: false }
 
+ledgerUrl: ""
 serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
   publicKeys: ""
