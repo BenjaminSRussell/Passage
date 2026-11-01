@@ -19,3 +19,4 @@ ledgerUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""

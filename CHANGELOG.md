@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- Wave 27 AC-27.4: a sales order line can carry a `configurationId` (validated against the product
+  service), `POST /v1/sales/orders/{id}:plan-production` creates the `SalesOrderLine` production
+  order that carries it through `POST /v1/production/sales-line-orders`, idempotent per line, with
+  the narrow service grants `sales -> product: product.configuration.read` and
+  `sales -> production: production.order.create-from-sales`.
 - `platform/go/eventing` is the shared at-least-once CloudEvents consumer (franz-go, structured and
   binary decoding, `consumer_inbox` dedupe by event id, bounded retry, dead-letter topic, metrics;
   a handler that calls other services runs outside the inbox transaction and relies on its own

@@ -96,6 +96,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold; draws allocation quota per line (`SLS-0013` warning when a line moves to a later period, 422 when none can cover it) |
 | POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3); when allocation quota cannot cover that confirmation the hold is still released and the order stays unconfirmed with an `SLS-0013` warning |
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
+| POST | `/v1/sales/orders/{id}:plan-production` | `sales.order.plan-production` | creates, for each configured line of a CONFIRMED order, the production order built to the line's saved configuration (origin `SalesOrderLine`) through the production service and links it to the line in `order_line_production`; idempotent per line; a line's `configurationId` is checked against the product service on order create |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled` |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
 | POST | `/v1/sales/orders/{id}/holds` | `sales.order.hold` | `If-Match`; MANUAL, FRAUD or PRICE_REVIEW with a reason code; emits `orderhold.applied` |
@@ -296,6 +297,11 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0044` | 409 | The change request was already decided |
 | `SLS-0045` | 403 | A change cannot be approved by the user who requested it |
 | `SLS-0046` | 409 | The order changed since the change request was made; reject it and ask for a new change |
+| `SLS-0047` | 422 | A line's `configurationId` does not exist, is not valid or does not belong to the line's product |
+| `SLS-0048` | 503 | The product service could not confirm a line's configuration (or is not configured); nothing is stored, retry |
+| `SLS-0049` | 422 | `:plan-production` on an order that is not CONFIRMED |
+| `SLS-0050` | 502/503 | The production service could not plan a line (or is not configured); the lines planned before it are kept, retry |
+| `SLS-0051` | 409 | Production already has an order for the line made for another product or configuration |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |

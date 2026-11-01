@@ -44,6 +44,12 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: production
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
             - name: PRODUCTION_RAF_TOLERANCE_PCT
               value: {{ .Values.config.rafTolerancePct | quote }}
             - name: PRODUCTION_OVERCONSUMPTION_PCT
@@ -52,8 +58,6 @@ spec:
               value: {{ .Values.config.autoStartOnFeedback | quote }}
             - name: PRODUCTION_ESTIMATE_ON_CREATE
               value: {{ .Values.config.estimateOnCreate | quote }}
-            - name: PASSAGE_SERVICE_NAME
-              value: production
 {{- if .Values.ledgerUrl }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
 {{- end }}

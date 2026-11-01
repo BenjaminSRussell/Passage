@@ -48,6 +48,23 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret.name }}
                   key: {{ .Values.databaseSecret.key }}
+            - name: PASSAGE_SERVICE_NAME
+              value: sales
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.serviceIdentity.signingKeySecret | quote }}
+                  key: signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+            - name: PRODUCT_URL
+              value: {{ .Values.upstream.productUrl | quote }}
+            - name: PRODUCTION_URL
+              value: {{ .Values.upstream.productionUrl | quote }}
           livenessProbe:
             httpGet:
               path: /healthz

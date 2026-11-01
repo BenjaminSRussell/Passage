@@ -266,6 +266,7 @@ components:
             product itself as a line to issue the reworked units into WIP at their cost.
             Defaults to Rework when reworkReference is set.
         originId: { type: [string, 'null'], format: uuid }
+        configurationId: { type: [string, 'null'], format: uuid, description: 'Saved configuration the order is built to; only with originType SalesOrderLine.' }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         minimumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s minimum order quantity (FR-21.1); absent or 0 is no minimum. Passed by the caller until released-product settings (wave 8) are read.' }
         maximumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s maximum order quantity; absent or 0 is no maximum. Below minimumQty is 422 PRODUCTION_INVALID_INPUT.' }
@@ -353,6 +354,7 @@ components:
         deliveryDate: { type: string, format: date }
         originType: { type: string }
         originId: { type: string, format: uuid }
+        configurationId: { type: string, format: uuid }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         splitFromOrderId: { type: string, format: uuid, description: 'The order a split took this order''s quantity from (FR-21.15).' }
         mergedIntoOrderId: { type: string, format: uuid, description: 'Set on a Cancelled order that a merge moved into this order (FR-21.15).' }
@@ -1184,6 +1186,47 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { description: 'AUTH-0003: a missing route duty, or originType Rework without production.order.rework', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); the quantity breaks the minimumQty, maximumQty or multiple (PRODUCTION_ORDER_QUANTITY); the rework reference does not name an order of the same product with enough output (PRODUCTION_REWORK_REFERENCE_INVALID); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/sales-line-orders:
+    post:
+      operationId: createSalesLineProductionOrder
+      summary: Create the production order of one configured sales order line
+      description: |
+        originType is SalesOrderLine, originId the sales order line and configurationId the saved
+        configuration (required). BOM and route are optional: they are resolved from the
+        configuration in wave 9. Idempotent per line: a repeat for the same line, product and
+        configuration returns the stored order (200, Idempotent-Replayed); another product or
+        configuration for the line, or a line already built in another legal entity, is 409
+        PRODUCTION_ORIGIN_CONFLICT. Called by the sales service with a service token.
+      x-passage-duty: production.order.create-from-sales
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrder' }
+      responses:
+        '201':
+          description: Created; emits dev.passage.production.order.created.v1 with configurationId.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '200':
+          description: The order already built for this line.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { description: 'Validation failed or Idempotency-Key missing (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { description: 'PRODUCTION_ORIGIN_CONFLICT', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'key reused with another body (idempotency_key_reuse) or an explosion rule failed', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders:bulk-status:
     post:
       operationId: bulkProductionOrderStatus

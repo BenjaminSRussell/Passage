@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -28,6 +29,7 @@ const (
 	CodeOrderNotFound    = "PRODUCTION_ORDER_NOT_FOUND"
 	CodeVersionConflict  = "conflict_version"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
+	CodeOriginConflict   = "PRODUCTION_ORIGIN_CONFLICT"
 	eventSource          = "production"
 	aggregateType        = "production_order"
 )
@@ -50,6 +52,8 @@ type Order struct {
 	DeliveryDate  *string         `json:"deliveryDate,omitempty"`
 	OriginType    string          `json:"originType"`
 	OriginID      *string         `json:"originId,omitempty"`
+	// ConfigurationID is the saved configuration of a SalesOrderLine order.
+	ConfigurationID *string `json:"configurationId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
 	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
 	// SplitFromOrderID is the order a split took this order's quantity from;
@@ -126,16 +130,17 @@ type StatusLogEntry struct {
 // NewOrder is a validated order to create, with its exploded snapshot.
 // RequestHash identifies the request body for Idempotency-Key replays.
 type NewOrder struct {
-	LegalEntityID string
-	ProductID     string
-	SiteID        string
-	WarehouseID   string
-	ItemGroup     string
-	Currency      string
-	Quantity      decimal.Decimal
-	DeliveryDate  *string
-	OriginType    string
-	OriginID      *string
+	LegalEntityID   string
+	ProductID       string
+	SiteID          string
+	WarehouseID     string
+	ItemGroup       string
+	Currency        string
+	Quantity        decimal.Decimal
+	DeliveryDate    *string
+	OriginType      string
+	OriginID        *string
+	ConfigurationID *string
 	// ReworkReference names the original of a rework order (OriginType Rework), or is nil.
 	ReworkReference *domain.ReworkRef
 	Lines           []domain.OrderLine
@@ -274,6 +279,10 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 	var out Order
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if existing, found, err := existingSalesLineOrder(ctx, tx, p.TenantID, in); err != nil || found {
+			out = existing
+			return err
+		}
 		var replayID, replayHash string
 		err := tx.QueryRow(ctx, `select id::text, request_hash from production_order where tenant_id = $1 and idempotency_key = $2`,
 			p.TenantID, in.IdempotencyKey).Scan(&replayID, &replayHash)
@@ -309,7 +318,47 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		created = err == nil
 		return err
 	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "production_order_sales_line_origin" {
+		var raced Order
+		var found bool
+		rerr := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (e error) {
+			raced, found, e = existingSalesLineOrder(ctx, tx, p.TenantID, in)
+			return e
+		})
+		if rerr != nil {
+			return Order{}, false, rerr
+		}
+		if found {
+			return raced, false, nil
+		}
+		return Order{}, false, httpx.NewProblem(http.StatusConflict, CodeOriginConflict, "the sales order line already has an order that this legal entity cannot read")
+	}
 	return out, created, err
+}
+
+// existingSalesLineOrder makes the create idempotent per sales order line: the
+// order already built for the line is returned (created=false) when it was made for
+// the same product and configuration, and any other request for the line is refused.
+func existingSalesLineOrder(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (Order, bool, error) {
+	if in.OriginType != domain.OriginSalesLine || in.OriginID == nil {
+		return Order{}, false, nil
+	}
+	var id, product string
+	var configuration *string
+	err := tx.QueryRow(ctx, `select id::text, product_id::text, configuration_id::text from production_order
+		where tenant_id = $1 and origin_type = 'SalesOrderLine' and origin_id = $2`, tenantID, *in.OriginID).Scan(&id, &product, &configuration)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Order{}, false, nil
+	}
+	if err != nil {
+		return Order{}, false, err
+	}
+	if product != in.ProductID || configuration == nil || in.ConfigurationID == nil || *configuration != *in.ConfigurationID {
+		return Order{}, false, httpx.NewProblem(http.StatusConflict, CodeOriginConflict, "the order of this sales order line was made for another product or configuration")
+	}
+	order, err := loadOrder(ctx, tx, tenantID, id)
+	return order, true, err
 }
 
 // estimateOnCreate applies `:estimate` to a just-created order inside its create
@@ -362,10 +411,10 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 	id := ids.New()
 	number := fmt.Sprintf("PO-%06d", seq)
 	if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
-		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
+		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id, configuration_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		tenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID); err != nil {
+		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID, in.ConfigurationID); err != nil {
 		return "", err
 	}
 	if err := insertLines(ctx, tx, tenantID, id, in.Lines); err != nil {
@@ -379,7 +428,7 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 	}
 	data := prodevents.OrderCreatedData{
 		OrderID: id, OrderNumber: number, ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
-		DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID,
+		DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID, ConfigurationID: in.ConfigurationID,
 	}
 	if ref := in.ReworkReference; ref != nil {
 		data.ReworkReference = &prodevents.ReworkReference{Type: string(ref.Type), ID: ref.ID}
@@ -897,10 +946,11 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	var refType, refID *string
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
-		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified
+		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified,
+		configuration_id::text
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

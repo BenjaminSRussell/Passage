@@ -66,6 +66,11 @@ type Line struct {
 	ConfirmedShipDate *string         `json:"confirmedShipDate,omitempty"`
 	LineStatus        string          `json:"lineStatus"`
 
+	// ConfigurationID is the saved configuration the line is sold to; ProductionOrderID
+	// the production order planned for it (absent until :plan-production ran).
+	ConfigurationID   *string `json:"configurationId,omitempty"`
+	ProductionOrderID *string `json:"productionOrderId,omitempty"`
+
 	// SupplementaryOf is the id of the parent line a MANDATORY supplementary
 	// line was added for at commit, ParentLineNo that line's number and
 	// SupplementaryRuleID the rule that added it (FR-27.14, BR-27.14). All
@@ -272,6 +277,7 @@ type Store interface {
 	GetChangeRequest(ctx context.Context, id string) (OrderChangeRequest, error)
 	ApproveChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (ChangeDecision, error)
 	RejectChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
+	RecordLineProduction(ctx context.Context, in LineProduction) error
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error
@@ -378,10 +384,10 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	for _, l := range in.Lines {
 		lineIDs[l.LineNo] = ids.New()
 		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
-				unit_price, disc_pct, line_net, requested_ship_date, line_status)
-			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
+				unit_price, disc_pct, line_net, requested_ship_date, line_status, configuration_id)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN', $14)`,
 			tenantID, lineIDs[l.LineNo], id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
-			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
+			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate, l.ConfigurationID); err != nil {
 			return Order{}, err
 		}
 	}
@@ -482,8 +488,10 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	}
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
-			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text
-		from sales_order_line where tenant_id = $1 and order_id = $2 order by line_no`, tenantID, id)
+			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text,
+			configuration_id::text,
+			(select p.production_order_id::text from order_line_production p where p.tenant_id = l.tenant_id and p.line_id = l.id)
+		from sales_order_line l where l.tenant_id = $1 and l.order_id = $2 order by l.line_no`, tenantID, id)
 	if err != nil {
 		return Order{}, err
 	}
@@ -493,7 +501,7 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		var l Line
 		var qty, price, disc, net, base, perBase string
 		if err := lineRows.Scan(&l.ID, &l.LineNo, &l.ProductID, &qty, &l.Unit, &l.SiteID, &l.WarehouseID, &price, &disc, &net,
-			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase); err != nil {
+			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase, &l.ConfigurationID, &l.ProductionOrderID); err != nil {
 			return Order{}, err
 		}
 		l.Quantity, l.UnitPrice = decimal.RequireFromString(qty), decimal.RequireFromString(price)
@@ -670,7 +678,7 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 			continue
 		}
 		lines = append(lines, salesevents.ConfirmedLine{LineID: l.ID, ProductID: l.ProductID, Quantity: l.Quantity.String(),
-			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate})
+			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID})
 	}
 	err = enqueue(ctx, tx, "order", o.ID, salesevents.OrderConfirmed, tenantID, salesevents.OrderConfirmedData{
 		OrderID: o.ID, CustomerID: o.CustomerID, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version})

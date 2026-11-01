@@ -83,6 +83,10 @@ type API struct {
 	changed  atomic.Int64
 	canceled atomic.Int64
 	failed   atomic.Int64
+	planned  atomic.Int64
+
+	configs    ConfigurationChecker
+	production LinePlanner
 }
 
 // New returns the API over s.
@@ -114,6 +118,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:confirm", a.confirmOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Patch(orders+"/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(dutyConfirm)).Post(orders+"/{id}:cancel", a.cancelOrder)
+	r.With(authz.RequireDuty(dutyPlanProduction)).Post(orders+"/{id}:plan-production", a.planProduction)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
 	r.With(authz.RequireDuty(dutyWrite)).Post(orders+"/{id}/lines/{lineNo}:promise", a.promiseLine)
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/schedule-lines", a.listScheduleLines)
@@ -186,6 +191,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP sales_atp_checks_total Stateless ATP promise checks.\n# TYPE sales_atp_checks_total counter\nsales_atp_checks_total %d\n", a.atp.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_changed_total Order changes that produced a new version.\n# TYPE sales_orders_changed_total counter\nsales_orders_changed_total %d\n", a.changed.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_cancelled_total Orders cancelled.\n# TYPE sales_orders_cancelled_total counter\nsales_orders_cancelled_total %d\n", a.canceled.Load())
+		fmt.Fprintf(w, "# HELP sales_production_orders_requested_total Production orders newly created for configured order lines.\n# TYPE sales_production_orders_requested_total counter\nsales_production_orders_requested_total %d\n", a.planned.Load())
 		fmt.Fprintf(w, "# HELP sales_request_failures_total Requests that failed in the store.\n# TYPE sales_request_failures_total counter\nsales_request_failures_total %d\n", a.failed.Load())
 	})
 }
