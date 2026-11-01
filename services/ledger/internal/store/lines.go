@@ -50,6 +50,7 @@ type JournalLine struct {
 	Dimensions      map[string]string `json:"dimensions,omitempty"`
 	DebitCredit     string            `json:"debitCredit"`
 	Amount          string            `json:"amount"`
+	AmountAcct      string            `json:"amountAcct"`
 	Currency        string            `json:"currency"`
 	NegativePosting bool              `json:"negativePosting"`
 	Text            string            `json:"text,omitempty"`
@@ -119,11 +120,12 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 
 	out := LinePage{Items: []JournalLine{}}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := loadLedger(ctx, tx, p.TenantID, f.LedgerID, false); err != nil {
+		ledger, err := loadLedger(ctx, tx, p.TenantID, f.LedgerID, false)
+		if err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `select l.id::text, e.id::text, e.voucher, e.posting_sequence, e.posting_date::text, l.line_number,
-				m.account_number, d.display_name, d.dimensions, l.debit_credit::text, l.amount_txn::text, l.currency_txn::text,
+				m.account_number, d.display_name, d.dimensions, l.debit_credit::text, l.amount_txn::text, l.amount_acct::text, l.currency_txn::text,
 				l.negative_posting, coalesce(l.line_text, ''), coalesce(e.description, ''), e.source_system, e.source_type, e.source_id,
 				coalesce(e.source_uri, ''), coalesce(l.source_line_ref, ''), coalesce(e.reversal_of_entry_id::text, ''), e.trace_id
 			from journal_entry e
@@ -140,12 +142,13 @@ func (s *Postgres) ListLines(ctx context.Context, f LineFilter) (LinePage, error
 		for rows.Next() {
 			var j JournalLine
 			if err := rows.Scan(&j.ID, &j.EntryID, &j.Voucher, &j.PostingSequence, &j.PostingDate, &j.LineNumber,
-				&j.Account, &j.DisplayName, &j.Dimensions, &j.DebitCredit, &j.Amount, &j.Currency,
+				&j.Account, &j.DisplayName, &j.Dimensions, &j.DebitCredit, &j.Amount, &j.AmountAcct, &j.Currency,
 				&j.NegativePosting, &j.Text, &j.Description, &j.SourceSystem, &j.SourceType, &j.SourceID,
 				&j.SourceURI, &j.SourceLineRef, &j.ReversalOfEntry, &j.TraceID); err != nil {
 				return err
 			}
 			j.Amount = fmtMoney(j.Amount, j.Currency)
+			j.AmountAcct = fmtMoney(j.AmountAcct, ledger.Currency)
 			out.Items = append(out.Items, j)
 		}
 		return rows.Err()

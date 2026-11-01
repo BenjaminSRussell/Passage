@@ -85,6 +85,7 @@ var (
 // API serves the ledger routes over a store.Store.
 type API struct {
 	store    store.Store
+	periods  store.PeriodGate
 	now      func() time.Time
 	posted   atomic.Int64
 	replayed atomic.Int64
@@ -95,9 +96,24 @@ type API struct {
 // New returns an API over s.
 func New(s store.Store) *API { return &API{store: s, now: time.Now} }
 
+func (a *API) WithPeriodGate(g store.PeriodGate) *API {
+	a.periods = g
+	return a
+}
+
+func (a *API) periodGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.periods != nil {
+			r = r.WithContext(store.WithPeriodGate(r.Context(), a.periods))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
 	r.Route("/v1/ledger", func(r chi.Router) {
+		r.Use(a.periodGate)
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
 		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)

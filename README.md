@@ -56,7 +56,7 @@ docker exec passage-pg createdb -U postgres ledger
 
 cd services/ledger
 DATABASE_URL='postgres://postgres:passage@localhost:5432/ledger?sslmode=disable' \
-MIGRATE_ON_START=true go run ./cmd/ledger
+MIGRATE_ON_START=true LEDGER_PERIOD_CHECK=disabled go run ./cmd/ledger
 # API on :8080, health/admin on :9090
 ```
 
