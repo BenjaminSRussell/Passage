@@ -86,7 +86,8 @@ type Store interface {
 
 // Postgres implements Store.
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	holds HoldPort
 }
 
 // New returns a Postgres store over pool.
@@ -646,6 +647,11 @@ func (s *Postgres) RecordResults(ctx context.Context, orderID string, expectedVe
 				return err
 			}
 			items = append(items, qevents.ResultItem{TestID: r.TestID, SampleNo: r.SampleNo, RetestNo: r.RetestNo, Passed: r.Passed})
+			if !r.Passed {
+				if err := s.queueHold(ctx, tx, orderHoldLink(o)); err != nil {
+					return err
+				}
+			}
 		}
 		if err := enqueue(ctx, tx, "order", orderID, qevents.ResultRecorded, p.TenantID, qevents.ResultRecordedData{QualityOrderID: orderID, Results: items}); err != nil {
 			return err
@@ -653,6 +659,9 @@ func (s *Postgres) RecordResults(ctx context.Context, orderID string, expectedVe
 		out, applied = o, true
 		return nil
 	})
+	if applied {
+		s.FlushHolds(ctx)
+	}
 	return out, applied, err
 }
 
@@ -795,9 +804,15 @@ func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expect
 		}); err != nil {
 			return err
 		}
+		if err := s.holdForDecision(ctx, tx, o, d); err != nil {
+			return err
+		}
 		order, stored = o, d
 		return nil
 	})
+	if err == nil && stored.ID != "" {
+		s.FlushHolds(ctx)
+	}
 	return order, stored, err
 }
 

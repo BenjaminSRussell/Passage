@@ -51,28 +51,35 @@ func projectionKey(legalEntity, product string, hash []byte) string {
 
 // rebuildSource reads, in one statement and therefore one snapshot, the stored
 // projection rows ('O') and what the ledger implies for them: transaction sums
-// per status ('T') and active reservation sums ('R', which move the
-// reserved_physical bucket without a transaction). legal entity, product and
+// per status ('T') and active reservation and hold sums ('R' and 'H', which move the
+// reserved_physical and held_physical buckets without a transaction). legal entity, product and
 // hash narrow it to one row when set (repair under the row lock).
 const rebuildSource = `
 select 'O', o.legal_entity_id::text, o.product_id::text, o.dimension_set_hash, '', coalesce(o.currency::text, ''),
   o.posted_qty::text, o.posted_value::text, o.received::text, o.registered::text, o.arrived::text, o.ordered::text,
-  o.deducted::text, o.picked::text, o.reserved_physical::text, o.reserved_ordered::text, o.on_order::text
+  o.deducted::text, o.picked::text, o.reserved_physical::text, o.held_physical::text, o.reserved_ordered::text, o.on_order::text
 from on_hand o
 where o.tenant_id = $1 and ($2 = '' or (o.legal_entity_id::text = $2 and o.product_id::text = $3 and o.dimension_set_hash = $4))
 union all
 select 'T', t.legal_entity_id::text, t.product_id::text, t.dimension_set_hash, coalesce(t.issue_status, t.receipt_status), max(t.currency::text),
-  sum(t.qty)::text, sum(coalesce(t.cost_amount_posted, 0))::text, '0', '0', '0', '0', '0', '0', '0', '0', '0'
+  sum(t.qty)::text, sum(coalesce(t.cost_amount_posted, 0))::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
 from inventory_transaction t
 where t.tenant_id = $1 and ($2 = '' or (t.legal_entity_id::text = $2 and t.product_id::text = $3 and t.dimension_set_hash = $4))
 group by t.legal_entity_id, t.product_id, t.dimension_set_hash, coalesce(t.issue_status, t.receipt_status)
 union all
 select 'R', r.legal_entity_id::text, r.product_id::text, r.dimension_set_hash, '', '',
-  sum(r.qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+  sum(r.qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
 from inventory_reservation r
 where r.tenant_id = $1 and r.status = 'ACTIVE'
   and ($2 = '' or (r.legal_entity_id::text = $2 and r.product_id::text = $3 and r.dimension_set_hash = $4))
-group by r.legal_entity_id, r.product_id, r.dimension_set_hash`
+group by r.legal_entity_id, r.product_id, r.dimension_set_hash
+union all
+select 'H', h.legal_entity_id::text, h.product_id::text, h.dimension_set_hash, '', '',
+  sum(h.qty - h.released_qty)::text, '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+from inventory_hold h
+where h.tenant_id = $1 and h.state = 'ACTIVE'
+  and ($2 = '' or (h.legal_entity_id::text = $2 and h.product_id::text = $3 and h.dimension_set_hash = $4))
+group by h.legal_entity_id, h.product_id, h.dimension_set_hash`
 
 // readProjection returns the stored and the rebuilt projection, keyed by
 // projectionKey. A transaction status sum is applied through OnHand.Post, the
@@ -87,7 +94,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, tenantID, legalEntity, produ
 	for rows.Next() {
 		var kind, le, prod, status, currency string
 		var h []byte
-		var b [11]string
+		var b [12]string
 		dest := []any{&kind, &le, &prod, &h, &status, &currency}
 		for i := range b {
 			dest = append(dest, &b[i])
@@ -115,6 +122,8 @@ func readProjection(ctx context.Context, tx pgx.Tx, tenantID, legalEntity, produ
 			if p.currency == "" {
 				p.currency = currency
 			}
+		case "H":
+			p.oh.HeldPhysical = p.oh.HeldPhysical.Add(decimal.RequireFromString(b[0]))
 		default: // "R"
 			p.oh.ReservedPhysical = p.oh.ReservedPhysical.Add(decimal.RequireFromString(b[0]))
 		}
@@ -216,10 +225,10 @@ func repairRow(ctx context.Context, tx pgx.Tx, tenantID string, p *projected) er
 		}
 	}
 	_, err = tx.Exec(ctx, `update on_hand set posted_qty = $5, posted_value = $6, received = $7, registered = $8, arrived = $9, ordered = $10,
-		deducted = $11, picked = $12, reserved_physical = $13, reserved_ordered = $14, on_order = $15, currency = coalesce(currency, $16), updated_at = now()
+		deducted = $11, picked = $12, reserved_physical = $13, held_physical = $14, reserved_ordered = $15, on_order = $16, currency = coalesce(currency, $17), updated_at = now()
 		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and dimension_set_hash = $4`,
 		tenantID, p.legalEntity, p.product, p.hash, o.PostedQty.String(), o.PostedValue.String(), o.Received.String(), o.Registered.String(),
-		o.Arrived.String(), o.Ordered.String(), o.Deducted.String(), o.Picked.String(), o.ReservedPhysical.String(),
+		o.Arrived.String(), o.Ordered.String(), o.Deducted.String(), o.Picked.String(), o.ReservedPhysical.String(), o.HeldPhysical.String(),
 		o.ReservedOrdered.String(), o.OnOrder.String(), currency)
 	return err
 }

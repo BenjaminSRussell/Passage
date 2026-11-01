@@ -75,6 +75,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(onHandPath, a.onHand)
 	a.registerReservations(r)
 	a.registerBlocking(r)
+	a.registerHolds(r)
 	a.registerCount(r)
 	a.registerTransfers(r)
 	a.registerReports(r)
@@ -177,6 +178,7 @@ type onHandItem struct {
 	AvailOrdered     *string           `json:"availOrdered,omitempty"`
 	PostedValue      string            `json:"postedValue"`
 	ReservedPhysical *string           `json:"reservedPhysical,omitempty"`
+	HeldPhysical     *string           `json:"heldPhysical,omitempty"`
 	Blocked          string            `json:"blocked"`
 	Currency         string            `json:"currency"`
 	Negative         bool              `json:"negative"`
@@ -476,7 +478,8 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative}
 		if res.AsOf == "" {
 			avail, ordered, reserved := row.AvailPhysical.String(), row.AvailOrdered.String(), row.ReservedPhysical.String()
-			item.AvailPhysical, item.AvailOrdered, item.ReservedPhysical = &avail, &ordered, &reserved
+			held := row.HeldPhysical.String()
+			item.AvailPhysical, item.AvailOrdered, item.ReservedPhysical, item.HeldPhysical = &avail, &ordered, &reserved, &held
 		}
 		items = append(items, item)
 	}

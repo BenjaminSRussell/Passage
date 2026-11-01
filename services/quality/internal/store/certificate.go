@@ -84,6 +84,9 @@ func (s *Postgres) RecordCertificate(ctx context.Context, rec domain.CertRecord,
 				return err
 			}
 			rec.NonconformanceID = saved.ID
+			if err := s.holdForNCR(ctx, tx, saved); err != nil {
+				return err
+			}
 		}
 		c, err := scanCert(tx.QueryRow(ctx, `insert into quality_certificate (tenant_id, id, quality_order_id, cert_type, document_ref,
 			certificate_values, in_spec, deviations, waiver, reason, nonconformance_id, recorded_by, recorded_at, idempotency_key)
@@ -99,6 +102,9 @@ func (s *Postgres) RecordCertificate(ctx context.Context, rec domain.CertRecord,
 		out, inserted = c, true
 		return nil
 	})
+	if inserted {
+		s.FlushHolds(ctx)
+	}
 	return out, inserted, err
 }
 

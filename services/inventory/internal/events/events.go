@@ -11,11 +11,13 @@ const (
 	ReservationReleased = "dev.passage.inventory.reservation.released.v1"
 	BlockingCreated     = "dev.passage.inventory.blocking.created.v1"
 	BlockingReleased    = "dev.passage.inventory.blocking.released.v1"
+	HoldPlaced          = "dev.passage.inventory.hold.placed.v1"
+	HoldReleased        = "dev.passage.inventory.hold.released.v1"
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased,
+	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased, HoldPlaced, HoldReleased,
 		TransferShipped, TransferReceived, OwnershipChanged, ReconciliationDiff, CountSheetChanged, JournalNameCreated, JournalNameUpdated}
 }
 
@@ -30,6 +32,7 @@ func All() []string {
 const (
 	BucketPosted           = "POSTED"
 	BucketReservedPhysical = "RESERVED_PHYSICAL"
+	BucketHeldPhysical     = "HELD_PHYSICAL"
 	BucketReceived         = "RECEIVED"
 	BucketDeducted         = "DEDUCTED"
 )
@@ -129,4 +132,19 @@ type BlockingData struct {
 	Reason        string            `json:"reason"`
 	State         string            `json:"state"`
 	Disposition   *string           `json:"disposition"`
+}
+
+// HoldData is the payload of both hold events. Qty is the quantity placed,
+// ReleasedQty the cumulative quantity released; held stock is their difference.
+type HoldData struct {
+	HoldID        string            `json:"holdId"`
+	LegalEntityID string            `json:"legalEntityId"`
+	ProductID     string            `json:"productId"`
+	DimensionSet  map[string]string `json:"dimensionSet"`
+	Qty           string            `json:"qty"`
+	ReleasedQty   string            `json:"releasedQty"`
+	Reason        string            `json:"reason"`
+	SourceType    string            `json:"sourceType"`
+	SourceRef     string            `json:"sourceRef"`
+	State         string            `json:"state"`
 }

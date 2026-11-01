@@ -146,6 +146,19 @@ shows the tiles with links to the pages that clear them, the last reconciliation
 note when the attention tiles are all zero, and the loading and error-with-retry states. The overview's
 orders-by-status counts (FR-16.15) are now served by this endpoint.
 
+Slice 15 adds holds (wave 33 AC2; the base for the wave 24 catch-weight and wave 30 RMA holds): `POST /v1/inventory/holds`
+places a hold with a reason (QUALITY, DAMAGE, RECALL, LEGAL, OTHER), a source (`sourceType` code, `sourceRef`) and a
+quantity or the whole lot (`wholeLot`, the batch named, one hold per row of the lot); held quantity stays in physical stock
+and is left out of `availPhysical`, `availOrdered`, every issue check, reservations and FEFO (`on_hand.held_physical`, migration
+0015, `inventory_hold` with RESTRICTIVE legal-entity RLS). `allowPartial` holds what is available and answers the shortfall.
+`POST /holds/{id}:release` (If-Match, optional quantity) and `POST /holds:release-source` (states the level to keep, so a retry
+releases nothing more) end holds; `GET /holds` is the inquiry. `hold.placed` / `hold.released` and `onhand.changed`
+(`HELD_PHYSICAL`) go through the outbox; the rebuild-and-compare counts active holds. The duty `inventory.hold.write` is for
+people; the service-only `inventory.hold.apply` (granted to `quality`) reaches place and release-source only. The property
+test `TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative` proves available + held + reserved = on-hand and no negative
+availability under random place, whole-lot, release, release-by-source and issue sequences. Not built: a hold on a whole lot
+does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables

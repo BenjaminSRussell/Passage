@@ -24,6 +24,7 @@ type OnHand struct {
 	Deducted         decimal.Decimal
 	Picked           decimal.Decimal
 	ReservedPhysical decimal.Decimal
+	HeldPhysical     decimal.Decimal
 	ReservedOrdered  decimal.Decimal
 	OnOrder          decimal.Decimal
 }
@@ -33,9 +34,9 @@ func (o OnHand) PhysicalInvent() decimal.Decimal {
 	return o.PostedQty.Add(o.Received).Add(o.Registered).Sub(o.Deducted).Sub(o.Picked)
 }
 
-// AvailPhysical is physical invent minus physically reserved quantity.
+// AvailPhysical is physical invent minus physically reserved and held quantity.
 func (o OnHand) AvailPhysical() decimal.Decimal {
-	return o.PhysicalInvent().Sub(o.ReservedPhysical)
+	return o.PhysicalInvent().Sub(o.ReservedPhysical).Sub(o.HeldPhysical)
 }
 
 // AvailOrdered is avail physical + ordered + arrived - on order - reserved ordered.
@@ -152,6 +153,7 @@ func Diff(stored, rebuilt OnHand) []string {
 		{"deducted", stored.Deducted, rebuilt.Deducted},
 		{"picked", stored.Picked, rebuilt.Picked},
 		{"reserved_physical", stored.ReservedPhysical, rebuilt.ReservedPhysical},
+		{"held_physical", stored.HeldPhysical, rebuilt.HeldPhysical},
 		{"reserved_ordered", stored.ReservedOrdered, rebuilt.ReservedOrdered},
 		{"on_order", stored.OnOrder, rebuilt.OnOrder},
 	}

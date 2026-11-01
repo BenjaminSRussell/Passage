@@ -145,9 +145,15 @@ func (s *Postgres) CreateNonconformance(ctx context.Context, in domain.Nonconfor
 		if err != nil {
 			return err
 		}
+		if err := s.holdForNCR(ctx, tx, n); err != nil {
+			return err
+		}
 		out, inserted = n, true
 		return nil
 	})
+	if inserted {
+		s.FlushHolds(ctx)
+	}
 	return out, inserted, err
 }
 
@@ -247,9 +253,17 @@ func (s *Postgres) UpdateNonconformance(ctx context.Context, id string, expected
 				}
 			}
 		}
+		if updated.Status != cur.Status && (updated.Status == domain.NCRRefused || updated.Status == domain.NCRClosed) {
+			if err := s.queueHold(ctx, tx, ncrReleaseLink(updated, updated.Status)); err != nil {
+				return err
+			}
+		}
 		out, applied = updated, true
 		return nil
 	})
+	if applied {
+		s.FlushHolds(ctx)
+	}
 	return out, applied, err
 }
 

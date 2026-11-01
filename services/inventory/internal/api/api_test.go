@@ -109,6 +109,8 @@ type fakeStore struct {
 	reconIn     store.ReconcileInput
 	reconFilter store.ReconciliationFilter
 	reconRuns   []domain.Reconciliation
+
+	hold holdFake
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -639,8 +641,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 72 {
-		t.Fatalf("router walk yielded %d operations, want 72: %v", len(served), served)
+	if len(served) != 76 {
+		t.Fatalf("router walk yielded %d operations, want 76: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

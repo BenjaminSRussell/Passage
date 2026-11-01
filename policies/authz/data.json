@@ -182,6 +182,7 @@
       {"resource": "/v1/inventory/transactions/*", "methods": ["GET"]},
       {"resource": "/v1/inventory/reservations", "methods": ["GET"]},
       {"resource": "/v1/inventory/blockings", "methods": ["GET"]},
+      {"resource": "/v1/inventory/holds", "methods": ["GET"]},
       {"resource": "/v1/inventory/status-changes", "methods": ["GET"]},
       {"resource": "/v1/inventory/count-plans", "methods": ["GET"]},
       {"resource": "/v1/inventory/count-plans/*/tags", "methods": ["GET"]},
@@ -228,6 +229,15 @@
     "inventory.blocking.write": {"permissions": [
       {"resource": "/v1/inventory/blockings", "methods": ["POST"]},
       {"resource": "/v1/inventory/blockings/*:release", "methods": ["POST"]}
+    ]},
+    "inventory.hold.write": {"permissions": [
+      {"resource": "/v1/inventory/holds", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds/*:release", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
+    ]},
+    "inventory.hold.apply": {"service_only": true, "permissions": [
+      {"resource": "/v1/inventory/holds", "methods": ["POST"]},
+      {"resource": "/v1/inventory/holds:release-source", "methods": ["POST"]}
     ]},
     "inventory.transaction.apply": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/transactions:apply", "methods": ["POST"]}]},
     "inventory.transaction.step": {"permissions": [
@@ -2331,6 +2341,9 @@
     },
     "party": {
       "numbering": ["numbering.sequence.allocate"]
+    },
+    "quality": {
+      "inventory": ["inventory.hold.apply"]
     }
   }
 }

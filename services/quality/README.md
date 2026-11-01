@@ -148,6 +148,12 @@ PASSAGE_ENV=dev SERVICE_NAME=quality DATABASE_URL=postgres://... \
 Config is read from the environment; `DATABASE_URL` is required. Health: `/healthz`,
 `/readyz`; metrics on the admin port (`/metrics`).
 
+`INVENTORY_URL` (optional) is the base URL of `services/inventory`. With it, a failing result or a
+nonconformance holds the lot in inventory and the usage decision or a refused / closed nonconformance
+releases it, through a signed service token that holds only `inventory.hold.apply`; it needs
+`PASSAGE_SERVICE_NAME=quality` and `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`) and stops the service at
+start when the key is missing. Without it quality does not touch inventory.
+
 ## Test
 
 ```

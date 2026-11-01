@@ -9,9 +9,13 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/quality/internal/api"
+	"github.com/BenjaminSRussell/passage/services/quality/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/quality/internal/store"
 	"github.com/BenjaminSRussell/passage/services/quality/migrations"
 )
@@ -55,7 +59,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	st, err := newStore(pool, getenv)
+	if err != nil {
+		return err
+	}
+	a := api.New(st)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -67,6 +75,23 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func newStore(pool *pgxpool.Pool, getenv func(string) string) (*store.Postgres, error) {
+	st := store.New(pool)
+	url := getenv("INVENTORY_URL")
+	if url == "" {
+		slog.Warn("INVENTORY_URL is empty: failed inspections and nonconformances do not hold stock in inventory")
+		return st, nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return nil, fmt.Errorf("service signer: %w", err)
+	}
+	if signer == nil {
+		return nil, errors.New("INVENTORY_URL needs PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE: inventory accepts hold calls only with a signed service token")
+	}
+	return st.WithHolds(inventory.New(url, signer, nil)), nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {
