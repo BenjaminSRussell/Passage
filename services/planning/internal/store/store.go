@@ -59,7 +59,7 @@ type Store interface {
 	ListPlannedOrders(ctx context.Context, planCode string, f OrderFilter, limit int) ([]PlannedOrder, error)
 	GetPlannedOrder(ctx context.Context, id string) (PlannedOrder, error)
 	PegsOf(ctx context.Context, versionID, supplyRef string) ([]domain.PegLine, error)
-	ListMessages(ctx context.Context, planCode, action string, limit int) ([]Message, error)
+	ListMessages(ctx context.Context, planCode, action, sort string, limit int) ([]Message, error)
 	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
 	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
@@ -216,11 +216,35 @@ type Message struct {
 	SuggestedDate string `json:"suggestedDate"`
 	DelayDays     int    `json:"delayDays"`
 	Qty           string `json:"qty"`
+	// PlanningPriority and BufferZone are those of the planned order the message is about when that
+	// order replenishes a DDMRP buffer (FR-22.16); null otherwise.
+	PlanningPriority *string `json:"planningPriority"`
+	BufferZone       *string `json:"bufferZone"`
+}
+
+// SortPriority orders a read by planning priority (FR-22.16): the most urgent buffer first.
+const SortPriority = "priority"
+
+// priorityOrder is the leading ORDER BY key of planned-order and message reads (FR-22.16). Rows of
+// planned orders that carry a planning priority (they replenish a DDMRP buffer) sort first, lowest
+// priority (most urgent) first: with sort = SortPriority every such order, by default only the orders
+// of items whose site-scope item coverage at the version's site, in the plan's legal entity, is
+// priorityBased (a priority-based item is ordered by priority instead of date). Every other row has a
+// null key and keeps the read's default order after them. sortParam is the query placeholder of the
+// sort value; o is the planned order and v its plan version.
+func priorityOrder(sortParam string) string {
+	return `case when o.planning_priority is not null and (` + sortParam + `::text = 'priority' or exists (
+			select 1 from item_coverage c where c.tenant_id = o.tenant_id and c.item_id = o.item_id and c.site_id = v.site_id
+				and c.planning_scope = 'site' and c.priority_based
+				and (v.legal_entity_id is null or c.legal_entity_id = v.legal_entity_id)))
+		then o.planning_priority end asc nulls last`
 }
 
 // OrderFilter narrows planned-order reads.
 type OrderFilter struct {
 	Status, ItemID string
+	// Sort is "" (priority-based items by planning priority, then order number) or SortPriority.
+	Sort string
 	// Version selects a version by number (a simulation, FR-22.15); 0 reads the current one.
 	Version int
 }
@@ -613,7 +637,7 @@ func (s *Postgres) ListPlannedOrders(ctx context.Context, planCode string, f Ord
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and (case when $6::int = 0 then v.status = 'current' else v.number = $6 end)
 			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4)
-			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version)
+			order by `+priorityOrder("$7")+`, o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version, f.Sort)
 		if err != nil {
 			return err
 		}
@@ -672,22 +696,28 @@ func (s *Postgres) PegsOf(ctx context.Context, versionID, supplyRef string) ([]d
 }
 
 // ListMessages reads the current version's messages, optionally of one action.
-func (s *Postgres) ListMessages(ctx context.Context, planCode, action string, limit int) ([]Message, error) {
+//
+// Messages about buffer-replenishing orders come first, the lowest planning priority (net-flow position
+// over top of green) first: with sort = SortPriority all of them, by default those of priority-based
+// items (see priorityOrder); the rest follow in action, supply, demand order.
+func (s *Postgres) ListMessages(ctx context.Context, planCode, action, sort string, limit int) ([]Message, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := []Message{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select m.action, m.item_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'), m.delay_days, m.qty::text
+		rows, err := tx.Query(ctx, `select m.action, m.item_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'), m.delay_days, m.qty::text,
+				o.planning_priority::text, o.buffer_zone
 			from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
 			join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
+			left join planned_order o on o.tenant_id = m.tenant_id and o.plan_version_id = m.plan_version_id and o.number = m.supply_ref
 			where m.tenant_id = $1 and p.code = $2 and v.status = 'current' and ($3::text = '' or m.action = $3)
-			order by m.action, m.supply_ref, m.demand_ref limit $4`, p.TenantID, planCode, action, limit)
+			order by `+priorityOrder("$5")+`, m.action, m.supply_ref, m.demand_ref, m.id limit $4`, p.TenantID, planCode, action, limit, sort)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var m Message
-			if err := rows.Scan(&m.Action, &m.ItemID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty); err != nil {
+			if err := rows.Scan(&m.Action, &m.ItemID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.PlanningPriority, &m.BufferZone); err != nil {
 				return err
 			}
 			out = append(out, m)

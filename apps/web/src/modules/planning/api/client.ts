@@ -49,8 +49,14 @@ export const Message = z.object({
   suggestedDate: z.string().nullish(),
   delayDays: z.number().int(),
   qty: z.string(),
+  /** Of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16). */
+  planningPriority: z.string().nullish(),
+  bufferZone: BufferZone.nullish(),
 });
 export type Message = z.infer<typeof Message>;
+
+/** `priority` lists buffer-replenishing orders and their messages by planning priority, most urgent first (FR-22.16). */
+export type ListSort = "priority";
 
 /** Response of GET /planned-orders/{id}/pegging: the explain tree of one order. */
 export interface PegNode {
@@ -227,6 +233,7 @@ export interface OrderQuery {
   itemId?: string;
   /** A version number, e.g. a simulation; without it the current version is read. */
   version?: number;
+  sort?: ListSort;
   limit?: number;
 }
 
@@ -235,6 +242,7 @@ export async function listPlannedOrders(q: OrderQuery, init?: RequestInit): Prom
   if (q.status) params.set("status", q.status);
   if (q.itemId) params.set("itemId", q.itemId);
   if (q.version) params.set("version", String(q.version));
+  if (q.sort) params.set("sort", q.sort);
   if (q.limit) params.set("limit", String(q.limit));
   const body = await request(
     `/planned-orders?${params.toString()}`,
@@ -248,9 +256,11 @@ export async function listMessages(
   planCode: string,
   action?: z.infer<typeof MessageAction>,
   init?: RequestInit,
+  sort?: ListSort,
 ): Promise<Message[]> {
   const params = new URLSearchParams({ planCode });
   if (action) params.set("action", action);
+  if (sort) params.set("sort", sort);
   const body = await request(`/messages?${params.toString()}`, z.object({ items: z.array(Message) }), init);
   return body.items;
 }

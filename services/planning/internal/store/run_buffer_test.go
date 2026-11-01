@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -155,8 +156,104 @@ func TestRunPlan_StoresBufferPriorityAndRedZoneMessage(t *testing.T) {
 			t.Errorf("get buffer order = %+v, %v", got, err)
 		}
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", 10)
 	if err != nil || len(msgs) != 1 || msgs[0].SupplyRef != bufferOrder || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(80)) {
 		t.Fatalf("red-zone messages = %+v, %v", msgs, err)
+	}
+}
+
+// TestListPlannedOrdersAndMessages_SortByPriority: sort=priority lists the
+// orders and messages of buffers by planning priority, the lowest (the most
+// urgent) first, and the orders without a buffer after them in number order.
+// Without sort, only the buffer orders of an item whose site-scope item
+// coverage is priorityBased lead (FR-22.16: a priority-based item is ordered
+// by priority instead of date); every other order keeps number order.
+func TestListPlannedOrdersAndMessages_SortByPriority(t *testing.T) {
+	st, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read", "planning.setup.maintain")
+	plain, yellow, red1, red2 := ids.New(), ids.New(), ids.New(), ids.New()
+	site := ids.New()
+	group, _, err := st.CreateCoverageGroup(ctx, store.CoverageCreate{Spec: domain.DefaultCoverageGroup("REQ", domain.CoverageRequirement)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// red1 is priority-based at this site; red2 is priority-based at another
+	// site only, so its orders here keep number order by default.
+	for item, at := range map[string]string{red1: site, red2: ids.New(), yellow: site} {
+		cov := domain.DefaultItemCoverage(item, at, group.ID)
+		cov.DecouplingPoint = true
+		cov.PriorityBased = item != yellow
+		if _, _, err := st.CreateItemCoverage(ctx, store.ItemCoverageCreate{Spec: cov}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	buffers := []domain.RunBuffer{
+		{ItemID: yellow, DLTDays: decimal.NewFromInt(10), PlannedQty: decimal.NewFromInt(115), Priority: decimal.RequireFromString("0.5306"), Zone: domain.ZoneYellow},
+		{ItemID: red1, DLTDays: decimal.NewFromInt(10), PlannedQty: decimal.NewFromInt(80), Priority: decimal.RequireFromString("0.2449"), Zone: domain.ZoneRed},
+		{ItemID: red2, DLTDays: decimal.NewFromInt(10), PlannedQty: decimal.NewFromInt(60), Priority: decimal.RequireFromString("0.1000"), Zone: domain.ZoneRed},
+	}
+	raw := []domain.Item{{ID: plain, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2,
+		Demand: []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 5, Qty: decimal.NewFromInt(3), Priority: domain.PrioritySales}}}}
+	for _, b := range buffers {
+		raw = append(raw, domain.Item{ID: b.ItemID, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2})
+	}
+	res, err := domain.Run(0, domain.ApplyBuffers(raw, buffers))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = domain.AddBufferResults(res, buffers)
+	req := runRequest(res, "run-sort", "in-sort")
+	req.SiteID = site
+	if _, _, err := st.RunPlan(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	itemsOf := func(sort string) []string {
+		t.Helper()
+		orders, err := st.ListPlannedOrders(ctx, "MAIN", store.OrderFilter{Sort: sort}, 10)
+		if err != nil || len(orders) != 4 {
+			t.Fatalf("orders (sort %q) = %+v, %v", sort, orders, err)
+		}
+		out := []string{}
+		for _, o := range orders {
+			out = append(out, o.ItemID)
+		}
+		return out
+	}
+	if got, want := itemsOf(store.SortPriority), []string{red2, red1, yellow, plain}; !slices.Equal(got, want) {
+		t.Errorf("sort=priority items = %v, want %v", got, want)
+	}
+	byDefault, err := st.ListPlannedOrders(ctx, "MAIN", store.OrderFilter{}, 10)
+	if err != nil || len(byDefault) != 4 {
+		t.Fatalf("orders by default = %+v, %v", byDefault, err)
+	}
+	if byDefault[0].ItemID != red1 {
+		t.Errorf("default order leads with %s, want the priority-based buffer %s", byDefault[0].ItemID, red1)
+	}
+	for i := 2; i < len(byDefault); i++ {
+		if byDefault[i-1].Number > byDefault[i].Number {
+			t.Errorf("default order after the priority-based buffer is not by number: %s before %s", byDefault[i-1].Number, byDefault[i].Number)
+		}
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionRedZone, store.SortPriority, 10)
+	if err != nil || len(msgs) != 2 || msgs[0].ItemID != red2 || msgs[1].ItemID != red1 {
+		t.Fatalf("red-zone messages by priority = %+v, %v", msgs, err)
+	}
+	if msgs[0].PlanningPriority == nil || !decimal.RequireFromString(*msgs[0].PlanningPriority).Equal(decimal.RequireFromString("0.1")) || msgs[0].BufferZone == nil || *msgs[0].BufferZone != domain.ZoneRed {
+		t.Errorf("message does not carry the buffer's priority and zone: %+v", msgs[0])
+	}
+	// By default the priority-based red1 leads although red2 is more urgent.
+	msgs, err = st.ListMessages(ctx, "MAIN", domain.ActionRedZone, "", 10)
+	if err != nil || len(msgs) != 2 || msgs[0].ItemID != red1 || msgs[1].ItemID != red2 {
+		t.Fatalf("red-zone messages by default = %+v, %v", msgs, err)
+	}
+	// A message about supply that is not a planned order of the version carries no priority.
+	all, err := st.ListMessages(ctx, "MAIN", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range all {
+		if (m.PlanningPriority != nil) != (m.ItemID == red1 || m.ItemID == red2 || m.ItemID == yellow) {
+			t.Errorf("message %+v: priority set only on messages about buffer orders", m)
+		}
 	}
 }

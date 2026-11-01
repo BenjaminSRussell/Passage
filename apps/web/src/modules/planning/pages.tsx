@@ -250,11 +250,12 @@ export function PlannedOrdersPage() {
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   // `?version=N` reads a version by number: a simulation, whose orders cannot be firmed (FR-22.15).
+  const sort = params.get("sort") === "priority" ? ("priority" as const) : undefined;
   const versionParam = Number(params.get("version"));
   const version = Number.isInteger(versionParam) && versionParam > 0 ? versionParam : undefined;
   const state = useLoad(
-    (signal) => listPlannedOrders({ planCode: plan, status, version, limit: PAGE_LIMIT }, { signal }),
-    [plan, status, version, reload],
+    (signal) => listPlannedOrders({ planCode: plan, status, version, sort, limit: PAGE_LIMIT }, { signal }),
+    [plan, status, version, sort, reload],
   );
   const open = (state.data ?? []).filter(isFirmable);
   // Only orders still listed and open stay selected when the list changes.
@@ -314,6 +315,12 @@ export function PlannedOrdersPage() {
     else next.delete("status");
     setParams(next);
   };
+  const setSort = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set("sort", value);
+    else next.delete("sort");
+    setParams(next);
+  };
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -335,6 +342,16 @@ export function PlannedOrdersPage() {
                     {sentence(s)}
                   </option>
                 ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+        <div className={styles.toolbarField}>
+          <FormField id="planning-sort" label="Sort by">
+            {(a11y) => (
+              <Select {...a11y} value={sort ?? ""} onChange={(e) => setSort(e.target.value)}>
+                <option value="">Priority-based items, then number</option>
+                <option value="priority">Planning priority</option>
               </Select>
             )}
           </FormField>
@@ -528,7 +545,8 @@ export function MessagesPage() {
   const [params, setParams] = useSearchParams();
   const raw = params.get("action") ?? "";
   const action = (MESSAGE_ACTIONS as readonly string[]).includes(raw) ? (raw as Message["action"]) : undefined;
-  const state = useLoad((signal) => listMessages(plan, action, { signal }), [plan, action]);
+  const sort = params.get("sort") === "priority" ? ("priority" as const) : undefined;
+  const state = useLoad((signal) => listMessages(plan, action, { signal }, sort), [plan, action, sort]);
   const columns: DataTableColumn<Message>[] = [
     { key: "action", header: "Action", render: (m) => <Badge tone={actionTone[m.action]}>{sentence(m.action)}</Badge> },
     { key: "itemId", header: "Item", mono: true },
@@ -537,11 +555,23 @@ export function MessagesPage() {
     { key: "suggestedDate", header: "Suggested date", render: (m) => m.suggestedDate || dash },
     { key: "delayDays", header: "Delay (days)", align: "end", render: (m) => (m.delayDays > 0 ? m.delayDays : dash) },
     { key: "qty", header: "Quantity", align: "end" },
+    {
+      key: "planningPriority",
+      header: "Priority",
+      align: "end",
+      render: (m) => (m.planningPriority ? `${priorityPercent(m.planningPriority)}${m.bufferZone ? ` ${zoneLabel[m.bufferZone]}` : ""}` : dash),
+    },
   ];
   const setAction = (value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set("action", value);
     else next.delete("action");
+    setParams(next);
+  };
+  const setSort = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set("sort", value);
+    else next.delete("sort");
     setParams(next);
   };
   return (
@@ -558,6 +588,16 @@ export function MessagesPage() {
                     {sentence(a)}
                   </option>
                 ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+        <div className={styles.toolbarField}>
+          <FormField id="planning-msg-sort" label="Sort by">
+            {(a11y) => (
+              <Select {...a11y} value={sort ?? ""} onChange={(e) => setSort(e.target.value)}>
+                <option value="">Priority-based items, then action</option>
+                <option value="priority">Planning priority</option>
               </Select>
             )}
           </FormField>

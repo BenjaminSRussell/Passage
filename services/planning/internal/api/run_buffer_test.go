@@ -94,3 +94,17 @@ func TestRun_WithoutBufferPlansByNetting(t *testing.T) {
 		t.Fatalf("order %+v; want 110", o)
 	}
 }
+
+// TestList_SortParameter: sort=priority is the only sort (FR-22.16); anything
+// else is a 400 naming the field, on planned orders and on messages.
+func TestList_SortParameter(t *testing.T) {
+	for _, path := range []string{"/v1/planning/planned-orders?planCode=MAIN", "/v1/planning/messages?planCode=MAIN"} {
+		if rec := do(t, &fakeStore{}, http.MethodGet, path+"&sort=priority", "", "planning.read", true, ""); rec.Code != http.StatusOK {
+			t.Errorf("%s sort=priority = %d %s", path, rec.Code, rec.Body)
+		}
+		rec := do(t, &fakeStore{}, http.MethodGet, path+"&sort=date", "", "planning.read", true, "")
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "sort") {
+			t.Errorf("%s sort=date = %d %s", path, rec.Code, rec.Body)
+		}
+	}
+}

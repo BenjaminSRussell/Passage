@@ -164,7 +164,7 @@ func (f *fakeStore) PegsOf(_ context.Context, _, supplyRef string) ([]domain.Peg
 	return nil, nil
 }
 
-func (f *fakeStore) ListMessages(context.Context, string, string, int) ([]store.Message, error) {
+func (f *fakeStore) ListMessages(context.Context, string, string, string, int) ([]store.Message, error) {
 	return []store.Message{}, nil
 }
 

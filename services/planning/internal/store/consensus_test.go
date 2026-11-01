@@ -163,7 +163,7 @@ func TestRunPlan_StoresIncrease(t *testing.T) {
 	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-1", "in-1")); err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionIncrease, 10)
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionIncrease, "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

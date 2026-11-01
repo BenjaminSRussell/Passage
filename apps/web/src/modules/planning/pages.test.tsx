@@ -200,6 +200,25 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
     expect(within(plain).queryByText(/%/)).not.toBeInTheDocument();
   });
 
+  it("sorts the orders by planning priority on request", async () => {
+    const fetchMock = stubApi(["/planned-orders", () => json({ items: [buffered, order] })]);
+    renderAt("/planning/planned-orders");
+    await findTable({ name: "Planned orders" });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("sort=priority"))).toBe(false);
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "priority" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("sort=priority"))).toBe(true));
+  });
+
+  it("shows the buffer priority and zone on a message and sorts messages by priority", async () => {
+    const red: Message = { action: "red-zone", itemId: buffered.itemId, supplyRef: "PLN-000007", demandRef: "ddmrp:red:item", suggestedDate: "2026-11-12", delayDays: 0, qty: "80", planningPriority: "0.2449", bufferZone: "red" };
+    const fetchMock = stubApi(["/messages", () => json({ items: [red] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("24.49% Red")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "priority" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("sort=priority"))).toBe(true));
+  });
+
   it("shows the buffer priority on the order page", async () => {
     stubApi(["/pegging", () => json({ ...pegging, orderId: buffered.id, number: buffered.number })], ["/planned-orders/", () => json(buffered)]);
     renderAt(`/planning/planned-orders/${buffered.id}`);

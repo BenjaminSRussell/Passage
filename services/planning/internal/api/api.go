@@ -657,8 +657,11 @@ func (a *API) listPlannedOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	code := q.Get("planCode")
-	f := store.OrderFilter{Status: q.Get("status"), ItemID: q.Get("itemId")}
+	f := store.OrderFilter{Status: q.Get("status"), ItemID: q.Get("itemId"), Sort: q.Get("sort")}
 	fields := map[string]string{}
+	if f.Sort != "" && f.Sort != store.SortPriority {
+		fields["sort"] = "must be priority"
+	}
 	if !planCodePattern.MatchString(code) {
 		fields["planCode"] = "is required"
 	}
@@ -788,7 +791,12 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	msgs, err := a.store.ListMessages(r.Context(), code, action, limit)
+	sort := q.Get("sort")
+	if sort != "" && sort != store.SortPriority {
+		validationFailed(w, r, map[string]string{"sort": "must be priority"})
+		return
+	}
+	msgs, err := a.store.ListMessages(r.Context(), code, action, sort, limit)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

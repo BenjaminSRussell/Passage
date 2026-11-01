@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 20)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 21)
 
-Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail; slice 20 adds the DDMRP buffer priority and zone as a Priority column on the planned orders list and on the planned-order detail, and the red-zone message action), all registered in `module.ts` and built from the
+Screens of slices 1 to 13 (slice 19 adds the quota arrangement link and source on the planned-order detail; slice 20 adds the DDMRP buffer priority and zone as a Priority column on the planned orders list and on the planned-order detail, and the red-zone message action; slice 21 adds a Sort by selector on the planned orders and messages screens, whose default puts the buffer orders of priority-based items first by planning priority and whose "Planning priority" option does so for every buffer order, and a Priority column on messages), all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles

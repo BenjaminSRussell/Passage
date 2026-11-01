@@ -164,6 +164,10 @@ paths:
           in: query
           description: Read this version number instead of the current one, e.g. a simulation version (FR-22.15)
           schema: {type: integer, minimum: 1}
+        - name: sort
+          in: query
+          description: 'priority: planned orders that replenish a DDMRP buffer first, lowest planning priority (net-flow position over top of green) first, then the rest in number order (FR-22.16). Without sort only the buffer orders of items whose site-scope item coverage is priorityBased lead by priority; the rest are in number order'
+          schema: {type: string, enum: [priority]}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -341,6 +345,10 @@ paths:
         - name: action
           in: query
           schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone]}
+        - name: sort
+          in: query
+          description: 'priority: messages about planned orders that replenish a DDMRP buffer first, lowest planning priority (net-flow position over top of green) first, then the rest in action, supply, demand order (FR-22.16). Without sort only the messages about buffer orders of items whose site-scope item coverage is priorityBased lead by priority; the rest are in action, supply, demand order'
+          schema: {type: string, enum: [priority]}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -1702,7 +1710,7 @@ components:
         decouplingPoint: {type: boolean, default: false, description: Strategic DDMRP buffer position (FR-22.16)}
         bufferProfileId: {type: [string, 'null'], format: uuid, description: A stored buffer profile of the tenant (422 PLAN-PROFILE-NOT-FOUND otherwise)}
         requiredShelfLifeDays: {type: integer, minimum: 0, maximum: 3650, default: 0, description: Remaining shelf life a demand needs (FR-22.20)}
-        priorityBased: {type: boolean, default: false, description: Plan by planning priority instead of date (FR-22.16)}
+        priorityBased: {type: boolean, default: false, description: 'The planned orders of the item''s DDMRP buffer, and the messages about them, lead the planned-order and message lists by planning priority (FR-22.16); buffer management itself comes from decouplingPoint'}
     ItemCoverage:
       type: object
       required: [id, version, itemId, siteId, warehouseId, coverageGroupId, coverageGroupCode, minQty, maxQty, safetyMarginReceiptDays,
@@ -2204,6 +2212,8 @@ components:
         suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order'}
         delayDays: {type: integer}
         qty: {type: string}
+        planningPriority: {type: string, nullable: true, description: 'Planning priority of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16); null otherwise'}
+        bufferZone: {type: string, nullable: true, enum: [red, yellow, green, null], description: Zone of that buffer}
     Problem:
       type: object
       required: [type, title, status, code]
