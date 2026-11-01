@@ -58,7 +58,7 @@ Slice 2:
 - Flushing principles on BOM lines: `start` lines are issued for their remaining quantity by a
   picking list that `:start` posts; `finish` lines are consumed in proportion to each report as
   finished (AC-21.4: the full quantity consumes exactly qty per × quantity × (1 + scrap%));
-  `manual` and `available-at-location` lines are picked. A route card on a Released order starts
+  `manual` and `available-at-location` lines are picked. A job card (`job-card`, slice 19) reports the same hours and quantities per setup or process job of a scheduled order and moves the job `planned`, `started`, `finished`. A route card or job card on a Released order starts
   it (`PRODUCTION_AUTOSTART_ON_FEEDBACK`); `finished` closes an operation to further feedback.
 - `:report-finished` posts a RAF journal; a RAF journal posted through `:post` moves a Started
   order to ReportedAsFinished the same way.
@@ -355,6 +355,9 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_JOURNAL_NOT_ALLOWED` | 409 | The journal type cannot post on the order's status |
 | `PRODUCTION_JOURNAL_ALREADY_POSTED` | 409 | Posting or deleting a posted journal |
 | `PRODUCTION_OPERATION_FINISHED` | 409 | Feedback on a finished operation |
+| `PRODUCTION_ORDER_NOT_SCHEDULED` | 409 | A job card on an order that has no jobs (not scheduled) |
+| `PRODUCTION_JOB_FINISHED` | 409 | A job card on a finished job |
+| `PRODUCTION_FEEDBACK_MODE_CONFLICT` | 409 | A route card on an operation that job cards report on, or a job card on one that route cards report on |
 | `PRODUCTION_OPERATION_STATE` | 409 | `:finish` or `:reopen` on an order that is not Started or ReportedAsFinished, or on a subcontracted operation |
 | `PRODUCTION_OPERATION_NOT_FOUND` | 404 | The operation number is not on the order's route |
 | `PRODUCTION_ORDER_QUANTITY` | 422 | The order quantity is below the item's minimum, above its maximum or not a multiple of its multiple (FR-21.1) |

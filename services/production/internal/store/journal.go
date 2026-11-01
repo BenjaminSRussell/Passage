@@ -20,12 +20,17 @@ import (
 
 // Stable error codes of journals and settlement.
 const (
-	CodeJournalNotFound     = "PRODUCTION_JOURNAL_NOT_FOUND"
-	CodeJournalNotAllowed   = "PRODUCTION_JOURNAL_NOT_ALLOWED"
-	CodeJournalPosted       = "PRODUCTION_JOURNAL_ALREADY_POSTED"
-	CodeJournalEmpty        = "PRODUCTION_JOURNAL_EMPTY"
-	CodeInvalidJournalLine  = "PRODUCTION_INVALID_JOURNAL_LINE"
-	CodeOperationFinished   = "PRODUCTION_OPERATION_FINISHED"
+	CodeJournalNotFound    = "PRODUCTION_JOURNAL_NOT_FOUND"
+	CodeJournalNotAllowed  = "PRODUCTION_JOURNAL_NOT_ALLOWED"
+	CodeJournalPosted      = "PRODUCTION_JOURNAL_ALREADY_POSTED"
+	CodeJournalEmpty       = "PRODUCTION_JOURNAL_EMPTY"
+	CodeInvalidJournalLine = "PRODUCTION_INVALID_JOURNAL_LINE"
+	CodeOperationFinished  = "PRODUCTION_OPERATION_FINISHED"
+	CodeNotScheduled       = "PRODUCTION_ORDER_NOT_SCHEDULED"
+	CodeJobFinished        = "PRODUCTION_JOB_FINISHED"
+	// CodeFeedbackMode refuses a route card on an operation that job cards report on, and a
+	// job card on one that route cards report on (FR-21.6: one feedback mode per operation).
+	CodeFeedbackMode        = "PRODUCTION_FEEDBACK_MODE_CONFLICT"
 	CodePostingBeforeOrder  = "PRODUCTION_POSTING_DATE_BEFORE_ORDER"
 	CodeUnpostedJournals    = "PRODUCTION_UNPOSTED_JOURNALS"
 	CodeEndBeforeLastPosted = "PRODUCTION_END_BEFORE_LAST_JOURNAL"
@@ -73,6 +78,8 @@ type JournalLine struct {
 	Kind       string  `json:"kind"`
 	LineNo     *string `json:"lineNo,omitempty"`
 	OperNumber *int    `json:"operNumber,omitempty"`
+	// JobType names the job of the operation a job card reports on (setup or process).
+	JobType *string `json:"jobType,omitempty"`
 	// CoProductLineNo names the order's co-product line of a coproduct receipt.
 	CoProductLineNo *string         `json:"coProductLineNo,omitempty"`
 	ItemID          *string         `json:"itemId,omitempty"`
@@ -95,6 +102,8 @@ type IssueInput struct {
 
 // HoursInput is an explicit route-card line for an operation (FR-21.6).
 type HoursInput struct {
+	// JobID names the job a job card reports on; a route card names the operation.
+	JobID      string
 	OperNumber int
 	Hours      decimal.Decimal
 	QtyGood    decimal.Decimal
@@ -219,7 +228,19 @@ func createJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead
 	if err != nil {
 		return Journal{}, err
 	}
-	planned, err := planJournal(in, *h, lines, ops, cos)
+	var jobs []workJob
+	var modes map[int]domain.JournalType
+	if in.Type == domain.JournalRouteCard || in.Type == domain.JournalJobCard {
+		if modes, err = loadCardModes(ctx, tx, tenantID, h.id); err != nil {
+			return Journal{}, err
+		}
+	}
+	if in.Type == domain.JournalJobCard {
+		if jobs, err = loadWorkJobs(ctx, tx, tenantID, h.id); err != nil {
+			return Journal{}, err
+		}
+	}
+	planned, err := planJournal(in, *h, lines, ops, cos, jobs, modes)
 	if err != nil {
 		return Journal{}, err
 	}
@@ -248,7 +269,11 @@ func lineProblem(format string, args ...any) error {
 // planJournal builds the lines of a new journal from explicit input or from
 // the proposal. The share of a proportional proposal is the order's reported
 // quantity (good and error, including this RAF) over its quantity.
-func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []domain.Operation, cos []domain.CoProduct) ([]JournalLine, error) {
+//
+// modes is the card type each operation already takes feedback from (loadCardModes): a card
+// names no operation of the other mode, and its proposal leaves those operations out.
+func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []domain.Operation, cos []domain.CoProduct, jobs []workJob,
+	modes map[int]domain.JournalType) ([]JournalLine, error) {
 	reported := h.qtyRAF.Add(h.qtyError)
 	if in.Type == domain.JournalReportFinished {
 		reported = reported.Add(in.QtyGood).Add(in.QtyError)
@@ -313,6 +338,9 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 				if err := checkFeedback(op); err != nil {
 					return nil, err
 				}
+				if err := checkCardMode(modes, op.OperNumber, in.Type); err != nil {
+					return nil, err
+				}
 				if !hi.Hours.IsZero() {
 					if err := domain.CheckHours(hi.Hours); err != nil {
 						return nil, domainProblem(err)
@@ -323,7 +351,7 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 			break
 		}
 		for _, op := range ops {
-			if op.Subcontract || op.Status == domain.OperFinished {
+			if op.Subcontract || op.Status == domain.OperFinished || checkCardMode(modes, op.OperNumber, in.Type) != nil {
 				continue
 			}
 			planned := op.SetupH.Add(op.RunHPer.Mul(op.ProcessQty))
@@ -331,11 +359,82 @@ func planJournal(in NewJournal, h orderHead, lines []domain.OrderLine, ops []dom
 				out = append(out, hoursLine(op, hours, decimal.Zero, decimal.Zero, false))
 			}
 		}
+	case domain.JournalJobCard:
+		var err error
+		if out, err = planJobCard(in, ops, jobs, modes, reported, h.quantity); err != nil {
+			return nil, err
+		}
 	}
 	if len(out) == 0 {
 		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeJournalEmpty, "the proposal found nothing left to post; enter the lines")
 	}
 	return out, nil
+}
+
+// planJobCard builds the hours lines of a job card (FR-21.6): the jobs the caller names, or, with
+// none named, the time still to report on each open setup and process job of an in-house
+// operation. The order must be scheduled, since the jobs come from the schedule.
+func planJobCard(in NewJournal, ops []domain.Operation, jobs []workJob, modes map[int]domain.JournalType, reported, orderQty decimal.Decimal) ([]JournalLine, error) {
+	if len(in.Issues) > 0 {
+		return nil, lineProblem("a job card takes no issue lines")
+	}
+	if len(jobs) == 0 {
+		return nil, httpx.NewProblem(http.StatusConflict, CodeNotScheduled, "the order has no jobs; schedule it before reporting job cards")
+	}
+	var out []JournalLine
+	if len(in.Hours) > 0 {
+		seen := map[string]bool{}
+		for _, hi := range in.Hours {
+			var job *workJob
+			for i := range jobs {
+				if jobs[i].id == hi.JobID {
+					job = &jobs[i]
+				}
+			}
+			if job == nil || seen[hi.JobID] {
+				return nil, lineProblem("job %s is not a setup or process job of the order, or is listed twice", hi.JobID)
+			}
+			seen[hi.JobID] = true
+			op, _ := findOperation(ops, job.oper)
+			if err := checkFeedback(op); err != nil {
+				return nil, err
+			}
+			if err := checkCardMode(modes, op.OperNumber, domain.JournalJobCard); err != nil {
+				return nil, err
+			}
+			if job.status == "finished" {
+				return nil, httpx.NewProblem(http.StatusConflict, CodeJobFinished, fmt.Sprintf("the %s job of operation %d is finished", job.typ, job.oper))
+			}
+			if job.typ != domain.JobProcess && (hi.QtyGood.IsPositive() || hi.QtyError.IsPositive()) {
+				return nil, lineProblem("quantities are reported on the process job, not on the %s job of operation %d", job.typ, job.oper)
+			}
+			if !hi.Hours.IsZero() {
+				if err := domain.CheckHours(hi.Hours); err != nil {
+					return nil, domainProblem(err)
+				}
+			}
+			out = append(out, jobHoursLine(op, job.typ, hi.Hours, hi.QtyGood, hi.QtyError, hi.Finished))
+		}
+		return out, nil
+	}
+	for _, job := range jobs {
+		op, ok := findOperation(ops, job.oper)
+		if !ok || op.Subcontract || op.Status == domain.OperFinished || job.status == "finished" ||
+			checkCardMode(modes, op.OperNumber, domain.JournalJobCard) != nil {
+			continue
+		}
+		if hours := domain.ProposeHours(in.Proposal, job.plannedHours, job.hoursReported, reported, orderQty); !hours.LessThan(domain.MinHours) {
+			out = append(out, jobHoursLine(op, job.typ, hours, decimal.Zero, decimal.Zero, false))
+		}
+	}
+	return out, nil
+}
+
+func jobHoursLine(op domain.Operation, typ domain.JobType, hours, good, bad decimal.Decimal, finished bool) JournalLine {
+	l := hoursLine(op, hours, good, bad, finished)
+	t := string(typ)
+	l.JobType = &t
+	return l
 }
 
 // checkFeedback refuses route-card feedback on a subcontracted operation
@@ -391,10 +490,10 @@ func nextJournalNumber(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 func insertJournalLines(ctx context.Context, tx pgx.Tx, tenantID, journalID string, lines []JournalLine) error {
 	for i, l := range lines {
 		if _, err := tx.Exec(ctx, `insert into production_journal_line (tenant_id, journal_id, line_seq, kind, bom_line_number, oper_number, item_id,
-				qty, qty_good, qty_error, finish_operation, unit_cost, amount, overhead_amount, coproduct_line_number)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+				qty, qty_good, qty_error, finish_operation, unit_cost, amount, overhead_amount, coproduct_line_number, job_type)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			tenantID, journalID, i+1, l.Kind, l.LineNo, l.OperNumber, l.ItemID, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(),
-			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String(), l.CoProductLineNo); err != nil {
+			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String(), l.CoProductLineNo, l.JobType); err != nil {
 			return err
 		}
 	}
@@ -527,6 +626,12 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 	if err != nil {
 		return err
 	}
+	var modes map[int]domain.JournalType
+	if j.Type == domain.JournalRouteCard || j.Type == domain.JournalJobCard {
+		if modes, err = loadCardModes(ctx, tx, tenantID, h.id); err != nil {
+			return err
+		}
+	}
 	var plannedTotal decimal.Decimal
 	var cos []domain.CoProduct
 	costBase := h.quantity
@@ -574,6 +679,14 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 			}
 			if err := checkFeedback(op); err != nil {
 				return err
+			}
+			if err := checkCardMode(modes, op.OperNumber, j.Type); err != nil {
+				return err
+			}
+			if l.JobType != nil {
+				if err := checkJobOpen(ctx, tx, tenantID, h.id, *l.OperNumber, *l.JobType); err != nil {
+					return err
+				}
 			}
 			l.UnitCost = op.LaborRate
 			l.Amount = domain.RoundMoney(l.Qty.Mul(op.LaborRate), h.currency)
@@ -660,6 +773,12 @@ func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID str
 				return err
 			}
 		case KindHours:
+			if l.JobType != nil {
+				if err := applyJobFeedback(ctx, tx, tenantID, orderID, l); err != nil {
+					return err
+				}
+				continue
+			}
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
 					qty_good = qty_good + $5, qty_error = qty_error + $6,
 					status = case when $7 then 'finished' else 'started' end
@@ -696,7 +815,7 @@ func enqueueJournalPosted(ctx context.Context, tx pgx.Tx, tenantID string, h ord
 	data := prodevents.JournalPostedData{JournalID: j.ID, JournalNumber: j.JournalNumber, OrderID: h.id, Type: string(j.Type),
 		PostingDate: j.PostingDate, Currency: h.currency, ReversalOf: j.ReversalOf, CounterpartOrderID: j.CounterpartOrderID, Lines: []prodevents.JournalLine{}, Postings: eventPostings(j.Postings)}
 	for _, l := range j.Lines {
-		line := prodevents.JournalLine{Kind: l.Kind, LineNo: l.LineNo, CoProductLineNo: l.CoProductLineNo, OperNumber: l.OperNumber, ItemID: l.ItemID, Qty: l.Qty.String(),
+		line := prodevents.JournalLine{Kind: l.Kind, LineNo: l.LineNo, CoProductLineNo: l.CoProductLineNo, OperNumber: l.OperNumber, JobType: l.JobType, ItemID: l.ItemID, Qty: l.Qty.String(),
 			UnitCost: l.UnitCost.String(), Amount: l.Amount.Add(l.OverheadAmount).String()}
 		if l.Kind == KindHours {
 			hours := l.Qty.String()
@@ -824,6 +943,86 @@ func reverseJournals(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHe
 	return nil
 }
 
+// loadCardModes returns, per operation of the order, the card type (route card or job card) of
+// its posted feedback that is not reversed. An operation takes feedback from one card type only
+// (FR-21.6 reports "per operation (route card) or per job (job card)"): mixing them would count
+// the same time twice in the proposals, and a route card's finish would leave the jobs open.
+func loadCardModes(ctx context.Context, q querier, tenantID, orderID string) (map[int]domain.JournalType, error) {
+	rows, err := q.Query(ctx, `select distinct l.oper_number, j.journal_type from production_journal j
+		join production_journal_line l on l.tenant_id = j.tenant_id and l.journal_id = j.id
+		where j.tenant_id = $1 and j.order_id = $2 and j.posted and j.reversal_of is null and l.kind = 'hours'
+		  and j.journal_type in ('route-card', 'job-card')
+		  and not exists (select 1 from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id)`, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int]domain.JournalType{}
+	for rows.Next() {
+		var oper int
+		var typ string
+		if err := rows.Scan(&oper, &typ); err != nil {
+			return nil, err
+		}
+		out[oper] = domain.JournalType(typ)
+	}
+	return out, rows.Err()
+}
+
+// checkCardMode refuses a card of type t on an operation that the other card type reports on.
+func checkCardMode(modes map[int]domain.JournalType, oper int, t domain.JournalType) error {
+	if m, ok := modes[oper]; ok && m != t {
+		return httpx.NewProblem(http.StatusConflict, CodeFeedbackMode,
+			fmt.Sprintf("operation %d takes its feedback from %ss; report it on a %s", oper, m, m))
+	}
+	return nil
+}
+
+// checkJobOpen refuses a job-card line whose job is gone (a re-date after the draft was made can
+// drop a job of zero hours) or already finished.
+func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper int, typ string) error {
+	var status string
+	err := tx.QueryRow(ctx, `select status from production_job where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
+		tenantID, orderID, oper, typ).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lineProblem("operation %d has no %s job; the order was re-dated since the journal was made", oper, typ)
+	}
+	if err != nil {
+		return err
+	}
+	if status == "finished" {
+		return httpx.NewProblem(http.StatusConflict, CodeJobFinished, fmt.Sprintf("the %s job of operation %d is finished", typ, oper))
+	}
+	return nil
+}
+
+// applyJobFeedback books a job-card line on its job and on the operation: the job starts, or
+// finishes when the line says so, and the operation finishes once every setup and process job of
+// it is finished (FR-21.6 "unless reopened" still applies through :reopen).
+func applyJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine) error {
+	if _, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported + $5, qty_good = qty_good + $6, qty_error = qty_error + $7,
+			status = case when $8 then 'finished' else 'started' end
+		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
+		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `update production_operation o set hours_reported = hours_reported + $4,
+			qty_good = qty_good + $5, qty_error = qty_error + $6,
+			status = case when not exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
+				and j.oper_number = o.oper_number and j.job_type in ('setup', 'process') and j.status <> 'finished') then 'finished' else 'started' end
+		where o.tenant_id = $1 and o.order_id = $2 and o.oper_number = $3`,
+		tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String())
+	return err
+}
+
+// reverseJobFeedback takes a negated job-card line back off its job.
+func reverseJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine) error {
+	_, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported + $5, qty_good = qty_good + $6, qty_error = qty_error + $7
+		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
+		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String())
+	return err
+}
+
 // applyReversal takes back the negated lines of a reversal journal; an
 // operation with nothing left reported is open again.
 func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []JournalLine) error {
@@ -839,11 +1038,24 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 				return err
 			}
 		case KindHours:
+			if l.JobType != nil {
+				if err := reverseJobFeedback(ctx, tx, tenantID, orderID, l); err != nil {
+					return err
+				}
+			}
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
 					qty_good = qty_good + $5, qty_error = qty_error + $6,
 					status = case when hours_reported + $4 = 0 and qty_good + $5 = 0 and qty_error + $6 = 0 then 'open' else 'started' end
 				where tenant_id = $1 and order_id = $2 and oper_number = $3`,
 				tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String()); err != nil {
+				return err
+			}
+			// The reopened operation's setup and process jobs open again (whether a job card or
+			// :finish closed them): a job with nothing left reported is planned, otherwise started.
+			if _, err := tx.Exec(ctx, `update production_job set status = case when hours_reported = 0 and qty_good = 0 and qty_error = 0
+					then 'planned' else 'started' end
+				where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type in ('setup', 'process')`,
+				tenantID, orderID, *l.OperNumber); err != nil {
 				return err
 			}
 		}
@@ -1133,7 +1345,7 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 	}
 	j.Type, j.QtyGood, j.QtyError = domain.JournalType(typ), dec(qg), dec(qe)
 	rows, err := q.Query(ctx, `select kind, bom_line_number, oper_number, item_id::text, qty::text, qty_good::text, qty_error::text,
-			finish_operation, unit_cost::text, amount::text, overhead_amount::text, coproduct_line_number
+			finish_operation, unit_cost::text, amount::text, overhead_amount::text, coproduct_line_number, job_type
 		from production_journal_line where tenant_id = $1 and journal_id = $2 order by line_seq`, tenantID, id)
 	if err != nil {
 		return Journal{}, err
@@ -1143,7 +1355,7 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 	for rows.Next() {
 		var l JournalLine
 		var qty, good, bad, unit, amount, overhead string
-		if err := rows.Scan(&l.Kind, &l.LineNo, &l.OperNumber, &l.ItemID, &qty, &good, &bad, &l.Finished, &unit, &amount, &overhead, &l.CoProductLineNo); err != nil {
+		if err := rows.Scan(&l.Kind, &l.LineNo, &l.OperNumber, &l.ItemID, &qty, &good, &bad, &l.Finished, &unit, &amount, &overhead, &l.CoProductLineNo, &l.JobType); err != nil {
 			return Journal{}, err
 		}
 		l.Qty, l.QtyGood, l.QtyError, l.UnitCost, l.Amount, l.OverheadAmount = dec(qty), dec(good), dec(bad), dec(unit), dec(amount), dec(overhead)
@@ -1173,7 +1385,7 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 		return Journal{}, err
 	}
 	prows.Close()
-	if j.Type == domain.JournalRouteCard && j.Posted {
+	if (j.Type == domain.JournalRouteCard || j.Type == domain.JournalJobCard) && j.Posted {
 		if j.TriggerFirings, err = loadFirings(ctx, q, tenantID, `f.journal_id = $2`, id); err != nil {
 			return Journal{}, err
 		}

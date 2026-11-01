@@ -924,7 +924,7 @@ func reversedBy(from, to domain.Status) []domain.JournalType {
 	started := from == domain.Started || from == domain.ReportedAsFinished
 	switch {
 	case started && to != domain.Started && to != domain.ReportedAsFinished:
-		return []domain.JournalType{domain.JournalPickingList, domain.JournalRouteCard, domain.JournalReportFinished}
+		return []domain.JournalType{domain.JournalPickingList, domain.JournalRouteCard, domain.JournalJobCard, domain.JournalReportFinished}
 	case from == domain.ReportedAsFinished:
 		return []domain.JournalType{domain.JournalReportFinished}
 	}

@@ -63,6 +63,12 @@ func writeSchedule(ctx context.Context, tx pgx.Tx, tenantID, orderID, legalEntit
 	if err != nil {
 		return nil, domainProblem(err)
 	}
+	// A re-date gives the jobs new ids; what the job cards reported stays with the operation's job
+	// of the same type (FR-21.6).
+	feedback, err := loadJobFeedback(ctx, tx, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
 	if err := clearJobs(ctx, tx, tenantID, orderID); err != nil {
 		return nil, err
 	}
@@ -79,6 +85,12 @@ func writeSchedule(ctx context.Context, tx pgx.Tx, tenantID, orderID, legalEntit
 			planned_start, planned_end, planned_hours) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 			tenantID, j.ID, legalEntityID, orderID, j.OperNumber, j.Seq, string(j.Type), j.ResourceID, j.Start, j.End, j.Hours.String()); err != nil {
 			return nil, err
+		}
+		if fb, ok := feedback[jobKey{j.OperNumber, j.Type}]; ok {
+			if _, err := tx.Exec(ctx, `update production_job set hours_reported = $3, qty_good = $4, qty_error = $5, status = $6
+				where tenant_id = $1 and id = $2`, tenantID, j.ID, fb.hours.String(), fb.good.String(), fb.bad.String(), fb.status); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, `update production_order set start_date = $3::date, end_date = $4::date, scheduling_method = $5, schedule_start = $6
@@ -180,6 +192,10 @@ type Job struct {
 	PlannedStart  time.Time       `json:"plannedStart"`
 	PlannedEnd    time.Time       `json:"plannedEnd"`
 	PlannedHours  decimal.Decimal `json:"plannedHours"`
+	// HoursReported, QtyGood and QtyError are what the job cards reported on the job (FR-21.6).
+	HoursReported decimal.Decimal `json:"hoursReported"`
+	QtyGood       decimal.Decimal `json:"qtyGood"`
+	QtyError      decimal.Decimal `json:"qtyError"`
 	Status        string          `json:"status"`
 }
 
@@ -193,7 +209,8 @@ type JobPage struct {
 
 const jobsSelected = `with jobs as (
 	select j.id, j.order_id, o.order_number, o.status as order_status, j.legal_entity_id, o.site_id, o.product_id, j.oper_number, j.seq,
-		j.job_type, j.resource_id, j.planned_start, j.planned_end, j.planned_hours, j.status
+		j.job_type, j.resource_id, j.planned_start, j.planned_end, j.planned_hours, j.status,
+		j.hours_reported, j.qty_good, j.qty_error
 	from production_job j
 	join production_order o on o.tenant_id = j.tenant_id and o.id = j.order_id
 	where j.tenant_id = $1
@@ -220,7 +237,8 @@ func (s *Postgres) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 	args := []any{p.TenantID, f.LegalEntityID, f.SiteID, f.ResourceID, f.OrderID, string(f.JobType), string(f.OrderStatus), f.From, f.To}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, jobsSelected+`select id::text, order_id::text, order_number, order_status, legal_entity_id::text, site_id::text,
-				product_id::text, oper_number, seq, job_type, resource_id::text, planned_start, planned_end, planned_hours::text, status
+				product_id::text, oper_number, seq, job_type, resource_id::text, planned_start, planned_end, planned_hours::text, status,
+				hours_reported::text, qty_good::text, qty_error::text
 			from jobs where ($10 = '' or (planned_start, id) > (select planned_start, id from jobs where id = nullif($10, '')::uuid))
 			order by planned_start, id limit $11`, append(args, f.Cursor, f.Limit+1)...)
 		if err != nil {
@@ -228,13 +246,14 @@ func (s *Postgres) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 		}
 		for rows.Next() {
 			var j Job
-			var orderStatus, jobType, hours string
+			var orderStatus, jobType, hours, reported, good, bad string
 			if err := rows.Scan(&j.ID, &j.OrderID, &j.OrderNumber, &orderStatus, &j.LegalEntityID, &j.SiteID, &j.ProductID, &j.OperNumber, &j.Seq,
-				&jobType, &j.ResourceID, &j.PlannedStart, &j.PlannedEnd, &hours, &j.Status); err != nil {
+				&jobType, &j.ResourceID, &j.PlannedStart, &j.PlannedEnd, &hours, &j.Status, &reported, &good, &bad); err != nil {
 				rows.Close()
 				return err
 			}
 			j.OrderStatus, j.JobType, j.PlannedHours = domain.Status(orderStatus), domain.JobType(jobType), dec(hours)
+			j.HoursReported, j.QtyGood, j.QtyError = dec(reported), dec(good), dec(bad)
 			out.Items = append(out.Items, j)
 		}
 		rows.Close()
@@ -256,4 +275,67 @@ func (s *Postgres) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 		out.NextCursor = out.Items[f.Limit-1].ID
 	}
 	return out, nil
+}
+
+// jobKey names a job within its order: an operation has at most one job of each type.
+type jobKey struct {
+	oper int
+	typ  domain.JobType
+}
+
+type jobFeedback struct {
+	hours, good, bad decimal.Decimal
+	status           string
+}
+
+// loadJobFeedback reads what job cards reported on the order's jobs (only jobs with feedback).
+func loadJobFeedback(ctx context.Context, q querier, tenantID, orderID string) (map[jobKey]jobFeedback, error) {
+	rows, err := q.Query(ctx, `select oper_number, job_type, hours_reported::text, qty_good::text, qty_error::text, status
+		from production_job where tenant_id = $1 and order_id = $2 and status <> 'planned'`, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[jobKey]jobFeedback{}
+	for rows.Next() {
+		var k jobKey
+		var typ, h, g, b, st string
+		if err := rows.Scan(&k.oper, &typ, &h, &g, &b, &st); err != nil {
+			return nil, err
+		}
+		k.typ = domain.JobType(typ)
+		out[k] = jobFeedback{dec(h), dec(g), dec(b), st}
+	}
+	return out, rows.Err()
+}
+
+// workJob is a job that takes feedback (setup and process), as a job card sees it.
+type workJob struct {
+	id            string
+	oper          int
+	typ           domain.JobType
+	plannedHours  decimal.Decimal
+	hoursReported decimal.Decimal
+	status        string
+}
+
+// loadWorkJobs reads the setup and process jobs of the order in route order.
+func loadWorkJobs(ctx context.Context, q querier, tenantID, orderID string) ([]workJob, error) {
+	rows, err := q.Query(ctx, `select id::text, oper_number, job_type, planned_hours::text, hours_reported::text, status
+		from production_job where tenant_id = $1 and order_id = $2 and job_type in ('setup', 'process') order by oper_number, seq`, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []workJob{}
+	for rows.Next() {
+		var j workJob
+		var typ, ph, hr string
+		if err := rows.Scan(&j.id, &j.oper, &typ, &ph, &hr, &j.status); err != nil {
+			return nil, err
+		}
+		j.typ, j.plannedHours, j.hoursReported = domain.JobType(typ), dec(ph), dec(hr)
+		out = append(out, j)
+	}
+	return out, rows.Err()
 }

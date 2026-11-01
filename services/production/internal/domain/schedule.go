@@ -18,6 +18,10 @@ const (
 	JobTransport   JobType = "transport"
 )
 
+// ReportsTime reports whether a job of type t takes feedback from a job card: setup and process
+// time are worked, queue and transport time are waited (FR-21.6).
+func ReportsTime(t JobType) bool { return t == JobSetup || t == JobProcess }
+
 // ValidJobType reports whether t is one of the job types.
 func ValidJobType(t JobType) bool {
 	switch t {

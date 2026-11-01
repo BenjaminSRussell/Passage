@@ -242,11 +242,13 @@ type JournalLine struct {
 	Kind       string  `json:"kind"`
 	LineNo     *string `json:"lineNo"`
 	OperNumber *int    `json:"operNumber"`
-	ItemID     *string `json:"itemId"`
-	Qty        string  `json:"qty"`
-	UnitCost   string  `json:"unitCost"`
-	Amount     string  `json:"amount"`
-	Hours      *string `json:"hours"`
+	// JobType is the job (setup or process) of the operation a job-card hours line reports on; null otherwise.
+	JobType  *string `json:"jobType"`
+	ItemID   *string `json:"itemId"`
+	Qty      string  `json:"qty"`
+	UnitCost string  `json:"unitCost"`
+	Amount   string  `json:"amount"`
+	Hours    *string `json:"hours"`
 	// CoProductLineNo names the co-product line of a coproduct receipt (FR-21.14).
 	CoProductLineNo *string `json:"coProductLineNo,omitempty"`
 }

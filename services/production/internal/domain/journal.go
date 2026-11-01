@@ -25,19 +25,20 @@ const HoursScale = 2
 // MinHours is 0.01 h.
 var MinHours = decimal.New(1, -HoursScale)
 
-// JournalType is the kind of production journal (FR-21.5 to FR-21.7). Job cards
-// need the ProductionJob rows that scheduling creates and are not posted yet.
+// JournalType is the kind of production journal (FR-21.5 to FR-21.7). A job card reports
+// hours and quantities per ProductionJob of a scheduled order (FR-21.6).
 type JournalType string
 
 const (
 	JournalPickingList    JournalType = "picking-list"
 	JournalRouteCard      JournalType = "route-card"
+	JournalJobCard        JournalType = "job-card"
 	JournalReportFinished JournalType = "report-as-finished"
 )
 
 // Valid reports whether t is a journal type this service posts.
 func (t JournalType) Valid() bool {
-	return t == JournalPickingList || t == JournalRouteCard || t == JournalReportFinished
+	return t == JournalPickingList || t == JournalRouteCard || t == JournalJobCard || t == JournalReportFinished
 }
 
 // Flushing is the flushing principle of a BOM line (FR-21.5): when its
@@ -400,13 +401,13 @@ func OperationKey(resourceID string, operNumber int) string {
 // JournalAllowed reports whether a journal type may post on an order in
 // status s: picking lists and route cards on a Started or ReportedAsFinished
 // order, report as finished on a Started or ReportedAsFinished order. A route
-// card on a Released order auto-starts it when autoStart is set (FR-21.6).
+// card or job card on a Released order auto-starts it when autoStart is set (FR-21.6).
 func JournalAllowed(t JournalType, s Status, autoStart bool) bool {
 	switch s {
 	case Started, ReportedAsFinished:
 		return true
 	case Released:
-		return t == JournalRouteCard && autoStart
+		return (t == JournalRouteCard || t == JournalJobCard) && autoStart
 	}
 	return false
 }

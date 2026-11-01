@@ -283,14 +283,14 @@ func loadFirings(ctx context.Context, q querier, tenantID, where, arg string) ([
 	return out, rows.Err()
 }
 
-// fireTriggers evaluates the order's trigger points on a posted route card (FR-21.17):
+// fireTriggers evaluates the order's trigger points on a posted route card or job card (FR-21.17):
 // each hours line is the feedback of its operation, and the operation's due trigger
 // points act in ascending sequence (BR-21.13). Each function runs in a savepoint: when it
 // fails on a business rule its changes are rolled back, the firing is recorded as failed
 // (PROD-0019) and the post goes on. Operations a trigger inserts are not on the journal,
 // so nothing is evaluated on them in the same post. The firings are added to j.
 func fireTriggers(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, j *Journal, actor string) error {
-	if j.Type != domain.JournalRouteCard || j.ReversalOf != nil {
+	if (j.Type != domain.JournalRouteCard && j.Type != domain.JournalJobCard) || j.ReversalOf != nil {
 		return nil
 	}
 	tps, err := loadTriggerPoints(ctx, tx, tenantID, `t.order_id = $2`, h.id)

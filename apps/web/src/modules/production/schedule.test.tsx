@@ -58,6 +58,9 @@ const job = (overrides: Partial<ProductionJob> = {}): ProductionJob => ({
   plannedStart: "2026-11-02T08:00:00Z",
   plannedEnd: "2026-11-02T18:00:00Z",
   plannedHours: "10",
+  hoursReported: "0",
+  qtyGood: "0",
+  qtyError: "0",
   status: "planned",
   ...overrides,
 });

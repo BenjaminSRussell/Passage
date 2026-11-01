@@ -122,7 +122,7 @@ func TestJournalInquiry_RejectsBadFiltersAndStoreFailure(t *testing.T) {
 	f := &fakeStore{}
 	_, h := newServer(t, f)
 	p := expectProblem(t, do(h, call{method: http.MethodGet, duties: []string{DutyRead},
-		path: "/v1/production/journals?type=job-card&posted=maybe&orderNumber=" + strings.Repeat("9", 65) + "&orderId=z&legalEntityId=y&from=2026-12-01&to=2026-11-01&limit=0&cursor=bad"}),
+		path: "/v1/production/journals?type=time-card&posted=maybe&orderNumber=" + strings.Repeat("9", 65) + "&orderId=z&legalEntityId=y&from=2026-12-01&to=2026-11-01&limit=0&cursor=bad"}),
 		http.StatusBadRequest, validationCode)
 	for _, name := range []string{"type", "posted", "orderNumber", "orderId", "legalEntityId", "to", "limit", "cursor"} {
 		if _, ok := p.Errors[name]; !ok {

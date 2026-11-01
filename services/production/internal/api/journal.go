@@ -32,6 +32,8 @@ type issueRequest struct {
 }
 
 type hoursRequest struct {
+	// JobID names the job of a job card line; a route card line names operNumber.
+	JobID      string           `json:"jobId"`
 	OperNumber int              `json:"operNumber"`
 	Hours      decimal.Decimal  `json:"hours"`
 	QtyGood    *decimal.Decimal `json:"qtyGood"`
@@ -100,7 +102,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 
 func validateJournal(req journalRequest, in *store.NewJournal, fields map[string]string) {
 	if !req.Type.Valid() {
-		fields["type"] = "must be picking-list, route-card or report-as-finished"
+		fields["type"] = "must be picking-list, route-card, job-card or report-as-finished"
 	}
 	if req.PostingDate != nil {
 		if !isDate(*req.PostingDate) {
@@ -149,11 +151,11 @@ func validateJournal(req journalRequest, in *store.NewJournal, fields map[string
 		checkQuantity(at+".quantity", c.Quantity, true, fields)
 		in.CoProducts = append(in.CoProducts, store.CoProductInput{LineNo: c.LineNo, Qty: c.Quantity})
 	}
-	if len(req.Issues) > 0 && req.Type == domain.JournalRouteCard {
-		fields["issues"] = "a route card reports hours, not issues"
+	if len(req.Issues) > 0 && (req.Type == domain.JournalRouteCard || req.Type == domain.JournalJobCard) {
+		fields["issues"] = "a route card or job card reports hours, not issues"
 	}
-	if len(req.Hours) > 0 && req.Type != domain.JournalRouteCard {
-		fields["hours"] = "only a route card reports hours"
+	if len(req.Hours) > 0 && req.Type != domain.JournalRouteCard && req.Type != domain.JournalJobCard {
+		fields["hours"] = "only a route card or job card reports hours"
 	}
 	for i, is := range req.Issues {
 		at := fmt.Sprintf("issues[%d]", i)
@@ -168,10 +170,14 @@ func validateJournal(req journalRequest, in *store.NewJournal, fields map[string
 	}
 	for i, h := range req.Hours {
 		at := fmt.Sprintf("hours[%d]", i)
-		if h.OperNumber < 1 {
-			fields[at+".operNumber"] = "must be a positive whole number"
+		if req.Type == domain.JournalJobCard {
+			if !ids.Valid(h.JobID) || h.OperNumber != 0 {
+				fields[at+".jobId"] = "a job card line names a job (UUID), not an operation"
+			}
+		} else if h.OperNumber < 1 || h.JobID != "" {
+			fields[at+".operNumber"] = "must be a positive whole number; a route card line names an operation, not a job"
 		}
-		line := store.HoursInput{OperNumber: h.OperNumber, Hours: h.Hours, Finished: h.Finished}
+		line := store.HoursInput{JobID: h.JobID, OperNumber: h.OperNumber, Hours: h.Hours, Finished: h.Finished}
 		if h.QtyGood != nil {
 			checkQuantity(at+".qtyGood", *h.QtyGood, false, fields)
 			line.QtyGood = *h.QtyGood
@@ -183,7 +189,7 @@ func validateJournal(req journalRequest, in *store.NewJournal, fields map[string
 		switch {
 		case h.Hours.IsZero():
 			if !line.QtyGood.IsPositive() && !line.QtyError.IsPositive() && !h.Finished {
-				fields[at+".hours"] = "report hours, a quantity, or finish the operation"
+				fields[at+".hours"] = "report hours, a quantity, or finish the operation or job"
 			}
 		case domain.CheckHours(h.Hours) != nil || !h.Hours.LessThan(maxQty):
 			fields[at+".hours"] = "must be at least 0.01 with at most 2 decimals"

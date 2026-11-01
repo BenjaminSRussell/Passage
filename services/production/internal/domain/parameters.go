@@ -128,7 +128,7 @@ func (p Parameters) JournalProposal(t JournalType) Proposal {
 	switch t {
 	case JournalReportFinished:
 		return ProposeProportional
-	case JournalRouteCard:
+	case JournalRouteCard, JournalJobCard:
 		if p.RouteCardProposal != "" {
 			return p.RouteCardProposal
 		}

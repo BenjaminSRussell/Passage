@@ -4,6 +4,7 @@ import {
   createJournal,
   deleteJournal,
   describeProblem,
+  getOrderJobs,
   journalTypesFor,
   listJournals,
   newIdempotencyKey,
@@ -14,11 +15,12 @@ import {
   type JournalType,
   type Posting,
   type Problem,
+  type ProductionJob,
   type ProductionOrder,
   type Proposal,
   type TriggerFiring,
 } from "./api/client";
-import { addDecimals, amount, coProductTypeLabel, dash, describeFiring, isZero, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
+import { addDecimals, amount, coProductTypeLabel, dash, describeFiring, isZero, jobTypeLabel, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -39,9 +41,9 @@ export interface Draft {
   postingDate: string;
   quantity: string;
   errorQuantity: string;
-  /** Manual lines: quantity and unit cost by BOM line; hours, good and error quantity by operation. */
+  /** Manual lines: quantity and unit cost by BOM line; hours, good and error quantity by operation (route card) or job id (job card). */
   issues: Record<string, { quantity: string; unitCost: string }>;
-  hours: Record<string, { hours: string; qtyGood: string; qtyError?: string }>;
+  hours: Record<string, { hours: string; qtyGood: string; qtyError?: string; finished?: boolean }>;
   /** Quantity received per co-product line of a report as finished (FR-21.14); empty skips the line. */
   coProducts: Record<string, string>;
 }
@@ -93,11 +95,12 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
     }
   }
   if (draft.proposal === "none") {
-    if (draft.type === "route-card") {
+    if (draft.type === "route-card" || draft.type === "job-card") {
+      const jobCard = draft.type === "job-card";
       input.hours = [];
       for (const [oper, line] of Object.entries(draft.hours)) {
         const qtyError = line.qtyError ?? "";
-        if (line.hours === "" && line.qtyGood === "" && qtyError === "") {
+        if (line.hours === "" && line.qtyGood === "" && qtyError === "" && !(jobCard && line.finished)) {
           continue;
         }
         if (line.hours !== "" && (!hoursPattern.test(line.hours) || !positive(line.hours))) {
@@ -110,14 +113,17 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
           errors[`error.${oper}`] = "Enter a quantity with up to 6 decimals.";
         }
         input.hours.push({
-          operNumber: Number(oper),
+          ...(jobCard ? { jobId: oper } : { operNumber: Number(oper) }),
           hours: line.hours || "0",
           ...(line.qtyGood ? { qtyGood: line.qtyGood } : {}),
           ...(qtyError ? { qtyError } : {}),
+          ...(jobCard && line.finished ? { finished: true } : {}),
         });
       }
       if (input.hours.length === 0) {
-        errors.lines = "Enter hours, a good or an error quantity for at least one operation.";
+        errors.lines = jobCard
+          ? "Enter hours, a good or an error quantity, or finish at least one job."
+          : "Enter hours, a good or an error quantity for at least one operation.";
       }
     } else {
       input.issues = [];
@@ -145,7 +151,7 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
 const journalValue = (j: Journal) => addDecimals(j.postings.map((p) => p.dr));
 
 const lineColumns: DataTableColumn<JournalLine>[] = [
-  { key: "kind", header: "Line", render: (l) => (l.kind === "issue" ? `Issue ${l.lineNo}` : l.kind === "hours" ? `Operation ${l.operNumber}` : l.kind === "coproduct" ? `Co-product ${l.coProductLineNo}` : "Finished receipt") },
+  { key: "kind", header: "Line", render: (l) => (l.kind === "issue" ? `Issue ${l.lineNo}` : l.kind === "hours" ? `Operation ${l.operNumber}${l.jobType ? `, ${jobTypeLabel[l.jobType].toLowerCase()} job` : ""}` : l.kind === "coproduct" ? `Co-product ${l.coProductLineNo}` : "Finished receipt") },
   { key: "itemId", header: "Item", mono: true, render: (l) => l.itemId ?? dash },
   { key: "qty", header: "Quantity or hours", align: "end" },
   { key: "qtyGood", header: "Good", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyGood) },
@@ -220,6 +226,25 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
   }, [types, draft.type]);
 
   const current = journals.rows.find((j) => j.id === selected) ?? null;
+
+  // A job card is entered against the order's setup and process jobs (FR-21.6).
+  const [jobs, setJobs] = useState<{ rows: ProductionJob[]; loading: boolean; error: Problem | null }>({ rows: [], loading: false, error: null });
+  const wantJobs = draft.type === "job-card" && draft.proposal === "none";
+  useEffect(() => {
+    if (!wantJobs) {
+      return;
+    }
+    const controller = new AbortController();
+    setJobs((j) => ({ ...j, loading: true, error: null }));
+    getOrderJobs(order.id, controller.signal).then(
+      (rows) => setJobs({ rows, loading: false, error: null }),
+      (err) => !controller.signal.aborted && setJobs({ rows: [], loading: false, error: describeProblem(err) }),
+    );
+    return () => controller.abort();
+  }, [wantJobs, order.id, order.version]);
+  const workJobs = jobs.rows.filter(
+    (j) => (j.jobType === "setup" || j.jobType === "process") && j.status !== "finished" && !order.operations.find((op) => op.operNumber === j.operNumber)?.subcontract,
+  );
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -304,7 +329,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
   const manual = draft.proposal === "none";
   const setIssue = (lineNo: string, patch: Partial<{ quantity: string; unitCost: string }>) =>
     setDraft({ ...draft, issues: { ...draft.issues, [lineNo]: { ...(draft.issues[lineNo] ?? { quantity: "", unitCost: "" }), ...patch } } });
-  const setHours = (oper: number, patch: Partial<{ hours: string; qtyGood: string; qtyError: string }>) =>
+  const setHours = (oper: number | string, patch: Partial<{ hours: string; qtyGood: string; qtyError: string; finished: boolean }>) =>
     setDraft({ ...draft, hours: { ...draft.hours, [oper]: { ...(draft.hours[oper] ?? { hours: "", qtyGood: "", qtyError: "" }), ...patch } } });
 
   return (
@@ -341,7 +366,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
               setSelected(j.id);
               setConfirmDelete(false);
             }}
-            empty={{ title: "No journals yet", description: "Picking lists, route cards and reports as finished posted on this order appear here." }}
+            empty={{ title: "No journals yet", description: "Picking lists, route cards, job cards and reports as finished posted on this order appear here." }}
           />
         )}
 
@@ -418,7 +443,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
 
         {types.length === 0 ? (
           <p className={styles.hint}>
-            Journals are posted on Released (route cards), Started and Reported-as-finished orders; this order is {order.status}.
+            Journals are posted on Released (route cards and job cards), Started and Reported-as-finished orders; this order is {order.status}.
           </p>
         ) : (
           <form className={styles.form} onSubmit={submit} noValidate aria-label="New journal">
@@ -519,7 +544,43 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
                   ))}
               </div>
             ) : null}
-            {manual && draft.type !== "route-card" ? (
+            {manual && draft.type === "job-card" ? (
+              <div className={styles.rows}>
+                {jobs.loading ? <p className={styles.hint}>Loading the jobs of the order.</p> : null}
+                {jobs.error ? (
+                  <Alert tone="danger" title="Could not load the jobs">
+                    {jobs.error.message} ({jobs.error.code})
+                  </Alert>
+                ) : null}
+                {!jobs.loading && !jobs.error && workJobs.length === 0 ? (
+                  <p className={styles.hint}>This order has no open setup or process job. Schedule the order to create its jobs.</p>
+                ) : null}
+                {workJobs.map((j) => (
+                  <fieldset key={j.id} className={styles.row}>
+                    <legend className={styles.legend}>
+                      Operation {j.operNumber}, {jobTypeLabel[j.jobType].toLowerCase()} job ({j.hoursReported} of {j.plannedHours} h reported)
+                    </legend>
+                    <FormField id={`journal-hours-${j.id}`} label="Hours" error={errors[`hours.${j.id}`]}>
+                      {(control) => <Input {...control} inputMode="decimal" value={draft.hours[j.id]?.hours ?? ""} onChange={(e) => setHours(j.id, { hours: e.target.value })} />}
+                    </FormField>
+                    {j.jobType === "process" ? (
+                      <>
+                        <FormField id={`journal-good-${j.id}`} label="Good quantity" optional error={errors[`good.${j.id}`]}>
+                          {(control) => <Input {...control} inputMode="decimal" value={draft.hours[j.id]?.qtyGood ?? ""} onChange={(e) => setHours(j.id, { qtyGood: e.target.value })} />}
+                        </FormField>
+                        <FormField id={`journal-error-${j.id}`} label="Error quantity" optional error={errors[`error.${j.id}`]}>
+                          {(control) => <Input {...control} inputMode="decimal" value={draft.hours[j.id]?.qtyError ?? ""} onChange={(e) => setHours(j.id, { qtyError: e.target.value })} />}
+                        </FormField>
+                      </>
+                    ) : null}
+                    <label className={styles.hint}>
+                      <input type="checkbox" checked={draft.hours[j.id]?.finished ?? false} onChange={(e) => setHours(j.id, { finished: e.target.checked })} /> Job finished
+                    </label>
+                  </fieldset>
+                ))}
+              </div>
+            ) : null}
+            {manual && draft.type !== "route-card" && draft.type !== "job-card" ? (
               <div className={styles.rows}>
                 {order.lines
                   .filter((l) => draft.type !== "report-as-finished" || l.flushing === "finish")

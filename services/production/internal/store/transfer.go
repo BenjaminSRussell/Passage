@@ -50,7 +50,7 @@ func checkStartedSplit(ctx context.Context, tx pgx.Tx, tenantID string, h orderH
 // (BR-21.11). Leaving ReportedAsFinished stays allowed: it reverses only the
 // reports as finished, which a split never shares (a split refuses reported output).
 func checkNoSplitTransfer(ctx context.Context, tx pgx.Tx, tenantID, orderID string, types []domain.JournalType) error {
-	if !slices.Contains(types, domain.JournalPickingList) && !slices.Contains(types, domain.JournalRouteCard) {
+	if !slices.Contains(types, domain.JournalPickingList) && !slices.Contains(types, domain.JournalRouteCard) && !slices.Contains(types, domain.JournalJobCard) {
 		return nil
 	}
 	var n int

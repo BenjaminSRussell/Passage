@@ -105,6 +105,7 @@ export const costGroupLabel: Record<CostGroup, string> = {
 export const journalTypeLabel: Record<ListedJournalType, string> = {
   "picking-list": "Picking list",
   "route-card": "Route card",
+  "job-card": "Job card",
   "report-as-finished": "Report as finished",
   "split-transfer": "Split transfer",
 };

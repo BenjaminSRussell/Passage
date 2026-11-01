@@ -156,7 +156,7 @@ func (a *API) journalInquiry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if f.Type != "" && !journalTypeValid(f.Type) {
-		fields["type"] = "must be picking-list, route-card, report-as-finished or split-transfer"
+		fields["type"] = "must be picking-list, route-card, job-card, report-as-finished or split-transfer"
 	}
 	if len(f.OrderNumber) > 64 {
 		fields["orderNumber"] = "must be at most 64 characters"

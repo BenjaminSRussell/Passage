@@ -31,6 +31,8 @@ const columns: DataTableColumn<ProductionJob>[] = [
   { key: "plannedStart", header: "Start", mono: true, render: (row) => instant(row.plannedStart) },
   { key: "plannedEnd", header: "End", mono: true, render: (row) => instant(row.plannedEnd) },
   { key: "plannedHours", header: "Hours", align: "end" },
+  { key: "hoursReported", header: "Reported hours", align: "end" },
+  { key: "status", header: "Status", render: (row) => <Badge tone={row.status === "finished" ? "success" : row.status === "started" ? "info" : "neutral"}>{row.status}</Badge> },
 ];
 
 interface Filter {

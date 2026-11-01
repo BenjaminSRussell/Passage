@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { Journal, PostingProfile } from "./api/client";
+import type { Journal, PostingProfile, ProductionJob } from "./api/client";
 import { emptyDraft, toJournalInput } from "./JournalsPanel";
 import { addDecimals, negate } from "./labels";
 import production from "./module";
@@ -90,6 +90,7 @@ interface Server {
   order: ReturnType<typeof order>;
   journals: Journal[];
   costs: typeof costs;
+  jobs?: ProductionJob[];
   onPost?: Handler;
 }
 
@@ -100,6 +101,9 @@ function serve(server: Server) {
     }
     if (url.endsWith("/costs")) {
       return json(server.costs);
+    }
+    if (url.endsWith("/jobs")) {
+      return json({ orderId, items: server.jobs ?? [], plannedHours: "0" });
     }
     if (url.endsWith("/journals") && init?.method !== "POST") {
       return json({ orderId, items: server.journals });
@@ -233,6 +237,60 @@ describe("Journals on the order detail", () => {
     });
   });
 
+  it("enters job-card hours against the order's jobs, finishing one", async () => {
+    const jobBase: ProductionJob = {
+      id: "0195d6a0-0000-7000-8000-00000000b001",
+      orderId,
+      orderNumber: "PO-000001",
+      orderStatus: "Started",
+      legalEntityId: "0195d6a0-0000-7000-8000-000000000001",
+      siteId: "0195d6a0-0000-7000-8000-000000000002",
+      productId: "0195d6a0-0000-7000-8000-000000000003",
+      operNumber: 10,
+      seq: 2,
+      jobType: "process",
+      resourceId: "WC-WELD",
+      plannedStart: "2026-11-02T08:00:00Z",
+      plannedEnd: "2026-11-02T18:00:00Z",
+      plannedHours: "46",
+      hoursReported: "4",
+      qtyGood: "0",
+      qtyError: "0",
+      status: "started",
+    };
+    const done: ProductionJob = { ...jobBase, id: "0195d6a0-0000-7000-8000-00000000b002", seq: 1, jobType: "setup", status: "finished" };
+    const server: Server = { order: order({ status: "Started", version: 5 }), costs, journals: [], jobs: [done, jobBase] };
+    const fetchMock = serve(server);
+    server.onPost = () => json(journal({ type: "job-card", lines: [] }), 201);
+    renderAt(`/production/${orderId}`);
+    const form = await screen.findByRole("form", { name: "New journal" });
+    await userEvent.selectOptions(within(form).getByLabelText("Journal type"), "job-card");
+    await userEvent.selectOptions(within(form).getByLabelText("Lines"), "none");
+    const job = await within(form).findByRole("group", { name: "Operation 10, process job (4 of 46 h reported)" });
+    expect(within(form).queryByRole("group", { name: /setup job/ })).toBeNull();
+    await userEvent.click(within(form).getByRole("button", { name: "Create journal" }));
+    expect(await within(form).findByText("Enter hours, a good or an error quantity, or finish at least one job.")).toBeInTheDocument();
+    await userEvent.type(within(job).getByLabelText("Hours"), "42");
+    await userEvent.type(within(job).getByLabelText("Good quantity"), "100");
+    await userEvent.click(within(job).getByRole("checkbox", { name: "Job finished" }));
+    await userEvent.click(within(form).getByRole("button", { name: "Create journal" }));
+    await waitFor(() => expect(posts(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(posts(fetchMock)[0][1]?.body))).toEqual({
+      type: "job-card",
+      proposal: "none",
+      hours: [{ jobId: jobBase.id, hours: "42", qtyGood: "100", finished: true }],
+    });
+  });
+
+  it("names the job a posted job-card line reported on", async () => {
+    const line = { kind: "hours" as const, operNumber: 10, jobType: "setup" as const, qty: "1", qtyGood: "0", qtyError: "0", finished: false, unitCost: "30", amount: "30", overheadAmount: "0" };
+    const server: Server = { order: order({ status: "Started", version: 5 }), costs, journals: [journal({ type: "job-card", posted: true, lines: [line] })] };
+    serve(server);
+    renderAt(`/production/${orderId}`);
+    await userEvent.click(await screen.findByText("PJ-000001"));
+    expect(await screen.findByText("Operation 10, setup job")).toBeInTheDocument();
+  });
+
   it("shows a refused post with its code", async () => {
     const server: Server = { order: order({ status: "Started", version: 5 }), costs, journals: [journal()] };
     server.onPost = () => problem(422, "PRODUCTION_OVER_CONSUMPTION", "line 10: consumption 221 exceeds required 200 plus tolerance 10%");
@@ -266,7 +324,7 @@ describe("Journals on the order detail", () => {
   it("explains when an order takes no journals and when the list fails", async () => {
     serve({ order: order({ status: "Estimated", version: 2 }), costs, journals: [] });
     renderAt(`/production/${orderId}`);
-    expect(await screen.findByText(/Journals are posted on Released \(route cards\), Started and Reported-as-finished orders/)).toBeInTheDocument();
+    expect(await screen.findByText(/Journals are posted on Released \(route cards and job cards\), Started and Reported-as-finished orders/)).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "New journal" })).not.toBeInTheDocument();
     vi.unstubAllGlobals();
 
@@ -310,6 +368,18 @@ describe("journal form rules", () => {
     });
     expect(manual.input).toEqual({ type: "picking-list", proposal: "none", postingDate: "2026-10-27", issues: [{ lineNo: "10", quantity: "203", unitCost: "10.20" }] });
     expect(toJournalInput({ ...emptyDraft("picking-list"), proposal: "none", issues: { "10": { quantity: "0", unitCost: "" } } }).errors).toHaveProperty("qty.10");
+  });
+
+  it("builds a job card line by job id and keeps a finish-only line", () => {
+    const draft = { ...emptyDraft("job-card"), proposal: "none" as const };
+    expect(toJournalInput(draft).errors).toHaveProperty("lines");
+    const built = toJournalInput({ ...draft, hours: { "job-1": { hours: "", qtyGood: "", finished: true }, "job-2": { hours: "2.5", qtyGood: "" }, "job-3": { hours: "", qtyGood: "" } } });
+    expect(built.errors).toEqual({});
+    expect(built.input?.hours).toEqual([
+      { jobId: "job-1", hours: "0", finished: true },
+      { jobId: "job-2", hours: "2.5" },
+    ]);
+    expect(toJournalInput({ ...draft, hours: { "job-1": { hours: "1.005", qtyGood: "" } } }).errors).toHaveProperty("hours.job-1");
   });
 
   it("adds and negates decimal strings exactly", () => {

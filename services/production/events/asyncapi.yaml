@@ -311,7 +311,7 @@ components:
       name: posted
       title: Production journal posted
       description: |
-        Emitted when a picking list, route card or report as finished is posted, including the
+        Emitted when a picking list, route card, job card or report as finished is posted, including the
         journals posted by :start and :report-finished and the reversal journals of
         :reset-status (reversalOf set, negative quantities). journalEntryId stays null until the
         general ledger books the postings (consumers: inventory, ledger, planning).
@@ -327,7 +327,7 @@ components:
           journalId: { type: string, format: uuid }
           journalNumber: { type: string }
           orderId: { type: string, format: uuid }
-          type: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer] }
+          type: { type: string, enum: [picking-list, route-card, job-card, report-as-finished, split-transfer] }
           postingDate: { type: string, format: date }
           currency: { type: string }
           reversalOf: { type: [string, 'null'], format: uuid }
@@ -622,12 +622,13 @@ components:
         id: { type: string, description: The order id for type order; the batch or serial number otherwise. }
     journalLine:
       type: object
-      required: [kind, lineNo, operNumber, itemId, qty, unitCost, amount, hours]
+      required: [kind, lineNo, operNumber, jobType, itemId, qty, unitCost, amount, hours]
       properties:
         kind: { type: string, enum: [issue, hours, receipt, coproduct] }
         lineNo: { type: [string, 'null'] }
         coProductLineNo: { type: [string, 'null'], description: 'The order''s co-product line of a coproduct receipt (FR-21.14); absent on other lines.' }
         operNumber: { type: [integer, 'null'] }
+        jobType: { type: [string, 'null'], enum: [setup, process, null], description: 'The job of the operation a job-card hours line reported on; null on every other line.' }
         itemId: { type: [string, 'null'], format: uuid }
         qty: { type: string }
         unitCost: { type: string }

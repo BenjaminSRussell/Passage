@@ -67,9 +67,9 @@ describe("production module", () => {
 describe("journal helpers", () => {
   it("offers route cards on Released orders and every journal once Started (FR-21.5 to FR-21.7)", () => {
     expect(journalTypesFor("Estimated")).toEqual([]);
-    expect(journalTypesFor("Released")).toEqual(["route-card"]);
-    expect(journalTypesFor("Started")).toEqual(["picking-list", "route-card", "report-as-finished"]);
-    expect(journalTypesFor("ReportedAsFinished")).toHaveLength(3);
+    expect(journalTypesFor("Released")).toEqual(["route-card", "job-card"]);
+    expect(journalTypesFor("Started")).toEqual(["picking-list", "route-card", "job-card", "report-as-finished"]);
+    expect(journalTypesFor("ReportedAsFinished")).toHaveLength(4);
     expect(journalTypesFor("Ended")).toEqual([]);
   });
 });

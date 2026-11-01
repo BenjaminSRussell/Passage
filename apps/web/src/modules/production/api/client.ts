@@ -50,7 +50,7 @@ export type CostGroup = "material" | "labor" | "overhead" | "subcontract";
 /** When a BOM line's material is consumed (FR-21.5). */
 export type Flushing = "manual" | "start" | "finish" | "available-at-location";
 
-export type JournalType = "picking-list" | "route-card" | "report-as-finished";
+export type JournalType = "picking-list" | "route-card" | "job-card" | "report-as-finished";
 
 /** A journal as listed: also the system journal a split of a Started order posts on both orders (BR-21.11). */
 export type ListedJournalType = JournalType | "split-transfer";
@@ -304,6 +304,8 @@ export interface JournalLine {
   /** On a coproduct receipt: the order's co-product line. */
   coProductLineNo?: string;
   operNumber?: number;
+  /** On a job-card hours line: the job of the operation it reported on. */
+  jobType?: "setup" | "process";
   itemId?: string;
   qty: string;
   qtyGood: string;
@@ -424,7 +426,10 @@ export interface IssueInput {
 }
 
 export interface HoursInput {
-  operNumber: number;
+  /** A route card line names the operation. */
+  operNumber?: number;
+  /** A job card line names the setup or process job. */
+  jobId?: string;
   hours: string;
   qtyGood?: string;
   qtyError?: string;
@@ -539,6 +544,10 @@ export interface ProductionJob {
   plannedStart: string;
   plannedEnd: string;
   plannedHours: string;
+  /** What the job cards reported on the job (FR-21.6). */
+  hoursReported: string;
+  qtyGood: string;
+  qtyError: string;
   status: "planned" | "started" | "finished";
 }
 
@@ -1085,14 +1094,14 @@ export function canDefineTriggers(status: ProductionStatus): boolean {
   return status !== "Ended" && status !== "Cancelled";
 }
 
-/** Journal types an order in this status can take (FR-21.5 to FR-21.7; a route card starts a Released order). */
+/** Journal types an order in this status can take (FR-21.5 to FR-21.7; a route card or job card starts a Released order). */
 export function journalTypesFor(status: ProductionStatus): JournalType[] {
   switch (status) {
     case "Released":
-      return ["route-card"];
+      return ["route-card", "job-card"];
     case "Started":
     case "ReportedAsFinished":
-      return ["picking-list", "route-card", "report-as-finished"];
+      return ["picking-list", "route-card", "job-card", "report-as-finished"];
     default:
       return [];
   }

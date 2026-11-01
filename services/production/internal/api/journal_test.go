@@ -24,7 +24,11 @@ func TestJournal_CreateValidation(t *testing.T) {
 		name, body string
 		field      string
 	}{
-		{"unknown type", `{"type":"job-card"}`, "type"},
+		{"unknown type", `{"type":"time-card"}`, "type"},
+		{"job card names an operation", `{"type":"job-card","hours":[{"operNumber":10,"hours":"1"}]}`, "hours[0].jobId"},
+		{"job card job is a UUID", `{"type":"job-card","hours":[{"jobId":"x","hours":"1"}]}`, "hours[0].jobId"},
+		{"route card names an operation, not a job", `{"type":"route-card","hours":[{"operNumber":10,"jobId":"` + ids.New() + `","hours":"1"}]}`, "hours[0].operNumber"},
+		{"issues on a job card", `{"type":"job-card","issues":[{"lineNo":"10","quantity":"1"}]}`, "issues"},
 		{"bad date", `{"type":"picking-list","postingDate":"26-10-2026"}`, "postingDate"},
 		{"bad proposal", `{"type":"picking-list","proposal":"all"}`, "proposal"},
 		{"RAF needs a quantity", `{"type":"report-as-finished"}`, "quantity"},
@@ -87,10 +91,21 @@ func TestJournal_CreateDefaultsAndLines(t *testing.T) {
 		t.Fatal("different bodies share a request hash")
 	}
 
+	job := ids.New()
+	c = journalCall(order, `{"type":"job-card","hours":[{"jobId":"`+job+`","hours":"2.5","qtyGood":"10","finished":true}]}`, DutyJournalPost)
+	c.headers[idempotencyName] = "journal-job"
+	if rec := do(h, c); rec.Code != http.StatusCreated {
+		t.Fatalf("job card: %d %s", rec.Code, rec.Body.String())
+	}
+	if card := f.journals[2]; card.Type != domain.JournalJobCard || len(card.Hours) != 1 || card.Hours[0].JobID != job ||
+		card.Hours[0].OperNumber != 0 || !card.Hours[0].Hours.Equal(decimal.RequireFromString("2.5")) || !card.Hours[0].Finished {
+		t.Fatalf("job-card input: %+v", card)
+	}
+
 	c = journalCall(order, `{"type":"picking-list","proposal":"none","issues":[{"lineNo":"30.1","quantity":"102","unitCost":"10.20"}]}`, DutyJournalPost)
 	c.headers[idempotencyName] = "journal-3"
 	do(h, c)
-	pick := f.journals[2]
+	pick := f.journals[3]
 	if pick.Proposal != domain.ProposeNone || len(pick.Issues) != 1 || pick.Issues[0].LineNo != "30.1" || pick.Issues[0].UnitCost == nil ||
 		!pick.Issues[0].UnitCost.Equal(decimal.RequireFromString("10.2")) {
 		t.Fatalf("picking input: %+v", pick)
