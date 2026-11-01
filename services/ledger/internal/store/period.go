@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,7 +35,30 @@ type PeriodGate interface {
 type periodGateKey struct{}
 
 func WithPeriodGate(ctx context.Context, g PeriodGate) context.Context {
-	return context.WithValue(ctx, periodGateKey{}, g)
+	return context.WithValue(ctx, periodGateKey{}, &requestGate{inner: g, open: map[string]bool{}})
+}
+
+type requestGate struct {
+	inner PeriodGate
+	mu    sync.Mutex
+	open  map[string]bool
+}
+
+func (r *requestGate) Status(ctx context.Context, legalEntityID, ledgerID string, postingDate time.Time, sourceSystem string) (string, error) {
+	key := ledgerID + "|" + sourceSystem + "|" + postingDate.Format(time.DateOnly)
+	r.mu.Lock()
+	known := r.open[key]
+	r.mu.Unlock()
+	if known {
+		return statusOpen, nil
+	}
+	status, err := r.inner.Status(ctx, legalEntityID, ledgerID, postingDate, sourceSystem)
+	if err == nil && status == statusOpen {
+		r.mu.Lock()
+		r.open[key] = true
+		r.mu.Unlock()
+	}
+	return status, err
 }
 
 func PeriodGateStatus(ctx context.Context) (PeriodGate, error) {

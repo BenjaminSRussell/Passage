@@ -179,3 +179,38 @@ func TestPostgres_CloseUnreachableFailsClosed(t *testing.T) {
 		t.Fatalf("an unconfirmed period wrote entries: %d before, %d after", before, after)
 	}
 }
+
+type scriptedGate struct {
+	statuses []string
+	calls    int
+}
+
+func (g *scriptedGate) Status(context.Context, string, string, time.Time, string) (string, error) {
+	s := g.statuses[min(g.calls, len(g.statuses)-1)]
+	g.calls++
+	return s, nil
+}
+
+func TestPostgres_OpenIsReusedWithinOneRequestOnly(t *testing.T) {
+	e, _ := setup(t)
+	gate := &scriptedGate{statuses: []string{"open", "open", "closed"}}
+	ctx := WithPeriodGate(e.ctx, gate)
+	if _, err := e.store.PostEntry(ctx, vendorInvoice(e.ledger.ID, "REQ-1", "10.00")); err != nil {
+		t.Fatal(err)
+	}
+	if gate.calls != 1 {
+		t.Fatalf("the warm-up open must serve the in-transaction check, calls %d", gate.calls)
+	}
+	next := WithPeriodGate(e.ctx, gate)
+	_, err := e.store.PostEntry(next, vendorInvoice(e.ledger.ID, "REQ-2", "10.00"))
+	if gate.calls != 2 {
+		t.Fatalf("a new request must ask close again, calls %d", gate.calls)
+	}
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	gate.statuses = []string{"closed"}
+	gate.calls = 0
+	_, err = e.store.PostEntry(WithPeriodGate(e.ctx, gate), vendorInvoice(e.ledger.ID, "REQ-3", "10.00"))
+	requirePeriodClosed(t, "request after close", err)
+}
