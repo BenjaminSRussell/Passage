@@ -152,7 +152,7 @@ Config is read from the environment; `DATABASE_URL` is required. Health: `/healt
 nonconformance holds the lot in inventory and the usage decision or a refused / closed nonconformance
 releases it, through a signed service token that holds only `inventory.hold.apply`; it needs
 `PASSAGE_SERVICE_NAME=quality` and `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`) and stops the service at
-start when the key is missing. Without it quality does not touch inventory.
+start when the key is missing. Without it quality does not touch inventory. Queued calls are sent by an in-process sweeper (not on the request path): at start, every `QUALITY_HOLD_SWEEP_INTERVAL` (default 1m) for the tenants in `QUALITY_HOLD_TENANTS` (comma-separated UUIDs), and at once for a tenant that queued one; it logs an error for calls inventory refused and calls pending over 5 minutes.
 
 ## Test
 

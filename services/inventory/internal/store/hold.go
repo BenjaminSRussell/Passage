@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -42,6 +43,16 @@ type HoldFilter struct {
 	SourceRef  string
 	State      string
 	Limit      int
+}
+
+type HoldSource struct {
+	Type string
+	Ref  string
+}
+
+type SourceRelease struct {
+	Released []domain.Hold
+	Known    bool
 }
 
 type holdRow struct {
@@ -208,13 +219,17 @@ func (s *Postgres) ReleaseHold(ctx context.Context, id string, version int, qty 
 // ReleaseHoldsBySource releases active holds of one source until at most keep
 // remains held for it, oldest first. The call states the end level rather than a
 // delta, so repeating it releases nothing more.
-func (s *Postgres) ReleaseHoldsBySource(ctx context.Context, sourceType, sourceRef string, keep decimal.Decimal) ([]domain.Hold, error) {
+func (s *Postgres) ReleaseHoldsBySource(ctx context.Context, sourceType, sourceRef string, keep decimal.Decimal, moveTo *HoldSource) (SourceRelease, error) {
 	tp, _ := tenant.FromContext(ctx)
-	out := []domain.Hold{}
+	out := SourceRelease{Released: []domain.Hold{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		found, err := queryHolds(ctx, tx, `h.tenant_id = $1 and h.source_type = $2 and h.source_ref = $3 and h.state = 'ACTIVE'
 			order by h.id for update of h`, tp.TenantID, sourceType, sourceRef)
 		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `select exists (select 1 from inventory_hold where tenant_id = $1 and source_type = $2 and source_ref = $3)`,
+			tp.TenantID, sourceType, sourceRef).Scan(&out.Known); err != nil {
 			return err
 		}
 		excess := decimal.Zero
@@ -222,17 +237,33 @@ func (s *Postgres) ReleaseHoldsBySource(ctx context.Context, sourceType, sourceR
 			excess = excess.Add(f.Held())
 		}
 		excess = excess.Sub(keep)
+		type planned struct {
+			hold domain.Hold
+			take decimal.Decimal
+		}
+		var plan []planned
 		for _, f := range found {
 			if excess.Sign() <= 0 {
 				break
 			}
 			take := decimal.Min(excess, f.Held())
-			h, err := applyHoldRelease(ctx, tx, tp, f.Hold, take)
+			plan = append(plan, planned{f.Hold, take})
+			excess = excess.Sub(take)
+		}
+		slices.SortFunc(plan, func(a, b planned) int {
+			return strings.Compare(rowKey(a.hold.ProductID, a.hold.Dims.Hash()), rowKey(b.hold.ProductID, b.hold.Dims.Hash()))
+		})
+		for _, pl := range plan {
+			h, err := applyHoldRelease(ctx, tx, tp, pl.hold, pl.take)
 			if err != nil {
 				return err
 			}
-			out = append(out, h)
-			excess = excess.Sub(take)
+			out.Released = append(out.Released, h)
+		}
+		if moveTo != nil {
+			_, err := tx.Exec(ctx, `update inventory_hold set source_type = $4, source_ref = $5, version = version + 1
+				where tenant_id = $1 and source_type = $2 and source_ref = $3 and state = 'ACTIVE'`, tp.TenantID, sourceType, sourceRef, moveTo.Type, moveTo.Ref)
+			return err
 		}
 		return nil
 	})

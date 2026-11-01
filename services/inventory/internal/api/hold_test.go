@@ -22,6 +22,7 @@ type holdFake struct {
 	sourceType   string
 	sourceRef    string
 	sourceKeep   decimal.Decimal
+	sourceMove   *store.HoldSource
 	filter       store.HoldFilter
 	placeErr     error
 	releasedHold domain.Hold
@@ -42,9 +43,9 @@ func (f *fakeStore) ReleaseHold(_ context.Context, id string, version int, qty *
 	return domain.Hold{ID: id, Qty: decimal.NewFromInt(5), ReleasedQty: decimal.NewFromInt(5), State: domain.HoldReleased, Version: version + 1}, nil
 }
 
-func (f *fakeStore) ReleaseHoldsBySource(_ context.Context, sourceType, sourceRef string, keep decimal.Decimal) ([]domain.Hold, error) {
-	f.hold.sourceType, f.hold.sourceRef, f.hold.sourceKeep = sourceType, sourceRef, keep
-	return []domain.Hold{{ID: ids.New(), Qty: decimal.NewFromInt(5), ReleasedQty: decimal.NewFromInt(3), State: domain.HoldActive, Version: 2}}, nil
+func (f *fakeStore) ReleaseHoldsBySource(_ context.Context, sourceType, sourceRef string, keep decimal.Decimal, moveTo *store.HoldSource) (store.SourceRelease, error) {
+	f.hold.sourceType, f.hold.sourceRef, f.hold.sourceKeep, f.hold.sourceMove = sourceType, sourceRef, keep, moveTo
+	return store.SourceRelease{Known: true, Released: []domain.Hold{{ID: ids.New(), Qty: decimal.NewFromInt(5), ReleasedQty: decimal.NewFromInt(3), State: domain.HoldActive, Version: 2}}}, nil
 }
 
 func (f *fakeStore) ListHolds(_ context.Context, filter store.HoldFilter) ([]domain.Hold, error) {
@@ -129,12 +130,13 @@ func TestReleaseHold_NeedsTheUserDutyAndIfMatchAndAPositiveQuantity(t *testing.T
 func TestReleaseHoldSource_ServiceDutyStatesTheLevelToKeep(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	body := `{"sourceType":"QUALITY_ORDER","sourceRef":"qo-1","keepQty":"2"}`
+	body := `{"sourceType":"QUALITY_ORDER","sourceRef":"qo-1","keepQty":"2","moveKeptTo":{"sourceType":"NONCONFORMANCE","sourceRef":"n1"}}`
 	if rec := do(t, h, http.MethodPost, "/v1/inventory/holds:release-source", body, []string{"inventory.read"}, nil); rec.Code != http.StatusForbidden {
 		t.Errorf("read duty: %d", rec.Code)
 	}
 	rec := do(t, h, http.MethodPost, "/v1/inventory/holds:release-source", body, []string{"inventory.hold.apply"}, nil)
-	if rec.Code != http.StatusOK || fs.hold.sourceType != "QUALITY_ORDER" || fs.hold.sourceRef != "qo-1" || !fs.hold.sourceKeep.Equal(decimal.NewFromInt(2)) {
+	if rec.Code != http.StatusOK || fs.hold.sourceType != "QUALITY_ORDER" || fs.hold.sourceRef != "qo-1" || !fs.hold.sourceKeep.Equal(decimal.NewFromInt(2)) ||
+		fs.hold.sourceMove == nil || fs.hold.sourceMove.Type != "NONCONFORMANCE" || fs.hold.sourceMove.Ref != "n1" || !strings.Contains(rec.Body.String(), `"known":true`) {
 		t.Fatalf("release-source: %d %+v", rec.Code, fs.hold)
 	}
 	if rec := do(t, h, http.MethodPost, "/v1/inventory/holds:release-source", `{"sourceType":"QUALITY_ORDER","sourceRef":"q","keepQty":"-1"}`,

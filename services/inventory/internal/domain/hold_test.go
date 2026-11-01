@@ -88,3 +88,17 @@ func TestCheckHoldRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestHeldQuantityNeverExceedsPhysicalEvenWhenNegativeStockIsAllowed(t *testing.T) {
+	before := OnHand{PostedQty: decimal.NewFromInt(10), HeldPhysical: decimal.NewFromInt(8)}
+	after := before
+	after.PostedQty = decimal.NewFromInt(5)
+	allow := NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}
+	if after.CheckNegative(before, allow) == nil {
+		t.Fatal("an issue that leaves less physical stock than is held must be refused under any policy")
+	}
+	after.PostedQty = decimal.NewFromInt(8)
+	if err := after.CheckNegative(before, allow); err != nil {
+		t.Fatalf("issuing down to the held quantity: %v", err)
+	}
+}

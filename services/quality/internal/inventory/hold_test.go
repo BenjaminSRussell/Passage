@@ -27,6 +27,10 @@ type seen struct {
 }
 
 func rig(t *testing.T, status int) (*inventory.Client, *seen) {
+	return rigBody(t, status, `{"items":[],"known":true}`)
+}
+
+func rigBody(t *testing.T, status int, reply string) (*inventory.Client, *seen) {
 	t.Helper()
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, err := tenant.NewServiceSigner("quality", priv)
@@ -43,6 +47,7 @@ func rig(t *testing.T, status int) (*inventory.Client, *seen) {
 		got.path, got.key, got.claims = r.URL.Path, r.Header.Get("Idempotency-Key"), claims
 		_ = json.NewDecoder(r.Body).Decode(&got.body)
 		w.WriteHeader(status)
+		_, _ = w.Write([]byte(reply))
 	}))
 	t.Cleanup(srv.Close)
 	return inventory.New(srv.URL+"/", signer, nil), got
@@ -96,5 +101,31 @@ func TestNoSignerNoCall(t *testing.T) {
 	defer srv.Close()
 	if err := inventory.New(srv.URL, nil, nil).Place(context.Background(), call()); err == nil || reached {
 		t.Fatalf("an unsigned hold call was sent: %v", err)
+	}
+}
+
+func TestWholeLotAndHandoverAreSent(t *testing.T) {
+	c, got := rig(t, http.StatusCreated)
+	in := call()
+	in.WholeLot = true
+	if err := c.Place(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if got.body["wholeLot"] != true || got.body["qty"] != nil {
+		t.Fatalf("a lot hold sends wholeLot and no qty: %v", got.body)
+	}
+	in.MoveToType, in.MoveToRef = "NONCONFORMANCE", "n1"
+	if err := c.Release(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := got.body["moveKeptTo"].(map[string]any); m["sourceType"] != "NONCONFORMANCE" || m["sourceRef"] != "n1" {
+		t.Fatalf("body %v", got.body)
+	}
+}
+
+func TestReleaseOfAnUnknownSourceIsAFailureNotASuccess(t *testing.T) {
+	c, _ := rigBody(t, http.StatusOK, `{"items":[],"known":false}`)
+	if err := c.Release(context.Background(), call()); !errors.Is(err, inventory.ErrNoHold) || !errors.Is(err, inventory.ErrRejected) {
+		t.Fatalf("release: %v", err)
 	}
 }

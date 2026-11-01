@@ -50,6 +50,8 @@ spec:
 {{- if .Values.serviceUrls.inventory }}
             - name: INVENTORY_URL
               value: {{ .Values.serviceUrls.inventory | quote }}
+            - name: QUALITY_HOLD_TENANTS
+              value: {{ .Values.holdTenants | quote }}
 {{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE

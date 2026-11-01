@@ -52,6 +52,10 @@ type holdSourceReleaseRequest struct {
 	SourceType string `json:"sourceType"`
 	SourceRef  string `json:"sourceRef"`
 	KeepQty    string `json:"keepQty"`
+	MoveKeptTo *struct {
+		SourceType string `json:"sourceType"`
+		SourceRef  string `json:"sourceRef"`
+	} `json:"moveKeptTo"`
 }
 
 type holdResponse struct {
@@ -204,16 +208,23 @@ func (a *API) releaseHoldSource(w http.ResponseWriter, r *http.Request) {
 			fields["keepQty"] = "must be a non-negative decimal number"
 		}
 	}
+	var moveTo *store.HoldSource
+	if m := req.MoveKeptTo; m != nil {
+		if !domain.HoldSourceType.MatchString(m.SourceType) || len(m.SourceRef) < 1 || len(m.SourceRef) > 60 {
+			fields["moveKeptTo"] = "needs a sourceType of 2 to 32 characters of A-Z, 0-9 or _ and a sourceRef of 1 to 60 characters"
+		}
+		moveTo = &store.HoldSource{Type: m.SourceType, Ref: m.SourceRef}
+	}
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
 		return
 	}
-	released, err := a.store.ReleaseHoldsBySource(r.Context(), req.SourceType, req.SourceRef, keep)
+	res, err := a.store.ReleaseHoldsBySource(r.Context(), req.SourceType, req.SourceRef, keep, moveTo)
 	if err != nil {
 		a.failed(w, r, "release holds by source", err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": holdItems(released)})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": holdItems(res.Released), "known": res.Known})
 }
 
 func (a *API) listHolds(w http.ResponseWriter, r *http.Request) {

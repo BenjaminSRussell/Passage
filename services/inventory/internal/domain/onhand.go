@@ -115,6 +115,9 @@ func (o OnHand) CheckNegative(before OnHand, p NegativePolicy) error {
 	if ao := o.AvailOrdered(); !p.FinancialAllowed && ao.Sign() < 0 && ao.LessThan(before.AvailOrdered()) {
 		return &NegativeError{Code: CodeNegativeFinancial, Shortfall: ao.Neg()}
 	}
+	if pi := o.PhysicalInvent(); o.HeldPhysical.Sign() > 0 && pi.LessThan(o.HeldPhysical) && pi.LessThan(before.PhysicalInvent()) {
+		return &NegativeError{Code: CodeNegativePhysical, Shortfall: o.HeldPhysical.Sub(pi)}
+	}
 	return nil
 }
 

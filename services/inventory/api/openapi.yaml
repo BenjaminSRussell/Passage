@@ -691,6 +691,13 @@ paths:
                 sourceType: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
                 sourceRef: { type: string, minLength: 1, maxLength: 60 }
                 keepQty: { $ref: '#/components/schemas/Decimal' }
+                moveKeptTo:
+                  type: object
+                  description: Re-sources the holds that stay held, in the same transaction, so a later release of the new source touches only them
+                  required: [sourceType, sourceRef]
+                  properties:
+                    sourceType: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+                    sourceRef: { type: string, minLength: 1, maxLength: 60 }
       responses:
         '200':
           description: The holds this call released from
@@ -698,11 +705,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, known]
                 properties:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Hold' }
+                  known: { type: boolean, description: 'False when no hold, active or released, ever had this source; a caller that placed one treats that as a failure' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }

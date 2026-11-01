@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -23,6 +25,9 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+
+	defaultHoldSweep = time.Minute
+	holdStaleAfter   = 5 * time.Minute
 )
 
 func main() {
@@ -71,6 +76,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	interval, err := holdSweepInterval(getenv)
+	if err != nil {
+		return err
+	}
+	go st.RunHoldSweeper(ctx, splitList(getenv("QUALITY_HOLD_TENANTS")), interval, holdStaleAfter)
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
@@ -92,6 +102,28 @@ func newStore(pool *pgxpool.Pool, getenv func(string) string) (*store.Postgres, 
 		return nil, errors.New("INVENTORY_URL needs PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE: inventory accepts hold calls only with a signed service token")
 	}
 	return st.WithHolds(inventory.New(url, signer, nil)), nil
+}
+
+func holdSweepInterval(getenv func(string) string) (time.Duration, error) {
+	raw := getenv("QUALITY_HOLD_SWEEP_INTERVAL")
+	if raw == "" {
+		return defaultHoldSweep, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 5*time.Second {
+		return 0, fmt.Errorf("QUALITY_HOLD_SWEEP_INTERVAL must be a duration of at least 5s, got %q", raw)
+	}
+	return d, nil
+}
+
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

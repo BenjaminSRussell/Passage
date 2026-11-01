@@ -88,6 +88,7 @@ type Store interface {
 type Postgres struct {
 	pool  *pgxpool.Pool
 	holds HoldPort
+	kick  chan string
 }
 
 // New returns a Postgres store over pool.
@@ -660,7 +661,7 @@ func (s *Postgres) RecordResults(ctx context.Context, orderID string, expectedVe
 		return nil
 	})
 	if applied {
-		s.FlushHolds(ctx)
+		s.kickFlush(ctx)
 	}
 	return out, applied, err
 }
@@ -811,7 +812,7 @@ func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expect
 		return nil
 	})
 	if err == nil && stored.ID != "" {
-		s.FlushHolds(ctx)
+		s.kickFlush(ctx)
 	}
 	return order, stored, err
 }

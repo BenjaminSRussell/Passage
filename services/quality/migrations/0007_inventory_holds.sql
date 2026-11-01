@@ -11,6 +11,8 @@ create table if not exists quality_hold_link (
   dims jsonb not null default '{}'::jsonb check (jsonb_typeof(dims) = 'object'),
   qty numeric(18,6) not null default 0 check (qty >= 0),
   keep_qty numeric(18,6) not null default 0 check (keep_qty >= 0),
+  move_to_type text check (move_to_type in ('QUALITY_ORDER', 'NONCONFORMANCE')),
+  move_to_ref text,
   state text not null default 'PENDING' check (state in ('PENDING', 'DONE', 'FAILED')),
   attempts integer not null default 0 check (attempts >= 0),
   last_error text not null default '' check (char_length(last_error) <= 500),
@@ -18,7 +20,8 @@ create table if not exists quality_hold_link (
   done_at timestamptz,
   primary key (tenant_id, id),
   unique (tenant_id, idempotency_key),
-  check ((action = 'PLACE') = (qty > 0))
+  check ((action = 'PLACE') = (qty > 0)),
+  check ((move_to_type is null) = (move_to_ref is null))
 );
 create index if not exists quality_hold_link_pending_idx on quality_hold_link (tenant_id, created_at, id) where state = 'PENDING';
 alter table quality_hold_link enable row level security;

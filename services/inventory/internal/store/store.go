@@ -66,7 +66,7 @@ type Store interface {
 	ListBlockings(ctx context.Context, f BlockingFilter) ([]domain.Blocking, error)
 	PlaceHold(ctx context.Context, in HoldInput) (HoldResult, error)
 	ReleaseHold(ctx context.Context, id string, version int, qty *decimal.Decimal) (domain.Hold, error)
-	ReleaseHoldsBySource(ctx context.Context, sourceType, sourceRef string, keep decimal.Decimal) ([]domain.Hold, error)
+	ReleaseHoldsBySource(ctx context.Context, sourceType, sourceRef string, keep decimal.Decimal, moveTo *HoldSource) (SourceRelease, error)
 	ListHolds(ctx context.Context, f HoldFilter) ([]domain.Hold, error)
 	CreateCountPlan(ctx context.Context, key string, p domain.CountPlan) (domain.CountPlan, bool, error)
 	ListCountPlans(ctx context.Context) ([]domain.CountPlan, error)

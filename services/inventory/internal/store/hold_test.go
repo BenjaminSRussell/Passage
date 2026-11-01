@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -179,24 +181,34 @@ func TestWholeLotHoldTakesEveryRowOfTheLotAndNothingElse(t *testing.T) {
 	if _, err := s.PlaceHold(ctx, in); problemCode(err) != domain.CodeHoldExceeds {
 		t.Fatalf("a lot with nothing available: %v", err)
 	}
-	released, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", dec("50"))
-	if err != nil {
-		t.Fatal(err)
+	rel, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", dec("50"), nil)
+	if err != nil || !rel.Known {
+		t.Fatalf("release: %v %+v", err, rel)
 	}
 	var total decimal.Decimal
-	for _, h := range released {
+	for _, h := range rel.Released {
 		total = total.Add(h.ReleasedQty)
 	}
 	if !total.Equal(dec("50")) {
 		t.Fatalf("keeping 50 of 100 releases 50, released %s", total)
 	}
-	if again, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", dec("50")); err != nil || len(again) != 0 {
+	if again, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", dec("50"), nil); err != nil || len(again.Released) != 0 {
 		t.Fatalf("stating the same level again releases nothing: %v %+v", err, again)
 	}
-	if none, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "unknown", decimal.Zero); err != nil || len(none) != 0 {
+	if none, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "unknown", decimal.Zero, nil); err != nil || len(none.Released) != 0 || none.Known {
 		t.Fatalf("a source without holds: %v %+v", err, none)
 	}
-	if _, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", decimal.Zero); err != nil {
+	moved, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", dec("30"), &store.HoldSource{Type: "NONCONFORMANCE", Ref: "n-1"})
+	if err != nil || !moved.Known {
+		t.Fatalf("keep 30 and re-source: %v %+v", err, moved)
+	}
+	if left, _ := s.ListHolds(ctx, store.HoldFilter{SourceType: "NONCONFORMANCE", SourceRef: "n-1", State: domain.HoldActive}); len(left) == 0 {
+		t.Fatal("the kept holds were not re-sourced")
+	}
+	if old, _ := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "qo-lot", decimal.Zero, nil); len(old.Released) != 0 || !old.Known {
+		t.Fatalf("the order source keeps nothing after the move: %+v", old)
+	}
+	if _, err := s.ReleaseHoldsBySource(ctx, "NONCONFORMANCE", "n-1", decimal.Zero, nil); err != nil {
 		t.Fatal(err)
 	}
 	for loc, r := range stockByLocation(t, ctx, s, product) {
@@ -222,7 +234,7 @@ func TestHoldsAreScopedToTheLegalEntityAndTenant(t *testing.T) {
 	if got, err := s.ListHolds(other, store.HoldFilter{}); err != nil || len(got) != 0 {
 		t.Fatalf("another legal entity listed %d holds: %v", len(got), err)
 	}
-	if out, err := s.ReleaseHoldsBySource(entityCtx(2, legalEntityOf(ctx)), "QUALITY_ORDER", "x", decimal.Zero); err != nil || len(out) != 0 {
+	if out, err := s.ReleaseHoldsBySource(entityCtx(2, legalEntityOf(ctx)), "QUALITY_ORDER", "x", decimal.Zero, nil); err != nil || len(out.Released) != 0 {
 		t.Fatalf("another tenant released holds: %v %+v", err, out)
 	}
 	foreign := holdInput(other, product, "k2", "1", "x", dims())
@@ -320,7 +332,7 @@ func TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative(t *testing.T) {
 			case 3:
 				ref := sources[rapid.IntRange(0, 1).Draw(rt, "src")]
 				keep := decimal.NewFromInt(int64(rapid.IntRange(0, 50).Draw(rt, "keep")))
-				if _, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", ref, keep); err != nil {
+				if _, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", ref, keep, nil); err != nil {
 					rt.Fatalf("release source %s keep %s: %v", ref, keep, err)
 				}
 				left, _ := s.ListHolds(ctx, store.HoldFilter{ProductID: product, SourceType: "QUALITY_ORDER", SourceRef: ref, State: domain.HoldActive})
@@ -346,5 +358,56 @@ func TestHoldProperty_AvailablePlusHeldIsOnHandAndNeverNegative(t *testing.T) {
 	})
 	if rep, err := s.RebuildOnHand(ctx, false); err != nil || rep.DiffCount != 0 {
 		t.Fatalf("rebuild after the random sequences: %v %+v", err, rep)
+	}
+}
+
+func TestConcurrentPlaceAndReleaseNeverOverHold(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "25", "1", dims("batch", "B1")))
+	var wg sync.WaitGroup
+	var placed atomic.Int64
+	for i := 0; i < 60; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := s.PlaceHold(ctx, holdInput(ctx, product, fmt.Sprintf("c-%d", i), "1", "race", dims("batch", "B1"))); err == nil {
+				placed.Add(1)
+			} else if problemCode(err) != domain.CodeHoldExceeds {
+				t.Errorf("place %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if placed.Load() != 25 {
+		t.Fatalf("%d one-unit holds placed on 25 units, want exactly 25", placed.Load())
+	}
+	row := stockByLocation(t, ctx, s, product)[""]
+	if !row.held.Equal(dec("25")) || !row.avail.IsZero() {
+		t.Fatalf("held %s avail %s, want 25 / 0", row.held, row.avail)
+	}
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if _, err := s.ReleaseHoldsBySource(ctx, "QUALITY_ORDER", "race", dec("10"), nil); err != nil {
+				t.Errorf("release: %v", err)
+			}
+		}()
+		go func(i int) {
+			defer wg.Done()
+			if _, err := s.PlaceHold(ctx, holdInput(ctx, product, fmt.Sprintf("d-%d", i), "1", "race", dims("batch", "B1"))); err != nil && problemCode(err) != domain.CodeHoldExceeds {
+				t.Errorf("place: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	row = stockByLocation(t, ctx, s, product)[""]
+	if row.avail.Sign() < 0 || !row.avail.Add(row.held).Equal(row.physical) {
+		t.Fatalf("avail %s held %s physical %s after the race", row.avail, row.held, row.physical)
+	}
+	if rep, err := s.RebuildOnHand(ctx, false); err != nil || rep.DiffCount != 0 {
+		t.Fatalf("rebuild: %v %+v", err, rep)
 	}
 }

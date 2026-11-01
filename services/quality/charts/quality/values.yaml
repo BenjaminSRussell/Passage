@@ -8,6 +8,7 @@ resources:
 serviceMonitor: { enabled: false }
 serviceUrls:
   inventory: ""
+holdTenants: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

@@ -103,7 +103,7 @@ func (s *Postgres) RecordCertificate(ctx context.Context, rec domain.CertRecord,
 		return nil
 	})
 	if inserted {
-		s.FlushHolds(ctx)
+		s.kickFlush(ctx)
 	}
 	return out, inserted, err
 }
