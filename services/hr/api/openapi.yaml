@@ -1703,6 +1703,12 @@ paths:
     post:
       operationId: approveCourseRegistration
       summary: Approve a REQUESTED registration; it takes a seat or a waitlist place
+      description: |
+        A manager with only MssApprove approves registrations of their direct
+        reports; any other registration answers the same 404 as one that does
+        not exist. A caller who also holds HcmLearningAdmin approves tenant-wide.
+        HCM-ESS-001 (404) when no worker is linked to the caller's sign-in,
+        HCM-ESS-002 (409) when more than one is.
       x-passage-duty: MssApprove
       parameters:
         - $ref: "#/components/parameters/RegistrationId"
@@ -1722,13 +1728,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "404":
-          description: HCM-CRS-REG-NOT-FOUND
+          description: HCM-CRS-REG-NOT-FOUND (also a registration outside the caller's team) or HCM-ESS-001
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
         "409":
-          description: HCM-CRS-STATE (not awaiting approval)
+          description: HCM-CRS-STATE (not awaiting approval) or HCM-ESS-002
           content:
             application/problem+json:
               schema:
@@ -1809,7 +1815,9 @@ paths:
       description: |
         A direct report is a worker whose manager today is the caller's worker
         (BR-42.1: the nearest occupied position up the reports-to line, vacant
-        positions skipped).
+        positions skipped). Items carry no userId or partyPersonId.
+        HCM-ESS-001 (404) when no worker is linked to the caller's sign-in,
+        HCM-ESS-002 (409) when more than one is.
       x-passage-duty: MssBase
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -1820,7 +1828,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkerList"
+                $ref: "#/components/schemas/TeamWorkerList"
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "401":
@@ -1828,16 +1836,26 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
-          $ref: "#/components/responses/Problem"
+          description: HCM-ESS-001, no worker is linked to the caller's sign-in
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "409":
-          $ref: "#/components/responses/Problem"
+          description: HCM-ESS-002, more than one worker is linked to the caller's sign-in
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/me/team/{id}:
     get:
       operationId: getMyTeamMember
       summary: A direct report's record with today's position and manager (no PII)
       description: |
         Any worker who is not the caller's direct report, and any id that does
-        not exist, answers the same 404 HCM-WRK-NOT-FOUND.
+        not exist, answers the same 404 HCM-WRK-NOT-FOUND. The record carries
+        no userId or partyPersonId. HCM-ESS-001 (404) when no worker is linked
+        to the caller's sign-in, HCM-ESS-002 (409) when more than one is.
       x-passage-duty: MssBase
       parameters:
         - $ref: "#/components/parameters/WorkerId"
@@ -1853,9 +1871,17 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
-          $ref: "#/components/responses/Problem"
+          description: HCM-WRK-NOT-FOUND (not a direct report) or HCM-ESS-001 (no worker is linked to the caller's sign-in)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "409":
-          $ref: "#/components/responses/Problem"
+          description: HCM-ESS-002, more than one worker is linked to the caller's sign-in
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/incidents:
     post:
       operationId: reportIncident
@@ -3003,6 +3029,13 @@ paths:
     post:
       operationId: createRequisition
       summary: Create a requisition for a position (FR-42.21)
+      description: |
+        requisitionNumber is optional. When omitted the number is the next one
+        of the REQ sequence from the numbering service, allocated with the
+        Idempotency-Key so a replay keeps its number; the caller must then carry
+        exactly one legal entity (422 HCM-LEGAL-ENTITY-REQUIRED) and an
+        unreachable numbering service answers 503 HCM-NUMBERING-UNAVAILABLE.
+        A supplied number is used as given.
       x-passage-duty: HcmRecruitMaintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -4084,6 +4117,121 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/hr/me/compensation/cycles/{id}/worksheet:
+    put:
+      operationId: saveMyWorksheet
+      summary: Save the signed-in manager's worksheet rows (draft); only their direct reports
+      description: |
+        The manager is the worker linked to the caller's sign-in. A row for a
+        worker who is not a direct report answers 404 HCM-WRK-NOT-FOUND and
+        nothing is saved. HCM-ESS-001 (404) when no worker is linked, HCM-ESS-002
+        (409) when more than one is.
+      x-passage-duty: MssApprove
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Json"
+      responses:
+        "200":
+          description: The caller's direct reports' rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Json"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CMP-NOT-FOUND, HCM-WRK-NOT-FOUND or HCM-ESS-001
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: state or duplicate conflict, or HCM-ESS-002
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: business rule violation
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: getMyWorksheet
+      summary: Read the signed-in manager's worksheet; only their direct reports' rows
+      description: A row whose worker no longer reports to the caller is not returned.
+      x-passage-duty: MssApprove
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: The caller's direct reports' rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Json"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CMP-NOT-FOUND or HCM-ESS-001
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-ESS-002
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/me/compensation/cycles/{id}/worksheet/submit:
+    post:
+      operationId: submitMyWorksheet
+      summary: Submit the signed-in manager's worksheet; blocked over budget (HCM-CMP-002) or outside guideline without justification (HCM-CMP-001)
+      x-passage-duty: MssApprove
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: The caller's direct reports' rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Json"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CMP-NOT-FOUND or HCM-ESS-001
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: state conflict, or HCM-ESS-002
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: business rule violation
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -4361,9 +4509,42 @@ components:
           properties:
             asOf:
               $ref: "#/components/schemas/AsOfView"
+    TeamWorker:
+      type: object
+      description: A direct report as a manager sees them; userId and partyPersonId are not exposed.
+      required: [id, personnelNumber, workerType, legalName, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        personnelNumber:
+          type: string
+        workerType:
+          type: string
+          enum: [EMPLOYEE, CONTRACTOR]
+        legalName:
+          type: string
+        preferredName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TeamWorkerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamWorker"
+        nextCursor:
+          type: string
     TeamMember:
       allOf:
-        - $ref: "#/components/schemas/Worker"
+        - $ref: "#/components/schemas/TeamWorker"
         - type: object
           required: [asOf]
           properties:

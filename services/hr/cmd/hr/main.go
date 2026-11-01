@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 	"github.com/BenjaminSRussell/passage/services/hr/migrations"
 )
@@ -156,6 +157,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	a := api.New(store.New(pool, sealer, depth)).EnableRetentionPurge(getenv("HR_RETENTION_PURGE_ENABLED") == "true")
+	if url := getenv("NUMBERING_URL"); url != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		a.WithSequencer(numbering.New(url).WithSigner(signer))
+	} else {
+		slog.Warn("NUMBERING_URL is empty, a requisition without a requisitionNumber returns 503 until it is set")
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -163,6 +173,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	sweep, err := newActionSweep(getenv, a.SweepDueActions)
+	if err != nil {
+		return err
+	}
+	if sweep != nil {
+		go sweep.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

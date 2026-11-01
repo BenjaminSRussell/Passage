@@ -364,7 +364,7 @@ func (s *Postgres) SaveWorksheet(ctx context.Context, cycleID, managerID string,
 	return out, err
 }
 
-func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID string) ([]WorksheetRow, error) {
+func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID string, onlyDirectReports bool) ([]WorksheetRow, error) {
 	p := principal(ctx)
 	var out []WorksheetRow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -379,9 +379,27 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 		if err != nil {
 			return err
 		}
-		mine := rows[:0:0]
+		var drafts []string
 		for _, r := range rows {
 			if r.Status == worksheetDraft {
+				drafts = append(drafts, r.WorkerID)
+			}
+		}
+		var onlyWorkers []string
+		reports := map[string]bool{}
+		if onlyDirectReports {
+			found, err := directReportsTx(ctx, tx, p.TenantID, managerID, drafts, s.now().UTC(), s.depth)
+			if err != nil {
+				return err
+			}
+			for _, id := range found {
+				reports[id] = true
+			}
+			onlyWorkers = append([]string{}, found...)
+		}
+		mine := rows[:0:0]
+		for _, r := range rows {
+			if r.Status == worksheetDraft && (!onlyDirectReports || reports[r.WorkerID]) {
 				mine = append(mine, r)
 			}
 		}
@@ -435,8 +453,9 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 				return problem(http.StatusUnprocessableEntity, domain.CodeCompOverBudget, err.(*domain.Error).Detail)
 			}
 		}
-		if _, err := tx.Exec(ctx, `update hr_comp_worksheet_row set status = 'SUBMITTED' where tenant_id = $1 and cycle_id = $2 and manager_worker_id = $3 and status = 'DRAFT'`,
-			p.TenantID, cycleID, managerID); err != nil {
+		if _, err := tx.Exec(ctx, `update hr_comp_worksheet_row set status = 'SUBMITTED' where tenant_id = $1 and cycle_id = $2 and manager_worker_id = $3 and status = 'DRAFT'
+				and ($4::uuid[] is null or worker_id = any($4))`,
+			p.TenantID, cycleID, managerID, onlyWorkers); err != nil {
 			return err
 		}
 		out, err = listWorksheet(ctx, tx, p.TenantID, cycleID, managerID)

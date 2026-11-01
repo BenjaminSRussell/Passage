@@ -235,17 +235,17 @@ func TestCompensationCycleBudgetBlocksAndAppliesAC4213(t *testing.T) {
 	if err != nil || saved[0].CompaRatio == nil || *saved[0].CompaRatio != "1.00" || saved[0].ProposedAmount != "5400.000000" {
 		t.Fatalf("worksheet = %+v err %v", saved, err)
 	}
-	_, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID)
+	_, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID, false)
 	requireCode(t, err, domain.CodeCompOutsideGuideline)
 	if _, err = f.s.SaveWorksheet(f.ctx, cycle.ID, manager.ID, rows("3.5", nil)); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID)
+	_, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID, false)
 	requireCode(t, err, domain.CodeCompOverBudget)
 	if _, err = f.s.SaveWorksheet(f.ctx, cycle.ID, manager.ID, rows("3", nil)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID); err != nil {
+	if _, err = f.s.SubmitWorksheet(allScope(), cycle.ID, manager.ID, false); err != nil {
 		t.Fatalf("submit at 5,400 of 6,000: %v", err)
 	}
 	if _, err = f.s.AdvanceCompCycle(f.ctx, cycle.ID, "APPROVAL"); err != nil {
