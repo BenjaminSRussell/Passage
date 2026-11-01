@@ -18,7 +18,9 @@ export function createEcoActivities(baseUrl: string, signer: ServiceTokenSigner,
         method: "POST",
         headers: {
           "X-Passage-Service-Token": signer.mintForEngineering({ tenantId: ref.tenantId, legalEntityId: ref.legalEntityId, actor: ref.actor }),
+          ...(ref.reason ? { "Content-Type": "application/json" } : {}),
         },
+        ...(ref.reason ? { body: JSON.stringify({ reason: ref.reason }) } : {}),
         signal: Context.current().cancellationSignal,
       });
       if (!response.ok) throw await callFailure(`engineering eco ${action}`, response);

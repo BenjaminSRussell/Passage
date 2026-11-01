@@ -9,6 +9,8 @@ export interface FakeEco {
   state: "submitted" | "approved" | "scheduled" | "released" | "rejected" | "cancelled";
   releaseDate?: string;
   decidedBy?: string;
+  createdBy?: string;
+  decisionReason?: string;
 }
 
 export const ECO_ID = "00000000-0000-0000-0000-0000000000e1";
@@ -39,7 +41,8 @@ export class FakeEngineering {
       return problem(refusal.status, `refused ${name}`, refusal.code);
     }
     if (id !== this.eco.id) return problem(404, "eco not found", "ENG-ECO-NOTFOUND");
-    const response = this.apply(name, claims.act);
+    const reason = init?.body ? (JSON.parse(String(init.body)) as { reason?: string }).reason : undefined;
+    const response = this.apply(name, claims.act, reason);
     if (response.ok) await this.afterEffect.get(name)?.(init?.signal);
     return response;
   };
@@ -52,14 +55,16 @@ export class FakeEngineering {
     this.afterEffect.set(action, hook);
   }
 
-  private apply(action: Action, actor: string): Response {
+  private apply(action: Action, actor: string, reason?: string): Response {
     const eco = this.eco;
     if (action === "release") return this.release();
     const target = ({ approve: "approved", reject: "rejected", cancel: "cancelled" } as const)[action];
     if (eco.state === target) return ok(eco);
     if (eco.state !== "submitted") return problem(409, `ECO is ${eco.state}`, "ENG-ECO-STATE");
+    if (actor === eco.createdBy) return problem(403, "the creator cannot decide", "ENG-ECO-SELF-APPROVAL");
     eco.state = target;
     eco.decidedBy = actor;
+    eco.decisionReason = reason;
     return ok(eco);
   }
 

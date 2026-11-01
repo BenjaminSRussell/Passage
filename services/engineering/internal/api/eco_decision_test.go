@@ -39,6 +39,75 @@ func TestDecideEco_RecordsTheDecisionWithoutReleasing(t *testing.T) {
 	}
 }
 
+func TestDecideEco_RefusesTheCreator(t *testing.T) {
+	for _, action := range []string{"approve", "reject", "cancel"} {
+		t.Run(action, func(t *testing.T) {
+			record := releasableRecord(domain.EcoSubmitted, time.Time{})
+			record.Eco.CreatedBy = "rita"
+			f := &fakeStore{record: record}
+			r, _ := newRouter(f, nil)
+			code, body := decide(r, action, workflowDuty, "rita")
+			if code != http.StatusForbidden || !strings.Contains(body, domain.CodeEcoSelfApproval) || len(f.released) != 0 {
+				t.Fatalf("creator %s = %d %s %+v", action, code, body, f.released)
+			}
+			if code, body := decide(r, action, workflowDuty, "carol"); code != http.StatusOK {
+				t.Fatalf("another user %s = %d %s", action, code, body)
+			}
+		})
+	}
+}
+
+func TestDecideEco_NeedsADecidingUser(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
+	r, _ := newRouter(f, nil)
+	if code, body := decide(r, "approve", workflowDuty, ""); code == http.StatusOK || !strings.Contains(body, domain.CodeEcoActorRequired) || len(f.released) != 0 {
+		t.Fatalf("no user = %d %s %+v", code, body, f.released)
+	}
+}
+
+func TestDecideEco_HumanApproveDutyCannotDecideOnlyRelease(t *testing.T) {
+	for _, action := range []string{"approve", "reject", "cancel"} {
+		f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
+		r, _ := newRouter(f, nil)
+		if code, _ := decide(r, action, allDuties, "carol"); code != http.StatusForbidden || len(f.released) != 0 {
+			t.Fatalf("human %s = %d, want 403 with no write", action, code)
+		}
+	}
+}
+
+func TestDecideEco_RecordsTheSystemActorAndReason(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
+	r, _ := newRouter(f, nil)
+	rec := do(r, http.MethodPost, ecos+"/"+ecoID+":cancel", `{"reason":"approval window closed"}`, workflowDuty, true, "X-Passage-User", "system:eco-timeout")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"decidedBy":"system:eco-timeout"`) || !strings.Contains(rec.Body.String(), `"decisionReason":"approval window closed"`) ||
+		f.released[0].eco.DecisionReason != "approval window closed" {
+		t.Fatalf("timeout cancel = %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+	long := do(r, http.MethodPost, ecos+"/"+ecoID+":cancel", `{"reason":"`+strings.Repeat("x", 201)+`"}`, workflowDuty, true, "X-Passage-User", "system:eco-timeout")
+	if long.Code != http.StatusBadRequest {
+		t.Fatalf("overlong reason = %d %s", long.Code, long.Body)
+	}
+}
+
+func TestCreateEco_RecordsTheCreator(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f, nil)
+	rec := do(r, http.MethodPost, ecos, `{"number":"ECO-9","replaces":[{"oldVersionId":"`+oldVersion+`","newVersionId":"`+newVersion+`"}]}`, allDuties, true, "X-Passage-User", "rita")
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"createdBy":"rita"`) {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestReleaseEco_ApproverSeamCannotApproveTheCreatorsEco(t *testing.T) {
+	record := releasableRecord(domain.EcoSubmitted, time.Time{})
+	record.Eco.CreatedBy = "alice"
+	f := &fakeStore{record: record}
+	r, _ := newRouter(f, approves)
+	if rec := release(r, allDuties); rec.Code != http.StatusForbidden || len(f.released) != 0 {
+		t.Fatalf("approver = creator = %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+}
+
 func TestDecideEco_RepeatIsIdempotent(t *testing.T) {
 	f := &fakeStore{record: releasableRecord(domain.EcoApproved, time.Time{})}
 	r, _ := newRouter(f, nil)

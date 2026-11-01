@@ -35,12 +35,14 @@ type Replacement struct {
 }
 
 type Eco struct {
-	ID          string
-	Number      string
-	State       EcoState
-	ReleaseDate time.Time
-	Replaces    []Replacement
-	DecidedBy   string
+	ID             string
+	Number         string
+	State          EcoState
+	ReleaseDate    time.Time
+	Replaces       []Replacement
+	DecidedBy      string
+	CreatedBy      string
+	DecisionReason string
 }
 
 type Decision struct {
@@ -80,6 +82,9 @@ func (e *Eco) Review(ctx context.Context, ap Approver) error {
 		unavailable.Cause = err
 		return unavailable
 	}
+	if err := e.checkSeparation(d.Actor); err != nil {
+		return err
+	}
 	e.DecidedBy = d.Actor
 	if !d.Approved {
 		return e.Transition(EcoRejected)
@@ -87,14 +92,27 @@ func (e *Eco) Review(ctx context.Context, ap Approver) error {
 	return e.Transition(EcoApproved)
 }
 
-func (e *Eco) Decide(to EcoState, actor string) error {
+func (e *Eco) checkSeparation(actor string) error {
+	if actor == "" {
+		return errf(CodeEcoActorRequired, "an ECO decision needs the deciding user")
+	}
+	if e.CreatedBy != "" && actor == e.CreatedBy {
+		return errf(CodeEcoSelfApproval, "the user who created ECO %s cannot decide it", e.Number)
+	}
+	return nil
+}
+
+func (e *Eco) Decide(to EcoState, actor, reason string) error {
 	if to != EcoApproved && to != EcoRejected && to != EcoCancelled {
 		return errf(CodeEcoState, "an ECO is decided as approved, rejected or cancelled, not %s", to)
 	}
 	if e.State != EcoSubmitted {
 		return errf(CodeEcoState, "ECO %s is %s, only a submitted ECO can be decided", e.ID, e.State)
 	}
-	e.DecidedBy = actor
+	if err := e.checkSeparation(actor); err != nil {
+		return err
+	}
+	e.DecidedBy, e.DecisionReason = actor, reason
 	return e.Transition(to)
 }
 

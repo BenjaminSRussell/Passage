@@ -335,3 +335,39 @@ func TestCorrection_ServiceDutyReachesOnlyTheCAPARoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestCorrection_ServiceDutyStillEnforcesTheD7Separation(t *testing.T) {
+	f := newFake()
+	h := newHandler(f)
+	id := createNCR(t, h).ID
+	base := "/v1/quality/nonconformances/" + id
+	call(h, reqSpec{method: http.MethodPost, path: base + ":approve", duties: ncrDuties, ifMatch: `"1"`})
+	call(h, reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{"effectivenessCheckDays":30}`, duties: "quality.capa.execute", key: "capa:" + id, ifMatch: `"2"`})
+	version := 3
+	for no := 1; no <= 7; no++ {
+		rec := call(h, reqSpec{method: http.MethodPost, path: base + ":complete-step", duties: "quality.capa.execute", user: "engineer",
+			body: `{"step":` + strconv.Itoa(no) + `,"notes":"done"}`, ifMatch: `"` + strconv.Itoa(version) + `"`})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("D%d: %d %s", no, rec.Code, rec.Body.String())
+		}
+		version++
+	}
+	n := f.ncrs[id]
+	due := time.Now().Add(-time.Hour)
+	n.Correction.EffectivenessDueAt = &due
+	f.ncrs[id] = n
+	check := reqSpec{method: http.MethodPost, path: base + ":check-effectiveness", body: `{"result":"EFFECTIVE","note":"ok"}`,
+		duties: "quality.capa.execute", ifMatch: `"` + strconv.Itoa(version) + `"`}
+	check.user = "engineer"
+	if rec := call(h, check); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeEffectivenessSoD) {
+		t.Fatalf("service duty with the D7 user: %d %s", rec.Code, rec.Body.String())
+	}
+	check.user = ""
+	if rec := call(h, check); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeEffectivenessSoD) {
+		t.Fatalf("service duty without a user: %d %s", rec.Code, rec.Body.String())
+	}
+	check.user = "reviewer"
+	if rec := call(h, check); rec.Code != http.StatusOK {
+		t.Fatalf("service duty with another user: %d %s", rec.Code, rec.Body.String())
+	}
+}

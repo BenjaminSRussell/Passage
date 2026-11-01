@@ -710,7 +710,10 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	data.duties["quality.capa.execute"].service_only
 	every action in ["approve", "reject", "cancel", "release"] {
 		allowed("engineering.eco.workflow", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
-		allowed("engineering.eco.approve", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
+	}
+	allowed("engineering.eco.approve", "POST", "/v1/engineering/ecos/e1:release")
+	every action in ["approve", "reject", "cancel"] {
+		not allowed("engineering.eco.approve", "POST", sprintf("/v1/engineering/ecos/e1:%s", [action]))
 	}
 	not allowed("engineering.eco.workflow", "POST", "/v1/engineering/ecos")
 	not allowed("engineering.eco.workflow", "GET", "/v1/engineering/ecos/e1")

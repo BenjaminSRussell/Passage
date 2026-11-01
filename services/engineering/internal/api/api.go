@@ -42,6 +42,7 @@ const (
 	maxLines          = 5000
 	maxOperations     = 500
 	maxNumberLength   = 40
+	maxReasonLength   = 200
 	maxDecimalExp     = 15
 	minDecimalExp     = -12
 )
@@ -92,8 +93,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos", a.listEcos)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}", a.getEco)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}/impact", a.ecoImpact)
-		ecoDecider := r.With(authz.RequireAnyDuty(dutyEcoApprove, dutyEcoWorkflow))
-		ecoDecider.Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+		r.With(authz.RequireAnyDuty(dutyEcoApprove, dutyEcoWorkflow)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+		ecoDecider := r.With(authz.RequireDuty(dutyEcoWorkflow))
 		ecoDecider.Post("/v1/engineering/ecos/{id}:approve", a.decideEco(domain.EcoApproved))
 		ecoDecider.Post("/v1/engineering/ecos/{id}:reject", a.decideEco(domain.EcoRejected))
 		ecoDecider.Post("/v1/engineering/ecos/{id}:cancel", a.decideEco(domain.EcoCancelled))
@@ -567,16 +568,18 @@ type replacementBody struct {
 }
 
 type ecoBody struct {
-	ID          string            `json:"id,omitempty"`
-	Number      string            `json:"number"`
-	State       string            `json:"state,omitempty"`
-	ReleaseDate string            `json:"releaseDate,omitempty"`
-	DecidedBy   string            `json:"decidedBy,omitempty"`
-	Replaces    []replacementBody `json:"replaces"`
+	ID             string            `json:"id,omitempty"`
+	Number         string            `json:"number"`
+	State          string            `json:"state,omitempty"`
+	ReleaseDate    string            `json:"releaseDate,omitempty"`
+	DecidedBy      string            `json:"decidedBy,omitempty"`
+	CreatedBy      string            `json:"createdBy,omitempty"`
+	DecisionReason string            `json:"decisionReason,omitempty"`
+	Replaces       []replacementBody `json:"replaces"`
 }
 
 func bodyFromEco(e domain.Eco) ecoBody {
-	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, Replaces: make([]replacementBody, len(e.Replaces))}
+	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, CreatedBy: e.CreatedBy, DecisionReason: e.DecisionReason, Replaces: make([]replacementBody, len(e.Replaces))}
 	for i, r := range e.Replaces {
 		body.Replaces[i] = replacementBody{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID}
 	}
@@ -619,6 +622,8 @@ func (a *API) createEco(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
+	creator, _ := tenant.FromContext(r.Context())
+	eco.CreatedBy = creator.UserID
 	created, err := a.store.CreateEco(r.Context(), eco, store.Idem{Key: r.Header.Get(idempotencyKey), Hash: hashOf(body)})
 	if err != nil {
 		a.fail(w, r, "create eco", err, &a.ecosFailed)
@@ -698,13 +703,26 @@ func (a *API) decideEco(to domain.EcoState) http.HandlerFunc {
 			a.fail(w, r, "load eco", err, &a.ecosFailed)
 			return
 		}
+		var decision struct {
+			Reason string `json:"reason"`
+		}
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &decision); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		if len([]rune(decision.Reason)) > maxReasonLength {
+			invalid(w, r, map[string]string{"reason": fmt.Sprintf("must be at most %d characters", maxReasonLength)})
+			return
+		}
 		eco, previous := record.Eco, record.Eco.State
 		if previous == to {
 			httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
 			return
 		}
 		p, _ := tenant.FromContext(r.Context())
-		if err := eco.Decide(to, p.UserID); err != nil {
+		if err := eco.Decide(to, p.UserID, strings.TrimSpace(decision.Reason)); err != nil {
 			a.fail(w, r, "decide eco", err, &a.ecosFailed)
 			return
 		}
@@ -749,6 +767,8 @@ func problemFrom(de *domain.Error) *httpx.Problem {
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
+	case domain.CodeEcoSelfApproval:
+		status = http.StatusForbidden
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
 }

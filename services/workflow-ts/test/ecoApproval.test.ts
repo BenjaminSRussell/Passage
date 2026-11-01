@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WorkflowFailedError } from "@temporalio/client";
 import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createEcoActivities } from "../src/ecoActivities.js";
@@ -8,9 +7,8 @@ import { createServiceTokenSigner } from "../src/serviceToken.js";
 import {
   ecoApprovalWorkflow,
   ecoApprovalWorkflowId,
-  ecoApproveSignal,
   ecoApprovalStateQuery,
-  ecoRejectSignal,
+  ecoDecisionSignal,
   validateEcoApprovalInput,
   type EcoApprovalInput,
 } from "../src/workflows.js";
@@ -21,9 +19,12 @@ const input: EcoApprovalInput = {
   legalEntityId: "00000000-0000-0000-0000-0000000000a1",
   ecoId: ECO_ID,
   requester: "rita",
-  approver: "alice",
   approvalTimeoutMs: 7 * 24 * 60 * 60 * 1000,
 };
+
+const approve = (handle: { signal: (...args: any[]) => Promise<void> }, actor: string) => handle.signal(ecoDecisionSignal, { decision: "approved", actor });
+const reject = (handle: { signal: (...args: any[]) => Promise<void> }, actor: string, reason?: string) =>
+  handle.signal(ecoDecisionSignal, { decision: "rejected", actor, ...(reason ? { reason } : {}) });
 
 const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 5).toString("base64") });
 
@@ -68,8 +69,8 @@ describe("ECO approval workflow", () => {
 
   it("applies the change on approval: old version expires, new version goes live, the approver is the actor", async () => {
     const fake = new FakeEngineering();
-    const result = await run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"));
-    expect(result).toEqual({ ecoId: ECO_ID, status: "released", decidedBy: "alice" });
+    const result = await run(fake, (handle) => approve(handle, "alice"));
+    expect(result).toMatchObject({ ecoId: ECO_ID, status: "released", decidedBy: "alice", refusedDecisions: 0 });
     expect(fake.eco.state).toBe("released");
     expect([fake.oldVersion, fake.newVersion]).toEqual(["expired", "active"]);
     expect(fake.calls).toEqual({ approve: 1, reject: 0, cancel: 0, release: 1 });
@@ -81,38 +82,54 @@ describe("ECO approval workflow", () => {
 
   it("records the rejection and leaves the BOM versions alone", async () => {
     const fake = new FakeEngineering();
-    const result = await run(fake, (handle) => handle.signal(ecoRejectSignal, "alice"));
-    expect(result).toEqual({ ecoId: ECO_ID, status: "rejected", decidedBy: "alice" });
+    const result = await run(fake, (handle) => reject(handle, "alice"));
+    expect(result).toMatchObject({ ecoId: ECO_ID, status: "rejected", decidedBy: "alice" });
     expect(fake.eco.state).toBe("rejected");
     expect([fake.oldVersion, fake.newVersion]).toEqual(["active", "draft"]);
     expect(fake.calls).toEqual({ approve: 0, reject: 1, cancel: 0, release: 0 });
   }, 60_000);
 
-  it("cancels the ECO as the requester when nobody decides before the timeout", async () => {
+  it("cancels the ECO as the system actor with a reason, not as the requester, when nobody decides in time", async () => {
     const fake = new FakeEngineering();
     const result = await run(fake, async () => {});
-    expect(result).toEqual({ ecoId: ECO_ID, status: "timed_out", decidedBy: "rita" });
-    expect(fake.eco.state).toBe("cancelled");
+    expect(result).toMatchObject({ ecoId: ECO_ID, status: "timed_out", decidedBy: "system:eco-timeout" });
+    expect(fake.eco).toMatchObject({ state: "cancelled", decidedBy: "system:eco-timeout", decisionReason: expect.stringContaining("approval window") });
+    expect(fake.tokens.map((claims) => claims.act)).toEqual(["system:eco-timeout"]);
     expect([fake.oldVersion, fake.newVersion]).toEqual(["active", "draft"]);
     expect(fake.calls).toEqual({ approve: 0, reject: 0, cancel: 1, release: 0 });
   }, 60_000);
 
-  it("ignores decisions from anyone but the named approver, including the requester", async () => {
+  it("takes no authorization decision from the signal: the engineering service refuses the creator and the workflow waits for someone else", async () => {
     const fake = new FakeEngineering();
+    fake.eco.createdBy = "rita";
     const result = await run(fake, async (handle) => {
-      await handle.signal(ecoApproveSignal, "rita");
-      await handle.signal(ecoApproveSignal, "mallory");
-      await handle.signal(ecoRejectSignal, "rita");
+      await approve(handle, "rita");
+      await approve(handle, "alice");
     });
-    expect(result.status).toBe("timed_out");
-    expect(fake.calls.approve + fake.calls.reject + fake.calls.release).toBe(0);
+    expect(result).toMatchObject({ status: "released", decidedBy: "alice", refusedDecisions: 1 });
+    expect(fake.calls.approve).toBe(2);
+  }, 60_000);
+
+  it("times the ECO out when only refused decisions arrive", async () => {
+    const fake = new FakeEngineering();
+    fake.eco.createdBy = "rita";
+    const result = await run(fake, (handle) => approve(handle, "rita"));
+    expect(result).toMatchObject({ status: "timed_out", refusedDecisions: 1 });
+    expect(fake.eco.state).toBe("cancelled");
+    expect(fake.calls.release).toBe(0);
+  }, 60_000);
+
+  it("passes a rejection reason through", async () => {
+    const fake = new FakeEngineering();
+    await run(fake, (handle) => reject(handle, "alice", "tolerance too loose"));
+    expect(fake.eco.decisionReason).toBe("tolerance too loose");
   }, 60_000);
 
   it("keeps the first decision when a second arrives", async () => {
     const fake = new FakeEngineering();
     const result = await run(fake, async (handle) => {
-      await handle.signal(ecoRejectSignal, "alice");
-      await handle.signal(ecoApproveSignal, "alice");
+      await reject(handle, "alice");
+      await approve(handle, "alice");
     });
     expect(result.status).toBe("rejected");
     expect(fake.calls.approve).toBe(0);
@@ -123,9 +140,9 @@ describe("ECO approval workflow", () => {
     let seen: unknown;
     await run(fake, async (handle) => {
       seen = await handle.query(ecoApprovalStateQuery);
-      await handle.signal(ecoApproveSignal, "alice");
+      await approve(handle, "alice");
     });
-    expect(seen).toEqual({ ecoId: ECO_ID, status: "awaiting_approval" });
+    expect(seen).toEqual({ ecoId: ECO_ID, tenantId: input.tenantId, requester: "rita", status: "awaiting_approval", refusedDecisions: 0 });
   }, 60_000);
 
   it.each(["approve", "release"] as const)("a reply lost after %s committed re-runs the step without a second effect", async (action) => {
@@ -136,7 +153,7 @@ describe("ECO approval workflow", () => {
       lost = true;
       throw new TypeError("fetch failed");
     });
-    const result = await run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"));
+    const result = await run(fake, (handle) => approve(handle, "alice"));
     expect(result.status).toBe("released");
     expect(fake.calls[action]).toBe(2);
     expect(fake.eco.state).toBe("released");
@@ -145,7 +162,7 @@ describe("ECO approval workflow", () => {
   it("retries a server fault and still releases", async () => {
     const fake = new FakeEngineering();
     fake.refuse("approve", 503, "ENG-ECO-APPROVER-UNAVAILABLE", 2);
-    const result = await run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"));
+    const result = await run(fake, (handle) => approve(handle, "alice"));
     expect(result.status).toBe("released");
     expect(fake.calls.approve).toBe(3);
   }, 60_000);
@@ -153,7 +170,7 @@ describe("ECO approval workflow", () => {
   it("waits for a future release date and releases then", async () => {
     const fake = new FakeEngineering();
     fake.eco.releaseDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const result = await run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"));
+    const result = await run(fake, (handle) => approve(handle, "alice"));
     expect(result.status).toBe("released");
     expect(fake.calls).toEqual({ approve: 1, reject: 0, cancel: 0, release: 2 });
     expect(fake.newVersion).toBe("active");
@@ -162,24 +179,24 @@ describe("ECO approval workflow", () => {
   it("reports a release the engineering rules refuse, leaves the ECO approved and does not retry it", async () => {
     const fake = new FakeEngineering();
     fake.refuse("release", 422, "ENG-ECO-DRYRUN");
-    const result = await run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"));
+    const result = await run(fake, (handle) => approve(handle, "alice"));
     expect(result.status).toBe("release_failed");
     expect(result.failureReason).toContain("ENG-ECO-DRYRUN");
     expect(fake.eco.state).toBe("approved");
     expect(fake.calls.release).toBe(1);
   }, 60_000);
 
-  it("fails the workflow when the ECO was already decided another way", async () => {
+  it("counts a decision the ECO state refuses and never releases it", async () => {
     const fake = new FakeEngineering();
     fake.eco.state = "cancelled";
-    await expect(run(fake, (handle) => handle.signal(ecoApproveSignal, "alice"))).rejects.toBeInstanceOf(WorkflowFailedError);
+    const result = await run(fake, (handle) => approve(handle, "alice"));
+    expect(result).toMatchObject({ status: "timed_out", refusedDecisions: 1 });
     expect(fake.calls.approve).toBe(1);
     expect(fake.calls.release).toBe(0);
   }, 60_000);
 
-  it("refuses to start without the people involved, or when the requester approves their own ECO", () => {
-    expect(() => validateEcoApprovalInput({ ...input, approver: "" })).toThrow(/required/);
-    expect(() => validateEcoApprovalInput({ ...input, approver: "rita" })).toThrow(/own ECO/);
+  it("refuses to start without the tenant, ECO or requester, or with no timeout", () => {
+    expect(() => validateEcoApprovalInput({ ...input, requester: "" })).toThrow(/required/);
     expect(() => validateEcoApprovalInput({ ...input, approvalTimeoutMs: 0 })).toThrow(/positive/);
     expect(() => validateEcoApprovalInput(input)).not.toThrow();
   });

@@ -268,12 +268,12 @@ paths:
     post:
       operationId: approveEco
       summary: Record the approval of a submitted engineering change order
-      x-passage-duty: engineering.eco.approve or engineering.eco.workflow
+      x-passage-duty: engineering.eco.workflow
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: The ECO is approved, decidedBy is the acting user, and eco.approved is enqueued. No BOM version changes until the ECO is released. Repeating it on an approved ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
+          description: The ECO is approved, decidedBy is the acting user (never its creator: 403 ENG-ECO-SELF-APPROVAL; no user: ENG-ECO-ACTOR-REQUIRED), and eco.approved is enqueued. No BOM version changes until the ECO is released. Repeating it on an approved ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404':
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
@@ -284,12 +284,12 @@ paths:
     post:
       operationId: rejectEco
       summary: Record the rejection of a submitted engineering change order
-      x-passage-duty: engineering.eco.approve or engineering.eco.workflow
+      x-passage-duty: engineering.eco.workflow
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: The ECO is rejected and decidedBy is the acting user. A rejected ECO is final. Repeating it on a rejected ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
+          description: The ECO is rejected and decidedBy is the acting user. A rejected ECO is final. An optional JSON body {reason} (200 characters at most) is kept as decisionReason; the creator cannot reject: 403 ENG-ECO-SELF-APPROVAL. Repeating it on a rejected ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404':
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
@@ -300,12 +300,12 @@ paths:
     post:
       operationId: cancelEco
       summary: Cancel a submitted engineering change order
-      x-passage-duty: engineering.eco.approve or engineering.eco.workflow
+      x-passage-duty: engineering.eco.workflow
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: The ECO is cancelled, for example when nobody decided it in time, and decidedBy is the acting user. No event is enqueued. Repeating it on a cancelled ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
+          description: The ECO is cancelled, for example when nobody decided it in time (the workflow acts as system:eco-timeout and sends {reason}, kept as decisionReason), and decidedBy is the acting user. No event is enqueued. Repeating it on a cancelled ECO returns the ECO unchanged. Any other state is 409 ENG-ECO-STATE.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         '404':
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
@@ -681,6 +681,8 @@ components:
         state: { type: string, enum: [draft, submitted, approved, scheduled, released, rejected, cancelled] }
         releaseDate: { type: string, format: date }
         decidedBy: { type: string }
+        createdBy: { type: string, readOnly: true, description: The user who created the ECO; they cannot decide it. }
+        decisionReason: { type: string, readOnly: true, maxLength: 200 }
         replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
     EcoImpact:
       type: object

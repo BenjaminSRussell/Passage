@@ -36,6 +36,7 @@ export class FakeQuality {
   private readonly afterEffect = new Map<Action, Hook>();
   private readonly startKeys = new Set<string>();
   private bumpBeforeNext = false;
+  skewMs = 0;
 
   readonly fetch: typeof fetch = async (input, init) => {
     const claims = decodeClaims(new Headers(init?.headers).get("X-Passage-Service-Token"));
@@ -101,7 +102,7 @@ export class FakeQuality {
       correction.currentStep += 1;
       if (body.step === 7) {
         correction.status = "EFFECTIVENESS_PENDING";
-        correction.effectivenessDueAt = new Date(Date.now() + correction.effectivenessDays * DAY_MS).toISOString();
+        correction.effectivenessDueAt = new Date(Date.now() + this.skewMs + correction.effectivenessDays * DAY_MS).toISOString();
       }
       ncr.version += 1;
       this.effects.stepWrites += 1;

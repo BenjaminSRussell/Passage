@@ -13,6 +13,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: workflow
+        passage.dev/temporal-client: "true"
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -59,5 +60,9 @@ spec:
           volumeMounts:
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
 {{- end }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

@@ -1,4 +1,4 @@
-import { condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep } from "@temporalio/workflow";
+import { ActivityFailure, condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep } from "@temporalio/workflow";
 import type { CapaActivities } from "./capaActivities.js";
 
 export type EffectivenessResult = "EFFECTIVE" | "NOT_EFFECTIVE";
@@ -36,9 +36,12 @@ export interface CapaNcr {
 
 export interface CapaState {
   ncrId: string;
-  status: "in_correction" | "closed" | "stalled" | "escalated";
+  tenantId: string;
+  status: "in_correction" | "effectiveness_pending" | "awaiting_effectiveness" | "closed" | "stalled" | "escalated";
   currentStep: number;
   reopened: number;
+  implementer?: string;
+  refusedChecks: number;
   stalledAt?: "step" | "effectiveness";
 }
 
@@ -81,12 +84,14 @@ export function validateCapaInput(input: CapaInput): void {
 export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
   validateCapaInput(input);
 
-  const state: CapaState = { ncrId: input.ncrId, status: "in_correction", currentStep: 1, reopened: 0 };
+  const state: CapaState = { ncrId: input.ncrId, tenantId: input.tenantId, status: "in_correction", currentStep: 1, reopened: 0, refusedChecks: 0 };
   const stepsDone: StepDone[] = [];
   const checks: EffectivenessChecked[] = [];
   setHandler(capaStateQuery, () => ({ ...state }));
   setHandler(capaStepDoneSignal, (done) => void stepsDone.push(done));
-  setHandler(capaEffectivenessSignal, (checked) => void checks.push(checked));
+  setHandler(capaEffectivenessSignal, (checked) => {
+    if (state.status === "awaiting_effectiveness") checks.push(checked);
+  });
 
   const as = (actor: string): CapaRef => ({ tenantId: input.tenantId, legalEntityId: input.legalEntityId, ncrId: input.ncrId, actor });
   const stalled = (at: "step" | "effectiveness"): CapaState => {
@@ -96,6 +101,7 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
   const follow = (ncr: CapaNcr): void => {
     state.currentStep = ncr.correction?.currentStep ?? state.currentStep;
     state.reopened = ncr.correction?.reopened ?? state.reopened;
+    state.implementer = ncr.correction?.steps.find((s) => s.step === LAST_STEP)?.completedBy;
   };
 
   let ncr = await activities.startCorrection({ ...as(input.startedBy), effectivenessCheckDays: input.effectivenessCheckDays });
@@ -113,13 +119,25 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
 
     const correction = ncr.correction;
     if (correction?.status !== "EFFECTIVENESS_PENDING" || !correction.effectivenessDueAt) break;
+    state.status = "effectiveness_pending";
+    checks.length = 0;
     await sleep(Math.max(0, Date.parse(correction.effectivenessDueAt) - Date.now()));
+    state.status = "awaiting_effectiveness";
 
-    const implementer = correction.steps.find((s) => s.step === LAST_STEP)?.completedBy;
-    const eligible = (): EffectivenessChecked | undefined => checks.find((c) => c.actor !== implementer);
-    if (!(await condition(() => eligible() !== undefined, input.effectivenessTimeoutMs))) return stalled("effectiveness");
-    const checked = checks.splice(checks.indexOf(eligible()!), 1)[0]!;
-    ncr = await activities.checkEffectiveness({ ...as(checked.actor), result: checked.result, note: checked.note });
+    let checked = false;
+    while (!checked) {
+      if (!(await condition(() => checks.length > 0, input.effectivenessTimeoutMs))) return stalled("effectiveness");
+      const candidate = checks.shift()!;
+      try {
+        ncr = await activities.checkEffectiveness({ ...as(candidate.actor), result: candidate.result, note: candidate.note });
+        checked = true;
+      } catch (error) {
+        if (!(error instanceof ActivityFailure)) throw error;
+        state.refusedChecks += 1;
+      }
+    }
+    state.status = "in_correction";
+    checks.length = 0;
     follow(ncr);
 
     if (ncr.correction?.status === "CLOSED") break;

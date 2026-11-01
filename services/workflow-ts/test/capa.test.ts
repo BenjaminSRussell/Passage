@@ -8,6 +8,7 @@ import { createServiceTokenSigner } from "../src/serviceToken.js";
 import {
   capaEffectivenessSignal,
   capaStateQuery,
+  type CapaState,
   capaStepDoneSignal,
   capaWorkflow,
   capaWorkflowId,
@@ -51,6 +52,7 @@ describe("CAPA workflow", () => {
   async function run(fake: FakeQuality, drive: (handle: Handle) => Promise<void>, override: Partial<CapaInput> = {}) {
     sequence += 1;
     const taskQueue = `capa-${sequence}`;
+    fake.skewMs = (await environment.currentTimeMs()) - Date.now();
     const worker = await Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
@@ -71,17 +73,31 @@ describe("CAPA workflow", () => {
     for (let step = from; step <= to; step += 1) sends.push(() => handle.signal(capaStepDoneSignal, { step, notes: `D${step} done`, actor }));
     return sends.reduce((chain, send) => chain.then(send), Promise.resolve());
   };
+  const until = async (handle: Handle, ready: (state: CapaState) => boolean) => {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if (ready(await handle.query(capaStateQuery))) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("workflow never reached the expected state");
+  };
+  const whenDue = async (fake: FakeQuality, handle: Handle, previouslyReopened = 0) => {
+    await until(handle, (state) => state.status === "effectiveness_pending" && state.reopened === previouslyReopened);
+    await environment.sleep(31 * DAY_MS);
+    fake.skewMs = (await environment.currentTimeMs()) - Date.now();
+    await until(handle, (state) => state.status === "awaiting_effectiveness");
+  };
   const check = (handle: Handle, actor: string, result: EffectivenessResult = "EFFECTIVE") =>
     handle.signal(capaEffectivenessSignal, { result, note: `${result} per audit`, actor });
+  const closeOut = async (fake: FakeQuality, handle: Handle, actor = "reviewer") => {
+    await steps(handle, 1, 7);
+    await whenDue(fake, handle);
+    await check(handle, actor);
+  };
 
   it("walks D1 to D7, waits out the effectiveness period and closes on an independent EFFECTIVE check", async () => {
     const fake = new FakeQuality();
-    const result = await run(fake, async (handle) => {
-      await steps(handle, 1, 7);
-      await check(handle, "engineer");
-      await check(handle, "reviewer");
-    });
-    expect(result).toEqual({ ncrId: NCR_ID, status: "closed", currentStep: 8, reopened: 0 });
+    const result = await run(fake, (handle) => closeOut(fake, handle));
+    expect(result).toEqual({ ncrId: NCR_ID, tenantId: input.tenantId, status: "closed", currentStep: 8, reopened: 0, implementer: "engineer", refusedChecks: 0 });
     expect(fake.ncr).toMatchObject({ status: "CLOSED", correction: { status: "CLOSED", effectivenessResult: "EFFECTIVE" } });
     expect(fake.effects).toEqual({ corrections: 1, stepWrites: 7, effectivenessChecks: 1 });
     expect(fake.tokens.map((claims) => claims.act)).toEqual([
@@ -94,35 +110,72 @@ describe("CAPA workflow", () => {
     expect(new Set(fake.tokens.map((claims) => claims.duties.join()))).toEqual(new Set(["quality.capa.execute"]));
   }, 60_000);
 
-  it("never lets the D7 implementer perform the effectiveness check", async () => {
+  it("takes no authorization decision from the signal: the service refuses the D7 implementer and the workflow keeps waiting", async () => {
     const fake = new FakeQuality();
     const result = await run(fake, async (handle) => {
       await steps(handle, 1, 7);
+      await whenDue(fake, handle);
       await check(handle, "engineer");
     });
-    expect(result).toMatchObject({ status: "stalled", stalledAt: "effectiveness" });
+    expect(result).toMatchObject({ status: "stalled", stalledAt: "effectiveness", refusedChecks: 1 });
     expect(fake.effects.effectivenessChecks).toBe(0);
-    expect(fake.calls["check-effectiveness"]).toBe(0);
+    expect(fake.calls["check-effectiveness"]).toBe(1);
   }, 60_000);
 
-  it("reopens at D4 after a NOT_EFFECTIVE check and closes on the next EFFECTIVE one", async () => {
+  it("then accepts an independent check after the refused one", async () => {
     const fake = new FakeQuality();
     const result = await run(fake, async (handle) => {
       await steps(handle, 1, 7);
+      await whenDue(fake, handle);
+      await check(handle, "engineer");
+      await until(handle, (state) => state.refusedChecks === 1);
+      await check(handle, "reviewer");
+    });
+    expect(result).toMatchObject({ status: "closed", refusedChecks: 1 });
+  }, 60_000);
+
+  it("drops an effectiveness check that arrives before the due date", async () => {
+    const fake = new FakeQuality();
+    const result = await run(fake, async (handle) => {
+      await steps(handle, 1, 7);
+      await until(handle, (state) => state.status === "effectiveness_pending");
+      await check(handle, "early-reviewer");
+      await whenDue(fake, handle);
+      await check(handle, "reviewer");
+    });
+    expect(result.status).toBe("closed");
+    expect(fake.calls["check-effectiveness"]).toBe(1);
+    expect(fake.tokens.at(-1)?.act).toBe("reviewer");
+  }, 60_000);
+
+  it("reopens at D4 after a NOT_EFFECTIVE check, drops checks left from that round, and closes on the next round's check", async () => {
+    const fake = new FakeQuality();
+    const result = await run(fake, async (handle) => {
+      await steps(handle, 1, 7);
+      await whenDue(fake, handle);
       await check(handle, "reviewer", "NOT_EFFECTIVE");
+      await check(handle, "reviewer", "EFFECTIVE");
+      await until(handle, (state) => state.reopened === 1 && state.currentStep === 4);
       await steps(handle, 4, 7);
+      await whenDue(fake, handle, 1);
       await check(handle, "reviewer");
     });
     expect(result).toMatchObject({ status: "closed", reopened: 1 });
     expect(fake.effects).toEqual({ corrections: 1, stepWrites: 11, effectivenessChecks: 2 });
+    expect(fake.ncr.correction?.effectivenessResult).toBe("EFFECTIVE");
   }, 60_000);
 
   it("escalates instead of looping forever once the reopen budget is spent", async () => {
     const fake = new FakeQuality();
-    const result = await run(fake, async (handle) => {
-      await steps(handle, 1, 7);
-      await check(handle, "reviewer", "NOT_EFFECTIVE");
-    }, { maxReopens: 0 });
+    const result = await run(
+      fake,
+      async (handle) => {
+        await steps(handle, 1, 7);
+        await whenDue(fake, handle);
+        await check(handle, "reviewer", "NOT_EFFECTIVE");
+      },
+      { maxReopens: 0 },
+    );
     expect(result).toMatchObject({ status: "escalated", reopened: 1 });
     expect(fake.ncr.status).toBe("IN_CORRECTION");
   }, 60_000);
@@ -130,7 +183,7 @@ describe("CAPA workflow", () => {
   it("stalls and says where when the next step never arrives", async () => {
     const fake = new FakeQuality();
     const result = await run(fake, (handle) => steps(handle, 1, 2));
-    expect(result).toEqual({ ncrId: NCR_ID, status: "stalled", currentStep: 3, reopened: 0, stalledAt: "step" });
+    expect(result).toMatchObject({ ncrId: NCR_ID, status: "stalled", currentStep: 3, reopened: 0, stalledAt: "step" });
     expect(fake.effects.stepWrites).toBe(2);
   }, 60_000);
 
@@ -138,6 +191,7 @@ describe("CAPA workflow", () => {
     const fake = new FakeQuality();
     const result = await run(fake, async (handle) => {
       for (const step of [3, 1, 2, 4, 6, 5, 7]) await handle.signal(capaStepDoneSignal, { step, notes: `D${step}`, actor: "engineer" });
+      await whenDue(fake, handle);
       await check(handle, "reviewer");
     });
     expect(result.status).toBe("closed");
@@ -147,10 +201,7 @@ describe("CAPA workflow", () => {
   it("retries an effectiveness check the service says is not due yet", async () => {
     const fake = new FakeQuality();
     fake.refuse("check-effectiveness", 422, "QM-0174", 2);
-    const result = await run(fake, async (handle) => {
-      await steps(handle, 1, 7);
-      await check(handle, "reviewer");
-    });
+    const result = await run(fake, (handle) => closeOut(fake, handle));
     expect(result.status).toBe("closed");
     expect(fake.calls["check-effectiveness"]).toBe(3);
     expect(fake.effects.effectivenessChecks).toBe(1);
@@ -164,10 +215,7 @@ describe("CAPA workflow", () => {
       lost = true;
       throw new TypeError("fetch failed");
     });
-    const result = await run(fake, async (handle) => {
-      await steps(handle, 1, 7);
-      await check(handle, "reviewer");
-    });
+    const result = await run(fake, (handle) => closeOut(fake, handle));
     expect(result.status).toBe("closed");
     expect(fake.effects).toEqual({ corrections: 1, stepWrites: 7, effectivenessChecks: 1 });
     expect(lost).toBe(true);
@@ -177,8 +225,7 @@ describe("CAPA workflow", () => {
     const fake = new FakeQuality();
     const result = await run(fake, async (handle) => {
       fake.staleOnce();
-      await steps(handle, 1, 7);
-      await check(handle, "reviewer");
+      await closeOut(fake, handle);
     });
     expect(result.status).toBe("closed");
     expect(fake.effects.stepWrites).toBe(7);

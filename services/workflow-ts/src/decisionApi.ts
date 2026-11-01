@@ -1,0 +1,146 @@
+import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
+import { WorkflowNotFoundError, type Client } from "@temporalio/client";
+import {
+  capaEffectivenessSignal,
+  capaStateQuery,
+  capaStepDoneSignal,
+  capaWorkflowId,
+  ecoApprovalStateQuery,
+  ecoApprovalWorkflowId,
+  ecoDecisionSignal,
+} from "./workflows.js";
+
+export const ECO_DECIDE_DUTY = "engineering.eco.approve";
+export const CAPA_DECIDE_DUTY = "QM_CAPA_MAINTAIN";
+
+const MAX_BODY_BYTES = 8192;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ECO_ROUTE = /^\/v1\/workflows\/eco-approvals\/([^/:]+):(approve|reject)$/;
+const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/;
+
+interface Principal {
+  tenantId: string;
+  userId: string;
+  duties: Set<string>;
+}
+
+class Refusal extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export function createDecisionHandler(client: Pick<Client, "workflow">): RequestListener {
+  return (request, response) => {
+    handle(client, request, response).catch(() => reply(response, new Refusal(502, "WF-0502", "the workflow service could not be reached")));
+  };
+}
+
+async function handle(client: Pick<Client, "workflow">, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const path = (request.url ?? "").split("?")[0] ?? "";
+  if (path === "/healthz" || path === "/readyz") return void response.writeHead(200).end();
+  const eco = ECO_ROUTE.exec(path);
+  const capa = CAPA_ROUTE.exec(path);
+  if (!eco && !capa) return reply(response, new Refusal(404, "COM-0404", "no such route"));
+  if (request.method !== "POST") return reply(response, new Refusal(405, "COM-0405", "POST only"));
+  try {
+    const principal = principalOf(request);
+    const body = await readJson(request);
+    if (eco) await decideEco(client, principal, eco[1]!, eco[2] as "approve" | "reject", body);
+    else await advanceCapa(client, principal, capa![1]!, capa![2] as "step-done" | "effectiveness", body);
+    response.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ accepted: true }));
+  } catch (error) {
+    reply(response, error instanceof Refusal ? error : new Refusal(502, "WF-0502", "the workflow service could not be reached"));
+  }
+}
+
+function principalOf(request: IncomingMessage): Principal {
+  if (request.headers["x-passage-service-token"] !== undefined) throw new Refusal(401, "AUTH-0001", "decisions are made by people, not services");
+  const tenantId = String(request.headers["x-passage-tenant"] ?? "");
+  const userId = String(request.headers["x-passage-user"] ?? "").trim();
+  if (!UUID.test(tenantId) || !userId) throw new Refusal(401, "AUTH-0001", "missing tenant or user");
+  const duties = new Set(String(request.headers["x-passage-duties"] ?? "").split(",").map((duty) => duty.trim()).filter(Boolean));
+  return { tenantId, userId, duties };
+}
+
+function requireDuty(principal: Principal, duty: string): void {
+  if (!principal.duties.has(duty)) throw new Refusal(403, "AUTH-0003", `requires ${duty}`);
+}
+
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Refusal(413, "COM-0413", "body too large");
+    chunks.push(chunk as Buffer);
+  }
+  if (size === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // falls through to the refusal below
+  }
+  throw new Refusal(400, "COM-0001", "body must be a JSON object");
+}
+
+function text(body: Record<string, unknown>, field: string, max: number, required: boolean): string | undefined {
+  const value = body[field];
+  if (value === undefined && !required) return undefined;
+  if (typeof value !== "string" || value.trim() === "" || [...value].length > max) throw new Refusal(400, "COM-0001", `${field} must be 1 to ${max} characters`);
+  return value.trim();
+}
+
+async function stateOf<T extends { tenantId: string }>(read: () => Promise<T>, principal: Principal): Promise<T> {
+  let state: T;
+  try {
+    state = await read();
+  } catch (error) {
+    if (error instanceof WorkflowNotFoundError) throw new Refusal(404, "WF-0404", "no workflow is running for this record");
+    throw error;
+  }
+  if (state.tenantId !== principal.tenantId) throw new Refusal(404, "WF-0404", "no workflow is running for this record");
+  return state;
+}
+
+async function decideEco(client: Pick<Client, "workflow">, principal: Principal, ecoId: string, action: "approve" | "reject", body: Record<string, unknown>): Promise<void> {
+  requireDuty(principal, ECO_DECIDE_DUTY);
+  const reason = action === "reject" ? text(body, "reason", 200, false) : undefined;
+  const handle = client.workflow.getHandle(ecoApprovalWorkflowId(ecoId));
+  const state = await stateOf(() => handle.query(ecoApprovalStateQuery), principal);
+  if (state.status !== "awaiting_approval") throw new Refusal(409, "WF-0409", `the ECO approval is ${state.status}`);
+  if (state.requester === principal.userId) throw new Refusal(403, "ENG-ECO-SELF-APPROVAL", "the user who created the ECO cannot decide it");
+  await handle.signal(ecoDecisionSignal, { decision: action === "approve" ? "approved" : "rejected", actor: principal.userId, ...(reason ? { reason } : {}) });
+}
+
+async function advanceCapa(client: Pick<Client, "workflow">, principal: Principal, ncrId: string, action: "step-done" | "effectiveness", body: Record<string, unknown>): Promise<void> {
+  requireDuty(principal, CAPA_DECIDE_DUTY);
+  const handle = client.workflow.getHandle(capaWorkflowId(ncrId));
+  if (action === "step-done") {
+    const step = body.step;
+    if (!Number.isInteger(step) || (step as number) < 1 || (step as number) > 7) throw new Refusal(400, "COM-0001", "step must be 1 to 7");
+    const notes = text(body, "notes", 2000, true)!;
+    const state = await stateOf(() => handle.query(capaStateQuery), principal);
+    if (state.status !== "in_correction" || state.currentStep !== step) throw new Refusal(409, "WF-0409", `D${state.currentStep} is the current step (${state.status})`);
+    await handle.signal(capaStepDoneSignal, { step: step as number, notes, actor: principal.userId });
+    return;
+  }
+  const result = body.result;
+  if (result !== "EFFECTIVE" && result !== "NOT_EFFECTIVE") throw new Refusal(400, "COM-0001", "result must be EFFECTIVE or NOT_EFFECTIVE");
+  const note = text(body, "note", 2000, true)!;
+  const state = await stateOf(() => handle.query(capaStateQuery), principal);
+  if (state.status !== "awaiting_effectiveness") throw new Refusal(409, "WF-0409", `the effectiveness check is not open (${state.status})`);
+  if (!state.implementer || state.implementer === principal.userId) throw new Refusal(403, "QM-0175", "the effectiveness check must be made by a user other than the one who completed D7");
+  await handle.signal(capaEffectivenessSignal, { result, note, actor: principal.userId });
+}
+
+function reply(response: ServerResponse, refusal: Refusal): void {
+  response.writeHead(refusal.status, { "Content-Type": "application/problem+json" }).end(
+    JSON.stringify({ type: `https://passage.dev/problems/${refusal.code}`, title: refusal.message, status: refusal.status, code: refusal.code, detail: refusal.message }),
+  );
+}
