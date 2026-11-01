@@ -53,6 +53,7 @@ const (
 	CodeWaveNotFound       = "FUL-0052"
 	CodeWaveConflict       = "FUL-0053"
 	CodeContainerNotFound  = "FUL-0054"
+	CodeNesting            = "FUL-0056"
 	CodeVersion            = "conflict_version"
 	CodeIdempotencyReuse   = "idempotency_key_reuse"
 	eventSource            = "fulfillment"
@@ -141,8 +142,12 @@ type Container struct {
 	Returnable        bool            `json:"returnable"`
 	PackagingMaterial *string         `json:"packagingMaterial"`
 	// PackingSlipID is the slip the container shipped with; null until then.
-	PackingSlipID *string         `json:"packingSlipId"`
-	Lines         []ContainerLine `json:"lines"`
+	PackingSlipID *string `json:"packingSlipId"`
+	// ParentContainerID is the pallet this carton sits on; ChildContainerIDs
+	// are the cartons on this pallet (a pallet holds no lines of its own).
+	ParentContainerID *string         `json:"parentContainerId"`
+	ChildContainerIDs []string        `json:"childContainerIds"`
+	Lines             []ContainerLine `json:"lines"`
 }
 
 // ContainerLine is a quantity of one shipment line packed into a container.
@@ -379,6 +384,8 @@ func mapDomain(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWaveTooLarge, err.Error())
 	case errors.Is(err, domain.ErrInvalidMove):
 		return httpx.NewProblem(http.StatusConflict, CodeInvalidMove, err.Error())
+	case errors.Is(err, domain.ErrNesting):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeNesting, err.Error())
 	case errors.Is(err, domain.ErrContainerWeight):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWeightExceeded, err.Error())
 	case errors.Is(err, domain.ErrRuleInvalid), errors.Is(err, domain.ErrSerialFraction):
@@ -683,7 +690,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 }
 
 func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Container, error) {
-	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code, packing_slip_id
+	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code, packing_slip_id, parent_container_id
 		from container where shipment_id = $1 and status <> 'UNPACKED' order by sscc`, shipmentID)
 	if err != nil {
 		return nil, err
@@ -692,17 +699,28 @@ func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Contai
 	for rows.Next() {
 		var c Container
 		var tare, gross string
-		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status, &tare, &gross, &c.Returnable, &c.PackagingMaterial, &c.PackingSlipID); err != nil {
+		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status, &tare, &gross, &c.Returnable, &c.PackagingMaterial, &c.PackingSlipID, &c.ParentContainerID); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		c.TareKg, c.GrossKg = dec(tare), dec(gross)
 		c.Lines = []ContainerLine{}
+		c.ChildContainerIDs = []string{}
 		containers = append(containers, c)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	for _, c := range containers {
+		if c.ParentContainerID == nil {
+			continue
+		}
+		for i := range containers {
+			if containers[i].ID == *c.ParentContainerID {
+				containers[i].ChildContainerIDs = append(containers[i].ChildContainerIDs, c.ID)
+			}
+		}
 	}
 	for i := range containers {
 		lrows, err := tx.Query(ctx, `select shipment_line_id, qty::text from container_line where container_id = $1 order by shipment_line_id`, containers[i].ID)

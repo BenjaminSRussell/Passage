@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -38,6 +39,8 @@ func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:cancel", a.cancelShipment)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:close-remainder", a.closeRemainder)
 	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}/containers/{cid}:unpack", a.unpackContainer)
+	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}:nest-containers", a.nestContainers)
+	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}/containers/{cid}:unnest", a.unnestContainer)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves:preview", a.previewWaves)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves", a.createWaves)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves", a.listWaves)
@@ -221,6 +224,78 @@ func (a *API) unpackContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh, err := a.store.UnpackContainer(r.Context(), id, version, cid, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, sh.Version)
+	httpx.JSON(w, http.StatusOK, sh)
+}
+
+type nestRequest struct {
+	ContainerType string   `json:"containerType"`
+	ContainerIDs  []string `json:"containerIds"`
+}
+
+// nestContainers puts CLOSED cartons of a shipment on a new pallet with its own SSCC.
+func (a *API) nestContainers(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	var req nestRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	ctype := strings.TrimSpace(req.ContainerType)
+	if ctype == "" || len(ctype) > 64 {
+		fail(w, r, "containerType", "is required and must be at most 64 characters")
+		return
+	}
+	if len(req.ContainerIDs) == 0 || len(req.ContainerIDs) > 200 {
+		fail(w, r, "containerIds", "between 1 and 200 containers are required")
+		return
+	}
+	seen := map[string]bool{}
+	for i, cid := range req.ContainerIDs {
+		if !ids.Valid(cid) {
+			fail(w, r, fmt.Sprintf("containerIds[%d]", i), "must be a UUID")
+			return
+		}
+		if seen[cid] {
+			fail(w, r, fmt.Sprintf("containerIds[%d]", i), "appears more than once")
+			return
+		}
+		seen[cid] = true
+	}
+	res, err := a.store.NestContainers(r.Context(), id, version, ctype, req.ContainerIDs, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, res.Shipment.Version)
+	httpx.JSON(w, http.StatusCreated, res)
+}
+
+// unnestContainer dissolves a pallet; its cartons stay packed.
+func (a *API) unnestContainer(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	cid := chi.URLParam(r, "cid")
+	if !ids.Valid(cid) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeContainerNotFound, "container not found on this shipment"))
+		return
+	}
+	_, idem, err := command(r, nil)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	sh, err := a.store.UnnestContainer(r.Context(), id, version, cid, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

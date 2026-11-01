@@ -82,6 +82,11 @@ func (s *Postgres) UnpackContainer(ctx context.Context, id string, version int, 
 				return sh, httpx.NewProblem(http.StatusNotFound, CodeContainerNotFound, "container not found on this shipment")
 			}
 			cont := sh.Containers[idx]
+			if cont.Status == "CLOSED" {
+				if err := domain.UnpackNested(cont.ParentContainerID != nil, len(cont.ChildContainerIDs)); err != nil {
+					return sh, mapDomain(err)
+				}
+			}
 			next, err := domain.UnpackContainer(sh.Status, cont.Status)
 			if err != nil {
 				return sh, mapDomain(err)
@@ -189,11 +194,18 @@ func asnData(sh Shipment, slip PackingSlip) fulevents.ASNIssuedData {
 	if sh.CarrierCode != nil {
 		data.Carrier = *sh.CarrierCode
 	}
+	ssccOf := map[string]string{}
+	for _, c := range sh.Containers {
+		ssccOf[c.ID] = c.SSCC
+	}
 	for _, c := range sh.Containers {
 		if c.Status != "CLOSED" {
 			continue
 		}
 		asn := fulevents.ASNContainer{SSCC: c.SSCC, ContainerType: c.ContainerType, Lines: []fulevents.ASNLine{}}
+		if c.ParentContainerID != nil {
+			asn.ParentSSCC = ssccOf[*c.ParentContainerID]
+		}
 		for _, cl := range c.Lines {
 			asn.Lines = append(asn.Lines, fulevents.ASNLine{OrderLineID: orderLine[cl.ShipmentLineID], Qty: cl.Qty.String()})
 		}

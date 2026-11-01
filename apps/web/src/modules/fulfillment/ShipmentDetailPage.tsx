@@ -6,6 +6,7 @@ import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
 import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
+import { canUnnest, NestForm, UnnestButton } from "./PalletForm";
 import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
 import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
@@ -39,12 +40,21 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "shortPickReason", header: "Short reason", render: (row) => (row.shortPickReason ? (SHORT_PICK_REASONS[row.shortPickReason] ?? row.shortPickReason) : dash) },
 ];
 
-function containerColumns(lines: ShipmentLine[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {
+/** The pallet a carton sits on, or the number of cartons a pallet holds. */
+function palletCell(row: Container, containers: Container[]): ReactNode {
+  if (row.parentContainerId) return containers.find((c) => c.id === row.parentContainerId)?.sscc ?? dash;
+  const n = (row.childContainerIds ?? []).length;
+  if (n === 0) return dash;
+  return n === 1 ? "1 carton" : `${n} cartons`;
+}
+
+function containerColumns(lines: ShipmentLine[], containers: Container[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {
   const orderLine = (id: string) => shortId(lines.find((l) => l.id === id)?.orderLineId ?? id);
   return [
     { key: "sscc", header: "SSCC", mono: true },
     { key: "containerType", header: "Type" },
     { key: "status", header: "Status" },
+    { key: "pallet", header: "Pallet", render: (row) => palletCell(row, containers) },
     { key: "grossKg", header: "Gross kg", align: "end" },
     { key: "returnable", header: "Returnable", render: (row) => (row.returnable ? "Yes" : "No") },
     { key: "packagingMaterial", header: "Material", render: (row) => row.packagingMaterial ?? dash },
@@ -163,12 +173,14 @@ export function ShipmentDetailPage() {
       ) : null}
       {canPack ? <PackForm key={`pack-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canPost ? <PostForm key={`post-${shipment.version}`} shipment={shipment} onPosted={(slip) => navigate(`/fulfillment/packing-slips/${slip.id}`)} /> : null}
+      <NestForm key={`nest-${shipment.version}`} shipment={shipment} onDone={state.reload} />
       <Card title="Containers">
         <DataTable
           label="Containers"
-          columns={containerColumns(shipment.lines, (row) => (
+          columns={containerColumns(shipment.lines, shipment.containers, (row) => (
             <span className={styles.actions}>
               <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+              {canUnnest(shipment, row) ? <UnnestButton key={`unnest-${shipment.version}-${row.id}`} shipment={shipment} container={row} onDone={state.reload} /> : null}
               {canUnpack(shipment, row) ? <UnpackButton key={`unpack-${shipment.version}-${row.id}`} shipment={shipment} container={row} onDone={state.reload} /> : null}
             </span>
           ))}

@@ -51,6 +51,16 @@ channels:
     messages:
       containerUnpacked:
         $ref: "#/components/messages/ContainerUnpacked"
+  containerNested:
+    address: passage.fulfillment.container
+    messages:
+      containerNested:
+        $ref: "#/components/messages/ContainerNested"
+  containerUnnested:
+    address: passage.fulfillment.container
+    messages:
+      containerUnnested:
+        $ref: "#/components/messages/ContainerUnnested"
   waveCreated:
     address: passage.fulfillment.wave
     messages:
@@ -117,6 +127,16 @@ operations:
     channel: { $ref: "#/channels/containerUnpacked" }
     messages:
       - $ref: "#/channels/containerUnpacked/messages/containerUnpacked"
+  publishContainerNested:
+    action: send
+    channel: { $ref: "#/channels/containerNested" }
+    messages:
+      - $ref: "#/channels/containerNested/messages/containerNested"
+  publishContainerUnnested:
+    action: send
+    channel: { $ref: "#/channels/containerUnnested" }
+    messages:
+      - $ref: "#/channels/containerUnnested/messages/containerUnnested"
   publishWaveCreated:
     action: send
     channel: { $ref: "#/channels/waveCreated" }
@@ -319,6 +339,47 @@ components:
               entries:
                 type: array
                 items: { $ref: "#/components/schemas/TrackingEntry" }
+    ContainerNested:
+      name: dev.passage.fulfillment.container.nested.v1
+      title: Cartons put on a pallet
+      summary: >
+        CLOSED cartons of a shipment were put on a new pallet (nested container). The
+        pallet has its own SSCC and holds no lines; the cartons keep their SSCCs and
+        lines. The pallet and its cartons ship together on the next packing slip.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, container_id, sscc, container_type, child_ssccs]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          container_id: { type: string, format: uuid }
+          sscc: { type: string, pattern: "^[0-9]{18}$", description: The SSCC of the pallet. }
+          container_type: { type: string }
+          child_ssccs:
+            type: array
+            description: The SSCCs of the cartons on the pallet.
+            items: { type: string, pattern: "^[0-9]{18}$" }
+    ContainerUnnested:
+      name: dev.passage.fulfillment.container.unnested.v1
+      title: Pallet dissolved
+      summary: >
+        A pallet was dissolved before it shipped. The cartons are top-level containers
+        again; the pallet SSCC stays issued and is never reused.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, container_id, sscc, container_type, child_ssccs]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          container_id: { type: string, format: uuid }
+          sscc: { type: string, pattern: "^[0-9]{18}$", description: The SSCC of the pallet. }
+          container_type: { type: string }
+          child_ssccs:
+            type: array
+            description: The SSCCs of the cartons on the pallet.
+            items: { type: string, pattern: "^[0-9]{18}$" }
     ContainerUnpacked:
       name: dev.passage.fulfillment.container.unpacked.v1
       title: Container unpacked
@@ -426,6 +487,7 @@ components:
               properties:
                 sscc: { type: string, pattern: "^[0-9]{18}$" }
                 container_type: { type: string }
+                parent_sscc: { type: string, pattern: "^[0-9]{18}$", description: The SSCC of the pallet the container sits on; absent for a top-level container. }
                 lines:
                   type: array
                   items:

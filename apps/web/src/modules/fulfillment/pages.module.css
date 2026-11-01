@@ -131,3 +131,18 @@
     display: none;
   }
 }
+
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}

@@ -17,6 +17,8 @@ var (
 	ShipmentCancelled    = events.Type(Context, "shipment", "cancelled", 1)
 	ShipmentClosed       = events.Type(Context, "shipment", "closed", 1)
 	ContainerUnpacked    = events.Type(Context, "container", "unpacked", 1)
+	ContainerNested      = events.Type(Context, "container", "nested", 1)
+	ContainerUnnested    = events.Type(Context, "container", "unnested", 1)
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
 	WaveAssigned         = events.Type(Context, "wave", "assigned", 1)
 	WaveClosed           = events.Type(Context, "wave", "closed", 1)
@@ -29,7 +31,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked,
 	}
 }
 
@@ -53,6 +55,18 @@ type ContainerUnpackedData struct {
 	ContainerID    string    `json:"container_id"`
 	SSCC           string    `json:"sscc"`
 	Lines          []LineRef `json:"lines"`
+}
+
+// ContainerNestedData is published when cartons are put on a new pallet
+// (nested container, FR-28.3): the pallet has its own SSCC and the cartons keep
+// theirs. Dissolving the pallet publishes container.unnested with the same shape.
+type ContainerNestedData struct {
+	ShipmentID     string   `json:"shipment_id"`
+	ShipmentNumber string   `json:"shipment_number"`
+	ContainerID    string   `json:"container_id"`
+	SSCC           string   `json:"sscc"`
+	ContainerType  string   `json:"container_type"`
+	ChildSSCCs     []string `json:"child_ssccs"`
 }
 
 // ClosedLine is one line of a closed remainder: Qty is the planned quantity
@@ -122,9 +136,11 @@ type ASNLine struct {
 
 // ASNContainer is one container with its SSCC (FR-28.9).
 type ASNContainer struct {
-	SSCC          string    `json:"sscc"`
-	ContainerType string    `json:"container_type"`
-	Lines         []ASNLine `json:"lines"`
+	SSCC          string `json:"sscc"`
+	ContainerType string `json:"container_type"`
+	// ParentSSCC is the pallet the container sits on, empty for a top-level one.
+	ParentSSCC string    `json:"parent_sscc,omitempty"`
+	Lines      []ASNLine `json:"lines"`
 }
 
 // ASNIssuedData is the advance ship notice emitted when a slip posts with ASN

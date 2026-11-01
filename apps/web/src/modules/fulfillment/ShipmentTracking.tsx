@@ -307,7 +307,8 @@ const UNPACKABLE: Shipment["status"][] = ["PICKING", "PICKED", "PACKED"];
 
 /** A CLOSED container of a shipment that has not posted it yet can be taken apart. */
 export function canUnpack(shipment: Shipment, container: Container): boolean {
-  return UNPACKABLE.includes(shipment.status) && container.status === "CLOSED";
+  const nested = Boolean(container.parentContainerId) || (container.childContainerIds ?? []).length > 0;
+  return UNPACKABLE.includes(shipment.status) && container.status === "CLOSED" && !nested;
 }
 
 /** Unpack button with an inline confirmation; the service re-checks the rule. */

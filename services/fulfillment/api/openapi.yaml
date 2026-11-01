@@ -173,6 +173,8 @@ components:
         containerType: { type: string }
         sscc: { type: string, pattern: '^[0-9]{18}$', description: "SSCC-18 with a valid GS1 mod-10 check digit." }
         status: { type: string, enum: [OPEN, CLOSED, SHIPPED] }
+        parentContainerId: { type: [string, "null"], format: uuid, description: "The pallet this carton sits on; null for a top-level container." }
+        childContainerIds: { type: array, items: { type: string, format: uuid }, description: "The cartons on this pallet; empty for a carton. A pallet holds no lines of its own." }
         tareKg: { $ref: "#/components/schemas/Decimal" }
         grossKg: { $ref: "#/components/schemas/Decimal", description: "Tare plus the packed units at the unit weights given to auto-pack; the tare alone for a manual pack." }
         returnable: { type: boolean, description: "Copied from the container type when packed; returnable containers count toward the customer's balance on post." }
@@ -1287,6 +1289,88 @@ paths:
         "409": { description: "FUL-0021 shipment status does not allow unpacking, or the container already shipped", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:nest-containers:
+    post:
+      operationId: nestContainers
+      summary: Put CLOSED cartons on a new pallet with its own SSCC
+      description: >
+        Allowed while the shipment is PICKED or PACKED. Every carton must be CLOSED,
+        not already on a pallet and not a pallet itself (FUL-0056); a pallet holds one
+        level. The pallet takes tare, returnable flag and packaging material from the
+        container type when it is a known one and weighs its tare plus its cartons.
+        It holds no lines, so packed quantities do not change; the shipment version
+        moves. The pallet and its cartons ship on the next packing slip and a
+        returnable pallet raises the customer's returnable balance. Publishes
+        container.nested.
+      x-passage-duty: WarehousePack
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [containerType, containerIds]
+              additionalProperties: false
+              properties:
+                containerType: { type: string, maxLength: 64 }
+                containerIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        "201":
+          description: The pallet and the updated shipment; ETag carries the new version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  container: { $ref: "#/components/schemas/Container" }
+                  shipment: { $ref: "#/components/schemas/Shipment" }
+          headers:
+            ETag: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment, FUL-0054 container not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 shipment status does not allow nesting", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0056 a carton is not CLOSED, is on a pallet or is a pallet; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}/containers/{cid}:unnest:
+    post:
+      operationId: unnestContainer
+      summary: Dissolve a pallet before it ships
+      description: >
+        Allowed while the shipment is PICKED or PACKED and the pallet is CLOSED. The
+        cartons become top-level containers again and stay packed; the pallet SSCC stays
+        issued and is never reused (BR-28.5). A carton on a pallet cannot be unpacked
+        until the pallet is dissolved. Publishes container.unnested.
+      x-passage-duty: WarehousePack
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { name: cid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Shipment without the pallet; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+          headers:
+            ETag: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment, FUL-0054 container not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 shipment status does not allow it, or the pallet already shipped", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0056 the container is not a pallet; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/lines/{lid}:capture-tracking:
     post:

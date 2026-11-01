@@ -60,6 +60,22 @@ func (f *fakeStore) UnpackContainer(_ context.Context, id string, version int, _
 	return store.Shipment{ID: id, Version: 4, Status: domain.StatusPicked}, nil
 }
 
+func (f *fakeStore) NestContainers(_ context.Context, id string, version int, ctype string, childIDs []string, idem store.Idem) (store.PackResult, error) {
+	f.lastIdem = idem
+	if version != 3 {
+		return store.PackResult{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersion, "shipment version changed")
+	}
+	return store.PackResult{Container: store.Container{ID: ids.New(), ContainerType: ctype, ChildContainerIDs: childIDs}, Shipment: store.Shipment{ID: id, Version: 4, Status: domain.StatusPacked}}, nil
+}
+
+func (f *fakeStore) UnnestContainer(_ context.Context, id string, version int, _ string, idem store.Idem) (store.Shipment, error) {
+	f.lastIdem = idem
+	if version != 3 {
+		return store.Shipment{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersion, "shipment version changed")
+	}
+	return store.Shipment{ID: id, Version: 4, Status: domain.StatusPacked}, nil
+}
+
 func (f *fakeStore) PreviewWaves(_ context.Context, req store.WaveRequest) ([]store.WavePlan, error) {
 	f.workbench.waveReq = req
 	return []store.WavePlan{
@@ -170,6 +186,48 @@ func TestUnpackContainer_RequiresKeyVersionAndDuty(t *testing.T) {
 	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker unpack: status = %d, want 403", rec.Code)
+	}
+}
+
+func TestNestAndUnnestContainers_RequireKeyVersionAndDuty(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	sid := ids.New()
+	nest := "/v1/fulfillment/shipments/" + sid + ":nest-containers"
+	body := `{"containerType":"EUR-PALLET","containerIds":["` + ids.New() + `","` + ids.New() + `"]}`
+	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-1"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: status = %d, want 428", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no key: status = %d, want 400", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-2", "If-Match": `"2"`}); rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale: status = %d, want 412", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-3", "If-Match": `"3"`})
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"childContainerIds"`) || rec.Header().Get("ETag") != `"4"` {
+		t.Fatalf("status = %d etag = %q body = %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	dup := ids.New()
+	for name, bad := range map[string]string{
+		"no type":    `{"containerType":" ","containerIds":["` + dup + `"]}`,
+		"no cartons": `{"containerType":"P","containerIds":[]}`,
+		"bad id":     `{"containerType":"P","containerIds":["x"]}`,
+		"duplicate":  `{"containerType":"P","containerIds":["` + dup + `","` + dup + `"]}`,
+	} {
+		if rec := do(t, h, http.MethodPost, nest, bad, map[string]string{"Idempotency-Key": "n-4", "If-Match": `"3"`}); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("picker nest: status = %d, want 403", rec.Code)
+	}
+	un := "/v1/fulfillment/shipments/" + sid + "/containers/" + ids.New() + ":unnest"
+	rec = do(t, h, http.MethodPost, un, "", map[string]string{"Idempotency-Key": "un-1", "If-Match": `"3"`})
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"4"` {
+		t.Fatalf("unnest: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, un, "", map[string]string{"Idempotency-Key": "un-2", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("picker unnest: status = %d, want 403", rec.Code)
 	}
 }
 

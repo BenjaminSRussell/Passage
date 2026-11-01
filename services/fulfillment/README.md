@@ -186,6 +186,18 @@ A pick confirmation that leaves a line below plan stamps the line's first
 short-pick time (migration 0005); the remainder is the backorder until a re-pick
 reaches plan or the shipment is cancelled.
 
+## Endpoints (slice 12)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| POST | `/v1/fulfillment/shipments/{id}:nest-containers` | WarehousePack | Idempotency-Key, If-Match; body `containerType`, `containerIds` (1 to 200); puts CLOSED free cartons of a PICKED or PACKED shipment on a new pallet with its own SSCC (FR-28.3); 201 with `container` and `shipment`; FUL-0056 when a carton is not CLOSED, is on a pallet or is a pallet; `container.nested` |
+| POST | `/v1/fulfillment/shipments/{id}/containers/{cid}:unnest` | WarehousePack | Idempotency-Key, If-Match; dissolves a CLOSED pallet, its cartons stay packed and the pallet SSCC is never reissued; FUL-0056 when the container is not a pallet; `container.unnested` |
+
+A container returns `parentContainerId` (its pallet) and `childContainerIds`
+(the cartons on a pallet). A carton on a pallet, or a pallet, cannot be unpacked
+until the pallet is dissolved (FUL-0056). The pallet ships with its cartons and
+the ASN gives each carton its `parent_sscc`.
+
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or
 with another body is `idempotency_key_reuse`. Concurrent requests with one key
@@ -229,6 +241,7 @@ Codes raised in this slice:
 | `FUL-0053` | A shipment left RELEASED, or a line is already in a wave, since the preview (409) |
 | `FUL-0055` | A wave cannot close: a line of a live shipment is still to pick (422) |
 | `FUL-0054` | Container not found on the shipment (404) |
+| `FUL-0056` | Container nesting refused: a carton is not CLOSED, already on a pallet or a pallet itself; the container is not a pallet; or a nested container is unpacked (422) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |
 | `conflict_version` | `If-Match` does not match the current version (412) |

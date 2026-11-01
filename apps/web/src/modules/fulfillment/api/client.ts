@@ -62,6 +62,10 @@ export interface Container {
   packagingMaterial: string | null;
   /** The packing slip the container shipped with; null while CLOSED. */
   packingSlipId: string | null;
+  /** The pallet this carton sits on; null or absent for a top-level container. */
+  parentContainerId?: string | null;
+  /** The cartons on this pallet (a pallet holds no lines of its own). */
+  childContainerIds?: string[];
   lines: { shipmentLineId: string; qty: string }[];
 }
 
@@ -580,6 +584,21 @@ export function cancelShipment(id: string, version: number, key: string): Promis
 /** Takes a CLOSED container apart before it ships; a PACKED shipment goes back to PICKED. */
 export function unpackContainer(shipmentId: string, containerId: string, version: number, key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}:unpack`, undefined, key, version);
+}
+
+/** Puts CLOSED cartons on a new pallet with its own SSCC (nested container). */
+export function nestContainers(
+  id: string,
+  version: number,
+  input: { containerType: string; containerIds: string[] },
+  key: string,
+): Promise<{ container: Container; shipment: Shipment }> {
+  return command(`${shipmentPath(id)}:nest-containers`, input, key, version);
+}
+
+/** Dissolves a pallet before it ships; its cartons stay packed. */
+export function unnestContainer(shipmentId: string, containerId: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}:unnest`, undefined, key, version);
 }
 
 /** Closes the open remainder of a partially shipped shipment at what shipped (FR-28.8, CANCEL_REMAINDER). */

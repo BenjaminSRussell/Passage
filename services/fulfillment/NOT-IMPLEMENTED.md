@@ -207,6 +207,26 @@ zero FAIL lines on the doc gates.
 | Auto-pack takes unit weights per shipment line from the caller (`unitWeights`); a line without one is limited by quantity only. | handoff to product (wave 8) for unit weights | Product weights and packaging units belong to the product master (wave 8). |
 | The ship-to country of the packaging fee comes from the caller (`countryCode` on the post), not from the order's ship-to address. | handoff to sales (wave 27) | The order ship-to is not read yet. Without a country no fee is posted. |
 
+Slice 12 adds nested containers, pallet to carton (FR-28.3; `container.parent_container_id` of section 5.28.4).
+Migration 0013 gives `container` a `parent_container_id` (no new table, the
+existing grants cover it). `POST /shipments/{id}:nest-containers` (`WarehousePack`,
+`If-Match`, `Idempotency-Key`, body `containerType` and `containerIds`) puts
+CLOSED cartons of a PICKED or PACKED shipment on a new pallet: the pallet is a
+container of its own with a fresh SSCC, takes tare, returnable flag and material
+from a known container type, weighs its tare plus its cartons and holds no lines,
+so packed quantities do not change. A carton that is not CLOSED, is already on a
+pallet or is a pallet itself is refused with FUL-0056 (one level only).
+`POST /shipments/{id}/containers/{cid}:unnest` dissolves a CLOSED pallet; the
+pallet row stays UNPACKED so its SSCC is never reissued. A carton on a pallet and
+a pallet cannot be unpacked (FUL-0056, dissolve first), and a shipment holding a
+pallet cannot cancel until it is dissolved and unpacked. Posting the slip ships the
+pallet with its cartons, a returnable pallet raises the customer's balance and a
+slip cancel reverts both. `container.nested` and `container.unnested` go through
+the outbox, the ASN lists `parent_sscc` on each carton, and `Container` returns
+`parentContainerId` and `childContainerIds`. Domain, API and store tests (Postgres,
+including post, ASN, balance and slip cancel) and web tests cover it; the shipment
+detail has the "Put cartons on a pallet" form, a Pallet column and "Dissolve pallet".
+
 ## Deliverables (PRD section 5.28 and ticket PSG-28)
 
 | # | Deliverable | Status | Reason |
@@ -217,7 +237,7 @@ zero FAIL lines on the doc gates.
 | D1 | `trackingRequired` source | handoff to product (wave 8) and sales (wave 27) | The release caller supplies `trackingRequired` per line (the web release form has a checkbox for it); this service does not read the product's tracking dimension group, so a caller that omits it releases the line as untracked. |
 | D1 | Serial freed by a customer return | handoff to sales returns (wave 30) and inventory (wave 16) | A serial that shipped on a posted slip stays unique for its product in `pick_tracking`, so the same unit cannot be picked again. A return receipt must free it (or inventory must own serial status); until then a returned and resold serial is refused with FUL-0036. |
 | D1 | Inventory issue by batch and serial | handoff to inventory (wave 16) | `packingslip.posted` lines carry `product_id` and `tracking` (batch, serial, location, qty); `pick.tracked` carries the live set before shipping. Inventory must consume them. |
-| D1 | Packing with containers, nested pallet → carton, SSCC with mod-10 | partial | SSCC generation and container creation (manual and auto-pack) are built; a known container type gives the tare, returnable flag and material. Nesting (`parent_container_id`) is not. Containers are created CLOSED in the pack call; a separate `:close` action is not exposed. Container dimensions are not recorded. |
+| D1 | Packing with containers, nested pallet → carton, SSCC with mod-10 | partial | SSCC generation, container creation (manual and auto-pack) and nesting of cartons on a pallet (slice 12) are built; a known container type gives the tare, returnable flag and material. Not built: deeper nesting than pallet to carton, adding a carton to an existing pallet (dissolve and nest again), auto-nesting by a pallet rule, a separate `:close` action (containers are created CLOSED), and container dimensions. |
 | D1 | GS1-128 label rendering (PDF, ZPL) | partial | Built: `GET /shipments/{id}/containers/{cid}/label` renders ZPL with AI (00) and the SSCC after FNC1, after checking the check digit (FUL-0007), and the web shows it. Not built: the PDF label, the GTIN (01), batch (10), quantity (37), ship-to postal (420) and order reference fields of section 5.28.15, and label storage (`label_ref`); document rendering is wave 5 (docgen). |
 | D2 | Packing slip posting: inventory deduction and COGS journal | partial | Journal (both BR-28.1 stocked rows), `PS-` numbering gap-free per legal entity, containers marked SHIPPED, and the event are built. Inventory deduction is a handoff (see above). Ledger post is a handoff. |
 | D2 | Cancellation with mirror journal and reversal_of | built | A reversing slip carries negative quantities, costs and journal amounts; the shipment returns to PACKED and its containers to CLOSED; an INVOICED slip is refused with FUL-0010. Inventory mirror is a handoff. Billing (wave 29) sets INVOICED. |
