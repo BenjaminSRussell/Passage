@@ -261,17 +261,17 @@ func TestBlockingMovesStockOutOfAvailability(t *testing.T) {
 	if _, err := reserve(ctx, s, product, "7", domain.PolicyFIFO, nil, "r"); problemCode(err) != domain.CodeReserveShortfall {
 		t.Fatalf("policy reservation reached quarantined stock: %v", err)
 	}
-	if _, err := s.ReleaseBlocking(ctx, b.ID, b.Version, "", day); problemCode(err) != domain.CodeQuarantineDisposition {
+	if _, err := s.ReleaseBlocking(ctx, b.ID, b.Version, "", day, postParams()); problemCode(err) != domain.CodeQuarantineDisposition {
 		t.Fatalf("quarantine exit without disposition: %v", err)
 	}
-	if _, err := s.ReleaseBlocking(ctx, b.ID, b.Version+1, domain.DispositionRelease, day); problemCode(err) != store.CodeConflictVersion {
+	if _, err := s.ReleaseBlocking(ctx, b.ID, b.Version+1, domain.DispositionRelease, day, postParams()); problemCode(err) != store.CodeConflictVersion {
 		t.Fatalf("stale version: %v", err)
 	}
-	released, err := s.ReleaseBlocking(ctx, b.ID, b.Version, domain.DispositionRelease, day)
+	released, err := s.ReleaseBlocking(ctx, b.ID, b.Version, domain.DispositionRelease, day, postParams())
 	if err != nil || released.State != domain.BlockingReleased || released.Disposition != domain.DispositionRelease || released.Version != 2 {
 		t.Fatalf("release: %v %+v", err, released)
 	}
-	if again, err := s.ReleaseBlocking(ctx, b.ID, 1, domain.DispositionRelease, day); err != nil || again.Version != 2 {
+	if again, err := s.ReleaseBlocking(ctx, b.ID, 1, domain.DispositionRelease, day, postParams()); err != nil || again.Version != 2 {
 		t.Fatalf("second release must return the blocking unchanged: %v %+v", err, again)
 	}
 	avail, blocked = availFor(t, s, ctx, product)

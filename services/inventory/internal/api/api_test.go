@@ -225,9 +225,14 @@ func (f *fakeStore) CreateBlocking(_ context.Context, in store.BlockingInput) (d
 		Reason: in.Reason, State: domain.BlockingActive, Version: 1}, f.blockReplayed, nil
 }
 
-func (f *fakeStore) ReleaseBlocking(_ context.Context, id string, version int, disposition string, _ time.Time) (domain.Blocking, error) {
+func (f *fakeStore) ReleaseBlocking(_ context.Context, id string, version int, disposition string, _ time.Time, _ store.PostParams) (domain.Blocking, error) {
 	f.releaseVersion, f.releaseDispo = version, disposition
 	return domain.Blocking{ID: id, State: domain.BlockingReleased, Disposition: domain.DispositionRelease, Version: version + 1}, nil
+}
+
+func (f *fakeStore) EscalateBlocking(_ context.Context, id string, version int, _ time.Time) (domain.Blocking, error) {
+	f.releaseVersion = version
+	return domain.Blocking{ID: id, State: domain.BlockingActive, Target: domain.StockBlocked, Version: version + 1}, nil
 }
 
 func (f *fakeStore) ListBlockings(_ context.Context, flt store.BlockingFilter) ([]domain.Blocking, error) {
@@ -651,8 +656,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 77 {
-		t.Fatalf("router walk yielded %d operations, want 77: %v", len(served), served)
+	if len(served) != 78 {
+		t.Fatalf("router walk yielded %d operations, want 78: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

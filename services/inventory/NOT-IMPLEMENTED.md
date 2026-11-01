@@ -206,6 +206,35 @@ a scheduler for the expiry run, extending a reservation's expiry, the consumers 
 from them; they need the Kafka consumer wiring and the wave 24 event contract settled, handoff to waves 24 / 27), and the
 hold items of slice 15 (a whole-lot hold following later receipts, holds freezing count sheets).
 
+PSG-1617 (wave 16 slice 17) adds the blocking dispositions of FR-16.8. Migration 0018 adds three columns to
+`inventory_blocking` (`expected_release_date`, `scrap_journal_id` with a composite foreign key to `inventory_journal` and a
+check that SCRAP and the journal go together, `escalated_at` / `escalated_by`); no new table, so no new grant. `POST
+/v1/inventory/blockings/{id}:release` with disposition SCRAP writes the stock off: in the release transaction it creates and
+posts an ADJUSTMENT journal (`blocking-scrap:<id>`, one issue line at the blocked dimensions) through the same posting path as
+any journal, so the issue is valued at the running average of the blocked row, the GL entry debits the adjustment account and
+credits the inventory account by that value, the on-hand projection events are written, and the daily reconciliation sees the
+GL entry. It needs the new duty `inventory.blocking.scrap` (checked in the handler, 403 `INV-BLK-008`) and
+`INV_ADJUSTMENT_ACCOUNT` (422 `INV-JNL-005` without it). The scrap always posts under the forbid negative policy, whatever
+`INV_NEGATIVE_DEFAULT` says, so it never writes off more than the blocked row still holds (422 `INV-NEG-001` when other
+postings took the blocked stock); a failure rolls the whole release back, journal included (store test
+`TestScrapBlockingLeavesNothingBehindWhenItFails`, which also shows another legal entity of the tenant gets 404), and a repeat
+returns the released blocking and posts nothing more (`TestScrapBlockingWritesTheStockOff`). A scrap writes off the whole
+blocking; there is no partial disposition (block the quantity to scrap as its own blocking). Inventory holds (#409) sit on
+unrestricted stock and a blocking only takes available stock (held quantity is excluded), so a scrap never touches held stock
+and neither places nor releases a hold. Valuation is the wave 16 running average of the blocked row, as for every issue in
+this service; the wave 20 costing engine settles it under the item's costing method like any other issue. `POST /v1/inventory/blockings/{id}:block` (If-Match) moves an active quarantine to
+BLOCKED as a valued pair (no GL effect), keeps the blocking ACTIVE at a higher version and emits
+`dev.passage.inventory.blocking.escalated.v1` (`INV-BLK-007` when already blocked, `INV-BLK-006` when no longer active;
+`TestEscalateQuarantineToBlocked`). A blocking request may carry `expectedReleaseDate` (not before the physical date;
+information only, part of the idempotent request); `BlockingData` events carry it and `scrapJournalId` as nullable fields.
+Web: the blocking list shows the expected release date and, per active blocking, Release, Move to blocked (quarantine only) and
+Scrap (only for users holding `inventory.blocking.scrap`; confirmation dialog, then a link to the scrap journal); the block
+form takes the expected release date; each with loading, empty and error states. The OpenAPI and AsyncAPI documents have no FAIL lines on the documentation gates. Not built:
+RETURN (wave 18 vendor return), a configurable status transition matrix, a posting profile account for scrap separate from
+the adjustment account (wave 11 posting profiles), and a link back from a reversal of the scrap journal: reversing it through
+the journal reversal puts the stock back at the restricted status while the blocking stays RELEASED (SCRAP); block it again
+to track it.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -237,7 +266,8 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 3 | `reservation_policy_default` per legal entity, `shelf_life_margin_days` per product tracking group | handoff — wave 6 / wave 8 parameters | The request carries the policy (default FIFO) and the margin (default 0). |
 | 3 | Batch expiry master data | handoff — wave 8 (batches) | `PUT /batch-expiries/{productId}/{batchId}` keeps a local copy that FEFO reads; it is replaced by the wave 8 batch event feed. No screen: the batch master screens are wave 8's. |
 | 3 | Blocking and quarantine: block a quantity, batch or serial with a reason, release with RELEASE | built (slice 2) | `POST /blockings`, `GET /blockings`, `POST /blockings/{id}:release`. A blocking is a valued SOLD / PURCHASED pair from the unrestricted dimension set to the same set with `inventory_status` BLOCKED or QUARANTINE (no GL effect: both legs are on the inventory account). |
-| 3 | Dispositions SCRAP and RETURN, QUARANTINE → BLOCKED transition, `inventory_status_transitions` matrix, expected release date | later slice of PSG-16 | SCRAP needs a loss posting and RETURN the vendor return (wave 18); both answer `INV-BLK-005`. Until then: release, then post an ADJUSTMENT. |
+| 3 | Disposition SCRAP, QUARANTINE → BLOCKED transition, expected release date | built (slice 17) | See the slice 17 paragraph. |
+| 3 | Disposition RETURN (return to vendor), `inventory_status_transitions` matrix per legal entity | later slice of PSG-16 / handoff — wave 18 | RETURN needs the vendor return of wave 18 and answers `INV-BLK-005`; until then: release, then post an ADJUSTMENT. The only transitions are the built ones (AVAILABLE to BLOCKED or QUARANTINE, QUARANTINE to BLOCKED, any restricted status back to AVAILABLE, SCRAP); a configurable matrix is not built. |
 | 3 | Blocking of reserved stock, blocking in another warehouse than the source | not planned | Reserved stock must be released first (INV-BLK-003 counts only available stock). |
 | 4 | Cycle counting: count plan, `:generate`, count entry, tolerance approval (AC-16.6), blind count, `:post` as a COUNT journal | built (slice 2) | Variances are measured against the book quantity at posting (BR-16.8). Approval is the `inventory.count.approve` duty of the poster (403 `INV-CNT-001` without it). |
 | 4 | Vendor-owned stock in cycle counts (SAP MIK1) | later slice of PSG-16 | Sheet generation leaves vendor-owned rows out: a count variance posts a valued COUNT journal, which vendor-owned stock never carries (BR-16.14). Counting it needs a quantity-only variance posting. Tags refuse the owner dimension for the same reason. |
@@ -312,6 +342,8 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 3.16.14 customer consignment stock, trace by document type and GS1 key data elements, count variance by counter across plans over time, export | later slice of PSG-16 / handoff — waves 8, 15, 27 | Customer consignment needs the warehouse type (wave 6) and customer documents (wave 27); batch key data elements live on the wave 8 batch; export is a wave 15 / shell grid feature. |
 | 3.16.15 printed documents (posting list, count sheets, transfer shipping / receiving, labels, blocking notice) | later slice of PSG-16 | Document layouts follow the wave 5/15 templates and are not built. |
 | 3 reservation expiry run resource in the policy bundle | done (seeded in `policies/authz/data.json`) | `inventory.reservation.write` carries POST `/v1/inventory/reservations:expire`. |
+| 3 blocking scrap duty `inventory.blocking.scrap` | done (seeded in `policies/authz/data.json`) | Seeded as a flag duty (no routes); the service checks it inside `POST /v1/inventory/blockings/{id}:release` when the disposition is SCRAP (403 `INV-BLK-008` without it), and the web shows the Scrap action only to holders. |
+| 3 escalation route `POST /v1/inventory/blockings/{id}:block` in the policy bundle | handoff — #313 (seed service-enforced duties in `policies/authz/data.json`) | The new route uses the existing `inventory.blocking.write`, whose resources in `policies/authz/data.json` (outside this wave's paths) list only `POST /v1/inventory/blockings` and `POST /v1/inventory/blockings/*:release`; #313 needs to add `{"resource": "/v1/inventory/blockings/*:block", "methods": ["POST"]}` to it. No new duty. |
 | 3.16.17 duties InventoryAdmin, InventorySetupMaintain | later slice of PSG-16 (per feature) | Built: `inventory.consignment.write` (ConsignmentMaintain, slice 5: replenishment orders, receipts and creating OWNERSHIP_CHANGE journals; approving and rejecting journals is the approval task of `inventory.journal.post`), `inventory.read`, `inventory.journal.write`, `inventory.journal.post`, `inventory.reservation.write` (InventoryReserve), `inventory.blocking.write` (InventoryBlock), `inventory.count.write` / `.post` / `.approve` (CycleCountMaintain / Post / Approve), `inventory.transfer.write` / `.post` (TransferOrderMaintain / TransferOrderPost, slice 3), `inventory.abc.write` (the ABC part of InventorySetupMaintain, slice 3), `inventory.admin` (the rebuild and reconciliation re-run parts of InventoryAdmin, slices 4 and 7), and `inventory.batch.write` for the interim batch-expiry input. Tag counting uses the cycle-count duties (marking open tags MISSING is `inventory.count.approve`); reversal uses the journal write / post duties. Segregation-of-duties pairs belong to the OPA policy bundle (platform). |
 | 3.16.19 performance budgets (k6 at 10k concurrent issues, p95 SLOs) | later slice of PSG-16 | AC1's correctness at 10,000 concurrent issues is proven at the store (`TestAC1TenThousandConcurrentIssuesOfOneSKU`); the k6 run through the gateway and the p95 SLOs need a load environment. |
 | Shared dimension-set inserts in hash order on the other multi-row writes (transfer order create / ship / receive, consignment order create, tag transfer) | later slice of PSG-16 | The Wave 16 proof found that two requests inserting the same new dimension sets in different orders deadlock (40P01); journal line adds and journal posting now insert all of a request's dimension sets first, in hash order (`upsertDimensionSets`, regression `TestConcurrentJournalsWithSharedNewDimensionSetsDoNotDeadlock`). The other paths that insert several new sets in line or row order have the same exposure and no regression test yet. |

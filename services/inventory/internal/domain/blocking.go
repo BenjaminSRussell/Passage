@@ -15,8 +15,10 @@ const (
 	CodeBlockedReserve        = "INV-BLK-002" // blocked or quarantined stock cannot be reserved
 	CodeBlockExceeds          = "INV-BLK-003" // blocked quantity exceeds the available quantity
 	CodeBlockingNotFound      = "INV-BLK-004"
-	CodeDispositionLater      = "INV-BLK-005" // scrap and return need the loss posting (later slice)
+	CodeDispositionLater      = "INV-BLK-005" // return needs the vendor return (wave 18)
 	CodeBlockingState         = "INV-BLK-006" // the blocking is no longer active
+	CodeBlockingTransition    = "INV-BLK-007" // only quarantined stock moves to blocked
+	CodeScrapDuty             = "INV-BLK-008" // scrapping writes stock off and needs inventory.blocking.scrap
 )
 
 // Inventory status values stock moves to when blocked (FR-16.8). Stock with no
@@ -62,7 +64,13 @@ type Blocking struct {
 	State         string
 	Disposition   string
 	PhysicalDate  string
-	Version       int
+	// ExpectedReleaseDate is when the inspection or recall hold is expected to
+	// end (YYYY-MM-DD, empty when unknown); it is information, not a deadline.
+	ExpectedReleaseDate string
+	// ScrapJournalID is the posted ADJUSTMENT journal that wrote a scrapped
+	// blocking off (empty for any other disposition).
+	ScrapJournalID string
+	Version        int
 }
 
 // UnitCode is the shape of an inventory unit code.
@@ -129,8 +137,9 @@ func BlockedDims(src Dimensions, target string) Dimensions {
 // ResolveRelease checks the disposition that ends an active blocking and
 // returns the one to record. RELEASE returns the quantity to unrestricted
 // stock; a BLOCKED blocking with no disposition is a RELEASE. A quarantine
-// exit must name its disposition (INV-BLK-001). SCRAP and RETURN need the
-// loss and vendor-return postings and are not in this slice (INV-BLK-005).
+// exit must name its disposition (INV-BLK-001). SCRAP writes the stock off
+// through a posted ADJUSTMENT journal; RETURN needs the vendor return of
+// wave 18 and is refused (INV-BLK-005).
 func ResolveRelease(b Blocking, disposition string) (string, error) {
 	if b.State != BlockingActive {
 		return "", fail(CodeBlockingState, "blocking %s is not active", b.ID)
@@ -143,8 +152,32 @@ func ResolveRelease(b Blocking, disposition string) (string, error) {
 		return DispositionRelease, nil
 	case DispositionRelease:
 		return DispositionRelease, nil
-	case DispositionScrap, DispositionReturn:
-		return "", fail(CodeDispositionLater, "disposition %s needs the loss posting and is not yet supported; release the stock and post an adjustment", disposition)
+	case DispositionScrap:
+		return DispositionScrap, nil
+	case DispositionReturn:
+		return "", fail(CodeDispositionLater, "disposition RETURN needs the vendor return and is not yet supported; release the stock and post an adjustment")
 	}
 	return "", fail(CodeInvalid, "disposition %q is not one of RELEASE, SCRAP, RETURN", disposition)
+}
+
+// CheckEscalate checks that an active quarantine can move to blocked: the
+// QUARANTINE to BLOCKED transition of the status matrix (FR-16.8). Blocked
+// stock has no further transition except its disposition.
+func CheckEscalate(b Blocking) error {
+	if b.State != BlockingActive {
+		return fail(CodeBlockingState, "blocking %s is not active", b.ID)
+	}
+	if b.Target != StockQuarantine {
+		return fail(CodeBlockingTransition, "only quarantined stock moves to blocked; blocking %s is already %s", b.ID, b.Target)
+	}
+	return nil
+}
+
+// CheckExpectedRelease checks an expected release date against the date the
+// stock was blocked: it cannot be earlier (both are YYYY-MM-DD).
+func CheckExpectedRelease(blockedOn, expected string) error {
+	if expected != "" && expected < blockedOn {
+		return fail(CodeInvalid, "expected release date %s is before the blocking date %s", expected, blockedOn)
+	}
+	return nil
 }

@@ -300,7 +300,7 @@ describe("Blocking", () => {
   });
 
   it("validates a blocking before sending it", () => {
-    const base = { legalEntityId: ENTITY_ID, productId: PRODUCT_ID, qty: "2", unit: "EA", targetStatus: "BLOCKED" as const, reason: "QUALITY" as const, note: "", physicalDate: "2026-09-01", dimensions: { ...emptyDimensions(), site: "S1" } };
+    const base = { legalEntityId: ENTITY_ID, productId: PRODUCT_ID, qty: "2", unit: "EA", targetStatus: "BLOCKED" as const, reason: "QUALITY" as const, note: "", physicalDate: "2026-09-01", expectedReleaseDate: "", dimensions: { ...emptyDimensions(), site: "S1" } };
     expect(validateBlocking(base)).toEqual({});
     expect(validateBlocking({ ...base, dimensions: emptyDimensions() })).toEqual({ dimensions: "Site is required." });
     expect(validateBlocking({ ...base, dimensions: { ...base.dimensions, serial: "SN-1" } }).qty).toBe("A serial number is blocked one unit at a time.");

@@ -15,10 +15,11 @@ export interface BlockingValues {
   reason: BlockReason;
   note: string;
   physicalDate: string;
+  expectedReleaseDate: string;
   dimensions: Record<FormDimension, string>;
 }
 
-const fields = ["legalEntityId", "productId", "qty", "unit", "targetStatus", "reason", "note", "physicalDate", "dimensions"] as const;
+const fields = ["legalEntityId", "productId", "qty", "unit", "targetStatus", "reason", "note", "physicalDate", "expectedReleaseDate", "dimensions"] as const;
 type Errors = Partial<Record<(typeof fields)[number], string>>;
 
 const targetHints: Record<BlockTarget, string> = {
@@ -40,6 +41,10 @@ export function validateBlocking(values: BlockingValues): Errors {
   if (!/^[A-Z0-9_-]{1,12}$/.test(values.unit.trim())) errors.unit = "Enter a unit code such as EA.";
   if (values.dimensions.site.trim() === "") errors.dimensions = "Site is required.";
   if (values.note.length > 500) errors.note = "Keep the note to 500 characters.";
+  const expected = values.expectedReleaseDate.trim();
+  if (expected !== "" && values.physicalDate !== "" && expected < values.physicalDate) {
+    errors.expectedReleaseDate = "The expected release cannot be before the physical date.";
+  }
   return errors;
 }
 
@@ -55,6 +60,7 @@ export function NewBlockingPage() {
     reason: "QUALITY",
     note: "",
     physicalDate: today(),
+    expectedReleaseDate: "",
     dimensions: emptyDimensions(),
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -80,6 +86,7 @@ export function NewBlockingPage() {
           reason: values.reason,
           note: values.note.trim(),
           physicalDate: values.physicalDate,
+          expectedReleaseDate: values.expectedReleaseDate.trim(),
           dimensions: values.dimensions,
         },
         key.current,
@@ -146,6 +153,11 @@ export function NewBlockingPage() {
           </FormField>
           <FormField id="blk-date" label="Physical date">
             {(control) => <Input {...control} type="date" value={values.physicalDate} onChange={set("physicalDate")} />}
+          </FormField>
+          <FormField id="blk-expected" label="Expected release" optional error={errors.expectedReleaseDate} hint="When the inspection or recall hold should end. Information only.">
+            {(control) => (
+              <Input {...control} type="date" value={values.expectedReleaseDate} onChange={set("expectedReleaseDate")} invalid={Boolean(errors.expectedReleaseDate)} />
+            )}
           </FormField>
           {FORM_DIMENSIONS.map((name) => (
             <FormField key={name} id={`blk-${name}`} label={sentence(name)} optional={name !== "site"} error={name === "site" ? errors.dimensions : undefined}>

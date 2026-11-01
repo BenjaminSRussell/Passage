@@ -37,6 +37,8 @@ channels:
         $ref: '#/components/messages/BlockingCreated'
       blockingReleased:
         $ref: '#/components/messages/BlockingReleased'
+      blockingEscalated:
+        $ref: '#/components/messages/BlockingEscalated'
   hold:
     address: passage.inventory.hold
     messages:
@@ -93,7 +95,7 @@ operations:
   publishBlocking:
     action: send
     channel: { $ref: '#/channels/blocking' }
-    summary: Stock was blocked or quarantined, or a blocking was released (FR-16.8)
+    summary: Stock was blocked or quarantined, a quarantine was moved to blocked, or a blocking was released or scrapped (FR-16.8)
   publishHold:
     action: send
     channel: { $ref: '#/channels/hold' }
@@ -173,6 +175,14 @@ components:
       summary: A blocking was released back to a usable inventory status.
       name: dev.passage.inventory.blocking.released.v1
       x-passage-type: dev.passage.inventory.blocking.released.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BlockingData'
+    BlockingEscalated:
+      title: Quarantine moved to blocked
+      summary: An active quarantine was moved to the BLOCKED inventory status (QUARANTINE to BLOCKED transition); targetStatus is BLOCKED.
+      name: dev.passage.inventory.blocking.escalated.v1
+      x-passage-type: dev.passage.inventory.blocking.escalated.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
@@ -396,7 +406,7 @@ components:
         version: { type: integer }
     BlockingData:
       type: object
-      required: [blockingId, legalEntityId, productId, dimensionSet, qty, targetStatus, reason, state, disposition]
+      required: [blockingId, legalEntityId, productId, dimensionSet, qty, targetStatus, reason, state, disposition, expectedReleaseDate, scrapJournalId]
       properties:
         blockingId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -407,6 +417,8 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }
+        expectedReleaseDate: { type: [string, 'null'], format: date, description: When the hold is expected to end; null when not given }
+        scrapJournalId: { type: [string, 'null'], format: uuid, description: The posted ADJUSTMENT journal that wrote the stock off; set only when disposition is SCRAP }
     HoldData:
       type: object
       required: [holdId, legalEntityId, productId, dimensionSet, qty, releasedQty, reason, sourceType, sourceRef, state]

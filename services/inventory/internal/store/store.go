@@ -63,7 +63,8 @@ type Store interface {
 	ListReservations(ctx context.Context, f ReservationFilter) ([]domain.Reservation, error)
 	UpsertBatchExpiry(ctx context.Context, productID, batchID string, expiry *time.Time) error
 	CreateBlocking(ctx context.Context, in BlockingInput) (domain.Blocking, bool, error)
-	ReleaseBlocking(ctx context.Context, id string, version int, disposition string, date time.Time) (domain.Blocking, error)
+	ReleaseBlocking(ctx context.Context, id string, version int, disposition string, date time.Time, p PostParams) (domain.Blocking, error)
+	EscalateBlocking(ctx context.Context, id string, version int, date time.Time) (domain.Blocking, error)
 	ListBlockings(ctx context.Context, f BlockingFilter) ([]domain.Blocking, error)
 	PlaceHold(ctx context.Context, in HoldInput) (HoldResult, error)
 	ReleaseHold(ctx context.Context, id string, version int, qty *decimal.Decimal) (domain.Hold, error)

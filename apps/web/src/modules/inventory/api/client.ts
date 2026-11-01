@@ -665,10 +665,17 @@ export interface Blocking {
   reason: BlockReason;
   note?: string;
   state: BlockingState;
-  disposition?: "RELEASE" | "SCRAP" | "RETURN";
+  disposition?: BlockDisposition;
   physicalDate: string;
+  /** When the hold is expected to end; information only. */
+  expectedReleaseDate?: string;
+  /** The posted ADJUSTMENT journal that wrote a scrapped blocking off. */
+  scrapJournalId?: string;
   version: number;
 }
+
+/** Dispositions the screen offers; RETURN needs the vendor return and is refused by the service. */
+export type BlockDisposition = "RELEASE" | "SCRAP" | "RETURN";
 
 export interface BlockInput {
   legalEntityId: string;
@@ -680,12 +687,14 @@ export interface BlockInput {
   reason: BlockReason;
   note?: string;
   physicalDate?: string;
+  expectedReleaseDate?: string;
 }
 
 export async function createBlocking(input: BlockInput, key: string = newKey()): Promise<Blocking> {
   const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
   if (!body.note) delete body.note;
   if (!body.physicalDate) delete body.physicalDate;
+  if (!body.expectedReleaseDate) delete body.expectedReleaseDate;
   return (await send<Blocking>("/blockings", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
 }
 
@@ -694,15 +703,23 @@ export async function listBlockings(state: BlockingState | "" = "", signal?: Abo
   return body.items ?? [];
 }
 
-/** Releases a blocking back to available stock at the version the screen shows (If-Match). */
-export async function releaseBlocking(id: string, version: number): Promise<Blocking> {
+/**
+ * Ends a blocking at the version the screen shows (If-Match): RELEASE returns the stock to available,
+ * SCRAP writes it off through a posted adjustment journal (needs inventory.blocking.scrap).
+ */
+export async function releaseBlocking(id: string, version: number, disposition: BlockDisposition = "RELEASE"): Promise<Blocking> {
   return (
     await send<Blocking>(`/blockings/${encodeURIComponent(id)}:release`, {
       method: "POST",
       headers: { "If-Match": `"${version}"` },
-      body: JSON.stringify({ disposition: "RELEASE" }),
+      body: JSON.stringify({ disposition }),
     })
   ).body;
+}
+
+/** Moves an active quarantine to blocked (QUARANTINE to BLOCKED) at the version the screen shows. */
+export async function escalateBlocking(id: string, version: number): Promise<Blocking> {
+  return (await send<Blocking>(`/blockings/${encodeURIComponent(id)}:block`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
 }
 
 // ---- Cycle counting (FR-16.9) ----

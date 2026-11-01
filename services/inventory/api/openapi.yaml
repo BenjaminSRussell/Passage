@@ -463,9 +463,16 @@ paths:
       summary: End a blocking with a disposition
       description: |
         RELEASE moves the quantity back to unrestricted stock. A QUARANTINE blocking must name its
-        disposition (INV-BLK-001); a BLOCKED one without a disposition is released. SCRAP and RETURN
-        are not supported yet (INV-BLK-005). Requires If-Match. A released blocking is returned unchanged.
-        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        disposition (INV-BLK-001); a BLOCKED one without a disposition is released. SCRAP writes the
+        stock off: it creates and posts, in the same transaction, an ADJUSTMENT journal (idempotency key
+        blocking-scrap:{id}) that issues the quantity from the blocked dimensions at their running
+        average, so the GL entry credits the inventory account and debits the adjustment account by the
+        value the blocking carried; the blocking answers scrapJournalId. SCRAP additionally needs the
+        inventory.blocking.scrap duty (403 INV-BLK-008) and an adjustment account in the posting profile
+        (422 INV-JNL-005). It writes off the whole blocking and never more than the blocked row still
+        holds, whatever the negative stock policy (422 INV-NEG-001). RETURN is not supported yet (INV-BLK-005). Requires If-Match. A released
+        blocking is returned unchanged. A row held by an unfinished sheet of a freezeStock count plan is
+        refused (409 INV-CNT-002).
       x-passage-duty: inventory.blocking.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -494,6 +501,37 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/blockings/{id}:block:
+    post:
+      operationId: escalateInventoryBlocking
+      summary: Move an active quarantine to blocked
+      description: |
+        The QUARANTINE to BLOCKED transition (FR-16.8): moves the quantity from the quarantine
+        dimensions to the same dimensions with inventory_status = BLOCKED as a SOLD issue and a
+        PURCHASED receipt valued at the running average (no GL effect), and sets targetStatus BLOCKED
+        on the blocking, which stays ACTIVE with a higher version. Only an active quarantine moves
+        (422 INV-BLK-006 when it is no longer active, 422 INV-BLK-007 when it is already blocked).
+        Requires If-Match. Emits dev.passage.inventory.blocking.escalated.v1. A row held by an
+        unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+      x-passage-duty: inventory.blocking.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Blocking after the transition, targetStatus BLOCKED
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Blocking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/inventory/journal-names:
     post:
       operationId: createInventoryJournalName
@@ -2773,6 +2811,7 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         note: { type: string, maxLength: 500 }
         physicalDate: { type: string, format: date, description: Defaults to today (UTC) }
+        expectedReleaseDate: { type: string, format: date, description: When the hold is expected to end; not before physicalDate. Information only }
     Blocking:
       type: object
       required: [id, legalEntityId, productId, dimensions, qty, unit, targetStatus, reason, state, physicalDate, version]
@@ -2789,6 +2828,8 @@ components:
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: string, enum: [RELEASE, SCRAP, RETURN] }
         physicalDate: { type: string, format: date }
+        expectedReleaseDate: { type: string, format: date, description: When the hold is expected to end; absent when not given }
+        scrapJournalId: { type: string, format: uuid, description: The posted ADJUSTMENT journal that wrote the stock off; present only when disposition is SCRAP }
         version: { type: integer }
     HoldRequest:
       type: object

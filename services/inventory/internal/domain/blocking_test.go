@@ -83,7 +83,8 @@ func TestResolveRelease(t *testing.T) {
 		{"blocked without disposition releases", StockBlocked, BlockingActive, "", DispositionRelease, ""},
 		{"quarantine needs a disposition", StockQuarantine, BlockingActive, "", "", CodeQuarantineDisposition},
 		{"quarantine release", StockQuarantine, BlockingActive, DispositionRelease, DispositionRelease, ""},
-		{"scrap not yet", StockQuarantine, BlockingActive, DispositionScrap, "", CodeDispositionLater},
+		{"quarantine scrap", StockQuarantine, BlockingActive, DispositionScrap, DispositionScrap, ""},
+		{"blocked scrap", StockBlocked, BlockingActive, DispositionScrap, DispositionScrap, ""},
 		{"return not yet", StockBlocked, BlockingActive, DispositionReturn, "", CodeDispositionLater},
 		{"unknown disposition", StockBlocked, BlockingActive, "SELL", "", CodeInvalid},
 		{"already released", StockBlocked, BlockingReleased, DispositionRelease, "", CodeBlockingState},
@@ -106,5 +107,29 @@ func TestValidateReservable(t *testing.T) {
 	}
 	if err := ValidateReservable(Dimensions{DimSite: "S1"}); err != nil {
 		t.Fatalf("unrestricted dims rejected: %v", err)
+	}
+}
+
+func TestCheckEscalate(t *testing.T) {
+	for _, tc := range []struct{ name, target, state, code string }{
+		{"quarantine moves to blocked", StockQuarantine, BlockingActive, ""},
+		{"blocked stays", StockBlocked, BlockingActive, CodeBlockingTransition},
+		{"released quarantine", StockQuarantine, BlockingReleased, CodeBlockingState},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := domainCode(CheckEscalate(Blocking{ID: "b1", Target: tc.target, State: tc.state})); got != tc.code {
+				t.Fatalf("got %q, want %q", got, tc.code)
+			}
+		})
+	}
+}
+
+func TestCheckExpectedRelease(t *testing.T) {
+	for _, tc := range []struct{ expected, code string }{
+		{"", ""}, {"2026-09-02", ""}, {"2026-10-01", ""}, {"2026-09-01", CodeInvalid},
+	} {
+		if got := domainCode(CheckExpectedRelease("2026-09-02", tc.expected)); got != tc.code {
+			t.Fatalf("expected %q: got %q, want %q", tc.expected, got, tc.code)
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -21,6 +22,9 @@ import (
 // Blocking and quarantine routes (FR-16.8).
 const (
 	dutyBlockingWrite = "inventory.blocking.write"
+	// dutyBlockingScrap is checked inside the release handler: scrapping writes
+	// value off to the adjustment account, which blocking.write alone does not allow.
+	dutyBlockingScrap = "inventory.blocking.scrap"
 	blockingsPath     = "/v1/inventory/blockings"
 	maxNoteLength     = 500
 )
@@ -29,6 +33,7 @@ func (a *API) registerBlocking(r chi.Router) {
 	r.With(authz.RequireDuty(dutyBlockingWrite)).Post(blockingsPath, a.createBlocking)
 	r.With(authz.RequireDuty(dutyRead)).Get(blockingsPath, a.listBlockings)
 	r.With(authz.RequireDuty(dutyBlockingWrite)).Post(blockingsPath+"/{id}:release", a.releaseBlocking)
+	r.With(authz.RequireDuty(dutyBlockingWrite)).Post(blockingsPath+"/{id}:block", a.escalateBlocking)
 }
 
 type blockingRequest struct {
@@ -41,6 +46,8 @@ type blockingRequest struct {
 	Reason        string            `json:"reason"`
 	Note          string            `json:"note"`
 	PhysicalDate  string            `json:"physicalDate"`
+	// ExpectedReleaseDate is when the hold is expected to end (YYYY-MM-DD).
+	ExpectedReleaseDate string `json:"expectedReleaseDate"`
 }
 
 type releaseRequest struct {
@@ -61,6 +68,9 @@ type blockingResponse struct {
 	Disposition   string            `json:"disposition,omitempty"`
 	PhysicalDate  string            `json:"physicalDate"`
 	Version       int               `json:"version"`
+	// ExpectedReleaseDate and ScrapJournalID are omitted when empty.
+	ExpectedReleaseDate string `json:"expectedReleaseDate,omitempty"`
+	ScrapJournalID      string `json:"scrapJournalId,omitempty"`
 }
 
 func (a *API) createBlocking(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +112,13 @@ func (a *API) createBlocking(w http.ResponseWriter, r *http.Request) {
 			fields["physicalDate"] = "must be a date (YYYY-MM-DD)"
 		}
 	}
+	if req.ExpectedReleaseDate != "" {
+		if expected, perr := time.Parse(dateLayout, req.ExpectedReleaseDate); perr != nil {
+			fields["expectedReleaseDate"] = "must be a date (YYYY-MM-DD)"
+		} else if expected.Before(date) {
+			fields["expectedReleaseDate"] = "must not be before the blocking date"
+		}
+	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
@@ -109,7 +126,7 @@ func (a *API) createBlocking(w http.ResponseWriter, r *http.Request) {
 	}
 	b, replayed, err := a.store.CreateBlocking(r.Context(), store.BlockingInput{IdempotencyKey: key, LegalEntityID: req.LegalEntityID,
 		ProductID: req.ProductID, Dims: domain.Dimensions(req.Dimensions), Qty: qty, Unit: req.Unit, Target: req.TargetStatus,
-		Reason: req.Reason, Note: req.Note, PhysicalDate: date})
+		Reason: req.Reason, Note: req.Note, PhysicalDate: date, ExpectedReleaseDate: req.ExpectedReleaseDate})
 	if err != nil {
 		a.failed(w, r, "create blocking", err)
 		return
@@ -173,7 +190,12 @@ func (a *API) releaseBlocking(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	b, err := a.store.ReleaseBlocking(r.Context(), id, version, strings.ToUpper(strings.TrimSpace(req.Disposition)), time.Now().UTC().Truncate(24*time.Hour))
+	disposition := strings.ToUpper(strings.TrimSpace(req.Disposition))
+	if p, _ := tenant.FromContext(r.Context()); disposition == domain.DispositionScrap && !p.HasDuty(dutyBlockingScrap) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeScrapDuty, "scrapping blocked stock writes it off and needs the "+dutyBlockingScrap+" duty"))
+		return
+	}
+	b, err := a.store.ReleaseBlocking(r.Context(), id, version, disposition, time.Now().UTC().Truncate(24*time.Hour), a.post)
 	if err != nil {
 		a.failed(w, r, "release blocking", err)
 		return
@@ -181,9 +203,34 @@ func (a *API) releaseBlocking(w http.ResponseWriter, r *http.Request) {
 	writeBlocking(w, http.StatusOK, b)
 }
 
+// escalateBlocking moves an active quarantine to blocked (QUARANTINE to
+// BLOCKED); the version comes from If-Match.
+func (a *API) escalateBlocking(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeBlockingNotFound, "blocking not found"))
+		return
+	}
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	b, err := a.store.EscalateBlocking(r.Context(), id, version, time.Now().UTC().Truncate(24*time.Hour))
+	if err != nil {
+		a.failed(w, r, "escalate blocking", err)
+		return
+	}
+	writeBlocking(w, http.StatusOK, b)
+}
+
 func toBlockingResponse(b domain.Blocking) blockingResponse {
 	return blockingResponse{ID: b.ID, LegalEntityID: b.LegalEntityID, ProductID: b.ProductID, Dimensions: b.Dims, Qty: b.Qty.String(), Unit: b.Unit,
-		TargetStatus: b.Target, Reason: b.Reason, Note: b.Note, State: b.State, Disposition: b.Disposition, PhysicalDate: b.PhysicalDate, Version: b.Version}
+		TargetStatus: b.Target, Reason: b.Reason, Note: b.Note, State: b.State, Disposition: b.Disposition, PhysicalDate: b.PhysicalDate, Version: b.Version,
+		ExpectedReleaseDate: b.ExpectedReleaseDate, ScrapJournalID: b.ScrapJournalID}
 }
 
 func writeBlocking(w http.ResponseWriter, status int, b domain.Blocking) {

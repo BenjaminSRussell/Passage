@@ -11,13 +11,14 @@ const (
 	ReservationReleased = "dev.passage.inventory.reservation.released.v1"
 	BlockingCreated     = "dev.passage.inventory.blocking.created.v1"
 	BlockingReleased    = "dev.passage.inventory.blocking.released.v1"
+	BlockingEscalated   = "dev.passage.inventory.blocking.escalated.v1"
 	HoldPlaced          = "dev.passage.inventory.hold.placed.v1"
 	HoldReleased        = "dev.passage.inventory.hold.released.v1"
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased, HoldPlaced, HoldReleased,
+	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased, BlockingEscalated, HoldPlaced, HoldReleased,
 		TransferShipped, TransferReceived, OwnershipChanged, ReconciliationDiff, CountSheetChanged, JournalNameCreated, JournalNameUpdated}
 }
 
@@ -121,7 +122,7 @@ type ReservationData struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// BlockingData is the payload of both blocking events. DimensionSet is the
+// BlockingData is the payload of the blocking events. DimensionSet is the
 // unrestricted source; the blocked stock sits at the same dimensions with
 // inventory_status = targetStatus. Disposition is null while ACTIVE.
 type BlockingData struct {
@@ -134,6 +135,10 @@ type BlockingData struct {
 	Reason        string            `json:"reason"`
 	State         string            `json:"state"`
 	Disposition   *string           `json:"disposition"`
+	// ExpectedReleaseDate is null when none was given; ScrapJournalID is null
+	// unless the blocking was scrapped (the ADJUSTMENT journal that wrote it off).
+	ExpectedReleaseDate *string `json:"expectedReleaseDate"`
+	ScrapJournalID      *string `json:"scrapJournalId"`
 }
 
 // HoldData is the payload of both hold events. Qty is the quantity placed,

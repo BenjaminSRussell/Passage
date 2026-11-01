@@ -61,7 +61,8 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | PUT | `/v1/inventory/batch-expiries/{productId}/{batchId}` | `inventory.batch.write` | (interim FEFO input until wave 8 batches) |
 | POST | `/v1/inventory/blockings` | `inventory.blocking.write` | InventoryBlock |
 | GET | `/v1/inventory/blockings` | `inventory.read` | InventoryInquire |
-| POST | `/v1/inventory/blockings/{id}:release` | `inventory.blocking.write` | InventoryBlock |
+| POST | `/v1/inventory/blockings/{id}:release` | `inventory.blocking.write` (SCRAP also `inventory.blocking.scrap`) | InventoryBlock |
+| POST | `/v1/inventory/blockings/{id}:block` | `inventory.blocking.write` | InventoryBlock |
 | POST | `/v1/inventory/count-plans` | `inventory.count.write` | CycleCountMaintain |
 | GET | `/v1/inventory/count-plans` | `inventory.read` | InventoryInquire |
 | POST | `/v1/inventory/count-plans/{id}:generate` | `inventory.count.write` | CycleCountMaintain |
@@ -179,8 +180,19 @@ Physical stock and value summed over the product do not change; both legs are on
 inventory account, so there is no GL entry. Restricted rows are left out of
 `availPhysical` / `availOrdered` in the on-hand inquiry (reported as `blocked`), out of
 policy reservations and out of manual reservations (`INV-BLK-002`). Release moves the
-stock back the same way; a quarantine needs an explicit disposition (`INV-BLK-001`),
-and SCRAP / RETURN are not built yet (`INV-BLK-005`).
+stock back the same way; a quarantine needs an explicit disposition (`INV-BLK-001`).
+SCRAP writes the stock off: the release creates and posts, in the same transaction, an
+ADJUSTMENT journal (`blocking-scrap:<blocking id>`) that issues the quantity from the blocked
+dimensions at their running average, so the GL entry debits the adjustment account and credits
+the inventory account by the value the blocking carried, and the inventory-to-ledger
+reconciliation sees it like any posted journal. It needs the `inventory.blocking.scrap` duty
+(`INV-BLK-008`) and `INV_ADJUSTMENT_ACCOUNT`, writes off the whole blocking, and always posts
+under the forbid negative policy (`INV-NEG-001` when other postings took the blocked stock); the
+blocking answers `scrapJournalId`. RETURN
+needs the wave 18 vendor return and answers `INV-BLK-005`. `POST /blockings/{id}:block` moves
+an active quarantine to BLOCKED (the QUARANTINE to BLOCKED transition) as a valued pair with
+no GL effect, emits `blocking.escalated` and keeps the blocking active. A blocking may carry an
+`expectedReleaseDate` (information only, not before the blocking date).
 
 ## Cycle counting (FR-16.9, BR-16.8)
 
@@ -349,8 +361,10 @@ expected picks come from `testdata/gen_fefo_100.py` (`python3 -I gen_fefo_100.py
 | `INV-BLK-002` | 422 | Reservation of BLOCKED or QUARANTINE stock |
 | `INV-BLK-003` | 422 | Blocked quantity exceeds the available quantity at the source |
 | `INV-BLK-004` | 404 | Blocking id not found |
-| `INV-BLK-005` | 422 | Disposition SCRAP or RETURN (not supported yet) |
+| `INV-BLK-005` | 422 | Disposition RETURN (not supported yet) |
 | `INV-BLK-006` | 422 | Blocking is no longer active |
+| `INV-BLK-007` | 422 | Only quarantined stock moves to blocked |
+| `INV-BLK-008` | 403 | SCRAP without `inventory.blocking.scrap` |
 | `INV-CNT-001` | 403 | Count variance above tolerance and the caller lacks `inventory.count.approve` |
 | `INV-CNT-003` | 422 | Count sheet is not OPEN |
 | `INV-CNT-004` | 404 | Count plan, sheet or line not found |

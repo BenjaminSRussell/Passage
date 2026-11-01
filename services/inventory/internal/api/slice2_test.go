@@ -29,6 +29,7 @@ func TestSlice2DutiesAreEnforcedPerRoute(t *testing.T) {
 		{http.MethodPost, "/v1/inventory/blockings", "inventory.read"},
 		{http.MethodGet, "/v1/inventory/blockings", "inventory.blocking.write"},
 		{http.MethodPost, "/v1/inventory/blockings/" + id + ":release", "inventory.read"},
+		{http.MethodPost, "/v1/inventory/blockings/" + id + ":block", "inventory.read"},
 		{http.MethodPost, "/v1/inventory/count-plans", "inventory.count.post"},
 		{http.MethodGet, "/v1/inventory/count-plans", "inventory.count.write"},
 		{http.MethodPost, "/v1/inventory/count-plans/" + id + ":generate", "inventory.read"},
@@ -256,6 +257,47 @@ func TestBlockingListAndRelease(t *testing.T) {
 	rec = do(t, h, http.MethodPost, path, `{"disposition":"release"}`, []string{"inventory.blocking.write"}, map[string]string{"If-Match": `"3"`})
 	if rec.Code != http.StatusOK || fs.releaseVersion != 3 || fs.releaseDispo != "RELEASE" || rec.Header().Get("ETag") != `"4"` {
 		t.Fatalf("release: %d version %d disposition %q etag %q", rec.Code, fs.releaseVersion, fs.releaseDispo, rec.Header().Get("ETag"))
+	}
+}
+
+func TestBlockingScrapNeedsItsOwnDutyAndEscalateNeedsIfMatch(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	path := "/v1/inventory/blockings/" + ids.New() + ":release"
+	hdr := map[string]string{"If-Match": `"2"`}
+	rec := do(t, h, http.MethodPost, path, `{"disposition":"SCRAP"}`, []string{"inventory.blocking.write"}, hdr)
+	if rec.Code != http.StatusForbidden || decodeProblem(t, rec).Code != domain.CodeScrapDuty || fs.releaseDispo != "" {
+		t.Fatalf("scrap without the scrap duty: %d %s (store reached: %q)", rec.Code, rec.Body.String(), fs.releaseDispo)
+	}
+	rec = do(t, h, http.MethodPost, path, `{"disposition":"scrap"}`, []string{"inventory.blocking.write", "inventory.blocking.scrap"}, hdr)
+	if rec.Code != http.StatusOK || fs.releaseDispo != "SCRAP" || fs.releaseVersion != 2 {
+		t.Fatalf("scrap with the duty: %d disposition %q version %d", rec.Code, fs.releaseDispo, fs.releaseVersion)
+	}
+	block := "/v1/inventory/blockings/" + ids.New() + ":block"
+	if rec := do(t, h, http.MethodPost, block, "", []string{"inventory.blocking.write"}, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("escalate without If-Match: %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, block, "", []string{"inventory.blocking.write"}, map[string]string{"If-Match": `"5"`})
+	if rec.Code != http.StatusOK || fs.releaseVersion != 5 || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("escalate: %d version %d etag %q", rec.Code, fs.releaseVersion, rec.Header().Get("ETag"))
+	}
+}
+
+func TestBlockingExpectedReleaseDateIsValidated(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	body := fmt.Sprintf(`{"legalEntityId":%q,"productId":%q,"dimensions":{"site":"S1"},"qty":"1","unit":"EA","targetStatus":"QUARANTINE","reason":"QUALITY",
+		"physicalDate":"2026-09-02","expectedReleaseDate":%%q}`, ids.New(), ids.New())
+	for _, tc := range []struct{ date, field string }{{"someday", "expectedReleaseDate"}, {"2026-09-01", "expectedReleaseDate"}, {"2026-09-09", ""}} {
+		rec := do(t, h, http.MethodPost, "/v1/inventory/blockings", fmt.Sprintf(body, tc.date), []string{"inventory.blocking.write"}, key("k-1"))
+		if tc.field == "" {
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("%s: %d %s", tc.date, rec.Code, rec.Body.String())
+			}
+			continue
+		}
+		if p := decodeProblem(t, rec); rec.Code != http.StatusBadRequest || p.Errors[tc.field] == "" {
+			t.Fatalf("%s: %d %+v", tc.date, rec.Code, p)
+		}
 	}
 }
 
