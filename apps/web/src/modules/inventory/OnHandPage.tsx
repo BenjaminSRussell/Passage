@@ -36,6 +36,7 @@ const availabilityColumns: DataTableColumn<OnHandRow>[] = [
   { key: "availPhysical", header: "Available physical", align: "end", mono: true, render: (row) => row.availPhysical ?? dash },
   { key: "availOrdered", header: "Available ordered", align: "end", mono: true, render: (row) => row.availOrdered ?? dash },
   { key: "reservedPhysical", header: "Reserved", align: "end", mono: true, render: (row) => row.reservedPhysical ?? dash },
+  { key: "heldPhysical", header: "Held", align: "end", mono: true, render: (row) => row.heldPhysical ?? dash },
 ];
 const amountColumns: DataTableColumn<OnHandRow>[] = [
   { key: "blocked", header: "Blocked", align: "end", mono: true, render: (row) => row.blocked ?? "0" },

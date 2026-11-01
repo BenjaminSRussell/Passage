@@ -393,6 +393,7 @@ describe("Segmented reservations", () => {
     demandId: "SO-1",
     requiredDate: "2026-10-01",
     shelfLifeMarginDays: "0",
+    ttlHours: "",
     allowPartial: false,
     dimensions: emptyDimensions(),
     segmentType: "PROJECT",

@@ -60,6 +60,8 @@ type Reservation struct {
 	AllocationNo  int
 	CreatedAt     time.Time
 	ReleasedAt    *time.Time
+	// ExpiresAt is when an ACTIVE reservation lapses (nil: it holds until released).
+	ExpiresAt *time.Time
 }
 
 // ValidateReservable rejects a reservation at a blocked or quarantined

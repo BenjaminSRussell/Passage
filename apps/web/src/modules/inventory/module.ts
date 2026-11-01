@@ -12,6 +12,7 @@ import { CountVariancePage } from "./CountVariancePage";
 import { DimensionCombinationsPage } from "./DimensionCombinationsPage";
 import { CountSheetsPage } from "./CountSheetsPage";
 import { CountTagsPage } from "./CountTagsPage";
+import { HoldsPage } from "./HoldsPage";
 import { InTransitPage } from "./InTransitPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalNamesPage } from "./JournalNamesPage";
@@ -19,6 +20,7 @@ import { JournalsPage } from "./JournalsPage";
 import { NewBlockingPage } from "./NewBlockingPage";
 import { NewConsignmentPage } from "./NewConsignmentPage";
 import { NewCountPlanPage } from "./NewCountPlanPage";
+import { NewHoldPage } from "./NewHoldPage";
 import { NewJournalNamePage } from "./NewJournalNamePage";
 import { NewJournalPage } from "./NewJournalPage";
 import { NewAbcRunPage } from "./NewAbcRunPage";
@@ -43,7 +45,7 @@ const inventory: PassageModule = {
   id: "inventory",
   title: "Inventory",
   description:
-    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification, the count variance, negative on-hand, batch and serial trace and dimension combination reports, and the daily inventory-to-ledger reconciliation.",
+    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations with time to live, holds, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification, the count variance, negative on-hand, batch and serial trace and dimension combination reports, and the daily inventory-to-ledger reconciliation.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry", duty: "inventory.read" } },
     { path: "/inventory/workspace", element: createElement(WorkspacePage), handle: { title: "Inventory workspace" } },
@@ -58,6 +60,8 @@ const inventory: PassageModule = {
     { path: "/inventory/status-changes", element: createElement(StatusChangesPage) },
     { path: "/inventory/reservations", element: createElement(ReservationsPage) },
     { path: "/inventory/reservations/new", element: createElement(NewReservationPage) },
+    { path: "/inventory/holds", element: createElement(HoldsPage) },
+    { path: "/inventory/holds/new", element: createElement(NewHoldPage) },
     { path: "/inventory/blockings", element: createElement(BlockingsPage) },
     { path: "/inventory/blockings/new", element: createElement(NewBlockingPage) },
     { path: "/inventory/count-plans", element: createElement(CountPlansPage) },
@@ -94,6 +98,7 @@ const inventory: PassageModule = {
     { label: "Transactions", to: "/inventory/transactions", duty: "inventory.read" },
     { label: "Status changes", to: "/inventory/status-changes", duty: "inventory.read" },
     { label: "Reservations", to: "/inventory/reservations", duty: "inventory.read" },
+    { label: "Holds", to: "/inventory/holds", duty: "inventory.read" },
     { label: "Blocking", to: "/inventory/blockings", duty: "inventory.read" },
     { label: "Count plans", to: "/inventory/count-plans", duty: "inventory.read" },
     { label: "Count sheets", to: "/inventory/count-sheets", duty: "inventory.read" },

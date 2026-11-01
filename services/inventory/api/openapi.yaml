@@ -310,6 +310,39 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reservations:expire:
+    post:
+      operationId: expireInventoryReservations
+      summary: Release the reservations whose time to live has passed
+      description: |
+        Releases ACTIVE reservations whose expiresAt (set by ttlHours at creation) is not in the future, oldest
+        expiry first, at most limit per call; more is true when others are still due. Each is released in its
+        own transaction by the same path as the release operation, so the quantity returns to availability and a
+        reservation.released event with reason EXPIRED is written. A reservation without ttlHours (or with 0)
+        never expires. The run covers only the caller's legal entities (row-level security); a scheduler runs it
+        with a tenant-wide principal. Each release re-checks the reservation under its row lock and skips one
+        another transaction holds, so concurrent runs never release a reservation twice, and repeating the call
+        releases only what is still due. Meant for a scheduler or an operator.
+      x-passage-duty: inventory.reservation.write
+      parameters:
+        - { name: limit, in: query, description: Most reservations released in this call (1 to 500, default 200), schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+      responses:
+        '200':
+          description: The reservations released by this call
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [released, more, items]
+                properties:
+                  released: { type: integer, description: Number of reservations released by this call }
+                  more: { type: boolean, description: True when more reservations are due than the limit allowed }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reservation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/reservations/{id}:
     delete:
       operationId: releaseInventoryReservation
@@ -2699,6 +2732,7 @@ components:
         segmentType: { type: string, enum: [NONE, SALES_ORDER, PROJECT], default: NONE, description: 'Segment of the demand (FR-16.20). A policy reservation takes stock of this segment first, then unsegmented stock when segmentFallback; never another segment. An unsegmented demand never takes segmented stock. MANUAL stock of an ineligible segment is INV-SEG-001.' }
         segmentRef: { type: string, maxLength: 48, description: Sales order or project reference; required with SALES_ORDER and PROJECT }
         segmentFallback: { type: boolean, default: true }
+        ttlHours: { type: integer, minimum: 0, maximum: 8760, default: 0, description: 'Hours after which the reservation lapses and the expiry run releases it (FR-16.7). 0 or absent means no expiry: the reservation holds until released or consumed (PRD reservation_ttl_hours, default 0); it never means expire immediately. Part of the request an Idempotency-Key stands for.' }
     Reservation:
       type: object
       required: [id, legalEntityId, productId, dimensions, qty, demandType, demandId, policy, status, allocationNo, createdAt]
@@ -2716,6 +2750,7 @@ components:
         allocationNo: { type: integer, description: Position of this allocation within its request }
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: When an ACTIVE reservation lapses; absent when it holds until released }
     ReserveResponse:
       type: object
       required: [items, shortfall]

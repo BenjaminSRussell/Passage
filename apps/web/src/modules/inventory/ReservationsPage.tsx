@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
+  expireReservations,
   listReservations,
   releaseReservation,
   RESERVATION_STATUSES,
@@ -26,6 +27,7 @@ export function ReservationsPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [expiring, setExpiring] = useState(false);
 
   const extra = more && more.key === key ? more.page : null;
   const rows = [...(state.data?.items ?? []), ...(extra?.items ?? [])];
@@ -45,6 +47,24 @@ export function ReservationsPage() {
     }
   }
 
+  async function releaseExpired() {
+    setExpiring(true);
+    setFailure(null);
+    try {
+      const out = await expireReservations();
+      setNotice(
+        out.released === 0
+          ? "No reservation has expired."
+          : `Released ${out.released} expired ${out.released === 1 ? "reservation" : "reservations"}${out.more ? "; more are due, run it again" : ""}.`,
+      );
+      setAttempt((n) => n + 1);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setExpiring(false);
+    }
+  }
+
   const columns: DataTableColumn<Reservation>[] = [
     { key: "createdAt", header: "Reserved", render: (row) => formatDateTime(row.createdAt) },
     { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
@@ -56,6 +76,7 @@ export function ReservationsPage() {
       render: (row) => `${sentence(row.demandType)} ${row.demandId}${row.demandSegment ? ` (segment ${row.demandSegment})` : ""}`,
     },
     { key: "policy", header: "Policy", render: (row) => row.policy },
+    { key: "expiresAt", header: "Expires", render: (row) => (row.expiresAt ? formatDateTime(row.expiresAt) : dash) },
     { key: "status", header: "Status", render: (row) => <Badge tone={stateTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     {
       key: "actions",
@@ -85,9 +106,14 @@ export function ReservationsPage() {
         title="Reservations"
         description="Stock held for a demand. Reserved stock cannot be issued or blocked until it is released."
         actions={
-          <Link className={buttonClassName("primary")} to="/inventory/reservations/new">
-            New reservation
-          </Link>
+          <>
+            <Button onClick={releaseExpired} loading={expiring}>
+              Release expired
+            </Button>
+            <Link className={buttonClassName("primary")} to="/inventory/reservations/new">
+              New reservation
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>

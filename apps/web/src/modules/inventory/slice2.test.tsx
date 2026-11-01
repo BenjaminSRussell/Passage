@@ -214,6 +214,7 @@ describe("New reservation", () => {
     demandId: "SO-1",
     requiredDate: "2026-09-01",
     shelfLifeMarginDays: "7",
+    ttlHours: "",
     allowPartial: false,
     dimensions: emptyDimensions(),
     segmentType: "NONE" as const,

@@ -111,6 +111,8 @@ export interface OnHandRow {
   reservedPhysical?: string;
   /** Physical quantity held as BLOCKED or QUARANTINE; not in the available columns. */
   blocked: string;
+  /** Quantity under an active hold; left out of the available columns. Absent in an as-of replay. */
+  heldPhysical?: string;
   currency: string;
   negative: boolean;
 }
@@ -480,6 +482,8 @@ export interface Reservation {
   allocationNo: number;
   createdAt: string;
   releasedAt?: string;
+  /** When an ACTIVE reservation lapses; absent when it holds until released. */
+  expiresAt?: string;
 }
 
 export interface ReserveInput {
@@ -498,6 +502,8 @@ export interface ReserveInput {
   segmentRef?: string;
   /** Let a segmented demand take unsegmented stock (default true). */
   segmentFallback?: boolean;
+  /** Hours after which the reservation lapses; 0 or absent means no expiry (it holds until released), never "expire now". */
+  ttlHours?: number;
 }
 
 export const SEGMENT_TYPES = ["NONE", "SALES_ORDER", "PROJECT"] as const;
@@ -527,6 +533,7 @@ function cleanDimensions(dims: Partial<Record<string, string>>): Record<string, 
 export async function createReservation(input: ReserveInput, key: string = newKey()): Promise<ReserveResult> {
   const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
   if (!body.requiredDate) delete body.requiredDate;
+  if (!body.ttlHours) delete body.ttlHours;
   if (!body.segmentType || body.segmentType === "NONE") {
     delete body.segmentType;
     delete body.segmentRef;
@@ -545,6 +552,96 @@ export async function listReservations(q: ReservationQuery = {}, signal?: AbortS
 
 export async function releaseReservation(id: string): Promise<Reservation> {
   return (await send<Reservation>(`/reservations/${encodeURIComponent(id)}`, { method: "DELETE" })).body;
+}
+
+export interface ExpireResult {
+  released: number;
+  more: boolean;
+  items: Reservation[];
+}
+
+/** Releases the reservations whose time to live has passed (FR-16.7); repeating it releases only what is still due. */
+export async function expireReservations(limit?: number): Promise<ExpireResult> {
+  const { body } = await send<ExpireResult>(`/reservations:expire${query({ limit: limit ? String(limit) : undefined })}`, { method: "POST" });
+  return { released: body.released ?? 0, more: body.more ?? false, items: body.items ?? [] };
+}
+
+// ---- Holds (wave 33 AC2) ----
+
+export const HOLD_STATES = ["ACTIVE", "RELEASED"] as const;
+export type HoldState = (typeof HOLD_STATES)[number];
+
+export interface Hold {
+  id: string;
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  releasedQty: string;
+  /** qty minus releasedQty: what availability leaves out. */
+  heldQty: string;
+  wholeLot: boolean;
+  reason: string;
+  sourceType: string;
+  sourceRef: string;
+  note?: string;
+  state: HoldState;
+  version: number;
+}
+
+export interface HoldInput {
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  /** Omitted for a whole-lot hold. */
+  qty?: string;
+  wholeLot?: boolean;
+  allowPartial?: boolean;
+  reason: string;
+  sourceType: string;
+  sourceRef: string;
+  note?: string;
+}
+
+export interface HoldResult {
+  items: Hold[];
+  shortfall: string;
+}
+
+export interface HoldQuery {
+  state?: HoldState | "";
+  product?: string;
+  sourceType?: string;
+  sourceRef?: string;
+  /** 1 to 200 (service default 100); the service has no cursor. */
+  limit?: number;
+}
+
+/** Places a hold; the key makes a retried submit replay instead of holding twice. */
+export async function placeHold(input: HoldInput, key: string = newKey()): Promise<HoldResult> {
+  const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
+  if (input.wholeLot || !body.qty) delete body.qty;
+  if (!body.wholeLot) delete body.wholeLot;
+  if (!body.allowPartial) delete body.allowPartial;
+  if (!body.note) delete body.note;
+  const { body: out } = await send<HoldResult>("/holds", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+  return { items: out.items ?? [], shortfall: out.shortfall ?? "0" };
+}
+
+export async function listHolds(q: HoldQuery = {}, signal?: AbortSignal): Promise<Hold[]> {
+  const { body } = await send<{ items?: Hold[] }>(`/holds${query({ ...q, limit: q.limit ? String(q.limit) : undefined })}`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Releases a hold (all of it, or qty) at the version the screen shows (If-Match). */
+export async function releaseHold(id: string, version: number, qty?: string): Promise<Hold> {
+  return (
+    await send<Hold>(`/holds/${encodeURIComponent(id)}:release`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify(qty ? { qty } : {}),
+    })
+  ).body;
 }
 
 // ---- Blocking and quarantine (FR-16.8) ----

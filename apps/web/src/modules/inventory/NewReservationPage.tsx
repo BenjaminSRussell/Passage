@@ -27,6 +27,8 @@ export interface ReservationValues {
   demandId: string;
   requiredDate: string;
   shelfLifeMarginDays: string;
+  /** Hours after which the reservation lapses; empty or 0 means no expiry (never "expire now"). */
+  ttlHours: string;
   allowPartial: boolean;
   dimensions: Record<FormDimension, string>;
   /** Segment of the demand (FR-16.20): sales-order or project stock. */
@@ -44,6 +46,7 @@ const fields = [
   "demandId",
   "requiredDate",
   "shelfLifeMarginDays",
+  "ttlHours",
   "dimensions",
   "segmentType",
   "segmentRef",
@@ -68,6 +71,8 @@ export function validateReservation(values: ReservationValues): Errors {
   if (values.demandId.trim() === "") errors.demandId = "Enter the order or reference the stock is held for.";
   const margin = values.shelfLifeMarginDays.trim();
   if (margin !== "" && (!/^\d+$/.test(margin) || Number(margin) > 365)) errors.shelfLifeMarginDays = "Enter 0 to 365 days.";
+  const ttl = values.ttlHours.trim();
+  if (ttl !== "" && (!/^\d+$/.test(ttl) || Number(ttl) > 8760)) errors.ttlHours = "Enter 1 to 8760 hours, or leave it empty (or 0) for no expiry.";
   if (values.policy === "MANUAL" && values.dimensions.site.trim() === "") errors.dimensions = "A manual reservation names the site and every dimension of the stock.";
   const ref = values.segmentRef.trim();
   if (values.segmentType !== "NONE" && (ref === "" || ref.length > 48)) errors.segmentRef = "Enter the sales order or project reference (up to 48 characters).";
@@ -89,6 +94,7 @@ const blank = (): ReservationValues => ({
   demandId: "",
   requiredDate: today(),
   shelfLifeMarginDays: "0",
+  ttlHours: "",
   allowPartial: false,
   dimensions: emptyDimensions(),
   segmentType: "NONE",
@@ -132,6 +138,7 @@ export function NewReservationPage() {
           demandId: values.demandId.trim(),
           requiredDate: values.requiredDate,
           shelfLifeMarginDays: Number(values.shelfLifeMarginDays || "0"),
+          ttlHours: Number(values.ttlHours || "0"),
           allowPartial: values.allowPartial,
           // A manual reservation of a segmented demand reserves that segment's stock.
           dimensions: values.policy === "MANUAL" && segmented ? { ...values.dimensions, segment } : values.dimensions,
@@ -209,6 +216,9 @@ export function NewReservationPage() {
             {(control) => (
               <Input {...control} inputMode="numeric" value={values.shelfLifeMarginDays} onChange={set("shelfLifeMarginDays")} invalid={Boolean(errors.shelfLifeMarginDays)} />
             )}
+          </FormField>
+          <FormField id="res-ttl" label="Expires after (hours)" optional hint="Empty or 0: no expiry, the stock stays reserved until you release it." error={errors.ttlHours}>
+            {(control) => <Input {...control} inputMode="numeric" value={values.ttlHours} onChange={set("ttlHours")} invalid={Boolean(errors.ttlHours)} />}
           </FormField>
           <FormField id="res-segment-type" label="Demand segment" hint={segmentHints[values.segmentType]} error={errors.segmentType}>
             {(control) => (

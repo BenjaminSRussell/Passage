@@ -42,6 +42,7 @@ type fakeStore struct {
 	reserveIn        store.ReserveInput
 	reserveOut       store.ReserveResult
 	reservations     store.ReservationFilter
+	expireLimit      int
 	txFilter         store.TransactionFilter
 	txRows           int
 	expiryProduct    string
@@ -191,6 +192,14 @@ func (f *fakeStore) ReleaseReservation(_ context.Context, id string) (domain.Res
 		return domain.Reservation{}, f.err
 	}
 	return domain.Reservation{ID: id, Qty: decimal.NewFromInt(4), Status: domain.ReservationReleased}, nil
+}
+
+func (f *fakeStore) ExpireReservations(_ context.Context, limit int) (store.ExpireResult, error) {
+	f.expireLimit = limit
+	if f.err != nil {
+		return store.ExpireResult{}, f.err
+	}
+	return store.ExpireResult{Released: []domain.Reservation{{ID: ids.New(), Qty: decimal.NewFromInt(2), Status: domain.ReservationReleased}}, More: true}, nil
 }
 
 func (f *fakeStore) ListReservations(_ context.Context, flt store.ReservationFilter) ([]domain.Reservation, error) {
@@ -642,8 +651,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 76 {
-		t.Fatalf("router walk yielded %d operations, want 76: %v", len(served), served)
+	if len(served) != 77 {
+		t.Fatalf("router walk yielded %d operations, want 77: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

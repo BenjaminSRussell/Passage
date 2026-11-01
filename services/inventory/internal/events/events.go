@@ -117,6 +117,8 @@ type ReservationData struct {
 	DemandSegment string            `json:"demandSegment"`
 	Policy        string            `json:"policy"`
 	Status        string            `json:"status"`
+	// Reason is "EXPIRED" when the release came from the expiry run, empty otherwise.
+	Reason string `json:"reason,omitempty"`
 }
 
 // BlockingData is the payload of both blocking events. DimensionSet is the

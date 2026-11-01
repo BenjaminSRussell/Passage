@@ -30,6 +30,7 @@ const (
 	defaultPageSize   = 100
 	maxPageSize       = 500
 	maxShelfLifeDays  = 365
+	maxTTLHours       = 8760
 	maxIdentifierLen  = 60
 	dateLayout        = "2006-01-02"
 )
@@ -43,6 +44,7 @@ func (a *API) registerReservations(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(transactionsPath, a.listTransactions)
 	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath, a.createReservation)
 	r.With(authz.RequireDuty(dutyRead)).Get(reservationsPath, a.listReservations)
+	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath+":expire", a.expireReservations)
 	r.With(authz.RequireDuty(dutyReserve)).Delete(reservationsPath+"/{id}", a.releaseReservation)
 	r.With(authz.RequireDuty(dutyBatchWrite)).Put(batchExpiriesPath+"/{productId}/{batchId}", a.putBatchExpiry)
 }
@@ -63,6 +65,8 @@ type reserveRequest struct {
 	SegmentType     string `json:"segmentType"`
 	SegmentRef      string `json:"segmentRef"`
 	SegmentFallback *bool  `json:"segmentFallback"`
+	// TTLHours makes the reservation lapse after that many hours (0 or absent: it holds until released).
+	TTLHours int `json:"ttlHours"`
 }
 
 type reservationResponse struct {
@@ -79,6 +83,7 @@ type reservationResponse struct {
 	AllocationNo  int               `json:"allocationNo"`
 	CreatedAt     time.Time         `json:"createdAt"`
 	ReleasedAt    *time.Time        `json:"releasedAt,omitempty"`
+	ExpiresAt     *time.Time        `json:"expiresAt,omitempty"`
 }
 
 type reserveResponse struct {
@@ -169,6 +174,9 @@ func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(domain.ReservationPolicies, policy) {
 		fields["policy"] = "must be MANUAL, FIFO, FEFO or LIFO"
 	}
+	if req.TTLHours < 0 || req.TTLHours > maxTTLHours {
+		fields["ttlHours"] = "must be between 0 and 8760"
+	}
 	if req.ShelfLifeMarginDays < 0 || req.ShelfLifeMarginDays > maxShelfLifeDays {
 		fields["shelfLifeMarginDays"] = "must be between 0 and 365"
 	}
@@ -201,7 +209,7 @@ func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
 		Segment: segment, SegmentFallback: fallback,
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, Qty: qty, DemandType: domain.DemandType(req.DemandType),
 		DemandID: req.DemandID, Policy: policy, Dims: dims, RequiredDate: required, ShelfLifeMarginDays: req.ShelfLifeMarginDays,
-		AllowPartial: req.AllowPartial, IdempotencyKey: key,
+		AllowPartial: req.AllowPartial, IdempotencyKey: key, TTLHours: req.TTLHours,
 	})
 	if err != nil {
 		a.failed(w, r, "create reservation", err)
@@ -278,6 +286,30 @@ func (a *API) releaseReservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, toReservationResponse(res))
+}
+
+// expireReservations releases the reservations whose time to live has passed. It is meant
+// for a scheduler or an operator; repeating it releases only what is still due.
+func (a *API) expireReservations(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	fields := map[string]string{}
+	limit := pageLimit(r, 200, maxPageSize, fields)
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	out, err := a.store.ExpireReservations(r.Context(), limit)
+	if err != nil {
+		a.failed(w, r, "expire reservations", err)
+		return
+	}
+	items := make([]reservationResponse, 0, len(out.Released))
+	for _, res := range out.Released {
+		items = append(items, toReservationResponse(res))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"released": len(items), "more": out.More, "items": items})
 }
 
 // putBatchExpiry sets the expiry of a batch, the FEFO input. expiryDate is
@@ -400,7 +432,7 @@ func toTransactionResponse(t store.TransactionRow) transactionResponse {
 func toReservationResponse(res domain.Reservation) reservationResponse {
 	return reservationResponse{ID: res.ID, LegalEntityID: res.LegalEntityID, ProductID: res.ProductID, Dimensions: res.Dims, Qty: res.Qty.String(),
 		DemandType: string(res.DemandType), DemandID: res.DemandID, DemandSegment: res.DemandSegment, Policy: string(res.Policy), Status: string(res.Status),
-		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt}
+		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt, ExpiresAt: res.ExpiresAt}
 }
 
 // detail is the message of a domain rule violation without its code.

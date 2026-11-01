@@ -36,6 +36,8 @@ type ReserveInput struct {
 	// unsegmented stock (FR-16.20, BR-16.17).
 	Segment         string
 	SegmentFallback bool
+	// TTLHours makes the reservations lapse that many hours after creation (0: never).
+	TTLHours int
 }
 
 // ReserveResult lists the allocations and the quantity that could not be
@@ -144,10 +146,11 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 				DemandType: in.DemandType, DemandID: in.DemandID, DemandSegment: in.Segment, Policy: in.Policy, Status: domain.ReservationActive,
 				AllocationNo: i + 1}
 			if err := tx.QueryRow(ctx, `insert into inventory_reservation (tenant_id, legal_entity_id, id, idempotency_key, allocation_no,
-				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by, demand_segment)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ACTIVE', $13, $14) returning created_at`,
+				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by, demand_segment, expires_at)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ACTIVE', $13, $14,
+					case when $15::int > 0 then now() + make_interval(hours => $15::int) end) returning created_at, expires_at`,
 				p.TenantID, in.LegalEntityID, res.ID, in.IdempotencyKey, res.AllocationNo, in.ProductID, r.hash,
-				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID), in.Segment).Scan(&res.CreatedAt); err != nil {
+				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID), in.Segment, in.TTLHours).Scan(&res.CreatedAt, &res.ExpiresAt); err != nil {
 				return scopeProblem(err)
 			}
 			if err := enqueue(ctx, tx, "reservation", res.ID, invevents.ReservationCreated, p.TenantID, reservationData(res)); err != nil {
@@ -168,14 +171,85 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 // to availability. Releasing a reservation that is no longer active returns it
 // unchanged (DELETE is idempotent).
 func (s *Postgres) ReleaseReservation(ctx context.Context, id string) (domain.Reservation, error) {
+	out, _, err := s.releaseReservation(ctx, id, false)
+	return out, err
+}
+
+// ExpireReservations releases the ACTIVE reservations whose expires_at has passed (FR-16.7
+// time to live), oldest expiry first, at most limit per call; more reports that others
+// are still due. Each reservation is released in its own transaction by the same path as
+// DELETE, so a failure leaves the earlier ones released; the event carries reason
+// EXPIRED. Repeating the call releases only what is due, so a retry is safe.
+func (s *Postgres) ExpireReservations(ctx context.Context, limit int) (ExpireResult, error) {
+	if limit <= 0 || limit > maxListLimit {
+		limit = 200
+	}
+	p, _ := tenant.FromContext(ctx)
+	var due []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text from inventory_reservation
+			where tenant_id = $1 and status = 'ACTIVE' and expires_at <= now()
+			order by expires_at, id limit $2`, p.TenantID, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			due = append(due, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return ExpireResult{}, err
+	}
+	out := ExpireResult{Released: []domain.Reservation{}}
+	if len(due) > limit {
+		due, out.More = due[:limit], true
+	}
+	for _, id := range due {
+		res, done, err := s.releaseReservation(ctx, id, true)
+		if err != nil {
+			return out, err
+		}
+		if done {
+			out.Released = append(out.Released, res)
+		}
+	}
+	return out, nil
+}
+
+// ExpireResult is the outcome of an expiry run.
+type ExpireResult struct {
+	Released []domain.Reservation
+	More     bool
+}
+
+// releaseReservation releases one reservation; with onlyExpired it leaves a reservation
+// alone that is not (or no longer) ACTIVE and past its expiry, and done is false then.
+// The expiry path re-checks status and expires_at under the row lock with the database
+// clock and skips a row another transaction holds (SKIP LOCKED): two expiry runs at once,
+// or a run racing a DELETE, never release the same reservation twice nor wait on each other.
+func (s *Postgres) releaseReservation(ctx context.Context, id string, onlyExpired bool) (domain.Reservation, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Reservation
+	done := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		found, err := queryReservations(ctx, tx, `r.tenant_id = $1 and r.id = $2 for update of r`, p.TenantID, id)
+		where := `r.tenant_id = $1 and r.id = $2 for update of r`
+		if onlyExpired {
+			where = `r.tenant_id = $1 and r.id = $2 and r.status = 'ACTIVE' and r.expires_at <= now() for update of r skip locked`
+		}
+		found, err := queryReservations(ctx, tx, where, p.TenantID, id)
 		if err != nil {
 			return err
 		}
 		if len(found) == 0 {
+			if onlyExpired {
+				return nil
+			}
 			return problem(http.StatusNotFound, domain.CodeReservationNotFound, "reservation not found")
 		}
 		res := found[0].Reservation
@@ -183,6 +257,7 @@ func (s *Postgres) ReleaseReservation(ctx context.Context, id string) (domain.Re
 			out = res
 			return nil
 		}
+		done = true
 		dims, _ := res.Dims.Normalize()
 		r := &row{product: res.ProductID, dims: dims, hash: dims.Hash()}
 		if err := lockRow(ctx, tx, p.TenantID, res.LegalEntityID, "", r); err != nil {
@@ -197,13 +272,17 @@ func (s *Postgres) ReleaseReservation(ctx context.Context, id string) (domain.Re
 			return err
 		}
 		res.Status = domain.ReservationReleased
-		if err := enqueue(ctx, tx, "reservation", res.ID, invevents.ReservationReleased, p.TenantID, reservationData(res)); err != nil {
+		data := reservationData(res)
+		if onlyExpired {
+			data.Reason = "EXPIRED"
+		}
+		if err := enqueue(ctx, tx, "reservation", res.ID, invevents.ReservationReleased, p.TenantID, data); err != nil {
 			return err
 		}
 		out = res
 		return enqueueOnHand(ctx, tx, p.TenantID, res.LegalEntityID, r, invevents.BucketReservedPhysical, res.Qty.Neg())
 	})
-	return out, err
+	return out, done, err
 }
 
 // ListReservations is the reservation inquiry (PRD 3.16.14), newest first.
@@ -374,7 +453,7 @@ type reservationRow struct {
 // sets; where is the rest of the statement after "where".
 func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]reservationRow, error) {
 	rows, err := tx.Query(ctx, `select r.id::text, r.legal_entity_id::text, r.product_id::text, d.dims, r.qty::text, r.requested_qty::text,
-		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at
+		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at, r.expires_at
 		from inventory_reservation r join dimension_set d on d.tenant_id = r.tenant_id and d.hash = r.dimension_set_hash
 		where `+where, args...)
 	if err != nil {
@@ -387,7 +466,7 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 		var raw []byte
 		var qty, requested, demand, policy, status string
 		if err := rows.Scan(&rr.ID, &rr.LegalEntityID, &rr.ProductID, &raw, &qty, &requested, &demand, &rr.DemandID, &rr.DemandSegment, &policy, &status,
-			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt); err != nil {
+			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt, &rr.ExpiresAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &rr.Dims); err != nil {
@@ -404,7 +483,17 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 func samePriorRequest(prior []reservationRow, in ReserveInput) bool {
 	first := prior[0]
 	return first.LegalEntityID == in.LegalEntityID && first.ProductID == in.ProductID && first.DemandType == in.DemandType &&
-		first.DemandID == in.DemandID && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty)
+		first.DemandID == in.DemandID && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty) &&
+		ttlHoursOf(first.Reservation) == in.TTLHours
+}
+
+// ttlHoursOf recovers the request's ttlHours: created_at and expires_at are both taken
+// from the inserting transaction's now(), so their difference is exactly the hours asked.
+func ttlHoursOf(r domain.Reservation) int {
+	if r.ExpiresAt == nil {
+		return 0
+	}
+	return int(r.ExpiresAt.Sub(r.CreatedAt).Round(time.Hour) / time.Hour)
 }
 
 func reservationData(r domain.Reservation) invevents.ReservationData {

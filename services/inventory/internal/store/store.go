@@ -59,6 +59,7 @@ type Store interface {
 	ListTransactions(ctx context.Context, f TransactionFilter) ([]TransactionRow, error)
 	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
 	ReleaseReservation(ctx context.Context, id string) (domain.Reservation, error)
+	ExpireReservations(ctx context.Context, limit int) (ExpireResult, error)
 	ListReservations(ctx context.Context, f ReservationFilter) ([]domain.Reservation, error)
 	UpsertBatchExpiry(ctx context.Context, productID, batchID string, expiry *time.Time) error
 	CreateBlocking(ctx context.Context, in BlockingInput) (domain.Blocking, bool, error)

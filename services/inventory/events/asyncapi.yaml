@@ -380,6 +380,7 @@ components:
         demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); empty when unsegmented (FR-16.20)' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+        reason: { type: string, enum: [EXPIRED], description: 'Present on reservation.released when the expiry run released the allocation (time to live passed); absent for a release by a person or caller' }
     JournalNameData:
       type: object
       required: [active, code, description, journalNameId, journalType, legalEntityId, offsetAccountId, requiresApproval, version]
