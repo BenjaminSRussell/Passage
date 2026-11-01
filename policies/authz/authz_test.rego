@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0

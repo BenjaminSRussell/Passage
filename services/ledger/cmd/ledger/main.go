@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/api"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/closeperiods"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 	"github.com/BenjaminSRussell/passage/services/ledger/migrations"
 )
@@ -66,6 +67,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	a := api.New(store.New(pool))
+	if url := getenv("CLOSE_URL"); url != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		a.WithPeriodGate(closeperiods.New(url, nil, signer))
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := a.Admin()

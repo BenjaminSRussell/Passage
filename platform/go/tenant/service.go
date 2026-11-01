@@ -74,6 +74,9 @@ var serviceGrants = map[string]map[string][]string{
 	"close": {
 		"ledger": {"ledger.ledger.lookup"},
 	},
+	"ledger": {
+		"close": {"period.check"},
+	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
 	},

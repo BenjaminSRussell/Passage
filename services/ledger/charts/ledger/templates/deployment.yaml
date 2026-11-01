@@ -16,8 +16,18 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
+{{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: ledger
           image: {{ include "ledger.image" . | quote }}
@@ -35,6 +45,15 @@ spec:
                   key: DATABASE_URL
             - name: PASSAGE_SERVICE_NAME
               value: ledger
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+            - { name: CLOSE_URL, value: {{ .Values.closeUrl | quote }} }
 {{- if .Values.serviceIdentity.publicKeys }}
             - name: PASSAGE_SERVICE_PUBLIC_KEYS
               value: {{ .Values.serviceIdentity.publicKeys | quote }}
@@ -52,5 +71,9 @@ spec:
             httpGet: { path: /healthz, port: http }
           readinessProbe:
             httpGet: { path: /readyz, port: admin }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

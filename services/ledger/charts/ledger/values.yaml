@@ -24,5 +24,8 @@ resources:
 serviceMonitor:
   enabled: false
 
+closeUrl: ""
 serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
   publicKeys: ""

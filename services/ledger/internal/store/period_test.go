@@ -1,0 +1,141 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
+)
+
+type fakeGate struct {
+	status string
+	err    error
+	calls  []fakeGateCall
+}
+
+type fakeGateCall struct {
+	legalEntityID, ledgerID, sourceSystem string
+	postingDate                           time.Time
+}
+
+func (g *fakeGate) Status(_ context.Context, legalEntityID, ledgerID string, postingDate time.Time, sourceSystem string) (string, error) {
+	g.calls = append(g.calls, fakeGateCall{legalEntityID, ledgerID, sourceSystem, postingDate})
+	return g.status, g.err
+}
+
+func withDuty(e env, duty string) context.Context {
+	duties := testkit.ScopeDuties(e.le)
+	duties[duty] = struct{}{}
+	return tenant.With(context.Background(), tenant.Principal{TenantID: e.tenant, LegalEntityID: e.le, UserID: "controller", Duties: duties})
+}
+
+func TestPostgres_CloseStatusRefusesEveryPostingPath(t *testing.T) {
+	for _, status := range []string{"closed", "permanently_closed", "never_opened"} {
+		t.Run(status, func(t *testing.T) {
+			e := setupLedgerSet(t)
+			putName(t, e.env, "GJ", JournalName{Active: true})
+			orig, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "OPEN-1", "100.00"))
+			if err != nil {
+				t.Fatalf("post while open: %v", err)
+			}
+			draft, err := e.store.CreateBatch(e.ctx, batchOf(e.env, "GJ", "55"))
+			if err != nil {
+				t.Fatalf("create batch: %v", err)
+			}
+			validated, err := e.store.SubmitBatch(e.ctx, draft.ID, 1, testToday)
+			if err != nil {
+				t.Fatalf("submit batch: %v", err)
+			}
+			before := entryTotal(t, e.env)
+			gate := &fakeGate{status: status}
+			ctx := WithPeriodGate(e.ctx, gate)
+
+			t.Run("direct post", func(t *testing.T) {
+				_, err := e.store.PostEntry(ctx, vendorInvoice(e.ledger.ID, "CLOSED-1", "10.00"))
+				requirePeriodClosed(t, "PostEntry", err)
+			})
+			t.Run("validate only", func(t *testing.T) {
+				res, err := e.store.ValidateEntry(ctx, vendorInvoice(e.ledger.ID, "CLOSED-V", "10.00"))
+				if err != nil || res.Valid() || res.Violations[0].Code != "LEDGER_PERIOD_CLOSED" {
+					t.Fatalf("ValidateEntry: %+v %v", res, err)
+				}
+			})
+			t.Run("ledger set post", func(t *testing.T) {
+				_, err := e.store.PostSetEntry(ctx, e.set.ID, vendorInvoice("", "CLOSED-SET", "10.00"))
+				requirePeriodClosed(t, "PostSetEntry", err)
+			})
+			t.Run("reversal", func(t *testing.T) {
+				hash, _ := domain.HashPayload("reverse closed")
+				_, err := e.store.ReverseEntry(ctx, ReverseInput{EntryID: orig.Entries[0].ID, Key: "REV-CLOSED", Hash: hash, Today: testToday})
+				requirePeriodClosed(t, "ReverseEntry", err)
+			})
+			t.Run("batch post", func(t *testing.T) {
+				_, err := postBatch(e.env, ctx, validated, "BATCH-CLOSED", true)
+				requirePeriodClosed(t, "PostBatch", err)
+			})
+
+			if after := entryTotal(t, e.env); after != before {
+				t.Fatalf("a refused posting wrote entries: %d before, %d after", before, after)
+			}
+			first := gate.calls[0]
+			if first.legalEntityID != e.le || first.ledgerID != e.ledger.ID || first.sourceSystem != "ap" || !first.postingDate.Equal(testPostingDate) {
+				t.Fatalf("gate asked about the wrong period: %+v", first)
+			}
+		})
+	}
+}
+
+func TestPostgres_CloseStatusOpenOnHoldOrUnregisteredPosts(t *testing.T) {
+	cases := map[string]*fakeGate{
+		"open":         {status: "open"},
+		"on_hold":      {status: "on_hold"},
+		"unregistered": {err: ErrNoFiscalPeriod},
+	}
+	for name, gate := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, _ := setup(t)
+			if _, err := e.store.PostEntry(WithPeriodGate(e.ctx, gate), vendorInvoice(e.ledger.ID, "OK-1", "10.00")); err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			if len(gate.calls) == 0 {
+				t.Fatal("the gate was never asked")
+			}
+		})
+	}
+}
+
+func TestPostgres_ClosePeriodDutyHolderPostsIntoClosedPeriod(t *testing.T) {
+	e, _ := setup(t)
+	gate := &fakeGate{status: "closed"}
+	holder := WithPeriodGate(withDuty(e, DutyPostClosedPeriod), gate)
+	if _, err := e.store.PostEntry(holder, vendorInvoice(e.ledger.ID, "ADJ-1", "10.00")); err != nil {
+		t.Fatalf("holder post: %v", err)
+	}
+	if len(gate.calls) != 0 {
+		t.Fatalf("a duty holder must not need the close service: %+v", gate.calls)
+	}
+	other := WithPeriodGate(e.ctx, gate)
+	_, err := e.store.PostEntry(other, vendorInvoice(e.ledger.ID, "ADJ-2", "10.00"))
+	requirePeriodClosed(t, "PostEntry without duty", err)
+}
+
+func TestPostgres_CloseUnreachableFailsClosed(t *testing.T) {
+	e, _ := setup(t)
+	before := entryTotal(t, e)
+	ctx := WithPeriodGate(e.ctx, &fakeGate{err: errors.New("connection refused")})
+	_, err := e.store.PostEntry(ctx, vendorInvoice(e.ledger.ID, "DOWN-1", "10.00"))
+	if !isProblem(err, http.StatusServiceUnavailable, CodePeriodUnavailable) {
+		t.Fatalf("want 503 %s, got %v", CodePeriodUnavailable, err)
+	}
+	if _, err := e.store.ValidateEntry(ctx, vendorInvoice(e.ledger.ID, "DOWN-V", "10.00")); !isProblem(err, http.StatusServiceUnavailable, CodePeriodUnavailable) {
+		t.Fatalf("validate: want 503 %s, got %v", CodePeriodUnavailable, err)
+	}
+	if after := entryTotal(t, e); after != before {
+		t.Fatalf("an unconfirmed period wrote entries: %d before, %d after", before, after)
+	}
+}

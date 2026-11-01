@@ -114,6 +114,7 @@
     "ledger.ledger.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]}]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
     "ledger.journal.postledger": {"flag": true, "permissions": []},
+    "ledger.period.postclosed": {"flag": true, "permissions": []},
     "ledger.journal.reverse": {"permissions": [{"resource": "/v1/ledger/journal-entries/*/reverse", "methods": ["POST"]}]},
     "ledger.journal.write": {"permissions": [
       {"resource": "/v1/ledger/journal-batches", "methods": ["POST"]},
@@ -2319,6 +2320,9 @@
     },
     "close": {
       "ledger": ["ledger.ledger.lookup"]
+    },
+    "ledger": {
+      "close": ["period.check"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
