@@ -2324,6 +2324,9 @@
     "ledger": {
       "close": ["period.check"]
     },
+    "analytics": {
+      "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
+    },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],

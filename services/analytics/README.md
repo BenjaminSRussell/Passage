@@ -104,6 +104,21 @@ on the existing endpoints:
 - **Web.** Dashboard list, detail and editor; export log and export request;
   deliveries on the schedule detail; lineage view with an add-edge form.
 
+## Nightly revenue reconciliation (FR-46.13)
+
+`internal/recon` runs in the service process at 02:00 in `ANALYTICS_RECON_TZ`
+(default UTC) for the tenant in `ANALYTICS_RECON_TENANT_ID`; unset, the job is
+off. It reads the previous day's `revenue` per legal entity from Cube
+(`CUBE_URL`, `CUBE_API_TOKEN`; a NULL, or an entity Cube returns no row for,
+counts as 0) and from the ledger (`LEDGER_URL`, signed service token with duties
+`ledger.entry.lookup` and `ledger.ledger.lookup`; credits minus debits of the
+accounts in `ANALYTICS_RECON_REVENUE_ACCOUNTS`, `FROM-TO`, for each
+`legalEntityId=ledgerId` pair in `ANALYTICS_RECON_LEDGERS`), then records each
+entity through `RecordReconciliation` (tolerance 0.005, trust counter,
+`metric.reconciled`). A failed day logs `ANA-0104`. A failed read records
+nothing and the next run is the next 02:00. Every replica runs the loop; the
+store is idempotent for identical values.
+
 ## Layout
 
 ```
@@ -139,7 +154,7 @@ Requests need the gateway headers `X-Passage-Tenant`, `X-Passage-Duties`
 go vet ./... && go test ./...
 PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # adds store and API database tests
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app-role@... # adds the RLS isolation test
-node --test ../../data/cube/                            # Cube queryRewrite RLS tests
+node --test ../../data/cube/cube.test.js                # Cube queryRewrite RLS tests (CI runs it)
 ```
 
 `internal/store/revenue_proof_test.go` (Wave 46 proof, AC2 and AC3) needs the
