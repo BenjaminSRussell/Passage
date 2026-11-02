@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,6 +19,7 @@ import (
 const (
 	CodeLedgerUnavailable = "REV-0200"
 	CodeLedgerRefused     = "REV-0201"
+	CodeLedgerNotMapped   = "REV-0202"
 
 	journalSourceType = "revenue_recognition"
 	allTime           = "1970-01-01"
@@ -25,17 +28,41 @@ const (
 type PostingStore interface {
 	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time) ([]store.Posting, error)
 	CompletePosting(ctx context.Context, postingID, entryID string) error
+	RejectPosting(ctx context.Context, postingID, code string) error
 }
 
-func (a *API) WithLedger(ledger ledgerclient.Ledger, postings PostingStore) *API {
-	a.ledger, a.postings = ledger, postings
+func (a *API) WithLedger(ledger ledgerclient.Ledger, postings PostingStore, ledgerIDs map[string]string) *API {
+	a.ledger, a.postings, a.ledgerIDs = ledger, postings, ledgerIDs
 	return a
+}
+
+func ParseLedgerIDs(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		le, ledger, ok := strings.Cut(pair, "=")
+		if !ok || !ids.Valid(le) || !ids.Valid(ledger) {
+			return nil, fmt.Errorf("REVREC_LEDGER_IDS entry %q must be <legalEntityId>=<ledgerId> with two UUIDs", pair)
+		}
+		out[le] = ledger
+	}
+	return out, nil
 }
 
 type postingRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
-	LedgerID      string `json:"ledgerId"`
 	Through       string `json:"through,omitempty"`
+}
+
+type rejectedOut struct {
+	ID          string `json:"id"`
+	PostingDate string `json:"postingDate"`
+	Currency    string `json:"currency"`
+	Amount      string `json:"amount"`
+	LedgerCode  string `json:"ledgerCode"`
 }
 
 type postingOut struct {
@@ -53,6 +80,14 @@ func (a *API) ledgerReady(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func (a *API) ledgerFor(w http.ResponseWriter, r *http.Request, legalEntityID string) (string, bool) {
+	ledgerID, ok := a.ledgerIDs[legalEntityID]
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerNotMapped, "no ledger is configured for this legal entity"))
+	}
+	return ledgerID, ok
 }
 
 func ledgerProblem(ctx context.Context, op string, err error) error {
@@ -78,13 +113,11 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	if !ids.Valid(req.LedgerID) {
-		fields["ledgerId"] = "must be a UUID"
-	}
-	through := a.now().UTC().Truncate(24 * time.Hour)
+	now := a.now().UTC()
+	through := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
 	if req.Through != "" {
 		t, err := time.Parse(dateLayout, req.Through)
-		if err != nil || t.After(through) {
+		if err != nil || t.After(now.Truncate(24*time.Hour)) {
 			fields["through"] = "must be a date as YYYY-MM-DD that is not in the future"
 		}
 		through = t
@@ -97,12 +130,16 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, outOfScope())
 		return
 	}
-	pending, err := a.postings.ClaimPostings(r.Context(), req.LegalEntityID, req.LedgerID, through)
+	ledgerID, ok := a.ledgerFor(w, r, req.LegalEntityID)
+	if !ok {
+		return
+	}
+	pending, err := a.postings.ClaimPostings(r.Context(), req.LegalEntityID, ledgerID, through)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	out := make([]postingOut, 0, len(pending))
+	out, rejected := make([]postingOut, 0, len(pending)), []rejectedOut{}
 	for _, p := range pending {
 		entryID, err := a.ledger.Post(r.Context(), ledgerclient.Entry{
 			LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: p.ID, PostingDate: p.PostingDate.Format(dateLayout),
@@ -112,6 +149,16 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 				{Account: store.RevenueAccount, Credit: true, Amount: p.Amount, Text: "Revenue recognized"},
 			},
 		})
+		if ledgerclient.Rejected(err) {
+			code := ledgerclient.CodeOf(err)
+			slog.WarnContext(r.Context(), "general ledger refused a revenue posting", "postingId", p.ID, "ledgerCode", code, "err", err, "correlationId", middleware.GetReqID(r.Context()))
+			if err := a.postings.RejectPosting(r.Context(), p.ID, code); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+			rejected = append(rejected, rejectedOut{ID: p.ID, PostingDate: p.PostingDate.Format(dateLayout), Currency: p.Currency, Amount: fixed(p.Amount, p.Currency), LedgerCode: code})
+			continue
+		}
 		if err != nil {
 			httpx.Fail(w, r, ledgerProblem(r.Context(), "post", err))
 			return
@@ -124,7 +171,7 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		out = append(out, postingOut{ID: p.ID, Currency: p.Currency, PostingDate: p.PostingDate.Format(dateLayout),
 			Amount: fixed(p.Amount, p.Currency), LineCount: p.LineCount, JournalEntryID: entryID})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "rejected": rejected})
 }
 
 type glReconciliationOut struct {
@@ -144,13 +191,10 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	le, ledgerID, cur, period := q.Get("legalEntityId"), q.Get("ledgerId"), q.Get("currency"), q.Get("period")
+	le, cur, period := q.Get("legalEntityId"), q.Get("currency"), q.Get("period")
 	fields := map[string]string{}
 	if !ids.Valid(le) {
 		fields["legalEntityId"] = "must be a UUID"
-	}
-	if !ids.Valid(ledgerID) {
-		fields["ledgerId"] = "must be a UUID"
 	}
 	if !currencyCode.MatchString(cur) {
 		fields["currency"] = "must be an ISO 4217 alpha-3 code"
@@ -167,6 +211,10 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, outOfScope())
 		return
 	}
+	ledgerID, ok := a.ledgerFor(w, r, le)
+	if !ok {
+		return
+	}
 	epoch, _ := time.Parse(dateLayout, allTime)
 	rf, err := a.store.RollForward(r.Context(), le, cur, epoch, start.AddDate(0, 1, -1))
 	if err != nil {
@@ -179,7 +227,7 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bal.Currency != cur {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerRefused, "the ledger reports "+bal.Currency+", not "+cur))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerRefused, "the ledger reports "+bal.Currency+", not "+cur))
 		return
 	}
 	diff := rf.Recognized.Sub(bal.Debit)

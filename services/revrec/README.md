@@ -50,8 +50,8 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 | GET | `/v1/revrec/recognition-runs` | `revrec.view` | latest period first |
 | GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, adjustments, closing |
 | GET | `/v1/revrec/roll-forward?contractId=&period=YYYY-MM` | `revrec.view` | the same for one contract, in its currency (drill-down); 404 when unknown or out of scope |
-| POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, ledgerId, through?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default today) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end; a pending post is retried with the same ledger idempotency key; 503 `REV-0200` without `LEDGER_URL`, 502 `REV-0201` when the ledger refuses |
-| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&ledgerId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period; `difference` and `reconciled` |
+| POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, through?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default the last completed month end) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end, to the ledger configured for the entity in `REVREC_LEDGER_IDS` (never the request); a pending post is retried with the same ledger idempotency key; a post the ledger refuses with a 4xx is marked rejected, its lines released, and listed under `rejected` while the other postings continue; 503 `REV-0200` without `LEDGER_URL`, 422 `REV-0202` for an entity with no configured ledger, 502 `REV-0201` when the ledger does not answer |
+| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period; `difference` and `reconciled` |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
 without the duty). A principal scoped to one legal entity (`X-Passage-Legal-Entity`)
@@ -121,7 +121,9 @@ posting and the reconciliation through `platform/ledgerclient`; the ledger must 
 revrec's public key (`PASSAGE_SERVICE_PUBLIC_KEYS`). The service holds only
 `ledger.entry.post` and `ledger.balance.read` (`service_grants`). A line is claimed
 for a posting in the transaction that creates the posting row, so no line is posted
-twice; a refused or unanswered post leaves the posting pending for the next call.
+twice; an unanswered post leaves the posting pending for the next call, a post the
+ledger refuses for good is marked rejected and its lines are released. `REVREC_LEDGER_IDS`
+(`<legalEntityId>=<ledgerId>,...`) names the ledger of each entity.
 The reconciliation compares the cumulative recognized revenue of the roll-forward
 with the ledger's 2400 debits: the credit side of 2400 is the invoice's posting
 (billing), not revrec's.
@@ -177,7 +179,8 @@ duties in step.
 | `REV-0006` | 422 | Milestone satisfied before the contract date |
 | `REV-0007` | 422 | Recognition run for a period that has not ended |
 | `REV-0200` | 503 | The general ledger is not configured (`LEDGER_URL` unset) |
-| `REV-0201` | 502 | The general ledger refused the request or did not answer |
+| `REV-0201` | 502 | The general ledger did not answer, refused a balance read, or reported another currency |
+| `REV-0202` | 422 | The legal entity has no ledger in `REVREC_LEDGER_IDS` |
 | `REV-0100` | 404 | Contract or obligation not found |
 | `REV-0103` | 412 | If-Match names a contract version that is no longer current |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different body |

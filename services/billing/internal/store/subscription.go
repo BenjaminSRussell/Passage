@@ -206,6 +206,15 @@ func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVers
 		if overlaps {
 			return httpx.NewProblem(http.StatusConflict, domain.CodePeriodInvoiced, "a billing period overlapping this one is already invoiced")
 		}
+		var gap bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from subscription_period where subscription_id = $1::uuid)
+			and not exists (select 1 from subscription_period where subscription_id = $1::uuid and period_to = $2::date)`,
+			id, periodFrom.AddDate(0, 0, -1).Format(dateLayout)).Scan(&gap); err != nil {
+			return err
+		}
+		if gap {
+			return httpx.NewProblem(http.StatusBadRequest, "COM-0001", "a billing period must start the day after the last invoiced period ends; invoice periods in order")
+		}
 		if err := writeProposal(ctx, tx, inv); err != nil {
 			return err
 		}

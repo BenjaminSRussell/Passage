@@ -174,9 +174,22 @@ func TestSubscription_BillingIsIdempotentPerPeriodAndRefusesOverlap(t *testing.T
 	if p := decodeProblemOf(t, other); other.Code != http.StatusUnprocessableEntity || p.Code != "idempotency_key_reuse" {
 		t.Errorf("same period, other invoice date: %d %s, want 422 idempotency_key_reuse", other.Code, p.Code)
 	}
+	sameDate := do(h, http.MethodPost, "/v1/billing/subscriptions/"+sub.ID+":bill", "", `{"periodFrom":"2027-01-01","invoiceDate":"2027-01-01"}`)
+	if sameDate.Code != http.StatusOK || sameDate.Header().Get("Idempotent-Replayed") != "true" {
+		t.Errorf("explicit invoice date equal to the default: %d, want a replay", sameDate.Code)
+	}
 	overlap := billPeriod(h, sub.ID, "2027-02-01")
 	if p := decodeProblemOf(t, overlap); overlap.Code != http.StatusConflict || p.Code != domain.CodePeriodInvoiced {
 		t.Errorf("overlapping period: %d %s, want 409 %s", overlap.Code, p.Code, domain.CodePeriodInvoiced)
+	}
+	skipped := billPeriod(h, sub.ID, "2027-07-01")
+	if p := decodeProblemOf(t, skipped); skipped.Code != http.StatusBadRequest || p.Code != "COM-0001" {
+		t.Errorf("skipping a period: %d %s, want 400 COM-0001", skipped.Code, p.Code)
+	}
+	var read subscriptionDTO
+	decode(t, do(h, http.MethodGet, "/v1/billing/subscriptions/"+sub.ID, "", ""), &read)
+	if read.BilledThrough != "2027-03-31" {
+		t.Errorf("billed through %q after refused periods, want 2027-03-31", read.BilledThrough)
 	}
 	if next := billPeriod(h, sub.ID, "2027-04-01"); next.Code != http.StatusCreated {
 		t.Errorf("following period: %d %s", next.Code, next.Body)

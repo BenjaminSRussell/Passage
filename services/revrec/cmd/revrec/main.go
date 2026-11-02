@@ -66,7 +66,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("ledger client: %w", err)
 	}
 	if ledger != nil {
-		a.WithLedger(ledger, st)
+		ledgerIDs, err := api.ParseLedgerIDs(getenv("REVREC_LEDGER_IDS"))
+		if err != nil {
+			return err
+		}
+		a.WithLedger(ledger, st, ledgerIDs)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

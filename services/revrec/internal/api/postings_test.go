@@ -35,7 +35,7 @@ func newLedgerRig(t *testing.T) *ledgerRig {
 	st := store.New(app)
 	rig := &ledgerRig{ledger: ledgerclient.NewFake(), ledgerID: ids.New(), clock: new(time.Time)}
 	*rig.clock = time.Date(2027, 4, 2, 9, 30, 0, 0, time.UTC)
-	rig.api = New(st).WithLedger(rig.ledger, st)
+	rig.api = New(st).WithLedger(rig.ledger, st, map[string]string{entityID: rig.ledgerID})
 	rig.api.now = func() time.Time { return *rig.clock }
 	r := httpx.NewRouter()
 	rig.api.Register(r)
@@ -53,7 +53,7 @@ func (g *ledgerRig) run(t *testing.T, periodEnd string) {
 
 func (g *ledgerRig) post(t *testing.T, want int) []postingOut {
 	t.Helper()
-	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`","ledgerId":"`+g.ledgerID+`"}`, nil)
+	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
 	if rec.Code != want {
 		t.Fatalf("journal-postings status %d, want %d: %s", rec.Code, want, rec.Body)
 	}
@@ -66,7 +66,7 @@ func (g *ledgerRig) post(t *testing.T, want int) []postingOut {
 
 func (g *ledgerRig) reconcile(t *testing.T, period string) glReconciliationOut {
 	t.Helper()
-	path := "/v1/revrec/gl-reconciliation?legalEntityId=" + entityID + "&ledgerId=" + g.ledgerID + "&currency=USD&period=" + period
+	path := "/v1/revrec/gl-reconciliation?legalEntityId=" + entityID + "&currency=USD&period=" + period
 	rec := call(t, g.handler, http.MethodGet, path, "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("gl-reconciliation status %d: %s", rec.Code, rec.Body)
@@ -122,7 +122,7 @@ func TestJournalPostings_LedgerFailureRetriesWithoutDoublePosting(t *testing.T) 
 	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
 	g.run(t, "2027-03-31")
 	g.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodePeriodClosed})
-	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`","ledgerId":"`+g.ledgerID+`"}`, nil)
+	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
 	if p := decodeProblem(t, rec); rec.Code != http.StatusBadGateway || p.Code != CodeLedgerRefused || len(g.ledger.Entries()) != 0 {
 		t.Fatalf("failed post %d %s with %d entries, want 502 %s and none", rec.Code, p.Code, len(g.ledger.Entries()), CodeLedgerRefused)
 	}
@@ -144,7 +144,7 @@ func TestJournalPostings_LedgerFailureRetriesWithoutDoublePosting(t *testing.T) 
 
 func TestJournalPostings_Guards(t *testing.T) {
 	g := newLedgerRig(t)
-	body := `{"legalEntityId":"` + entityID + `","ledgerId":"` + g.ledgerID + `"}`
+	body := `{"legalEntityId":"` + entityID + `"}`
 	if rec := callAs(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", body, allDuties, ids.New(), nil); rec.Code != http.StatusForbidden {
 		t.Errorf("other legal-entity scope %d, want 403", rec.Code)
 	}
@@ -154,23 +154,82 @@ func TestJournalPostings_Guards(t *testing.T) {
 	if rec := callAs(t, g.handler, http.MethodGet, "/v1/revrec/gl-reconciliation", "", "revrec.post", "", nil); rec.Code != http.StatusForbidden {
 		t.Errorf("reconciliation without revrec.view %d, want 403", rec.Code)
 	}
-	bad := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"x","ledgerId":"y","through":"2099-01-01"}`, nil)
-	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["legalEntityId"] == "" || p.Errors["ledgerId"] == "" || p.Errors["through"] == "" {
-		t.Errorf("invalid request %d %+v, want 400 with three field errors", bad.Code, p.Errors)
+	bad := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"x","through":"2099-01-01"}`, nil)
+	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["legalEntityId"] == "" || p.Errors["through"] == "" {
+		t.Errorf("invalid request %d %+v, want 400 with two field errors", bad.Code, p.Errors)
 	}
 	badRec := call(t, g.handler, http.MethodGet, "/v1/revrec/gl-reconciliation?legalEntityId=x&currency=usd&period=March", "", nil)
-	if p := decodeProblem(t, badRec); badRec.Code != http.StatusBadRequest || p.Errors["legalEntityId"] == "" || p.Errors["ledgerId"] == "" || p.Errors["currency"] == "" || p.Errors["period"] == "" {
-		t.Errorf("invalid reconciliation %d %+v, want 400 with four field errors", badRec.Code, p.Errors)
+	if p := decodeProblem(t, badRec); badRec.Code != http.StatusBadRequest || p.Errors["legalEntityId"] == "" || p.Errors["currency"] == "" || p.Errors["period"] == "" {
+		t.Errorf("invalid reconciliation %d %+v, want 400 with three field errors", badRec.Code, p.Errors)
 	}
 
 	unconfigured := newHandler(newFakeStore())
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/v1/revrec/journal-postings", body},
-		{http.MethodGet, "/v1/revrec/gl-reconciliation?legalEntityId=" + entityID + "&ledgerId=" + g.ledgerID + "&currency=USD&period=2027-03", ""},
+		{http.MethodGet, "/v1/revrec/gl-reconciliation?legalEntityId=" + entityID + "&currency=USD&period=2027-03", ""},
 	} {
 		rec := call(t, unconfigured, c.method, c.path, c.body, nil)
 		if p := decodeProblem(t, rec); rec.Code != http.StatusServiceUnavailable || p.Code != CodeLedgerUnavailable {
 			t.Errorf("%s without a ledger %d %s, want 503 %s", c.path, rec.Code, p.Code, CodeLedgerUnavailable)
+		}
+	}
+}
+
+func TestJournalPostings_PermanentRefusalDoesNotBlockTheEntity(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
+		var out struct {
+			Items    []postingOut  `json:"items"`
+			Rejected []rejectedOut `json:"rejected"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || len(out.Items) != 0 || len(out.Rejected) != 1 ||
+			out.Rejected[0].LedgerCode != ledgerclient.CodePeriodClosed || out.Rejected[0].PostingDate != "2027-03-31" {
+			t.Fatalf("attempt %d: %d %s, want 200 with one rejected March posting", attempt, rec.Code, rec.Body)
+		}
+	}
+
+	g.ledger.FailPosts(nil)
+	items := g.post(t, http.StatusOK)
+	if len(items) != 1 || items[0].PostingDate != "2027-03-31" || len(g.ledger.Entries()) != 1 {
+		t.Fatalf("after the ledger recovered %+v with %d entries, want the released March lines posted once", items, len(g.ledger.Entries()))
+	}
+}
+
+func TestJournalPostings_LedgerComesFromConfiguration(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+
+	forged := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`","ledgerId":"`+ids.New()+`"}`, nil)
+	if forged.Code != http.StatusBadRequest || len(g.ledger.Entries()) != 0 {
+		t.Fatalf("request ledgerId %d with %d entries, want 400 and none", forged.Code, len(g.ledger.Entries()))
+	}
+	g.post(t, http.StatusOK)
+	if e := g.ledger.Entries(); len(e) != 1 || e[0].LedgerID != g.ledgerID {
+		t.Fatalf("entries %+v, want one on the configured ledger %s", e, g.ledgerID)
+	}
+
+	g.api.ledgerIDs = map[string]string{}
+	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
+	if p := decodeProblem(t, rec); rec.Code != http.StatusUnprocessableEntity || p.Code != CodeLedgerNotMapped {
+		t.Errorf("unmapped entity %d %s, want 422 %s", rec.Code, p.Code, CodeLedgerNotMapped)
+	}
+}
+
+func TestParseLedgerIDs(t *testing.T) {
+	le, ledger := ids.New(), ids.New()
+	got, err := ParseLedgerIDs(le + "=" + ledger + " ,")
+	if err != nil || got[le] != ledger || len(got) != 1 {
+		t.Errorf("parsed %v %v, want the one pair", got, err)
+	}
+	for _, bad := range []string{"x=y", le, le + "=" + ledger + "," + ledger} {
+		if _, err := ParseLedgerIDs(bad); err == nil {
+			t.Errorf("%q parsed, want an error", bad)
 		}
 	}
 }

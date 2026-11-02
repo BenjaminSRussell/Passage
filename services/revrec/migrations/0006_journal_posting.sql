@@ -3,7 +3,8 @@
 -- lines it covers carry its id in revenue_schedule.journal_posting_id. A row is
 -- created pending (entry_id null) in the transaction that claims its lines and is
 -- completed once the ledger has answered, so a failed post is retried with the
--- same ledger idempotency key.
+-- same ledger idempotency key. A posting the ledger refuses for good is marked
+-- rejected (rejected_code) and its lines are released, so it never blocks the entity.
 
 CREATE TABLE IF NOT EXISTS journal_posting (
   tenant_id uuid NOT NULL,
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS journal_posting (
   amount numeric(20,6) NOT NULL CHECK (amount > 0),
   line_count integer NOT NULL CHECK (line_count > 0),
   entry_id text,
+  rejected_code text,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id)
 );
@@ -26,7 +28,7 @@ CREATE POLICY journal_posting_tenant_access ON journal_posting AS PERMISSIVE
 CREATE POLICY journal_posting_legal_entity_scope ON journal_posting AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
-CREATE INDEX IF NOT EXISTS journal_posting_pending_idx ON journal_posting (tenant_id, legal_entity_id) WHERE entry_id IS NULL;
+CREATE INDEX IF NOT EXISTS journal_posting_pending_idx ON journal_posting (tenant_id, legal_entity_id) WHERE entry_id IS NULL AND rejected_code IS NULL;
 CREATE INDEX IF NOT EXISTS revenue_schedule_unposted_idx ON revenue_schedule (tenant_id, recognized_on) WHERE status = 'RECOGNIZED' AND journal_posting_id IS NULL;
 
 DO $$

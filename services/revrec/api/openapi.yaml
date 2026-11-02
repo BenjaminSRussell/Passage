@@ -267,13 +267,17 @@ paths:
       x-passage-duty: revrec.post (RevRecPost)
       description: >
         Claims every recognized, not yet posted RATABLE and MILESTONE line
-        recognized on or before `through` (default today) and posts one ledger
+        recognized on or before `through` (default the last completed month end) and posts one ledger
         entry per currency and month of recognition, dated the month end, through
         the ledger's journal API with the service token. A posting the ledger
-        refused or did not answer stays pending and is retried by the next call
-        with the same ledger idempotency key, so no amount posts twice. 503
-        REV-0200 when LEDGER_URL is not set; 502 REV-0201 when the ledger
-        refuses or does not answer.
+        did not answer stays pending and is retried by the next call with the
+        same ledger idempotency key, so no amount posts twice. A posting the
+        ledger refuses for good (a 4xx such as a closed period) is marked
+        rejected, its lines are released and it is listed under `rejected`; it
+        does not block the entity's other postings. The ledger comes from the
+        service configuration (REVREC_LEDGER_IDS), never from the request. 503
+        REV-0200 when LEDGER_URL is not set; 422 REV-0202 when the legal entity
+        has no configured ledger; 502 REV-0201 when the ledger does not answer.
       requestBody:
         required: true
         content:
@@ -288,6 +292,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
         "502": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
   /v1/revrec/gl-reconciliation:
@@ -303,7 +308,6 @@ paths:
         billing's posting and is not part of this check.
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
-        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
         - { name: period, in: query, required: true, schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }, description: "YYYY-MM" }
       responses:
@@ -523,16 +527,26 @@ components:
         closing: { type: string }
     JournalPostingRequest:
       type: object
-      required: [legalEntityId, ledgerId]
+      required: [legalEntityId]
       additionalProperties: false
       properties:
         legalEntityId: { type: string, format: uuid }
-        ledgerId: { type: string, format: uuid }
-        through: { type: string, format: date, description: "Last recognition date to post; default today, not in the future." }
+        through: { type: string, format: date, description: "Last recognition date to post; default the last completed month end, not in the future." }
     JournalPostings:
       type: object
-      required: [items]
+      required: [items, rejected]
       properties:
+        rejected:
+          type: array
+          items:
+            type: object
+            required: [id, currency, postingDate, amount, ledgerCode]
+            properties:
+              id: { type: string, format: uuid }
+              currency: { type: string }
+              postingDate: { type: string, format: date }
+              amount: { type: string }
+              ledgerCode: { type: string }
         items:
           type: array
           items:

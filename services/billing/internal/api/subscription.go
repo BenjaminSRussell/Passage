@@ -346,7 +346,7 @@ func (a *API) billSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := "subscription-" + sub.ID + "-" + req.PeriodFrom
-	hash := hashOf(req)
+	hash := hashOf(invoiceDate.Format(dateLayout))
 	if existing, found, err := a.store.FindByIdempotencyKey(r.Context(), key); err != nil {
 		httpx.Fail(w, r, err)
 		return

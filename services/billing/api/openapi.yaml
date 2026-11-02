@@ -598,7 +598,7 @@ components:
       required: [periodFrom]
       additionalProperties: false
       properties:
-        periodFrom: { type: string, format: date, description: "The first of a month." }
+        periodFrom: { type: string, format: date, description: "The first of a month; after the first invoiced period it must be the day after the last invoiced period ends (400 COM-0001 otherwise)." }
         invoiceDate: { type: string, format: date, description: "Defaults to periodFrom." }
     Subscription:
       type: object

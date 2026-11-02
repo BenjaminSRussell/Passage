@@ -60,7 +60,7 @@ func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID st
 			}
 		}
 		rows, err := tx.Query(ctx, `select id::text, ledger_id::text, currency::text, posting_date, amount::text, line_count from journal_posting
-			where legal_entity_id = $1::uuid and entry_id is null order by posting_date, id`, legalEntityID)
+			where legal_entity_id = $1::uuid and entry_id is null and rejected_code is null order by posting_date, id`, legalEntityID)
 		if err != nil {
 			return err
 		}
@@ -120,6 +120,17 @@ func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through ti
 func (s *Postgres) CompletePosting(ctx context.Context, postingID, entryID string) error {
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `update journal_posting set entry_id = $2 where id = $1::uuid and entry_id is null`, postingID, entryID)
+		return err
+	})
+}
+
+func (s *Postgres) RejectPosting(ctx context.Context, postingID, code string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update journal_posting set rejected_code = $2 where id = $1::uuid and entry_id is null and rejected_code is null`, postingID, code)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `update revenue_schedule set journal_posting_id = null where journal_posting_id = $1::uuid`, postingID)
 		return err
 	})
 }

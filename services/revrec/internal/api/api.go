@@ -46,10 +46,11 @@ var (
 
 // API holds the dependencies of the handlers and their counters.
 type API struct {
-	store    Store
-	now      func() time.Time
-	ledger   ledgerclient.Ledger
-	postings PostingStore
+	store     Store
+	now       func() time.Time
+	ledger    ledgerclient.Ledger
+	postings  PostingStore
+	ledgerIDs map[string]string
 
 	previews            atomic.Int64
 	contractsCreated    atomic.Int64
