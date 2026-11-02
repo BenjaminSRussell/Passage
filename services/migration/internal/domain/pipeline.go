@@ -48,6 +48,24 @@ type LoadResult struct {
 	Detail        string
 	TargetID      string
 	TargetVersion int
+	// LegalEntityID is the legal entity the row was loaded into; the loader sets it for entities the owning service
+	// scopes to a legal entity (XrefLegalEntityScoped) and the cross-reference stores it with the row.
+	LegalEntityID string
+}
+
+// XrefLegalEntityScoped says whether the owning service keeps records of entity per legal entity, so a
+// cross-reference row for it carries the legal entity (migration.xref.legal_entity_id) and a lookup from another
+// legal entity does not see it. party, product and item are tenant-wide masters (party.party and product.product have
+// no legal_entity_id; item loads the product master, not a released product); customer and vendor are per-legal-entity
+// roles (party.customer_role and vendor_role), ar_open_item an item of one legal entity's ledger, and sales orders and
+// invoices (outbound subjects) belong to one legal entity. An entity not listed as tenant-wide is scoped: the
+// safe default, since an unscoped row answers every legal entity.
+func XrefLegalEntityScoped(entity string) bool {
+	switch entity {
+	case "party", "product", "item":
+		return false
+	}
+	return true
 }
 
 type Extractor interface {
@@ -56,6 +74,14 @@ type Extractor interface {
 
 type TargetLoader interface {
 	LoadBatch(ctx context.Context, entity string, items []LoadItem) ([]LoadResult, error)
+}
+
+// RowLegalEntityReader is a loader that can say, without loading, which legal entity a row names itself for an entity
+// the owning service keeps per legal entity ("" when the row names none or the entity is tenant-wide). The pipeline
+// uses it to tag an unchanged row whose cross-reference was written before the legal entity was recorded: the content
+// hash covers the row's own legal entity, so an unchanged row was loaded into exactly that one.
+type RowLegalEntityReader interface {
+	RowLegalEntity(entity string, fields map[string]any) string
 }
 
 type TargetReader interface {
@@ -68,6 +94,9 @@ type XrefEntry struct {
 	TargetID, ContentHash string
 	// TargetVersion is the version of the target record after the last load (0 when the target keeps none).
 	TargetVersion int
+	// LegalEntityID is the legal entity of the target record, "" for a tenant-wide one (XrefLegalEntityScoped). It is
+	// written once: a put never moves a row to another legal entity.
+	LegalEntityID string
 	// Rebind, on a put, replaces the stored target id with TargetID. It is set when the target assigned its own id
 	// to a record the pipeline had reserved another for; every other put keeps the id first reserved.
 	Rebind bool
@@ -85,6 +114,9 @@ type XrefStore interface {
 	PutMany(ctx context.Context, sourceSystem, entity string, items []XrefItem) error
 	Reserve(ctx context.Context, sourceSystem, entity string, items []XrefItem) (map[string]string, error)
 	Keys(ctx context.Context, sourceSystem, entity string) ([]string, error)
+	// TagLegalEntities sets the legal entity of rows that have none (source key -> legal entity); a tagged row is
+	// left as it is.
+	TagLegalEntities(ctx context.Context, sourceSystem, entity string, tags map[string]string) error
 }
 
 type RunSpec struct {
@@ -252,6 +284,8 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	}
 	var todo []pending
 	var reserve []XrefItem
+	tags := map[string]string{}
+	rowLE, _ := p.Loader.(RowLegalEntityReader)
 	for _, r := range mapped {
 		hash := ContentHash(r.Fields)
 		x, found := known[r.Key]
@@ -267,6 +301,11 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 		idemKey := IdempotencyKey(spec.SourceSystem, spec.Entity, r.Key, hash)
 		if found && x.ContentHash == hash {
+			if !spec.DryRun && rowLE != nil && x.LegalEntityID == "" && XrefLegalEntityScoped(spec.Entity) {
+				if le := rowLE.RowLegalEntity(spec.Entity, r.Fields); le != "" {
+					tags[r.Key] = le
+				}
+			}
 			rep.Unchanged++
 			rep.Ledger = append(rep.Ledger, LedgerEntry{r.Key, x.TargetID, idemKey, hash, ActionUnchanged, templated[r.Key]})
 			continue
@@ -287,6 +326,9 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 		item := LoadItem{TargetID: x.TargetID, SourceKey: r.Key, IdempotencyKey: idemKey, Fields: r.Fields, Existing: found && x.ContentHash != "", TargetVersion: x.TargetVersion}
 		todo = append(todo, pending{entry, item, r.Key, action})
+	}
+	if err := p.tagXrefs(ctx, spec, tags); err != nil {
+		return rep, err
 	}
 	won, err := p.reserveXrefs(ctx, spec, reserve)
 	if err != nil {
@@ -381,6 +423,28 @@ func (p *Pipeline) putXrefs(ctx context.Context, spec RunSpec, items []XrefItem)
 	return nil
 }
 
+// tagXrefs records the legal entity of unchanged rows whose cross-reference has none, in batches.
+func (p *Pipeline) tagXrefs(ctx context.Context, spec RunSpec, tags map[string]string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for start := 0; start < len(keys); start += MaxBatch {
+		batch := make(map[string]string, MaxBatch)
+		for _, k := range keys[start:min(start+MaxBatch, len(keys))] {
+			batch[k] = tags[k]
+		}
+		if err := p.Xref.TagLegalEntities(ctx, spec.SourceSystem, spec.Entity, batch); err != nil {
+			return fmt.Errorf("xref tag %s: %w", spec.Entity, err)
+		}
+	}
+	return nil
+}
+
 func (p *Pipeline) reserveXrefs(ctx context.Context, spec RunSpec, items []XrefItem) (map[string]string, error) {
 	won := make(map[string]string, len(items))
 	for start := 0; start < len(items); start += MaxBatch {
@@ -463,7 +527,7 @@ func (p *Pipeline) load(ctx context.Context, spec RunSpec, rep *Report, todo []p
 			if id := results[i].TargetID; id != "" {
 				rebind, b.entry.TargetID = id != b.entry.TargetID, id
 			}
-			loaded = append(loaded, XrefItem{b.key, XrefEntry{TargetID: b.entry.TargetID, ContentHash: b.entry.ContentHash, TargetVersion: results[i].TargetVersion, Rebind: rebind}})
+			loaded = append(loaded, XrefItem{b.key, XrefEntry{TargetID: b.entry.TargetID, ContentHash: b.entry.ContentHash, TargetVersion: results[i].TargetVersion, LegalEntityID: results[i].LegalEntityID, Rebind: rebind}})
 			rep.count(b.action)
 			rep.Ledger = append(rep.Ledger, b.entry)
 		}
@@ -504,6 +568,9 @@ func (m *MemXref) Get(_ context.Context, k XrefKey) (XrefEntry, bool, error) {
 func (m *MemXref) Put(_ context.Context, k XrefKey, e XrefEntry) error {
 	m.Puts++
 	e.Rebind = false
+	if old, ok := m.Entries[k]; ok && old.LegalEntityID != "" {
+		e.LegalEntityID = old.LegalEntityID // a row keeps the legal entity it was first tagged with
+	}
 	m.Entries[k] = e
 	return nil
 }
@@ -550,6 +617,17 @@ func (m *MemXref) Keys(_ context.Context, sourceSystem, entity string) ([]string
 		}
 	}
 	return keys, nil
+}
+
+func (m *MemXref) TagLegalEntities(_ context.Context, sourceSystem, entity string, tags map[string]string) error {
+	for key, le := range tags {
+		k := XrefKey{sourceSystem, entity, key}
+		if e, ok := m.Entries[k]; ok && e.LegalEntityID == "" {
+			e.LegalEntityID = le
+			m.Entries[k] = e
+		}
+	}
+	return nil
 }
 
 type MemLoader struct {

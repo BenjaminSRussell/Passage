@@ -943,7 +943,7 @@ paths:
     post:
       operationId: renderOutboundMapping
       summary: Render an event for the legacy ERP
-      description: "Called by the integration hub (service token, issuer integration-hub). Builds the request body for one CloudEvent through the mapping. It is pure: the same mapping version and event give the same answer, nothing is written and nothing is sent. The event's legalentityid extension must be the legal entity of the service token. The idempotencyKey is derived from the mapping id and the event id only, so it is the same for every render of one event whatever the mapping version. A reference the event carries that has no legacy key yet is 422 MIG-XREF-UNRESOLVED, listing each one."
+      description: "Called by the integration hub (service token, issuer integration-hub). Builds the request body for one CloudEvent through the mapping. It is pure: the same mapping version and event give the same answer, nothing is written and nothing is sent. The event's legalentityid extension must be the legal entity of the service token. The idempotencyKey is derived from the mapping id and the event id only, so it is the same for every render of one event whatever the mapping version. A reference the event carries that has no legacy key yet is 422 MIG-XREF-UNRESOLVED, listing each one. Legacy keys are resolved for the token's legal entity only: a record whose cross-reference row belongs to another legal entity is unresolved too, with the same answer as an id that was never loaded, so the response never shows that it exists elsewhere. Rows of tenant-wide master data (party, product, item) resolve in every legal entity."
       x-passage-duty: migration.outbound.render
       requestBody:
         required: true
@@ -969,7 +969,7 @@ paths:
     post:
       operationId: recordOutboundXref
       summary: Record the legacy key of a pushed record
-      description: "Called by the integration hub (service token, issuer integration-hub) after the legacy ERP accepted a push and answered with the key it assigned. Stores the key in the cross-reference so later events about the record resolve it, and the record resolves in both directions. Only the subject entity of the mapping is recorded, and an existing cross-reference row is never repointed. Idempotent on eventId: a repeat of the same call is 204 again; the same event with another key is 409."
+      description: "Called by the integration hub (service token, issuer integration-hub) after the legacy ERP accepted a push and answered with the key it assigned. Stores the key in the cross-reference so later events about the record resolve it, and the record resolves in both directions. Only the subject entity of the mapping is recorded, and an existing cross-reference row is never repointed. A subject the owning service keeps per legal entity (everything except party, product and item) is recorded with the token's legal entity, which later lookups from other legal entities do not resolve. An existing row is never changed, its legal entity included: one already tagged with another legal entity is 409 MIG-XREF-CONFLICT, an untagged one is accepted and stays untagged. Idempotent on eventId: a repeat of the same call is 204 again; the same event with another key is 409."
       x-passage-duty: migration.xref.record
       requestBody:
         required: true
@@ -1123,6 +1123,7 @@ components:
         targetId: { type: string, format: uuid }
         contentHash: { type: string }
         mergedIntoTargetId: { type: string, format: uuid, description: Set when the record was merged into another Passage record. }
+        legalEntityId: { type: string, format: uuid, description: "The legal entity of the target record. Absent for tenant-wide master data (party, product, item) and for rows loaded before the legal entity was recorded that no stored data could place. An outbound lookup for a legal entity resolves its own rows and the rows without one, never another legal entity's." }
         updatedAt: { type: string, format: date-time }
     XrefCount:
       type: object

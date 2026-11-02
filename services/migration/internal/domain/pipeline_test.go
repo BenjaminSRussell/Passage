@@ -471,3 +471,95 @@ func TestPipeline_RecordsTheTargetsIDVersionAndRefusalDetail(t *testing.T) {
 		t.Fatalf("version after update = %d", e.TargetVersion)
 	}
 }
+
+func TestXrefLegalEntityScoped(t *testing.T) {
+	for entity, want := range map[string]bool{"party": false, "product": false, "item": false, "customer": true, "vendor": true, "ar_open_item": true, "salesOrder": true, "invoice": true, "": true} {
+		if got := domain.XrefLegalEntityScoped(entity); got != want {
+			t.Errorf("XrefLegalEntityScoped(%q) = %v, want %v", entity, got, want)
+		}
+	}
+}
+
+// leLoader accepts every row and reports the legal entity it loaded into, as the real loader does.
+type leLoader struct{ le string }
+
+func (l leLoader) LoadBatch(_ context.Context, _ string, items []domain.LoadItem) ([]domain.LoadResult, error) {
+	out := make([]domain.LoadResult, len(items))
+	for i := range out {
+		out[i].LegalEntityID = l.le
+	}
+	return out, nil
+}
+
+func TestPipeline_StoresTheLegalEntityTheLoaderReported(t *testing.T) {
+	rows := []domain.Record{{Key: "C1", Fields: map[string]any{"name": "Acme"}}}
+	xref := domain.NewMemXref()
+	m := parseMapping(t, fieldDoc("", `{"source":"name","target":"name","type":"string"}`))
+	p := &domain.Pipeline{Extractor: sliceExtractor{rows: rows}, Loader: leLoader{le: "00000000-0000-7000-8000-0000000000a1"}, Xref: xref, IDGen: counterIDs()}
+	if _, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: "customer", Mapping: m}); err != nil {
+		t.Fatal(err)
+	}
+	e, ok, _ := xref.Get(context.Background(), domain.XrefKey{SourceSystem: system, Entity: "customer", SourceKey: "C1"})
+	if !ok || e.LegalEntityID != "00000000-0000-7000-8000-0000000000a1" {
+		t.Fatalf("xref entry = %+v", e)
+	}
+}
+
+// ownLELoader is leLoader that can also tell the legal entity a row names itself, as target.Loader does.
+type ownLELoader struct{ leLoader }
+
+func (ownLELoader) RowLegalEntity(entity string, f map[string]any) string {
+	if !domain.XrefLegalEntityScoped(entity) {
+		return ""
+	}
+	le, _ := f["legalEntityId"].(string)
+	return le
+}
+
+// A row loaded before the cross-reference recorded legal entities is skipped as unchanged on a rerun; when the row
+// names its own legal entity (covered by the content hash) the rerun tags it. A row that names none, a tagged row, a
+// tenant-wide entity and a dry run are left alone.
+func TestPipeline_TagsUnchangedUntaggedRowsWithTheirOwnLegalEntity(t *testing.T) {
+	const leA, leB = "00000000-0000-7000-8000-0000000000a1", "00000000-0000-7000-8000-0000000000b1"
+	m := parseMapping(t, fieldDoc("", `{"source":"name","target":"name","type":"string"},{"source":"le","target":"legalEntityId","type":"string"}`))
+	rows := []domain.Record{
+		{Key: "OWN", Fields: map[string]any{"name": "A", "le": leA}},
+		{Key: "NONE", Fields: map[string]any{"name": "B"}},
+		{Key: "TAGGED", Fields: map[string]any{"name": "C", "le": leA}},
+	}
+	run := func(entity string, dry bool) *domain.MemXref {
+		t.Helper()
+		xref := domain.NewMemXref()
+		for _, r := range rows {
+			out, _, rejects, _ := m.ApplyTemplate(r.Fields, nil)
+			if len(rejects) > 0 {
+				t.Fatalf("mapping rejected %s: %+v", r.Key, rejects)
+			}
+			e := domain.XrefEntry{TargetID: "t-" + r.Key, ContentHash: domain.ContentHash(out), TargetVersion: 1}
+			if r.Key == "TAGGED" {
+				e.LegalEntityID = leB
+			}
+			xref.Entries[domain.XrefKey{SourceSystem: system, Entity: entity, SourceKey: r.Key}] = e
+		}
+		loader := ownLELoader{leLoader{le: leA}}
+		p := &domain.Pipeline{Extractor: sliceExtractor{rows: rows}, Loader: loader, Xref: xref, IDGen: counterIDs()}
+		rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: entity, Mapping: m, DryRun: dry})
+		if err != nil || rep.Unchanged != len(rows) {
+			t.Fatalf("run = %+v %v", rep, err)
+		}
+		return xref
+	}
+	le := func(x *domain.MemXref, entity, key string) string {
+		return x.Entries[domain.XrefKey{SourceSystem: system, Entity: entity, SourceKey: key}].LegalEntityID
+	}
+	x := run("customer", false)
+	if le(x, "customer", "OWN") != leA || le(x, "customer", "NONE") != "" || le(x, "customer", "TAGGED") != leB {
+		t.Fatalf("customer tags = %q %q %q", le(x, "customer", "OWN"), le(x, "customer", "NONE"), le(x, "customer", "TAGGED"))
+	}
+	if x := run("customer", true); le(x, "customer", "OWN") != "" {
+		t.Fatal("a dry run must not tag")
+	}
+	if x := run("party", false); le(x, "party", "OWN") != "" {
+		t.Fatal("a tenant-wide entity must not be tagged")
+	}
+}

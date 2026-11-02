@@ -16,13 +16,15 @@ import (
 
 // XrefRow is one legacy-key to Passage-id mapping as the cutover team looks it up.
 type XrefRow struct {
-	SourceSystem       string    `json:"sourceSystem"`
-	Entity             string    `json:"entity"`
-	SourceKey          string    `json:"sourceKey"`
-	TargetID           string    `json:"targetId"`
-	ContentHash        string    `json:"contentHash"`
-	MergedIntoTargetID string    `json:"mergedIntoTargetId,omitempty"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	SourceSystem       string `json:"sourceSystem"`
+	Entity             string `json:"entity"`
+	SourceKey          string `json:"sourceKey"`
+	TargetID           string `json:"targetId"`
+	ContentHash        string `json:"contentHash"`
+	MergedIntoTargetID string `json:"mergedIntoTargetId,omitempty"`
+	// LegalEntityID is the legal entity of the target record; absent for tenant-wide master data.
+	LegalEntityID string    `json:"legalEntityId,omitempty"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // XrefCursor is the keyset position after the last row of a page.
@@ -88,7 +90,7 @@ func (s *Postgres) ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error
 		where = append(where, "(source_system, source_entity, source_key) > ("+arg(f.After.SourceSystem)+", "+arg(f.After.Entity)+", "+arg(f.After.SourceKey)+")")
 	}
 	sql := `select source_system, source_entity, source_key, target_id::text, content_hash,
-			coalesce(merged_into_target_id::text, ''), updated_at
+			coalesce(merged_into_target_id::text, ''), coalesce(legal_entity_id::text, ''), updated_at
 		from migration.xref where ` + strings.Join(where, " and ") + `
 		order by source_system, source_entity, source_key limit ` + arg(clampLimit(f.Limit))
 	out := []XrefRow{}
@@ -100,7 +102,7 @@ func (s *Postgres) ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error
 		defer rows.Close()
 		for rows.Next() {
 			var x XrefRow
-			if err := rows.Scan(&x.SourceSystem, &x.Entity, &x.SourceKey, &x.TargetID, &x.ContentHash, &x.MergedIntoTargetID, &x.UpdatedAt); err != nil {
+			if err := rows.Scan(&x.SourceSystem, &x.Entity, &x.SourceKey, &x.TargetID, &x.ContentHash, &x.MergedIntoTargetID, &x.LegalEntityID, &x.UpdatedAt); err != nil {
 				return err
 			}
 			out = append(out, x)
@@ -149,7 +151,7 @@ func (m *Mem) ListXref(_ context.Context, f XrefFilter) ([]XrefRow, error) {
 		if f.After != nil && compareXref(k.SourceSystem, k.Entity, k.SourceKey, *f.After) <= 0 {
 			continue
 		}
-		out = append(out, XrefRow{SourceSystem: k.SourceSystem, Entity: k.Entity, SourceKey: k.SourceKey, TargetID: e.TargetID, ContentHash: e.ContentHash})
+		out = append(out, XrefRow{SourceSystem: k.SourceSystem, Entity: k.Entity, SourceKey: k.SourceKey, TargetID: e.TargetID, ContentHash: e.ContentHash, LegalEntityID: e.LegalEntityID})
 	}
 	slices.SortFunc(out, func(a, b XrefRow) int {
 		return compareXref(a.SourceSystem, a.Entity, a.SourceKey, XrefCursor{b.SourceSystem, b.Entity, b.SourceKey})

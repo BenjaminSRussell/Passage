@@ -435,11 +435,17 @@ func (s *Postgres) LegacyKeys(ctx context.Context, sourceSystem, entity string, 
 	err := s.outboundTx(ctx, obRender, func(tx pgx.Tx) error {
 		// A record merged into a survivor answers to the survivor's id. The two predicates use the target_id and
 		// merged_into_target_id indexes of 0005; the lowest legacy key wins when a record has several.
+		//
+		// The transaction has the all-entities scope (see outboundTx), so the legal entity is filtered here: a token
+		// that names a legal entity (the hub's always does) sees the rows of that legal entity and the tenant-wide ones
+		// (legal_entity_id is null), never another legal entity's. A tenant administrator (no legal-entity claim) sees all.
+		le, _ := ids.Canonical(p.LegalEntityID)
 		rows, err := tx.Query(ctx, `select distinct on (pid) pid, source_key from (
 				select coalesce(merged_into_target_id, target_id)::text as pid, source_key from migration.xref
 				where tenant_id = $1 and source_system = $2 and source_entity = $3
 				  and ((merged_into_target_id is null and target_id = any($4::uuid[])) or merged_into_target_id = any($4::uuid[]))
-			) k order by pid, source_key`, p.TenantID, sourceSystem, entity, uuids)
+				  and (not $5::boolean or legal_entity_id is null or legal_entity_id::text = $6)
+			) k order by pid, source_key`, p.TenantID, sourceSystem, entity, uuids, p.LegalEntityID != "", le)
 		if err != nil {
 			return err
 		}
@@ -533,16 +539,26 @@ func (s *Postgres) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord
 			return nil // a mapping without a subject: the push is recorded, there is no record to tie the key to
 		}
 		ref := canonical[0]
-		// The no-op update only locks an existing row so RETURNING reports whom it resolves to; nothing is changed.
-		var current string
-		err = tx.QueryRow(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id)
-			values ($1, $2, $3, $4, $5)
+		// A row this call creates for a subject the owning service scopes to a legal entity is tagged with the token's
+		// (the event's) legal entity; a tenant-wide one stays untagged. An existing row is never changed, its legal
+		// entity included: the token cannot prove that an untagged row (loaded before 0013 and not backfilled) belongs
+		// to its legal entity, so tagging it would let one legal entity's token take a record away from another. Such a
+		// row is accepted as before and stays tenant-wide; one tagged with another legal entity is 409. The no-op update
+		// only locks an existing row so RETURNING reports whom it resolves to and its legal entity.
+		le := ""
+		if domain.XrefLegalEntityScoped(ref.Entity) {
+			le, _ = ids.Canonical(p.LegalEntityID)
+		}
+		var current, tagged string
+		err = tx.QueryRow(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, legal_entity_id)
+			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid)
 			on conflict (tenant_id, source_system, source_entity, source_key) do update set updated_at = migration.xref.updated_at
-			returning coalesce(merged_into_target_id, target_id)::text`, p.TenantID, system, ref.Entity, in.LegacyKey, ref.ID).Scan(&current)
+			returning coalesce(merged_into_target_id, target_id)::text, coalesce(legal_entity_id::text, '')`,
+			p.TenantID, system, ref.Entity, in.LegacyKey, ref.ID, le).Scan(&current, &tagged)
 		if err != nil {
 			return err
 		}
-		if current != ref.ID {
+		if current != ref.ID || (le != "" && tagged != "" && tagged != le) {
 			return xrefConflict(in.LegacyKey)
 		}
 		return nil
@@ -696,13 +712,18 @@ func (m *Mem) UpdateOutboundMapping(_ context.Context, id string, version int, e
 	return cur, nil
 }
 
-func (m *Mem) LegacyKeys(_ context.Context, sourceSystem, entity string, passageIDs []string) (map[string]string, error) {
+func (m *Mem) LegacyKeys(ctx context.Context, sourceSystem, entity string, passageIDs []string) (map[string]string, error) {
+	p, _ := tenant.FromContext(ctx)
+	le, _ := ids.Canonical(p.LegalEntityID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := map[string]string{}
 	best := map[string]string{}
 	for k, e := range m.xref.Entries {
 		if k.SourceSystem != sourceSystem || k.Entity != entity {
+			continue
+		}
+		if p.LegalEntityID != "" && e.LegalEntityID != "" && e.LegalEntityID != le {
 			continue
 		}
 		if cur, ok := best[e.TargetID]; !ok || k.SourceKey < cur {
@@ -719,7 +740,8 @@ func (m *Mem) LegacyKeys(_ context.Context, sourceSystem, entity string, passage
 	return out, nil
 }
 
-func (m *Mem) RecordOutboundXref(_ context.Context, in OutboundXrefRecord) (bool, error) {
+func (m *Mem) RecordOutboundXref(ctx context.Context, in OutboundXrefRecord) (bool, error) {
+	p, _ := tenant.FromContext(ctx)
 	st := m.ob()
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -748,10 +770,16 @@ func (m *Mem) RecordOutboundXref(_ context.Context, in OutboundXrefRecord) (bool
 		defer m.mu.Unlock()
 		ref := in.Refs[0]
 		key := domain.XrefKey{SourceSystem: st.items[i].SourceSystem, Entity: ref.Entity, SourceKey: in.LegacyKey}
-		if cur, exists := m.xref.Entries[key]; exists && cur.TargetID != ref.ID {
-			return false, xrefConflict(in.LegacyKey)
-		} else if !exists {
-			m.xref.Entries[key] = domain.XrefEntry{TargetID: ref.ID}
+		le := ""
+		if domain.XrefLegalEntityScoped(ref.Entity) {
+			le, _ = ids.Canonical(p.LegalEntityID)
+		}
+		if cur, exists := m.xref.Entries[key]; exists {
+			if cur.TargetID != ref.ID || (le != "" && cur.LegalEntityID != "" && cur.LegalEntityID != le) {
+				return false, xrefConflict(in.LegacyKey)
+			}
+		} else {
+			m.xref.Entries[key] = domain.XrefEntry{TargetID: ref.ID, LegalEntityID: le}
 		}
 	}
 	st.events[k] = in

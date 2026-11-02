@@ -67,6 +67,18 @@ func (l *Loader) legalEntity(f map[string]any) (string, *domain.LoadResult) {
 	return strings.ToLower(own), nil
 }
 
+// RowLegalEntity is the legal entity a row names itself (its own legalEntityId), for an entity the owning service
+// keeps per legal entity; "" for a row that names none, names an invalid one, or a tenant-wide entity. The run's
+// legal entity is deliberately not used: it is not in the row's content hash, so an unchanged row may have been
+// loaded under another project, while a row's own legalEntityId is in the hash and so is the one it was loaded into.
+func (l *Loader) RowLegalEntity(entity string, f map[string]any) string {
+	own := text(f, "legalEntityId")
+	if !domain.XrefLegalEntityScoped(entity) || !ids.Valid(own) {
+		return ""
+	}
+	return strings.ToLower(own)
+}
+
 // localPrefix marks a mapped field that stays in the migration service: it feeds reject rules and the change hash and
 // is never sent to a target.
 const localPrefix = "_"
@@ -130,6 +142,11 @@ func (l *Loader) ref(ctx context.Context, f map[string]any, idField, keyField, e
 		return "", &domain.LoadResult{Code: CodeRefUnresolved, Detail: "cross-reference lookup failed for " + keyField}
 	}
 	if !found || e.ContentHash == "" {
+		return "", &domain.LoadResult{Code: CodeRefUnresolved, Detail: fmt.Sprintf("%s %q is not loaded yet; run the %s load first", keyField, key, entity)}
+	}
+	// A key loaded into another legal entity is as good as unloaded here: the owning service would not find the record
+	// in this row's legal entity, and the answer must not tell which legal entity has it.
+	if le, bad := l.legalEntity(f); bad == nil && e.LegalEntityID != "" && !strings.EqualFold(e.LegalEntityID, le) {
 		return "", &domain.LoadResult{Code: CodeRefUnresolved, Detail: fmt.Sprintf("%s %q is not loaded yet; run the %s load first", keyField, key, entity)}
 	}
 	return e.TargetID, nil

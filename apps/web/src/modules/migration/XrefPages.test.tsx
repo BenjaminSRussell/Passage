@@ -57,12 +57,18 @@ describe("legacy key cross-reference", () => {
     handler = (url) => {
       if (url.pathname.endsWith("/xref/summary")) return json(200, summary);
       if (url.searchParams.get("cursor") === "c1") return json(200, { items: [entry("C3")] });
-      return json(200, { items: [entry("C1"), entry("C2", { mergedIntoTargetId: "0195f0a0-0000-7000-8000-0000000000e2" })], nextCursor: "c1" });
+      return json(200, {
+        items: [entry("C1"), entry("C2", { mergedIntoTargetId: "0195f0a0-0000-7000-8000-0000000000e2", legalEntityId: "0195f0a0-0000-7000-8000-0000000000a1" })],
+        nextCursor: "c1",
+      });
     };
     const { container } = renderPage();
     const table = await findTable({ name: "Legacy key cross-reference" });
     expect(table).toHaveTextContent("C2");
     expect(table).toHaveTextContent("0195f0a0-0000-7000-8000-0000000000e2");
+    // A row with a legal entity shows it; one without resolves in every legal entity and says so.
+    expect(screen.getByRole("row", { name: /C2/ })).toHaveTextContent("0195f0a0-0000-7000-8000-0000000000a1");
+    expect(screen.getByRole("row", { name: /C1/ })).toHaveTextContent("All legal entities");
     expect(screen.getByLabelText("Mapped keys per source system and entity")).toHaveTextContent("ax2012 customer");
     expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
 

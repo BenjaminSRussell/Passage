@@ -24,6 +24,7 @@ type xrefView struct {
 	TargetID           string    `json:"targetId"`
 	ContentHash        string    `json:"contentHash,omitempty"`
 	MergedIntoTargetID string    `json:"mergedIntoTargetId,omitempty"`
+	LegalEntityID      string    `json:"legalEntityId,omitempty"`
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 

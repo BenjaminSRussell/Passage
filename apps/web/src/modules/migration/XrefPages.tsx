@@ -15,6 +15,8 @@ const columns: DataTableColumn<XrefEntry>[] = [
   { key: "sourceKey", header: "Legacy key", mono: true },
   { key: "targetId", header: "Passage id", mono: true },
   { key: "mergedIntoTargetId", header: "Merged into", mono: true, render: (row) => row.mergedIntoTargetId ?? "" },
+  // No legal entity: tenant-wide master data, or a row loaded before legal entities were recorded; both resolve in every legal entity.
+  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? "All legal entities" },
   { key: "updatedAt", header: "Updated", render: (row) => formatDateTime(row.updatedAt) },
 ];
 

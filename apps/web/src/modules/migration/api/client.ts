@@ -254,6 +254,8 @@ export interface XrefEntry {
   contentHash?: string;
   /** Set when the legacy record was merged into another Passage record. */
   mergedIntoTargetId?: string;
+  /** The legal entity of the Passage record; absent for tenant-wide master data and rows no stored data could place. */
+  legalEntityId?: string;
   updatedAt: string;
 }
 

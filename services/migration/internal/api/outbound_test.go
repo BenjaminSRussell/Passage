@@ -440,3 +440,54 @@ func TestOutbound_RecordWithoutSubject(t *testing.T) {
 		t.Fatalf("ref without subject = %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A customer the loader put into another legal entity is not resolved for the hub's token (legal entity A): the
+// render is MIG-XREF-UNRESOLVED exactly as for an id that was never loaded, and nothing in the answer says the record
+// exists elsewhere. The same customer loaded into the token's legal entity, and a tenant-wide one, resolve.
+func TestOutbound_RenderDoesNotResolveAnotherLegalEntitysRecord(t *testing.T) {
+	s := store.NewMem()
+	r := obRouter(s, hubPrincipal(1))
+	m := createOutbound(t, r, "Orders")
+	put := func(key, le string) string {
+		id := ids.New()
+		if err := s.Xref().Put(principalCtx(), domain.XrefKey{SourceSystem: "custom_acme", Entity: "customer", SourceKey: key}, domain.XrefEntry{TargetID: id, LegalEntityID: le}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	other := put("C-OTHER", "00000000-0000-7000-8000-0000000000b2")
+	mine := put("C-MINE", hubLegalEnt)
+	wide := put("C-WIDE", "")
+	never := ids.New()
+
+	render := func(customer string) *httptest.ResponseRecorder {
+		return hubCall(r, obPath+"/"+m.ID+":render", `{"event":`+hubEvent("evt-1", ids.New(), customer)+`}`)
+	}
+	if rec := render(mine); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "C-MINE") {
+		t.Fatalf("own legal entity = %d %s", rec.Code, rec.Body)
+	}
+	if rec := render(wide); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "C-WIDE") {
+		t.Fatalf("tenant-wide = %d %s", rec.Code, rec.Body)
+	}
+	cross, unknown := render(other), render(never)
+	if cross.Code != http.StatusUnprocessableEntity || !strings.Contains(cross.Body.String(), `"code":"MIG-XREF-UNRESOLVED"`) {
+		t.Fatalf("another legal entity's customer = %d %s", cross.Code, cross.Body)
+	}
+	if strings.Contains(cross.Body.String(), "C-OTHER") || strings.Contains(cross.Body.String(), "00000000-0000-7000-8000-0000000000b2") {
+		t.Fatalf("the refusal reveals the record: %s", cross.Body)
+	}
+	// Indistinguishable from an id that exists nowhere, apart from the id the caller sent.
+	if strings.ReplaceAll(cross.Body.String(), other, "X") != strings.ReplaceAll(unknown.Body.String(), never, "X") {
+		t.Fatalf("cross-legal-entity and unknown answers differ:\n%s\n%s", cross.Body, unknown.Body)
+	}
+
+	// xref:record tags the order with the token's legal entity: a scoped subject is not tenant-wide.
+	order := ids.New()
+	rec := hubCall(r, "/v1/integration/xref:record", `{"outboundMappingId":"`+m.ID+`","refs":[{"entity":"salesOrder","id":"`+order+`"}],"legacyKey":"SO-5","eventId":"evt-5"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("record = %d %s", rec.Code, rec.Body)
+	}
+	if e, _, _ := s.Xref().Get(principalCtx(), domain.XrefKey{SourceSystem: "custom_acme", Entity: "salesOrder", SourceKey: "SO-5"}); e.LegalEntityID != hubLegalEnt {
+		t.Fatalf("recorded row = %+v, want legal entity %s", e, hubLegalEnt)
+	}
+}

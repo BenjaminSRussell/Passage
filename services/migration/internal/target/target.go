@@ -96,7 +96,10 @@ type Loader struct {
 	failed map[string]int // consecutive exhausted calls per target service
 }
 
-var _ domain.TargetLoader = (*Loader)(nil)
+var (
+	_ domain.TargetLoader         = (*Loader)(nil)
+	_ domain.RowLegalEntityReader = (*Loader)(nil)
+)
 
 // New builds the loader of one run.
 func New(cfg Config, run Run) *Loader {
@@ -139,6 +142,24 @@ func Entities() []string {
 // LoadBatch loads items of one entity. The result has one entry per item, in order. An error means the batch could
 // not be attempted at all (no tenant in the context, a missing service grant).
 func (l *Loader) LoadBatch(ctx context.Context, entity string, items []domain.LoadItem) ([]domain.LoadResult, error) {
+	results, err := l.loadBatch(ctx, entity, items)
+	if err != nil || !domain.XrefLegalEntityScoped(entity) {
+		return results, err
+	}
+	// A row the owning service keeps per legal entity is cross-referenced with the legal entity it was loaded into, so
+	// an outbound lookup for another legal entity does not resolve it. legalEntity is pure and answered for every
+	// accepted row already.
+	for i, it := range items {
+		if i < len(results) && results[i].Code == "" {
+			if le, bad := l.legalEntity(it.Fields); bad == nil {
+				results[i].LegalEntityID = le
+			}
+		}
+	}
+	return results, nil
+}
+
+func (l *Loader) loadBatch(ctx context.Context, entity string, items []domain.LoadItem) ([]domain.LoadResult, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok || p.TenantID == "" {
 		return nil, errors.New("loader needs the tenant in the context")
