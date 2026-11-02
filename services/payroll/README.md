@@ -47,8 +47,10 @@ Slice 1 is the pure gross-to-net engine behind a stateless HTTP preview:
   exact-fraction reference (`python3 -I gen_payroll_fixtures.py`): `payroll-us-200.csv`
   (200 Pub 15-T gross-to-net scenarios) and `payroll-retro-25.json` (25 retro cases).
 
-Changing a posting profile after a run is POSTED changes what reconciliation expects for
-that run. See `NOT-IMPLEMENTED.md`.
+Post fixes the journal lines and the ledger on the run before the first ledger call, so a
+retry resends the identical entry (a different ledgerId is 409 PAY-GL-004) and
+reconciliation sums the stored journals of POSTED runs: a later posting-profile edit
+changes only runs not yet posted. See `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -110,13 +112,14 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | PAY-RULE-002 | 422  | Rule-set publisher must differ from its author (domain, not yet wired)|
 | PAY-RUN-004  | 422  | The user who calculated a run cannot finalize it (domain)             |
 | PAY-RUN-005  | 422  | Illegal pay-run state transition (domain)                             |
-| PAY-RUN-006  | 422  | Calculation input the engine refuses (pre-tax above gross)            |
+| PAY-RUN-006  | 422  | Input the engine refuses (pre-tax above gross, payDate before periodStart) |
 | PAY-RUN-007  | 404  | Pay run not found                                                     |
 | PAY-RUN-008  | 409  | Idempotency-Key reused with a different request                       |
 | PAY-RUN-009  | 503  | Pay runs not configured                                               |
 | PAY-GL-001   | 502  | The general ledger refused or did not answer                          |
 | PAY-GL-002   | 503  | No general ledger configured                                          |
 | PAY-GL-003   | 422  | The posting profile has no GL account for a payroll role              |
+| PAY-GL-004   | 409  | The run is already fixed against another ledger                       |
 | COM-0500     | 500  | Unexpected failure                                                    |
 
 ## Dependencies

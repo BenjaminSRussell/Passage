@@ -63,6 +63,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	runs := store.New(pool)
 	a := api.New(pool).WithRuns(runs, nil)
+	// WithRuns takes the ledger interface; passing a nil *Client directly would make a non-nil interface that posts through nothing.
 	if ledger != nil {
 		a.WithRuns(runs, ledger)
 	}

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,7 +52,11 @@ func profileBody(roles ...string) string {
 
 func newRunServer(t *testing.T, withLedger bool) *runServer {
 	t.Helper()
-	s := newBareRunServer(t, withLedger)
+	return withProfile(t, newBareRunServer(t, withLedger))
+}
+
+func withProfile(t *testing.T, s *runServer) *runServer {
+	t.Helper()
 	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, profileBody(payrollRoles...), "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusOK {
 		t.Fatalf("profile %d: %s", rec.Code, rec.Body.String())
 	}
@@ -59,14 +65,35 @@ func newRunServer(t *testing.T, withLedger bool) *runServer {
 
 func newBareRunServer(t *testing.T, withLedger bool) *runServer {
 	t.Helper()
+	if !withLedger {
+		return buildRunServer(t, nil)
+	}
+	return buildRunServer(t, func(f *ledgerclient.Fake) ledgerclient.Ledger { return f })
+}
+
+type lostAnswer struct {
+	*ledgerclient.Fake
+	lose bool
+}
+
+func (l *lostAnswer) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	id, err := l.Fake.Post(ctx, e)
+	if err == nil && l.lose {
+		return "", errors.New("answer lost")
+	}
+	return id, err
+}
+
+func buildRunServer(t *testing.T, ledgerFor func(*ledgerclient.Fake) ledgerclient.Ledger) *runServer {
+	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	s := &runServer{t: t, ledger: ledgerclient.NewFake()}
 	a := New(nil)
-	if withLedger {
-		a.WithRuns(store.New(app), s.ledger)
+	if ledgerFor != nil {
+		a.WithRuns(store.New(app), ledgerFor(s.ledger))
 	} else {
 		a.WithRuns(store.New(app), nil)
 	}
@@ -335,6 +362,10 @@ func TestRunCreate_IdempotencyKeyIsScopedToCallerAndLegalEntity(t *testing.T) {
 	if bob.Code != http.StatusCreated || decodeRun(t, bob).ID == alice.ID || decodeRun(t, bob).CalculatedBy != "bob" {
 		t.Fatalf("another user must get its own run, not alice's: %d %s", bob.Code, bob.Body.String())
 	}
+	bobReplay := s.do(http.MethodPost, "/v1/payroll/runs", body, "bob", "payroll.run.maintain", "shared-key")
+	if bobReplay.Code != http.StatusCreated || decodeRun(t, bobReplay).ID != decodeRun(t, bob).ID {
+		t.Fatalf("bob's replay must return bob's run, not alice's: %d %s", bobReplay.Code, bobReplay.Body.String())
+	}
 	probe := s.do(http.MethodPost, "/v1/payroll/runs", runBody(workerA, workerB), "bob", "payroll.run.maintain", "shared-key")
 	if probe.Code != http.StatusConflict || problemCode(probe) != store.CodeKeyConflict || strings.Contains(probe.Body.String(), alice.ID) {
 		t.Fatalf("bob's own key with another body: %d %s", probe.Code, probe.Body.String())
@@ -343,6 +374,10 @@ func TestRunCreate_IdempotencyKeyIsScopedToCallerAndLegalEntity(t *testing.T) {
 	same := s.doAt(otherEntity, http.MethodPost, "/v1/payroll/runs", elsewhere, "alice", "payroll.run.maintain", "shared-key")
 	if same.Code != http.StatusCreated || decodeRun(t, same).ID == alice.ID || decodeRun(t, same).LegalEntityID != otherEntity {
 		t.Fatalf("another legal entity must get its own run: %d %s", same.Code, same.Body.String())
+	}
+	sameReplay := s.doAt(otherEntity, http.MethodPost, "/v1/payroll/runs", elsewhere, "alice", "payroll.run.maintain", "shared-key")
+	if sameReplay.Code != http.StatusCreated || decodeRun(t, sameReplay).ID != decodeRun(t, same).ID {
+		t.Fatalf("replay in the other legal entity: %d %s", sameReplay.Code, sameReplay.Body.String())
 	}
 	replay := s.do(http.MethodPost, "/v1/payroll/runs", body, "alice", "payroll.run.maintain", "shared-key")
 	if replay.Code != http.StatusCreated || decodeRun(t, replay).ID != alice.ID {
@@ -422,5 +457,108 @@ func TestPostingProfile_AccessAndValidation(t *testing.T) {
 	}
 	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/not-a-uuid", profileBody(domain.AccountSalaryExpense), "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad legal entity id: %d", rec.Code)
+	}
+}
+
+func TestRunCreate_PayDateBeforePeriodStartIsRefused(t *testing.T) {
+	s := newRunServer(t, true)
+	body := strings.Replace(runBody(workerA), `"payDate":"2025-03-14"`, `"payDate":"2025-02-28"`, 1)
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs", body, "alice", "payroll.run.maintain", "k-early"); rec.Code != http.StatusUnprocessableEntity || problemCode(rec) != domain.CodeInvalidInput {
+		t.Fatalf("pay date before the period: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRunCreate_ReplayIgnoresWhitespaceAndKeyOrder(t *testing.T) {
+	s := newRunServer(t, true)
+	first := decodeRun(t, s.do(http.MethodPost, "/v1/payroll/runs", runBody(workerA), "alice", "payroll.run.maintain", "k-canon"))
+	var generic map[string]any
+	if err := json.Unmarshal([]byte(runBody(workerA)), &generic); err != nil {
+		t.Fatal(err)
+	}
+	reshaped := map[string]any{"statements": generic["statements"], "periodEnd": generic["periodEnd"], "periodStart": generic["periodStart"], "payDate": generic["payDate"], "legalEntityId": generic["legalEntityId"]}
+	pretty, err := json.MarshalIndent(reshaped, "", "   ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := s.do(http.MethodPost, "/v1/payroll/runs", "\n  "+string(pretty)+"\n", "alice", "payroll.run.maintain", "k-canon")
+	if replay.Code != http.StatusCreated || decodeRun(t, replay).ID != first.ID {
+		t.Fatalf("reordered replay: %d %s", replay.Code, replay.Body.String())
+	}
+}
+
+func TestRunByID_OtherLegalEntityScopeSeesNotFound(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	created := decodeRun(t, s.do(http.MethodPost, "/v1/payroll/runs", runBody(workerB), "alice", "payroll.run.maintain", "k-open"))
+	steps := []struct{ method, path, body, duty string }{
+		{http.MethodGet, "/v1/payroll/runs/" + run.ID, "", "payroll.run.read"},
+		{http.MethodPost, "/v1/payroll/runs/" + created.ID + "/review", "", "payroll.run.maintain"},
+		{http.MethodPost, "/v1/payroll/runs/" + created.ID + "/finalize", "", "payroll.run.finalize"},
+		{http.MethodPost, "/v1/payroll/runs/" + run.ID + "/post", `{"ledgerId":"` + ledgerID + `"}`, "payroll.run.post"},
+	}
+	for _, st := range steps {
+		if rec := s.doAt(otherEntity, st.method, st.path, st.body, "zed", st.duty, ""); rec.Code != http.StatusNotFound || problemCode(rec) != store.CodeRunNotFound {
+			t.Errorf("%s %s from another legal entity: %d %s", st.method, st.path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(s.ledger.Entries()) != 0 {
+		t.Fatalf("a foreign caller posted: %+v", s.ledger.Entries())
+	}
+}
+
+func TestRunPosting_JournalIsFixedBeforeTheLedgerCall(t *testing.T) {
+	var lost *lostAnswer
+	s := withProfile(t, buildRunServer(t, func(f *ledgerclient.Fake) ledgerclient.Ledger {
+		lost = &lostAnswer{Fake: f, lose: true}
+		return lost
+	}))
+	run := s.finalizedRun(workerA)
+	postBody := `{"ledgerId":"` + ledgerID + `"}`
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", postBody, "carol", "payroll.run.post", ""); rec.Code != http.StatusBadGateway {
+		t.Fatalf("lost answer: %d %s", rec.Code, rec.Body.String())
+	}
+	sent := s.ledger.Entries()
+	if len(sent) != 1 {
+		t.Fatalf("entries %+v", sent)
+	}
+	rewired := `{"accounts":{"` + domain.AccountSalaryExpense + `":"MOVED"}}`
+	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, rewired, "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusOK {
+		t.Fatalf("profile edit %d", rec.Code)
+	}
+	otherLedger := `{"ledgerId":"00000000-0000-0000-0000-0000000000b9"}`
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", otherLedger, "carol", "payroll.run.post", ""); rec.Code != http.StatusConflict || problemCode(rec) != store.CodeLedgerPinned {
+		t.Fatalf("retry against another ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	lost.lose = false
+	rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", postBody, "carol", "payroll.run.post", "")
+	if got := decodeRun(t, rec); rec.Code != http.StatusOK || got.Status != "POSTED" || got.JournalEntryID != sent[0].ID {
+		t.Fatalf("retry %d: %s", rec.Code, rec.Body.String())
+	}
+	if after := s.ledger.Entries(); len(after) != 1 || !reflect.DeepEqual(after[0].Lines, sent[0].Lines) {
+		t.Fatalf("the retry must resend the identical journal: %+v", after)
+	}
+}
+
+func TestReconciliation_UsesTheJournalStoredOnThePostedRun(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", `{"ledgerId":"`+ledgerID+`"}`, "carol", "payroll.run.post", ""); rec.Code != http.StatusOK {
+		t.Fatalf("post %d: %s", rec.Code, rec.Body.String())
+	}
+	rewired := `{"accounts":{"` + domain.AccountSalaryExpense + `":"MOVED"}}`
+	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, rewired, "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusOK {
+		t.Fatalf("profile edit %d", rec.Code)
+	}
+	rec := s.do(http.MethodGet, "/v1/payroll/gl-reconciliation?legalEntityId="+legalEntity+"&ledgerId="+ledgerID, "", "carol", "payroll.run.read", "")
+	var v reconView
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &v) != nil || !v.Reconciled {
+		t.Fatalf("reconciliation after a profile edit %d: %s", rec.Code, rec.Body.String())
+	}
+	listed := map[string]bool{}
+	for _, a := range v.Accounts {
+		listed[a.Account] = true
+	}
+	if !listed[glAccount(domain.AccountSalaryExpense)] || listed["MOVED"] {
+		t.Fatalf("accounts %+v", v.Accounts)
 	}
 }

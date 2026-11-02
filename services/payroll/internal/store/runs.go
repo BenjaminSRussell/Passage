@@ -25,10 +25,11 @@ const (
 	CodeRunNotFound  = "PAY-RUN-007"
 	CodeKeyConflict  = "PAY-RUN-008"
 	CodeGLRefused    = "PAY-GL-001"
+	CodeLedgerPinned = "PAY-GL-004"
 	sourceType       = "payroll-run"
-	runColumns       = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, '')`
+	runColumns       = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, ''), posting_lines`
 	statementsOfRun  = `select worker_id::text, rule_set, hash, gross::text, net::text, employer_cost::text, lines from pay_statement where tenant_id = $1 and run_id = $2 order by worker_id`
-	postedStatements = `select s.lines, s.net::text from pay_statement s join pay_run r on r.tenant_id = s.tenant_id and r.id = s.run_id where s.tenant_id = $1 and r.legal_entity_id = $2 and r.status = 'POSTED'`
+	postedJournals   = `select posting_lines from pay_run where tenant_id = $1 and legal_entity_id = $2 and status = 'POSTED'`
 	lockRun          = `select status, calculated_by from pay_run where tenant_id = $1 and id = $2 for update`
 )
 
@@ -74,6 +75,7 @@ type Run struct {
 	FinalizedBy    string
 	LedgerID       string
 	JournalEntryID string
+	PostingLines   []domain.JournalLine
 	Statements     []StatementRow
 }
 
@@ -100,8 +102,9 @@ func principal(ctx context.Context) tenant.Principal {
 func loadRun(ctx context.Context, tx pgx.Tx, tenantID, id string) (Run, error) {
 	var run Run
 	var status string
+	var postingLines []byte
 	err := tx.QueryRow(ctx, `select `+runColumns+` from pay_run where tenant_id = $1 and id = $2`, tenantID, id).
-		Scan(&run.ID, &run.LegalEntityID, &run.PayDate, &run.PeriodStart, &run.PeriodEnd, &status, &run.CalculatedBy, &run.FinalizedBy, &run.LedgerID, &run.JournalEntryID)
+		Scan(&run.ID, &run.LegalEntityID, &run.PayDate, &run.PeriodStart, &run.PeriodEnd, &status, &run.CalculatedBy, &run.FinalizedBy, &run.LedgerID, &run.JournalEntryID, &postingLines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, httpx.NewProblem(http.StatusNotFound, CodeRunNotFound, "pay run not found")
 	}
@@ -109,6 +112,11 @@ func loadRun(ctx context.Context, tx pgx.Tx, tenantID, id string) (Run, error) {
 		return Run{}, err
 	}
 	run.Status = domain.RunStatus(status)
+	if postingLines != nil {
+		if err := json.Unmarshal(postingLines, &run.PostingLines); err != nil {
+			return Run{}, err
+		}
+	}
 	rows, err := tx.Query(ctx, statementsOfRun, tenantID, id)
 	if err != nil {
 		return Run{}, err
@@ -154,7 +162,7 @@ func (s *Postgres) CreateRun(ctx context.Context, in NewRun) (Run, error) {
 		}
 		if tag.RowsAffected() == 0 {
 			var storedID, storedHash string
-			if err := tx.QueryRow(ctx, `select id::text, request_hash from pay_run where tenant_id = $1 and idempotency_key = $2`, p.TenantID, in.Key).Scan(&storedID, &storedHash); err != nil {
+			if err := tx.QueryRow(ctx, `select id::text, request_hash from pay_run where tenant_id = $1 and legal_entity_id = $2 and calculated_by = $3 and idempotency_key = $4`, p.TenantID, in.LegalEntityID, p.UserID, in.Key).Scan(&storedID, &storedHash); err != nil {
 				return err
 			}
 			if storedHash != in.RequestHash {
@@ -236,7 +244,8 @@ func journalEntry(run Run, ledgerID string, journal []domain.JournalLine) ledger
 }
 
 // PostRun sends the balanced run journal (gross, employer cost, tax and deduction liabilities, net pay clearing) to the ledger under the key
-// payroll-run:<id> and records the journal entry on the run. A POSTED run is returned unchanged; a retry after a lost answer resends the same journal.
+// payroll-run:<id> and records the journal entry on the run. The journal and ledger are fixed on the run before the first ledger call, so a retry
+// after a lost answer resends the identical entry whatever the posting profile or the requested ledger became since. A POSTED run is returned unchanged.
 func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (Run, error) {
 	p := principal(ctx)
 	run, err := s.GetRun(ctx, id)
@@ -249,19 +258,27 @@ func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, 
 	if err := domain.CheckTransition(run.Status, domain.RunPosted); err != nil {
 		return Run{}, err
 	}
-	journal, err := s.postingJournal(ctx, run.LegalEntityID, run.statements())
-	if err != nil {
-		return Run{}, err
+	if run.PostingLines == nil {
+		journal, err := s.postingJournal(ctx, run.LegalEntityID, run.statements())
+		if err != nil {
+			return Run{}, err
+		}
+		if run, err = s.fixJournal(ctx, id, journal, ledgerID); err != nil {
+			return Run{}, err
+		}
 	}
-	entryID, err := ledger.Post(ctx, journalEntry(run, ledgerID, journal))
+	if run.LedgerID != ledgerID {
+		return Run{}, httpx.NewProblem(http.StatusConflict, CodeLedgerPinned, "this run's journal is already fixed against ledger "+run.LedgerID)
+	}
+	entryID, err := ledger.Post(ctx, journalEntry(run, run.LedgerID, run.PostingLines))
 	if err != nil {
 		code := ledgerclient.CodeOf(err)
 		slog.ErrorContext(ctx, "payroll run posting refused by the ledger", "run", id, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
 		return Run{}, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not accept the payroll journal ("+code+")")
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `update pay_run set status = 'POSTED', ledger_id = $3, journal_entry_id = $4 where tenant_id = $1 and id = $2 and status = 'FINALIZED'`,
-			p.TenantID, id, ledgerID, entryID); err != nil {
+		if _, err := tx.Exec(ctx, `update pay_run set status = 'POSTED', journal_entry_id = $3 where tenant_id = $1 and id = $2 and status = 'FINALIZED'`,
+			p.TenantID, id, entryID); err != nil {
 			return err
 		}
 		run, err = loadRun(ctx, tx, p.TenantID, id)
@@ -270,6 +287,24 @@ func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, 
 	if err != nil {
 		slog.ErrorContext(ctx, "payroll run posted to the ledger but not recorded", "run", id, "entryId", entryID, "err", err, "correlationId", middleware.GetReqID(ctx))
 	}
+	return run, err
+}
+
+func (s *Postgres) fixJournal(ctx context.Context, id string, journal []domain.JournalLine, ledgerID string) (Run, error) {
+	p := principal(ctx)
+	lines, err := json.Marshal(journal)
+	if err != nil {
+		return Run{}, err
+	}
+	var run Run
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `update pay_run set posting_lines = $3, ledger_id = $4 where tenant_id = $1 and id = $2 and status = 'FINALIZED' and posting_lines is null`,
+			p.TenantID, id, lines, ledgerID); err != nil {
+			return err
+		}
+		run, err = loadRun(ctx, tx, p.TenantID, id)
+		return err
+	})
 	return run, err
 }
 
@@ -286,49 +321,48 @@ type Reconciliation struct {
 	Reconciled bool
 }
 
-// Reconcile compares, per payroll account, the journal the POSTED runs of a legal entity imply (debits positive) with the ledger's net balance of that
-// account. Difference is the ledger minus the register.
+// Reconcile compares, per payroll account, the journals stored on the POSTED runs of a legal entity (debits positive) with the ledger's net balance of that
+// account. Difference is the ledger minus the register. The stored journals are used, so later posting-profile edits do not move the register.
 func (s *Postgres) Reconcile(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, ledgerID string) (Reconciliation, error) {
 	p := principal(ctx)
-	var statements []domain.Statement
 	out := Reconciliation{Accounts: []AccountRecon{}, Reconciled: true}
+	var order []string
+	register := map[string]decimal.Decimal{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, postedStatements, p.TenantID, legalEntityID)
+		rows, err := tx.Query(ctx, postedJournals, p.TenantID, legalEntityID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var lines []byte
-			var net string
-			if err := rows.Scan(&lines, &net); err != nil {
+			var raw []byte
+			var journal []domain.JournalLine
+			if err := rows.Scan(&raw); err != nil {
 				return err
 			}
-			st := domain.Statement{Net: decimal.RequireFromString(net)}
-			if err := json.Unmarshal(lines, &st.Lines); err != nil {
+			if err := json.Unmarshal(raw, &journal); err != nil {
 				return err
 			}
-			statements = append(statements, st)
+			out.Runs++
+			for _, l := range journal {
+				if _, ok := register[l.Account]; !ok {
+					order = append(order, l.Account)
+				}
+				register[l.Account] = register[l.Account].Add(l.Amount)
+			}
 		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		return tx.QueryRow(ctx, `select count(*) from pay_run where tenant_id = $1 and legal_entity_id = $2 and status = 'POSTED'`, p.TenantID, legalEntityID).Scan(&out.Runs)
+		return rows.Err()
 	})
 	if err != nil {
 		return Reconciliation{}, err
 	}
-	journal, err := s.postingJournal(ctx, legalEntityID, statements)
-	if err != nil {
-		return Reconciliation{}, err
-	}
-	for _, l := range journal {
-		bal, err := ledger.Balance(ctx, ledgerclient.BalanceQuery{LegalEntityID: legalEntityID, LedgerID: ledgerID, Account: l.Account})
+	for _, account := range order {
+		bal, err := ledger.Balance(ctx, ledgerclient.BalanceQuery{LegalEntityID: legalEntityID, LedgerID: ledgerID, Account: account})
 		if err != nil {
-			slog.ErrorContext(ctx, "payroll reconciliation cannot read the ledger balance", "account", l.Account, "err", err, "correlationId", middleware.GetReqID(ctx))
-			return Reconciliation{}, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not answer the balance read for "+l.Account)
+			slog.ErrorContext(ctx, "payroll reconciliation cannot read the ledger balance", "account", account, "err", err, "correlationId", middleware.GetReqID(ctx))
+			return Reconciliation{}, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not answer the balance read for "+account)
 		}
-		a := AccountRecon{Account: l.Account, Register: l.Amount, GL: bal.Net()}
+		a := AccountRecon{Account: account, Register: register[account], GL: bal.Net()}
 		a.Difference = a.GL.Sub(a.Register)
 		out.Reconciled = out.Reconciled && a.Difference.IsZero()
 		out.Accounts = append(out.Accounts, a)

@@ -213,7 +213,16 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if !inScope(w, r, req.LegalEntityID) {
 		return
 	}
-	hash := sha256.Sum256(raw)
+	if req.PayDate < req.PeriodStart {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeInvalidInput, "payDate must not be before periodStart"))
+		return
+	}
+	canonical, err := json.Marshal(req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	hash := sha256.Sum256(canonical)
 	in := store.NewRun{LegalEntityID: req.LegalEntityID, PayDate: req.PayDate, PeriodStart: req.PeriodStart, PeriodEnd: req.PeriodEnd, Key: key, RequestHash: hex.EncodeToString(hash[:])}
 	seen := map[string]bool{}
 	for i, sr := range req.Statements {
