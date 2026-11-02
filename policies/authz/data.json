@@ -1484,7 +1484,8 @@
       {"resource": "/v1/fulfillment/warehouse-settings/*", "methods": ["PUT"]},
       {"resource": "/v1/fulfillment/shipments/*:backorder-remainder", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/drop-ships/*:cancel", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/drop-ships/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/drop-ships/*:close-remainder", "methods": ["POST"]}
     ]},
     "WarehouseShip": {"permissions": [{"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]}]},
     "WarehouseView": {"permissions": [
