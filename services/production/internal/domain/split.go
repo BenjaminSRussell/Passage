@@ -126,6 +126,7 @@ type MergeInput struct {
 	Quantity        decimal.Decimal
 	Lines           []OrderLine
 	Operations      []Operation
+	CoProducts      []CoProduct
 }
 
 // MergedOrder is the survivor after a merge: the summed quantity and its
@@ -167,6 +168,9 @@ func MergeOrders(orders []MergeInput) (MergedOrder, error) {
 		if !sameSnapshot(o.Lines, o.Operations, first.Lines, first.Operations) {
 			return MergedOrder{}, refuseMerge(fmt.Sprintf("order %s has a different BOM or route", o.ID))
 		}
+		if !sameCoProducts(o.CoProducts, first.CoProducts) {
+			return MergedOrder{}, refuseMerge(fmt.Sprintf("order %s declares different co-products or by-products", o.ID))
+		}
 		total = total.Add(o.Quantity)
 	}
 	if !total.LessThan(maxOrderQty) {
@@ -190,6 +194,20 @@ func sameReworkRef(a, b *ReworkRef) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+// sameCoProducts compares the declared outputs of two orders (line, type, item
+// and quantity per unit); the planned and received quantities follow the order.
+func sameCoProducts(a, b []CoProduct) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].LineNo != b[i].LineNo || a[i].Type != b[i].Type || a[i].ItemID != b[i].ItemID || !a[i].QtyPer.Equal(b[i].QtyPer) {
+			return false
+		}
+	}
+	return true
 }
 
 // sameSnapshot compares the BOM and route snapshot of two orders: the fields a

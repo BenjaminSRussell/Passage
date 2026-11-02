@@ -966,6 +966,37 @@ func loadCardModes(ctx context.Context, q querier, tenantID, orderID string) (ma
 		}
 		out[oper] = domain.JournalType(typ)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// Feedback a split moved here (BR-21.11) came from the original's cards: an operation that holds
+	// moved feedback keeps the original's mode, job cards when its jobs hold it, route cards otherwise.
+	rows, err = q.Query(ctx, `select o.oper_number, exists (select 1 from production_job b where b.tenant_id = o.tenant_id and b.order_id = o.order_id
+			and b.oper_number = o.oper_number and b.job_type in ('setup', 'process') and (b.hours_reported <> 0 or b.qty_good <> 0 or b.qty_error <> 0))
+		from production_operation o
+		where o.tenant_id = $1 and o.order_id = $2 and (o.hours_reported <> 0 or o.qty_good <> 0 or o.qty_error <> 0)
+		  and exists (select 1 from production_journal j join production_journal_line l on l.tenant_id = j.tenant_id and l.journal_id = j.id
+			where j.tenant_id = o.tenant_id and j.order_id = o.order_id and j.journal_type = 'split-transfer' and l.kind = 'hours' and l.oper_number = o.oper_number)`,
+		tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oper int
+		var jobs bool
+		if err := rows.Scan(&oper, &jobs); err != nil {
+			return nil, err
+		}
+		if _, ok := out[oper]; ok {
+			continue
+		}
+		out[oper] = domain.JournalRouteCard
+		if jobs {
+			out[oper] = domain.JournalJobCard
+		}
+	}
 	return out, rows.Err()
 }
 

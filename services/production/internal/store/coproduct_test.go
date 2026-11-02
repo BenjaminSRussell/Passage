@@ -107,13 +107,32 @@ func TestCoProducts_Rules(t *testing.T) {
 	_, err = st.post(over.ID, nil)
 	expectProblem(t, err, 422, domain.CodeCoProductExceeds)
 
-	// An order with co-products cannot be split.
+}
+
+// FR-21.14 with FR-21.15: a split divides the declared outputs, the original
+// keeping 60 units and 12 of the co-product, the new order 40 and 8.
+func TestCoProducts_SplitDividesTheOutputs(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(95))
 	o, _, err := s.CreateOrder(ctx, coProductOrder(t, "key-co-3"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "split-co", RequestHash: "h"})
-	expectProblem(t, err, 409, CodeCoProductUnsupported)
+	res, err := s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "split-co", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		o       Order
+		planned string
+	}{{res.Original, "12"}, {res.New, "8"}} {
+		if len(c.o.CoProducts) != 1 || c.o.CoProducts[0].LineNo != "C1" || !c.o.CoProducts[0].QtyPlanned.Equal(d(c.planned)) || !c.o.CoProducts[0].QtyReported.IsZero() {
+			t.Fatalf("co-products of %s after the split: %+v", c.o.OrderNumber, c.o.CoProducts)
+		}
+	}
+	if res.New.CoProducts[0].ItemID != o.CoProducts[0].ItemID || !res.New.CoProducts[0].QtyPer.Equal(d("0.2")) {
+		t.Fatalf("the new order's co-product: %+v", res.New.CoProducts)
+	}
 }
 
 // BR-9.12: a by-product carries no cost. It is received at zero, the product and
@@ -169,7 +188,7 @@ func TestCoProducts_ByProductReceivedAtZero(t *testing.T) {
 }
 
 // The tolerance counts what earlier journals received; a quantity PATCH rescales
-// the planned co-products; a merge is refused like a split.
+// the planned co-products; a merge needs the same declared outputs.
 func TestCoProducts_CumulativeLimitReplanAndMerge(t *testing.T) {
 	_, s := migrated(t)
 	ctx := tenantCtx(testkit.TenantID(94))
@@ -202,5 +221,92 @@ func TestCoProducts_CumulativeLimitReplanAndMerge(t *testing.T) {
 	}
 	_, err = s.MergeOrders(ctx, Merge{Orders: []MergeRef{{other.ID, other.Version}, {u.ID, u.Version}}, Actor: "planner",
 		IdempotencyKey: "merge-co", RequestHash: "h"})
-	expectProblem(t, err, 409, CodeCoProductUnsupported)
+	expectProblem(t, err, 422, domain.CodeMergeRefused)
+
+	// Orders that declare the same outputs merge, and the survivor's co-product scales.
+	twin := sameShape(in, "key-co-7")
+	twinOrder, _, err := s.CreateOrder(ctx, twin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.MergeOrders(ctx, Merge{Orders: []MergeRef{{u.ID, u.Version}, {twinOrder.ID, twinOrder.Version}}, Actor: "planner",
+		IdempotencyKey: "merge-co-2", RequestHash: "h2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Survivor.Quantity.Equal(d("140")) || !m.Survivor.CoProducts[0].QtyPlanned.Equal(d("28")) {
+		t.Fatalf("merged survivor: %s %+v", m.Survivor.Quantity, m.Survivor.CoProducts)
+	}
+}
+
+// FR-21.14 with FR-21.15 and BR-21.11 on a Started order: received co-products
+// stay with the original (a reported order is not split until its report as
+// finished is reset), then a 40-of-100 split moves 40 % of the WIP and plans 8 of the 20
+// co-product units on the new order with nothing received. The WIP of the two
+// orders adds up to what the original held, and each order's receipts, the
+// co-product's share of planned cost included, clear its own WIP at End.
+func TestCoProducts_StartedSplitKeepsReceiptsAndWIP(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(96))
+	st := startedOrder(t, s, ctx, coProductOrder(t, "key-co-split-st"))
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalPickingList}).ID)
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalRouteCard}).ID)
+
+	// A report as finished of 60 receives 12 of the co-product and leaves the order
+	// ReportedAsFinished, which no split takes: the receipts stay on the original.
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalReportFinished, QtyGood: d("60"), CoProductsProportional: true}).ID)
+	o := st.refresh()
+	_, err := s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "split-co-st-0", RequestHash: "h0"})
+	expectProblem(t, err, 409, domain.CodeIllegalTransition)
+	if o = st.refresh(); !o.Quantity.Equal(d("100")) || !o.CoProducts[0].QtyPlanned.Equal(d("20")) || !o.CoProducts[0].QtyReported.Equal(d("12")) {
+		t.Fatalf("a refused split changed the order: %s %+v", o.Quantity, o.CoProducts)
+	}
+
+	// The reset to Started reverses the report and the co-product receipt.
+	st.must(domain.CmdResetStatus, func(tr *Transition) { tr.ResetTo = domain.Started })
+	o = st.refresh()
+	before := st.costs().WIPBalance
+	if o.Status != domain.Started || !o.CoProducts[0].QtyReported.IsZero() || !before.Equal(d("5000")) {
+		t.Fatalf("after the reset: %s %+v WIP %s", o.Status, o.CoProducts, before)
+	}
+	res, err := s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "split-co-st-1", RequestHash: "h1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		o            Order
+		planned, wip string
+	}{{res.Original, "12", "3000"}, {res.New, "8", "2000"}} {
+		if len(c.o.CoProducts) != 1 || !c.o.CoProducts[0].QtyPlanned.Equal(d(c.planned)) || !c.o.CoProducts[0].QtyReported.IsZero() {
+			t.Fatalf("co-products of %s: %+v", c.o.OrderNumber, c.o.CoProducts)
+		}
+		cs, err := s.Costs(ctx, c.o.ID)
+		if err != nil || !cs.WIPBalance.Equal(d(c.wip)) || !ledgerNet(t, pool, c.o.ID).IsZero() {
+			t.Fatalf("WIP of %s: %s (want %s), ledger net %s, %v", c.o.OrderNumber, cs.WIPBalance, c.wip, ledgerNet(t, pool, c.o.ID), err)
+		}
+	}
+	oc, _ := s.Costs(ctx, res.Original.ID)
+	nc, _ := s.Costs(ctx, res.New.ID)
+	if !oc.WIPBalance.Add(nc.WIPBalance).Equal(before) {
+		t.Fatalf("WIP before %s, after %s + %s", before, oc.WIPBalance, nc.WIPBalance)
+	}
+
+	// Each order reports its full quantity (co-products in proportion) and ends with no WIP and no variance.
+	for _, ord := range []Order{res.Original, res.New} {
+		cur, _ := s.GetOrder(ctx, ord.ID)
+		e := &stepper{t: t, s: s, ctx: ctx, orderID: ord.ID, version: cur.Version, n: 20}
+		e.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = cur.Quantity })
+		if got := e.refresh(); !got.CoProducts[0].QtyReported.Equal(got.CoProducts[0].QtyPlanned) {
+			t.Fatalf("co-product of %s after the full report: %+v", got.OrderNumber, got.CoProducts)
+		}
+		e.must(domain.CmdEnd, nil)
+		c := e.costs()
+		total := decimal.Zero
+		for _, v := range c.Variances {
+			total = total.Add(v.Amount)
+		}
+		if !c.WIPBalance.IsZero() || !total.IsZero() || !ledgerNet(t, pool, ord.ID).IsZero() {
+			t.Fatalf("End of %s: WIP %s, variances %s %+v", ord.OrderNumber, c.WIPBalance, total, c.Variances)
+		}
+	}
 }

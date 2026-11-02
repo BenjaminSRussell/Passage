@@ -153,6 +153,9 @@ func applyTransfer(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead,
 				string(domain.OperStarted)); err != nil {
 				return err
 			}
+			if err := moveJobFeedback(ctx, tx, tenantID, h.id, newID, l, in.SplitQty, h.quantity); err != nil {
+				return err
+			}
 		}
 	}
 	// An operation closed on the original is closed on the new order too.
@@ -237,4 +240,64 @@ func postTransferJournal(ctx context.Context, tx pgx.Tx, tenantID string, h orde
 		return err
 	}
 	return enqueueJournalPosted(ctx, tx, tenantID, h, j, in.Actor)
+}
+
+// moveJobFeedback moves the job-card feedback of a transferred operation with it
+// (FR-21.6 with BR-21.11): the new order gets a copy of each setup and process job
+// of the original that took feedback, holding the moved share (domain.SplitJobHours;
+// the quantities sit on the process job), and the original's job keeps the rest.
+// The re-date that follows the transfer rebuilds both orders' jobs from what they
+// hold, so the jobs of each order add up to its operation and the new order takes
+// job cards on the operation (loadCardModes). An operation fed by route cards has
+// no job feedback and moves nothing here.
+func moveJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID, newID string, l domain.TransferLine, splitQty, orderQty decimal.Decimal) error {
+	type job struct {
+		id, typ          string
+		hours, good, bad decimal.Decimal
+	}
+	rows, err := tx.Query(ctx, `select id::text, job_type, hours_reported::text, qty_good::text, qty_error::text from production_job
+		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type in ('setup', 'process') and status <> 'planned'`,
+		tenantID, orderID, l.OperNumber)
+	if err != nil {
+		return err
+	}
+	var jobs []job
+	setupHours, processHours := decimal.Zero, decimal.Zero
+	for rows.Next() {
+		var j job
+		var hrs, good, bad string
+		if err := rows.Scan(&j.id, &j.typ, &hrs, &good, &bad); err != nil {
+			rows.Close()
+			return err
+		}
+		j.hours, j.good, j.bad = dec(hrs), dec(good), dec(bad)
+		if j.typ == string(domain.JobSetup) {
+			setupHours = j.hours
+		} else {
+			processHours = j.hours
+		}
+		jobs = append(jobs, j)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	setup, process := domain.SplitJobHours(setupHours, processHours, l.Qty, splitQty, orderQty)
+	for _, j := range jobs {
+		hrs, good, bad := setup, decimal.Zero, decimal.Zero
+		if j.typ != string(domain.JobSetup) {
+			hrs, good, bad = process, decimal.Min(l.Good, j.good), decimal.Min(l.Error, j.bad)
+		}
+		if _, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported - $3, qty_good = qty_good - $4, qty_error = qty_error - $5
+			where tenant_id = $1 and id = $2`, tenantID, j.id, hrs.String(), good.String(), bad.String()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into production_job (tenant_id, id, legal_entity_id, order_id, oper_number, seq, job_type, resource_id,
+				planned_start, planned_end, planned_hours, hours_reported, qty_good, qty_error, status)
+			select tenant_id, $3, legal_entity_id, $4, oper_number, seq, job_type, resource_id, planned_start, planned_end, planned_hours, $5, $6, $7, status
+			from production_job where tenant_id = $1 and id = $2`, tenantID, j.id, ids.New(), newID, hrs.String(), good.String(), bad.String()); err != nil {
+			return err
+		}
+	}
+	return nil
 }

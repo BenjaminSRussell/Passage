@@ -92,3 +92,29 @@ func TestPlanTransfer_Property(t *testing.T) {
 		}
 	})
 }
+
+// The setup and process jobs of a job-card operation move exactly the hours the
+// operation moves, never more than either holds: 2.25 h of setup and 7.75 h of
+// process, 1 of 3 units split off, moves 3.33 h as 0.75 + 2.58.
+func TestSplitJobHours(t *testing.T) {
+	moved := PlanTransfer(d("3"), d("1"), "USD", nil, []TransferOpIn{{OperNumber: 10, Hours: d("10")}}).Lines[0].Qty
+	setup, process := SplitJobHours(d("2.25"), d("7.75"), moved, d("1"), d("3"))
+	if !setup.Equal(d("0.75")) || !process.Equal(d("2.58")) || !moved.Equal(d("3.33")) {
+		t.Fatalf("moved %s as setup %s + process %s", moved, setup, process)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		s := decimal.New(int64(rapid.IntRange(0, 100000).Draw(t, "setup")), -2)
+		p := decimal.New(int64(rapid.IntRange(0, 100000).Draw(t, "process")), -2)
+		qty := decimal.NewFromInt(int64(rapid.IntRange(2, 1000).Draw(t, "qty")))
+		split := decimal.NewFromInt(int64(rapid.IntRange(1, int(qty.IntPart())-1).Draw(t, "split")))
+		tr := PlanTransfer(qty, split, "USD", nil, []TransferOpIn{{OperNumber: 10, Hours: s.Add(p)}})
+		moved := decimal.Zero
+		if len(tr.Lines) == 1 {
+			moved = tr.Lines[0].Qty
+		}
+		ms, mp := SplitJobHours(s, p, moved, split, qty)
+		if !ms.Add(mp).Equal(moved) || ms.GreaterThan(s) || mp.GreaterThan(p) || ms.IsNegative() || mp.IsNegative() {
+			t.Fatalf("S %s P %s moved %s as %s + %s", s, p, moved, ms, mp)
+		}
+	})
+}

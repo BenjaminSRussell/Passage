@@ -198,6 +198,7 @@ func TestMergeOrders_Refusals(t *testing.T) {
 		"another setup":        {a, variant(func(o *MergeInput) { o.Operations[0].SetupH = d("3") })},
 		"another component":    {a, variant(func(o *MergeInput) { o.Lines[0].ItemID = "other" })},
 		"an extra BOM line":    {a, variant(func(o *MergeInput) { o.Lines = append(o.Lines, o.Lines[0]) })},
+		"another co-product":   {a, variant(func(o *MergeInput) { o.CoProducts = []CoProduct{{LineNo: "C1", ItemID: "x", QtyPer: d("0.2")}} })},
 		"a quantity too large": {a, variant(func(o *MergeInput) { o.Quantity = d("999999999999.999999") })},
 	}
 	for name, orders := range cases {
@@ -206,6 +207,18 @@ func TestMergeOrders_Refusals(t *testing.T) {
 			wantCode(t, err, CodeMergeRefused)
 		})
 	}
+}
+
+func TestMergeOrders_SameCoProductsMerge(t *testing.T) {
+	co := []CoProduct{{LineNo: "C1", Type: CoProductTypeCo, ItemID: "x", QtyPer: d("0.2")}}
+	a, b := mergeOrder("a", "40", Released), mergeOrder("b", "60", Released)
+	a.CoProducts, b.CoProducts = co, co
+	if _, err := MergeOrders([]MergeInput{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	b.CoProducts = []CoProduct{{LineNo: "C1", Type: CoProductTypeBy, ItemID: "x", QtyPer: d("0.2")}}
+	_, err := MergeOrders([]MergeInput{a, b})
+	wantCode(t, err, CodeMergeRefused)
 }
 
 func TestMergeOrders_SameReworkReference(t *testing.T) {

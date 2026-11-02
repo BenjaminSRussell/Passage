@@ -140,3 +140,14 @@ func TransferPostings(p Profile, t Transfer, out bool) []Posting {
 	}
 	return ps
 }
+
+// SplitJobHours divides the moved hours of an operation reported on job cards
+// between its setup and process jobs (FR-21.6 with BR-21.11): the setup job moves
+// its own share, rounded like the operation's hours, and the process job the rest
+// of the operation's moved hours, so on both orders the jobs still add up to the
+// operation. Neither moves more than it holds.
+func SplitJobHours(setupHours, processHours, movedHours, splitQty, orderQty decimal.Decimal) (setup, process decimal.Decimal) {
+	setup = decimal.Min(share(setupHours, splitQty, orderQty, HoursScale), movedHours, setupHours)
+	process = decimal.Min(decimal.Max(movedHours.Sub(setup), decimal.Zero), processHours)
+	return setup, process
+}

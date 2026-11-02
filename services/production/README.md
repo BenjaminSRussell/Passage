@@ -54,7 +54,12 @@ Slice 2:
   as finished may carry `coProducts` receipt lines (the `:report-finished` command reports them in
   proportion); planned cost is spread over product and co-products by quantity only, and End measures
   earned output over the same base so WIP still clears to 0. A line typed `by-product` carries no cost
-  (BR-9.12) and is received at zero. Split and merge refuse such orders.
+  (BR-9.12) and is received at zero. A split divides the declared outputs
+  (the original is re-planned for its remaining quantity, the new order gets the same lines planned
+  for the split quantity); a merge needs the same declared outputs on every order and re-plans the
+  survivor's for the summed quantity (`PRODUCTION_MERGE_REFUSED` otherwise). A split of a Started
+  order reported on job cards moves the jobs' share of the feedback with the operation's, and the
+  new order keeps the original's feedback mode per operation.
 - Flushing principles on BOM lines: `start` lines are issued for their remaining quantity by a
   picking list that `:start` posts; `finish` lines are consumed in proportion to each report as
   finished (AC-21.4: the full quantity consumes exactly qty per × quantity × (1 + scrap%));

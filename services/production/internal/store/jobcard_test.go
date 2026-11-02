@@ -267,3 +267,46 @@ func TestJobCard_AsAppRole(t *testing.T) {
 		t.Fatalf("job after the reset: %+v", j)
 	}
 }
+
+// FR-21.6 with BR-21.11: a Started split of an order reported on job cards moves the jobs' share
+// of the feedback with the operation's, so each order's jobs add up to its operation after the
+// re-date, and the new order keeps the job-card mode the original reported in. A route-card
+// operation keeps route cards on the new order.
+func TestJobCard_StartedSplitMovesJobFeedback(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(9306))
+	st := startedOrder(t, s, ctx, routedOrder(t, "key-jobcard-split", ids.New(), 10, 20))
+	job10 := jobOf(t, s, ctx, st.orderID, 10, domain.JobProcess)
+	st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalJobCard, Hours: []HoursInput{{JobID: job10.ID, Hours: d("5"), QtyGood: d("50")}}}).ID)
+	st.routeCard(HoursInput{OperNumber: 20, Hours: d("2"), QtyGood: d("20")})
+
+	o := st.refresh()
+	res, err := s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "split-jc", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id          string
+		hours, good string
+	}{{res.Original.ID, "3", "30"}, {res.New.ID, "2", "20"}} {
+		j := jobOf(t, s, ctx, c.id, 10, domain.JobProcess)
+		if j.Status != "started" || !j.HoursReported.Equal(d(c.hours)) || !j.QtyGood.Equal(d(c.good)) {
+			t.Fatalf("process job of operation 10 on %s: %+v, want %s h %s good", c.id, j, c.hours, c.good)
+		}
+		if other := jobOf(t, s, ctx, c.id, 20, domain.JobProcess); other.Status != "planned" || !other.HoursReported.IsZero() {
+			t.Fatalf("operation 20 is route-card fed, its job moved: %+v", other)
+		}
+	}
+	nst := &stepper{t: t, s: s, ctx: ctx, orderID: res.New.ID, version: res.New.Version}
+	if _, err := nst.journal(NewJournal{Type: domain.JournalRouteCard, Hours: []HoursInput{{OperNumber: 10, Hours: d("1")}}}); codeOf(err) != CodeFeedbackMode {
+		t.Fatalf("route card on the new order's job-card operation: %v", err)
+	}
+	if _, err := nst.journal(NewJournal{Type: domain.JournalJobCard, Hours: []HoursInput{{JobID: jobOf(t, s, ctx, res.New.ID, 20, domain.JobProcess).ID, Hours: d("1")}}}); codeOf(err) != CodeFeedbackMode {
+		t.Fatalf("job card on the new order's route-card operation: %v", err)
+	}
+	// The job-card proposal of the new order asks only for its own open time: 4 planned − 2 moved.
+	if prop := nst.mustJournal(NewJournal{Type: domain.JournalJobCard, Proposal: domain.ProposeRemaining}); len(prop.Lines) != 1 ||
+		*prop.Lines[0].OperNumber != 10 || !prop.Lines[0].Qty.Equal(d("2")) {
+		t.Fatalf("new order's job card proposal: %+v", prop.Lines)
+	}
+}

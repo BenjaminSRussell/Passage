@@ -94,9 +94,6 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := domain.CheckSplittable(h.status); err != nil {
 			return domainProblem(err)
 		}
-		if err := checkNoCoProducts(ctx, tx, p.TenantID, in.OrderID); err != nil {
-			return err
-		}
 		lines, err := loadLines(ctx, tx, p.TenantID, in.OrderID)
 		if err != nil {
 			return err
@@ -153,6 +150,9 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 			return err
 		}
 		if err := insertOperations(ctx, tx, p.TenantID, newID, plan.NewOps); err != nil {
+			return err
+		}
+		if err := splitCoProducts(ctx, tx, p.TenantID, h.legalEntityID, in.OrderID, newID, plan.OriginalQty, plan.SplitQty); err != nil {
 			return err
 		}
 		requested, err := requestedSubcontracts(ctx, tx, p.TenantID, in.OrderID)
@@ -309,9 +309,6 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		if err := checkMergeJournals(ctx, tx, p.TenantID, survivorID, out.Merged); err != nil {
 			return err
 		}
-		if err := checkNoCoProducts(ctx, tx, p.TenantID, append([]string{survivorID}, out.Merged...)...); err != nil {
-			return err
-		}
 		inputs := make([]domain.MergeInput, 0, len(in.Orders))
 		// The survivor carries the merged orders' BOM, so it is flagged when any of them was edited (FR-21.18).
 		modified := false
@@ -323,7 +320,7 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 			modified = modified || o.OrderBOMModified
 			inputs = append(inputs, domain.MergeInput{ID: o.ID, LegalEntityID: o.LegalEntityID, ProductID: o.ProductID, SiteID: o.SiteID,
 				WarehouseID: o.WarehouseID, Currency: o.Currency, ItemGroup: o.ItemGroup, ReworkReference: o.ReworkReference,
-				Status: o.Status, Quantity: o.Quantity, Lines: o.Lines, Operations: o.Operations})
+				Status: o.Status, Quantity: o.Quantity, Lines: o.Lines, Operations: o.Operations, CoProducts: o.CoProducts})
 		}
 		merged, err := domain.MergeOrders(inputs)
 		if err != nil {
@@ -336,6 +333,10 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 			return err
 		}
 		if err := writeQuantities(ctx, tx, p.TenantID, survivorID, merged.Lines, merged.Operations); err != nil {
+			return err
+		}
+		// FR-21.14: the survivor's declared outputs scale to the merged quantity.
+		if err := replanCoProducts(ctx, tx, p.TenantID, survivorID, merged.Quantity); err != nil {
 			return err
 		}
 		// FR-21.10: the survivor's PO grows with the merged quantity.

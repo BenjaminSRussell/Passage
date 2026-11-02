@@ -1478,7 +1478,9 @@ paths:
         away are withdrawn (dev.passage.production.subcontract.pocancelled.v1, reason
         order-cancelled). Refused (422
         PRODUCTION_MERGE_REFUSED, PROD-0016) when any order has posted journals, an order
-        to be cancelled has draft journals, or the orders differ.
+        to be cancelled has draft journals, or the orders differ (the declared co-products and
+        by-products included: line, type, item and quantity per unit). The survivor's co-products
+        are re-planned for the summed quantity (FR-21.14).
       x-passage-duty: production.order.release
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -1499,9 +1501,8 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PRODUCTION_COPRODUCT_NOT_SUPPORTED: an order has co-products (FR-21.14)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: 'An order version is stale (conflict_version)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016, or the orders declare different co-products or by-products) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:
     get:
       operationId: getProductionOrder
@@ -1691,7 +1692,12 @@ paths:
         `allocation` `keep-on-original` moves nothing. A Started order with reported output, draft
         journals or as-built records is refused (409 PRODUCTION_SPLIT_REFUSED). After a transfer,
         a reset of either order back before Started is refused (409 PRODUCTION_ILLEGAL_TRANSITION);
-        leaving ReportedAsFinished still reverses the reports as finished.
+        leaving ReportedAsFinished still reverses the reports as finished. Co-products and
+        by-products (FR-21.14): the original's are re-planned for its remaining quantity and the
+        new order gets the same lines planned for splitQty with nothing received. An operation
+        reported on job cards moves its jobs' share of the feedback too (the setup job its own
+        share of hours, the process job the rest and the quantities), and the new order keeps the
+        original's feedback mode per operation.
       x-passage-duty: production.order.release
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -1722,7 +1728,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Started; PRODUCTION_COPRODUCT_NOT_SUPPORTED: the order has co-products; PRODUCTION_SPLIT_REFUSED: a Started order has reported output, draft journals or as-built records', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Started; PRODUCTION_SPLIT_REFUSED: a Started order has reported output or received co-products, draft journals or as-built records', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

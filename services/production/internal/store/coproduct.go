@@ -2,17 +2,12 @@ package store
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 )
-
-// CodeCoProductUnsupported refuses a split or merge of an order with co-products.
-const CodeCoProductUnsupported = "PRODUCTION_COPRODUCT_NOT_SUPPORTED"
 
 // CoProductInput is one co-product line of a report as finished: the quantity of
 // the declared co-product received into stock (FR-21.14).
@@ -70,18 +65,31 @@ func replanCoProducts(ctx context.Context, tx pgx.Tx, tenantID, orderID string, 
 	return nil
 }
 
-// checkNoCoProducts refuses a split or merge of orders that yield co-products:
-// dividing the declared outputs between orders is a later slice.
-func checkNoCoProducts(ctx context.Context, tx pgx.Tx, tenantID string, orderIDs ...string) error {
-	var n int
-	if err := tx.QueryRow(ctx, `select count(*) from production_coproduct where tenant_id = $1 and order_id::text = any($2)`,
-		tenantID, orderIDs).Scan(&n); err != nil {
+// splitCoProducts divides the declared outputs of a split order between the two
+// orders (FR-21.14 with FR-21.15): the original is re-planned for its smaller
+// quantity and the new order gets the same lines, planned for the split quantity
+// with nothing reported. A received co-product stays on the original, which a
+// split never re-plans below what it received: every receipt rides on a report as
+// finished, which leaves the order ReportedAsFinished (not splittable) until a
+// reset reverses it, and this check holds the rule on its own (PRODUCTION_SPLIT_REFUSED).
+func splitCoProducts(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, orderID, newID string, originalQty, splitQty decimal.Decimal) error {
+	cos, err := loadCoProducts(ctx, tx, tenantID, orderID)
+	if err != nil || len(cos) == 0 {
 		return err
 	}
-	if n > 0 {
-		return httpx.NewProblem(http.StatusConflict, CodeCoProductUnsupported, "an order with co-products cannot be split or merged")
+	for _, c := range cos {
+		if !c.QtyReported.IsZero() {
+			return splitRefused("co-product line %s has %s received; reset the report as finished first", c.LineNo, c.QtyReported)
+		}
 	}
-	return nil
+	if err := replanCoProducts(ctx, tx, tenantID, orderID, originalQty); err != nil {
+		return err
+	}
+	planned, err := domain.PlanCoProducts(cos, splitQty)
+	if err != nil {
+		return domainProblem(err)
+	}
+	return insertCoProducts(ctx, tx, tenantID, newID, legalEntityID, planned)
 }
 
 func coProductLine(c domain.CoProduct, qty decimal.Decimal) JournalLine {

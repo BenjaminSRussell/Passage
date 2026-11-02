@@ -182,3 +182,26 @@ func TestFiniteDates_VersionRouteOrderAndCompression(t *testing.T) {
 		t.Fatalf("after a re-date: %s %v", after.ScheduleBasis, after.FiniteCompressedOperations)
 	}
 }
+
+// A split re-dates both orders from the schedule start with infinite capacity (FR-21.15): the
+// finite plan scheduling sent for the original quantity holds for neither order, so both go back
+// to basis infinite with no run, and the new order never inherits the original's run.
+func TestFiniteDates_SplitGoesBackToInfinite(t *testing.T) {
+	st, o, s, _ := scheduledOrder(t, "fin-split", 2105)
+	ctx := tenantCtx(testkit.TenantID(2105))
+	start := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
+	got, _, err := s.ApplyFiniteDates(ctx, FiniteDates{OrderID: o.ID, RunID: "run-s", Windows: []domain.OperationWindow{{OperNumber: 20, Start: start, End: start.Add(9 * time.Hour)}}})
+	if err != nil || got.ScheduleBasis != domain.BasisFinite {
+		t.Fatalf("apply: %v %s", err, got.ScheduleBasis)
+	}
+	st.refresh()
+	res, err := s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: st.version, SplitQty: d("40"), Actor: "planner", IdempotencyKey: "fin-split-1", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []Order{res.Original, res.New} {
+		if x.ScheduleBasis != domain.BasisInfinite || x.FiniteRunID != nil || x.FiniteScheduledAt != nil || x.StartDate == nil || len(jobsOf(t, s, ctx, x.ID)) == 0 {
+			t.Fatalf("after the split %s: basis %s run %v dates %v, %d jobs", x.OrderNumber, x.ScheduleBasis, x.FiniteRunID, x.StartDate, len(jobsOf(t, s, ctx, x.ID)))
+		}
+	}
+}
