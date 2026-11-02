@@ -14,6 +14,8 @@ info:
     and list, job detail, and operator feedback with quality checks (FR-25.3 to
     FR-25.5). Slice 11: time profiles, pay agreements and the worker links the pay
     calculation reads (FR-25.7); a replace takes `If-Match` with the version read.
+    Slice 14: the edge fleet (FR-25.19): edge nodes, versioned configuration documents and
+    the connector heartbeat.
     Commands that change state
     (except the registration batch, idempotent per item id, process message
     creation, idempotent per source and sourceMessageId, job plans keyed by job id,
@@ -1940,6 +1942,314 @@ paths:
           $ref: "#/components/responses/Problem"
         "412":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes:
+    post:
+      operationId: createEdgeNode
+      summary: Register an edge node
+      description: |
+        Registers one iot-edge connector (FR-25.19) with its platform and rollout ring (default
+        `all`, the PRD default). `connectorSubject` binds the node to the identity its connector
+        authenticates as (the subject the gateway forwards); only that identity may pull the
+        node's configuration or report its heartbeat, and a node without one refuses both
+        (SF-0154). The node has status `pending` until its first heartbeat. A name, or a connector
+        identity bound to another node, already used is SF-0153. Publishes
+        `dev.passage.shopfloor.edgenode.saved.v1`. Token enrollment and the mTLS certificate are
+        not part of this service yet: the binding is set here by hand, and the certificate serial
+        and expiry the connector reports in its heartbeat are stored as reported.
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewEdgeNode"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeNode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listEdgeNodes
+      summary: List edge nodes (fleet status)
+      description: |
+        Edge nodes by name with their derived status: `pending` (never reported), `online` (last
+        heartbeat within 90 seconds, three missed beats), `offline`, or `inactive` (switched off).
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: ring
+          in: query
+          description: Only nodes in this rollout ring.
+          schema:
+            type: string
+            enum: [canary, ring1, all]
+        - name: status
+          in: query
+          description: Only nodes with this derived status.
+          schema:
+            type: string
+            enum: [pending, online, offline, inactive]
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Edge nodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EdgeNode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:
+    get:
+      operationId: getEdgeNode
+      summary: Get one edge node
+      x-passage-duty: shopfloor.view
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "200":
+          description: The edge node with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeNode"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateEdgeNode
+      summary: Change an edge node's name, site, ring, connector identity or status
+      description: |
+        Replaces the name, site, ring, connector identity and active flag (the platform does not
+        change) and bumps the version; an omitted `siteId` or `connectorSubject` clears it, and a
+        node with no connector identity refuses configuration pulls and heartbeats. Rebinding
+        moves the right to the new identity at once. `If-Match` carries the version you read; another change in between is SF-0143
+        (412). Moving a node to another ring is how a rollout is promoted. A switched-off node
+        refuses heartbeats and configuration pulls (SF-0152). Heartbeats do not change the version.
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEdgeNode"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeNode"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/config-versions:
+    post:
+      operationId: publishEdgeConfig
+      summary: Publish the next configuration version of an edge node
+      description: |
+        Stores a configuration document as the node's next version (1, 2, ... per node). The
+        document is the one the connector runs with: `machines` (machineId, resourceId UUID),
+        `tags` (address, machineId, kind, and a name for a measurement) and `writeRules` (the write
+        allowlist: node with finite min <= max); other keys such as OPC-UA endpoints and MQTT
+        topics are kept as sent. Machines, tag addresses and write-rule nodes must be unique and
+        a tag must point at a listed machine. The server writes the version number into the
+        document. A version cannot be changed or deleted once published (the database refuses it);
+        publish a new one. The write allowlist decides which machine nodes the connector may
+        write, so publishing needs the edge duty, not the machine setup duty. Publishes
+        `dev.passage.shopfloor.edgeconfig.published.v1` with the publisher, the SHA-256 of the
+        stored document and the write allowlist nodes, the audit record of the publish.
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document]
+              properties:
+                document:
+                  type: object
+                  description: The configuration document, at most 256 KiB.
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Published (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeConfigVersion"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listEdgeConfigs
+      summary: List the configuration versions of an edge node
+      description: Newest first, with the document and when a heartbeat first reported the version applied.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+        - name: limit
+          in: query
+          description: At most this many versions (default 50, at most 200).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Configuration versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EdgeConfigVersion"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/config:
+    get:
+      operationId: pullEdgeConfig
+      summary: Pull the current configuration (connector)
+      description: |
+        What a connector pulls: the newest version published for its node, with the version as
+        ETag. The caller must hold the connect duty and be the connector identity bound to the
+        node (`connectorSubject`); any other caller, including another node's connector, is
+        SF-0154 (403). Nothing published yet is SF-0151 (404); a switched-off node is SF-0152 (409).
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "200":
+          description: The newest configuration version.
+          headers:
+            ETag:
+              description: The configuration version as an entity tag.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeConfigVersion"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:heartbeat:
+    post:
+      operationId: edgeHeartbeat
+      summary: Report a connector heartbeat
+      description: |
+        A connector reports in every 30 seconds with its version, buffer fill, machine states and
+        the configuration version it runs. It is a state report, repeated freely and not keyed:
+        the last report wins. Reporting a configuration version other than the applied one makes
+        it the applied one (only one is applied at a time), stamps when it was first applied and
+        publishes `dev.passage.shopfloor.edgeconfig.applied.v1`; a version never published to this
+        node is SF-0151 (422). Only the connector identity bound to the node may report for it
+        (SF-0154, 403, nothing is stored). A switched-off node is SF-0152 (409). The answer names
+        the latest published version so the connector knows to pull. No event is published per
+        heartbeat.
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdgeHeartbeat"
+      responses:
+        "200":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeHeartbeatResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/workers/{id}:assign-setup:
     post:
       operationId: assignWorkerSetup
@@ -2030,6 +2340,13 @@ components:
       schema:
         type: string
         default: UTC
+    EdgeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     Limit:
       name: limit
       in: query
@@ -2388,6 +2705,197 @@ components:
         updatedAt:
           type: string
           format: date-time
+    NewEdgeNode:
+      type: object
+      required: [name, platform]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        platform:
+          type: string
+          enum: [k3s, windows, linux]
+        ring:
+          type: string
+          enum: [canary, ring1, all]
+          default: all
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        connectorSubject:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: The identity the connector authenticates as; only it may pull the configuration and report heartbeats. Unique per tenant.
+        active:
+          type: boolean
+          default: true
+    UpdateEdgeNode:
+      type: object
+      required: [name, ring]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        ring:
+          type: string
+          enum: [canary, ring1, all]
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        connectorSubject:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: The connector identity; omitted or null unbinds the node.
+        active:
+          type: boolean
+          default: true
+    EdgeMachineStatus:
+      type: object
+      required: [machineCode, state]
+      properties:
+        machineCode:
+          type: string
+          minLength: 1
+          maxLength: 80
+        state:
+          type: string
+          minLength: 1
+          maxLength: 40
+    EdgeNode:
+      type: object
+      required: [id, name, platform, ring, status, machines, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [k3s, windows, linux]
+        ring:
+          type: string
+          enum: [canary, ring1, all]
+        connectorSubject:
+          type: [string, "null"]
+          description: The connector identity bound to the node; null when unbound.
+        status:
+          type: string
+          enum: [pending, online, offline, inactive]
+          description: Derived when read from the last heartbeat; offline after 90 seconds without one.
+        connectorVersion:
+          type: [string, "null"]
+        certSerial:
+          type: [string, "null"]
+        certExpiresAt:
+          type: [string, "null"]
+          format: date-time
+        lastHeartbeatAt:
+          type: [string, "null"]
+          format: date-time
+        bufferFillPct:
+          type: [string, "null"]
+          description: Decimal string, 0 to 100, from the last heartbeat.
+        machines:
+          type: array
+          description: Per-machine states from the last heartbeat.
+          items:
+            $ref: "#/components/schemas/EdgeMachineStatus"
+        appliedConfigVersion:
+          type: [integer, "null"]
+        latestConfigVersion:
+          type: [integer, "null"]
+          description: The newest published version; above appliedConfigVersion means the connector has not picked it up yet.
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    EdgeConfigVersion:
+      type: object
+      required: [id, edgeId, version, document, documentSha256, publishedBy, publishedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        edgeId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        document:
+          type: object
+          additionalProperties: true
+        documentSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the stored document as returned here.
+        publishedBy:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When a heartbeat first reported this version applied.
+    EdgeHeartbeat:
+      type: object
+      required: [bufferFillPct]
+      properties:
+        connectorVersion:
+          type: string
+          minLength: 1
+          maxLength: 60
+        bufferFillPct:
+          type: string
+          description: Share of the store-and-forward buffer in use, 0 to 100 with up to 2 decimals.
+        machines:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/EdgeMachineStatus"
+        appliedConfigVersion:
+          type: integer
+          minimum: 1
+          description: The configuration version the connector runs.
+        certSerial:
+          type: string
+          minLength: 1
+          maxLength: 200
+        certExpiresAt:
+          type: string
+          format: date-time
+    EdgeHeartbeatResult:
+      type: object
+      required: [edgeId, ring, heartbeatIntervalSeconds]
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        ring:
+          type: string
+          enum: [canary, ring1, all]
+        appliedConfigVersion:
+          type: [integer, "null"]
+        latestConfigVersion:
+          type: [integer, "null"]
+        heartbeatIntervalSeconds:
+          type: integer
     ShiftPremium:
       type: object
       description: >-

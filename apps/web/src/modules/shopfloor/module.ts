@@ -8,11 +8,14 @@ import { ClockedInPage } from "./ClockedInPage";
 import { CorrectionsPage } from "./CorrectionsPage";
 import { CorrectRegistrationPage } from "./CorrectRegistrationPage";
 import { DowntimesPage } from "./DowntimesPage";
+import { EdgeNodeDetailPage } from "./EdgeNodeDetailPage";
+import { EdgeNodesPage } from "./EdgeNodesPage";
 import { JobDetailPage } from "./JobDetailPage";
 import { JobsPage } from "./JobsPage";
 import { KioskPage } from "./KioskPage";
 import { MachinesPage } from "./MachinesPage";
 import { NewAbsenceCodePage } from "./NewAbsenceCodePage";
+import { NewEdgeNodePage } from "./NewEdgeNodePage";
 import { NewMachinePage } from "./NewMachinePage";
 import { NewProcessMessagePage } from "./NewProcessMessagePage";
 import { NewWorkerPage } from "./NewWorkerPage";
@@ -35,7 +38,7 @@ const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
   description:
-    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
+    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, the edge fleet with its connector heartbeats and versioned configuration, downtimes, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
@@ -64,6 +67,9 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/downtimes", element: createElement(DowntimesPage), handle: { title: "Downtimes" } },
     { path: "/shopfloor/andon", element: createElement(AndonPage), handle: { title: "Andon board" } },
     { path: "/shopfloor/oee", element: createElement(OeePage), handle: { title: "OEE" } },
+    { path: "/shopfloor/edge-nodes", element: createElement(EdgeNodesPage), handle: { title: "Edge fleet", duty: "shopfloor.view" } },
+    { path: "/shopfloor/edge-nodes/new", element: createElement(NewEdgeNodePage), handle: { title: "Register edge node", duty: "shopfloor.view" } },
+    { path: "/shopfloor/edge-nodes/:id", element: createElement(EdgeNodeDetailPage), handle: { title: "Edge node", duty: "shopfloor.view" } },
     { path: "/shopfloor/process-messages", element: createElement(ProcessMessagesPage), handle: { title: "Process messages" } },
     { path: "/shopfloor/process-messages/new", element: createElement(NewProcessMessagePage), handle: { title: "Record process message" } },
     { path: "/shopfloor/process-messages/:id", element: createElement(ProcessMessageDetailPage), handle: { title: "Process message" } },
@@ -84,6 +90,7 @@ const shopfloor: PassageModule = {
     { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },
     { label: "Andon board", to: "/shopfloor/andon", duty: "shopfloor.view" },
     { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
+    { label: "Edge fleet", to: "/shopfloor/edge-nodes", duty: "shopfloor.view" },
     { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
   ],
 };

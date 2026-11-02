@@ -62,6 +62,23 @@ channels:
     messages:
       absenceCodeSaved:
         $ref: "#/components/messages/AbsenceCodeSaved"
+  edgeNodeSaved:
+    address: passage.shopfloor.edge-node
+    description: An edge node was registered or its name, site, ring, connector identity or status changed (FR-25.19). Not in the PRD event table.
+    messages:
+      edgeNodeSaved:
+        $ref: "#/components/messages/EdgeNodeSaved"
+  edgeConfig:
+    address: passage.shopfloor.edge-config
+    description: |
+      Configuration documents of an edge node (FR-25.19): a new version was published, and a
+      heartbeat reported a version applied. Not in the PRD event table; fleet audit and the
+      rollout job consume them. A heartbeat itself publishes nothing.
+    messages:
+      edgeConfigPublished:
+        $ref: "#/components/messages/EdgeConfigPublished"
+      edgeConfigApplied:
+        $ref: "#/components/messages/EdgeConfigApplied"
   paydayExported:
     address: passage.shopfloor.pay-export
     messages:
@@ -224,6 +241,30 @@ operations:
       $ref: "#/channels/absenceCodeSaved"
     messages:
       - $ref: "#/channels/absenceCodeSaved/messages/absenceCodeSaved"
+  publishEdgeNodeSaved:
+    action: send
+    summary: Edge node saved
+    description: Sends the edge node saved event through the outbox.
+    channel:
+      $ref: "#/channels/edgeNodeSaved"
+    messages:
+      - $ref: "#/channels/edgeNodeSaved/messages/edgeNodeSaved"
+  publishEdgeConfigPublished:
+    action: send
+    summary: Edge configuration published
+    description: Sends the edge configuration published event through the outbox.
+    channel:
+      $ref: "#/channels/edgeConfig"
+    messages:
+      - $ref: "#/channels/edgeConfig/messages/edgeConfigPublished"
+  publishEdgeConfigApplied:
+    action: send
+    summary: Edge configuration applied
+    description: Sends the edge configuration applied event through the outbox.
+    channel:
+      $ref: "#/channels/edgeConfig"
+    messages:
+      - $ref: "#/channels/edgeConfig/messages/edgeConfigApplied"
 components:
   messages:
     JobReported:
@@ -279,6 +320,27 @@ components:
       description: Published in the transaction that creates or replaces an absence code; payMultiplier is a decimal string.
       payload:
         $ref: "#/components/schemas/AbsenceCodeSavedData"
+    EdgeNodeSaved:
+      name: dev.passage.shopfloor.edgenode.saved.v1
+      contentType: application/cloudevents+json
+      summary: Edge node registered or changed
+      description: Published in the transaction that registers an edge node or changes its name, site, ring, connector identity or status.
+      payload:
+        $ref: "#/components/schemas/EdgeNodeSavedData"
+    EdgeConfigPublished:
+      name: dev.passage.shopfloor.edgeconfig.published.v1
+      contentType: application/cloudevents+json
+      summary: Edge configuration version published
+      description: Published in the transaction that stores the next configuration version of an edge node; it is the audit record of the publish (who, the SHA-256 of the stored document and the write allowlist nodes). The Kafka key is the edge id.
+      payload:
+        $ref: "#/components/schemas/EdgeConfigPublishedData"
+    EdgeConfigApplied:
+      name: dev.passage.shopfloor.edgeconfig.applied.v1
+      contentType: application/cloudevents+json
+      summary: Edge configuration version applied
+      description: Published when a heartbeat reports a configuration version other than the one applied before; previousVersion is null for the first. The Kafka key is the edge id.
+      payload:
+        $ref: "#/components/schemas/EdgeConfigAppliedData"
     WorkerAssigned:
       name: dev.passage.shopfloor.worker.assigned.v1
       contentType: application/cloudevents+json
@@ -775,6 +837,71 @@ components:
           minimum: 1
         savedBy:
           type: string
+    EdgeNodeSavedData:
+      type: object
+      required: [edgeId, siteId, name, platform, ring, connectorSubject, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [k3s, windows, linux]
+        ring:
+          type: string
+          enum: [canary, ring1, all]
+        connectorSubject:
+          type: [string, "null"]
+          description: The connector identity bound to the node; null when unbound.
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    EdgeConfigPublishedData:
+      type: object
+      required: [edgeId, version, documentSha256, writeRuleNodes, publishedBy]
+      additionalProperties: false
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        documentSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the stored document, as the configuration endpoints return it.
+        writeRuleNodes:
+          type: array
+          description: The nodes of the version's write allowlist, in document order.
+          items:
+            type: string
+        publishedBy:
+          type: string
+    EdgeConfigAppliedData:
+      type: object
+      required: [edgeId, version, previousVersion]
+      additionalProperties: false
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        previousVersion:
+          type: [integer, "null"]
+          minimum: 1
     WorkerAssignedData:
       type: object
       required: [workerId, profileId, payAgreementId, assignedBy]

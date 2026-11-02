@@ -968,3 +968,101 @@ export function assignWorkerSetup(
     body: JSON.stringify(input),
   });
 }
+
+/** Registers and changes edge nodes and publishes their configuration (with the write allowlist). */
+export const DUTY_EDGE_CONFIGURE = "shopfloor.edge.configure";
+
+export type EdgePlatform = "k3s" | "windows" | "linux";
+export type EdgeRing = "canary" | "ring1" | "all";
+export type EdgeStatusValue = "pending" | "online" | "offline" | "inactive";
+
+export interface EdgeMachineStatus {
+  machineCode: string;
+  state: string;
+}
+
+/** One iot-edge connector (FR-25.19); the status is derived by the service from the last heartbeat. */
+export interface EdgeNode {
+  id: string;
+  siteId: string | null;
+  name: string;
+  platform: EdgePlatform;
+  ring: EdgeRing;
+  /** The identity the connector authenticates as; only it may pull the configuration and report. */
+  connectorSubject: string | null;
+  status: EdgeStatusValue;
+  connectorVersion: string | null;
+  certSerial: string | null;
+  certExpiresAt: string | null;
+  lastHeartbeatAt: string | null;
+  /** Decimal string, 0 to 100. */
+  bufferFillPct: string | null;
+  machines: EdgeMachineStatus[];
+  appliedConfigVersion: number | null;
+  latestConfigVersion: number | null;
+  active: boolean;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewEdgeNode {
+  name: string;
+  platform: EdgePlatform;
+  ring?: EdgeRing;
+  connectorSubject?: string | null;
+  active?: boolean;
+}
+
+/** A PUT replaces the node: an omitted site or connector identity is cleared. */
+export interface EdgeNodeChange {
+  name: string;
+  ring: EdgeRing;
+  siteId: string | null;
+  connectorSubject: string | null;
+  active: boolean;
+}
+
+export interface EdgeConfigVersion {
+  id: string;
+  edgeId: string;
+  version: number;
+  document: Record<string, unknown>;
+  /** SHA-256 of the stored document, also on the published event. */
+  documentSha256: string;
+  publishedBy: string;
+  publishedAt: string;
+  appliedAt: string | null;
+}
+
+export function listEdgeNodes(filter: { ring?: EdgeRing; status?: EdgeStatusValue } = {}, signal?: AbortSignal): Promise<EdgeNode[]> {
+  return items<EdgeNode>(`/edge-nodes${query({ ring: filter.ring, status: filter.status })}`, signal);
+}
+
+export function getEdgeNode(id: string, signal?: AbortSignal): Promise<EdgeNode> {
+  return send<EdgeNode>(`/edge-nodes/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Registers a connector; reuse one key per form so a retried submit cannot register two. */
+export function createEdgeNode(input: NewEdgeNode, key: string = newKey()): Promise<EdgeNode> {
+  return post<EdgeNode>("/edge-nodes", input, key);
+}
+
+/** Replaces name, ring, identity and status. The node version is the If-Match entity tag (SF-0143, 412 when stale). */
+export function updateEdgeNode(id: string, version: number, input: EdgeNodeChange): Promise<EdgeNode> {
+  return send<EdgeNode>(`/edge-nodes/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
+}
+
+export function listEdgeConfigs(id: string, signal?: AbortSignal): Promise<EdgeConfigVersion[]> {
+  return items<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, signal);
+}
+
+/** Publishes the next configuration version; reuse one key per form. */
+export function publishEdgeConfig(id: string, document: Record<string, unknown>, key: string = newKey()): Promise<EdgeConfigVersion> {
+  return post<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, { document }, key);
+}

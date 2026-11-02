@@ -40,12 +40,19 @@ var (
 	// AbsenceCodeSaved is not in the PRD event table: payroll (w43) needs the pay terms
 	// behind the absence lines of a worker-day.
 	AbsenceCodeSaved = events.Type(Context, "absencecode", "saved", 1)
+	// The edge fleet events (FR-25.19) are not in the PRD event table: the config publish and
+	// apply are the audit trail of what a connector ran with, and a heartbeat publishes nothing
+	// (50 edges report twice a minute).
+	EdgeNodeSaved       = events.Type(Context, "edgenode", "saved", 1)
+	EdgeConfigPublished = events.Type(Context, "edgeconfig", "published", 1)
+	EdgeConfigApplied   = events.Type(Context, "edgeconfig", "applied", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
+		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -294,4 +301,40 @@ type AbsenceCodeSavedData struct {
 	Active        bool   `json:"active"`
 	Version       int    `json:"version"`
 	SavedBy       string `json:"savedBy"`
+}
+
+// EdgeNodeSavedData is the payload of dev.passage.shopfloor.edgenode.saved.v1, published when
+// an edge node is registered or its name, site, ring, connector identity or status is changed.
+type EdgeNodeSavedData struct {
+	EdgeID   string  `json:"edgeId"`
+	SiteID   *string `json:"siteId"`
+	Name     string  `json:"name"`
+	Platform string  `json:"platform"`
+	Ring     string  `json:"ring"`
+	// ConnectorSubject is the identity bound to the node; only it may pull the configuration
+	// and report heartbeats. Null leaves the node unbound.
+	ConnectorSubject *string `json:"connectorSubject"`
+	Active           bool    `json:"active"`
+	Version          int     `json:"version"`
+	SavedBy          string  `json:"savedBy"`
+}
+
+// EdgeConfigPublishedData is the payload of dev.passage.shopfloor.edgeconfig.published.v1,
+// published when a new configuration version is stored for an edge node. It is the audit
+// record of the publish: who, the SHA-256 of the stored document and the write allowlist nodes.
+type EdgeConfigPublishedData struct {
+	EdgeID         string   `json:"edgeId"`
+	Version        int      `json:"version"`
+	DocumentSHA256 string   `json:"documentSha256"`
+	WriteRuleNodes []string `json:"writeRuleNodes"`
+	PublishedBy    string   `json:"publishedBy"`
+}
+
+// EdgeConfigAppliedData is the payload of dev.passage.shopfloor.edgeconfig.applied.v1,
+// published when a heartbeat reports a configuration version other than the one applied before.
+// PreviousVersion is null for the first one.
+type EdgeConfigAppliedData struct {
+	EdgeID          string `json:"edgeId"`
+	Version         int    `json:"version"`
+	PreviousVersion *int   `json:"previousVersion"`
 }

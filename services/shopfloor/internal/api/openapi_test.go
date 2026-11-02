@@ -108,6 +108,14 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/absence-codes get":                                          DutyView,
 		"/v1/shopfloor/absence-codes/{id} get":                                     DutyView,
 		"/v1/shopfloor/absence-codes/{id} put":                                     DutySetup,
+		"/v1/shopfloor/edge-nodes post":                                            DutyEdgeConfigure,
+		"/v1/shopfloor/edge-nodes get":                                             DutyView,
+		"/v1/shopfloor/edge-nodes/{id} get":                                        DutyView,
+		"/v1/shopfloor/edge-nodes/{id} put":                                        DutyEdgeConfigure,
+		"/v1/shopfloor/edge-nodes/{id}/config-versions post":                       DutyEdgeConfigure,
+		"/v1/shopfloor/edge-nodes/{id}/config-versions get":                        DutyView,
+		"/v1/shopfloor/edge-nodes/{id}/config get":                                 DutyEdgeConnect,
+		"/v1/shopfloor/edge-nodes/{id}:heartbeat post":                             DutyEdgeConnect,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             DutySetup,
 	}
 	keyed := map[string]bool{
@@ -125,6 +133,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/time-profiles post":                                         true,
 		"/v1/shopfloor/pay-agreements post":                                        true,
 		"/v1/shopfloor/absence-codes post":                                         true,
+		"/v1/shopfloor/edge-nodes post":                                            true,
+		"/v1/shopfloor/edge-nodes/{id}/config-versions post":                       true,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             true,
 	}
 	for op := range served {

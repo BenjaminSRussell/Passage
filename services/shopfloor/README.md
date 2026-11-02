@@ -3,6 +3,42 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 14: edge fleet and versioned connector configuration (FR-25.19)
+
+An edge node is one iot-edge connector. `POST /v1/shopfloor/edge-nodes` registers it (platform k3s,
+windows or linux; ring `all` by default, the PRD parameter default; name unique, SF-0153), `PUT` replaces
+name, site, ring (promotion), connector identity and the active flag with `If-Match`. Configuration
+documents are versioned per node: `POST edge-nodes/{id}/config-versions` validates the document
+(machines with a UUID resource, tags that point at a listed machine with a known kind, a write allowlist
+with finite min <= max; other keys pass through), writes the server's version number into it and stores
+it. A published version is immutable: `passage_app` may update only `applied_at`, and a trigger refuses
+any other change, a second `applied_at` stamp and deletes, even for the table owner.
+
+Fleet writes (register, update, publish) need `shopfloor.edge.configure`, not the machine setup duty,
+because the write allowlist decides which machine nodes a connector may write. The publish event
+`edgeconfig.published` is the audit record of a publish: who, the SHA-256 of the stored document
+(`documentSha256`, also on every configuration read) and the allowlist nodes.
+
+**Connector identity.** Each node is bound to the identity its connector authenticates as
+(`connectorSubject`, the subject the gateway forwards in `X-Passage-User`; unique per tenant). The
+connector holds `shopfloor.edge.connect` and pulls `GET edge-nodes/{id}/config` and reports every 30 s
+with `POST edge-nodes/{id}:heartbeat`; both refuse any caller other than the bound identity, a signed
+service token and an unbound node with SF-0154 (403) before anything is read or written. The machine-event
+ingest duty does not grant either. Until token enrollment exists (see NOT-IMPLEMENTED D9) the binding is set
+by hand on the node and the gateway's authentication of the connector's credential is what makes the
+subject trustworthy; nothing yet ties it to the mTLS certificate the connector reports.
+
+The heartbeat carries connector version, buffer fill, per-machine states, certificate serial and expiry,
+and the version the connector runs. A reported version other than the applied one becomes the applied one
+(one at a time), stamps `applied_at` on that version the first time and publishes `edgeconfig.applied`; a
+version never published to the node is SF-0151 (422). Status is derived when read: `pending` (never
+reported), `online` (heartbeat within 90 s), `offline`, `inactive`; the list filters by ring and status. A
+heartbeat updates the node but not its version and publishes no event. Events: `edgenode.saved`,
+`edgeconfig.published`, `edgeconfig.applied`. Web: edge fleet list with ring and status filters, register
+form, and a node page with the heartbeat, machine states, the ring, identity and status form,
+configuration versions (with their documents) and a publish form; the write actions show only to holders
+of `shopfloor.edge.configure` (migration 0013).
+
 ## Slice 13: absence codes and absence pay lines (FR-25.2, pay types `absence-paid` and `absence-unpaid`)
 
 An absence code (migration `0012_absence.sql`, table `absence_code`; `POST/GET/PUT /absence-codes`,
@@ -438,6 +474,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/v1/shopfloor/oee:rollup` | `shopfloor.oee.rollup` (scheduler service identity; not in the PRD duty table) |
 | POST `/v1/shopfloor/sessions:badge` | `shopfloor.kiosk.login` (Kiosk login) |
 | POST `/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
+| POST `/v1/shopfloor/edge-nodes`, PUT `/edge-nodes/{id}`, POST `/edge-nodes/{id}/config-versions` | `shopfloor.edge.configure` (edge fleet administrator; not in the PRD duty table) |
+| GET `/v1/shopfloor/edge-nodes`, `/edge-nodes/{id}`, `/edge-nodes/{id}/config-versions` | `shopfloor.view` |
+| GET `/v1/shopfloor/edge-nodes/{id}/config`, POST `/edge-nodes/{id}:heartbeat` | `shopfloor.edge.connect` (the connector's own identity, which must be the one bound to the node; not in the PRD duty table) |
 | POST `/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
 | POST `/v1/shopfloor/registrations/{id}:correct` | `shopfloor.time.correct` (supervisor; not in the PRD duty table) |
@@ -504,6 +543,11 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0145` | 404 or 422 | Absence code not found (422 when named by an absence registration) |
 | `SF-0146` | 422 | The absence code named by a new absence registration is inactive |
 | `SF-0147` | 409 | The paid flag or pay multiplier of an absence code that an absence already names cannot change |
+| `SF-0150` | 404 | Edge node not found |
+| `SF-0151` | 404 or 422 | No configuration published for the node (404 on a pull); a heartbeat reported a version never published to it (422) |
+| `SF-0152` | 409 | The edge node is switched off: it refuses heartbeats and configuration pulls |
+| `SF-0153` | 409 | An edge node with this name, or bound to this connector identity, already exists |
+| `SF-0154` | 403 | The caller is not the connector bound to this edge node (or the node has none): configuration pull and heartbeat refused |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

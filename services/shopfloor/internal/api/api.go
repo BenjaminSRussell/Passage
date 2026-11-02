@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -94,6 +95,14 @@ type Store interface {
 	UpdateAbsenceCode(ctx context.Context, id string, version int, in store.AbsenceCodeInput, updatedBy string) (store.AbsenceCode, error)
 	GetAbsenceCode(ctx context.Context, id string) (store.AbsenceCode, error)
 	ListAbsenceCodes(ctx context.Context, activeOnly bool, limit int) ([]store.AbsenceCode, error)
+	CreateEdgeNode(ctx context.Context, in store.EdgeNodeInput, createdBy string, idem store.Idem) (store.EdgeNode, error)
+	UpdateEdgeNode(ctx context.Context, id string, version int, in store.EdgeNodeInput, updatedBy string) (store.EdgeNode, error)
+	GetEdgeNode(ctx context.Context, id string) (store.EdgeNode, error)
+	ListEdgeNodes(ctx context.Context, ring, status string, limit int) ([]store.EdgeNode, error)
+	PublishEdgeConfig(ctx context.Context, edgeID string, document json.RawMessage, publishedBy string, idem store.Idem) (store.EdgeConfigVersion, error)
+	ListEdgeConfigs(ctx context.Context, edgeID string, limit int) ([]store.EdgeConfigVersion, error)
+	CurrentEdgeConfig(ctx context.Context, edgeID, subject string) (store.EdgeConfigVersion, error)
+	Heartbeat(ctx context.Context, edgeID, subject string, in store.HeartbeatInput) (store.HeartbeatResult, error)
 	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
@@ -252,6 +261,7 @@ type itemsResponse[T any] struct {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	a.registerAbsence(r)
+	a.registerEdge(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers/{id}", a.getWorker)

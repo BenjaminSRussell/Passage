@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 13
+# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 14
 
-Every PSG-25 deliverable and acceptance criterion that slices 1 to 13 do not build, with its
+Every PSG-25 deliverable and acceptance criterion that slices 1 to 14 do not build, with its
 status and reason. Slice 1 covers the time and attendance core of the shopfloor service
 (workers, registrations, pay calculation, approval, review lists, OEE arithmetic), the
 supervisor web pages in `apps/web/src/modules/shopfloor/`, and the iot-edge domain core.
@@ -65,6 +65,24 @@ terms fixed once an absence names the code, SF-0147), absence registrations that
 day, the `absence-overlap` day flag, the `absencecode.saved` event, `absenceCodeId` on registrations and
 `registration.posted`, and on the web the absence code list, create form and a record absence form
 (migration 0012).
+Slice 14 adds the edge fleet (FR-25.19): `edge_node` and `edge_config_version` (migration 0013), the node
+register and update with a bound connector identity, versioned configuration documents validated on
+publish and immutable once published (column grant plus trigger), the connector's configuration pull and
+30 s heartbeat with one applied version at a time, both restricted to the node's bound connector, derived
+online/offline status, the `edgenode.saved`, `edgeconfig.published` (with the document hash and allowlist
+nodes) and `edgeconfig.applied` events, the duties `shopfloor.edge.configure` and `shopfloor.edge.connect`,
+and the edge fleet web pages.
+
+> **Security gap (slice 14): connector identity is bound by hand, not by certificate.** The configuration
+> pull (which carries the write allowlist) and the heartbeat are refused unless the caller holds
+> `shopfloor.edge.connect` and its authenticated subject equals the node's `connectorSubject`, so one
+> connector cannot read or report for another node. The binding is set by an edge administrator on the
+> node, and it is only as strong as the gateway's authentication of the connector's credential: token
+> enrollment and the mTLS client certificate (FR-25.19, BR-25.14) are not built, so nothing ties the
+> subject to the certificate serial the connector reports, and the reported serial and expiry are stored
+> as reported. Enrollment must set the binding from the issued certificate and the gateway must forward
+> the certificate subject; until then the connector credential must be a per-node client (never a shared
+> one), issued by the platform identity service.
 
 ## Ticket deliverables
 
@@ -93,7 +111,7 @@ day, the `absence-overlap` day flag, the `absencecode.saved` event, `absenceCode
 | D8d | BR-25.13 unknown order or phase: status `error` without delivery (SF-0015) | handoff (waves 21–24) | Needs the order and routing read model. Messages are accepted without the order lookup. |
 | D8e | Delete an error message with a reason; cursor pagination of the monitor | built (slice 5) | `POST process-messages/{id}:delete` (SF-0119 unless a destination is in error, SF-0120 once deleted) keeps the row for audit and publishes `processmessage.deleted`; the monitor pages by `cursor`/`nextCursor`. Not built: a monitor filter that lists deleted messages (they are read by id), and an undelete. |
 | D8f | Duties `shopfloor.process.create` and `shopfloor.process.deliver` in the OPA bundle | handoff (policies/) | Declared in the OpenAPI (`x-passage-duty`) and enforced by `authz.RequireDuty`; the role grants live outside this wave's paths. |
-| D9 | iot-edge as a deployable (signed image, Helm, static binary, enrollment, mTLS, config, heartbeat, ring rollout, write-back) | partial | Domain core, config validation, Helm chart and admin endpoint are built; slice 3 adds the policy rules (versioned config document and apply rule, tag normalization, write guard and readback check, certificate renewal decision, ring promotion and rollback). The rest is listed in `../iot-edge/NOT-IMPLEMENTED.md`. |
+| D9 | iot-edge as a deployable (signed image, Helm, static binary, enrollment, mTLS, config, heartbeat, ring rollout, write-back) | partial | Domain core, config validation, Helm chart and admin endpoint are built; slice 3 adds the policy rules (versioned config document and apply rule, tag normalization, write guard and readback check, certificate renewal decision, ring promotion and rollback). The rest is listed in `../iot-edge/NOT-IMPLEMENTED.md`. Slice 14 (shopfloor side): the edge node registry, versioned configuration documents, the configuration pull, the heartbeat endpoint and the fleet screens are built. Not built: token enrollment and certificate issuance (the heartbeat only stores the serial and expiry a connector reports), the OPC-UA server trust list, `EdgeWriteAudit`, the ring promotion rule and rollout job (promotion is a manual ring change), automatic rollback and the SF-0018/SF-0019/SF-0020 alerts, heartbeat history (only the last report is kept; the PRD 90-day status history is not), binding the connector identity to the enrolled certificate (slice 14 binds the authenticated subject set by hand on the node; see the security gap above), the edge buffer-hours setting, and an offline sweep that raises an alert when a node goes quiet. |
 | Deploy | Kiosk app and edge chart deployed to the demo plant | later slice of PSG-25 | Depends on D1 and on the edge enrollment work. Edge chart exists with demo-plant defaults. |
 
 ## Acceptance criteria
@@ -150,6 +168,9 @@ day, the `absence-overlap` day flag, the `absencecode.saved` event, `absenceCode
 | `flags`, `autoStopped` and `warnings` on registration results, `flags` on stored registrations and in `registration.posted`, `openJobs` on `sessions:badge` | added (slice 8) | Not in the PRD API or event tables. The kiosk shows SF-0002 and SF-0004 from them and offers to stop the open work; supervisors and the w21 consumer tell server-written stops and conflicting starts apart. Additive; in the OpenAPI and AsyncAPI. |
 | `bundleId` in `registration.posted` | added | A bundled job's `hours` is its share, so consumers (w21 job card) need the bundle to reconcile. Additive change to the v1 payload; the AsyncAPI lists it. |
 | `shopfloor.machine.ingest` duty | added | The PRD duty table has no duty for the edge gateway; the ingest endpoint uses this service-identity duty, which no person role should hold. |
+| Duties `shopfloor.edge.configure` and `shopfloor.edge.connect` | added (slice 14); seeding is a handoff (policies/, #313) | Not in the PRD duty table. `shopfloor.edge.configure` (edge fleet administrator: register and change nodes, bind the connector identity, publish configuration with the write allowlist) is kept apart from `shopfloor.setup.maintain` so machine and pay setup does not grant control writes. `shopfloor.edge.connect` is held only by each connector's own identity (`service_only`). Both are declared in the OpenAPI and enforced by `authz.RequireDuty`. Rows for `policies/authz/data.json`: `shopfloor.edge.configure` permissions `POST /v1/shopfloor/edge-nodes`, `PUT /v1/shopfloor/edge-nodes/*`, `POST /v1/shopfloor/edge-nodes/*/config-versions`; `shopfloor.edge.connect` (`service_only: true`) permissions `GET /v1/shopfloor/edge-nodes/*/config`, `POST /v1/shopfloor/edge-nodes/*:heartbeat`; add to `shopfloor.view` `GET /v1/shopfloor/edge-nodes`, `GET /v1/shopfloor/edge-nodes/*`, `GET /v1/shopfloor/edge-nodes/*/config-versions`. The web nav uses `shopfloor.view`; the register, change and publish actions show only to holders of `shopfloor.edge.configure`. |
+| `edge-nodes` routes, SF-0150 to SF-0154, events `edgenode.saved`, `edgeconfig.published`, `edgeconfig.applied` | added (slice 14) | Not in the PRD API or event tables; FR-25.19 names the EdgeNode and EdgeConfigVersion data and the pull and heartbeat but gives no endpoints. Documented in the OpenAPI and AsyncAPI. |
+| Edge rollout ring default | built (slice 14) | A new node is in ring `all`, the PRD parameter default ("Edge rollout ring", edge node, default `all`). A canary must be put in `canary` when registered or by a ring change. |
 | Duties `shopfloor.time.correct` and `shopfloor.pay.revise`, events `registration.corrected` and `payday.revised` | added (slice 9); role grants are a handoff (policies/) | Not in the PRD duty or event tables. Supervisors correct times and revise approved pay; segregation of duties (SF-0106) applies to both. Payroll (w43) and the w21 job-card consumer read the events; they are documented in the AsyncAPI. |
 | Revision of days outside the corrected week | later slice of PSG-25 | `pay:revise` recalculates the range the caller names (at most 28 days). A correction that moves overtime into another pay week needs the caller to revise that week too; the service does not find the affected days. |
 | `time-profiles`, `pay-agreements`, `workers/{id}:assign-setup`, SF-0140 to SF-0144 | added (slice 11) | Not in the PRD API table; FR-25.7 and the data model name ProfileDay and the pay agreement but give no endpoints. No new duty: writes use `shopfloor.setup.maintain` and reads `shopfloor.view`, so nothing is added to the #313 duty seeding list. The web create routes carry the handle duty `shopfloor.setup.maintain`; the nav items use `shopfloor.view`, which exists in `policies/authz/data.json`. |
