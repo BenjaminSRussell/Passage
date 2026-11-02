@@ -16,8 +16,11 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/tax/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/tax/internal/store"
 )
 
 const (
@@ -35,10 +38,15 @@ type API struct {
 	db              Pinger
 	providers       map[string]domain.TaxProvider
 	providerTimeout time.Duration
+	store           Store
+	ledger          ledgerclient.Ledger
 	calculations    atomic.Int64
 	failures        atomic.Int64
 	fallbacks       atomic.Int64
 	withholdings    atomic.Int64
+	queueFailures   atomic.Int64
+	recommitted     atomic.Int64
+	settlements     atomic.Int64
 }
 
 type calculateRequest struct {
@@ -68,10 +76,25 @@ func New(db Pinger, providers map[string]domain.TaxProvider, providerTimeout tim
 	return &API{db: db, providers: providers, providerTimeout: providerTimeout}
 }
 
+func (a *API) WithStore(s Store) *API {
+	a.store = s
+	return a
+}
+
+func (a *API) WithLedger(l ledgerclient.Ledger) *API {
+	a.ledger = l
+	return a
+}
+
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyCalculate)).Post("/v1/tax/calculate", a.calculate)
 	r.With(authz.RequireDuty(dutyWithholding)).Post("/v1/tax/withholding/calculate", a.withholding)
+	r.With(authz.RequireDuty(dutyRecordTransactions)).Post("/v1/tax/transactions", a.recordTransactions)
+	r.With(authz.RequireDuty(dutySettle)).Post("/v1/tax/settlements:run", a.settle)
+	r.With(authz.RequireDuty(dutyLedgerConfig)).Put("/v1/tax/ledger-config", a.setLedgerConfig)
+	r.With(authz.RequireDuty(dutyRecommit)).Post("/v1/tax/recommit:run", a.recommit)
+	r.With(authz.RequireDuty(dutySAFT)).Get("/v1/tax/saft", a.saft)
 }
 
 func (a *API) withholding(w http.ResponseWriter, r *http.Request) {
@@ -112,29 +135,30 @@ func (a *API) calculate(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
-	res, err := a.compute(r.Context(), req)
+	res, notice, err := a.compute(r.Context(), req)
 	if err != nil {
 		a.reject(w, r, err)
 		return
+	}
+	if notice != nil {
+		a.fallbacks.Add(1)
+		slog.Warn("tax provider fallback", "provider", notice.Provider, "reason", notice.Reason, "correlationId", middleware.GetReqID(r.Context()))
+		a.queueRecommit(r.Context(), req, notice)
 	}
 	a.calculations.Add(1)
 	httpx.JSON(w, http.StatusOK, res)
 }
 
-func (a *API) compute(ctx context.Context, req calculateRequest) (domain.Result, error) {
+func (a *API) compute(ctx context.Context, req calculateRequest) (domain.Result, *domain.FallbackNotice, error) {
 	if req.Provider == "" {
-		return domain.Calculate(req.Document, req.Config)
+		res, err := domain.Calculate(req.Document, req.Config)
+		return res, nil, err
 	}
 	provider, ok := a.providers[req.Provider]
 	if !ok {
-		return domain.Result{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeProviderFallback, fmt.Sprintf("provider %q is not configured", req.Provider))
+		return domain.Result{}, nil, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeProviderFallback, fmt.Sprintf("provider %q is not configured", req.Provider))
 	}
-	res, notice, err := domain.CalculateWithFailover(ctx, provider, req.Document, req.Config, a.providerTimeout)
-	if notice != nil {
-		a.fallbacks.Add(1)
-		slog.Warn("tax provider fallback", "provider", notice.Provider, "reason", notice.Reason, "correlationId", middleware.GetReqID(ctx))
-	}
-	return res, err
+	return domain.CalculateWithFailover(ctx, provider, req.Document, req.Config, a.providerTimeout)
 }
 
 func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
@@ -155,6 +179,12 @@ func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
 		err = problem
 	case errors.As(err, &pe):
 		err = httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, fmt.Sprintf("provider rejected the document with status %d", pe.Status))
+	case errors.Is(err, ledger.ErrRead):
+		err = httpx.NewProblem(http.StatusBadGateway, codeLedgerUnavailable, "the general ledger could not be read")
+	case errors.Is(err, store.ErrNoLegalEntity):
+		err = httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "this operation needs a single legal entity in the request scope")
+	case errors.Is(err, store.ErrNoLedgerConfig):
+		err = httpx.NewProblem(http.StatusUnprocessableEntity, codeNotConfigured, "no ledger configuration is set for this legal entity")
 	}
 	fail(w, r, err)
 }
@@ -197,5 +227,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE tax_calculation_failures_total counter\ntax_calculation_failures_total %d\n", a.failures.Load())
 		fmt.Fprintf(w, "# TYPE tax_withholding_calculations_total counter\ntax_withholding_calculations_total %d\n", a.withholdings.Load())
 		fmt.Fprintf(w, "# TYPE tax_provider_fallbacks_total counter\ntax_provider_fallbacks_total %d\n", a.fallbacks.Load())
+		fmt.Fprintf(w, "# TYPE tax_recommit_queue_failures_total counter\ntax_recommit_queue_failures_total %d\n", a.queueFailures.Load())
+		fmt.Fprintf(w, "# TYPE tax_recommits_completed_total counter\ntax_recommits_completed_total %d\n", a.recommitted.Load())
+		fmt.Fprintf(w, "# TYPE tax_settlement_runs_total counter\ntax_settlement_runs_total %d\n", a.settlements.Load())
 	})
 }

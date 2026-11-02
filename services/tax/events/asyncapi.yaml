@@ -1,0 +1,40 @@
+asyncapi: 3.0.0
+info:
+  title: tax
+  version: 0.2.0
+  description: >-
+    CloudEvents 1.0 envelope from platform/go/events (source /passage/tax/tax, subject the
+    recommit queue id); payloads below are the data member. Events are written to the outbox
+    in the transaction that queues the document for recommit and relayed to Kafka keyed by
+    the aggregate (tax_recommit). dev.passage.tax.provider.fallback.v1 is published when an
+    external tax provider timed out or failed and the internal engine calculated the
+    document instead (TAX-0007); the document is queued for recommit.
+channels:
+  passage.tax.provider:
+    address: passage.tax.provider
+    messages:
+      fallback:
+        $ref: '#/components/messages/providerFallback'
+operations:
+  publishProviderFallback:
+    action: send
+    channel:
+      $ref: '#/channels/passage.tax.provider'
+    summary: An external tax provider failed and the internal engine calculated the document.
+    messages:
+      - $ref: '#/channels/passage.tax.provider/messages/fallback'
+components:
+  messages:
+    providerFallback:
+      name: dev.passage.tax.provider.fallback.v1
+      title: Tax provider fallback
+      contentType: application/json
+      payload:
+        type: object
+        required: [legalEntityId, recommitId, provider, reason]
+        additionalProperties: false
+        properties:
+          legalEntityId: { type: string, format: uuid }
+          recommitId: { type: string, format: uuid, description: The recommit queue entry holding the document. }
+          provider: { type: string, example: avalara }
+          reason: { type: string, maxLength: 200, description: Why the provider call failed, truncated. }

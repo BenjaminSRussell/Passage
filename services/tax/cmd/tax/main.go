@@ -13,8 +13,11 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/api"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/tax/internal/store"
+	"github.com/BenjaminSRussell/passage/services/tax/migrations"
 )
 
 const (
@@ -51,7 +54,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	a := api.New(pool, map[string]domain.TaxProvider{}, providerTimeout(getenv))
+	if getenv("MIGRATE_ON_START") == "true" {
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	a := api.New(pool, map[string]domain.TaxProvider{}, providerTimeout(getenv)).WithStore(store.New(pool))
+	gl, err := ledgerclient.FromEnv(getenv, "tax")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if gl != nil {
+		a.WithLedger(gl)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

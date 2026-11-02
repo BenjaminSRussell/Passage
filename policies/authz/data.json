@@ -182,6 +182,11 @@
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "Calculate withholding tax": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
+    "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
+    "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
+    "tax.recommit.run": {"permissions": [{"resource": "/v1/tax/recommit:run", "methods": ["POST"]}]},
+    "tax.saft.export": {"permissions": [{"resource": "/v1/tax/saft", "methods": ["GET"]}]},
+    "tax.ledgerconfig.manage": {"permissions": [{"resource": "/v1/tax/ledger-config", "methods": ["PUT"]}]},
     "period.check": {"permissions": [
       {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
@@ -2730,6 +2735,9 @@
     },
     "analytics": {
       "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
+    },
+    "tax": {
+      "ledger": ["ledger.balance.read"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],

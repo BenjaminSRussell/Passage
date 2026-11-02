@@ -183,11 +183,11 @@ func TestBalance_SumsTheRequestedAccountOnly(t *testing.T) {
 		query = r.URL.Query()
 		_, _ = w.Write([]byte(`{"currency":"USD","rows":[{"account":"1400","debit":"100.00","credit":"40.25"},{"account":"1400","debit":"1.00","credit":"0"},{"account":"9999","debit":"5","credit":"0"}]}`))
 	})
-	b, err := c.Balance(principalCtx(), ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "1400", PeriodTo: "2026-10"})
+	b, err := c.Balance(principalCtx(), ledgerclient.BalanceQuery{LegalEntityID: entityID, LedgerID: ledgerID, Account: "1400", PeriodFrom: "2026-09", PeriodTo: "2026-10"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !b.Net().Equal(decimal.RequireFromString("60.75")) || b.Currency != "USD" || query["account_from"][0] != "1400" || query["period_to"][0] != "2026-10" || query["ledger"][0] != ledgerID {
+	if !b.Net().Equal(decimal.RequireFromString("60.75")) || b.Currency != "USD" || query["account_from"][0] != "1400" || query["period_from"][0] != "2026-09" || query["period_to"][0] != "2026-10" || query["ledger"][0] != ledgerID {
 		t.Fatalf("balance %+v query %v", b, query)
 	}
 }

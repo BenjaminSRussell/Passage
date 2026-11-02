@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:OECD:StandardAuditFile-Tax:2.00"
+           targetNamespace="urn:OECD:StandardAuditFile-Tax:2.00"
+           elementFormDefault="qualified">
+  <xs:simpleType name="CountryCode">
+    <xs:restriction base="xs:string"><xs:pattern value="[A-Z]{2}"/></xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="CurrencyCode">
+    <xs:restriction base="xs:string"><xs:pattern value="[A-Z]{3}"/></xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="Text200">
+    <xs:restriction base="xs:string"><xs:minLength value="1"/><xs:maxLength value="200"/></xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="TaxDirection">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="output"/>
+      <xs:enumeration value="input"/>
+      <xs:enumeration value="use"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element name="AuditFile">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Header">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="AuditFileVersion"><xs:simpleType><xs:restriction base="xs:string"><xs:enumeration value="2.00"/></xs:restriction></xs:simpleType></xs:element>
+              <xs:element name="AuditFileCountry" type="CountryCode"/>
+              <xs:element name="AuditFileDateCreated" type="xs:date"/>
+              <xs:element name="SoftwareCompanyName" type="Text200"/>
+              <xs:element name="SoftwareID" type="Text200"/>
+              <xs:element name="SoftwareVersion" type="Text200"/>
+              <xs:element name="Company">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="RegistrationNumber" type="Text200"/>
+                    <xs:element name="Name" type="Text200"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="DefaultCurrencyCode" type="CurrencyCode"/>
+              <xs:element name="SelectionCriteria">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="PeriodStart" type="xs:date"/>
+                    <xs:element name="PeriodEnd" type="xs:date"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="MasterFiles">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="TaxTable">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="TaxTableEntry" minOccurs="0" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="TaxType" type="TaxDirection"/>
+                          <xs:element name="TaxCode" type="Text200"/>
+                          <xs:element name="TaxAmount" type="xs:decimal"/>
+                          <xs:element name="NumberOfTransactions" type="xs:nonNegativeInteger"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
