@@ -31,6 +31,11 @@ var domainStatus = map[string]int{
 	domain.CodeNotAuditBlocked:   http.StatusConflict,
 	domain.CodeAuditSelfRelease:  http.StatusForbidden,
 	domain.CodeInvalidBank:       http.StatusUnprocessableEntity,
+	domain.CodeInvalidCapture:    http.StatusUnprocessableEntity,
+	domain.CodeSheetOverLine:     http.StatusUnprocessableEntity,
+	domain.CodeSheetSelfAccept:   http.StatusForbidden,
+	domain.CodeSheetNotPending:   http.StatusConflict,
+	domain.CodeCaptureExtraction: http.StatusUnprocessableEntity,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

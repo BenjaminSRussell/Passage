@@ -38,6 +38,11 @@ channels:
         $ref: "#/components/messages/ErsVendorChanged"
       ersPriceConfirmed:
         $ref: "#/components/messages/ErsPriceConfirmed"
+  serviceEntryEvents:
+    address: passage.receiving.serviceentrysheet
+    messages:
+      serviceSheetDecided:
+        $ref: "#/components/messages/ServiceSheetDecided"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -89,6 +94,11 @@ operations:
     channel: { $ref: "#/channels/policyEvents" }
     messages:
       - { $ref: "#/channels/policyEvents/messages/ersPriceConfirmed" }
+  publishServiceSheetDecided:
+    action: send
+    channel: { $ref: "#/channels/serviceEntryEvents" }
+    messages:
+      - { $ref: "#/channels/serviceEntryEvents/messages/serviceSheetDecided" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -166,6 +176,15 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsPriceConfirmedData"
+    ServiceSheetDecided:
+      name: dev.passage.receiving.serviceentrysheet.decided.v1
+      summary: >-
+        POST /v1/receiving/service-entry-sheets/{id}:accept or :reject decided a service entry sheet. ACCEPTED sheets are the
+        acceptance of the service performed against purchase order lines; no GR/IR item or ledger entry follows yet.
+        Consumers: audit, purchasing.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ServiceSheetDecidedData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -306,6 +325,28 @@ components:
         old_price: { type: string, description: "decimal string; omitted on the first confirmation" }
         new_price: { type: string, description: "decimal string, the confirmed unit price" }
         confirmed_by: { type: string }
+    ServiceSheetDecidedData:
+      type: object
+      required: [sheet_id, legal_entity_id, vendor_id, purchase_order_id, currency, total, decision, decided_by, lines]
+      properties:
+        sheet_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        purchase_order_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string, description: "decimal string, the sum of the line amounts" }
+        decision: { type: string, enum: [ACCEPTED, REJECTED] }
+        decided_by: { type: string }
+        reason: { type: string, description: "the rejection reason; omitted when accepted" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [po_line_no, qty, amount]
+            properties:
+              po_line_no: { type: integer, minimum: 1 }
+              qty: { type: string }
+              amount: { type: string }
     ErsVendorChangedData:
       type: object
       required: [legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by]

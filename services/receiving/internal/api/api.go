@@ -54,6 +54,7 @@ type Ports struct {
 	PlanRowSettlements domain.PlanRowSettlements
 	OwnershipChanges   domain.OwnershipChanges
 	VendorGroups       domain.VendorGroups
+	Extractor          domain.DocumentExtractor
 	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
@@ -85,6 +86,10 @@ type API struct {
 	auditRejected   atomic.Int64
 	payeesCreated   atomic.Int64
 	groupMissing    atomic.Int64
+	capturesCreated atomic.Int64
+	capturesReview  atomic.Int64
+	sheetsCreated   atomic.Int64
+	sheetsDecided   atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -138,6 +143,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/one-time-payees", a.idempotent(a.createOneTimePayee))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-captures", a.idempotent(a.createInvoiceCapture))
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures/{id}", a.getInvoiceCapture)
+	r.With(authz.RequireDuty(dutySheetMaintain)).Post("/v1/receiving/service-entry-sheets", a.idempotent(a.createServiceSheet))
+	r.With(authz.RequireDuty(dutySheetMaintain)).Get("/v1/receiving/service-entry-sheets/{id}", a.getServiceSheet)
+	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:accept", a.idempotent(a.acceptServiceSheet))
+	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:reject", a.idempotent(a.rejectServiceSheet))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))
@@ -170,6 +181,10 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_one_time_payees_created_total", "One-time payees recorded for vendor invoices.", &a.payeesCreated},
 		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
 		{"receiving_vendor_group_lookups_failed_total", "Invoices posted without vendor_group_id because party was unreachable, refused the lookup or does not know the vendor.", &a.groupMissing},
+		{"receiving_invoice_captures_total", "Vendor invoice documents captured from UBL or OCR.", &a.capturesCreated},
+		{"receiving_invoice_captures_review_total", "Captured documents held for review (low confidence, total mismatch or no vendor tax id).", &a.capturesReview},
+		{"receiving_service_entry_sheets_created_total", "Service entry sheets entered against purchase order lines.", &a.sheetsCreated},
+		{"receiving_service_entry_sheets_decided_total", "Service entry sheets accepted or rejected.", &a.sheetsDecided},
 		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
