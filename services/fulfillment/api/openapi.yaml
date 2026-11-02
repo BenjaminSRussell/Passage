@@ -166,9 +166,27 @@ components:
       required: [warehouseId, legalEntityId, shortPickAction, version]
       properties:
         warehouseId: { type: string, format: uuid }
-        legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its shipments; null when neither is known." }
+        legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its short pick setting or its shipments; null when none is known." }
         shortPickAction: { $ref: "#/components/schemas/ShortPickAction" }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved." }
+        updatedAt: { type: [string, "null"], format: date-time }
+    ReleaseRule:
+      type: object
+      required: [warehouseId, legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders, version]
+      description: >
+        The release and wave parameters of one warehouse (section 5.28.13). A warehouse
+        without a saved rule reads the defaults at version 0: the service configuration
+        for horizonDays and requireFullAtp (RELEASE_HORIZON_DAYS and
+        RELEASE_REQUIRES_FULL_ATP, 2 days and full ATP unless configured), 200 lines and
+        50 orders; these are the values a release run and the workbench apply to it.
+      properties:
+        warehouseId: { type: string, format: uuid }
+        legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its short pick setting or its shipments; null when none is known." }
+        horizonDays: { type: integer, minimum: 0, maximum: 30, description: "release_horizon_days: a line confirmed for a later date than today plus this is not released." }
+        requireFullAtp: { type: boolean, description: "release_requires_full_atp: a line short of ATP is not released when true." }
+        waveMaxLines: { type: integer, minimum: 1, maximum: 2000, description: "wave_max_lines: the picking workbench default when a call names no maxLines." }
+        waveMaxOrders: { type: integer, minimum: 1, maximum: 500, description: "wave_max_orders: the picking workbench default when a call names no maxOrders." }
+        version: { type: integer, minimum: 0, description: "0 when no rule is saved." }
         updatedAt: { type: [string, "null"], format: date-time }
     LegalEntitySetting:
       type: object
@@ -1455,8 +1473,8 @@ paths:
         The response of the post names the action taken. If-Match carries the version
         read, 0 when none is saved. legalEntityId is the legal entity the warehouse
         belongs to; the setting is scoped by it, and a legal entity other than the
-        saved one or the one of the warehouse's shipments is refused (FUL-0057).
-        Publishes warehousesetting.changed.
+        saved one or the one of the warehouse's release rule or its shipments is
+        refused (FUL-0057). Publishes warehousesetting.changed.
       x-passage-duty: WarehouseRelease
       parameters:
         - { $ref: "#/components/parameters/WarehouseId" }
@@ -1480,6 +1498,85 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WarehouseSetting" }
         "400": { description: "FUL-0050 validation (If-Match, shortPickAction, legalEntityId), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/release-rules:
+    get:
+      operationId: listReleaseRules
+      summary: Release and wave parameters per warehouse (FR-28.1, FR-28.13)
+      description: >
+        Every warehouse the caller sees shipments, a short pick setting or a saved rule
+        for (all scoped by legal entity). A warehouse without a saved rule reads the
+        defaults at version 0.
+      x-passage-duty: WarehouseView
+      responses:
+        "200":
+          description: Release rules, ordered by warehouse
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReleaseRule" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/release-rules/{warehouseId}:
+    get:
+      operationId: getReleaseRule
+      summary: Read the release rule of one warehouse
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+      responses:
+        "200":
+          description: The rule; ETag carries its version (0 when none is saved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseRule" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: saveReleaseRule
+      summary: Set the release and wave parameters of a warehouse (FR-28.1, FR-28.13)
+      description: >
+        A release run that names no horizonDays or requireFullAtp takes the saved rule
+        (a value in the request wins), and a picking workbench call that names no maxLines
+        or maxOrders takes waveMaxLines and waveMaxOrders. If-Match carries the version
+        read, 0 when none is saved; of two first saves at the same moment one is
+        written and the other gets 412. legalEntityId is the legal entity the warehouse
+        belongs to; a legal entity other than the one of the saved rule, the warehouse's
+        short pick setting or its shipments, or outside the caller's scope, is refused
+        (FUL-0057). Publishes warehousereleaserule.changed with the values replaced.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders]
+              properties:
+                legalEntityId: { type: string, format: uuid, description: "The legal entity the warehouse belongs to." }
+                horizonDays: { type: integer, minimum: 0, maximum: 30 }
+                requireFullAtp: { type: boolean }
+                waveMaxLines: { type: integer, minimum: 1, maximum: 2000 }
+                waveMaxOrders: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: The saved rule; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseRule" }
+        "400": { description: "FUL-0050 validation (If-Match, legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

@@ -109,6 +109,25 @@ export interface WarehouseSetting {
   updatedAt: string | null;
 }
 
+/** Release and wave parameters of a warehouse (section 5.28.13). */
+export interface ReleaseRule {
+  warehouseId: string;
+  legalEntityId: string | null;
+  /** release_horizon_days, 0 to 30. */
+  horizonDays: number;
+  /** release_requires_full_atp. */
+  requireFullAtp: boolean;
+  /** wave_max_lines, 1 to 2000. */
+  waveMaxLines: number;
+  /** wave_max_orders, 1 to 500. */
+  waveMaxOrders: number;
+  /** 0 when no rule is saved (the defaults are shown). */
+  version: number;
+  updatedAt: string | null;
+}
+
+export type ReleaseRuleInput = Pick<ReleaseRule, "horizonDays" | "requireFullAtp" | "waveMaxLines" | "waveMaxOrders"> & { legalEntityId: string };
+
 /** Packing slip posting defaults of a legal entity (section 5.28.13). */
 export interface LegalEntitySetting {
   legalEntityId: string;
@@ -668,6 +687,16 @@ export function saveWarehouseSetting(
 ): Promise<WarehouseSetting> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
   return send<WarehouseSetting>(`/warehouse-settings/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+export function listReleaseRules(signal?: AbortSignal): Promise<ReleaseRule[]> {
+  return items<ReleaseRule>("/release-rules", signal);
+}
+
+/** Sets the release rule of a warehouse of a legal entity; version is the one read (0 when none is saved). */
+export function saveReleaseRule(warehouseId: string, version: number, input: ReleaseRuleInput, key: string): Promise<ReleaseRule> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<ReleaseRule>(`/release-rules/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
 /** The ledger setup duty that changing cogs_at_shipment needs (the service enforces it). */

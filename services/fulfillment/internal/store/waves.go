@@ -23,6 +23,7 @@ import (
 // and carrier tracking (FR-28.10) part of the store.
 type WorkbenchStore interface {
 	RemainderStore
+	ReleaseRuleStore
 	LegalEntitySettingStore
 	DropShipStore
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)

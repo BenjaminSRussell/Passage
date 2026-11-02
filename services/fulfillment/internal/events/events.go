@@ -26,8 +26,9 @@ var (
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
 
-	WarehouseSettingChanged   = events.Type(Context, "warehousesetting", "changed", 1)
-	LegalEntitySettingChanged = events.Type(Context, "legalentitysetting", "changed", 1)
+	WarehouseSettingChanged     = events.Type(Context, "warehousesetting", "changed", 1)
+	LegalEntitySettingChanged   = events.Type(Context, "legalentitysetting", "changed", 1)
+	WarehouseReleaseRuleChanged = events.Type(Context, "warehousereleaserule", "changed", 1)
 
 	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
@@ -39,7 +40,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged,
 		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed,
 	}
 }
@@ -120,6 +121,22 @@ type LegalEntitySettingChangedData struct {
 	AsnEnabled             bool   `json:"asn_enabled"`
 	PreviousCogsAtShipment bool   `json:"previous_cogs_at_shipment"`
 	PreviousAsnEnabled     bool   `json:"previous_asn_enabled"`
+	Version                int    `json:"version"`
+}
+
+// WarehouseReleaseRuleChangedData is published when the release and wave
+// parameters of a warehouse are saved (FR-28.1, FR-28.13), with the values they replace.
+type WarehouseReleaseRuleChangedData struct {
+	WarehouseID            string `json:"warehouse"`
+	LegalEntityID          string `json:"legal_entity_id"`
+	HorizonDays            int    `json:"release_horizon_days"`
+	RequireFullATP         bool   `json:"release_requires_full_atp"`
+	WaveMaxLines           int    `json:"wave_max_lines"`
+	WaveMaxOrders          int    `json:"wave_max_orders"`
+	PreviousHorizonDays    int    `json:"previous_release_horizon_days"`
+	PreviousRequireFullATP bool   `json:"previous_release_requires_full_atp"`
+	PreviousWaveMaxLines   int    `json:"previous_wave_max_lines"`
+	PreviousWaveMaxOrders  int    `json:"previous_wave_max_orders"`
 	Version                int    `json:"version"`
 }
 

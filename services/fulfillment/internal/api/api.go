@@ -81,6 +81,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
 	a.routesPacking(r)
 	a.routesWorkbench(r)
+	a.routesReleaseRule(r)
 	a.routesInquiry(r)
 	a.routesTracking(r)
 }
@@ -185,7 +186,19 @@ func (a *API) runRelease(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	// A request value wins, then the warehouse's saved rule, then the process
+	// configuration (RELEASE_HORIZON_DAYS).
 	horizon, fullATP := a.opts.ReleaseHorizonDays, a.opts.RequireFullATP
+	if req.HorizonDays == nil || req.RequireFullATP == nil {
+		rule, err := a.store.GetReleaseRule(r.Context(), req.WarehouseID)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if rule.Saved() {
+			horizon, fullATP = rule.HorizonDays, rule.RequireFullATP
+		}
+	}
 	if req.HorizonDays != nil {
 		if *req.HorizonDays < 0 || *req.HorizonDays > 30 {
 			fail(w, r, "horizonDays", "must be 0 to 30")

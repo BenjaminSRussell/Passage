@@ -78,7 +78,8 @@ func (s *Postgres) ListWarehouseSettings(ctx context.Context) ([]WarehouseSettin
 }
 
 // loadWarehouseSetting reads the saved setting of a warehouse, or the default
-// (version 0) with the legal entity of its shipments when none is saved.
+// (version 0) with the legal entity the warehouse belongs to (its release rule
+// or its shipments) when none is saved.
 func loadWarehouseSetting(ctx context.Context, tx pgx.Tx, warehouseID string, lock bool) (WarehouseSetting, error) {
 	w := WarehouseSetting{WarehouseID: warehouseID, ShortPickAction: domain.DefaultShortPickAction}
 	q := `select legal_entity_id, short_pick_action, version, updated_at from warehouse_setting where warehouse_id = $1`
@@ -88,10 +89,7 @@ func loadWarehouseSetting(ctx context.Context, tx pgx.Tx, warehouseID string, lo
 	var action string
 	err := tx.QueryRow(ctx, q, warehouseID).Scan(&w.LegalEntityID, &action, &w.Version, &w.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = tx.QueryRow(ctx, `select legal_entity_id from shipment where warehouse_id = $1 limit 1`, warehouseID).Scan(&w.LegalEntityID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return w, nil
-		}
+		w.LegalEntityID, err = warehouseLegalEntity(ctx, tx, warehouseID)
 		return w, err
 	}
 	if err != nil {
@@ -120,8 +118,8 @@ func otherLegalEntity() error {
 // SaveWarehouseSetting sets the short pick action of a warehouse of
 // legalEntityID. version is the version the caller read (0 for a warehouse
 // without a saved setting); a stale version is refused, as is a legal entity
-// other than the one of the saved setting or of the warehouse's shipments
-// (FUL-0057). warehousesetting.changed is written in the same transaction.
+// other than the one of the saved setting, the warehouse's release rule or its
+// shipments (FUL-0057). warehousesetting.changed is written in the same transaction.
 func (s *Postgres) SaveWarehouseSetting(ctx context.Context, warehouseID, legalEntityID string, version int, action domain.ShortPickAction, idem Idem) (WarehouseSetting, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out WarehouseSetting

@@ -21,10 +21,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
 
-// Workbench defaults: WAVE_MAX_LINES and WAVE_MAX_ORDERS (section 5.28.13).
+// Workbench defaults: WAVE_MAX_LINES and WAVE_MAX_ORDERS (section 5.28.13),
+// the values a warehouse without a saved release rule reads.
 const (
-	defaultWaveMaxLines  = 200
-	defaultWaveMaxOrders = 50
+	defaultWaveMaxLines  = store.DefaultWaveMaxLines
+	defaultWaveMaxOrders = store.DefaultWaveMaxOrders
 )
 
 var (
@@ -307,6 +308,26 @@ func (a *API) unnestContainer(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, sh)
 }
 
+// waveDefaults gives a limit the call left out the value of the warehouse's
+// saved release rule (wave_max_lines, wave_max_orders); without a saved rule the
+// built-in defaults stay.
+func (a *API) waveDefaults(r *http.Request, in waveRequest, req *store.WaveRequest) error {
+	if in.MaxLines != 0 && in.MaxOrders != 0 {
+		return nil
+	}
+	rule, err := a.store.GetReleaseRule(r.Context(), req.WarehouseID)
+	if err != nil || !rule.Saved() {
+		return err
+	}
+	if in.MaxLines == 0 {
+		req.Limits.MaxLines = rule.WaveMaxLines
+	}
+	if in.MaxOrders == 0 {
+		req.Limits.MaxOrders = rule.WaveMaxOrders
+	}
+	return nil
+}
+
 func (a *API) previewWaves(w http.ResponseWriter, r *http.Request) {
 	var in waveRequest
 	if err := decodeQuery(r, &in); err != nil {
@@ -315,6 +336,10 @@ func (a *API) previewWaves(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := workbenchRequest(in)
 	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := a.waveDefaults(r, in, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -341,6 +366,10 @@ func (a *API) createWaves(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := workbenchRequest(in)
 	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := a.waveDefaults(r, in, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}

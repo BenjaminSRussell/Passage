@@ -66,7 +66,7 @@ func run() error {
 		return err
 	}
 
-	s := store.New(pool, prefix, ext)
+	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP)
 	r := httpx.NewRouter()
 	api.New(s, api.Options{ReleaseHorizonDays: horizon, RequireFullATP: fullATP}).Routes(r)
 

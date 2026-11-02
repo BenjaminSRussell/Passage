@@ -315,11 +315,22 @@ type Postgres struct {
 	pool      *pgxpool.Pool
 	gs1Prefix string
 	extension int
+	// releaseDefaults is what a warehouse without a saved release rule reads.
+	releaseDefaults ReleaseRuleInput
 }
 
 // New returns a Postgres store that issues SSCCs under gs1Prefix.
 func New(pool *pgxpool.Pool, gs1Prefix string, extension int) *Postgres {
-	return &Postgres{pool: pool, gs1Prefix: gs1Prefix, extension: extension}
+	return &Postgres{pool: pool, gs1Prefix: gs1Prefix, extension: extension, releaseDefaults: ReleaseRuleInput{
+		HorizonDays: DefaultReleaseHorizonDays, RequireFullATP: true, WaveMaxLines: DefaultWaveMaxLines, WaveMaxOrders: DefaultWaveMaxOrders}}
+}
+
+// WithReleaseDefaults makes a warehouse without a saved release rule read the
+// process configuration (RELEASE_HORIZON_DAYS, RELEASE_REQUIRES_FULL_ATP), the
+// values a release run applies to it.
+func (s *Postgres) WithReleaseDefaults(horizonDays int, requireFullATP bool) *Postgres {
+	s.releaseDefaults.HorizonDays, s.releaseDefaults.RequireFullATP = horizonDays, requireFullATP
+	return s
 }
 
 // Ping checks the database connection for readiness.
