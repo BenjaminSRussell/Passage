@@ -2632,7 +2632,8 @@
       {"resource": "/v1/shopfloor/time-profiles", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/time-profiles/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/workers", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/workers/*:assign-setup", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/workers/*:assign-setup", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/workers/*:assign-resource", "methods": ["POST"]}
     ]},
     "shopfloor.time.autoclockout": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/registrations:auto-clock-out", "methods": ["POST"]}]},
     "shopfloor.time.correct": {"permissions": [{"resource": "/v1/shopfloor/registrations/*:correct", "methods": ["POST"]}]},
