@@ -595,6 +595,22 @@ func TestListAccounts_PagesWithCursor(t *testing.T) {
 	}
 }
 
+func TestListAccounts_AcceptsTheServiceLookupDutyAndNoOtherNarrowDuty(t *testing.T) {
+	fs := &fakeStore{accounts: []store.Account{{Number: "1000"}}}
+	path := "/v1/ledger/charts/STD/accounts"
+	if rec := call(server(fs), http.MethodGet, path, "", dutyAccountLookup, nil); rec.Code != http.StatusOK {
+		t.Fatalf("ledger.account.lookup must read the chart, got %d", rec.Code)
+	}
+	for _, duty := range []string{dutyLedgerLookup, dutyEntryLookup, dutyAccountWrite} {
+		if rec := call(server(fs), http.MethodGet, path, "", duty, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("%s must not read the chart, got %d", duty, rec.Code)
+		}
+	}
+	if rec := call(server(fs), http.MethodPut, path+"/6010", `{"name":"Freight","accountType":"expense"}`, dutyAccountLookup, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("ledger.account.lookup must not write an account, got %d", rec.Code)
+	}
+}
+
 func TestCreateLedger_ScopeAndValidation(t *testing.T) {
 	h := server(&fakeStore{})
 	body := `{"legalEntityId":"` + testDoc + `","code":"GL","name":"General ledger","chartCode":"STD","currency":"USD","dimensionAttributes":["DEPT","CC"]}`

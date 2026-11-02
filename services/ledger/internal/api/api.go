@@ -61,6 +61,7 @@ const (
 	dutySetPost       = "ledger.set.post"
 	dutyEntryLookup   = "ledger.entry.lookup"
 	dutyLedgerLookup  = "ledger.ledger.lookup"
+	dutyAccountLookup = "ledger.account.lookup"
 
 	// Maintain account structures (§2.11.17) and the dimension register.
 	dutyStructureWrite = "ledger.structure.write"
@@ -127,7 +128,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Patch("/ledgers/{id}", a.patchLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
-		r.With(authz.RequireDuty(dutyRead)).Get("/charts/{chart}/accounts", a.listAccounts)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyAccountLookup)).Get("/charts/{chart}/accounts", a.listAccounts)
 		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
