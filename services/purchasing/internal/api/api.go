@@ -124,6 +124,8 @@ type API struct {
 	catalogImportsCommitted atomic.Int64
 
 	categoryVendorsSaved atomic.Int64
+	chargeCodesSaved     atomic.Int64
+	autoChargesSaved     atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -253,6 +255,8 @@ func (a *API) Register(r chi.Router) {
 			Get("/catalog-entries", a.searchCatalogEntries)
 		// Category vendor assignment and managers (FR-17.20).
 		a.registerCategoryRoutes(r)
+		// Charge codes and auto charges (FR-17.9).
+		a.registerChargeRoutes(r)
 		// Signing limits and their requests (FR-17.17).
 		a.registerSigningRoutes(r)
 	})
@@ -295,6 +299,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_catalog_imports_staged_total", "Vendor catalog files staged; idempotent replays are counted.", a.catalogImportsStaged.Load()},
 			{"purchasing_catalog_imports_committed_total", "Vendor catalog imports committed to a catalog.", a.catalogImportsCommitted.Load()},
 			{"purchasing_category_vendor_assignments_saved_total", "Category vendor assignments created or changed.", a.categoryVendorsSaved.Load()},
+			{"purchasing_charge_codes_saved_total", "Charge codes created or changed.", a.chargeCodesSaved.Load()},
+			{"purchasing_auto_charges_saved_total", "Auto charges created or changed.", a.autoChargesSaved.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

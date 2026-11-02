@@ -81,6 +81,16 @@ func (a *API) editOrder(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	body.keepCharges = map[string]store.PurchaseOrderCharge{}
+	for _, c := range cur.Charges {
+		if _, ok := body.keepCharges[c.ChargeCodeID]; !ok && c.ChargeCodeID != "" {
+			body.keepCharges[c.ChargeCodeID] = c
+		}
+	}
+	body.autoApplied = map[string]bool{}
+	for _, id := range cur.AutoChargeCodes {
+		body.autoApplied[id] = true
+	}
 	next, err := a.buildOrder(r.Context(), body)
 	if err != nil {
 		fail(w, r, err)

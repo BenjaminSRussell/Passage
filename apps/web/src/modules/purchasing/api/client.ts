@@ -160,6 +160,14 @@ export interface PurchaseOrderCharge {
   calc: ChargeCalc;
   value: string;
   amount: string;
+  /** The charge code the charge was entered with, and the sides copied from it (FR-17.9). */
+  chargeCodeId?: string;
+  chargeCode?: string;
+  debitType?: ChargeSide;
+  creditType?: ChargeSide;
+  allocationRule?: AllocationRule;
+  /** True when an auto charge added the charge. */
+  auto?: boolean;
 }
 
 export interface PurchaseOrder {
@@ -182,6 +190,8 @@ export interface PurchaseOrder {
   rowVersion: number;
   lines: PurchaseOrderLine[];
   charges: PurchaseOrderCharge[];
+  /** Charge codes auto charges have added to the order; saving with auto charges does not add them again (FR-17.9). */
+  autoChargeCodes?: string[];
   createdAt: string;
   updatedAt: string;
   /** Returned on create and edit: PRC-AGR-004 when a release reaches an agreement threshold; PRC-CAT-002 / PRC-CAT-010 category access (FR-17.20). */
@@ -230,7 +240,10 @@ export interface PurchaseOrderInput {
   currency: string;
   changeManagement?: boolean;
   lines: PurchaseOrderLineInput[];
-  charges?: { calc: ChargeCalc; value: string }[];
+  /** Give calc and value, or a chargeCodeId whose calc applies (a value given overrides the code's default). */
+  charges?: { chargeCodeId?: string; calc?: ChargeCalc; value?: string }[];
+  /** Adds the charges of the active auto charges that apply to the order (FR-17.9). */
+  applyAutoCharges?: boolean;
 }
 
 /** PO custom methods (FR-17.7). Approve and reject stand in for the wave 4 approval task. */
@@ -1633,4 +1646,119 @@ export function decideSigningLimitRequest(
     body: note ? { note } : undefined,
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
   });
+}
+
+// --- Charge codes and auto charges (FR-17.9) ---
+
+export type ChargeSide = "ITEM" | "LEDGER" | "VENDOR";
+export type AllocationRule = "QTY" | "AMOUNT" | "LINES";
+export type ChargeStatus = "ACTIVE" | "INACTIVE";
+export type AutoChargeKey = "VENDOR" | "GROUP" | "ALL";
+
+export interface ChargeCode {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  calc: ChargeCalc;
+  defaultValue: string;
+  debitType: ChargeSide;
+  creditType: "LEDGER" | "VENDOR";
+  debitAccountId?: string;
+  creditAccountId?: string;
+  vendorId?: string;
+  allocationRule: AllocationRule;
+  status: ChargeStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChargeCodeInput {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  calc: ChargeCalc;
+  defaultValue?: string;
+  debitType?: ChargeSide;
+  creditType?: "LEDGER" | "VENDOR";
+  debitAccountId?: string;
+  creditAccountId?: string;
+  vendorId?: string;
+  allocationRule?: AllocationRule;
+  status?: ChargeStatus;
+}
+
+export interface AutoCharge {
+  id: string;
+  legalEntityId: string;
+  chargeCodeId: string;
+  accountCode: AutoChargeKey;
+  accountId?: string;
+  value?: string;
+  minOrderAmount?: string;
+  currency?: string;
+  validFrom: string;
+  validTo?: string;
+  status: ChargeStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutoChargeInput {
+  legalEntityId: string;
+  chargeCodeId: string;
+  accountCode: AutoChargeKey;
+  accountId?: string;
+  value?: string;
+  minOrderAmount?: string;
+  currency?: string;
+  validFrom?: string;
+  validTo?: string;
+  status?: ChargeStatus;
+}
+
+export function listChargeCodes(
+  filters: { status?: ChargeStatus | ""; q?: string; legalEntityId?: string } = {},
+  options: ListOptions = {},
+) {
+  return list<ChargeCode>("/charge-codes", { status: filters.status || undefined, q: filters.q, legalEntityId: filters.legalEntityId }, options);
+}
+
+export function getChargeCode(id: string, signal?: AbortSignal) {
+  return send<ChargeCode>("GET", `/charge-codes/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createChargeCode(input: ChargeCodeInput, idempotencyKey = newIdempotencyKey()) {
+  return send<ChargeCode>("POST", "/charge-codes", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Replaces everything but the code under the version read. PUT is idempotent, so no key is sent. */
+export function changeChargeCode(id: string, input: ChargeCodeInput, version: number) {
+  return send<ChargeCode>("PUT", `/charge-codes/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
+}
+
+export function listAutoCharges(
+  filters: { status?: ChargeStatus | ""; chargeCodeId?: string; legalEntityId?: string } = {},
+  options: ListOptions = {},
+) {
+  return list<AutoCharge>(
+    "/auto-charges",
+    { status: filters.status || undefined, chargeCodeId: filters.chargeCodeId, legalEntityId: filters.legalEntityId },
+    options,
+  );
+}
+
+export function getAutoCharge(id: string, signal?: AbortSignal) {
+  return send<AutoCharge>("GET", `/auto-charges/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createAutoCharge(input: AutoChargeInput, idempotencyKey = newIdempotencyKey()) {
+  return send<AutoCharge>("POST", "/auto-charges", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Replaces value, minimum, currency, window and status under the version read. */
+export function changeAutoCharge(id: string, input: AutoChargeInput, version: number) {
+  return send<AutoCharge>("PUT", `/auto-charges/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
 }

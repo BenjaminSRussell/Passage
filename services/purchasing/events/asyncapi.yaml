@@ -61,6 +61,22 @@ channels:
         $ref: '#/components/messages/CatalogPublished'
       catalogRetired:
         $ref: '#/components/messages/CatalogRetired'
+  chargecode:
+    address: passage.procurement.chargecode
+    description: Charge codes (FR-17.9); the Kafka key is the charge code id.
+    messages:
+      chargeCodeCreated:
+        $ref: '#/components/messages/ChargeCodeCreated'
+      chargeCodeChanged:
+        $ref: '#/components/messages/ChargeCodeChanged'
+  autocharge:
+    address: passage.procurement.autocharge
+    description: Auto charges that add a charge code to matching POs (FR-17.9); the Kafka key is the auto charge id.
+    messages:
+      autoChargeCreated:
+        $ref: '#/components/messages/AutoChargeCreated'
+      autoChargeChanged:
+        $ref: '#/components/messages/AutoChargeChanged'
   categoryvendor:
     address: passage.procurement.categoryvendor
     description: Vendor assignments to procurement categories (FR-17.20); the Kafka key is the assignment id.
@@ -174,6 +190,30 @@ operations:
       $ref: '#/channels/policy'
     messages:
       - $ref: '#/channels/policy/messages/policyChanged'
+  publishChargeCodeCreated:
+    action: send
+    channel:
+      $ref: '#/channels/chargecode'
+    messages:
+      - $ref: '#/channels/chargecode/messages/chargeCodeCreated'
+  publishChargeCodeChanged:
+    action: send
+    channel:
+      $ref: '#/channels/chargecode'
+    messages:
+      - $ref: '#/channels/chargecode/messages/chargeCodeChanged'
+  publishAutoChargeCreated:
+    action: send
+    channel:
+      $ref: '#/channels/autocharge'
+    messages:
+      - $ref: '#/channels/autocharge/messages/autoChargeCreated'
+  publishAutoChargeChanged:
+    action: send
+    channel:
+      $ref: '#/channels/autocharge'
+    messages:
+      - $ref: '#/channels/autocharge/messages/autoChargeChanged'
   publishCategoryVendorAssigned:
     action: send
     channel:
@@ -280,6 +320,62 @@ components:
               type: { type: string, const: dev.passage.procurement.catalog.retired.v1 }
               subject: { type: string, format: uuid, description: catalog id }
               data: { $ref: '#/components/schemas/CatalogData' }
+    ChargeCodeCreated:
+      name: ChargeCodeCreated
+      title: chargecode.created.v1
+      x-passage-type: dev.passage.procurement.chargecode.created.v1
+      summary: A charge code was created for a legal entity (FR-17.9). Carries its calculation, default value, debit and credit sides and allocation rule.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.chargecode.created.v1 }
+              subject: { type: string, format: uuid, description: charge code id }
+              data: { $ref: '#/components/schemas/ChargeCodeData' }
+    ChargeCodeChanged:
+      name: ChargeCodeChanged
+      title: chargecode.changed.v1
+      x-passage-type: dev.passage.procurement.chargecode.changed.v1
+      summary: A charge code was changed or deactivated (FR-17.9); carries the code at its new version. POs keep the sides they were entered with.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.chargecode.changed.v1 }
+              subject: { type: string, format: uuid, description: charge code id }
+              data: { $ref: '#/components/schemas/ChargeCodeData' }
+    AutoChargeCreated:
+      name: AutoChargeCreated
+      title: autocharge.created.v1
+      x-passage-type: dev.passage.procurement.autocharge.created.v1
+      summary: An auto charge was created, adding a charge code to the POs of a vendor, a vendor group or every vendor (FR-17.9).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.autocharge.created.v1 }
+              subject: { type: string, format: uuid, description: auto charge id }
+              data: { $ref: '#/components/schemas/AutoChargeData' }
+    AutoChargeChanged:
+      name: AutoChargeChanged
+      title: autocharge.changed.v1
+      x-passage-type: dev.passage.procurement.autocharge.changed.v1
+      summary: An auto charge was changed or deactivated (FR-17.9); carries it at its new version.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.autocharge.changed.v1 }
+              subject: { type: string, format: uuid, description: auto charge id }
+              data: { $ref: '#/components/schemas/AutoChargeData' }
     CategoryVendorAssigned:
       name: CategoryVendorAssigned
       title: categoryvendor.assigned.v1
@@ -812,6 +908,44 @@ components:
         error_rows: { type: integer, minimum: 0 }
         skipped_rows: { type: integer, minimum: 0, description: "Rows still undecided (ACCEPTABLE) at the commit; they stay out of the catalog." }
         catalog_version: { type: integer, minimum: 2 }
+    ChargeCodeData:
+      type: object
+      required: [charge_code_id, legal_entity_id, code, name, calc, default_value, debit_type, credit_type, allocation_rule, status, version]
+      additionalProperties: false
+      properties:
+        charge_code_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        calc: { type: string, enum: [FIXED, PER_UNIT, PERCENT] }
+        default_value: { type: string, description: decimal }
+        debit_type: { type: string, enum: [ITEM, LEDGER, VENDOR] }
+        credit_type: { type: string, enum: [LEDGER, VENDOR] }
+        debit_account_id: { type: string, format: uuid }
+        credit_account_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        allocation_rule: { type: string, enum: [QTY, AMOUNT, LINES] }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        version: { type: integer, minimum: 1 }
+        changed_by: { type: string, format: uuid }
+    AutoChargeData:
+      type: object
+      required: [auto_charge_id, legal_entity_id, charge_code_id, account_code, valid_from, status, version]
+      additionalProperties: false
+      properties:
+        auto_charge_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        charge_code_id: { type: string, format: uuid }
+        account_code: { type: string, enum: [VENDOR, GROUP, ALL] }
+        account_id: { type: string, format: uuid }
+        value: { type: string, description: decimal }
+        min_order_amount: { type: string, description: decimal }
+        currency: { type: string }
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        version: { type: integer, minimum: 1 }
+        changed_by: { type: string, format: uuid }
     CategoryVendorData:
       type: object
       required: [assignment_id, legal_entity_id, category, vendor_id, status, valid_from, version]

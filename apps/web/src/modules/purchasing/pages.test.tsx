@@ -272,7 +272,7 @@ describe("purchase orders", () => {
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "25" } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/purchase-orders/${PO_ID}`));
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    const body = JSON.parse(String((fetchMock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST") as [string, RequestInit])[1].body));
     expect(body.lines[0]).toMatchObject({ productId: PRODUCT, qty: "100", unit: "EA", priceUnit: "1" });
     expect(body.lines[0].unitPrice).toBeUndefined();
     expect(body.charges).toEqual([{ calc: "FIXED", value: "25" }]);
@@ -312,11 +312,11 @@ describe("purchase orders", () => {
     fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText("Agreement line id must be a UUID.")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([, i]) => (i as RequestInit).method === "POST")).toBe(false);
     fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: AGR_LINE } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/purchase-orders/${PO_ID}`));
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)).lines[0].agreementLineId).toBe(AGR_LINE);
+    expect(JSON.parse(String((fetchMock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST") as [string, RequestInit])[1].body)).lines[0].agreementLineId).toBe(AGR_LINE);
     expect(await screen.findByText(/at 95 % of commitment \(PRC-AGR-004\)/)).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Purchase order lines" })).getByText("Purchase agreement")).toBeInTheDocument();
   });

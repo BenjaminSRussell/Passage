@@ -78,6 +78,9 @@ type fakeStore struct {
 	// Category vendor assignments and managers (FR-17.20).
 	categories categoryLog
 
+	// Charge codes and auto charges (FR-17.9).
+	charges chargeLog
+
 	// Signing limits and their requests (FR-17.17).
 	signing signingLog
 

@@ -418,6 +418,7 @@ func repriceDocument(cur store.PurchaseOrder, plan domain.RepricePlan) (store.Pu
 	if err := priceDocument(&next, inputs, charges); err != nil {
 		return store.PurchaseOrder{}, err
 	}
+	copyChargeSides(&next, cur.Charges)
 	return next, nil
 }
 

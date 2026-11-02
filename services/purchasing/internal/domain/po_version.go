@@ -29,6 +29,8 @@ type SnapshotCharge struct {
 	Calc   string          `json:"calc"`
 	Value  decimal.Decimal `json:"value"`
 	Amount decimal.Decimal `json:"amount"`
+	// ChargeCode is the charge code the charge was entered with; empty for a charge without one.
+	ChargeCode string `json:"chargeCode,omitempty"`
 }
 
 // Snapshot is the full commercial content of a PO at one version (FR-17.8).

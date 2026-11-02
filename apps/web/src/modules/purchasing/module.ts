@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
 import { CatalogImportCreatePage, CatalogImportDetailPage, CatalogImportsPage } from "./CatalogImportPages";
 import { CatalogCreatePage, CatalogDetailPage, CatalogsPage } from "./CatalogPages";
+import { AutoChargeCreatePage, AutoChargeDetailPage, AutoChargesPage, ChargeCodeCreatePage, ChargeCodeDetailPage, ChargeCodesPage } from "./ChargePages";
 import { CategoryManagersPage, CategoryVendorCreatePage, CategoryVendorDetailPage, CategoryVendorsPage } from "./CategoryPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { DeliverySchedulePage } from "./DeliverySchedulePage";
@@ -33,7 +34,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -88,6 +89,12 @@ const purchasing: PassageModule = {
     { path: "/purchasing/category-vendors/new", element: createElement(CategoryVendorCreatePage), handle: { title: "New category vendor assignment" } },
     { path: "/purchasing/category-vendors/:id", element: createElement(CategoryVendorDetailPage), handle: { title: "Category vendor assignment" } },
     { path: "/purchasing/category-managers", element: createElement(CategoryManagersPage) },
+    { path: "/purchasing/charge-codes", element: createElement(ChargeCodesPage) },
+    { path: "/purchasing/charge-codes/new", element: createElement(ChargeCodeCreatePage), handle: { title: "New charge code" } },
+    { path: "/purchasing/charge-codes/:id", element: createElement(ChargeCodeDetailPage), handle: { title: "Charge code" } },
+    { path: "/purchasing/auto-charges", element: createElement(AutoChargesPage) },
+    { path: "/purchasing/auto-charges/new", element: createElement(AutoChargeCreatePage), handle: { title: "New auto charge" } },
+    { path: "/purchasing/auto-charges/:id", element: createElement(AutoChargeDetailPage), handle: { title: "Auto charge" } },
     { path: "/purchasing/signing-limits", element: createElement(SigningLimitsPage) },
     { path: "/purchasing/signing-limits/:id", element: createElement(SigningLimitDetailPage), handle: { title: "Signing limit" } },
     { path: "/purchasing/signing-limit-requests", element: createElement(SigningLimitRequestsPage) },
@@ -109,6 +116,7 @@ const purchasing: PassageModule = {
     { label: "Price lookup", to: "/purchasing/pricing", duty: "PurchaseOrderMaintain" },
     { label: "Catalogs", to: "/purchasing/catalogs", duty: "PurchaseOrderInquire" },
     { label: "Category vendors", to: "/purchasing/category-vendors", duty: "PurchaseOrderInquire" },
+    { label: "Charge codes", to: "/purchasing/charge-codes", duty: "PurchaseOrderInquire" },
     { label: "Signing limits", to: "/purchasing/signing-limits", duty: "PurchaseOrderInquire" },
     { label: "Policies", to: "/purchasing/policies", duty: "PurchaseOrderInquire" },
   ],

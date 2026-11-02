@@ -109,6 +109,9 @@ func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, 
 		if err := applyLines(ctx, tx, next, removed); err != nil {
 			return PurchaseOrder{}, editResult{}, err
 		}
+		if err := addAutoChargeCodes(ctx, tx, id, next.AutoChargeCodes); err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
 		next.ApprovalStatus = status
 		if err := updateHeader(ctx, tx, next); err != nil {
 			return PurchaseOrder{}, editResult{}, err
@@ -530,7 +533,7 @@ func snapshotOf(po PurchaseOrder, lines []PurchaseOrderLine) domain.Snapshot {
 	}
 	charges := make([]domain.SnapshotCharge, 0, len(po.Charges))
 	for _, c := range po.Charges {
-		charges = append(charges, domain.SnapshotCharge{Calc: c.Calc, Value: c.Value, Amount: c.Amount})
+		charges = append(charges, domain.SnapshotCharge{Calc: c.Calc, Value: c.Value, Amount: c.Amount, ChargeCode: c.ChargeCode})
 	}
 	return domain.NewSnapshot(po.Currency, po.Total, out, charges)
 }
@@ -594,8 +597,7 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 		return err
 	}
 	for _, c := range next.Charges {
-		if _, err := tx.Exec(ctx, `insert into purchase_order_charge (tenant_id, purchase_order_id, seq, calc, value, amount)
-			values ($1, $2, $3, $4, $5, $6)`, p.TenantID, next.ID, c.Seq, c.Calc, c.Value, c.Amount); err != nil {
+		if err := insertCharge(ctx, tx, next.ID, c); err != nil {
 			return err
 		}
 	}
@@ -607,6 +609,19 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 
 // updateHeader writes approval status, confirmed version number, site,
 // warehouse and totals, and bumps the row version used as the ETag.
+// addAutoChargeCodes adds codes to the charge codes auto charges have added to the PO (FR-17.9);
+// the set only grows, so applyAutoCharges never adds a code twice.
+func addAutoChargeCodes(ctx context.Context, tx pgx.Tx, id string, codes []string) error {
+	if len(codes) == 0 {
+		return nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	_, err := tx.Exec(ctx, `update purchase_order set auto_charge_codes = array(
+		select c from unnest(auto_charge_codes || $3::uuid[]) with ordinality as t(c, n) group by c order by min(n))
+		where tenant_id = $1 and id = $2`, p.TenantID, id, codes)
+	return err
+}
+
 func updateHeader(ctx context.Context, tx pgx.Tx, po PurchaseOrder) error {
 	p, _ := tenant.FromContext(ctx)
 	_, err := tx.Exec(ctx, `update purchase_order set approval_status = $3, version_no = $4, site_id = $5, warehouse_id = $6,

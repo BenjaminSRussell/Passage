@@ -15,6 +15,8 @@ info:
     the purchasing policy per legal entity (change management default, PO four-eyes, invoice before receipt).
     Slice 13 adds signing limits (FR-17.17): requests, approval, recertification, and the spending and approval
     limit rules on requisition submit and PO approval.
+    Slice 15 adds charge codes and auto charges (FR-17.9): a PO charge may name a charge code that supplies its
+    calculation, value and debit and credit sides, and applyAutoCharges adds the charges the auto charges give the order.
     Mounted at /v1/procurement. The browser reaches the same paths under /api/v1/procurement
     through the web BFF. Errors are RFC 9457 problem details; see README for codes.
 servers:
@@ -218,6 +220,94 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/CategoryVendorAssignment' } }
         nextCursor: { type: string, format: uuid }
+    ChargeCode:
+      type: object
+      required: [id, legalEntityId, code, name, calc, defaultValue, debitType, creditType, allocationRule, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{1,20}$' }
+        name: { type: string, maxLength: 200 }
+        calc: { type: string, enum: [FIXED, PER_UNIT, PERCENT] }
+        defaultValue: { $ref: '#/components/schemas/Money' }
+        debitType: { type: string, enum: [ITEM, LEDGER, VENDOR], description: "ITEM capitalizes into inventory cost, LEDGER books to debitAccountId, VENDOR charges vendorId." }
+        creditType: { type: string, enum: [LEDGER, VENDOR], description: "LEDGER credits creditAccountId; VENDOR is payable to vendorId, or to the PO vendor when none." }
+        debitAccountId: { type: string, format: uuid }
+        creditAccountId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        allocationRule: { type: string, enum: [QTY, AMOUNT, LINES] }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    ChargeCodeInput:
+      type: object
+      required: [legalEntityId, code, name, calc]
+      additionalProperties: false
+      description: On PUT only name, calc, defaultValue, the sides, allocationRule and status are read; legalEntityId and code are ignored because a code does not change. Left-out fields take the defaults below, so a PUT replaces them.
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, description: "Trimmed and upper-cased; 1 to 20 characters of A-Z, 0-9, _ and -." }
+        name: { type: string, maxLength: 200 }
+        calc: { type: string, enum: [FIXED, PER_UNIT, PERCENT] }
+        defaultValue: { $ref: '#/components/schemas/Money', description: "Default 0; at most 100 for PERCENT." }
+        debitType: { type: string, enum: [ITEM, LEDGER, VENDOR], default: ITEM }
+        creditType: { type: string, enum: [LEDGER, VENDOR], default: VENDOR }
+        debitAccountId: { type: string, format: uuid, description: "A wave 11 ledger account; required for a LEDGER debit and refused for another debit. Not checked against the chart of accounts yet." }
+        creditAccountId: { type: string, format: uuid, description: "A wave 11 ledger account; required for a LEDGER credit and refused for a VENDOR credit. Not checked against the chart of accounts yet." }
+        vendorId: { type: string, format: uuid, description: "Required for a VENDOR debit (which then needs a LEDGER credit); optional for a VENDOR credit, which is payable to this vendor instead of the PO vendor; refused when neither side is VENDOR." }
+        allocationRule: { type: string, enum: [QTY, AMOUNT, LINES], default: AMOUNT }
+        status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
+    ChargeCodePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ChargeCode' } }
+        nextCursor: { type: string, format: uuid }
+    AutoCharge:
+      type: object
+      required: [id, legalEntityId, chargeCodeId, accountCode, validFrom, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        chargeCodeId: { type: string, format: uuid }
+        accountCode: { type: string, enum: [VENDOR, GROUP, ALL] }
+        accountId: { type: string, format: uuid, description: "The vendor or vendor group; absent for ALL." }
+        value: { $ref: '#/components/schemas/Money', description: "Overrides the charge code's default value." }
+        minOrderAmount: { $ref: '#/components/schemas/Money', description: "Applies only to POs in currency whose lines total at least this after discount and before any charge." }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        validFrom: { $ref: '#/components/schemas/Day' }
+        validTo: { $ref: '#/components/schemas/Day' }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    AutoChargeInput:
+      type: object
+      required: [legalEntityId, chargeCodeId, accountCode]
+      additionalProperties: false
+      description: On PUT only value, minOrderAmount, currency, validFrom, validTo and status are read and replace the stored ones; the charge code and the key do not change.
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        chargeCodeId: { type: string, format: uuid, description: "An ACTIVE charge code of the same legal entity (PRC-CHG-004)." }
+        accountCode: { type: string, enum: [VENDOR, GROUP, ALL] }
+        accountId: { type: string, format: uuid, description: "Required for VENDOR and GROUP, empty for ALL." }
+        value: { $ref: '#/components/schemas/Money' }
+        minOrderAmount: { $ref: '#/components/schemas/Money', description: "Needs currency." }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: "Required for a FIXED or PER_UNIT charge code (an amount of money) and with minOrderAmount." }
+        validFrom: { $ref: '#/components/schemas/Day', description: "Defaults to today." }
+        validTo: { $ref: '#/components/schemas/Day' }
+        status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
+    AutoChargePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AutoCharge' } }
+        nextCursor: { type: string, format: uuid }
     CategoryManager:
       type: object
       required: [id, legalEntityId, category, workerId, createdAt]
@@ -360,8 +450,9 @@ components:
         nextCursor: { type: string, format: uuid }
     PriceChargeInput:
       type: object
-      required: [calc, value]
+      description: A header charge. Give calc and value, or a chargeCodeId whose calc and default value apply (a value given then overrides the default; a calc given must be the code's).
       properties:
+        chargeCodeId: { type: string, format: uuid, description: "An ACTIVE charge code of the PO's legal entity (PRC-CHG-004 otherwise). The code's debit and credit sides, vendor and allocation rule are copied to the charge." }
         calc: { type: string, enum: [FIXED, PER_UNIT, PERCENT] }
         value: { $ref: '#/components/schemas/Money' }
     PurchaseOrderLineInput:
@@ -399,6 +490,10 @@ components:
         charges:
           type: array
           items: { $ref: '#/components/schemas/PriceChargeInput' }
+        applyAutoCharges:
+          type: boolean
+          default: false
+          description: "Adds, after the charges given, the charge of every ACTIVE auto charge valid today that applies to the vendor (or its group), the PO currency (an auto charge in another currency is skipped) and the minimum order amount (compared with the lines after discount, before any charge), once per charge code and at most 20 (FR-17.9). A code already among the charges, or one an auto charge added to the PO before (autoChargeCodes), is not added again, so a charge the buyer removed stays removed. The charges count towards the total that approval and signing limits check."
     PurchaseOrderLine:
       type: object
       properties:
@@ -509,6 +604,19 @@ components:
               calc: { type: string }
               value: { $ref: '#/components/schemas/Money' }
               amount: { $ref: '#/components/schemas/Money' }
+              chargeCodeId: { type: string, format: uuid }
+              chargeCode: { type: string, description: "The code string the charge was entered with; absent for a charge without a code." }
+              debitType: { type: string, enum: [ITEM, LEDGER, VENDOR], description: "Copied from the charge code when entered; ITEM for a charge without one." }
+              creditType: { type: string, enum: [LEDGER, VENDOR] }
+              debitAccountId: { type: string, format: uuid }
+              creditAccountId: { type: string, format: uuid }
+              vendorId: { type: string, format: uuid, description: "The vendor a VENDOR side is payable to; the PO vendor when absent." }
+              allocationRule: { type: string, enum: [QTY, AMOUNT, LINES], description: "How wave 18 allocates the charge to lines at invoice time." }
+              auto: { type: boolean, description: "True when an auto charge added the charge." }
+        autoChargeCodes:
+          type: array
+          description: The charge codes auto charges have added to the PO (FR-17.9); applyAutoCharges does not add them again. The set only grows.
+          items: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         warnings:
@@ -1636,9 +1744,9 @@ paths:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '404': { description: Requisition line (PRC-REQ-LINE-NOT-FOUND) or agreement line (PRC-AGR-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition line (PRC-REQ-LINE-NOT-FOUND), agreement line (PRC-AGR-NOT-FOUND) or charge code (PRC-CHG-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: A requisition line is not OPEN on an APPROVED requisition (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit), vendor not assigned to (or BLOCKED for) the category of a line under HARD category access (PRC-CAT-002), a category that differs from the requisition line's (COM-0001)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation, missing price (PRC-PRICE-001), requisition of another legal entity (PRC-REQ-005), agreement rules (PRC-AGR-003 HARD limit, PRC-AGR-005 validity, PRC-AGR-006 party, PRC-AGR-007 not EFFECTIVE, PRC-AGR-008 product or unit), vendor not assigned to (or BLOCKED for) the category of a line under HARD category access (PRC-CAT-002), a category that differs from the requisition line's (COM-0001), a charge code that is inactive or of another legal entity (PRC-CHG-004) or a charge calc that differs from its code's (PRC-CHG-005)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     get:
       operationId: listPurchaseOrders
       x-passage-duty: PurchaseOrderInquire
@@ -1689,6 +1797,9 @@ paths:
         back to the confirmed content drops it. APPROVED, FINALIZED and CANCELLED orders cannot be edited.
         Category access (FR-17.20): an existing line keeps its category, and the lines the edit adds are
         checked against the vendor (HARD refuses with PRC-CAT-002, SOFT and PROVISIONAL warn in warnings).
+        Charges (FR-17.9): a charge that names a chargeCodeId the PO already carries keeps the calculation, value (unless one is given)
+        and debit and credit sides it was entered with, even if the code has since been changed or deactivated; applyAutoCharges adds
+        only the codes that are not among the charges and that no auto charge added to the PO before, so a removed auto charge stays removed.
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -3257,6 +3368,199 @@ paths:
         '404': { description: Assignment not found (PRC-CAT-VENDOR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match is not the stored version (PRC-CAT-013), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation - status or window (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/charge-codes:
+    post:
+      operationId: createChargeCode
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Create a charge code of a legal entity (FR-17.9; duty ProcurementPolicyMaintain)
+      description: >-
+        A charge code names a kind of charge (freight, handling, customs) with its calculation, default value, debit and credit sides
+        and allocation rule. Left-out sides default to the PRD's: debited to the item, payable to the vendor, allocated by amount.
+        Writes chargecode.created.v1. A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChargeCodeInput' }
+      responses:
+        '201':
+          description: The charge code at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeCode' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The legal entity already has a charge code with this code (PRC-CHG-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - code, calc, value, sides or ids (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listChargeCodes
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: List charge codes, newest first (FR-17.9)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [ACTIVE, INACTIVE] } }
+        - { name: q, in: query, required: false, description: Text found in the code or the name, schema: { type: string } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeCodePage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/charge-codes/{id}:
+    get:
+      operationId: getChargeCode
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: Read one charge code (FR-17.9)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The charge code
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeCode' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Charge code not found (PRC-CHG-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: changeChargeCode
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Change a charge code under If-Match (FR-17.9; duty ProcurementPolicyMaintain)
+      description: >-
+        PUT is idempotent, so no Idempotency-Key is taken. It replaces name, calc, defaultValue, the sides, allocationRule and status;
+        the code and the legal entity do not change, and calc does not change once auto charges use the code (409 PRC-CHG-006). POs
+        already carry a copy of the sides they were entered with, so a change does not move them. Writes chargecode.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChargeCodeInput' }
+      responses:
+        '200':
+          description: The charge code at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeCode' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Charge code not found (PRC-CHG-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The calculation of a charge code that auto charges use cannot change (PRC-CHG-006), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-CHG-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/auto-charges:
+    post:
+      operationId: createAutoCharge
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Create an auto charge that adds a charge code to matching POs (FR-17.9; duty ProcurementPolicyMaintain)
+      description: >-
+        An auto charge is keyed on one vendor, one vendor group or every vendor of the legal entity, and may carry a value that overrides the
+        code's default and a minimum order amount. It applies when a PO is created or edited with applyAutoCharges. A FIXED or PER_UNIT charge
+        is an amount of money, so it needs a currency and applies only to POs in that currency. Writes autocharge.created.v1.
+        A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AutoChargeInput' }
+      responses:
+        '201':
+          description: The auto charge at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoCharge' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Charge code not found (PRC-CHG-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), the charge code is inactive or of another legal entity (PRC-CHG-004), or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listAutoCharges
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: List auto charges, newest first (FR-17.9)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: chargeCodeId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [ACTIVE, INACTIVE] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoChargePage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/auto-charges/{id}:
+    get:
+      operationId: getAutoCharge
+      x-passage-duty: ProcurementPolicyMaintain or PurchaseOrderInquire
+      summary: Read one auto charge (FR-17.9)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The auto charge
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoCharge' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Auto charge not found (PRC-CHG-AUTO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: changeAutoCharge
+      x-passage-duty: ProcurementPolicyMaintain
+      summary: Change an auto charge under If-Match (FR-17.9; duty ProcurementPolicyMaintain)
+      description: >-
+        PUT is idempotent, so no Idempotency-Key is taken. It replaces value, minOrderAmount, currency, validFrom, validTo and status;
+        the charge code and the key (accountCode, accountId) do not change. Writes autocharge.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AutoChargeInput' }
+      responses:
+        '200':
+          description: The auto charge at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoCharge' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty ProcurementPolicyMaintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Auto charge not found (PRC-CHG-AUTO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-CHG-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/category-managers:
     post:

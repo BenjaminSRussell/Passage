@@ -137,6 +137,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
 | POST `/category-vendors`, GET `/category-vendors`, GET `/category-vendors/{id}`, PUT `/category-vendors/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Vendor assignments to a procurement category (FR-17.20): status APPROVED, PROVISIONAL or BLOCKED and a validity window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CAT-013) and keeps the stored `validFrom` when left out; one assignment per vendor and category (409 PRC-CAT-011); writes `categoryvendor.assigned.v1` and `categoryvendor.changed.v1` |
 | POST `/category-managers`, GET `/category-managers`, DELETE `/category-managers/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Workers who manage a category (FR-17.20); POST needs an Idempotency-Key (409 PRC-CAT-012 for the same worker twice); writes `categorymanager.assigned.v1` and `categorymanager.removed.v1` |
+| POST `/charge-codes`, GET `/charge-codes`, GET `/charge-codes/{id}`, PUT `/charge-codes/{id}`, POST `/auto-charges`, GET `/auto-charges`, GET `/auto-charges/{id}`, PUT `/auto-charges/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Charge codes (FR-17.9: calculation, default value, debit ITEM/LEDGER/VENDOR and credit LEDGER/VENDOR sides, allocation rule QTY/AMOUNT/LINES) and auto charges by vendor, vendor group or every vendor with a value, minimum order amount, currency and window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CHG-002 and PRC-CHG-003); a duplicate code is 409 PRC-CHG-001; writes `chargecode.created.v1`, `chargecode.changed.v1`, `autocharge.created.v1` and `autocharge.changed.v1`; a calc change on a code that auto charges use is 409 PRC-CHG-006. A PO charge may carry `chargeCodeId` and the PO body `applyAutoCharges`, which adds each code once per PO (`autoChargeCodes`) |
 | POST `/signing-limit-requests`, GET `/signing-limit-requests`, GET `/signing-limit-requests/{id}` | RequisitionCreate to request; reads need SigningLimitApprove or PurchaseOrderInquire | Requests for a worker's signing limit (FR-17.17) per document type and currency with a spending and an approval limit; POST needs an Idempotency-Key |
 | POST `/signing-limit-requests/{id}:approve`, `:reject` | SigningLimitApprove | Idempotency-Key and If-Match required (412 PRC-SL-005); approving writes or changes the worker's limit and `signinglimit.changed.v1` in one transaction; a decided request is 409 PRC-SL-004; the requester and the worker cannot decide (403 PRC-SL-003) |
 | GET `/signing-limits`, GET `/signing-limits/{id}`, GET `/signing-limits/evaluation` | SigningLimitApprove or PurchaseOrderInquire | Limits (filter by worker, document type, `expired=true`); the evaluation shows what a limit does to an amount as requester and as approver |
@@ -497,6 +498,12 @@ store codes are returned as the `code` field.
 | PRC-CAT-011 | 409 | The vendor already has an assignment for the category (change that one) |
 | PRC-CAT-012 | 409 | The worker already manages the category |
 | PRC-CAT-013 | 412 | If-Match is not the category vendor assignment's version |
+| PRC-CHG-001 | 409 | The legal entity already has a charge code with this code |
+| PRC-CHG-002 | 412 | If-Match is not the charge code's version |
+| PRC-CHG-003 | 412 | If-Match is not the auto charge's version |
+| PRC-CHG-004 | 422 | The charge code is inactive or belongs to another legal entity |
+| PRC-CHG-005 | 422 | A PO charge's calculation differs from its charge code's |
+| PRC-CHG-006 | 409 | The calculation of a charge code that auto charges use cannot change |
 | PRC-DS-001 | 422 | The delivery schedule rows do not add up to the line quantity |
 | PRC-DS-002 | 422 | The PO is not DRAFT or REJECTED (replace, delete) or not CONFIRMED (confirmed date), or the line is cancelled |
 | PRC-DS-003 | 422 | The PO's delivery schedules would hold more than 1,000 rows together |

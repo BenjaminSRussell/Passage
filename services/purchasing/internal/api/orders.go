@@ -24,6 +24,15 @@ type orderBody struct {
 	ChangeManagement *bool           `json:"changeManagement,omitempty"`
 	Lines            []orderLineBody `json:"lines"`
 	Charges          []chargeBody    `json:"charges,omitempty"`
+	// ApplyAutoCharges adds the charges the active auto charges give this vendor and order (FR-17.9).
+	ApplyAutoCharges bool `json:"applyAutoCharges,omitempty"`
+
+	// keepCharges are the charges the PO already carries, by charge code id: an edit keeps the
+	// calculation, value and sides they were entered with.
+	keepCharges map[string]store.PurchaseOrderCharge
+	// autoApplied are the charge codes auto charges added to the PO before: applyAutoCharges on an
+	// edit does not add them again, so a charge the buyer removed stays removed.
+	autoApplied map[string]bool
 }
 
 type orderLineBody struct {
@@ -55,8 +64,11 @@ type orderLineBody struct {
 }
 
 type chargeBody struct {
-	Calc  string `json:"calc"`
-	Value string `json:"value"`
+	// ChargeCodeID names a charge code (FR-17.9): calc and value then default to the code's and
+	// the code's debit and credit sides, vendor and allocation rule are copied to the charge.
+	ChargeCodeID string `json:"chargeCodeId,omitempty"`
+	Calc         string `json:"calc,omitempty"`
+	Value        string `json:"value,omitempty"`
 }
 
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -158,24 +170,15 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 		out.Lines = append(out.Lines, line)
 		inputs = append(inputs, in)
 	}
-	charges := make([]domain.ChargeInput, 0, len(body.Charges))
-	for i, c := range body.Charges {
-		field := "charges[" + strconv.Itoa(i) + "]."
-		if c.Calc != domain.CalcFixed && c.Calc != domain.CalcPerUnit && c.Calc != domain.CalcPercent {
-			return store.PurchaseOrder{}, invalid(field+"calc", "must be FIXED, PER_UNIT or PERCENT")
-		}
-		v, err := decimalField(field+"value", c.Value, "")
-		if err != nil {
-			return store.PurchaseOrder{}, err
-		}
-		if v.Sign() < 0 {
-			return store.PurchaseOrder{}, invalid(field+"value", "must not be negative")
-		}
-		charges = append(charges, domain.ChargeInput{Calc: c.Calc, Value: v})
+	charges, sides, autoCodes, err := a.orderCharges(ctx, body, inputs)
+	if err != nil {
+		return store.PurchaseOrder{}, err
 	}
 	if err := priceDocument(&out, inputs, charges); err != nil {
 		return store.PurchaseOrder{}, err
 	}
+	copyChargeSides(&out, sides)
+	out.AutoChargeCodes = autoCodes
 	return out, nil
 }
 

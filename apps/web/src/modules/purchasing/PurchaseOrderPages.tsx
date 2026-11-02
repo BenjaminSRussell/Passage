@@ -20,6 +20,7 @@ import {
   describeProblem,
   editPurchaseOrder,
   getPurchaseOrder,
+  listChargeCodes,
   listDeliverySchedules,
   listInvoicingPlans,
   listPurchaseOrderVersions,
@@ -44,6 +45,7 @@ import {
   ShortId,
   StatusBadge,
   currencyPattern,
+  dash,
   datePattern,
   decimalPattern,
   money,
@@ -166,6 +168,10 @@ interface ChargeDraft {
   key: string;
   calc: ChargeCalc;
   value: string;
+  /** The charge code the charge takes its calculation and debit and credit sides from (FR-17.9). */
+  chargeCodeId?: string;
+  /** The code string of a charge already on the order, shown when the code is no longer active. */
+  chargeCode?: string;
 }
 
 function emptyLine(): LineDraft {
@@ -240,6 +246,7 @@ function toInput(
   header: { legalEntityId: string; vendorId: string; currency: string; siteId?: string; warehouseId?: string },
   lines: LineDraft[],
   charges: ChargeDraft[],
+  applyAutoCharges = false,
 ): PurchaseOrderInput {
   const opt = (v: string) => (v.trim() === "" ? undefined : v.trim());
   return {
@@ -260,7 +267,13 @@ function toInput(
       // An existing line keeps its agreement link; the service refuses a changed one.
       agreementLineId: l.lineNo === undefined ? opt(l.agreementLineId) : undefined,
     })),
-    charges: charges.length > 0 ? charges.map((c) => ({ calc: c.calc, value: c.value.trim() })) : undefined,
+    charges:
+      charges.length > 0
+        ? charges.map((c) =>
+            c.chargeCodeId ? { chargeCodeId: c.chargeCodeId, value: c.value.trim() } : { calc: c.calc, value: c.value.trim() },
+          )
+        : undefined,
+    applyAutoCharges: applyAutoCharges || undefined,
   };
 }
 
@@ -369,10 +382,39 @@ function LinesCard({
   );
 }
 
-/** Header charges of the create and edit forms. */
-function ChargesCard({ charges, setCharges, errors }: { charges: ChargeDraft[]; setCharges: (fn: (cs: ChargeDraft[]) => ChargeDraft[]) => void; errors: Errors }) {
+/** Header charges of the create and edit forms; a charge may take its calculation and sides from a charge code (FR-17.9). */
+function ChargesCard({
+  charges,
+  setCharges,
+  errors,
+  legalEntityId,
+  applyAuto,
+  setApplyAuto,
+  autoAdded = 0,
+}: {
+  charges: ChargeDraft[];
+  setCharges: (fn: (cs: ChargeDraft[]) => ChargeDraft[]) => void;
+  errors: Errors;
+  legalEntityId: string;
+  applyAuto: boolean;
+  setApplyAuto: (on: boolean) => void;
+  /** How many charge codes auto charges added to the order before (edit only). */
+  autoAdded?: number;
+}) {
+  // The codes are fetched once the order has a charge to pick one for.
+  const known = uuidPattern.test(legalEntityId) && charges.length > 0;
+  const codes = useResource(
+    async (signal) => (known ? ((await listChargeCodes({ status: "ACTIVE", legalEntityId }, { signal })).items ?? []) : []),
+    [legalEntityId, known],
+  );
+  const options = codes.data ?? [];
   const updateCharge = (index: number, patch: Partial<ChargeDraft>) =>
     setCharges((cs) => cs.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  const pickCode = (index: number, id: string) => {
+    const code = options.find((o) => o.id === id);
+    if (id === "") updateCharge(index, { chargeCodeId: undefined, chargeCode: undefined });
+    else if (code) updateCharge(index, { chargeCodeId: id, chargeCode: code.code, calc: code.calc, value: code.defaultValue });
+  };
   return (
     <Card
       title="Charges"
@@ -383,32 +425,63 @@ function ChargesCard({ charges, setCharges, errors }: { charges: ChargeDraft[]; 
       }
     >
       {charges.length === 0 ? <p className={styles.muted}>No header charges. Freight, handling and fees go here.</p> : null}
-      {charges.map((charge, i) => (
-        <fieldset key={charge.key} className={styles.lineCard} aria-label={`Charge ${i + 1}`}>
-          <div className={styles.lineHead}>
-            <p className={styles.lineTitle}>Charge {i + 1}</p>
-            <Button size="sm" variant="ghost" onClick={() => setCharges((cs) => cs.filter((_, j) => j !== i))}>
-              Remove charge {i + 1}
-            </Button>
-          </div>
-          <div className={styles.grid}>
-            <FormField id={`po-charge-${i}-calc`} label="Calculation">
-              {(c) => (
-                <Select {...c} value={charge.calc} onChange={(e) => updateCharge(i, { calc: e.target.value as ChargeCalc })}>
-                  {CALCS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </FormField>
-            <FormField id={`po-charge-${i}-value`} label="Value" error={errors[`charges[${i}].value`]}>
-              {(c) => <Input {...c} inputMode="decimal" value={charge.value} onChange={(e) => updateCharge(i, { value: e.target.value })} />}
-            </FormField>
-          </div>
-        </fieldset>
-      ))}
+      {charges.map((charge, i) => {
+        const coded = charge.chargeCodeId !== undefined;
+        return (
+          <fieldset key={charge.key} className={styles.lineCard} aria-label={`Charge ${i + 1}`}>
+            <div className={styles.lineHead}>
+              <p className={styles.lineTitle}>Charge {i + 1}</p>
+              <Button size="sm" variant="ghost" onClick={() => setCharges((cs) => cs.filter((_, j) => j !== i))}>
+                Remove charge {i + 1}
+              </Button>
+            </div>
+            <div className={styles.grid}>
+              {options.length > 0 || coded ? (
+                <FormField id={`po-charge-${i}-code`} label="Charge code" optional hint="Sets the calculation and the debit and credit sides">
+                  {(c) => (
+                    <Select {...c} value={charge.chargeCodeId ?? ""} onChange={(e) => pickCode(i, e.target.value)}>
+                      <option value="">None</option>
+                      {coded && !options.some((o) => o.id === charge.chargeCodeId) ? (
+                        <option value={charge.chargeCodeId}>{charge.chargeCode ? `${charge.chargeCode} (on this order)` : "Code on this order"}</option>
+                      ) : null}
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.code} - {o.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+              ) : null}
+              <FormField id={`po-charge-${i}-calc`} label="Calculation">
+                {(c) => (
+                  <Select {...c} disabled={coded} value={charge.calc} onChange={(e) => updateCharge(i, { calc: e.target.value as ChargeCalc })}>
+                    {CALCS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+              <FormField id={`po-charge-${i}-value`} label="Value" error={errors[`charges[${i}].value`]}>
+                {(c) => <Input {...c} inputMode="decimal" value={charge.value} onChange={(e) => updateCharge(i, { value: e.target.value })} />}
+              </FormField>
+            </div>
+          </fieldset>
+        );
+      })}
+      {codes.error ? <p className={styles.muted}>Charge codes could not be loaded; charges can still be entered by calculation.</p> : null}
+      <div className={styles.checkboxRow}>
+        <Input id="po-apply-auto-charges" type="checkbox" checked={applyAuto} onChange={(e) => setApplyAuto(e.target.checked)} />
+        <label htmlFor="po-apply-auto-charges">Add the charges from auto charges that apply to this vendor and order when saving</label>
+      </div>
+      {autoAdded > 0 ? (
+        <p className={styles.muted}>
+          Auto charges have added {autoAdded === 1 ? "a charge code" : `${autoAdded} charge codes`} to this order before; they are not added again, so a
+          charge you removed stays removed.
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -421,10 +494,11 @@ export function PurchaseOrderCreatePage() {
   const [currency, setCurrency] = useState("USD");
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [charges, setCharges] = useState<ChargeDraft[]>([]);
+  const [applyAuto, setApplyAuto] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  const key = useMemo(() => newIdempotencyKey(), [legalEntityId, vendorId, currency, lines, charges]);
+  const key = useMemo(() => newIdempotencyKey(), [legalEntityId, vendorId, currency, lines, charges, applyAuto]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -436,7 +510,7 @@ export function PurchaseOrderCreatePage() {
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const { body } = await createPurchaseOrder(toInput({ legalEntityId: le, vendorId: vendor, currency }, lines, charges), key);
+      const { body } = await createPurchaseOrder(toInput({ legalEntityId: le, vendorId: vendor, currency }, lines, charges, applyAuto), key);
       navigate(`/purchasing/purchase-orders/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -468,7 +542,14 @@ export function PurchaseOrderCreatePage() {
           </div>
         </Card>
         <LinesCard lines={lines} setLines={setLines} errors={errors} />
-        <ChargesCard charges={charges} setCharges={setCharges} errors={errors} />
+        <ChargesCard
+          charges={charges}
+          setCharges={setCharges}
+          errors={errors}
+          legalEntityId={legalEntityId.trim()}
+          applyAuto={applyAuto}
+          setApplyAuto={setApplyAuto}
+        />
         <Alert tone="danger" live="alert">
           {failure ? `${failure.message} (${failure.code})` : null}
         </Alert>
@@ -505,8 +586,9 @@ function EditForm({ po }: { po: PurchaseOrder }) {
   const navigate = useNavigate();
   const [lines, setLines] = useState<LineDraft[]>(() => po.lines.filter((l) => l.status !== "CANCELLED").map(draftOf));
   const [charges, setCharges] = useState<ChargeDraft[]>(() =>
-    po.charges.map((c) => ({ key: newIdempotencyKey(), calc: c.calc, value: c.value })),
+    po.charges.map((c) => ({ key: newIdempotencyKey(), calc: c.calc, value: c.value, chargeCodeId: c.chargeCodeId, chargeCode: c.chargeCode })),
   );
+  const [applyAuto, setApplyAuto] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
@@ -520,7 +602,7 @@ function EditForm({ po }: { po: PurchaseOrder }) {
     setBusy(true);
     try {
       const header = { legalEntityId: po.legalEntityId, vendorId: po.vendorId, currency: po.currency, siteId: po.siteId, warehouseId: po.warehouseId };
-      const { body } = await editPurchaseOrder(po.id, toInput(header, lines, charges), po.rowVersion);
+      const { body } = await editPurchaseOrder(po.id, toInput(header, lines, charges, applyAuto), po.rowVersion);
       navigate(`/purchasing/purchase-orders/${po.id}`, { state: { notice: editOutcome(po, body), warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -545,7 +627,15 @@ function EditForm({ po }: { po: PurchaseOrder }) {
         />
       </Card>
       <LinesCard lines={lines} setLines={setLines} errors={errors} editing />
-      <ChargesCard charges={charges} setCharges={setCharges} errors={errors} />
+      <ChargesCard
+        charges={charges}
+        setCharges={setCharges}
+        errors={errors}
+        legalEntityId={po.legalEntityId}
+        applyAuto={applyAuto}
+        setApplyAuto={setApplyAuto}
+        autoAdded={po.autoChargeCodes?.length ?? 0}
+      />
       <Alert tone="danger" live="alert">
         {failure
           ? failure.code === "PRC-PO-009"
@@ -1003,8 +1093,11 @@ export function PurchaseOrderDetailPage() {
         label="Charges"
         columns={[
           { key: "seq", header: "Charge", align: "end" },
+          { key: "chargeCode", header: "Code", mono: true, render: (c) => (c.chargeCode ? `${c.chargeCode}${c.auto ? " (auto)" : ""}` : dash) },
           { key: "calc", header: "Calculation", render: (c) => statusLabel(c.calc) },
           { key: "value", header: "Value", align: "end", mono: true },
+          { key: "sides", header: "Debit / credit", render: (c) => (c.debitType && c.creditType ? `${statusLabel(c.debitType)} / ${statusLabel(c.creditType)}` : dash) },
+          { key: "allocationRule", header: "Allocated by", render: (c) => (c.allocationRule ? statusLabel(c.allocationRule) : dash) },
           { key: "amount", header: "Amount", align: "end", render: (c) => money(c.amount, po.currency) },
         ]}
         rows={po.charges}
