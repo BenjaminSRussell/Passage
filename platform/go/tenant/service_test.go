@@ -666,14 +666,20 @@ func TestCloseMayMintOnlyItsYearEndLedgerDuties(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	closer, _ := tenant.NewServiceSigner("close", priv)
 	user := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}
-	for _, duty := range []string{"ledger.ledger.lookup", "ledger.account.lookup", "ledger.balance.read", "ledger.entry.post", "ledger.journal.reverse"} {
+	for _, duty := range []string{"ledger.ledger.lookup", "ledger.account.lookup", "ledger.balance.read", "ledger.entry.post", "ledger.journal.reverse", "ledger.period.postclosed"} {
 		if _, err := closer.MintDuties("ledger", user, validLE, []string{duty}); err != nil {
 			t.Errorf("%s: %v", duty, err)
 		}
 	}
-	for _, duty := range []string{"ledger.period.postclosed", "ledger.ledger.write", "ledger.setup.write", "ledger.journal.post"} {
+	for _, duty := range []string{"ledger.journal.postdirect", "ledger.ledger.write", "ledger.setup.write", "ledger.journal.post"} {
 		if _, err := closer.MintDuties("ledger", user, validLE, []string{duty}); !errors.Is(err, tenant.ErrNoServiceGrant) {
 			t.Errorf("%s must not be grantable to close: %v", duty, err)
+		}
+	}
+	for _, caller := range []string{"receiving", "payables", "production", "eam", "assets"} {
+		signer, _ := tenant.NewServiceSigner(caller, priv)
+		if _, err := signer.MintDuties("ledger", user, validLE, []string{"ledger.period.postclosed"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+			t.Errorf("%s must not be able to post into a closed period: %v", caller, err)
 		}
 	}
 	allScope := tenant.Principal{TenantID: validTenant, UserID: "u", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}

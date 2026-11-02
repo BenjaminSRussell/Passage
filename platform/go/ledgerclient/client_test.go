@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -174,6 +176,49 @@ func TestReverse_PostsToTheEntryWithTheReverseDuty(t *testing.T) {
 	}
 	if path != "/v1/ledger/journal-entries/entry 9/reverse" || len(duties) != 1 || duties[0] != ledgerclient.DutyReverse {
 		t.Fatalf("path %q duties %v", path, duties)
+	}
+}
+
+func TestPostClosed_OnlyCloseCanSignThePostClosedDuty(t *testing.T) {
+	for _, tc := range []struct {
+		service string
+		want    []string
+	}{
+		{"close", []string{ledgerclient.DutyPost, ledgerclient.DutyPostClosed}},
+		{"receiving", []string{ledgerclient.DutyPost}},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
+			var verifier *tenant.ServiceVerifier
+			var posted, reversed []string
+			c, v := newClientAs(t, tc.service, func(w http.ResponseWriter, r *http.Request) {
+				claims, _ := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
+				if strings.HasSuffix(r.URL.Path, "/reverse") {
+					reversed = claims.Duties
+				} else {
+					posted = claims.Duties
+				}
+				_, _ = w.Write([]byte(`{"journalEntryId":"e-1"}`))
+			})
+			verifier = v
+			in := entry()
+			in.PostClosed = true
+			if _, err := c.Post(principalCtx(), in); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.Reverse(principalCtx(), ledgerclient.Reversal{LegalEntityID: entityID, EntryID: "e-0", IdempotencyKey: "k", PostClosed: true}); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(posted, tc.want) {
+				t.Fatalf("post duties %v, want %v", posted, tc.want)
+			}
+			wantReverse := []string{ledgerclient.DutyReverse}
+			if tc.service == "close" {
+				wantReverse = append(wantReverse, ledgerclient.DutyPostClosed)
+			}
+			if !slices.Equal(reversed, wantReverse) {
+				t.Fatalf("reverse duties %v, want %v", reversed, wantReverse)
+			}
+		})
 	}
 }
 

@@ -38,6 +38,16 @@ func (m *memoryRuns) latest() *domain.YearEndRun {
 	return m.runs[len(m.runs)-1]
 }
 
+func (m *memoryRuns) latestLive() *domain.YearEndRun {
+	var live *domain.YearEndRun
+	for _, r := range m.runs {
+		if r.Status != domain.RunAbandoned {
+			live = r
+		}
+	}
+	return live
+}
+
 func (m *memoryRuns) find(id string) *domain.YearEndRun {
 	for _, r := range m.runs {
 		if r.ID == id {
@@ -48,19 +58,25 @@ func (m *memoryRuns) find(id string) *domain.YearEndRun {
 }
 
 func (m *memoryRuns) BeginYearEnd(_ context.Context, in domain.YearEndRun) (domain.YearEndRun, bool, error) {
-	latest := m.latest()
+	reuse := &domain.Error{Code: domain.CodeIdempotencyReuse, Detail: "different request"}
+	latest := m.latestLive()
 	switch {
-	case latest == nil && in.SupersedesRunID == "":
-		in.Sequence = 1
-	case latest != nil && latest.Status == domain.RunPending && latest.RequestHash == in.RequestHash:
+	case latest == nil:
+		if in.SupersedesRunID != "" {
+			return domain.YearEndRun{}, false, reuse
+		}
+	case latest.Status == domain.RunPending:
+		if latest.RequestHash != in.RequestHash || latest.SupersedesRunID != in.SupersedesRunID {
+			return domain.YearEndRun{}, false, reuse
+		}
 		return *latest, false, nil
-	case latest != nil && in.SupersedesRunID == latest.ID && latest.Status == domain.RunCompleted:
-		in.Sequence = latest.Sequence + 1
-	case latest != nil && in.SupersedesRunID == "" && latest.RequestHash == in.RequestHash:
+	case in.SupersedesRunID == latest.ID:
+	case in.SupersedesRunID == latest.SupersedesRunID && latest.RequestHash == in.RequestHash:
 		return *latest, false, nil
 	default:
-		return domain.YearEndRun{}, false, &domain.Error{Code: domain.CodeIdempotencyReuse, Detail: "different request"}
+		return domain.YearEndRun{}, false, reuse
 	}
+	in.Sequence = len(m.runs) + 1
 	in.ID = testkit.TenantID(50 + len(m.runs))
 	in.Status = domain.RunPending
 	in.Journals = map[string]string{}
@@ -70,7 +86,7 @@ func (m *memoryRuns) BeginYearEnd(_ context.Context, in domain.YearEndRun) (doma
 
 func (m *memoryRuns) SetYearEndProposals(_ context.Context, id string, proposals domain.YearEnd) (domain.YearEndRun, error) {
 	run := m.find(id)
-	if run.Proposals == nil {
+	if run.Status == domain.RunPending && run.Journals[domain.JournalClosing] == "" {
 		run.Proposals = &proposals
 	}
 	return *run, nil
@@ -79,6 +95,14 @@ func (m *memoryRuns) SetYearEndProposals(_ context.Context, id string, proposals
 func (m *memoryRuns) SetYearEndJournal(_ context.Context, id, name, journalID string) (domain.YearEndRun, error) {
 	run := m.find(id)
 	run.Journals[name] = journalID
+	return *run, nil
+}
+
+func (m *memoryRuns) AbandonYearEnd(_ context.Context, id string) (domain.YearEndRun, error) {
+	run := m.find(id)
+	if run.Status == domain.RunPending && len(run.Journals) == 0 {
+		run.Status = domain.RunAbandoned
+	}
 	return *run, nil
 }
 
@@ -100,11 +124,14 @@ func (m *memoryRuns) YearEndRun(_ context.Context, id string) (domain.YearEndRun
 
 type chartLedger struct {
 	*ledgerclient.Fake
-	info       ledgerclient.Info
-	accounts   map[string]ledgerclient.ChartAccount
-	cumulative []ledgerclient.BalanceRow
-	thisYear   []ledgerclient.BalanceRow
-	queries    []ledgerclient.TrialBalanceQuery
+	info          ledgerclient.Info
+	accounts      map[string]ledgerclient.ChartAccount
+	cumulative    []ledgerclient.BalanceRow
+	thisYear      []ledgerclient.BalanceRow
+	queries       []ledgerclient.TrialBalanceQuery
+	chartReads    int
+	balanceErr    error
+	balanceCurren string
 }
 
 func (c *chartLedger) Ledger(context.Context, string, string) (ledgerclient.Info, error) {
@@ -112,15 +139,61 @@ func (c *chartLedger) Ledger(context.Context, string, string) (ledgerclient.Info
 }
 
 func (c *chartLedger) Accounts(context.Context, string, string) (map[string]ledgerclient.ChartAccount, error) {
+	c.chartReads++
 	return c.accounts, nil
 }
 
 func (c *chartLedger) TrialBalance(_ context.Context, q ledgerclient.TrialBalanceQuery) (ledgerclient.TrialBalance, error) {
 	c.queries = append(c.queries, q)
-	if q.PeriodFrom != "" {
-		return ledgerclient.TrialBalance{Currency: "USD", Rows: c.thisYear}, nil
+	if c.balanceErr != nil {
+		return ledgerclient.TrialBalance{}, c.balanceErr
 	}
-	return ledgerclient.TrialBalance{Currency: "USD", Rows: c.cumulative}, nil
+	currency := "USD"
+	if c.balanceCurren != "" {
+		currency = c.balanceCurren
+	}
+	if q.PeriodFrom != "" {
+		return ledgerclient.TrialBalance{Currency: currency, Rows: c.thisYear}, nil
+	}
+	return ledgerclient.TrialBalance{Currency: currency, Rows: c.cumulative}, nil
+}
+
+type cumulativeLedger struct{ *chartLedger }
+
+func (c cumulativeLedger) TrialBalance(_ context.Context, q ledgerclient.TrialBalanceQuery) (ledgerclient.TrialBalance, error) {
+	type cell struct {
+		account string
+		dims    string
+	}
+	sums := map[cell]ledgerclient.BalanceRow{}
+	for _, e := range c.Entries() {
+		period := e.PostingDate[:len("2006-01")]
+		if e.LedgerID != q.LedgerID || (q.PeriodTo != "" && period > q.PeriodTo) || (q.PeriodFrom != "" && period < q.PeriodFrom) {
+			continue
+		}
+		for _, l := range e.Lines {
+			dims := map[string]string{}
+			for _, attribute := range q.GroupBy {
+				if v := l.Dimensions[attribute]; v != "" {
+					dims[attribute] = v
+				}
+			}
+			key := cell{l.Account, domain.DimensionKey(dims)}
+			row := sums[key]
+			row.Account, row.Dimensions = l.Account, dims
+			if l.Credit {
+				row.Net = row.Net.Sub(l.Amount)
+			} else {
+				row.Net = row.Net.Add(l.Amount)
+			}
+			sums[key] = row
+		}
+	}
+	out := ledgerclient.TrialBalance{Currency: "USD"}
+	for _, row := range sums {
+		out.Rows = append(out.Rows, row)
+	}
+	return out, nil
 }
 
 func net(account string, amount int64, dims map[string]string) ledgerclient.BalanceRow {
@@ -130,10 +203,11 @@ func net(account string, amount int64, dims map[string]string) ledgerclient.Bala
 func closedYear() []domain.Period {
 	var periods []domain.Period
 	for month := time.January; month <= time.December; month++ {
-		end := time.Date(2026, month+1, 0, 0, 0, 0, 0, time.UTC)
 		periods = append(periods, domain.Period{
-			FiscalPeriodID: testkit.TenantID(100 + int(month)), End: end,
-			Rows: []domain.Row{{Module: domain.ModuleGL, Status: domain.StatusOnHold}, {Module: domain.ModuleAP, Status: domain.StatusClosed}},
+			FiscalPeriodID: testkit.TenantID(100 + int(month)),
+			Start:          time.Date(2026, month, 1, 0, 0, 0, 0, time.UTC),
+			End:            time.Date(2026, month+1, 0, 0, 0, 0, 0, time.UTC),
+			Rows:           []domain.Row{{Module: domain.ModuleGL, Status: domain.StatusOnHold}, {Module: domain.ModuleAP, Status: domain.StatusClosed}},
 		})
 	}
 	return periods
@@ -146,6 +220,10 @@ type yearEndFixture struct {
 }
 
 func newYearEnd() yearEndFixture {
+	return newYearEndOn(func(l *chartLedger) api.YearEndLedger { return l })
+}
+
+func newYearEndOn(wrap func(*chartLedger) api.YearEndLedger) yearEndFixture {
 	f := yearEndFixture{
 		runs: &memoryRuns{periods: closedYear()},
 		ledger: &chartLedger{
@@ -160,7 +238,7 @@ func newYearEnd() yearEndFixture {
 			thisYear:   []ledgerclient.BalanceRow{net("4000", -100, nil)},
 		},
 	}
-	a := api.New(fakeStore{}).WithLedgers(fakeLedger{owner: testkit.TenantID(9)}).WithYearEnd(f.runs, f.ledger)
+	a := api.New(fakeStore{}).WithLedgers(fakeLedger{owner: testkit.TenantID(9)}).WithYearEnd(f.runs, wrap(f.ledger))
 	r := httpx.NewRouter()
 	a.Register(r)
 	f.router = r
@@ -185,6 +263,19 @@ func (f yearEndFixture) run(payload string) *httptest.ResponseRecorder {
 	return f.send(http.MethodPost, runsPath, payload, "close.yearend.run")
 }
 
+func (f yearEndFixture) supersede(priorID string) *httptest.ResponseRecorder {
+	return f.run(strings.TrimSuffix(yearEndBody(), "}") + `,"supersedesRunId":"` + priorID + `"}`)
+}
+
+func decodeRun(t *testing.T, rec *httptest.ResponseRecorder) domain.YearEndRun {
+	t.Helper()
+	var run domain.YearEndRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
 func lineAmounts(s ledgerclient.Stored) map[string]string {
 	out := map[string]string{}
 	for _, l := range s.Lines {
@@ -197,32 +288,34 @@ func lineAmounts(s ledgerclient.Stored) map[string]string {
 	return out
 }
 
-func TestYearEnd_PostsLedgerDerivedClosingAndOpeningEntriesAndCompletesOnce(t *testing.T) {
+func proposalAmounts(entries []domain.Entry) map[string]string {
+	out := map[string]string{}
+	for _, e := range entries {
+		out[e.Account] = e.Amount.String()
+	}
+	return out
+}
+
+func TestYearEnd_PostsOnlyTheLedgerDerivedClosingEntryAndKeepsTheOpeningProposalUnposted(t *testing.T) {
 	f := newYearEnd()
 	rec := f.run(yearEndBody())
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
-	var run domain.YearEndRun
-	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
-		t.Fatal(err)
-	}
+	run := decodeRun(t, rec)
 	posted := f.ledger.Entries()
-	if len(posted) != 2 || run.Status != domain.RunCompleted || run.Journals[domain.JournalClosing] != posted[0].ID || run.Journals[domain.JournalOpening] != posted[1].ID {
+	if len(posted) != 1 || run.Status != domain.RunCompleted || run.Journals[domain.JournalClosing] != posted[0].ID || len(run.Journals) != 1 {
 		t.Fatalf("run %+v posted %d entries", run, len(posted))
 	}
-	closing, opening := posted[0], posted[1]
-	if closing.PostingDate != "2026-12-31" || closing.SourceType != "year_end_closing" || closing.Currency != "USD" {
+	closing := posted[0]
+	if closing.PostingDate != "2026-12-31" || closing.SourceType != "year_end_closing" || closing.Currency != "USD" || !closing.PostClosed {
 		t.Fatalf("closing entry %+v", closing.Entry)
 	}
 	if got := lineAmounts(closing); got["4000"] != "D100" || got["3000"] != "C100" || len(got) != 2 {
 		t.Fatalf("closing lines %v", got)
 	}
-	if opening.PostingDate != "2027-01-01" || opening.SourceType != "year_end_opening" {
-		t.Fatalf("opening entry %+v", opening.Entry)
-	}
-	if got := lineAmounts(opening); got["1000"] != "D100" || got["3000"] != "C100" || len(got) != 2 {
-		t.Fatalf("opening lines %v", got)
+	if got := proposalAmounts(run.Proposals.Opening); got["1000"] != "100" || got["3000"] != "-100" || len(got) != 2 {
+		t.Fatalf("the opening proposal is kept for verification: %v", got)
 	}
 	if run.ClosingDate != "2026-12-31" || run.OpeningDate != "2027-01-01" {
 		t.Fatalf("dates %s %s must come from the fiscal periods", run.ClosingDate, run.OpeningDate)
@@ -232,6 +325,108 @@ func TestYearEnd_PostsLedgerDerivedClosingAndOpeningEntriesAndCompletesOnce(t *t
 	}
 	if len(f.ledger.queries) != 2 || f.ledger.queries[0].PeriodTo != "2026-12" || f.ledger.queries[1].PeriodFrom != "2026-01" || f.ledger.queries[0].LegalEntityID != testkit.TenantID(9) {
 		t.Fatalf("balances must be read per period range from the ledger: %+v", f.ledger.queries)
+	}
+	if f.ledger.chartReads != 1 {
+		t.Fatalf("the chart must be read once per request, got %d", f.ledger.chartReads)
+	}
+}
+
+func seed(t *testing.T, l *ledgerclient.Fake, key, date string, debit, credit string, amount int64, dim string) {
+	t.Helper()
+	dims := map[string]string{"CC": dim}
+	value := decimal.NewFromInt(amount)
+	if _, err := l.Post(context.Background(), ledgerclient.Entry{
+		LegalEntityID: testkit.TenantID(9), LedgerID: testkit.TenantID(7), DocumentID: key, PostingDate: date, Currency: "USD", IdempotencyKey: key, SourceType: "seed",
+		Lines: []ledgerclient.Line{{Account: debit, Amount: value, Dimensions: dims}, {Account: credit, Credit: true, Amount: value, Dimensions: dims}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestYearEnd_RunLeavesBalanceSheetDimensionsUntouchedAndZeroesProfitAndLossOnACumulativeLedger(t *testing.T) {
+	var ledger cumulativeLedger
+	f := newYearEndOn(func(c *chartLedger) api.YearEndLedger {
+		ledger = cumulativeLedger{c}
+		return ledger
+	})
+	seed(t, f.ledger.Fake, "prior-capital", "2025-06-30", "1000", "3100", 500, "A")
+	seed(t, f.ledger.Fake, "sale", "2026-03-15", "1000", "4000", 100, "A")
+	seed(t, f.ledger.Fake, "cost", "2026-09-10", "5000", "1000", 30, "B")
+	query := ledgerclient.TrialBalanceQuery{LegalEntityID: testkit.TenantID(9), LedgerID: testkit.TenantID(7), PeriodTo: "2026-12", GroupBy: []string{"CC"}}
+	balances := func(from string) map[string]decimal.Decimal {
+		t.Helper()
+		q := query
+		q.PeriodFrom = from
+		tb, err := ledger.TrialBalance(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]decimal.Decimal{}
+		for _, row := range tb.Rows {
+			out[row.Account+"|"+row.Dimensions["CC"]] = row.Net
+		}
+		return out
+	}
+	before := balances("")
+
+	rec := f.run(strings.Replace(yearEndBody(), `"3000"`, `"3000","retainDimensions":true`, 1))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if len(f.ledger.Entries()) != 4 {
+		t.Fatalf("three seed postings and exactly one closing entry expected, got %d", len(f.ledger.Entries()))
+	}
+	after := balances("")
+	for _, key := range []string{"1000|A", "1000|B", "3100|A"} {
+		if !after[key].Equal(before[key]) {
+			t.Errorf("%s moved from %s to %s: a closing run must not change balance sheet accounts other than retained earnings", key, before[key], after[key])
+		}
+	}
+	if !after["3000|A"].Equal(decimal.NewFromInt(-100)) || !after["3000|B"].Equal(decimal.NewFromInt(30)) {
+		t.Errorf("retained earnings per dimension after the run: A %s, B %s", after["3000|A"], after["3000|B"])
+	}
+	for _, key := range []string{"4000|A", "5000|B"} {
+		if !after[key].IsZero() {
+			t.Errorf("%s must be zero as of the closing date, got %s", key, after[key])
+		}
+	}
+	if thisYear := balances("2026-01"); !thisYear["4000|A"].IsZero() || !thisYear["5000|B"].IsZero() {
+		t.Errorf("profit and loss of the year must net to zero, got %v", thisYear)
+	}
+	total := decimal.Zero
+	for _, v := range after {
+		total = total.Add(v)
+	}
+	if !total.IsZero() {
+		t.Errorf("the ledger no longer balances: %s", total)
+	}
+	for _, e := range f.ledger.Entries() {
+		if e.PostingDate > "2026-12-31" {
+			t.Errorf("nothing may be posted after the year: %+v", e.Entry)
+		}
+	}
+}
+
+func TestYearEnd_PostsUnderThePreconditionPlanYearEnforcesOnALedgerThatRefusesClosedPeriods(t *testing.T) {
+	f := newYearEnd()
+	f.ledger.RefuseClosedThrough("2026-12-31")
+	control := ledgerclient.Entry{
+		LegalEntityID: testkit.TenantID(9), LedgerID: testkit.TenantID(7), DocumentID: "d", PostingDate: "2026-12-31", Currency: "USD", IdempotencyKey: "control",
+		Lines: []ledgerclient.Line{{Account: "1000", Amount: decimal.NewFromInt(1)}, {Account: "3000", Credit: true, Amount: decimal.NewFromInt(1)}},
+	}
+	if _, err := f.ledger.Post(context.Background(), control); ledgerclient.CodeOf(err) != ledgerclient.CodePeriodClosed {
+		t.Fatalf("the fake must refuse a closed period without the duty, got %v", err)
+	}
+	first := f.run(yearEndBody())
+	if first.Code != http.StatusCreated {
+		t.Fatalf("closing into the closed last period got %d %s", first.Code, first.Body)
+	}
+	rerun := f.supersede(decodeRun(t, first).ID)
+	if rerun.Code != http.StatusCreated {
+		t.Fatalf("reversing and closing again into the closed last period got %d %s", rerun.Code, rerun.Body)
+	}
+	if got := len(f.ledger.Entries()); got != 3 {
+		t.Fatalf("closing, reversal and closing again expected, got %d", got)
 	}
 }
 
@@ -296,7 +491,7 @@ func TestYearEnd_RepeatReturnsTheStoredRunWithoutPostingAgain(t *testing.T) {
 	f := newYearEnd()
 	f.run(yearEndBody())
 	rec := f.run(yearEndBody())
-	if rec.Code != http.StatusOK || len(f.ledger.Entries()) != 2 || f.runs.completed != 1 {
+	if rec.Code != http.StatusOK || len(f.ledger.Entries()) != 1 || f.runs.completed != 1 {
 		t.Fatalf("got %d, %d entries, %d completions", rec.Code, len(f.ledger.Entries()), f.runs.completed)
 	}
 }
@@ -310,20 +505,96 @@ func TestYearEnd_LedgerOutageLeavesARunThatTheRetryFinishesWithoutDuplicates(t *
 	}
 	f.ledger.FailPosts(nil)
 	rec = f.run(yearEndBody())
-	if rec.Code != http.StatusOK || len(f.ledger.Entries()) != 2 || f.runs.latest().Status != domain.RunCompleted {
+	if rec.Code != http.StatusOK || len(f.ledger.Entries()) != 1 || f.runs.latest().Status != domain.RunCompleted {
 		t.Fatalf("retry got %d %s with %d entries", rec.Code, rec.Body, len(f.ledger.Entries()))
 	}
 }
 
-func TestYearEnd_LedgerRejectionIsReportedAsUnprocessable(t *testing.T) {
+func TestYearEnd_RetryAfterAnOutageRederivesTheProposalsFromTheLedgerAsItIsNow(t *testing.T) {
+	f := newYearEnd()
+	f.ledger.FailPosts(errors.New("ledger down"))
+	if rec := f.run(yearEndBody()); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if stored := f.runs.latest().Proposals; stored == nil || proposalAmounts(stored.Closing)["3000"] != "-100" {
+		t.Fatalf("the first derivation is stored: %+v", stored)
+	}
+	f.ledger.cumulative = []ledgerclient.BalanceRow{net("1000", 250, nil), net("4000", -250, nil)}
+	f.ledger.thisYear = []ledgerclient.BalanceRow{net("4000", -250, nil)}
+	f.ledger.FailPosts(nil)
+	rec := f.run(yearEndBody())
+	if rec.Code != http.StatusOK || len(f.ledger.Entries()) != 1 {
+		t.Fatalf("retry got %d %s with %d entries", rec.Code, rec.Body, len(f.ledger.Entries()))
+	}
+	if got := lineAmounts(f.ledger.Entries()[0]); got["3000"] != "C250" {
+		t.Fatalf("the retry must post the ledger's current 250, got %v", got)
+	}
+	if got := proposalAmounts(decodeRun(t, rec).Proposals.Closing); got["3000"] != "-250" {
+		t.Fatalf("the stored proposals must be replaced by the retry's derivation: %v", got)
+	}
+}
+
+func TestYearEnd_LedgerRejectionAbandonsTheRunSoANewRequestCanStart(t *testing.T) {
 	f := newYearEnd()
 	f.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
 	rec := f.run(yearEndBody())
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"serviceCode":"CLOSE-0008"`) || !strings.Contains(rec.Body.String(), ledgerclient.CodePeriodClosed) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
-	if f.runs.latest().Status != domain.RunPending {
-		t.Fatalf("a rejected posting must leave the run pending, got %s", f.runs.latest().Status)
+	if f.runs.latest().Status != domain.RunAbandoned {
+		t.Fatalf("a rejection with nothing posted must abandon the run, got %s", f.runs.latest().Status)
+	}
+	f.ledger.FailPosts(nil)
+	f.ledger.cumulative = []ledgerclient.BalanceRow{net("1000", 180, nil), net("4000", -180, nil)}
+	f.ledger.thisYear = []ledgerclient.BalanceRow{net("4000", -180, nil)}
+	retry := f.run(strings.Replace(yearEndBody(), `"3000"`, `"3100"`, 1))
+	if retry.Code != http.StatusCreated {
+		t.Fatalf("a new request after the abandoned run got %d %s", retry.Code, retry.Body)
+	}
+	run := decodeRun(t, retry)
+	if run.Sequence != 2 || run.Status != domain.RunCompleted || len(f.ledger.Entries()) != 1 {
+		t.Fatalf("run %+v with %d entries", run, len(f.ledger.Entries()))
+	}
+	if got := lineAmounts(f.ledger.Entries()[0]); got["3100"] != "C180" {
+		t.Fatalf("the new run must post the ledger's current 180, got %v", got)
+	}
+}
+
+func TestYearEnd_RejectionAfterAReversalPostedKeepsTheRunPendingForTheRetry(t *testing.T) {
+	f := newYearEnd()
+	prior := decodeRun(t, f.run(yearEndBody()))
+	f.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	rec := f.supersede(prior.ID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if latest := f.runs.latest(); latest.Status != domain.RunPending || latest.Journals[domain.JournalReverseClosing] == "" {
+		t.Fatalf("the reversal posted, so the run must stay pending: %+v", latest)
+	}
+	f.ledger.FailPosts(nil)
+	if retry := f.supersede(prior.ID); retry.Code != http.StatusOK || len(f.ledger.Entries()) != 3 {
+		t.Fatalf("retry got %d %s with %d entries", retry.Code, retry.Body, len(f.ledger.Entries()))
+	}
+}
+
+func TestYearEnd_LedgerAuthorizationFailureIsNotARetryableOutage(t *testing.T) {
+	f := newYearEnd()
+	f.ledger.balanceErr = &ledgerclient.Error{Op: "trial-balance", Status: http.StatusForbidden, Code: "AUTH-0003"}
+	rec := f.run(yearEndBody())
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "403") || rec.Header().Get("Retry-After") != "" {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if f.runs.latest().Status != domain.RunAbandoned || len(f.ledger.Entries()) != 0 {
+		t.Fatalf("run %+v", f.runs.latest())
+	}
+}
+
+func TestYearEnd_TrialBalanceInAnotherCurrencyIsRefused(t *testing.T) {
+	f := newYearEnd()
+	f.ledger.balanceCurren = "EUR"
+	rec := f.run(yearEndBody())
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "EUR") || len(f.ledger.Entries()) != 0 {
+		t.Fatalf("got %d %s with %d entries", rec.Code, rec.Body, len(f.ledger.Entries()))
 	}
 }
 
@@ -333,6 +604,9 @@ func TestYearEnd_PostingStillInProgressAsksForARetry(t *testing.T) {
 	rec := f.run(yearEndBody())
 	if rec.Code != http.StatusConflict || rec.Header().Get("Retry-After") == "" || !strings.Contains(rec.Body.String(), `"serviceCode":"CLOSE-0002"`) {
 		t.Fatalf("got %d %s retry-after %q", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
+	}
+	if f.runs.latest().Status != domain.RunPending {
+		t.Fatalf("a posting in progress must leave the run pending, got %s", f.runs.latest().Status)
 	}
 }
 
@@ -345,49 +619,49 @@ func TestYearEnd_SameYearWithADifferentRequestConflicts(t *testing.T) {
 	}
 }
 
-func TestYearEnd_SupersedesReversesThePriorEntriesAndPostsAgainFromTheLedger(t *testing.T) {
+func TestYearEnd_SupersedesReversesThePriorClosingEntryAndPostsAgainFromTheLedger(t *testing.T) {
 	f := newYearEnd()
-	first := f.run(yearEndBody())
-	var prior domain.YearEndRun
-	if err := json.Unmarshal(first.Body.Bytes(), &prior); err != nil {
-		t.Fatal(err)
-	}
+	prior := decodeRun(t, f.run(yearEndBody()))
 	f.ledger.cumulative = []ledgerclient.BalanceRow{net("1000", 180, nil), net("4000", -180, nil)}
 	f.ledger.thisYear = []ledgerclient.BalanceRow{net("4000", -180, nil)}
 
-	rec := f.run(strings.TrimSuffix(yearEndBody(), "}") + `,"supersedesRunId":"` + prior.ID + `"}`)
+	rec := f.supersede(prior.ID)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
-	var rerun domain.YearEndRun
-	if err := json.Unmarshal(rec.Body.Bytes(), &rerun); err != nil {
-		t.Fatal(err)
-	}
+	rerun := decodeRun(t, rec)
 	if rerun.Sequence != 2 || rerun.SupersedesRunID != prior.ID || rerun.Status != domain.RunCompleted {
 		t.Fatalf("rerun %+v", rerun)
 	}
 	posted := f.ledger.Entries()
-	if len(posted) != 6 {
-		t.Fatalf("want 2 originals, 2 reversals and 2 new entries, got %d", len(posted))
+	if len(posted) != 3 {
+		t.Fatalf("want the original, its reversal and the new closing entry, got %d", len(posted))
 	}
-	reversed := map[string]bool{}
-	for _, s := range posted {
-		if s.ReversalOf != "" {
-			reversed[s.ReversalOf] = true
-		}
+	if posted[1].ReversalOf != prior.Journals[domain.JournalClosing] || !posted[1].PostClosed || posted[1].PostingDate != "2026-12-31" {
+		t.Fatalf("the prior closing entry must be reversed on its own date: %+v", posted[1])
 	}
-	if !reversed[prior.Journals[domain.JournalClosing]] || !reversed[prior.Journals[domain.JournalOpening]] {
-		t.Fatalf("both prior entries must be reversed, got %v", reversed)
+	if rerun.Journals[domain.JournalReverseClosing] != posted[1].ID || len(rerun.Journals) != 2 {
+		t.Fatalf("rerun must record its reversal: %+v", rerun.Journals)
 	}
-	if rerun.Journals[domain.JournalReverseClosing] == "" || rerun.Journals[domain.JournalReverseOpening] == "" {
-		t.Fatalf("rerun must record its reversals: %+v", rerun.Journals)
-	}
-	if got := lineAmounts(posted[4]); got["3000"] != "C180" {
+	if got := lineAmounts(posted[2]); got["3000"] != "C180" {
 		t.Fatalf("the re-run must post the ledger's current 180, got %v", got)
 	}
-	again := f.run(strings.TrimSuffix(yearEndBody(), "}") + `,"supersedesRunId":"` + prior.ID + `"}`)
-	if again.Code == http.StatusCreated || len(f.ledger.Entries()) != 6 {
-		t.Fatalf("repeating the re-run got %d with %d entries", again.Code, len(f.ledger.Entries()))
+	again := f.supersede(prior.ID)
+	if again.Code != http.StatusOK || decodeRun(t, again).ID != rerun.ID || len(f.ledger.Entries()) != 3 {
+		t.Fatalf("repeating the completed re-run got %d %s with %d entries", again.Code, again.Body, len(f.ledger.Entries()))
+	}
+}
+
+func TestYearEnd_SupersedesMismatchOnAnUnfinishedRerunConflicts(t *testing.T) {
+	f := newYearEnd()
+	prior := decodeRun(t, f.run(yearEndBody()))
+	f.ledger.FailPosts(errors.New("ledger down"))
+	if rec := f.supersede(prior.ID); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	f.ledger.FailPosts(nil)
+	if rec := f.run(yearEndBody()); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), domain.CodeIdempotencyReuse) {
+		t.Fatalf("the same request without supersedesRunId must not adopt the unfinished re-run: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -396,7 +670,7 @@ func TestYearEnd_RerunWithoutNamingTheCompletedRunConflicts(t *testing.T) {
 	f.run(yearEndBody())
 	f.ledger.cumulative = []ledgerclient.BalanceRow{net("1000", 180, nil), net("4000", -180, nil)}
 	rec := f.run(strings.Replace(yearEndBody(), `"3000"`, `"3100"`, 1))
-	if rec.Code != http.StatusConflict || len(f.ledger.Entries()) != 2 {
+	if rec.Code != http.StatusConflict || len(f.ledger.Entries()) != 1 {
 		t.Fatalf("got %d with %d entries", rec.Code, len(f.ledger.Entries()))
 	}
 }
@@ -410,6 +684,19 @@ func TestYearEnd_PreconditionsRefuseBeforeAnythingIsRecorded(t *testing.T) {
 
 	none := newYearEnd()
 	none.runs.periods = nil
+
+	gap := newYearEnd()
+	gap.runs.periods = append(append([]domain.Period{}, gap.runs.periods[:5]...), gap.runs.periods[6:]...)
+
+	noDecember := newYearEnd()
+	noDecember.runs.periods = noDecember.runs.periods[:11]
+
+	overlap := newYearEnd()
+	overlap.runs.periods = append([]domain.Period{}, overlap.runs.periods...)
+	overlap.runs.periods[3].End = overlap.runs.periods[3].End.AddDate(0, 0, 5)
+
+	permanentlyClosedLast := newYearEnd()
+	permanentlyClosedLast.runs.periods[11].Rows = []domain.Row{{Module: domain.ModuleAll, Status: domain.StatusPermanentlyClosed}}
 
 	notEquity := newYearEnd()
 	notPostable := newYearEnd()
@@ -429,6 +716,10 @@ func TestYearEnd_PreconditionsRefuseBeforeAnythingIsRecorded(t *testing.T) {
 		{"ledger of another legal entity", foreign, yearEndBody(), http.StatusForbidden, "AUTH-0003"},
 		{"period still open", open, yearEndBody(), http.StatusConflict, domain.CodeInvalidTransition},
 		{"no periods registered", none, yearEndBody(), http.StatusNotFound, domain.CodeNoPeriod},
+		{"gap between periods", gap, yearEndBody(), http.StatusNotFound, domain.CodeNoPeriod},
+		{"december not registered", noDecember, yearEndBody(), http.StatusNotFound, domain.CodeNoPeriod},
+		{"overlapping periods", overlap, yearEndBody(), http.StatusConflict, domain.CodeAmbiguousPeriod},
+		{"last period permanently closed", permanentlyClosedLast, yearEndBody(), http.StatusConflict, domain.CodeInvalidTransition},
 		{"retained earnings is not equity", notEquity, strings.Replace(yearEndBody(), `"3000"`, `"1000"`, 1), http.StatusBadRequest, "postable equity"},
 		{"retained earnings is not postable", notPostable, strings.Replace(yearEndBody(), `"3000"`, `"3900"`, 1), http.StatusBadRequest, "postable equity"},
 		{"retained earnings not in the chart", statistical, strings.Replace(yearEndBody(), `"3000"`, `"3999"`, 1), http.StatusBadRequest, "postable equity"},

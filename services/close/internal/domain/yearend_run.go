@@ -2,17 +2,17 @@ package domain
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 )
 
 const (
 	RunPending   = "pending"
 	RunCompleted = "completed"
+	RunAbandoned = "abandoned"
 
 	JournalClosing         = "closing"
-	JournalOpening         = "opening"
 	JournalReverseClosing  = "reverseClosing"
-	JournalReverseOpening  = "reverseOpening"
 	EventYearEndCompleted  = "dev.passage.close.yearend.completed.v1"
 	maxDimensionAttributes = 5
 )
@@ -42,11 +42,11 @@ type YearEndCompleted struct {
 	LedgerID         string `json:"ledgerId"`
 	FiscalYear       string `json:"fiscalYear"`
 	ClosingJournalID string `json:"closingJournalId,omitempty"`
-	OpeningJournalID string `json:"openingJournalId,omitempty"`
 }
 
 type Period struct {
 	FiscalPeriodID string
+	Start          time.Time
 	End            time.Time
 	Rows           []Row
 }
@@ -60,21 +60,45 @@ func PlanYear(year string, periods []Period) (YearPlan, error) {
 	if len(periods) == 0 {
 		return YearPlan{}, fail(CodeNoPeriod, "no fiscal period is registered for "+year+" on this ledger")
 	}
-	var plan YearPlan
-	for _, p := range periods {
+	sorted := append([]Period(nil), periods...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start.Before(sorted[j].Start) })
+	if err := checkCoverage(year, sorted); err != nil {
+		return YearPlan{}, err
+	}
+	for i, p := range sorted {
+		final := i == len(sorted)-1
 		for _, r := range p.Rows {
-			closed := r.Status == StatusClosed || r.Status == StatusPermanentlyClosed
+			closed := r.Status == StatusClosed || (r.Status == StatusPermanentlyClosed && !final)
 			if closed || (r.Module == ModuleGL && r.Status == StatusOnHold) {
 				continue
 			}
-			return YearPlan{}, fail(CodeInvalidTransition, "period "+p.FiscalPeriodID+" module "+string(r.Module)+" is "+string(r.Status)+"; every module must be closed, except general ledger which may be on hold")
-		}
-		if p.End.After(plan.ClosingDate) {
-			plan.ClosingDate = p.End
+			return YearPlan{}, fail(CodeInvalidTransition, "period "+p.FiscalPeriodID+" module "+string(r.Module)+" is "+string(r.Status)+"; every module must be closed, except general ledger which may be on hold, and the last period of the year cannot be permanently closed because the closing entry posts into it")
 		}
 	}
-	plan.OpeningDate = plan.ClosingDate.AddDate(0, 0, 1)
-	return plan, nil
+	closing := sorted[len(sorted)-1].End
+	return YearPlan{ClosingDate: closing, OpeningDate: closing.AddDate(0, 0, 1)}, nil
+}
+
+func checkCoverage(year string, sorted []Period) error {
+	const layout = "2006-01-02"
+	first, last := year+"-01-01", year+"-12-31"
+	if got := sorted[0].Start.Format(layout); got != first {
+		return fail(CodeNoPeriod, "the fiscal periods of "+year+" start on "+got+", not "+first)
+	}
+	if got := sorted[len(sorted)-1].End.Format(layout); got != last {
+		return fail(CodeNoPeriod, "the fiscal periods of "+year+" end on "+got+", not "+last)
+	}
+	for i := 1; i < len(sorted); i++ {
+		prev, cur := sorted[i-1], sorted[i]
+		next := prev.End.AddDate(0, 0, 1)
+		switch {
+		case cur.Start.Before(next):
+			return fail(CodeAmbiguousPeriod, "fiscal periods "+prev.FiscalPeriodID+" and "+cur.FiscalPeriodID+" overlap")
+		case cur.Start.After(next):
+			return fail(CodeNoPeriod, "no fiscal period covers "+next.Format(layout)+" to "+cur.Start.AddDate(0, 0, -1).Format(layout))
+		}
+	}
+	return nil
 }
 
 func ClassOf(accountType string) (Class, error) {

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS year_end_run (
   sequence int NOT NULL CHECK (sequence >= 1),
   supersedes_run_id uuid,
   request_hash text NOT NULL,
-  status text NOT NULL CHECK (status IN ('pending', 'completed')),
+  status text NOT NULL CHECK (status IN ('pending', 'completed', 'abandoned')),
   currency text NOT NULL,
   closing_date date NOT NULL,
   opening_date date NOT NULL,

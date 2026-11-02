@@ -596,7 +596,7 @@ test_service_grants_allow_only_their_declared_routes if {
 	not allowed("ledger.account.lookup", "PUT", "/v1/ledger/charts/c1/accounts/1000")
 	not allowed("ledger.account.lookup", "GET", "/v1/ledger/journal-lines")
 	data.duties["ledger.account.lookup"].service_only
-	data.service_grants.close.ledger == ["ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup"]
+	data.service_grants.close.ledger == ["ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"]
 	every duty in data.service_grants.close.ledger {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
@@ -686,15 +686,29 @@ test_internal_only_duties_are_service_only if {
 	}
 }
 
-test_service_grants_hold_no_flag_or_all_scope_duty if {
-	every _, targets in data.service_grants {
-		every _, duties in targets {
+test_service_grants_hold_no_flag_or_all_scope_duty_except_close_postclosed if {
+	every caller, targets in data.service_grants {
+		every target, duties in targets {
 			every duty in duties {
-				not data.duties[duty].flag
+				flag_grant_permitted(caller, target, duty)
 				duty != "org.switcher.all_scope"
 			}
 		}
 	}
+}
+
+flag_grant_permitted(caller, target, duty) if not data.duties[duty].flag
+
+flag_grant_permitted("close", "ledger", "ledger.period.postclosed")
+
+test_only_close_may_post_into_a_closed_period if {
+	data.duties["ledger.period.postclosed"].flag
+	granted := {caller |
+		some caller, targets in data.service_grants
+		"ledger.period.postclosed" in targets.ledger
+	}
+	granted == {"close"}
+	count(data.duties["ledger.period.postclosed"].permissions) == 0
 }
 
 test_receiving_purchasing_grant_reaches_only_the_plan_row_settlement_route if {

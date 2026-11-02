@@ -32,7 +32,7 @@ func TestLedger_ReadsTheOwnerChartAndCurrencyWithTheLookupDuty(t *testing.T) {
 	if err != nil || info.LegalEntityID != entityID || info.ChartCode != "COA" || info.Currency != "USD" || len(info.DimensionAttributes) != 1 {
 		t.Fatalf("info %+v err %v", info, err)
 	}
-	if len(duties) != 1 || duties[0] != ledgerclient.DutyLedgerLookup {
+	if len(duties) != 1 || duties[0] != ledgerclient.DutyLedgerRead {
 		t.Fatalf("duties %v", duties)
 	}
 }

@@ -80,28 +80,62 @@ func TestYearEnd_RunIsStoredIdempotentlyAndCompletionQueuesOneEvent(t *testing.T
 	}
 }
 
-func TestYearEnd_ProposalsAreWrittenOnceAndJournalsAccumulate(t *testing.T) {
+func TestYearEnd_ProposalsAreReplacedUntilTheClosingEntryPostsThenFrozen(t *testing.T) {
 	_, app := migrated(t)
 	s := store.New(app)
 	run, _, err := s.BeginYearEnd(principal(1), yearEndInput("h1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(5)}}}
-	second := domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(9)}}}
-	for _, p := range []domain.YearEnd{first, second} {
-		if _, err := s.SetYearEndProposals(principal(1), run.ID, p); err != nil {
-			t.Fatal(err)
-		}
+	proposing := func(amount int64) domain.YearEnd {
+		return domain.YearEnd{Closing: []domain.Entry{{Kind: domain.EntryClosing, Account: "4000", Amount: decimal.NewFromInt(amount)}}}
 	}
-	for name, id := range map[string]string{domain.JournalClosing: ids.New(), domain.JournalOpening: ids.New()} {
-		if _, err := s.SetYearEndJournal(principal(1), run.ID, name, id); err != nil {
+	for _, amount := range []int64{5, 9} {
+		if _, err := s.SetYearEndProposals(principal(1), run.ID, proposing(amount)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got, err := s.YearEndRun(principal(1), run.ID)
-	if err != nil || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(5)) || len(got.Journals) != 2 {
-		t.Fatalf("proposals must keep the first derivation and journals both names: %+v %v", got, err)
+	if err != nil || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(9)) {
+		t.Fatalf("proposals must follow the latest derivation while nothing has posted: %+v %v", got, err)
+	}
+	if _, err := s.SetYearEndJournal(principal(1), run.ID, domain.JournalClosing, ids.New()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetYearEndProposals(principal(1), run.ID, proposing(70)); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.YearEndRun(principal(1), run.ID)
+	if err != nil || !got.Proposals.Closing[0].Amount.Equal(decimal.NewFromInt(9)) || len(got.Journals) != 1 {
+		t.Fatalf("proposals must freeze once the closing entry posted: %+v %v", got, err)
+	}
+}
+
+func TestYearEnd_AbandonedRunFreesTheYearForANewRequestOnlyWhileNothingPosted(t *testing.T) {
+	_, app := migrated(t)
+	s := store.New(app)
+	first, _, err := s.BeginYearEnd(principal(1), yearEndInput("h1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := s.AbandonYearEnd(principal(1), first.ID)
+	if err != nil || abandoned.Status != domain.RunAbandoned {
+		t.Fatalf("abandon: %+v %v", abandoned, err)
+	}
+	second, created, err := s.BeginYearEnd(principal(1), yearEndInput("other"))
+	if err != nil || !created || second.ID == first.ID || second.Sequence != 2 {
+		t.Fatalf("a new request after an abandoned run: %+v created=%v err=%v", second, created, err)
+	}
+	if _, err := s.SetYearEndJournal(principal(1), second.ID, domain.JournalClosing, ids.New()); err != nil {
+		t.Fatal(err)
+	}
+	stillPending, err := s.AbandonYearEnd(principal(1), second.ID)
+	if err != nil || stillPending.Status != domain.RunPending {
+		t.Fatalf("a run with a posted journal must not be abandoned: %+v %v", stillPending, err)
+	}
+	var conflict *domain.Error
+	if _, _, err = s.BeginYearEnd(principal(1), yearEndInput("third")); !errors.As(err, &conflict) || conflict.Code != domain.CodeIdempotencyReuse {
+		t.Fatalf("a run with a posted journal still blocks other requests: %v", err)
 	}
 }
 
@@ -136,8 +170,14 @@ func TestYearEnd_SupersedesChainsRunsAndRefusesAnythingElse(t *testing.T) {
 		t.Fatalf("repeat of the pending re-run: %+v created=%v err=%v", pending, created, err)
 	}
 	finish(t, s, second.ID)
-	if _, _, err = s.BeginYearEnd(principal(1), redo); !errors.As(err, &conflict) || conflict.Code != domain.CodeIdempotencyReuse {
-		t.Fatalf("re-running a run that already has a successor: got %v", err)
+	replay, created, err := s.BeginYearEnd(principal(1), redo)
+	if err != nil || created || replay.ID != second.ID || replay.Status != domain.RunCompleted {
+		t.Fatalf("repeat of the completed re-run must return it: %+v created=%v err=%v", replay, created, err)
+	}
+	redone := yearEndInput("h3")
+	redone.SupersedesRunID = first.ID
+	if _, _, err = s.BeginYearEnd(principal(1), redone); !errors.As(err, &conflict) || conflict.Code != domain.CodeIdempotencyReuse {
+		t.Fatalf("a different request re-running a run that already has a successor: got %v", err)
 	}
 }
 
@@ -178,12 +218,14 @@ func TestYearPeriods_ReadsOnlyTheYearAndGroupsModules(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	dec, jan := "00000000-0000-0000-0000-0000000000d1", "00000000-0000-0000-0000-0000000000d2"
+	dec, jan, rest := "00000000-0000-0000-0000-0000000000d1", "00000000-0000-0000-0000-0000000000d2", "00000000-0000-0000-0000-0000000000d3"
+	insert(rest, "all", "closed", "2026-01-01", "2026-11-30")
 	insert(dec, "all", "closed", "2026-12-01", "2026-12-31")
 	insert(dec, "gl", "on_hold", "2026-12-01", "2026-12-31")
 	insert(jan, "all", "open", "2027-01-01", "2027-01-31")
 	periods, err := store.New(app).YearPeriods(principal(1), entityID, ledgerID, "2026")
-	if err != nil || len(periods) != 1 || periods[0].FiscalPeriodID != dec || len(periods[0].Rows) != 2 || periods[0].End.Format("2006-01-02") != "2026-12-31" {
+	if err != nil || len(periods) != 2 || periods[0].FiscalPeriodID != rest || periods[1].FiscalPeriodID != dec || len(periods[1].Rows) != 2 ||
+		periods[1].Start.Format("2006-01-02") != "2026-12-01" || periods[1].End.Format("2006-01-02") != "2026-12-31" {
 		t.Fatalf("got %+v %v", periods, err)
 	}
 	plan, err := domain.PlanYear("2026", periods)

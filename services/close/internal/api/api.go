@@ -105,6 +105,7 @@ var problemStatuses = map[string]int{
 	domain.CodeNoPeriod:          http.StatusNotFound,
 	domain.CodeAmbiguousPeriod:   http.StatusConflict,
 	domain.CodeNoRun:             http.StatusNotFound,
+	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
 	domain.CodeIdempotencyReuse:  http.StatusConflict,
 }
 

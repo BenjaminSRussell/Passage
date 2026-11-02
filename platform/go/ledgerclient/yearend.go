@@ -13,14 +13,12 @@ import (
 )
 
 const (
-	DutyLedgerLookup = "ledger.ledger.lookup"
-	DutyChartRead    = "ledger.account.lookup"
+	DutyChartRead = "ledger.account.lookup"
 
 	CodeInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
 
-	ledgersPath = "/v1/ledger/ledgers/"
-	chartsPath  = "/v1/ledger/charts/"
-	pageLimit   = "1000"
+	chartsPath = "/v1/ledger/charts/"
+	pageLimit  = "1000"
 )
 
 var ErrNotVisible = errors.New("ledger: not visible to the legal entity")
@@ -70,7 +68,7 @@ func InProgress(err error) bool {
 }
 
 func (c *Client) Ledger(ctx context.Context, legalEntityID, ledgerID string) (Info, error) {
-	raw, err := c.do(ctx, "ledger", ledgerID, http.MethodGet, ledgersPath+url.PathEscape(ledgerID), nil, nil, "", legalEntityID, DutyLedgerLookup)
+	raw, err := c.do(ctx, "ledger", ledgerID, http.MethodGet, ledgersPath+url.PathEscape(ledgerID), nil, nil, "", legalEntityID, DutyLedgerRead)
 	if err != nil {
 		var le *Error
 		if errors.As(err, &le) && (le.Status == http.StatusForbidden || le.Status == http.StatusNotFound) {

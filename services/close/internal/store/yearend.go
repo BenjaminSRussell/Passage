@@ -42,8 +42,8 @@ func scanRun(row pgx.Row) (domain.YearEndRun, error) {
 func (s *Postgres) YearPeriods(ctx context.Context, legalEntityID, ledgerID, year string) ([]domain.Period, error) {
 	var periods []domain.Period
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		found, err := tx.Query(ctx, `select fiscal_period_id::text, end_date, module, status from period_status
-			where legal_entity_id = $1 and ledger_id = $2 and start_date >= make_date($3::int, 1, 1) and end_date <= make_date($3::int, 12, 31) order by fiscal_period_id, module`,
+		found, err := tx.Query(ctx, `select fiscal_period_id::text, start_date, end_date, module, status from period_status
+			where legal_entity_id = $1 and ledger_id = $2 and start_date >= make_date($3::int, 1, 1) and end_date <= make_date($3::int, 12, 31) order by start_date, fiscal_period_id, module`,
 			legalEntityID, ledgerID, year)
 		if err != nil {
 			return err
@@ -51,12 +51,12 @@ func (s *Postgres) YearPeriods(ctx context.Context, legalEntityID, ledgerID, yea
 		defer found.Close()
 		for found.Next() {
 			var id, module, status string
-			var end time.Time
-			if err := found.Scan(&id, &end, &module, &status); err != nil {
+			var start, end time.Time
+			if err := found.Scan(&id, &start, &end, &module, &status); err != nil {
 				return err
 			}
 			if n := len(periods); n == 0 || periods[n-1].FiscalPeriodID != id {
-				periods = append(periods, domain.Period{FiscalPeriodID: id, End: end})
+				periods = append(periods, domain.Period{FiscalPeriodID: id, Start: start, End: end})
 			}
 			last := &periods[len(periods)-1]
 			last.Rows = append(last.Rows, domain.Row{Module: domain.Module(module), Status: domain.Status(status)})
@@ -80,13 +80,17 @@ func (s *Postgres) BeginYearEnd(ctx context.Context, in domain.YearEndRun) (doma
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, in.LedgerID+in.FiscalYear); err != nil {
 			return err
 		}
-		latest, err := scanRun(tx.QueryRow(ctx, `select `+yearEndColumn+` from year_end_run where ledger_id = $1 and fiscal_year = $2 order by sequence desc limit 1 for update`, in.LedgerID, in.FiscalYear))
+		var lastSequence int
+		if err := tx.QueryRow(ctx, `select coalesce(max(sequence), 0) from year_end_run where ledger_id = $1 and fiscal_year = $2`, in.LedgerID, in.FiscalYear).Scan(&lastSequence); err != nil {
+			return err
+		}
+		latest, err := scanRun(tx.QueryRow(ctx, `select `+yearEndColumn+` from year_end_run where ledger_id = $1 and fiscal_year = $2 and status <> 'abandoned' order by sequence desc limit 1 for update`, in.LedgerID, in.FiscalYear))
+		in.Sequence = lastSequence + 1
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			if in.SupersedesRunID != "" {
 				return reuse("supersedesRunId names a run that is not the latest of this ledger and year")
 			}
-			in.Sequence = 1
 		case err != nil:
 			return err
 		case latest.Status == domain.RunPending:
@@ -96,8 +100,7 @@ func (s *Postgres) BeginYearEnd(ctx context.Context, in domain.YearEndRun) (doma
 			run = latest
 			return nil
 		case in.SupersedesRunID == latest.ID:
-			in.Sequence = latest.Sequence + 1
-		case in.SupersedesRunID == "" && latest.RequestHash == in.RequestHash:
+		case in.SupersedesRunID == latest.SupersedesRunID && latest.RequestHash == in.RequestHash:
 			run = latest
 			return nil
 		default:
@@ -129,7 +132,11 @@ func (s *Postgres) SetYearEndProposals(ctx context.Context, runID string, propos
 	if err != nil {
 		return domain.YearEndRun{}, fmt.Errorf("encode year-end proposals: %w", err)
 	}
-	return s.updateRun(ctx, runID, `update year_end_run set proposals = $2 where id = $1 and proposals is null`, encoded)
+	return s.updateRun(ctx, runID, `update year_end_run set proposals = $2 where id = $1 and status = 'pending' and journals->'closing' is null`, encoded)
+}
+
+func (s *Postgres) AbandonYearEnd(ctx context.Context, runID string) (domain.YearEndRun, error) {
+	return s.updateRun(ctx, runID, `update year_end_run set status = 'abandoned' where id = $1 and status = 'pending' and journals = '{}'::jsonb`)
 }
 
 func (s *Postgres) SetYearEndJournal(ctx context.Context, runID, name, journalID string) (domain.YearEndRun, error) {
@@ -169,7 +176,7 @@ func (s *Postgres) CompleteYearEnd(ctx context.Context, runID string) (domain.Ye
 		}
 		evt, err := events.New(domain.EventYearEndCompleted, eventSource, run.ID, p.TenantID, domain.YearEndCompleted{
 			RunID: run.ID, LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, FiscalYear: run.FiscalYear,
-			ClosingJournalID: run.Journals[domain.JournalClosing], OpeningJournalID: run.Journals[domain.JournalOpening],
+			ClosingJournalID: run.Journals[domain.JournalClosing],
 		})
 		if err != nil {
 			return err

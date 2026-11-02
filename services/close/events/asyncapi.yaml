@@ -41,7 +41,6 @@ components:
           ledgerId: { type: string, format: uuid }
           fiscalYear: { type: string }
           closingJournalId: { type: string }
-          openingJournalId: { type: string }
       x-passage-type: dev.passage.close.yearend.completed.v1
     statusChanged:
       name: statusChanged
