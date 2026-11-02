@@ -26,6 +26,10 @@ type Event struct {
 	CorrelationID string `json:"correlationid,omitempty"`
 	CausationID   string `json:"causationid,omitempty"`
 	Actor         string `json:"actor,omitempty"`
+	// LegalEntityID is copied from the payload's top-level legalEntityId or
+	// legal_entity_id so consumers that act per legal entity (the integration
+	// hub's REST push) can route without knowing every payload shape.
+	LegalEntityID string `json:"legalentityid,omitempty"`
 }
 
 var typeRe = regexp.MustCompile(`^dev\.passage\.[a-z][a-z0-9]*\.[a-z][a-z0-9]*\.[a-z][a-z0-9]*\.v[0-9]+$`)
@@ -50,7 +54,23 @@ func New(typ, source, subject, tenantID string, data any) (Event, error) {
 		return Event{}, err
 	}
 	return Event{SpecVersion: "1.0", ID: ids.New(), Source: source, Type: typ, Subject: subject, Time: time.Now().UTC(),
-		DataContentType: "application/json", Data: raw, TenantID: tenantID}, nil
+		DataContentType: "application/json", Data: raw, TenantID: tenantID, LegalEntityID: payloadLegalEntity(raw)}, nil
+}
+
+// payloadLegalEntity returns the legal entity a JSON object payload names at
+// its top level, or "" for any other payload.
+func payloadLegalEntity(raw json.RawMessage) string {
+	var p struct {
+		Camel string `json:"legalEntityId"`
+		Snake string `json:"legal_entity_id"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return ""
+	}
+	if p.Camel != "" {
+		return p.Camel
+	}
+	return p.Snake
 }
 
 // Topic returns the Kafka topic for an event type: passage.<context>.<entity>.
