@@ -171,6 +171,9 @@ jobs:
           - package: dispatch-py
             ortools: false
             extras: dev
+          - package: routing-py
+            ortools: true
+            extras: dev
     defaults:
       run:
         working-directory: services/${{ matrix.package }}
