@@ -427,11 +427,26 @@ type absentRig struct {
 
 func (a absentRig) finish(mutate func(f *store.SyncFinish)) {
 	a.t.Helper()
+	claim, st := a.claim()
+	a.finishClaimed(claim, st, mutate)
+}
+
+// claim takes the binding as the scheduler does and returns the state the claim saw.
+func (a absentRig) claim() (string, store.SyncState) {
+	a.t.Helper()
 	claim := ids.New()
-	if _, ok, err := a.s.ClaimSync(a.ctx, a.r.binding.ID, claim); err != nil || !ok {
+	st, ok, err := a.s.ClaimSync(a.ctx, a.r.binding.ID, claim)
+	if err != nil || !ok {
 		a.t.Fatalf("claim: %v %v", ok, err)
 	}
+	return claim, st
+}
+
+// finishClaimed ends a claim with the operator requests it saw (as syncer.finish does) and makes the binding due again.
+func (a absentRig) finishClaimed(claim string, st store.SyncState, mutate func(f *store.SyncFinish)) {
+	a.t.Helper()
 	f := finishOK(a.r, claim, "w")
+	f.KeyCheckForced, f.KeyCheckAcceptLarge = st.KeyCheckForce, st.KeyCheckAcceptLarge
 	mutate(&f)
 	if err := a.s.FinishSync(a.ctx, f); err != nil {
 		a.t.Fatal(err)
@@ -464,10 +479,11 @@ func (a absentRig) list() []string {
 func exerciseAbsent(t *testing.T, s store.Store, ctx context.Context, outboxCount func() int) {
 	r := newSyncRig(t, s, ctx, everyQuarter)
 	seed(t, s, ctx, r.binding.ID, time.Now().Add(-time.Minute))
-	loadXref(t, s, ctx, "", "A", "B", "C", "Z")
+	// P1..P8 stay in the source, so a read that loses A, B, C and Z is not taken for a broken source.
+	loadXref(t, s, ctx, "", "A", "B", "C", "Z", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8")
 	a := absentRig{t, s, ctx, r}
 	finish, list := a.finish, a.list
-	if v, _ := s.GetSync(ctx, r.binding.ID); v.KeyCheckHours != domain.DefaultKeyCheckHours || !v.KeyCheckDue || v.LastKeyCheckAt != nil || v.AbsentCount != 0 {
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.KeyCheckHours != domain.DefaultKeyCheckHours || (v.KeyCheckDue && domain.KeyCheckOffset(r.binding.ID, 24) > time.Minute) || v.LastKeyCheckAt != nil || v.AbsentCount != 0 {
 		t.Fatalf("before any full read: %+v", v)
 	}
 	base := outboxCount()
@@ -543,6 +559,47 @@ func exerciseAbsent(t *testing.T, s store.Store, ctx context.Context, outboxCoun
 		t.Fatalf("absent after a full read that found every key = %v", got)
 	}
 
+	// A read that loses more than half of the loaded keys is refused, keeps the list and says why; keyCheckAcceptLarge
+	// accepts it once, makes the next run a full read, and is spent by the check it accepted.
+	everything := []string{"A", "B", "C", "Z", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
+	finish(func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything })
+	// The web card offers the acceptance on this wording.
+	if v, _ := s.GetSync(ctx, r.binding.ID); len(list()) != 0 || !strings.Contains(v.KeyCheckError, "12 of the 12") || !strings.Contains(v.KeyCheckError, "newly absent (more than half)") || v.KeyCheckDue || v.AbsentCount != 0 {
+		t.Fatalf("a read that lost every key was recorded: %v %+v", list(), v)
+	}
+	// An acceptance sent while a run reads the source is not spent by that run: the read began before the operator
+	// confirmed the source. It stays, with the request for a full read, for the next run.
+	claim, seen := a.claim()
+	cur, _ = s.GetSync(ctx, r.binding.ID)
+	if v, err := s.UpdateSync(ctx, r.binding.ID, cur.Version, store.SyncEdit{KeyCheckAcceptLarge: true}); err != nil || !v.KeyCheckDue || !v.KeyCheckAcceptLarge {
+		t.Fatalf("keyCheckAcceptLarge: %+v %v", v, err)
+	}
+	a.finishClaimed(claim, seen, func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything })
+	if v, _ := s.GetSync(ctx, r.binding.ID); len(list()) != 0 || v.KeyCheckError == "" || !v.KeyCheckAcceptLarge || !v.KeyCheckDue {
+		t.Fatalf("a run claimed before the acceptance spent it: %v %+v", list(), v)
+	}
+	finish(func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything })
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.KeyCheckError != "" || v.KeyCheckAcceptLarge || v.AbsentCount != 12 {
+		t.Fatalf("an accepted read was not recorded, or the acceptance was not spent: %+v", v)
+	}
+	// Keys already listed are not newly absent: the same read again is not refused.
+	finish(func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything })
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.AbsentCount != 12 || v.KeyCheckError != "" {
+		t.Fatalf("a repeated read of listed keys was refused: %+v", v)
+	}
+	// The threshold counts against the keys still present: after genuine deletions of A, B, C, Z, P1 and P2 (half of
+	// the loaded keys, accepted), a read that also loses P3, P4, P5 and P6 (4 of the 6 left) is refused, although 4 is
+	// a third of all loaded keys.
+	finish(func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything[:6] })
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.AbsentCount != 6 || v.KeyCheckError != "" {
+		t.Fatalf("losing half of the loaded keys was refused: %+v", v)
+	}
+	finish(func(f *store.SyncFinish) { f.FullRead, f.Absent = true, everything[:10] })
+	if v, _ := s.GetSync(ctx, r.binding.ID); v.AbsentCount != 6 || !strings.Contains(v.KeyCheckError, "4 of the 6") {
+		t.Fatalf("losing 4 of the 6 keys still present was recorded: %+v", v)
+	}
+	finish(func(f *store.SyncFinish) { f.FullRead = true })
+
 	// The period and an explicit check request drive KeyCheckDue.
 	zero := 0
 	cur, _ = s.GetSync(ctx, r.binding.ID)
@@ -587,7 +644,7 @@ func TestPostgres_AbsentUnderRLS(t *testing.T) {
 	if _, ok, _ := s.ClaimSync(ctx, r.binding.ID, claim); !ok {
 		t.Fatal("claim")
 	}
-	loadXref(t, s, ctx, "", "K1")
+	loadXref(t, s, ctx, "", "K1", "K2", "K3")
 	f := finishOK(r, claim, "w")
 	f.FullRead, f.Absent = true, []string{"K1"}
 	if err := s.FinishSync(ctx, f); err != nil {
@@ -626,9 +683,9 @@ func exerciseAbsentScope(t *testing.T, s store.Store, ctx context.Context) {
 	}
 	r := syncRig{profile, binding, project}
 	seed(t, s, ctx, binding.ID, time.Now().Add(-time.Minute))
-	loadXref(t, s, ctx, leA, "A1")
+	loadXref(t, s, ctx, leA, "A1", "A2", "A3")
 	loadXref(t, s, ctx, leB, "B1")
-	loadXref(t, s, ctx, "", "N1")
+	loadXref(t, s, ctx, "", "N1", "N2", "N3")
 	a := absentRig{t, s, ctx, r}
 	all := []string{"A1", "B1", "N1"}
 

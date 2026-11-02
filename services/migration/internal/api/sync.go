@@ -40,7 +40,9 @@ type updateSyncRequest struct {
 	SourceOfTruth *string `json:"sourceOfTruth"`
 	KeyCheckHours *int    `json:"keyCheckHours"`
 	KeyCheckNow   bool    `json:"keyCheckNow"`
-	RunNow        bool    `json:"runNow"`
+	// KeyCheckAcceptLarge accepts once a full read that lists more than half of the loaded keys as newly absent.
+	KeyCheckAcceptLarge bool `json:"keyCheckAcceptLarge"`
+	RunNow              bool `json:"runNow"`
 }
 
 func (a *API) listSync(w http.ResponseWriter, r *http.Request) {
@@ -129,14 +131,14 @@ func (a *API) updateSync(w http.ResponseWriter, r *http.Request) {
 	if req.KeyCheckHours != nil && !domain.ValidKeyCheckHours(*req.KeyCheckHours) {
 		bad["keyCheckHours"] = fmt.Sprintf("must be between 0 (off) and %d", domain.MaxKeyCheckHours)
 	}
-	if req.Paused == nil && req.SourceOfTruth == nil && req.KeyCheckHours == nil && !req.KeyCheckNow && !req.RunNow {
-		bad["paused"] = "send paused, sourceOfTruth, keyCheckHours, keyCheckNow or runNow"
+	if req.Paused == nil && req.SourceOfTruth == nil && req.KeyCheckHours == nil && !req.KeyCheckNow && !req.KeyCheckAcceptLarge && !req.RunNow {
+		bad["paused"] = "send paused, sourceOfTruth, keyCheckHours, keyCheckNow, keyCheckAcceptLarge or runNow"
 	}
 	if len(bad) > 0 {
 		fail(w, r, validation(bad))
 		return
 	}
-	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, SourceOfTruth: req.SourceOfTruth, KeyCheckHours: req.KeyCheckHours, KeyCheckNow: req.KeyCheckNow, RunNow: req.RunNow})
+	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, SourceOfTruth: req.SourceOfTruth, KeyCheckHours: req.KeyCheckHours, KeyCheckNow: req.KeyCheckNow, KeyCheckAcceptLarge: req.KeyCheckAcceptLarge, RunNow: req.RunNow})
 	if err != nil {
 		a.logFailure(r, "update sync failed", err)
 		fail(w, r, err)

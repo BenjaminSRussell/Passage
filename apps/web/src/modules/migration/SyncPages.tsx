@@ -176,7 +176,7 @@ export function SyncDetailPage() {
     );
   }
 
-  async function edit(current: SyncStatus, change: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; runNow?: boolean }) {
+  async function edit(current: SyncStatus, change: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) {
     setBusy(true);
     setFailure(null);
     try {
@@ -289,7 +289,7 @@ const absentColumns: DataTableColumn<SyncAbsent>[] = [
  * Rows the legacy system deleted. A delta cannot see them, so the binding is read in full on a period and the keys
  * loaded earlier that the read did not find are listed. Nothing is deactivated in Passage.
  */
-function DeletedRowsCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; canEdit: boolean; busy: boolean; onChange(change: { keyCheckHours?: number; keyCheckNow?: boolean }): void }) {
+function DeletedRowsCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; canEdit: boolean; busy: boolean; onChange(change: { keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean }): void }) {
   const key = `${sync.bindingId}/${sync.lastKeyCheckAt ?? ""}/${sync.absentCount}`;
   const state = useLoad((signal) => listAbsent(sync.bindingId, {}, signal), key);
   const paged = usePaged(state, key, (cursor) => listAbsent(sync.bindingId, { cursor }));
@@ -311,8 +311,20 @@ function DeletedRowsCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; 
           {sync.lastKeyCheckAt ? `Last full read: ${formatDateTime(sync.lastKeyCheckAt)}.` : "No full read has completed yet."}
         </p>
         {sync.keyCheckError ? (
-          <Alert tone="warning" title="The last full read did not update this list">
+          <Alert
+            tone="warning"
+            title="The last full read did not update this list"
+            action={
+              // The service words a refused large vanish with "newly absent (more than half)"; only that case can be accepted.
+              canEdit && !sync.keyCheckAcceptLarge && /newly absent \(more than half\)/.test(sync.keyCheckError) ? (
+                <Button size="sm" disabled={busy} onClick={() => onChange({ keyCheckAcceptLarge: true })}>
+                  Accept the next full read once
+                </Button>
+              ) : undefined
+            }
+          >
             {sync.keyCheckError}
+            {sync.keyCheckAcceptLarge ? " The next full read will be accepted whatever it lists." : ""}
           </Alert>
         ) : null}
         <FormField id="sync-key-check" label="Full read to find deleted rows">

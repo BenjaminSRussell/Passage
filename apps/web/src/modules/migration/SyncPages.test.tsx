@@ -185,6 +185,8 @@ describe("deleted legacy rows", () => {
     expect(await screen.findByText("The last full read did not update this list")).toBeInTheDocument();
     expect(screen.getByText(/more than 2000000 rows/)).toBeInTheDocument();
     expect(await findTable({ name: "Keys missing in the legacy system" })).toHaveTextContent("C9");
+    // Only a refused large vanish can be accepted; a failed read cannot.
+    expect(screen.queryByRole("button", { name: "Accept the next full read once" })).not.toBeInTheDocument();
   });
 
   it("shows a load failure of the list", async () => {
@@ -203,6 +205,20 @@ describe("deleted legacy rows", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Check at the next run" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
     expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ version: 3, keyCheckNow: true });
+  });
+
+  it("offers to accept a refused large vanish once", async () => {
+    detailHandler({ ...healthy, keyCheckError: "the full read lists 8 of the 10 loaded keys not listed already as newly absent (more than half); taken for a broken source rather than deletions, so the list was kept." });
+    renderAt(`/migration/sync/${BINDING}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Accept the next full read once" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, keyCheckAcceptLarge: true }));
+  });
+
+  it("says an acceptance is waiting instead of offering it again", async () => {
+    detailHandler({ ...healthy, keyCheckAcceptLarge: true, keyCheckError: "the full read lists 8 of the 10 loaded keys not listed already as newly absent (more than half); taken for a broken source rather than deletions, so the list was kept." });
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/The next full read will be accepted whatever it lists/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept the next full read once" })).not.toBeInTheDocument();
   });
 
   it("is read-only without migration.project.write, and offers no check when the period is off", async () => {

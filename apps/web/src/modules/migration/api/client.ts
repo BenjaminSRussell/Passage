@@ -568,6 +568,8 @@ export interface SyncStatus {
   version: number;
   /** Hours between full reads that look for rows the legacy system deleted; 0 is off. */
   keyCheckHours: number;
+  /** True while an operator's one-time acceptance of a large vanish waits for the completed key check of a run started after it. */
+  keyCheckAcceptLarge?: boolean;
   lastKeyCheckAt?: string;
   /** Why the last full read produced no list of missing keys (it failed, the key space is shared, it found no rows). */
   keyCheckError?: string;
@@ -610,7 +612,7 @@ export const listSync = (filter: { paused?: string; failing?: string; cursor?: s
 export const getSync = (bindingId: string, signal?: AbortSignal) => send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, {}, signal);
 
 /** Pauses or resumes a schedule, sets the source of truth or makes the binding due now, under the status's version. */
-export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; runNow?: boolean }) =>
+export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; keyCheckAcceptLarge?: boolean; runNow?: boolean }) =>
   send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
 
 export const listAbsent = (bindingId: string, filter: { cursor?: string; limit?: string }, signal?: AbortSignal) =>

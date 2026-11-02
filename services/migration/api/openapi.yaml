@@ -673,7 +673,7 @@ paths:
     patch:
       operationId: updateSyncStatus
       summary: Pause, resume or configure the delta sync of an entity binding
-      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), sets how often a binding with a cursor is read in full to find rows the legacy system deleted (keyCheckHours), asks for the next run to be a full read that looks for deleted rows (keyCheckNow), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
+      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), sets how often a binding with a cursor is read in full to find rows the legacy system deleted (keyCheckHours), asks for the next run to be a full read that looks for deleted rows (keyCheckNow), accepts once a full read that would list more than half of the loaded keys still present as newly absent (keyCheckAcceptLarge; refused with keyCheckError otherwise), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
       x-passage-duty: migration.project.write
       requestBody:
         required: true
@@ -1627,7 +1627,8 @@ components:
         version: { type: integer }
         keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: "How often a binding with a cursor is read in full to find rows the legacy system deleted; 0 turns the check off. Default 24. A binding without a cursor is read in full on every run." }
         lastKeyCheckAt: { type: string, format: date-time, description: When a full read last completed and replaced the absent list. }
-        keyCheckError: { type: string, description: "Why the last full read produced no absent list: it failed (the next one is still a period away, the runs in between are deltas), another active binding loads the same entity from the same source system into the same keys, or it found no rows at all while keys are loaded. Absent when the last one produced the list." }
+        keyCheckError: { type: string, description: "Why the last full read produced no absent list: it failed (the next one is still a period away, the runs in between are deltas), another active binding loads the same entity from the same source system into the same keys, it found no rows at all while keys are loaded, or it would list more than half of the loaded keys not listed already as newly absent (send keyCheckAcceptLarge to accept it once). Absent when the last one produced the list." }
+        keyCheckAcceptLarge: { type: boolean, description: "True while an operator's one-time acceptance of a large vanish is waiting for the next completed key check." }
         absentCount: { type: integer, minimum: 0, description: Loaded source keys the last full read did not find in the legacy system. See listSyncAbsent. }
     SyncAbsent:
       type: object
@@ -1648,6 +1649,7 @@ components:
         sourceOfTruth: { type: string, enum: [legacy, passage] }
         keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: Period in hours of the full read that finds deleted legacy rows; 0 turns it off. }
         keyCheckNow: { type: boolean, description: "Makes the next run a full read that looks for deleted legacy rows, whatever the period (also after a failed one); combine with runNow to start it at once." }
+        keyCheckAcceptLarge: { type: boolean, description: "Accepts, once, a full read that lists more than half of the loaded keys still present as newly absent (an operator confirms the source is healthy); it also makes the next run a full read. A run already reading the source when it is sent does not spend it. Without it such a read keeps the list and sets keyCheckError." }
         runNow: { type: boolean }
     SyncConflict:
       type: object

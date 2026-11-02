@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -203,25 +204,82 @@ func TestDeltaSince_LateRowsAtOrBeforeTheWatermarkAreReadAgain(t *testing.T) {
 
 func TestKeyCheckDue(t *testing.T) {
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
-	at := func(h int) *time.Time { x := now.Add(-time.Duration(h) * time.Hour); return &x }
+	at := func(d time.Duration) *time.Time { x := now.Add(-d); return &x }
+	long := now.Add(-48 * time.Hour) // anchor well past any offset
 	cases := []struct {
 		name  string
 		hours int
 		last  *time.Time
+		force bool
 		want  bool
 	}{
-		{"never checked", 24, nil, true},
-		{"checked a day ago", 24, at(24), true},
-		{"checked recently", 24, at(23), false},
-		{"turned off", 0, nil, false},
-		{"turned off, old check", 0, at(1000), false},
+		{"checked a day ago", 24, at(24 * time.Hour), false, true},
+		// The attempt is stamped at the end of a run, so a daily schedule finds it seconds short of a full period.
+		{"checked a day ago, less a few seconds", 24, at(24*time.Hour - 30*time.Second), false, true},
+		{"checked 23 hours 20 minutes ago", 24, at(23*time.Hour + 20*time.Minute), false, true},
+		{"checked 23 hours ago", 24, at(23 * time.Hour), false, false},
+		{"hourly, checked 46 minutes ago", 1, at(46 * time.Minute), false, true},
+		{"hourly, checked 44 minutes ago", 1, at(44 * time.Minute), false, false},
+		{"never checked, anchored long ago", 24, nil, false, true},
+		{"turned off", 0, nil, false, false},
+		{"turned off, old check", 0, at(1000 * time.Hour), false, false},
+		{"turned off, asked", 0, nil, true, false},
+		{"asked, checked recently", 24, at(time.Hour), true, true},
 	}
 	for _, c := range cases {
-		if got := domain.KeyCheckDue(c.hours, c.last, now); got != c.want {
+		k := domain.KeyCheckState{BindingID: "b", Hours: c.hours, LastAttempt: c.last, Force: c.force, Since: long}
+		if got := k.Due(now); got != c.want {
 			t.Errorf("%s: %v", c.name, got)
 		}
 	}
 	if !domain.ValidKeyCheckHours(0) || !domain.ValidKeyCheckHours(8760) || domain.ValidKeyCheckHours(-1) || domain.ValidKeyCheckHours(8761) {
 		t.Error("period bounds")
+	}
+}
+
+// A binding that never checked becomes due at its own offset after its anchor and stays due until a run attempts the
+// check, so a deploy does not make every binding read its legacy source at once, and a schedule that runs at one time of
+// day still reaches the check.
+func TestKeyCheckStagger(t *testing.T) {
+	since := time.Date(2026, 11, 2, 9, 17, 0, 0, time.UTC)
+	offsets := map[time.Duration]bool{}
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("0195f0a0-0000-7000-8000-%012d", i)
+		off := domain.KeyCheckOffset(id, 24)
+		if off < 0 || off >= 24*time.Hour || off != domain.KeyCheckOffset(id, 24) {
+			t.Fatalf("offset %v", off)
+		}
+		offsets[off] = true
+		k := domain.KeyCheckState{BindingID: id, Hours: 24, Since: since}
+		if off > 0 && k.Due(since.Add(off-time.Second)) {
+			t.Errorf("%s due before its offset", id)
+		}
+		// Due from its offset on, also in the following days at any time of day (a daily 02:00 schedule).
+		for _, later := range []time.Duration{off, 24 * time.Hour, 3*24*time.Hour + time.Hour} {
+			if !k.Due(since.Add(max(off, later))) {
+				t.Errorf("%s not due %v after its anchor (offset %v)", id, later, off)
+			}
+		}
+	}
+	if len(offsets) < 40 {
+		t.Errorf("only %d distinct offsets for 50 bindings", len(offsets))
+	}
+	if domain.KeyCheckOffset("x", 0) != 0 {
+		t.Error("off has no offset")
+	}
+	// A shorter period moves the first check inside it.
+	if off := domain.KeyCheckOffset("0195f0a0-0000-7000-8000-000000000007", 1); off >= time.Hour {
+		t.Errorf("hourly offset %v", off)
+	}
+}
+
+func TestKeyCheckVanishTooLarge(t *testing.T) {
+	for _, c := range []struct {
+		newly, present int
+		want           bool
+	}{{0, 0, false}, {5, 10, false}, {6, 10, true}, {1, 1, true}, {1, 2, false}, {2, 3, true}, {0, 10, false}} {
+		if got := domain.KeyCheckVanishTooLarge(c.newly, c.present); got != c.want {
+			t.Errorf("%d of %d: %v", c.newly, c.present, got)
+		}
 	}
 }

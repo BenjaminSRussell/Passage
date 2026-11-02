@@ -276,17 +276,26 @@ func TestScheduler_AFailingKeyCheckFallsBackToDeltas(t *testing.T) {
 		return syncer.Result{RunID: "r", Report: domain.Report{Status: domain.StatusSucceeded, Extracted: 1, Created: 1, Watermark: "W2"}}, nil
 	}}
 	sc := &syncer.Scheduler{Store: m, Runner: runner}
-	sc.Tick(ctx) // never checked: the first run is the full read, and it fails
-	st, _ := m.GetSync(ctx, binding.ID)
-	if !runner.seen[0].KeyCheckDue || st.LastStatus != "failed" || st.KeyCheckDue || st.KeyCheckError == "" || st.LastKeyCheckAt != nil {
-		t.Fatalf("after the failed full read: %+v", st)
+	// A new binding's first check falls at its offset inside the period, so its first run is a delta.
+	sc.Tick(ctx)
+	if len(runner.seen) != 1 || (runner.seen[0].KeyCheckDue && domain.KeyCheckOffset(binding.ID, 24) > time.Minute) {
+		t.Fatalf("a new binding's first run read in full before its offset: %+v", runner.seen)
 	}
 	cur, _ := m.GetSync(ctx, binding.ID)
+	if _, err := m.UpdateSync(ctx, binding.ID, cur.Version, store.SyncEdit{KeyCheckNow: true, RunNow: true}); err != nil {
+		t.Fatal(err)
+	}
+	sc.Tick(ctx) // the full read the operator asked for, and it fails: the request is spent
+	st, _ := m.GetSync(ctx, binding.ID)
+	if !runner.seen[1].KeyCheckDue || st.LastStatus != "failed" || st.KeyCheckDue || st.KeyCheckError == "" || st.LastKeyCheckAt != nil {
+		t.Fatalf("after the failed full read: %+v", st)
+	}
+	cur, _ = m.GetSync(ctx, binding.ID)
 	if _, err := m.UpdateSync(ctx, binding.ID, cur.Version, store.SyncEdit{RunNow: true}); err != nil {
 		t.Fatal(err)
 	}
 	sc.Tick(ctx)
-	if st, _ := m.GetSync(ctx, binding.ID); runner.seen[1].KeyCheckDue || st.LastStatus != "succeeded" || st.Watermark != "W2" || st.ConsecutiveFailures != 0 {
-		t.Fatalf("the run after a failed key check must be a delta: due=%v %+v", runner.seen[1].KeyCheckDue, st)
+	if st, _ := m.GetSync(ctx, binding.ID); runner.seen[2].KeyCheckDue || st.LastStatus != "succeeded" || st.Watermark != "W2" || st.ConsecutiveFailures != 0 {
+		t.Fatalf("the run after a failed key check must be a delta: due=%v %+v", runner.seen[2].KeyCheckDue, st)
 	}
 }

@@ -282,6 +282,8 @@ func (s *Scheduler) finish(st store.SyncState, claimID, runID string, res Result
 	// full read that failed still counts as the period's attempt, so the runs after it are deltas again.
 	f.FullRead = res.FullRead && runErr == nil && f.Status != domain.SyncFailed
 	f.KeyCheckAttempted = res.FullRead
+	// Only the operator requests the claim saw are spent: one sent while this run read the source waits for the next.
+	f.KeyCheckForced, f.KeyCheckAcceptLarge = st.KeyCheckForce, st.KeyCheckAcceptLarge
 	if f.RunID == "" && runErr == nil {
 		f.RunID = runID
 	}

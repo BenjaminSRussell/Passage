@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/hex"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"time"
@@ -102,14 +103,63 @@ func SyncBackoff(failures int) time.Duration {
 	return min(d, BackoffCap)
 }
 
-// KeyCheckDue reports whether a scheduled run of a binding must read the source in full to find deleted rows: the
-// binding has a cursor (without one every run is a full read already), the check is on (hours > 0) and the last one
-// is older than the period or never happened.
-func KeyCheckDue(hours int, last *time.Time, now time.Time) bool {
+// KeyCheckSlack is how much earlier than a full period after the last attempt a key check is already due. The attempt
+// is stamped when its run ends, so without it a binding on a daily schedule with the default 24 hours would find the
+// check a few seconds short of due at every other run and read in full only every second day. It covers a run's
+// deadline plus a scheduler pass, and is at most a quarter of the period.
+const KeyCheckSlack = 40 * time.Minute
+
+// KeyCheckOffset is how long after its anchor a binding's first key check falls: a deterministic offset inside the
+// period from a hash of the binding id, so bindings that were all added (or all migrated onto key checks) together do
+// not all read their legacy source in full at the same moment.
+func KeyCheckOffset(bindingID string, hours int) time.Duration {
 	if hours <= 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(bindingID))
+	period := uint64(time.Duration(hours) * time.Hour / time.Second)
+	return time.Duration(h.Sum64()%period) * time.Second
+}
+
+// KeyCheckState is what decides whether a binding's next scheduled run reads its source in full to find deleted rows.
+type KeyCheckState struct {
+	BindingID string
+	// Hours is the period; 0 turns the check off.
+	Hours int
+	// LastAttempt is the last full read tried, failed or not (nil before the first).
+	LastAttempt *time.Time
+	// Force is an operator's request (keyCheckNow, keyCheckAcceptLarge) for the next run to be a full read.
+	Force bool
+	// Since anchors the first check: when the binding's sync state was created, or when key checks were introduced
+	// for a binding that existed before.
+	Since time.Time
+}
+
+// Due reports whether a run at now must read the source in full: the check is on and an operator asked for it, or the
+// last attempt is (all but KeyCheckSlack) a period old, or there has been none and the binding's offset after Since
+// has passed. Once due it stays due until a run attempts the check, whatever times the binding's schedule runs at;
+// after the first attempt the period runs from the attempt, so the spread of first checks carries over.
+func (k KeyCheckState) Due(now time.Time) bool {
+	if k.Hours <= 0 {
 		return false
 	}
-	return last == nil || !last.Add(time.Duration(hours)*time.Hour).After(now)
+	if k.Force {
+		return true
+	}
+	period := time.Duration(k.Hours) * time.Hour
+	if k.LastAttempt != nil {
+		return !k.LastAttempt.Add(period - min(KeyCheckSlack, period/4)).After(now)
+	}
+	return !k.Since.Add(KeyCheckOffset(k.BindingID, k.Hours)).After(now)
+}
+
+// KeyCheckVanishTooLarge reports whether a full read lists so many newly absent keys (more than half of the loaded keys
+// that were still present, i.e. not listed absent already) that it is taken for a broken source rather than deletions,
+// and needs an operator to accept it. Keys listed before are left out of both counts: they are already gone from the
+// source and say nothing about whether this read is whole.
+func KeyCheckVanishTooLarge(newlyAbsent, present int) bool {
+	return present > 0 && newlyAbsent*2 > present
 }
 
 // ValidKeyCheckHours reports whether h is a period the service accepts (0 is off).
