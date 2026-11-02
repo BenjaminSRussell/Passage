@@ -262,7 +262,8 @@
       {"resource": "/v1/inventory/reports/negative-onhand", "methods": ["GET"]},
       {"resource": "/v1/inventory/reports/tracking-trace", "methods": ["GET"]},
       {"resource": "/v1/inventory/reports/dimension-combinations", "methods": ["GET"]},
-      {"resource": "/v1/inventory/workspace/summary", "methods": ["GET"]}
+      {"resource": "/v1/inventory/workspace/summary", "methods": ["GET"]},
+      {"resource": "/v1/inventory/reservation-candidates", "methods": ["GET"]}
     ]},
     "inventory.ownership-change.read": {"service_only": true, "permissions": [
       {"resource": "/v1/inventory/journals", "methods": ["GET"]},
@@ -1660,7 +1661,10 @@
       {"resource": "/v1/engineering/bom-versions/*", "methods": ["PUT"]},
       {"resource": "/v1/engineering/bom-versions/*:activate", "methods": ["POST"]},
       {"resource": "/v1/engineering/bom-versions/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/engineering/bom-versions/*:copy", "methods": ["POST"]}
+      {"resource": "/v1/engineering/bom-versions/*:copy", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs/*:cancel", "methods": ["POST"]}
     ]},
     "engineering.eco.approve": {"permissions": [{"resource": "/v1/engineering/ecos/*:release", "methods": ["POST"]}]},
     "engineering.eco.workflow": {"service_only": true, "permissions": [
@@ -1668,6 +1672,11 @@
       {"resource": "/v1/engineering/ecos/*:approve", "methods": ["POST"]},
       {"resource": "/v1/engineering/ecos/*:reject", "methods": ["POST"]},
       {"resource": "/v1/engineering/ecos/*:cancel", "methods": ["POST"]}
+    ]},
+    "engineering.ecr.review": {"permissions": [
+      {"resource": "/v1/engineering/ecrs/*:review", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs/*:reject", "methods": ["POST"]}
     ]},
     "engineering.read": {"permissions": [
       {"resource": "/v1/engineering/bom-versions", "methods": ["GET"]},
@@ -1689,7 +1698,9 @@
       {"resource": "/v1/engineering/route-versions", "methods": ["GET"]},
       {"resource": "/v1/engineering/route-versions/*", "methods": ["GET"]},
       {"resource": "/v1/engineering/route-versions:active", "methods": ["GET"]},
-      {"resource": "/v1/engineering/routes:lead-time", "methods": ["POST"]}
+      {"resource": "/v1/engineering/routes:lead-time", "methods": ["POST"]},
+      {"resource": "/v1/engineering/ecrs", "methods": ["GET"]},
+      {"resource": "/v1/engineering/ecrs/*", "methods": ["GET"]}
     ]},
     "engineering.resource.write": {"permissions": [
       {"resource": "/v1/engineering/calendars", "methods": ["POST"]},
@@ -2183,7 +2194,11 @@
       {"resource": "/v1/production/batch-picking:propose-stored", "methods": ["POST"]},
       {"resource": "/v1/production/customer-batch-requirements", "methods": ["GET"]},
       {"resource": "/v1/production/customer-batch-requirements/*", "methods": ["GET"]},
-      {"resource": "/v1/production/batch-requirements:check-stored", "methods": ["POST"]}
+      {"resource": "/v1/production/batch-requirements:check-stored", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-record-profiles", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-record-profiles/*", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-records", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-records/*", "methods": ["GET"]}
     ]},
     "production.batch-order.write": {"permissions": [
       {"resource": "/v1/production/batch-orders", "methods": ["POST"]},
@@ -2194,7 +2209,18 @@
       {"resource": "/v1/production/bulk-consolidation:preview", "methods": ["POST"]},
       {"resource": "/v1/production/rework-orders:preview", "methods": ["POST"]}
     ]},
-    "production.batch-record.approve": {"permissions": [{"resource": "/v1/production/batch-records:approve-check", "methods": ["POST"]}]},
+    "production.batch-record.approve": {"permissions": [
+      {"resource": "/v1/production/batch-records:approve-check", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-records/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-records/*:seal", "methods": ["POST"]}
+    ]},
+    "production.batch-record.write": {"permissions": [
+      {"resource": "/v1/production/batch-record-profiles", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-record-profiles/*:retire", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-records", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-records/*/exceptions", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-records/*/exceptions/*:disposition", "methods": ["POST"]}
+    ]},
     "production.batch.consume-expired": {"flag": true, "permissions": []},
     "production.batch.merge": {"permissions": [
       {"resource": "/v1/production/batch-merge:preview", "methods": ["POST"]},
