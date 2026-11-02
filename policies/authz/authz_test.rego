@@ -1139,4 +1139,22 @@ test_receiving_payee_erase_reaches_only_the_erase_route if {
 	not allowed("receiving.payee.erase", "POST", "/v1/receiving/one-time-payees")
 	not allowed("receiving.payee.erase", "GET", "/v1/receiving/one-time-payees:erase")
 	not allowed("VendorInvoicePost", "POST", "/v1/receiving/one-time-payees:erase")
+
+test_payroll_run_duties_split_maintain_finalize_post_and_read if {
+	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
+	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")
+	not allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/finalize")
+	not allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/post")
+	allowed("payroll.run.finalize", "POST", "/v1/payroll/runs/r-1/finalize")
+	not allowed("payroll.run.finalize", "POST", "/v1/payroll/runs/r-1/post")
+	allowed("payroll.run.post", "POST", "/v1/payroll/runs/r-1/post")
+	not allowed("payroll.run.post", "POST", "/v1/payroll/runs")
+	allowed("payroll.run.read", "GET", "/v1/payroll/runs/r-1")
+	allowed("payroll.run.read", "GET", "/v1/payroll/gl-reconciliation")
+	not allowed("payroll.run.read", "POST", "/v1/payroll/runs")
+}
+
+test_payroll_service_grant_reaches_only_ledger_post_and_balance if {
+	data.service_grants.payroll.ledger == ["ledger.entry.post", "ledger.balance.read"]
+	count(data.service_grants.payroll) == 1
 }

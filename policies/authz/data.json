@@ -2036,7 +2036,17 @@
       {"resource": "/v1/org/warehouses", "methods": ["POST"]},
       {"resource": "/v1/org/warehouses/*", "methods": ["PATCH"]}
     ]},
-    "payroll.run.maintain": {"permissions": [{"resource": "/v1/payroll/calculations", "methods": ["POST"]}]},
+    "payroll.run.maintain": {"permissions": [
+      {"resource": "/v1/payroll/calculations", "methods": ["POST"]},
+      {"resource": "/v1/payroll/runs", "methods": ["POST"]},
+      {"resource": "/v1/payroll/runs/*/review", "methods": ["POST"]}
+    ]},
+    "payroll.run.finalize": {"permissions": [{"resource": "/v1/payroll/runs/*/finalize", "methods": ["POST"]}]},
+    "payroll.run.post": {"permissions": [{"resource": "/v1/payroll/runs/*/post", "methods": ["POST"]}]},
+    "payroll.run.read": {"permissions": [
+      {"resource": "/v1/payroll/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/payroll/gl-reconciliation", "methods": ["GET"]}
+    ]},
     "planning.forecast.approve": {"permissions": [
       {"resource": "/v1/planning/forecasts/*:publish", "methods": ["POST"]},
       {"resource": "/v1/planning/forecasts/*:reject", "methods": ["POST"]}
@@ -2757,6 +2767,9 @@
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "assets": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "payroll": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "sales": {
