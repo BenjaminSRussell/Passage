@@ -148,6 +148,7 @@
     "ledger.batch.post": {"permissions": [{"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]}]},
     "ledger.set.post": {"permissions": [{"resource": "/v1/ledger/ledger-sets/*/journal-entries", "methods": ["POST"]}]},
     "ledger.entry.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-lines", "methods": ["GET"]}]},
+    "ledger.account.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/charts/*/accounts", "methods": ["GET"]}]},
     "ledger.ledger.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]}]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
     "ledger.journal.postledger": {"flag": true, "permissions": []},
@@ -2769,7 +2770,7 @@
       "compliance": ["compliance.legal_hold.check"]
     },
     "close": {
-      "ledger": ["ledger.ledger.lookup"]
+      "ledger": ["ledger.ledger.lookup", "ledger.account.lookup"]
     },
     "production": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
