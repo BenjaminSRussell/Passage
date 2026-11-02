@@ -56,7 +56,7 @@ func parityPrincipals(c *Catalogue) map[string][]string {
 		"viewer-and-edit": {"View vendors", "Maintain vendors", "View vendors"},
 		"finance":         {"ledger.journal.read", "reporting.statement.view", "ledger.journal.post", "inventory.read"},
 		"unknown-only":    {"not-a-seeded-duty"},
-		"flags-only":      {"ledger.journal.postdirect", "inventory.count.approve", "pii.read"},
+		"flags-only":      {"ledger.journal.postdirect", "budget.override", "pii.read"},
 		"identity-admin":  {"Maintain users", "View effective permissions", "Maintain security roles"},
 		"broad":           everyNthDuty(c, 3),
 	}

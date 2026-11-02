@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ARWriteOffApprove", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.blocking.scrap", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "scheduling.order.import", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"ARWriteOffApprove", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "scheduling.order.import", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -46,6 +46,12 @@ test_flag_duties_grant_no_routes if {
 segregation_denials := [
 	["inventory.journal.write", "POST", "/v1/inventory/journals/j1:post"],
 	["inventory.journal.write", "POST", "/v1/inventory/journals/j1:approve"],
+	["inventory.count.write", "POST", "/v1/inventory/count-sheets/c1:approve"],
+	["inventory.count.write", "POST", "/v1/inventory/count-sheets/c1/lines/l1:recount"],
+	["inventory.count.write", "POST", "/v1/inventory/count-sheets/c1:post"],
+	["inventory.count.post", "POST", "/v1/inventory/count-sheets/c1:approve"],
+	["inventory.count.approve", "POST", "/v1/inventory/count-sheets/c1:post"],
+	["inventory.count.approve", "PUT", "/v1/inventory/count-sheets/c1/lines/l1"],
 	["inventory.transfer.write", "POST", "/v1/inventory/transfer-orders/t1:ship"],
 	["inventory.transfer.write", "POST", "/v1/inventory/transfer-orders/t1:receive"],
 	["ledger.journal.write", "POST", "/v1/ledger/journal-batches/b1/approve"],

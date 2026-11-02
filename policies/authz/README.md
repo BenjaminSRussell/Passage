@@ -27,7 +27,7 @@ The PEP must pass the decoded `r.URL.Path` with no query string, or the route te
 
 ## Flag duties
 
-`"flag": true` duties (for example `ledger.journal.postdirect`, `inventory.count.approve`, `budget.override`, `org.hierarchy.backdate`) are checked in a handler on a route another duty already opens. They carry no route permissions. `Maintain tax codes` is a flag until a tax-code read route is mounted.
+`"flag": true` duties (for example `ledger.journal.postdirect`, `budget.override`, `org.hierarchy.backdate`) are checked in a handler on a route another duty already opens. They carry no route permissions. `Maintain tax codes` is a flag until a tax-code read route is mounted. A duty can own routes and still be checked in handlers: `inventory.count.approve` opens `count-sheets/*:approve` and `count-sheets/*/lines/*:recount`, and the inventory handlers also read it with `HasDuty` for over-tolerance `:post`, marking open tags MISSING on `:transfer-tags`, and unmasking blind counts.
 
 ## Tests
 

@@ -109,6 +109,7 @@
       {"resource": "/v1/ledger/clearings", "methods": ["GET"]},
       {"resource": "/v1/ledger/clearings/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/open-item-accounts", "methods": ["GET"]},
+      {"resource": "/v1/ledger/ledgers/*/open-item-activations", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/tolerance-groups", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/tolerance-groups/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledgers/*/auto-clearing-rules", "methods": ["GET"]},
@@ -129,7 +130,10 @@
       {"resource": "/v1/ledger/ledgers/*/advanced-rules/*", "methods": ["GET"]}
     ]},
     "ledger.balance.read": {"permissions": [{"resource": "/v1/ledger/balances", "methods": ["GET"]}]},
-    "ledger.balance.rebuild": {"permissions": [{"resource": "/v1/ledger/balances:rebuild", "methods": ["POST"]}]},
+    "ledger.balance.rebuild": {"permissions": [
+      {"resource": "/v1/ledger/balances:rebuild", "methods": ["POST"]},
+      {"resource": "/v1/ledger/ledgers/*/open-item-accounts/*:activate", "methods": ["POST"]}
+    ]},
     "ledger.journal.post": {"permissions": [
       {"resource": "/v1/ledger/journal-entries", "methods": ["POST"]},
       {"resource": "/v1/ledger/validate", "methods": ["POST"]},
@@ -322,7 +326,10 @@
       {"resource": "/v1/inventory/count-sheets/*:cancel", "methods": ["POST"]}
     ]},
     "inventory.count.post": {"permissions": [{"resource": "/v1/inventory/count-sheets/*:post", "methods": ["POST"]}]},
-    "inventory.count.approve": {"flag": true, "permissions": []},
+    "inventory.count.approve": {"permissions": [
+      {"resource": "/v1/inventory/count-sheets/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/inventory/count-sheets/*/lines/*:recount", "methods": ["POST"]}
+    ]},
     "RequisitionCreate": {"permissions": [
       {"resource": "/v1/procurement/requisitions", "methods": ["GET", "POST"]},
       {"resource": "/v1/procurement/requisitions/*", "methods": ["GET"]},
@@ -2005,6 +2012,11 @@
       {"resource": "/v1/pricing/campaigns", "methods": ["POST"]},
       {"resource": "/v1/pricing/campaigns/*:kill", "methods": ["POST"]},
       {"resource": "/v1/pricing/campaigns/*:restore", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commodity/bases", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commodity/bases/*/index-values", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commodity/calculations", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commodity/calculations/*:run", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commodity/calculations/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/pricing/condition-records", "methods": ["POST"]},
       {"resource": "/v1/pricing/condition-records/*:activate", "methods": ["POST"]},
       {"resource": "/v1/pricing/condition-records/*:withdraw", "methods": ["POST"]},
@@ -2033,6 +2045,13 @@
     "pricing.view": {"permissions": [
       {"resource": "/v1/pricing/campaigns", "methods": ["GET"]},
       {"resource": "/v1/pricing/campaigns/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/bases", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/bases/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/bases/*/index-values", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/calculations", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/calculations/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/calculations/*/runs", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commodity/calculations/*:preview", "methods": ["POST"]},
       {"resource": "/v1/pricing/condition-records", "methods": ["GET"]},
       {"resource": "/v1/pricing/condition-records/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/free-goods-rules", "methods": ["GET"]},
@@ -2378,7 +2397,8 @@
       {"resource": "/v1/scheduling/jobs/*:move", "methods": ["POST"]},
       {"resource": "/v1/scheduling/operations", "methods": ["POST"]},
       {"resource": "/v1/scheduling/order-pegs", "methods": ["POST"]},
-      {"resource": "/v1/scheduling/order-pegs/*", "methods": ["DELETE"]}
+      {"resource": "/v1/scheduling/order-pegs/*", "methods": ["DELETE"]},
+      {"resource": "/v1/scheduling/order-imports/*:reimport", "methods": ["POST"]}
     ]},
     "scheduling.setup.write": {"permissions": [
       {"resource": "/v1/scheduling/cleanout-rules", "methods": ["POST"]},
@@ -2409,6 +2429,8 @@
       {"resource": "/v1/shopfloor/process-messages:retry-due", "methods": ["POST"]}
     ]},
     "shopfloor.setup.maintain": {"permissions": [
+      {"resource": "/v1/shopfloor/absence-codes", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/absence-codes/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/machines", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/pay-agreements", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/pay-agreements/*", "methods": ["PUT"]},
@@ -2427,6 +2449,8 @@
       {"resource": "/v1/shopfloor/registrations", "methods": ["POST"]}
     ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/absence-codes", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/absence-codes/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/andon", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/auto-clock-outs", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/clocked-in", "methods": ["GET"]},
