@@ -294,23 +294,42 @@ func TestCutoverPlan_GenerateCompleteRollback(t *testing.T) {
 	}
 
 	rb := base + "/rollback"
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","alice"]}`}); r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), "CUT-1603") {
-		t.Fatalf("one distinct approver must fail CUT-1603: %d %s", r.Code, r.Body)
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`, user: "alice"}); r.Code != http.StatusBadRequest {
+		t.Fatalf("approvers cannot be named in the request: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantB, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantB, duties: "CutoverManager", body: `{}`, user: "alice"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant must not see the plan: %d", r.Code)
 	}
-	done := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`, key: "rb-1", user: "manager"})
-	if done.Code != http.StatusOK {
-		t.Fatalf("two approvers: %d %s", done.Code, done.Body)
+	first := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-1", user: "alice"})
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first approval must be 202 pending: %d %s", first.Code, first.Body)
 	}
-	if p := decode[planDTO](t, done); !p.RolledBack || len(p.Approvers) != 2 {
+	if p := decode[planDTO](t, first); p.RolledBack || p.PendingRollback == nil || p.PendingRollback.Approver != "alice" || p.Version != 5 {
+		t.Fatalf("plan after the first approval %+v", p)
+	}
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-1", user: "alice"}); r.Code != http.StatusAccepted || r.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replayed first approval: %d %s", r.Code, r.Body)
+	}
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, user: "alice"}); r.Code != http.StatusConflict || !strings.Contains(r.Body.String(), "CUT-1603") {
+		t.Fatalf("the same user cannot confirm their own approval: %d %s", r.Code, r.Body)
+	}
+	if got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager"})); got.PendingRollback == nil || got.RolledBack {
+		t.Fatalf("pending approval is shown on the plan: %+v", got)
+	}
+	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.cutover.plan.rolledback.v1'`); n != 0 {
+		t.Fatalf("a first approval writes no rolledback event, got %d", n)
+	}
+	done := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-2", user: "bob"})
+	if done.Code != http.StatusOK {
+		t.Fatalf("second approval: %d %s", done.Code, done.Body)
+	}
+	if p := decode[planDTO](t, done); !p.RolledBack || strings.Join(p.Approvers, ",") != "alice,bob" || p.PendingRollback != nil {
 		t.Fatalf("rolled back plan %+v", p)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`, key: "rb-1"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-2", user: "bob"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replayed rollback: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`}); r.Code != http.StatusConflict {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, user: "carol"}); r.Code != http.StatusConflict {
 		t.Fatalf("a second rollback must be 409: %d %s", r.Code, r.Body)
 	}
 	if c := complete("First weekly reconciliation", `{"actualDurationMin":1}`); c.Code != http.StatusConflict {

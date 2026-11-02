@@ -374,6 +374,14 @@ export interface CutoverPlan {
   abortWarning?: string;
   /** The latest go/no-go decision; absent until one is recorded. */
   decision?: DecisionSummary;
+  /** The rehearsal plan the planned durations were measured on, and how many steps took one. */
+  rehearsalPlanId?: string;
+  rehearsalCarried?: number;
+  /**
+   * The first approval of a rollback in the current go/no-go round, waiting for a second, different CutoverManager
+   * (CUT-1603). A go/no-go decision recorded after it voids it.
+   */
+  pendingRollback?: { approver: string; approvedAt: string };
   /** Present once the plan is rolled back: the lines exported for re-keying (FR-49.9). */
   rekeying?: Rekeying;
   /** Present on get and commands; the list leaves it out. */
@@ -485,6 +493,8 @@ export interface GenerateCutoverRequest {
   entities: string[];
   abortOffsetHours?: number;
   rehearsalDurationsMin?: Record<string, number>;
+  /** Carry the durations measured on that earlier plan into this one (FR-49.6). */
+  rehearsalPlanId?: string;
 }
 
 export function newKey(): string {
@@ -641,11 +651,12 @@ export function completeStep(planId: string, seq: number, actualDurationMin: num
 }
 
 /**
- * POST /cutover/plans/{id}/rollback. Needs two distinct approvers (CUT-1603). postings are the
- * Passage postings since T-0 to export for re-keying; one the service rejects leaves the plan as it was.
+ * POST /cutover/plans/{id}/rollback as the signed-in user. Needs two different CutoverManagers (CUT-1603): the first call
+ * stores the caller's approval and returns the plan with pendingRollback (202), a second caller's call runs the rollback.
+ * postings are the Passage postings since T-0 to export for re-keying; one the service rejects leaves the plan as it was.
  */
-export function rollbackPlan(planId: string, approvers: string[], postings: RekeyPosting[], version: number, key: string = newKey()): Promise<CutoverPlan> {
-  return post(`/cutover/plans/${encodeURIComponent(planId)}/rollback`, { approvers, postings, version }, key);
+export function rollbackPlan(planId: string, postings: RekeyPosting[], version: number, key: string = newKey()): Promise<CutoverPlan> {
+  return post(`/cutover/plans/${encodeURIComponent(planId)}/rollback`, { postings, version }, key);
 }
 
 /** GET /cutover/plans/{id}/go-no-go: the checklist evaluated now and the decisions so far. */

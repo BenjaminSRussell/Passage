@@ -233,3 +233,30 @@ func TestPlanVersionAndRolledBackState(t *testing.T) {
 		t.Fatalf("complete after rollback: %v, want ErrTransition", err)
 	}
 }
+
+// CUT-1603, CUT-1605: rollback approvers are authenticated people; the first approval is pending,
+// a different person's confirms it, and the same person cannot approve twice.
+func TestPrepareRollback_ApproveThenConfirm(t *testing.T) {
+	p := &Plan{}
+	for _, by := range []string{"", "  ", "service:migration-loader"} {
+		if _, _, err := p.PrepareRollback(by, nil); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%q must be refused as ErrInvalid, got %v", by, err)
+		}
+	}
+	approvers, complete, err := p.PrepareRollback("alice", nil)
+	if err != nil || complete || len(approvers) != 1 || approvers[0] != "alice" {
+		t.Fatalf("first approval: %v %v %v", approvers, complete, err)
+	}
+	pending := &RollbackApproval{Approver: "alice"}
+	if _, _, err := p.PrepareRollback("alice", pending); !errors.Is(err, ErrTransition) {
+		t.Fatalf("the same user twice: %v", err)
+	}
+	approvers, complete, err = p.PrepareRollback("bob", pending)
+	if err != nil || !complete || len(approvers) != 2 || approvers[0] != "alice" || approvers[1] != "bob" {
+		t.Fatalf("second approval: %v %v %v", approvers, complete, err)
+	}
+	p.RolledBack = true
+	if _, _, err := p.PrepareRollback("bob", pending); !errors.Is(err, ErrTransition) {
+		t.Fatalf("rolled-back plan: %v", err)
+	}
+}

@@ -25,9 +25,9 @@ func (s *Postgres) CreatePlan(ctx context.Context, idem Idem, plan domain.Plan, 
 			for i, p := range plan.Packs {
 				packs[i] = string(p)
 			}
-			if err := tx.QueryRow(ctx, `insert into cutover_plan (tenant_id, plan_id, t0, packs, entities, abort_offset_min, version, created_by)
-				values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7) returning created_at`,
-				plan.PlanID, plan.T0, packs, plan.Entities, plan.AbortOffsetMin, plan.Version, createdBy).Scan(&plan.CreatedAt); err != nil {
+			if err := tx.QueryRow(ctx, `insert into cutover_plan (tenant_id, plan_id, t0, packs, entities, abort_offset_min, version, created_by, rehearsal_plan_id, rehearsal_carried)
+				values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid, $9) returning created_at`,
+				plan.PlanID, plan.T0, packs, plan.Entities, plan.AbortOffsetMin, plan.Version, createdBy, plan.RehearsalPlanID, plan.RehearsalCarried).Scan(&plan.CreatedAt); err != nil {
 				return domain.Plan{}, fmt.Errorf("insert cutover_plan: %w", err)
 			}
 			for _, st := range plan.Steps {
@@ -46,13 +46,13 @@ func (s *Postgres) CreatePlan(ctx context.Context, idem Idem, plan domain.Plan, 
 }
 
 const planColumns = `plan_id::text, t0, packs, entities, abort_offset_min, rolled_back, rollback_approvers,
-	rekey_journal_lines, rekey_document_lines, rekey_excluded, version, created_at`
+	rekey_journal_lines, rekey_document_lines, rekey_excluded, version, created_at, coalesce(rehearsal_plan_id::text, ''), rehearsal_carried`
 
 func scanPlan(row pgx.Row) (domain.Plan, error) {
 	var p domain.Plan
 	var packs []string
 	if err := row.Scan(&p.PlanID, &p.T0, &packs, &p.Entities, &p.AbortOffsetMin, &p.RolledBack, &p.Approvers,
-		&p.Rekey.JournalLines, &p.Rekey.DocumentLines, &p.Rekey.Excluded, &p.Version, &p.CreatedAt); err != nil {
+		&p.Rekey.JournalLines, &p.Rekey.DocumentLines, &p.Rekey.Excluded, &p.Version, &p.CreatedAt, &p.RehearsalPlanID, &p.RehearsalCarried); err != nil {
 		return domain.Plan{}, err
 	}
 	for _, pk := range packs {
@@ -104,6 +104,9 @@ func getPlan(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (domain.
 		return domain.Plan{}, err
 	}
 	if err := loadSteps(ctx, tx, []*domain.Plan{&p}); err != nil {
+		return domain.Plan{}, err
+	}
+	if err := loadPendingRollbacks(ctx, tx, []*domain.Plan{&p}); err != nil {
 		return domain.Plan{}, err
 	}
 	if err := loadLatestDecisions(ctx, tx, []*domain.Plan{&p}); err != nil {
@@ -169,6 +172,9 @@ func (s *Postgres) ListPlans(ctx context.Context, f PlanFilter) ([]domain.Plan, 
 			ptrs[i] = &out[i]
 		}
 		if err := loadSteps(ctx, tx, ptrs); err != nil {
+			return err
+		}
+		if err := loadPendingRollbacks(ctx, tx, ptrs); err != nil {
 			return err
 		}
 		return loadLatestDecisions(ctx, tx, ptrs)
@@ -292,60 +298,129 @@ func (s *Postgres) CompleteStep(ctx context.Context, idem Idem, c StepCompletion
 	return out, replayed, err
 }
 
-// RollbackRequest executes a plan's rollback with two distinct approvers. Postings are the
-// Passage postings since go-live to export for re-keying (FR-49.9).
+// RollbackRequest approves a plan's rollback as the authenticated user By (CUT-1603, CUT-1605).
+// Postings are the Passage postings since go-live to export for re-keying (FR-49.9); they are
+// used by the request that executes the rollback (the second approval) and validated then.
 type RollbackRequest struct {
 	PlanID          string
-	Approvers       []string
 	Postings        []domain.RekeyPosting
 	ExpectedVersion int
 	By              string
 }
 
-// Rollback records the rollback under the plan's row lock, stores the re-keying lines built
-// from the postings and writes cutover.plan.rolledback, all in one transaction: a posting the
-// export rejects leaves the plan as it was.
-func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (domain.Plan, bool, error) {
-	var out domain.Plan
+// RollbackResult is the plan after the request and, for the first approval, the approval that
+// waits for a second approver (Pending set, plan not rolled back).
+type RollbackResult struct {
+	Plan    domain.Plan
+	Pending *domain.RollbackApproval `json:",omitempty"`
+}
+
+// Rollback approves the rollback under the plan's row lock. The first approval is stored and moves
+// the plan's version; a second, different user's approval executes it: it stores the re-keying
+// lines built from the postings and writes cutover.plan.rolledback, all in one transaction, so a
+// posting the export rejects leaves the plan as it was.
+func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (RollbackResult, bool, error) {
+	var out RollbackResult
 	var replayed bool
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, replayed, err = idempotent(ctx, tx, idem, http.StatusOK, func() (domain.Plan, error) {
+		out, replayed, err = idempotent(ctx, tx, idem, http.StatusOK, func() (RollbackResult, error) {
 			plan, err := lockPlan(ctx, tx, r.PlanID, r.ExpectedVersion)
 			if err != nil {
-				return domain.Plan{}, err
+				return RollbackResult{}, err
 			}
-			if err := plan.Rollback(r.Approvers...); err != nil {
-				return domain.Plan{}, err
+			approvers, complete, err := plan.PrepareRollback(r.By, plan.PendingRollback)
+			if err != nil {
+				return RollbackResult{}, err
 			}
+			if !complete {
+				// Bad postings are refused at the first approval too, so the confirmer is not surprised.
+				if _, err := domain.BuildRekeyExport(plan, r.Postings); err != nil {
+					return RollbackResult{}, err
+				}
+				plan.Version++
+				a := domain.RollbackApproval{Approver: approvers[0], PlanVersion: plan.Version}
+				if err := tx.QueryRow(ctx, `insert into cutover_rollback_approval (tenant_id, plan_id, round, approver, plan_version)
+					values (current_setting('passage.tenant_id', true)::uuid, $1, `+rollbackRound+`, $2, $3) returning round, approved_at`,
+					plan.PlanID, a.Approver, a.PlanVersion).Scan(&a.Round, &a.ApprovedAt); err != nil {
+					return RollbackResult{}, fmt.Errorf("insert cutover_rollback_approval: %w", err)
+				}
+				if err := savePlanVersion(ctx, tx, plan); err != nil {
+					return RollbackResult{}, err
+				}
+				plan.PendingRollback = &a
+				return RollbackResult{Plan: plan, Pending: &a}, nil
+			}
+			if err := plan.Rollback(approvers...); err != nil {
+				return RollbackResult{}, err
+			}
+			plan.PendingRollback = nil
 			export, err := domain.BuildRekeyExport(plan, r.Postings)
 			if err != nil {
-				return domain.Plan{}, err
+				return RollbackResult{}, err
 			}
 			plan.Rekey = export.Summary()
 			if err := insertRekeyLines(ctx, tx, plan.PlanID, domain.KindJournal, export.Journals); err != nil {
-				return domain.Plan{}, err
+				return RollbackResult{}, err
 			}
 			if err := insertRekeyLines(ctx, tx, plan.PlanID, domain.KindDocument, export.Documents); err != nil {
-				return domain.Plan{}, err
+				return RollbackResult{}, err
 			}
 			if _, err := tx.Exec(ctx, `update cutover_plan set rolled_back = true, rollback_approvers = $2, rolled_back_by = $3,
 				rolled_back_at = now(), version = $4, rekey_journal_lines = $5, rekey_document_lines = $6, rekey_excluded = $7
 				where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`,
 				plan.PlanID, plan.Approvers, r.By, plan.Version, plan.Rekey.JournalLines, plan.Rekey.DocumentLines, plan.Rekey.Excluded); err != nil {
-				return domain.Plan{}, fmt.Errorf("update cutover_plan: %w", err)
+				return RollbackResult{}, fmt.Errorf("update cutover_plan: %w", err)
 			}
 			if err := enqueue(ctx, tx, mfevents.CutoverPlanRolledBack, "cutover_plan", plan.PlanID, mfevents.CutoverPlanRolledBackData{
 				PlanID: plan.PlanID, Approvers: plan.Approvers, ExecutedBy: r.By,
 				RekeyJournalLines: plan.Rekey.JournalLines, RekeyDocumentLines: plan.Rekey.DocumentLines,
 			}); err != nil {
-				return domain.Plan{}, fmt.Errorf("enqueue cutover.plan.rolledback: %w", err)
+				return RollbackResult{}, fmt.Errorf("enqueue cutover.plan.rolledback: %w", err)
 			}
-			return plan, nil
+			return RollbackResult{Plan: plan}, nil
 		})
 		return err
 	})
 	return out, replayed, err
+}
+
+// rollbackRound is the go/no-go decision round of plan $1 now: the seq its next decision takes, as
+// for GO approvals (domain.ReadinessFacts.Round). A rollback approval of an earlier round is void.
+const rollbackRound = `(select count(*)::int + 1 from cutover_decision d
+	where d.tenant_id = current_setting('passage.tenant_id', true)::uuid and d.plan_id = $1)`
+
+// loadPendingRollbacks fills PendingRollback on every unrolled-back plan in plans with the first
+// approval of the plan's current decision round; one given before a go/no-go decision is void.
+func loadPendingRollbacks(ctx context.Context, tx pgx.Tx, plans []*domain.Plan) error {
+	if len(plans) == 0 {
+		return nil
+	}
+	byID := make(map[string]*domain.Plan, len(plans))
+	planIDs := make([]string, 0, len(plans))
+	for _, p := range plans {
+		byID[p.PlanID] = p
+		planIDs = append(planIDs, p.PlanID)
+	}
+	rows, err := tx.Query(ctx, `select a.plan_id::text, a.round, a.approver, a.plan_version, a.approved_at from cutover_rollback_approval a
+		where a.tenant_id = current_setting('passage.tenant_id', true)::uuid and a.plan_id = any($1::uuid[])
+		and a.round = (select count(*)::int + 1 from cutover_decision d where d.tenant_id = a.tenant_id and d.plan_id = a.plan_id)
+		order by a.approved_at, a.approver`, planIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var planID string
+		var a domain.RollbackApproval
+		if err := rows.Scan(&planID, &a.Round, &a.Approver, &a.PlanVersion, &a.ApprovedAt); err != nil {
+			return err
+		}
+		if p := byID[planID]; !p.RolledBack && p.PendingRollback == nil {
+			p.PendingRollback = &a
+		}
+	}
+	return rows.Err()
 }
 
 // insertRekeyLines stores one re-keying file's lines in file order (seq from 1).

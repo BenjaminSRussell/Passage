@@ -90,7 +90,7 @@ func TestCutoverStep_StartTimesAndMeasuresTheStep(t *testing.T) {
 		t.Fatalf("step.completed events = %d, want 1 (starting writes none)", n)
 	}
 
-	if r := do(t, h, request{method: "POST", path: base + "/rollback", tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`}); r.Code != http.StatusOK {
+	if r := rollbackBoth(t, h, base+"/rollback", `{}`, ""); r.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", r.Code, r.Body)
 	}
 	if r := step("start", "First weekly reconciliation", `{}`, ""); r.Code != http.StatusConflict || problemCode(t, r) != CodeTransition {

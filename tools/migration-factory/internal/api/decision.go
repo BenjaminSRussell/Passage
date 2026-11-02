@@ -137,7 +137,7 @@ func (s *Server) recordDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, replayed, err := s.store.RecordDecision(r.Context(), idem, store.DecisionRequest{PlanID: id, ExpectedVersion: req.Version,
-		Input: domain.DecisionInput{Decision: req.Decision, Reason: req.Reason, Attestations: req.Attestations, By: p.UserID}})
+		Input: domain.DecisionInput{Decision: req.Decision, Reason: req.Reason, Attestations: req.Attestations, By: approverID(p)}})
 	if err != nil {
 		fail(w, r, err)
 		return

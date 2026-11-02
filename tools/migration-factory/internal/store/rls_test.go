@@ -147,6 +147,14 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
 			NoUpdate: true,
 		},
+		{
+			Table:  "cutover_rollback_approval",
+			Before: insertPlan,
+			Insert: `insert into cutover_rollback_approval (tenant_id, plan_id, round, approver, plan_version)
+				values ($1, $2, 1, 'alice', 2)`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
+			NoUpdate: true,
+		},
 	})
 }
 
@@ -177,6 +185,7 @@ func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 		`update project_opening_line set cost_amount = 0`, `delete from project_opening_line`, `delete from variance`, `delete from parallel_run`,
 		`delete from control_total`, `delete from pack_quarantine`, `update rekey_line set amount = 0`, `delete from rekey_line`, `update cutover_decision set reason = 'x'`, `delete from cutover_decision`,
 		`update cutover_go_approval set approver = 'x'`, `delete from cutover_go_approval`,
+		`update cutover_rollback_approval set approver = 'x'`, `delete from cutover_rollback_approval`,
 		`update gl_opening_balance set balance = 0`, `delete from gl_opening_balance`} {
 		err := inTenant(func(tx pgx.Tx) error { _, err := tx.Exec(ctx, stmt); return err })
 		var pgErr *pgconn.PgError

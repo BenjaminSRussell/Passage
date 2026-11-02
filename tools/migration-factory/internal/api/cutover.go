@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,9 @@ type generateRequest struct {
 	Entities           []string       `json:"entities"`
 	AbortOffsetHours   int            `json:"abortOffsetHours"`
 	RehearsalDurations map[string]int `json:"rehearsalDurationsMin"`
+	// RehearsalPlanID carries the durations measured on that earlier plan into this one (FR-49.6);
+	// rehearsalDurationsMin entries override its values.
+	RehearsalPlanID string `json:"rehearsalPlanId"`
 }
 
 type stepDTO struct {
@@ -81,6 +85,12 @@ type planDTO struct {
 	AbortWarning string `json:"abortWarning,omitempty"`
 	// Decision is the latest go/no-go decision, nil until one is recorded.
 	Decision *decisionSummaryDTO `json:"decision,omitempty"`
+	// RehearsalPlanID and RehearsalCarried say which earlier plan the planned durations were measured on
+	// and how many steps took one (FR-49.6).
+	RehearsalPlanID  string `json:"rehearsalPlanId,omitempty"`
+	RehearsalCarried int    `json:"rehearsalCarried"`
+	// PendingRollback is the first approval of a rollback, waiting for a second, different CutoverManager.
+	PendingRollback *pendingRollbackDTO `json:"pendingRollback,omitempty"`
 	// Rekeying is set once the plan is rolled back: the lines exported for re-keying (FR-49.9).
 	Rekeying *rekeyingDTO `json:"rekeying,omitempty"`
 	Steps    []stepDTO    `json:"steps,omitempty"`
@@ -91,7 +101,7 @@ type planDTO struct {
 func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 	out := planDTO{PlanID: p.PlanID, T0: p.T0, Entities: p.Entities, AbortOffsetMin: p.AbortOffsetMin, RolledBack: p.RolledBack,
 		Approvers: p.Approvers, Version: p.Version, CreatedAt: p.CreatedAt, Packs: []string{}, OpenGoNoGo: p.OpenGoNoGo(),
-		Decision: toDecisionSummary(p.LatestDecision)}
+		Decision: toDecisionSummary(p.LatestDecision), RehearsalPlanID: p.RehearsalPlanID, RehearsalCarried: p.RehearsalCarried}
 	if out.Approvers == nil {
 		out.Approvers = []string{}
 	}
@@ -100,6 +110,9 @@ func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 	}
 	if out.OpenGoNoGo == nil {
 		out.OpenGoNoGo = []string{}
+	}
+	if p.PendingRollback != nil && !p.RolledBack {
+		out.PendingRollback = &pendingRollbackDTO{Approver: p.PendingRollback.Approver, ApprovedAt: p.PendingRollback.ApprovedAt}
 	}
 	for _, pk := range p.Packs {
 		out.Packs = append(out.Packs, string(pk))
@@ -155,9 +168,30 @@ func (s *Server) generatePlan(w http.ResponseWriter, r *http.Request) {
 		}
 		packs = append(packs, pk)
 	}
+	rehearsal := domain.DurationOverrides{}
+	if id := strings.TrimSpace(req.RehearsalPlanID); id != "" {
+		if !ids.Valid(id) {
+			fail(w, r, invalid("rehearsalPlanId must be a plan id"))
+			return
+		}
+		source, err := s.store.GetPlan(r.Context(), id)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		rehearsal = source.MeasuredDurations()
+		if len(rehearsal) == 0 {
+			fail(w, r, invalid("the rehearsal plan has no measured step durations yet: complete its steps first"))
+			return
+		}
+		req.RehearsalPlanID = source.PlanID
+	}
+	for name, d := range req.RehearsalDurations {
+		rehearsal[name] = d
+	}
 	plan, err := domain.GeneratePlan(domain.PlanInput{
 		PlanID: ids.New(), T0: req.T0.UTC(), Packs: packs, Entities: req.Entities,
-		AbortOffsetH: req.AbortOffsetHours, Rehearsal: req.RehearsalDurations,
+		AbortOffsetH: req.AbortOffsetHours, Rehearsal: rehearsal, RehearsalPlanID: req.RehearsalPlanID,
 	})
 	if err != nil {
 		fail(w, r, err)
@@ -296,10 +330,16 @@ func (s *Server) completeStep(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, replayed, s.toPlanDTO(plan, true))
 }
 
+// rollbackRequest has no approvers: the approver is the authenticated caller (CUT-1603, CUT-1605).
 type rollbackRequest struct {
-	Approvers []string     `json:"approvers"`
-	Postings  []postingDTO `json:"postings"`
-	Version   int          `json:"version,omitempty"`
+	Postings []postingDTO `json:"postings"`
+	Version  int          `json:"version,omitempty"`
+}
+
+// pendingRollbackDTO is the first approval of a rollback, waiting for a second CutoverManager.
+type pendingRollbackDTO struct {
+	Approver   string    `json:"approver"`
+	ApprovedAt time.Time `json:"approvedAt"`
 }
 
 func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
@@ -327,11 +367,15 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	plan, replayed, err := s.store.Rollback(r.Context(), idem, store.RollbackRequest{PlanID: id, Approvers: req.Approvers, Postings: postings,
-		ExpectedVersion: req.Version, By: p.UserID})
+	res, replayed, err := s.store.Rollback(r.Context(), idem, store.RollbackRequest{PlanID: id, Postings: postings,
+		ExpectedVersion: req.Version, By: approverID(p)})
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	respond(w, http.StatusOK, replayed, s.toPlanDTO(plan, true))
+	status := http.StatusOK
+	if res.Pending != nil {
+		status = http.StatusAccepted
+	}
+	respond(w, status, replayed, s.toPlanDTO(res.Plan, true))
 }

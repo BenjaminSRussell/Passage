@@ -46,12 +46,11 @@ func TestRollback_ExportsPostingsSinceT0AsRekeyingFiles(t *testing.T) {
 	rejected := []struct {
 		name, body, want string
 	}{
-		{"entity outside the plan", fmt.Sprintf(`{"approvers":["alice","bob"],"postings":%s}`, rekeyPostingsBody(append(good, posting("DOCUMENT", "GBSI", "SI-7", "2027-01-02T08:00:00Z", "1200", "1"))...)), "does not cover"},
-		{"unbalanced journal", fmt.Sprintf(`{"approvers":["alice","bob"],"postings":%s}`, rekeyPostingsBody(posting("JOURNAL", "USMF", "JV-3", "2027-01-02T08:00:00Z", "1100", "1"))), "does not balance"},
-		{"one approver", fmt.Sprintf(`{"approvers":["alice","alice"],"postings":%s}`, rekeyPostingsBody(good...)), "CUT-1603"},
+		{"entity outside the plan", fmt.Sprintf(`{"postings":%s}`, rekeyPostingsBody(append(good, posting("DOCUMENT", "GBSI", "SI-7", "2027-01-02T08:00:00Z", "1200", "1"))...)), "does not cover"},
+		{"unbalanced journal", fmt.Sprintf(`{"postings":%s}`, rekeyPostingsBody(posting("JOURNAL", "USMF", "JV-3", "2027-01-02T08:00:00Z", "1100", "1"))), "does not balance"},
 	}
 	for _, c := range rejected {
-		r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: c.body})
+		r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: c.body, user: "alice"})
 		if r.Code != http.StatusUnprocessableEntity || !strings.Contains(r.Body.String(), c.want) {
 			t.Fatalf("%s: %d %s", c.name, r.Code, r.Body)
 		}
@@ -64,8 +63,8 @@ func TestRollback_ExportsPostingsSinceT0AsRekeyingFiles(t *testing.T) {
 		t.Fatalf("rekey lines after rejected rollbacks = %d", n)
 	}
 
-	body := fmt.Sprintf(`{"approvers":["alice","bob"],"version":1,"postings":%s}`, rekeyPostingsBody(good...))
-	done := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: body, key: "rb-rekey", user: "manager"})
+	body := fmt.Sprintf(`{"postings":%s}`, rekeyPostingsBody(good...))
+	done := rollbackBoth(t, h, rb, body, "rb-rekey")
 	if done.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", done.Code, done.Body)
 	}
@@ -73,7 +72,7 @@ func TestRollback_ExportsPostingsSinceT0AsRekeyingFiles(t *testing.T) {
 	if !p.RolledBack || p.Rekeying == nil || *p.Rekeying != (rekeyingDTO{JournalLines: 4, DocumentLines: 1, Excluded: 1}) {
 		t.Fatalf("rolled back plan %+v rekeying %+v", p, p.Rekeying)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: body, key: "rb-rekey"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: body, key: "rb-rekey-2", user: "bob"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replay: %d %s", r.Code, r.Body)
 	}
 	if n := count(t, admin, `select count(*) from rekey_line where plan_id = $1`, plan.PlanID); n != 5 {
@@ -133,7 +132,7 @@ func TestRollback_WithoutPostingsHasEmptyFiles(t *testing.T) {
 	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager",
 		body: generateBody(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 36)}))
 	base := "/api/v1/cutover/plans/" + plan.PlanID
-	p := decode[planDTO](t, do(t, h, request{method: "POST", path: base + "/rollback", tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`}))
+	p := decode[planDTO](t, rollbackBoth(t, h, base+"/rollback", `{}`, ""))
 	if p.Rekeying == nil || *p.Rekeying != (rekeyingDTO{}) {
 		t.Fatalf("rekeying %+v", p.Rekeying)
 	}

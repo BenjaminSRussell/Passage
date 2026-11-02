@@ -235,6 +235,8 @@ func (s *Postgres) RecordDecision(ctx context.Context, idem Idem, r DecisionRequ
 			}); err != nil {
 				return DecisionResult{}, fmt.Errorf("enqueue cutover.decision.recorded: %w", err)
 			}
+			// The decision starts a new round: a rollback approval given before it is void.
+			plan.PendingRollback = nil
 			plan.LatestDecision = &domain.Decision{Seq: d.Seq, Decision: d.Decision, Approvers: d.Approvers, Reason: d.Reason, DecidedBy: d.DecidedBy,
 				DecidedAt: d.DecidedAt, PlanVersion: d.PlanVersion}
 			return DecisionResult{Plan: plan, Decision: &d}, nil

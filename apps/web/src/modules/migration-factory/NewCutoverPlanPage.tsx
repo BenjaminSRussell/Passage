@@ -10,9 +10,10 @@ export interface PlanValues {
   packs: Pack[];
   entities: string;
   abortOffsetHours: string;
+  rehearsalPlanId: string;
 }
 
-type Field = "t0" | "packs" | "entities" | "abortOffsetHours";
+type Field = "t0" | "packs" | "entities" | "abortOffsetHours" | "rehearsalPlanId";
 type Errors = Partial<Record<Field, string>>;
 
 /** The checks the planner makes, and the request the form sends. */
@@ -27,14 +28,27 @@ export function validatePlan(values: PlanValues): { errors: Errors; input?: Gene
   if (hours !== "" && (!/^\d{1,2}$/.test(hours) || Number(hours) < 12 || Number(hours) > 72)) {
     errors.abortOffsetHours = "Enter whole hours from 12 to 72.";
   }
+  const rehearsal = values.rehearsalPlanId.trim();
+  if (rehearsal !== "" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rehearsal)) {
+    errors.rehearsalPlanId = "Enter the id of the rehearsal plan (a UUID), or leave it empty.";
+  }
   if (Object.keys(errors).length > 0 || !t0) return { errors };
-  return { errors, input: { t0, packs: values.packs, entities, ...(hours !== "" ? { abortOffsetHours: Number(hours) } : {}) } };
+  return {
+    errors,
+    input: {
+      t0,
+      packs: values.packs,
+      entities,
+      ...(hours !== "" ? { abortOffsetHours: Number(hours) } : {}),
+      ...(rehearsal !== "" ? { rehearsalPlanId: rehearsal } : {}),
+    },
+  };
 }
 
 /** Generate a cutover runbook (FR-49.6). */
 export function NewCutoverPlanPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<PlanValues>({ t0: "", packs: ["open_items"], entities: "", abortOffsetHours: "" });
+  const [values, setValues] = useState<PlanValues>({ t0: "", packs: ["open_items"], entities: "", abortOffsetHours: "", rehearsalPlanId: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -82,6 +96,17 @@ export function NewCutoverPlanPage() {
           <FormField id="plan-abortOffsetHours" label="Abort deadline (hours after T-0)" hint="Default 36." optional error={errors.abortOffsetHours}>
             {(control) => (
               <Input {...control} inputMode="numeric" value={values.abortOffsetHours} invalid={Boolean(errors.abortOffsetHours)} onChange={(event) => update({ abortOffsetHours: event.target.value })} />
+            )}
+          </FormField>
+          <FormField
+            id="plan-rehearsalPlanId"
+            label="Rehearsal plan"
+            hint="Optional. The id of an earlier plan: the durations measured on its completed steps become this plan's planned durations (FR-49.6)."
+            optional
+            error={errors.rehearsalPlanId}
+          >
+            {(control) => (
+              <Input {...control} value={values.rehearsalPlanId} invalid={Boolean(errors.rehearsalPlanId)} onChange={(event) => update({ rehearsalPlanId: event.target.value })} />
             )}
           </FormField>
           <fieldset className={styles.choices} aria-describedby={errors.packs ? "plan-packs-error" : undefined}>

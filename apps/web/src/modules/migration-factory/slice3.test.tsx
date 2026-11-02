@@ -65,6 +65,7 @@ const plan: CutoverPlan = {
   steps: [{ seq: 1, offsetMin: 1440, name: "Go/no-go meeting", owner: "Cutover manager", plannedDurationMin: 60, actualDurationMin: 0, status: "PENDING", goNoGo: true }],
 };
 
+const pendingPlan: CutoverPlan = { ...plan, pendingRollback: { approver: "alice", approvedAt: "2027-01-01T20:00:00Z" } };
 const rolled: CutoverPlan = {
   ...plan,
   rolledBack: true,
@@ -122,20 +123,18 @@ describe("parsePostings", () => {
 });
 
 describe("Rollback re-keying export", () => {
-  it("sends the parsed postings with the approvers and shows the re-keying files", async () => {
-    handler = (_url, init) => (init.method === "POST" ? json(200, rolled) : json(200, plan));
+  it("sends the parsed postings, without approvers, and shows the re-keying files", async () => {
+    handler = (_url, init) => (init.method === "POST" ? json(200, rolled) : json(200, pendingPlan));
     const { container } = renderAt(`/migration-factory/cutover/${PLAN}`);
-    fireEvent.change(await screen.findByLabelText("First approver"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByLabelText("Second approver"), { target: { value: "bob" } });
-    fireEvent.change(screen.getByLabelText(/Postings since T-0/), { target: { value: pasted } });
-    fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
+    fireEvent.change(await screen.findByLabelText(/Postings since T-0/), { target: { value: pasted } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve and roll back" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("3 posting lines are sent for re-keying");
     fireEvent.click(within(dialog).getByRole("button", { name: "Roll back" }));
 
     expect(await screen.findByRole("heading", { name: "Re-keying files" })).toBeInTheDocument();
     const [post] = rollbacks();
-    expect(post.body).toMatchObject({ approvers: ["alice", "bob"], version: 5 });
+    expect(post.body).toMatchObject({ version: 5 });
     expect((post.body as { postings: unknown[] }).postings).toHaveLength(3);
     expect(new Headers(post.init.headers).get("Idempotency-Key")).toBeTruthy();
 
@@ -152,10 +151,8 @@ describe("Rollback re-keying export", () => {
   it("stops a paste with bad lines before anything is sent", async () => {
     handler = () => json(200, plan);
     renderAt(`/migration-factory/cutover/${PLAN}`);
-    fireEvent.change(await screen.findByLabelText("First approver"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByLabelText("Second approver"), { target: { value: "bob" } });
-    fireEvent.change(screen.getByLabelText(/Postings since T-0/), { target: { value: "JOURNAL,GBSI,JV-2,2027-01-01T09:00:00Z,1100,,USD,1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
+    fireEvent.change(await screen.findByLabelText(/Postings since T-0/), { target: { value: "JOURNAL,GBSI,JV-2,2027-01-01T09:00:00Z,1100,,USD,1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve rollback" }));
     expect(await screen.findByText(/entity GBSI is not cut over by this plan/)).toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(rollbacks()).toHaveLength(0);
@@ -163,17 +160,15 @@ describe("Rollback re-keying export", () => {
 
   it("shows the service's rejection and leaves the plan not rolled back", async () => {
     handler = (_url, init) =>
-      init.method === "POST" ? json(422, { code: "MIG-0001", detail: "journal JV-1 of USMF does not balance in USD (difference 1.000000)" }) : json(200, plan);
+      init.method === "POST" ? json(422, { code: "MIG-0001", detail: "journal JV-1 of USMF does not balance in USD (difference 1.000000)" }) : json(200, pendingPlan);
     renderAt(`/migration-factory/cutover/${PLAN}`);
-    fireEvent.change(await screen.findByLabelText("First approver"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByLabelText("Second approver"), { target: { value: "bob" } });
-    fireEvent.change(screen.getByLabelText(/Postings since T-0/), { target: { value: "JOURNAL,USMF,JV-1,2027-01-01T09:00:00Z,1100,,USD,1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
+    fireEvent.change(await screen.findByLabelText(/Postings since T-0/), { target: { value: "JOURNAL,USMF,JV-1,2027-01-01T09:00:00Z,1100,,USD,1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve and roll back" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Roll back" }));
     expect(await screen.findByText(/does not balance in USD/)).toBeInTheDocument();
     expect(screen.getByText(/MIG-0001/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Re-keying files" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Roll back cutover" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve and roll back" })).toBeInTheDocument();
   });
 
   it("shows the files of a plan that was already rolled back", async () => {

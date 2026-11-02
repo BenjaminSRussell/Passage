@@ -494,8 +494,8 @@ func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
 func (r *rehearsal) rollback(planID string) {
 	t := r.t
 	x := r.exp.Rekey
-	body := mustJSON(t, map[string]any{"approvers": []string{"Controller", "CIO"}, "postings": r.ds.RekeyPostings})
-	rec := do(t, r.h, request{method: "POST", path: "/api/v1/cutover/plans/" + planID + "/rollback", tenant: tenantA, duties: "CutoverManager", user: "cutover-manager", body: body})
+	body := mustJSON(t, map[string]any{"postings": r.ds.RekeyPostings})
+	rec := rollbackBoth(t, r.h, "/api/v1/cutover/plans/"+planID+"/rollback", body, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", rec.Code, truncate(rec.Body.String()))
 	}

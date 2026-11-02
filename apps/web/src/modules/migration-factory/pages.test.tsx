@@ -259,14 +259,15 @@ describe("Cutover plans", () => {
 
 describe("Generate cutover plan", () => {
   it("validates T-0, packs, entities and the abort offset", () => {
-    expect(validatePlan({ t0: "2027-01-01T00:00", packs: ["open_items"], entities: "USMF, DEMF", abortOffsetHours: "48" }).input).toEqual({
+    expect(validatePlan({ t0: "2027-01-01T00:00", packs: ["open_items"], entities: "USMF, DEMF", abortOffsetHours: "48", rehearsalPlanId: "" }).input).toEqual({
       t0: "2027-01-01T00:00:00Z",
       packs: ["open_items"],
       entities: ["USMF", "DEMF"],
       abortOffsetHours: 48,
     });
-    const { errors } = validatePlan({ t0: "", packs: [], entities: " ", abortOffsetHours: "6" });
-    expect(Object.keys(errors).sort()).toEqual(["abortOffsetHours", "entities", "packs", "t0"]);
+    const { errors } = validatePlan({ t0: "", packs: [], entities: " ", abortOffsetHours: "6", rehearsalPlanId: "plan-1" });
+    expect(Object.keys(errors).sort()).toEqual(["abortOffsetHours", "entities", "packs", "rehearsalPlanId", "t0"]);
+    expect(validatePlan({ t0: "2027-01-01T00:00", packs: ["open_items"], entities: "USMF", abortOffsetHours: "", rehearsalPlanId: ` ${PLAN} ` }).input?.rehearsalPlanId).toBe(PLAN);
   });
 
   it("generates the plan and opens it", async () => {
@@ -280,13 +281,20 @@ describe("Generate cutover plan", () => {
     fireEvent.change(screen.getByLabelText("T-0 (UTC)"), { target: { value: "2027-01-01T00:00" } });
     fireEvent.change(screen.getByLabelText("Legal entities"), { target: { value: "USMF" } });
     fireEvent.click(screen.getByLabelText("gl_balances"));
+    fireEvent.change(screen.getByLabelText(/Rehearsal plan/), { target: { value: PLAN } });
     fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
     expect(await screen.findByRole("heading", { name: "Cutover runbook" })).toBeInTheDocument();
-    expect(posts("/cutover/plans/generate")[0].body).toEqual({ t0: "2027-01-01T00:00:00Z", packs: ["open_items", "gl_balances"], entities: ["USMF"] });
+    expect(posts("/cutover/plans/generate")[0].body).toEqual({ t0: "2027-01-01T00:00:00Z", packs: ["open_items", "gl_balances"], entities: ["USMF"], rehearsalPlanId: PLAN });
   });
 });
 
 describe("Cutover runbook", () => {
+  it("says which rehearsal plan the planned durations were measured on", async () => {
+    handler = () => json(200, { ...plan, rehearsalPlanId: "01a19c46-9e7c-72ce-83c7-aa23184b9838", rehearsalCarried: 4 });
+    renderAt(`/migration-factory/cutover/${PLAN}`);
+    expect(await screen.findByText(/4 planned durations were measured in rehearsal plan 01a19c46/)).toBeInTheDocument();
+  });
+
   it("shows steps with offsets and overrun, and the open go/no-go items", async () => {
     handler = () => json(200, plan);
     const { container } = renderAt(`/migration-factory/cutover/${PLAN}`);
@@ -352,20 +360,22 @@ describe("Cutover runbook", () => {
     expect(await screen.findByText("Abort deadline passed")).toBeInTheDocument();
   });
 
-  it("needs two different approvers and a confirmation to roll back", async () => {
-    const rolled: CutoverPlan = { ...plan, rolledBack: true, approvers: ["alice", "bob"], version: 4 };
-    handler = (_url, init) => (init.method === "POST" ? json(200, rolled) : json(200, plan));
+  it("records the first approval as pending, then a second approver confirms and rolls back", async () => {
+    const pending: CutoverPlan = { ...plan, version: 4, pendingRollback: { approver: "alice", approvedAt: "2027-01-02T00:00:00Z" } };
+    const rolled: CutoverPlan = { ...plan, rolledBack: true, approvers: ["alice", "bob"], version: 5 };
+    let stage = 0;
+    handler = (_url, init) => (init.method === "POST" ? json(stage === 0 ? 202 : 200, stage === 0 ? pending : rolled) : json(200, plan));
     renderAt(`/migration-factory/cutover/${PLAN}`);
-    fireEvent.change(await screen.findByLabelText("First approver"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByLabelText("Second approver"), { target: { value: "alice" } });
-    fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
-    expect(await screen.findByText(/two different approvers/)).toBeInTheDocument();
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Second approver"), { target: { value: "bob" } });
-    fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
+    expect(screen.queryByLabelText("First approver")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve rollback" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("Waiting for a second approver")).toBeInTheDocument();
+    expect(posts("/rollback")[0].body).toEqual({ postings: [], version: 3 });
+    stage = 1;
+    fireEvent.click(screen.getByRole("button", { name: "Approve and roll back" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Roll back" }));
     expect(await screen.findByText("Rolled back with the approval of alice and bob.")).toBeInTheDocument();
-    expect(posts("/rollback")[0].body).toEqual({ approvers: ["alice", "bob"], postings: [], version: 3 });
+    expect(posts("/rollback")[1].body).toEqual({ postings: [], version: 4 });
     expect(screen.queryByRole("button", { name: "Complete step 1" })).not.toBeInTheDocument();
   });
 });

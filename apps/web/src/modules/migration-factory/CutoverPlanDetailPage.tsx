@@ -84,8 +84,6 @@ export function CutoverPlanDetailPage() {
   const [selected, setSelected] = useState<RunbookStep | null>(null);
   const [minutes, setMinutes] = useState("");
   const [minutesError, setMinutesError] = useState<string | undefined>();
-  const [approvers, setApprovers] = useState({ first: "", second: "" });
-  const [approverError, setApproverError] = useState<string | undefined>();
   const [postingsText, setPostingsText] = useState("");
   const [postingsError, setPostingsError] = useState<string | undefined>();
   const [postings, setPostings] = useState<RekeyPosting[]>([]);
@@ -214,13 +212,9 @@ export function CutoverPlanDetailPage() {
   function askRollback(event: FormEvent) {
     event.preventDefault();
     if (!plan) return;
-    const first = approvers.first.trim();
-    const second = approvers.second.trim();
-    const approversOk = Boolean(first && second && first !== second);
-    setApproverError(approversOk ? undefined : "Rollback needs two different approvers (CUT-1603).");
     const parsed = parsePostings(postingsText, plan.entities);
     setPostingsError(parsed.errors.length > 0 ? parsed.errors.slice(0, 3).join(" ") : undefined);
-    if (!approversOk || parsed.errors.length > 0) return;
+    if (parsed.errors.length > 0) return;
     setPostings(parsed.postings);
     setConfirming(true);
   }
@@ -231,7 +225,8 @@ export function CutoverPlanDetailPage() {
     setFailure(null);
     setBusy(true);
     try {
-      state.set(await rollbackPlan(plan.planId, [approvers.first.trim(), approvers.second.trim()], postings, plan.version, rollbackKey.current));
+      state.set(await rollbackPlan(plan.planId, postings, plan.version, rollbackKey.current));
+      rollbackKey.current = newKey();
     } catch (error) {
       const problem = describeProblem(error);
       setFailure({ ...problem, message: conflictMessage(problem) });
@@ -246,7 +241,13 @@ export function CutoverPlanDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Cutover runbook"
-        description={plan ? `T-0 ${formatDateTime(plan.t0)} for ${plan.entities.join(", ")}.` : undefined}
+        description={
+          plan
+            ? `T-0 ${formatDateTime(plan.t0)} for ${plan.entities.join(", ")}.${
+                plan.rehearsalPlanId ? ` ${plan.rehearsalCarried ?? 0} planned durations were measured in rehearsal plan ${plan.rehearsalPlanId}.` : ""
+              }`
+            : undefined
+        }
         meta={plan?.rolledBack ? <StatusPill status="Rolled back" /> : undefined}
         actions={
           <Link className={buttonClassName("ghost")} to="/migration-factory/cutover">
@@ -367,14 +368,17 @@ export function CutoverPlanDetailPage() {
             <form className={styles.form} onSubmit={askRollback} noValidate>
               <p className={`${styles.note} ${styles.wide}`}>
                 Stops Passage access, restores legacy write access and exports the postings made since T-0 as journal and document files for
-                re-keying in the legacy system. Two different people must approve.
+                re-keying in the legacy system. Two different CutoverManagers must approve (CUT-1603): your approval is recorded under your own
+                sign-in, and the rollback runs when a second person approves.
               </p>
-              <FormField id="rollback-first" label="First approver" error={approverError}>
-                {(control) => <Input {...control} value={approvers.first} invalid={Boolean(approverError)} onChange={(event) => setApprovers({ ...approvers, first: event.target.value })} />}
-              </FormField>
-              <FormField id="rollback-second" label="Second approver">
-                {(control) => <Input {...control} value={approvers.second} onChange={(event) => setApprovers({ ...approvers, second: event.target.value })} />}
-              </FormField>
+              {plan.pendingRollback ? (
+                <div className={styles.wide}>
+                  <Alert tone="warning" title="Waiting for a second approver">
+                    {plan.pendingRollback.approver} approved this rollback on {formatDateTime(plan.pendingRollback.approvedAt)}. A different CutoverManager
+                    approves it here to run it, with the postings since T-0 entered below. A go/no-go decision recorded before then voids this approval.
+                  </Alert>
+                </div>
+              ) : null}
               <div className={styles.wide}>
                 <FormField id="rollback-postings" label="Postings since T-0" hint={POSTINGS_HINT} error={postingsError} optional>
                   {(control) => (
@@ -384,7 +388,7 @@ export function CutoverPlanDetailPage() {
               </div>
               <div className={styles.formActions}>
                 <Button type="submit" variant="danger" loading={busy}>
-                  Roll back cutover
+                  {plan.pendingRollback ? "Approve and roll back" : "Approve rollback"}
                 </Button>
               </div>
             </form>
@@ -415,9 +419,13 @@ export function CutoverPlanDetailPage() {
       ) : null}
       {confirming ? (
         <ConfirmDialog
-          title="Roll back this cutover?"
-          description={`Passage access stops and the legacy system takes postings again. ${postingSummary(postings.length)} This can't be undone from this screen.`}
-          confirmLabel="Roll back"
+          title={plan?.pendingRollback ? "Roll back this cutover?" : "Approve the rollback?"}
+          description={
+            plan?.pendingRollback
+              ? `Passage access stops and the legacy system takes postings again. ${postingSummary(postings.length)} This can't be undone from this screen.`
+              : `Your approval is recorded; the rollback runs when a different CutoverManager approves it. ${postingSummary(postings.length)}`
+          }
+          confirmLabel={plan?.pendingRollback ? "Roll back" : "Approve"}
           cancelLabel="Keep cutover"
           onConfirm={() => void doRollback()}
           onCancel={() => setConfirming(false)}

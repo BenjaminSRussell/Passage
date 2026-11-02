@@ -62,7 +62,7 @@ type Store interface {
 	ListPlans(ctx context.Context, f store.PlanFilter) ([]domain.Plan, error)
 	StartStep(ctx context.Context, idem store.Idem, st store.StepStart) (domain.Plan, bool, error)
 	CompleteStep(ctx context.Context, idem store.Idem, c store.StepCompletion) (domain.Plan, bool, error)
-	Rollback(ctx context.Context, idem store.Idem, r store.RollbackRequest) (domain.Plan, bool, error)
+	Rollback(ctx context.Context, idem store.Idem, r store.RollbackRequest) (store.RollbackResult, bool, error)
 	GetReadiness(ctx context.Context, planID string) (domain.ReadinessFacts, error)
 	RecordDecision(ctx context.Context, idem store.Idem, r store.DecisionRequest) (store.DecisionResult, bool, error)
 	RekeyLines(ctx context.Context, planID string, kind domain.PostingKind) ([]domain.RekeyPosting, error)
@@ -142,6 +142,16 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
 	}
 	return p, ok
+}
+
+// approverID is the person an approval is recorded under (CUT-1605): the signed-in user. A call made
+// with a service token carries the calling service's duties, not the user's, and a background service
+// principal is no person, so neither approves anything: the empty id is refused by the domain.
+func approverID(p tenant.Principal) string {
+	if p.Service != "" || tenant.IsServiceActor(p.UserID) {
+		return ""
+	}
+	return p.UserID
 }
 
 func invalid(detail string) error {

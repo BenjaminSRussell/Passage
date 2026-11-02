@@ -323,8 +323,8 @@ func TestGoNoGo_RolledBackPlanDutyAndTenant(t *testing.T) {
 		t.Errorf("bad id: %d", r.Code)
 	}
 
-	rb := fmt.Sprintf(`{"approvers":["alice","bob"],"postings":%s}`, rekeyPostingsBody())
-	if r := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/" + plan.PlanID + "/rollback", tenant: tenantA, duties: "CutoverManager", body: rb, user: "manager"}); r.Code != http.StatusOK {
+	rb := fmt.Sprintf(`{"postings":%s}`, rekeyPostingsBody())
+	if r := rollbackBoth(t, h, "/api/v1/cutover/plans/"+plan.PlanID+"/rollback", rb, ""); r.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", r.Code, r.Body)
 	}
 	if r := do(t, h, request{method: "POST", path: base, tenant: tenantA, duties: "CutoverManager", body: noGo, user: "manager"}); r.Code != http.StatusConflict || problemCode(t, r) != CodeTransition {

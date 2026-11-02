@@ -679,6 +679,8 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
   /api/v1/cutover/plans:
@@ -973,9 +975,18 @@ paths:
   /api/v1/cutover/plans/{id}/rollback:
     post:
       operationId: rollbackCutoverPlan
-      summary: Execute the rollback and export the postings since T-0 for re-keying (FR-49.9). Needs two distinct approvers (CUT-1603).
+      summary: Approve the rollback; a second, different CutoverManager's approval executes it and exports the postings since T-0 for re-keying (FR-49.9, CUT-1603)
       description: |
-        Runs once per plan (a second rollback is MIG-0004). `postings` are the Passage postings
+        Approvers are the authenticated callers, never names in the body: the request has no
+        `approvers` field and one that sends it is refused (400). The first CutoverManager's request
+        stores an approval and answers 202 with the plan and `pendingRollback`; it moves the plan's
+        version and writes no event. A second, different CutoverManager's request executes the rollback
+        with both of them as `approvers` (the first approver first). The same user twice is MIG-0004
+        (CUT-1603); a service principal, or a call made with a service token, is refused (MIG-0001,
+        CUT-1605); and the two steps are serialized under the plan row lock. An approval belongs to the
+        go/no-go decision round it was given in: a decision recorded after it (GO or NO_GO) voids it, and
+        the next request is a new first approval. Step progress does not void it, and it does not expire. `postings` are used by the request that executes
+        the rollback and are validated at the first approval too, so send them on both. Runs once per plan (a second rollback is MIG-0004). `postings` are the Passage postings
         made since go-live; lines dated before T-0 are counted as excluded, every line must be for
         an entity of the plan, and each journal (entity, document, currency) must balance. One bad
         posting rejects the request (MIG-0001) and leaves the plan as it was. The accepted lines are
@@ -992,14 +1003,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [approvers]
               additionalProperties: false
               properties:
-                approvers:
-                  type: array
-                  minItems: 2
-                  items:
-                    type: string
                 postings:
                   type: array
                   description: Passage postings since T-0 to export for re-keying. Empty or absent when nothing was posted.
@@ -1011,6 +1016,15 @@ paths:
       responses:
         "200":
           description: The plan with rolledBack true and the re-keying counts.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "202":
+          description: The first approval is stored and waits for a second, different CutoverManager; the plan carries `pendingRollback` and is not rolled back.
           headers:
             Idempotent-Replayed:
               $ref: "#/components/headers/IdempotentReplayed"
@@ -1927,6 +1941,14 @@ components:
           additionalProperties:
             type: integer
             minimum: 0
+        rehearsalPlanId:
+          type: string
+          format: uuid
+          description: |
+            An earlier plan of the tenant (a rehearsal) whose measured step durations (done steps with a
+            recorded duration) become this plan's planned durations (FR-49.6). Entries in
+            `rehearsalDurationsMin` override them. 422 when that plan has no measured duration, 404 when it
+            does not exist.
     Step:
       type: object
       required: [seq, offsetMin, name, owner, plannedDurationMin, actualDurationMin, status, goNoGo]
@@ -2138,6 +2160,16 @@ components:
       type: object
       required: [planId, t0, packs, entities, abortOffsetMin, rolledBack, approvers, version, createdAt, stepsDone, stepsTotal, openGoNoGo, abortDue]
       properties:
+        pendingRollback:
+          type: object
+          description: The first approval of a rollback in the current go/no-go decision round, waiting for a second, different CutoverManager (CUT-1603). Absent when none, once rolled back, or when a decision recorded after it voided it.
+          required: [approver, approvedAt]
+          properties:
+            approver:
+              type: string
+            approvedAt:
+              type: string
+              format: date-time
         planId:
           type: string
           format: uuid
@@ -2171,6 +2203,14 @@ components:
           type: integer
         stepsTotal:
           type: integer
+        rehearsalPlanId:
+          type: string
+          format: uuid
+          description: The rehearsal plan whose measured durations this plan was generated from; absent when none.
+        rehearsalCarried:
+          type: integer
+          minimum: 0
+          description: Number of steps whose planned duration came from a rehearsal, from `rehearsalPlanId` or the request.
         openGoNoGo:
           type: array
           description: Names of go/no-go steps not yet done.

@@ -146,7 +146,7 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `GET /api/v1/cutover/plans/{id}` | `CutoverManager` |
 | `POST /api/v1/cutover/plans/{id}/steps/{seq}/start` | `CutoverStepOwner` |
 | `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `CutoverStepOwner` |
-| `POST /api/v1/cutover/plans/{id}/rollback` | `CutoverManager` (plus two approvers in the body) |
+| `POST /api/v1/cutover/plans/{id}/rollback` | `CutoverManager` (two different callers approve; the second runs it) |
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `CutoverManager` |
 
 Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point replaces it later
@@ -193,7 +193,7 @@ Message codes raised inside detail text:
 - MIG-1505 re-run loaded 0 new records (informational, returned in `message`)
 - MIG-1509 parallel run cannot be signed off
 - CUT-1601 go/no-go item open (step sequencing)
-- CUT-1603 rollback needs two distinct approvers
+- CUT-1603 rollback needs two different authenticated approvers (approve, then confirm)
 - CUT-1604 abort deadline approaching with go/no-go items open (returned in `abortWarning`)
 
 ## Dependencies

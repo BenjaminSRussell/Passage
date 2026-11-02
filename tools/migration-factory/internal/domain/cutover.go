@@ -62,7 +62,57 @@ type Plan struct {
 	// LatestDecision is the most recent go/no-go decision (nil until one is recorded); the full
 	// history is read with the readiness view.
 	LatestDecision *Decision
-	CreatedAt      time.Time
+	// PendingRollback is the first approval of a rollback in the current go/no-go decision round,
+	// waiting for a second, different CutoverManager (CUT-1603); nil when none.
+	PendingRollback *RollbackApproval
+	// RehearsalPlanID is the earlier plan whose measured durations this plan was generated from
+	// (FR-49.6 "durations from the last rehearsal"); empty when none. RehearsalCarried counts the
+	// steps whose planned duration came from a rehearsal, from that plan or the request.
+	RehearsalPlanID  string
+	RehearsalCarried int
+	CreatedAt        time.Time
+}
+
+// MeasuredDurations returns the durations measured on this plan, by step name: the done steps with a
+// recorded duration. A rehearsal plan's measurements become the next plan's planned durations.
+func (p *Plan) MeasuredDurations() DurationOverrides {
+	out := DurationOverrides{}
+	for _, s := range p.Steps {
+		if s.Status == StepDone && s.ActualDurationMin > 0 {
+			out[s.Name] = s.ActualDurationMin
+		}
+	}
+	return out
+}
+
+// RollbackApproval is the first approval of a rollback (CUT-1603, CUT-1605). It belongs to the
+// go/no-go decision round it was given in, so a decision recorded in between voids it.
+type RollbackApproval struct {
+	Round       int       `json:"round"`
+	Approver    string    `json:"approver"`
+	PlanVersion int       `json:"planVersion"`
+	ApprovedAt  time.Time `json:"approvedAt"`
+}
+
+// PrepareRollback applies the approval rules: approvers are authenticated people, never services and
+// never names in a request. With no approval pending the caller's is the first and complete is
+// false; a different caller's confirms it and both become the plan's approvers (first approver
+// first). The same user cannot approve twice. Nothing is approved on a plan already rolled back.
+func (p *Plan) PrepareRollback(by string, pending *RollbackApproval) (approvers []string, complete bool, err error) {
+	if p.RolledBack {
+		return nil, false, fmt.Errorf("%w: plan is already rolled back", ErrTransition)
+	}
+	by = strings.TrimSpace(by)
+	if by == "" || strings.HasPrefix(by, "service:") {
+		return nil, false, fmt.Errorf("%w: CUT-1605 a rollback must be approved by an identified person, not a service", ErrInvalid)
+	}
+	if pending == nil {
+		return []string{by}, false, nil
+	}
+	if pending.Approver == by {
+		return nil, false, fmt.Errorf("%w: CUT-1603 you have already approved this rollback; it needs a second approval by a different CutoverManager", ErrTransition)
+	}
+	return []string{pending.Approver, by}, true, nil
 }
 
 // DurationOverrides maps a step name to the duration measured in the last rehearsal (minutes).
@@ -76,6 +126,8 @@ type PlanInput struct {
 	Entities     []string
 	AbortOffsetH int
 	Rehearsal    DurationOverrides
+	// RehearsalPlanID names the plan the Rehearsal durations were carried from, for the record.
+	RehearsalPlanID string
 }
 
 // Name constants used by the timeline and by the open-access rule.
@@ -185,7 +237,14 @@ func GeneratePlan(in PlanInput) (Plan, error) {
 	for i := range steps {
 		steps[i].Seq = i + 1
 	}
-	return Plan{PlanID: in.PlanID, T0: in.T0, Packs: in.Packs, Entities: in.Entities, AbortOffsetMin: abortH * MinutesPerHour, Steps: steps, Version: 1}, nil
+	carried := 0
+	for _, s := range steps {
+		if _, ok := in.Rehearsal[s.Name]; ok {
+			carried++
+		}
+	}
+	return Plan{PlanID: in.PlanID, T0: in.T0, Packs: in.Packs, Entities: in.Entities, AbortOffsetMin: abortH * MinutesPerHour, Steps: steps, Version: 1,
+		RehearsalPlanID: in.RehearsalPlanID, RehearsalCarried: carried}, nil
 }
 
 // StepByName returns the step with the given name.
