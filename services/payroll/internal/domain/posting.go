@@ -9,8 +9,7 @@ import (
 )
 
 // Payroll GL account roles of the BR-43.1 posting example. The posting profile
-// that maps a role, earning/deduction/tax code and position dimension to a
-// ledger account (FR-43.9) is not built yet; these names stand for the roles.
+// stored per legal entity maps each role to the ledger account it posts to.
 // Per-code accounts are AccountPayable(code) for a deduction, its match and a
 // state withholding, and AccountMatchExpense(code) for an employer match.
 const (
@@ -101,6 +100,31 @@ func RunPosting(statements []Statement) ([]JournalLine, error) {
 	}
 	if !total.IsZero() {
 		return nil, ErrUnbalancedPosting
+	}
+	return out, nil
+}
+
+// MapToAccounts replaces each role of a journal with the account the posting profile stores for it and sums roles that share an account.
+// A role without a stored account is an error: accounts never come from the caller.
+func MapToAccounts(journal []JournalLine, profile map[string]string) ([]JournalLine, error) {
+	var missing []string
+	position := map[string]int{}
+	out := make([]JournalLine, 0, len(journal))
+	for _, l := range journal {
+		account, ok := profile[l.Account]
+		if !ok {
+			missing = append(missing, l.Account)
+			continue
+		}
+		if i, seen := position[account]; seen {
+			out[i].Amount = out[i].Amount.Add(l.Amount)
+			continue
+		}
+		position[account] = len(out)
+		out = append(out, JournalLine{Account: account, Amount: l.Amount})
+	}
+	if len(missing) > 0 {
+		return nil, &Error{Code: CodeNoPostingAccount, Detail: "the posting profile has no GL account for " + strings.Join(missing, ", ")}
 	}
 	return out, nil
 }

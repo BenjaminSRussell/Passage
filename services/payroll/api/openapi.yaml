@@ -3,14 +3,13 @@ info:
   title: payroll
   version: 0.1.0
   description: >-
-    Payroll engine, slice 1 of PSG-43. Serves a stateless gross-to-net preview under a
+    Payroll engine of PSG-43. Serves a stateless gross-to-net preview (no Idempotency-Key), stored pay runs with a review/finalize lifecycle, GL posting and reconciliation. The preview under a
     versioned rule set (US-FED-2025.1: Pub 15-T Worksheet 1A annual percentage method for
     every filing status, standard and Step 2 checkbox schedules, 2020+ and pre-2020 W-4;
     Social Security with the wage base cap, Medicare with the employee-only additional tax,
     FUTA, Colorado flat state tax), supplemental withholding for off-cycle bonuses, deduction
-    arrears (BR-43.10) and employer costs. Nothing is persisted or posted, so the call takes
-    no Idempotency-Key. Money is a decimal string with two places, never a float.
-    Error codes: COM-0001, AUTH-0001, AUTH-0003, PAY-RULE-001, PAY-RUN-006, COM-0500.
+    arrears (BR-43.10) and employer costs and persists nothing. Money is a decimal string with two places, never a float.
+    Error codes: COM-0001, AUTH-0001, AUTH-0003, PAY-RULE-001, PAY-RUN-004 to PAY-RUN-009, PAY-GL-001 to PAY-GL-005, COM-0500.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -34,6 +33,152 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Statement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/runs:
+    post:
+      operationId: createPayRun
+      x-passage-duty: payroll.run.maintain
+      description: >-
+        Calculates and stores a CALCULATED pay run. Idempotency-Key is required and scoped to the caller and legal entity:
+        a replay with an equivalent body (key order and whitespace ignored) returns the caller's stored run, the same key with another body is 409 PAY-RUN-008,
+        and another caller's or legal entity's run with the same key is never returned. 400 COM-0001 on validation
+        (unknown fields such as GL accounts are refused), 403 AUTH-0003 without the duty or outside the legal-entity scope,
+        422 PAY-RULE-001 when no rule set covers a statement, 422 PAY-RUN-006 when payDate is before periodStart.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RunRequest' }
+      responses:
+        '201':
+          description: The stored run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/runs/{id}:
+    get:
+      operationId: getPayRun
+      x-passage-duty: payroll.run.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run with its statement totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/runs/{id}/review:
+    post:
+      operationId: reviewPayRun
+      x-passage-duty: payroll.run.maintain
+      description: CALCULATED to REVIEWED. 422 PAY-RUN-005 on an illegal transition.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The reviewed run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/runs/{id}/finalize:
+    post:
+      operationId: finalizePayRun
+      x-passage-duty: payroll.run.finalize
+      description: REVIEWED to FINALIZED. 422 PAY-RUN-004 when the finalizer calculated the run (separation of duties), 422 PAY-RUN-005 on an illegal transition.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The finalized run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/runs/{id}/post:
+    post:
+      operationId: postPayRun
+      x-passage-duty: payroll.run.post
+      description: >-
+        Posts the balanced run journal to the general ledger under the key payroll-run:{id}. GL accounts come from the
+        legal entity's stored posting profile, never from the request. 422 PAY-GL-003 when the profile lacks an account for a role,
+        422 PAY-RUN-005 unless the run is FINALIZED, 422 PAY-GL-005 when the ledger is unknown or belongs to another legal entity,
+        502 PAY-GL-001 when the ledger refuses or does not answer (the run stays FINALIZED and can be retried),
+        503 PAY-GL-002 when no ledger is configured, 409 PAY-GL-004 when the run is already fixed or posted against another ledger.
+        The journal and ledger are stored on the run before the ledger call. After an ambiguous outcome (transport error, timeout, 5xx, 401, 403, 429, idempotency conflict) retries reuse them and the run is marked as ambiguously attempted;
+        after a definite refusal (HTTP 400, 404 or 422 from the ledger) of a run never ambiguously attempted they are cleared, so the retry uses the corrected posting profile or ledger.
+        An ambiguously attempted run is never cleared automatically (manual reconciliation against the ledger).
+        A POSTED run on the same ledger is returned unchanged.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId]
+              additionalProperties: false
+              properties:
+                ledgerId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The POSTED run with its journal entry id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/gl-reconciliation:
+    get:
+      operationId: reconcilePayrollToGL
+      x-passage-duty: payroll.run.read
+      description: >-
+        Per payroll GL account, the journal the POSTED runs of the legal entity imply against the ledger balance. difference is ledger minus register.
+        502 PAY-GL-001 when the ledger cannot be read.
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The reconciliation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reconciliation' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/payroll/posting-profiles/{legalEntityId}:
+    parameters:
+      - { name: legalEntityId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setPostingProfile
+      x-passage-duty: payroll.posting-profile.maintain
+      description: >-
+        Stores the given payroll role to GL account mappings for a legal entity (roles not named keep their account) and returns the whole profile.
+        400 COM-0001 on a malformed role or account, 403 AUTH-0003 without the duty or outside the legal-entity scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostingProfileRequest' }
+      responses:
+        '200':
+          description: The whole profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getPostingProfile
+      x-passage-duty: payroll.run.read
+      responses:
+        '200':
+          description: The stored profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
         default: { $ref: '#/components/responses/Problem' }
   /readyz:
     get:
@@ -135,6 +280,75 @@ components:
             ficaWages: { type: string }
             futaWages: { type: string }
             supplementalWages: { type: string }
+    RunStatement:
+      type: object
+      properties:
+        workerId: { type: string, format: uuid }
+        ruleSet: { type: string }
+        hash: { type: string }
+        gross: { type: string }
+        net: { type: string }
+        employerCost: { type: string }
+    RunRequest:
+      type: object
+      required: [legalEntityId, payDate, periodStart, periodEnd, statements]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        payDate: { type: string, format: date }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        statements: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/CalculationRequest' }, description: One per worker; workerId is required and unique in the run. }
+    Run:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        payDate: { type: string, format: date }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        status: { type: string, enum: [CALCULATED, REVIEWED, FINALIZED, POSTED] }
+        calculatedBy: { type: string }
+        finalizedBy: { type: string }
+        ledgerId: { type: string, format: uuid }
+        journalEntryId: { type: string, format: uuid }
+        currency: { type: string, example: USD }
+        gross: { type: string }
+        net: { type: string }
+        employerCost: { type: string }
+        statements: { type: array, items: { $ref: '#/components/schemas/RunStatement' } }
+    Reconciliation:
+      type: object
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string }
+        postedRuns: { type: integer }
+        reconciled: { type: boolean }
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              account: { type: string, description: The GL account from the posting profile. }
+              register: { type: string }
+              gl: { type: string }
+              difference: { type: string }
+    PostingProfileRequest:
+      type: object
+      required: [accounts]
+      additionalProperties: false
+      properties:
+        accounts:
+          type: object
+          minProperties: 1
+          maxProperties: 200
+          description: 'Payroll role (PAYROLL_SALARY_EXPENSE, PAYROLL_401K_PAYABLE, ...) to GL account (1 to 64 letters, digits or . _ : -).'
+          additionalProperties: { type: string }
+    PostingProfile:
+      type: object
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        accounts: { type: object, additionalProperties: { type: string } }
     Line:
       type: object
       required: [code, kind, amount, basisAmount, ruleVersion]

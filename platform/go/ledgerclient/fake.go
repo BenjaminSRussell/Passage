@@ -25,6 +25,7 @@ type Fake struct {
 	byKey    map[string]int
 	reversed map[string]string
 	postErr  error
+	ledgers  map[string]string
 }
 
 type Stored struct {
@@ -34,7 +35,7 @@ type Stored struct {
 }
 
 func NewFake() *Fake {
-	return &Fake{byKey: map[string]int{}, reversed: map[string]string{}}
+	return &Fake{byKey: map[string]int{}, reversed: map[string]string{}, ledgers: map[string]string{}}
 }
 
 // FailPosts makes every Post return err until it is called with nil.
@@ -113,6 +114,22 @@ func (f *Fake) Reverse(_ context.Context, r Reversal) (string, error) {
 		f.reversed[r.EntryID] = id
 	}
 	return id, err
+}
+
+// AddLedger registers a ledger and its legal entity for LegalEntity.
+func (f *Fake) AddLedger(ledgerID, legalEntityID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ledgers[ledgerID] = legalEntityID
+}
+
+func (f *Fake) LegalEntity(_ context.Context, _, ledgerID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if le, ok := f.ledgers[ledgerID]; ok {
+		return le, nil
+	}
+	return "", &Error{Op: "ledger", Status: http.StatusNotFound, Code: "LEDGER_NOT_FOUND"}
 }
 
 func (f *Fake) Balance(_ context.Context, q BalanceQuery) (Balance, error) {

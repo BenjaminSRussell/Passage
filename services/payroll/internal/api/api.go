@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payroll/internal/domain"
 )
@@ -38,8 +39,12 @@ type Pinger interface {
 // API holds the handlers and their counters.
 type API struct {
 	db           Pinger
+	runs         Runs
+	ledger       ledgerclient.Ledger
 	calculations atomic.Int64
 	failed       atomic.Int64
+	runsCreated  atomic.Int64
+	runsPosted   atomic.Int64
 }
 
 // New returns the API. db may be nil in tests; readiness then reports ready.
@@ -49,6 +54,7 @@ func New(db Pinger) *API { return &API{db: db} }
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyCalculate)).Post("/v1/payroll/calculations", a.calculate)
+	a.registerRuns(r)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -56,6 +62,8 @@ func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "# HELP payroll_calculations_total Gross-to-net previews computed.\n# TYPE payroll_calculations_total counter\npayroll_calculations_total %d\n", a.calculations.Load())
 		fmt.Fprintf(w, "# HELP payroll_calculation_failures_total Gross-to-net previews refused.\n# TYPE payroll_calculation_failures_total counter\npayroll_calculation_failures_total %d\n", a.failed.Load())
+		fmt.Fprintf(w, "# HELP payroll_runs_created_total Pay runs stored.\n# TYPE payroll_runs_created_total counter\npayroll_runs_created_total %d\n", a.runsCreated.Load())
+		fmt.Fprintf(w, "# HELP payroll_runs_posted_total Pay runs posted to the general ledger.\n# TYPE payroll_runs_posted_total counter\npayroll_runs_posted_total %d\n", a.runsPosted.Load())
 	})
 }
 

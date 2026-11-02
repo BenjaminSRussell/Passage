@@ -201,6 +201,36 @@ func TestBalance_RejectsAnUnusableBody(t *testing.T) {
 	}
 }
 
+func TestLegalEntity_ReadsTheOwnerWithTheLookupDuty(t *testing.T) {
+	var verifier *tenant.ServiceVerifier
+	var claims tenant.ServiceClaims
+	var path string
+	c, v := newClientAs(t, "payroll", func(w http.ResponseWriter, r *http.Request) {
+		claims, _ = verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"id":"` + ledgerID + `","legalEntityId":"` + entityID + `"}`))
+	})
+	verifier = v
+	owner, err := c.LegalEntity(principalCtx(), entityID, ledgerID)
+	if err != nil || owner != entityID || path != "/v1/ledger/ledgers/"+ledgerID || len(claims.Duties) != 1 || claims.Duties[0] != ledgerclient.DutyLedgerRead {
+		t.Fatalf("owner %q err %v path %s claims %+v", owner, err, path, claims)
+	}
+}
+
+func TestLegalEntity_UnknownLedgerIsRejectedAndUnusableBodyFails(t *testing.T) {
+	missing, _ := newClientAs(t, "payroll", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"LEDGER_NOT_FOUND"}`))
+	})
+	if _, err := missing.LegalEntity(principalCtx(), entityID, ledgerID); !ledgerclient.Rejected(err) || ledgerclient.CodeOf(err) != "LEDGER_NOT_FOUND" {
+		t.Fatalf("err %v", err)
+	}
+	empty, _ := newClientAs(t, "payroll", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	if _, err := empty.LegalEntity(principalCtx(), entityID, ledgerID); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
 func TestFromEnv(t *testing.T) {
 	if c, err := ledgerclient.FromEnv(func(string) string { return "" }, "production"); c != nil || err != nil {
 		t.Fatalf("unset: %v %v", c, err)

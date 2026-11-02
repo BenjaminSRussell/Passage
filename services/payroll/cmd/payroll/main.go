@@ -12,7 +12,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/payroll/internal/api"
+	"github.com/BenjaminSRussell/passage/services/payroll/internal/store"
 	"github.com/BenjaminSRussell/passage/services/payroll/migrations"
 )
 
@@ -55,7 +57,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool)
+	ledger, err := ledgerclient.FromEnv(getenv, "payroll")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	runs := store.New(pool)
+	var l ledgerclient.Ledger
+	if ledger != nil {
+		l = ledger
+	}
+	a := api.New(pool).WithRuns(runs, l)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
