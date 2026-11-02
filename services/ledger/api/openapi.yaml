@@ -143,7 +143,14 @@ components:
         sourceLineRef: { type: string, maxLength: 200 }
     PostEntryRequest:
       type: object
-      required: [ledgerId, documentId, postingDate, source, lines]
+      required: [ledgerId, documentId, postingDate, source]
+      description: |
+        lines may be omitted or empty on POST /journal-entries when ledgerLines is present; a request with neither
+        is rejected with 400 (field lines). POST /validate requires lines and rejects ledgerLines with 400.
+        ledgerLines on this single-ledger post accepts one group, for ledgerId itself; its lines are added to lines.
+        A group for any other ledger is rejected with 422 LEDGER_LINES_OWN_LEDGER_ONLY (use the ledger set to post
+        other ledgers). A ledger entry left with no lines, or only zero-amount lines without text, is rejected with
+        422 LEDGER_LINE_EMPTY.
       properties:
         ledgerId: { type: string, format: uuid }
         documentId: { type: string, format: uuid, description: Groups entries across ledgers and split documents }
@@ -153,9 +160,13 @@ components:
         source: { $ref: "#/components/schemas/Source" }
         lines:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 10000
           items: { $ref: "#/components/schemas/PostLine" }
+        ledgerLines:
+          type: array
+          maxItems: 1
+          items: { $ref: "#/components/schemas/LedgerLines" }
     SetEntryRequest:
       type: object
       required: [documentId, postingDate, source]
@@ -167,6 +178,12 @@ components:
         a request with neither is rejected with 400 (field lines). A ledger whose entry ends up with no lines, or only
         zero-amount lines without text, is rejected with 422 LEDGER_LINE_EMPTY. The idempotency payload hash orders
         ledgerLines groups by ledger id, so group order does not matter on a retry.
+        A member ledger kept in another currency than the leading ledger gets the common lines translated at the
+        spot rate of the posting date (services/fx, rounded to the member's minor units; a rounding residual of a
+        balanced document goes to the largest line of the heavier side, so each ledger still balances alone). A pair
+        without a rate gives 422 LEDGER_FX_RATE_MISSING (also when FX_URL is not configured) and an unreachable fx
+        service 503 LEDGER_FX_UNAVAILABLE; nothing is written either way. ledgerLines are not translated: they are
+        written in the named ledger's own currency (a different currency is 422 LEDGER_CURRENCY_MISMATCH).
       properties:
         documentId: { type: string, format: uuid }
         postingDate: { type: string, format: date }
@@ -330,6 +347,19 @@ components:
           minItems: 1
           maxItems: 20
           items: { type: string, format: uuid }
+        members:
+          type: array
+          maxItems: 21
+          description: Optional per-ledger settings of members of the set (at most one entry per ledger, each a member). Ledgers of a set may be kept in different currencies.
+          items: { $ref: "#/components/schemas/LedgerSetMember" }
+    LedgerSetMember:
+      type: object
+      required: [ledgerId]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Fiscal calendar the ledger follows; held for the fiscal calendar (not consumed by posting yet) }
+        accountingPrinciple: { type: string, pattern: '^[A-Z0-9_.-]{1,20}$', description: "Accounting principle code, for example IFRS" }
+        reportingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
     LedgerSet:
       type: object
       properties:
@@ -341,6 +371,9 @@ components:
         ledgerIds:
           type: array
           items: { type: string, format: uuid }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/LedgerSetMember" }
         createdAt: { type: string, format: date-time }
     AccountMappingRequest:
       type: object

@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/api"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/closeperiods"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/fxrates"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 	"github.com/BenjaminSRussell/passage/services/ledger/migrations"
 )
@@ -74,6 +75,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if gate != nil {
 		a.WithPeriodGate(gate)
 	}
+	rates, err := rateSource(getenv)
+	if err != nil {
+		return err
+	}
+	if rates != nil {
+		a.WithRateSource(rates)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := a.Admin()
@@ -103,6 +111,22 @@ func periodGate(getenv func(string) string) (store.PeriodGate, error) {
 		return nil, errors.New("CLOSE_URL is set but there is no service signing key (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
 	}
 	return closeperiods.New(url, nil, signer), nil
+}
+
+func rateSource(getenv func(string) string) (store.RateSource, error) {
+	url := getenv("FX_URL")
+	if url == "" {
+		slog.Warn("FX_URL is not set; ledger sets that span currencies cannot post")
+		return nil, nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if signer == nil {
+		return nil, errors.New("FX_URL is set but there is no service signing key (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+	}
+	return fxrates.New(url, nil, signer), nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

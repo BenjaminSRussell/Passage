@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -28,10 +29,11 @@ func (a *API) registerLedgerSets(r chi.Router) {
 }
 
 type createLedgerSetRequest struct {
-	Code              string   `json:"code"`
-	Name              string   `json:"name"`
-	LeadingLedgerID   string   `json:"leadingLedgerId"`
-	ParallelLedgerIDs []string `json:"parallelLedgerIds"`
+	Code              string            `json:"code"`
+	Name              string            `json:"name"`
+	LeadingLedgerID   string            `json:"leadingLedgerId"`
+	ParallelLedgerIDs []string          `json:"parallelLedgerIds"`
+	Members           []store.SetMember `json:"members"`
 }
 
 func (a *API) createLedgerSet(w http.ResponseWriter, r *http.Request) {
@@ -64,17 +66,43 @@ func (a *API) createLedgerSet(w http.ResponseWriter, r *http.Request) {
 			fields["parallelLedgerIds"] = "each entry must be a UUID"
 		}
 	}
+	for i, m := range req.Members {
+		checkMember(fmt.Sprintf("members[%d]", i), m, fields)
+	}
+	if len(req.Members) > maxParallelLedgers+1 {
+		fields["members"] = "at most 21 entries"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
 	set, err := a.store.CreateLedgerSet(r.Context(), store.LedgerSetInput{Code: req.Code, Name: req.Name,
-		LeadingLedgerID: req.LeadingLedgerID, ParallelLedgerIDs: req.ParallelLedgerIDs})
+		LeadingLedgerID: req.LeadingLedgerID, ParallelLedgerIDs: req.ParallelLedgerIDs, Members: req.Members})
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, set)
+}
+
+var (
+	calendarCodeRe        = regexp.MustCompile(`^[A-Z0-9_-]{1,20}$`)
+	accountingPrincipleRe = regexp.MustCompile(`^[A-Z0-9_.-]{1,20}$`)
+)
+
+func checkMember(prefix string, m store.SetMember, fields map[string]string) {
+	if !ids.Valid(m.LedgerID) {
+		fields[prefix+".ledgerId"] = "must be a UUID"
+	}
+	if m.CalendarCode != nil && !calendarCodeRe.MatchString(*m.CalendarCode) {
+		fields[prefix+".calendarCode"] = "must be 1 to 20 characters of A-Z, 0-9, '_' or '-'"
+	}
+	if m.AccountingPrinciple != nil && !accountingPrincipleRe.MatchString(*m.AccountingPrinciple) {
+		fields[prefix+".accountingPrinciple"] = "must be 1 to 20 characters of A-Z, 0-9, '.', '_' or '-'"
+	}
+	if m.ReportingCurrency != nil && !currencyRe.MatchString(*m.ReportingCurrency) {
+		fields[prefix+".reportingCurrency"] = "must be an ISO 4217 alpha-3 code"
+	}
 }
 
 func (a *API) getLedgerSet(w http.ResponseWriter, r *http.Request) {

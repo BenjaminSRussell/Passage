@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -75,6 +76,9 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err := requireLedgerSpecific(ctx, tx, tenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 		return out, err
 	}
+	if in, err = withOwnLedgerLines(ledger, in); err != nil {
+		return out, err
+	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
@@ -85,6 +89,17 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	}
 	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
 	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+}
+
+func withOwnLedgerLines(ledger Ledger, in PostInput) (PostInput, error) {
+	for raw, lines := range in.LedgerLines {
+		if id, ok := ids.Canonical(raw); !ok || id != ledger.ID {
+			return in, setViolation(CodeLedgerLinesOwnLedgerOnly, "ledgerLines",
+				"a single-ledger post accepts ledger lines only for its own ledger "+ledger.Code+"; use the ledger set to post other ledgers")
+		}
+		in.Lines = append(slices.Clone(in.Lines), lines...)
+	}
+	return in, nil
 }
 
 func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID string, allowed bool) error {

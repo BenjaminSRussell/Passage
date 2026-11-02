@@ -86,6 +86,7 @@ var (
 type API struct {
 	store    store.Store
 	periods  store.PeriodGate
+	rates    store.RateSource
 	now      func() time.Time
 	posted   atomic.Int64
 	replayed atomic.Int64
@@ -101,10 +102,18 @@ func (a *API) WithPeriodGate(g store.PeriodGate) *API {
 	return a
 }
 
+func (a *API) WithRateSource(src store.RateSource) *API {
+	a.rates = src
+	return a
+}
+
 func (a *API) periodGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.periods != nil {
 			r = r.WithContext(store.WithPeriodGate(r.Context(), a.periods))
+		}
+		if a.rates != nil {
+			r = r.WithContext(store.WithRateSource(r.Context(), a.rates))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -499,6 +508,11 @@ type postEntryRequest struct {
 	Lines        []lineDTO `json:"lines"`
 }
 
+type singleEntryRequest struct {
+	postEntryRequest
+	LedgerLines []ledgerLinesDTO `json:"ledgerLines,omitempty"`
+}
+
 // toPostInput checks the request's syntax and builds the store input. Rule
 // checks happen in the domain and are reported as violations, not here.
 func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInput, map[string]string) {
@@ -573,17 +587,22 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req postEntryRequest
+	var req singleEntryRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in, fields := a.toPostInput(req, r)
+	in, fields := a.toPostInput(req.postEntryRequest, r)
+	if len(req.LedgerLines) > 0 && len(req.Lines) == 0 {
+		delete(fields, "lines")
+	}
+	in.LedgerLines = ledgerLinesInput(req.LedgerLines, fields)
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
+	req.LedgerLines = canonicalGroups(req.LedgerLines)
 	hash, err := domain.HashPayload(req)
 	if err != nil {
 		httpx.Fail(w, r, err)

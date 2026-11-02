@@ -147,10 +147,6 @@ func TestPostgres_SetPostingIsAllOrNothing(t *testing.T) {
 
 func TestPostgres_LedgerSetValidation(t *testing.T) {
 	e := setupLedgerSet(t)
-	eur, err := e.store.CreateLedger(e.ctx, Ledger{LegalEntityID: e.le, Code: "EUR", Name: "Euro", ChartCode: "STD", Currency: "EUR", FuturePostingDays: 366})
-	if err != nil {
-		t.Fatal(err)
-	}
 	wide := principalCtx(e.tenant, "")
 	otherEntity, err := e.store.CreateLedger(wide, Ledger{LegalEntityID: ids.New(), Code: "OTH", Name: "Other", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
 	if err != nil {
@@ -160,7 +156,8 @@ func TestPostgres_LedgerSetValidation(t *testing.T) {
 		name, code string
 		in         LedgerSetInput
 	}{
-		{"currency", CodeSetCurrencyMismatch, LedgerSetInput{Code: "S1", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{eur.ID}}},
+		{"member outside the set", CodeSetInvalid, LedgerSetInput{Code: "S1", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.tax.ID}, Members: []SetMember{{LedgerID: e.local.ID}}}},
+		{"member twice", CodeSetInvalid, LedgerSetInput{Code: "S6", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.tax.ID}, Members: []SetMember{{LedgerID: e.tax.ID}, {LedgerID: e.tax.ID}}}},
 		{"legal entity", CodeSetEntityMismatch, LedgerSetInput{Code: "S2", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{otherEntity.ID}}},
 		{"no parallel", CodeSetInvalid, LedgerSetInput{Code: "S3", Name: "s", LeadingLedgerID: e.ledger.ID}},
 		{"leading is parallel", CodeSetInvalid, LedgerSetInput{Code: "S4", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.ledger.ID}}},

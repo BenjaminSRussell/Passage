@@ -54,6 +54,7 @@ spec:
 {{- end }}
 {{- end }}
             - { name: CLOSE_URL, value: {{ .Values.closeUrl | quote }} }
+            - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
 {{- if .Values.periodCheck }}
             - { name: LEDGER_PERIOD_CHECK, value: {{ .Values.periodCheck | quote }} }
 {{- end }}

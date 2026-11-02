@@ -2717,7 +2717,8 @@
       "production": ["production.order.create-from-sales"]
     },
     "ledger": {
-      "close": ["period.check"]
+      "close": ["period.check"],
+      "fx": ["fx.rate.lookup"]
     },
     "analytics": {
       "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]

@@ -26,18 +26,27 @@ const (
 	CodeSetEntityMismatch   = "LEDGER_SET_LEGAL_ENTITY_MISMATCH"
 	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
 	CodeMappingOnLeading    = "LEDGER_MAPPING_ON_LEADING_LEDGER"
-	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
 	CodeLedgerLinesNotInSet = "LEDGER_LINES_LEDGER_NOT_IN_SET"
+
+	CodeLedgerLinesOwnLedgerOnly = "LEDGER_LINES_OWN_LEDGER_ONLY"
 )
 
+type SetMember struct {
+	LedgerID            string  `json:"ledgerId"`
+	CalendarCode        *string `json:"calendarCode,omitempty"`
+	AccountingPrinciple *string `json:"accountingPrinciple,omitempty"`
+	ReportingCurrency   *string `json:"reportingCurrency,omitempty"`
+}
+
 type LedgerSet struct {
-	ID              string    `json:"id"`
-	LegalEntityID   string    `json:"legalEntityId"`
-	Code            string    `json:"code"`
-	Name            string    `json:"name"`
-	LeadingLedgerID string    `json:"leadingLedgerId"`
-	LedgerIDs       []string  `json:"ledgerIds"`
-	CreatedAt       time.Time `json:"createdAt"`
+	ID              string      `json:"id"`
+	LegalEntityID   string      `json:"legalEntityId"`
+	Code            string      `json:"code"`
+	Name            string      `json:"name"`
+	LeadingLedgerID string      `json:"leadingLedgerId"`
+	LedgerIDs       []string    `json:"ledgerIds"`
+	Members         []SetMember `json:"members"`
+	CreatedAt       time.Time   `json:"createdAt"`
 }
 
 type LedgerSetInput struct {
@@ -45,6 +54,19 @@ type LedgerSetInput struct {
 	Name              string
 	LeadingLedgerID   string
 	ParallelLedgerIDs []string
+	Members           []SetMember
+}
+
+const setMembersSQL = `(select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('ledgerId', m.ledger_id, 'calendarCode', m.calendar_code,
+		'accountingPrinciple', m.accounting_principle, 'reportingCurrency', m.reporting_currency)) order by m.ledger_id), '[]'::jsonb)
+	from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id)`
+
+func withLedgerIDs(set LedgerSet) LedgerSet {
+	set.LedgerIDs = make([]string, len(set.Members))
+	for i, m := range set.Members {
+		set.LedgerIDs[i] = m.LedgerID
+	}
+	return set
 }
 
 type AccountMapping struct {
@@ -98,9 +120,10 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 			if l.LegalEntityID != loaded[0].LegalEntityID {
 				return setViolation(CodeSetEntityMismatch, "parallelLedgerIds", "every ledger of a set belongs to one legal entity")
 			}
-			if l.Currency != loaded[0].Currency {
-				return setViolation(CodeSetCurrencyMismatch, "parallelLedgerIds", "every ledger of a set has the same accounting currency")
-			}
+		}
+		attributes, err := memberAttributes(in.Members, sorted)
+		if err != nil {
+			return err
 		}
 		if err := lockLegalEntity(ctx, tx, p.TenantID, loaded[0].LegalEntityID); err != nil {
 			return err
@@ -127,15 +150,20 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 			return setViolation(CodeSetLeadingConflict, "leadingLedgerId", "a legal entity has exactly one leading ledger; its sets must all use it")
 		}
 		out = LedgerSet{ID: ids.New(), LegalEntityID: loaded[0].LegalEntityID, Code: in.Code, Name: in.Name,
-			LeadingLedgerID: in.LeadingLedgerID, LedgerIDs: sorted}
+			LeadingLedgerID: in.LeadingLedgerID}
+		for _, id := range sorted {
+			out.Members = append(out.Members, attributes[id])
+		}
+		out = withLedgerIDs(out)
 		if err := tx.QueryRow(ctx, `insert into ledger_set (tenant_id, id, legal_entity_id, code, name, leading_ledger_id)
 			values ($1, $2, $3, $4, $5, $6) returning created_at`,
 			p.TenantID, out.ID, out.LegalEntityID, out.Code, out.Name, out.LeadingLedgerID).Scan(&out.CreatedAt); err != nil {
 			return err
 		}
-		for _, id := range sorted {
-			if _, err := tx.Exec(ctx, `insert into ledger_set_member (tenant_id, ledger_set_id, ledger_id, legal_entity_id) values ($1, $2, $3, $4)`,
-				p.TenantID, out.ID, id, out.LegalEntityID); err != nil {
+		for _, m := range out.Members {
+			if _, err := tx.Exec(ctx, `insert into ledger_set_member (tenant_id, ledger_set_id, ledger_id, legal_entity_id,
+					calendar_code, accounting_principle, reporting_currency) values ($1, $2, $3, $4, $5, $6, $7)`,
+				p.TenantID, out.ID, m.LedgerID, out.LegalEntityID, m.CalendarCode, m.AccountingPrinciple, m.ReportingCurrency); err != nil {
 				return err
 			}
 		}
@@ -145,6 +173,27 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		return LedgerSet{}, httpx.NewProblem(http.StatusConflict, CodeSetCodeDuplicate, "a ledger set with this code already exists")
 	}
 	return out, err
+}
+
+func memberAttributes(given []SetMember, ledgerIDs []string) (map[string]SetMember, error) {
+	out := make(map[string]SetMember, len(ledgerIDs))
+	for _, id := range ledgerIDs {
+		out[id] = SetMember{LedgerID: id}
+	}
+	seen := map[string]bool{}
+	for _, m := range given {
+		id, ok := ids.Canonical(m.LedgerID)
+		if _, member := out[id]; !ok || !member {
+			return nil, setViolation(CodeSetInvalid, "members", "ledger "+m.LedgerID+" is not a member of the set")
+		}
+		if seen[id] {
+			return nil, setViolation(CodeSetInvalid, "members", "a ledger can appear in members only once")
+		}
+		seen[id] = true
+		m.LedgerID = id
+		out[id] = m
+	}
+	return out, nil
 }
 
 func lockLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) error {
@@ -168,13 +217,13 @@ func (s *Postgres) GetLedgerSet(ctx context.Context, id string) (LedgerSet, erro
 func loadLedgerSet(ctx context.Context, tx pgx.Tx, tenantID, id string) (LedgerSet, error) {
 	var set LedgerSet
 	err := tx.QueryRow(ctx, `select s.id::text, s.legal_entity_id::text, s.code, s.name, s.leading_ledger_id::text, s.created_at,
-			array(select m.ledger_id::text from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id order by m.ledger_id)
+			`+setMembersSQL+`
 		from ledger_set s where s.tenant_id = $1 and s.id = $2`, tenantID, id).
-		Scan(&set.ID, &set.LegalEntityID, &set.Code, &set.Name, &set.LeadingLedgerID, &set.CreatedAt, &set.LedgerIDs)
+		Scan(&set.ID, &set.LegalEntityID, &set.Code, &set.Name, &set.LeadingLedgerID, &set.CreatedAt, &set.Members)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return set, httpx.NewProblem(http.StatusNotFound, CodeSetNotFound, "ledger set not found")
 	}
-	return set, err
+	return withLedgerIDs(set), err
 }
 
 const setListPageSize = 100
@@ -200,7 +249,7 @@ func (s *Postgres) ListLedgerSets(ctx context.Context, after string) ([]LedgerSe
 			}
 		}
 		rows, err := tx.Query(ctx, `select s.id::text, s.legal_entity_id::text, s.code, s.name, s.leading_ledger_id::text, s.created_at,
-				array(select m.ledger_id::text from ledger_set_member m where m.tenant_id = s.tenant_id and m.ledger_set_id = s.id order by m.ledger_id)
+				`+setMembersSQL+`
 			from ledger_set s where s.tenant_id = $1
 				and ($2 = '' or (s.legal_entity_id, s.code) > (select a.legal_entity_id, a.code from ledger_set a where a.tenant_id = $1 and a.id = $2::uuid))
 			order by s.legal_entity_id, s.code limit $3`, p.TenantID, after, setListPageSize+1)
@@ -210,10 +259,10 @@ func (s *Postgres) ListLedgerSets(ctx context.Context, after string) ([]LedgerSe
 		defer rows.Close()
 		for rows.Next() {
 			var set LedgerSet
-			if err := rows.Scan(&set.ID, &set.LegalEntityID, &set.Code, &set.Name, &set.LeadingLedgerID, &set.CreatedAt, &set.LedgerIDs); err != nil {
+			if err := rows.Scan(&set.ID, &set.LegalEntityID, &set.Code, &set.Name, &set.LeadingLedgerID, &set.CreatedAt, &set.Members); err != nil {
 				return err
 			}
-			out = append(out, set)
+			out = append(out, withLedgerIDs(set))
 		}
 		return rows.Err()
 	})
@@ -361,6 +410,12 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 		}
 		ledgers = append(ledgers, l)
 	}
+	documentCurrency := ""
+	for _, l := range ledgers {
+		if l.ID == set.LeadingLedgerID {
+			documentCurrency = l.Currency
+		}
+	}
 	ledgerLines, err := checkLedgerLines(set, in)
 	if err != nil {
 		return out, err
@@ -379,6 +434,9 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 				return EntryResult{}, err
 			}
 			li.Lines = domain.ApplyMappings(in.Lines, mappings, in.PostingDate)
+		}
+		if li.Lines, err = translateLines(ctx, ledger, documentCurrency, in.PostingDate, li.Lines); err != nil {
+			return EntryResult{}, err
 		}
 		li.Lines = append(slices.Clone(li.Lines), ledgerLines[ledger.ID]...)
 		li.Key = setEntryKey(in.Key, ledger.ID)

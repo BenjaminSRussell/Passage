@@ -274,3 +274,43 @@ func TestListLedgerSetsAndAccountMappings(t *testing.T) {
 		t.Errorf("malformed ledger id: status %d", rec.Code)
 	}
 }
+
+func TestCreateLedgerSet_MembersAreValidatedAndPassedOn(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	head := `{"code":"IFRS","name":"Parallel","leadingLedgerId":"` + testLedger + `","parallelLedgerIds":["` + testDoc + `"],"members":[`
+	for name, member := range map[string]string{
+		"bad ledger":    `{"ledgerId":"nope"}`,
+		"bad calendar":  `{"ledgerId":"` + testDoc + `","calendarCode":"fiscal year"}`,
+		"bad principle": `{"ledgerId":"` + testDoc + `","accountingPrinciple":"ifrs!"}`,
+		"bad currency":  `{"ledgerId":"` + testDoc + `","reportingCurrency":"euro"}`,
+	} {
+		if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", head+member+`]}`, dutySetupWrite, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d", name, rec.Code)
+		}
+	}
+	if len(fs.setInputs) != 0 {
+		t.Fatalf("invalid members must not reach the store: %d", len(fs.setInputs))
+	}
+	ok := `{"ledgerId":"` + testDoc + `","calendarCode":"FISCAL_EU","accountingPrinciple":"IFRS","reportingCurrency":"EUR"}`
+	rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", head+ok+`]}`, dutySetupWrite, nil)
+	if rec.Code != http.StatusCreated || len(fs.setInputs) != 1 || len(fs.setInputs[0].Members) != 1 || *fs.setInputs[0].Members[0].CalendarCode != "FISCAL_EU" {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostEntry_LedgerLinesReachTheStoreAndValidateRefusesThem(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	body := `{"ledgerId":"` + testLedger + `","documentId":"` + testDoc + `","postingDate":"2026-03-31",
+	  "source":{"system":"ap","type":"vendor_invoice","id":"7F3A"},
+	  "lines":[{"account":"6010","debitCredit":"D","amount":{"currency":"USD","value":"10.00"}}],
+	  "ledgerLines":[{"ledgerId":"` + testLedger + `","lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]}]}`
+	rec := call(h, http.MethodPost, "/v1/ledger/journal-entries", body, dutyPost, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusCreated || len(fs.posted) != 1 || len(fs.posted[0].LedgerLines[testLedger]) != 1 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(h, http.MethodPost, "/v1/ledger/validate", body, dutyPost, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("validate has no ledger lines: status %d", rec.Code)
+	}
+}
