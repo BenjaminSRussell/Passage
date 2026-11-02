@@ -42,6 +42,7 @@ const validationDetail = "request failed validation"
 
 var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+	accountCode  = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 	// decimalText is the OpenAPI Decimal pattern: no exponent, no leading plus.
 	decimalText = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 )
@@ -244,6 +245,9 @@ func toPair(req eliminationRequest) (domain.Pair, map[string]string) {
 	f := decimals{}
 	if !currencyCode.MatchString(req.Currency) {
 		f["currency"] = "must be an ISO 4217 code"
+	}
+	if req.FXGainLossAccount != "" && !accountCode.MatchString(req.FXGainLossAccount) {
+		f["fxGainLossAccount"] = "must be 1 to 64 letters, digits or . _ : -"
 	}
 	p := domain.Pair{
 		Currency:     req.Currency,

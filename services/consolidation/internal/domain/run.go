@@ -33,6 +33,8 @@ const (
 	LineClosingNetAssets   = "CLOSING_NET_ASSETS"
 	LineCTANCIShare        = "CTA_NCI_SHARE"
 	LineCTAGroupShare      = "CTA_GROUP_SHARE"
+	LineEliminationCTA     = "CTA_ELIMINATIONS"
+	LineICFXGainLoss       = "IC_FX_GAIN_LOSS"
 	LineUnrealizedProfitE3 = "UNREALIZED_PROFIT_E3"
 	LineConsolidatedIncome = "CONSOLIDATED_NET_INCOME"
 	LineNCIProfit          = "NCI_PROFIT"
@@ -123,6 +125,7 @@ func ComputeRun(in RunInput) (RunResult, error) {
 	}
 	var res RunResult
 	open, income, closing, cta, ctaNCI, ctaGroup := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+	elimCTA, icFX := decimal.Zero, decimal.Zero
 	for _, u := range in.Units {
 		t, err := TranslateUnit(Statement{OpeningNetAssets: u.OpeningNetAssets, NetIncome: u.Pair.NetIncome, ClosingNetAssets: u.ClosingNetAssets},
 			u.Pair.Rates, u.Pair.OwnershipPct, in.Currency)
@@ -139,6 +142,13 @@ func ComputeRun(in RunInput) (RunResult, error) {
 			Balance{u.ID, AcctCTANCIShare, t.NCIShareOfCTA}, Balance{u.ID, AcctCTAGroupShare, t.GroupShareOfCTA})
 		for _, e := range entries {
 			res.Entries = append(res.Entries, UnitEntry{UnitID: u.ID, Entry: e})
+			net := e.Debit.Sub(e.Credit)
+			switch {
+			case e.Account == AcctCTA:
+				elimCTA = elimCTA.Sub(net)
+			case e.RuleCode == RuleE2 && e.Account == u.Pair.icDifferenceAccount():
+				icFX = icFX.Add(net)
+			}
 		}
 		open, income, closing = open.Add(t.OpeningNetAssets), income.Add(t.NetIncome), closing.Add(t.ClosingNetAssets)
 		cta, ctaNCI, ctaGroup = cta.Add(t.CTA), ctaNCI.Add(t.NCIShareOfCTA), ctaGroup.Add(t.GroupShareOfCTA)
@@ -152,13 +162,13 @@ func ComputeRun(in RunInput) (RunResult, error) {
 			nci = nci.Add(e.Debit).Sub(e.Credit)
 		}
 	}
-	consolidated := income.Sub(e3)
-	res.CTA = cta
+	consolidated := income.Sub(e3).Sub(icFX)
+	res.CTA = cta.Add(elimCTA)
 	res.Statements = []StatementLine{
 		{StatementNetAssets, LineOpeningNetAssets, open}, {StatementNetAssets, LineUnitNetIncome, income},
 		{StatementNetAssets, LineCTA, cta}, {StatementNetAssets, LineClosingNetAssets, closing},
-		{StatementNetAssets, LineCTANCIShare, ctaNCI}, {StatementNetAssets, LineCTAGroupShare, ctaGroup},
-		{StatementIncome, LineUnitNetIncome, income}, {StatementIncome, LineUnrealizedProfitE3, e3.Neg()},
+		{StatementNetAssets, LineCTANCIShare, ctaNCI}, {StatementNetAssets, LineCTAGroupShare, ctaGroup}, {StatementNetAssets, LineEliminationCTA, elimCTA},
+		{StatementIncome, LineUnitNetIncome, income}, {StatementIncome, LineUnrealizedProfitE3, e3.Neg()}, {StatementIncome, LineICFXGainLoss, icFX.Neg()},
 		{StatementIncome, LineConsolidatedIncome, consolidated}, {StatementIncome, LineNCIProfit, nci},
 		{StatementIncome, LineOwnersProfit, consolidated.Sub(nci)},
 	}

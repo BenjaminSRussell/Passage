@@ -83,6 +83,32 @@ func TestPreviewEliminations_PSExample(t *testing.T) {
 	}
 }
 
+func TestPreviewEliminations_ICFXTreatment(t *testing.T) {
+	cases := []struct{ name, extra, account string }{
+		{"default account", ``, "FX_GAIN_LOSS"},
+		{"configured account", `,"fxGainLossAccount":"FX_REALIZED"`, "FX_REALIZED"},
+		{"net investment", `,"icNetInvestment":true`, "CTA"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true`+c.extra, 1)
+			rec := do(api.New(nil), eliminationsPath, tenantID, api.DutyRun, body)
+			var got struct {
+				Entries []struct{ Rule, Account, Debit string } `json:"entries"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+			}
+			for _, e := range got.Entries {
+				if e.Rule == "E2" && e.Account == c.account && e.Debit == "1500.00" {
+					return
+				}
+			}
+			t.Fatalf("no E2 Dr 1500.00 on %s: %+v", c.account, got.Entries)
+		})
+	}
+}
+
 func TestPreviewEliminations_Authorization(t *testing.T) {
 	if rec := do(api.New(nil), eliminationsPath, tenantID, "", psBody); rec.Code != http.StatusForbidden {
 		t.Fatalf("without duty status = %d; want 403", rec.Code)
@@ -110,6 +136,8 @@ func TestPreviewEliminations_Errors(t *testing.T) {
 		{"exponent decimal", strings.Replace(psBody, `"icSales":"100000"`, `"icSales":"1e5"`, 1), http.StatusBadRequest, "COM-0001", "icSales"},
 		{"bad currency", strings.Replace(psBody, `"USD"`, `"usd"`, 1), http.StatusBadRequest, "COM-0001", "currency"},
 		{"ownership above 100", strings.Replace(psBody, `"ownershipPct":"80"`, `"ownershipPct":"120"`, 1), http.StatusBadRequest, "COM-0001", ""},
+		{"reserved FX account", strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true,"fxGainLossAccount":"CTA"`, 1), http.StatusBadRequest, "COM-0001", ""},
+		{"malformed FX account", strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true,"fxGainLossAccount":"a b"`, 1), http.StatusBadRequest, "COM-0001", "fxGainLossAccount"},
 		{"bargain purchase", strings.Replace(psBody, `"investmentCost":"620000"`, `"investmentCost":"1"`, 1), http.StatusUnprocessableEntity, "CNS-0920", ""},
 	}
 	for _, c := range cases {

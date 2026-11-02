@@ -10,6 +10,7 @@ export const accountNames: Record<string, string> = {
   IC_RECEIVABLE: "Intercompany receivable",
   IC_DIFFERENCE: "Intercompany difference",
   CTA: "Translation difference (CTA)",
+  FX_GAIN_LOSS: "Exchange gain or loss",
   COGS: "Cost of sales",
   INVENTORY: "Inventory",
   NCI_EQUITY: "Non-controlling interest (equity)",

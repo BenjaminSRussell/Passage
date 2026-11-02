@@ -14,7 +14,7 @@ Nothing is persisted, no run is versioned and no event is published yet.
 
 | Area | Code | Status |
 |---|---|---|
-| Elimination entries E1–E5 with NCI, FR-40.9 worked example (1,032,952.00 per side) | `internal/domain/eliminate.go` | built, exact-amount test (AC-40.7) |
+| Elimination entries E1–E5 with NCI, FR-40.9 worked example (1,034,475.81 per side) | `internal/domain/eliminate.go` | built, exact-amount test (AC-40.7) |
 | Balance check per rule, CNS-0903 | `internal/domain/eliminate.go` | built, tests |
 | Ownership validation (never above 100.00 % on any date), CNS-0904 | `internal/domain/ownership.go` | built, tests |
 | IAS 21 translation and CTA with NCI share, FR-40.8 / BR-40.6, AC-40.6 (38,000.00) | `internal/domain/translate.go` | built, unit tests |

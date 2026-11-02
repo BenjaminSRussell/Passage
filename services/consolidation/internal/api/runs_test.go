@@ -89,7 +89,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
 	}
 	started := created[runOut](t, rec)
-	if started.Version != 1 || started.Status != "completed" || started.CreatedBy != "user-7" || started.CTAAmount != "38000.00" ||
+	if started.Version != 1 || started.Status != "completed" || started.CreatedBy != "user-7" || started.CTAAmount != "39523.81" ||
 		started.UnitCount != 1 || started.EliminationCount != 17 || rec.Header().Get("Location") != runsPath+"/"+started.ID {
 		t.Fatalf("started = %+v", started)
 	}
@@ -129,7 +129,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 	for _, l := range st.Statements {
 		amounts[l.Statement+"/"+l.Line] = l.Amount
 	}
-	if st.Version != 1 || amounts["income/CONSOLIDATED_NET_INCOME"] != "149040.00" || amounts["income/NCI_PROFIT"] != "29808.00" || amounts["net_assets/CTA"] != "38000.00" {
+	if st.Version != 1 || amounts["income/CONSOLIDATED_NET_INCOME"] != "147540.00" || amounts["income/IC_FX_GAIN_LOSS"] != "-1500.00" || amounts["net_assets/CTA_ELIMINATIONS"] != "1523.81" || amounts["income/NCI_PROFIT"] != "29808.00" || amounts["net_assets/CTA"] != "38000.00" {
 		t.Fatalf("statements = %+v", amounts)
 	}
 }

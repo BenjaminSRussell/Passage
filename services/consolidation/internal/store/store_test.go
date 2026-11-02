@@ -101,7 +101,7 @@ func TestCreateRun_RoundTripAndEvent(t *testing.T) {
 		t.Fatalf("create: replayed=%v err=%v", replayed, err)
 	}
 	if !ids.Valid(rec.ID) || rec.Version != 1 || rec.Status != store.StatusCompleted || rec.CreatedBy != "user-test" ||
-		rec.InputsHash == "" || rec.UnitCount != 1 || rec.EliminationCount != 17 || !rec.CTA.Equal(dec("38000")) {
+		rec.InputsHash == "" || rec.UnitCount != 1 || rec.EliminationCount != 17 || !rec.CTA.Equal(dec("39523.81")) {
 		t.Fatalf("header = %+v", rec)
 	}
 	got, err := s.GetRun(ctx, rec.ID)
@@ -132,7 +132,7 @@ func TestCreateRun_RoundTripAndEvent(t *testing.T) {
 	}
 	evts := outboxTypes(t, pool, ctx)
 	if len(evts) != 1 || evts[0]["_type"] != "dev.passage.consol.run.completed.v1" || evts[0]["runId"] != rec.ID ||
-		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "38000.00" || evts[0]["currency"] != "USD" || evts[0]["eliminationCount"] != float64(17) {
+		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "39523.81" || evts[0]["currency"] != "USD" || evts[0]["eliminationCount"] != float64(17) {
 		t.Fatalf("outbox = %v", evts)
 	}
 }
@@ -152,7 +152,7 @@ func TestCreateRun_RerunIsANewVersion(t *testing.T) {
 		t.Fatalf("another period starts at version 1: %+v err=%v", other, err)
 	}
 	again, err := s.GetRun(ctx, first.ID)
-	if err != nil || len(again.Entries) != 17 || !again.CTA.Equal(dec("38000")) {
+	if err != nil || len(again.Entries) != 17 || !again.CTA.Equal(dec("39523.81")) {
 		t.Fatalf("version 1 changed by the rerun: %+v err=%v", again.RunRecord, err)
 	}
 	page, err := s.ListRuns(ctx, store.RunFilter{GroupID: "G1", Period: "2026-06"}, "", 50)

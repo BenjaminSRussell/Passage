@@ -35,6 +35,12 @@ const (
 	AcctInvestment   = "INVESTMENT"
 )
 
+var reservedAccounts = map[string]bool{
+	AcctICRevenue: true, AcctICCOGS: true, AcctICPayable: true, AcctICReceivable: true, AcctCTA: true, AcctCOGS: true,
+	AcctInventory: true, AcctNCIEquity: true, AcctNCIProfit: true, AcctShareCapital: true, AcctPreAcqRE: true,
+	AcctGoodwill: true, AcctInvestment: true, AcctICDifference: true,
+}
+
 // Entry is one consolidation line. Debit and Credit are never both non-zero.
 type Entry struct {
 	RuleCode string
@@ -114,7 +120,7 @@ func Eliminate(p Pair) ([]Entry, error) {
 	}
 	out = leg(out, RuleE4, AcctShareCapital, sc)
 	out = leg(out, RuleE4, AcctPreAcqRE, re)
-	closingGoodwill := round(goodwill.Div(p.Rates.Historical).Mul(p.Rates.Closing), cur)
+	closingGoodwill := round(goodwill.Mul(p.Rates.Closing).Div(p.Rates.Historical), cur)
 	out = leg(out, RuleE4, AcctGoodwill, closingGoodwill)
 	out = leg(out, RuleE4, AcctCTA, goodwill.Sub(closingGoodwill))
 	out = leg(out, RuleE4, AcctInvestment, inv.Neg())
@@ -193,6 +199,8 @@ func (p Pair) validate() error {
 		return invalid("closing, average and historical rates must be positive")
 	case p.UnsoldShare.IsNegative() || p.UnsoldShare.GreaterThan(decimal.NewFromInt(1)):
 		return invalid("unsold share must be between 0 and 1")
+	case p.FXGainLossAccount != "" && (!codePattern.MatchString(p.FXGainLossAccount) || reservedAccounts[p.FXGainLossAccount]):
+		return invalid("FX gain or loss account must be 1 to 64 letters, digits or . _ : - and not an elimination or CTA account")
 	case p.InvestmentCost.IsNegative():
 		return invalid("investment cost must not be negative")
 	case p.ICSales.IsNegative() || p.ICCost.IsNegative() || p.ICReceivable.IsNegative() || p.PayableGroup.IsNegative() || p.ShareCapital.IsNegative():

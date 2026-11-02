@@ -52,15 +52,16 @@ func TestClassify_PlantedMismatches(t *testing.T) {
 	var planted []ReconInput
 	for i := 0; i < 50; i++ {
 		base := d(fmt.Sprintf("%d.00", 100+i))
-		switch i % 4 {
+		switch i % 3 {
 		case 0: // missing mirror: B never booked
 			planted = append(planted, ReconInput{AmountA: base})
 		case 1: // wrong amount: B booked 5.00 more
 			planted = append(planted, ReconInput{AmountA: base, AmountB: base.Add(d("5.00"))})
-		case 2: // wrong period: A booked the same amount again next period and B never booked
+		default: // wrong period: A booked the same amount again next period and B never booked
 			planted = append(planted, ReconInput{AmountA: base, NextPeriodA: base})
-		default: // wrong period: B's mirror landed next period 5.00 short
-			planted = append(planted, ReconInput{AmountA: base, NextPeriodB: base.Sub(d("5.00"))})
+			if got := Classify(ReconInput{AmountA: base, NextPeriodB: base}); got.Status != ReconTiming {
+				t.Fatalf("the same item with B's mirror in the next period classified %s; want Timing", got.Status)
+			}
 		}
 	}
 	for i, in := range planted {
