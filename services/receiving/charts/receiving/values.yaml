@@ -21,6 +21,8 @@ postingProfile:
   grirAccount: ""
   ppvAccount: ""
   vendorControlAccount: ""
+# legalEntityCountries maps legal entity ids to ISO country codes ("<uuid>=GB,<uuid>=DE"); one-time payee erasure keeps every payee of an entity that is not listed.
+legalEntityCountries: ""
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }

@@ -124,6 +124,30 @@ func TestCheckHolds_CoverageRulesAndLegalEntityIsolation(t *testing.T) {
 	}
 }
 
+func TestHolds_UUIDRefsMatchRegardlessOfCase(t *testing.T) {
+	s, _ := migrated(t)
+	le := ids.New()
+	ctx := asEntity(ids.New(), le, ids.New())
+	record, subject := ids.New(), ids.New()
+	upper := func(s string) string { return strings.ToUpper(s) }
+	h, err := s.PlaceHold(ctx, holdInput(le, " "+upper(subject)+" ", "", upper(record)), "k-case", t0)
+	if err != nil || h.RecordRef != record || h.SubjectRef != subject {
+		t.Fatalf("place must store the canonical form: %+v %v", h, err)
+	}
+	got, err := s.CheckHolds(ctx, domain.HoldScope{LegalEntityID: le, SubjectRef: subject, DataClass: "AP_PAYEE", RecordRef: record})
+	if err != nil || !got.Held {
+		t.Fatalf("a lowercase check must see the upper-case hold: %+v %v", got, err)
+	}
+	got, err = s.CheckHolds(ctx, domain.HoldScope{LegalEntityID: le, SubjectRef: upper(subject), RecordRef: upper(record)})
+	if err != nil || !got.Held {
+		t.Fatalf("an upper-case check must also match: %+v %v", got, err)
+	}
+	page, err := s.ListHolds(ctx, HoldFilter{SubjectRef: upper(subject)})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("list by upper-case subject: %+v %v", page, err)
+	}
+}
+
 func mustFirstHold(t *testing.T, s *Postgres, ctx context.Context) Hold {
 	t.Helper()
 	page, err := s.ListHolds(ctx, HoldFilter{})

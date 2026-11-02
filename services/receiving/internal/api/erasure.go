@@ -54,7 +54,8 @@ func (a *API) erasePayees(ctx context.Context, legalEntityID, subjectRef, erasur
 	if a.ports.LegalHolds == nil {
 		return store.ErasePayeesResult{}, errNoLegalHolds
 	}
-	res, err := store.ErasePayees(ctx, a.store, a.ports.LegalHolds, store.ErasePayeesInput{LegalEntityID: legalEntityID, SubjectRef: subjectRef, ErasureID: erasureID, Now: time.Now().UTC()})
+	leID, _ := ids.Canonical(legalEntityID)
+	res, err := store.ErasePayees(ctx, a.store, a.ports.LegalHolds, store.ErasePayeesInput{LegalEntityID: legalEntityID, EntityCountry: a.ports.LegalEntityCountry[leID], SubjectRef: subjectRef, ErasureID: erasureID, Now: time.Now().UTC()})
 	if err != nil {
 		slog.ErrorContext(ctx, "one-time payee erasure failed", "err", err, "legalEntityId", legalEntityID, "erasureId", erasureID, "actor", actor, "correlationId", middleware.GetReqID(ctx))
 		return res, err

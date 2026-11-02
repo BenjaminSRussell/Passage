@@ -466,12 +466,14 @@ paths:
     post:
       operationId: eraseOneTimePayees
       x-passage-duty: receiving.payee.erase
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       description: >-
         Retention and erasure path for one-time payees (BR-48.5, BR-48.6, #335). Pseudonymizes the legal entity's payees
         (all of them, or those with the given subjectRef) by overwriting the sealed name, address, tax id, email and bank
         account and setting erased_at; the row stays because posted invoices reference it. A payee is erased only when
         84 months (7 years, owner decision for AP and payee records) have passed since its last activity, the later of its
-        creation and its latest invoice, and the payee's country has no longer statutory floor (DE and FR, 10 years, are
+        creation and its latest invoice, and the legal entity's country (LEGAL_ENTITY_COUNTRIES) has no longer statutory floor (an entity in DE or FR, 10 years, and an entity whose country is not configured are
         skipped and counted as retained until the local rules land, LOC-0502), and when the compliance service reports no active legal hold covering the payee
         (data class AP_PAYEE, the payee id as recordRef, its subjectRef). A payee inside retention or under a hold is
         kept and counted; each hold check runs immediately before that payee's own erasure, and a hold check that cannot be answered stops the run (500; payees already erased stay erased and a repeat continues), and with no

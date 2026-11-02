@@ -19,6 +19,12 @@ BEGIN
   IF OLD.erased_at IS NOT NULL AND NEW.erased_at IS DISTINCT FROM OLD.erased_at THEN
     RAISE EXCEPTION 'erased_at is write-once' USING ERRCODE = '23514';
   END IF;
+  IF OLD.erased_at IS NOT NULL AND (
+    NEW.name_sealed IS DISTINCT FROM OLD.name_sealed OR NEW.address_sealed IS DISTINCT FROM OLD.address_sealed OR
+    NEW.tax_id_sealed IS DISTINCT FROM OLD.tax_id_sealed OR NEW.email_sealed IS DISTINCT FROM OLD.email_sealed OR
+    NEW.bank_sealed IS DISTINCT FROM OLD.bank_sealed OR NEW.erasure_id IS DISTINCT FROM OLD.erasure_id) THEN
+    RAISE EXCEPTION 'an erased payee cannot be changed' USING ERRCODE = '23514';
+  END IF;
   RETURN NEW;
 END $$;
 

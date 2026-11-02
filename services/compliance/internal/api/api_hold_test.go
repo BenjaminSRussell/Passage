@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/store"
 )
@@ -77,6 +78,23 @@ func TestHoldDutiesAreEnforced(t *testing.T) {
 		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: rest})
 		if rec.Code != http.StatusForbidden || problemCode(t, rec) != "AUTH-0003" {
 			t.Errorf("%s %s without %s: %d", tc.method, tc.path, tc.duty, rec.Code)
+		}
+	}
+}
+
+func TestHoldReadAndReleaseRefuseAMalformedTenant(t *testing.T) {
+	h := router(newAPI(&fakeStore{}, true))
+	id := ids.New()
+	for _, tc := range []struct{ method, path, duty string }{
+		{http.MethodGet, "/v1/privacy/holds/" + id, DutyLegalHoldRead},
+		{http.MethodPost, "/v1/privacy/holds/" + id + "/release", DutyLegalHoldRelease},
+	} {
+		p := tenant.Principal{TenantID: "not-a-uuid", UserID: ids.New(), Duties: map[string]struct{}{tc.duty: {}}}
+		req := httptest.NewRequest(tc.method, tc.path, nil).WithContext(tenant.With(context.Background(), p))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized || problemCode(t, rec) != "AUTH-0001" {
+			t.Errorf("%s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
 	}
 }

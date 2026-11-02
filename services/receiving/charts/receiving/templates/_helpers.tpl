@@ -45,6 +45,8 @@
   value: {{ .Values.serviceUrls.party | default (printf "http://party.%s.svc:8080" .Release.Namespace) | quote }}
 - name: COMPLIANCE_URL
   value: {{ .Values.serviceUrls.compliance | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
+- name: LEGAL_ENTITY_COUNTRIES
+  value: {{ .Values.legalEntityCountries | quote }}
 - name: POSTING_LEDGER_ID
   value: {{ .Values.postingProfile.ledgerId | quote }}
 - name: POSTING_ACCOUNT_INVENTORY

@@ -831,9 +831,17 @@ func (s *Store) PayeeCandidates(ctx context.Context, legalEntityID, subjectRef s
 					last = inv.CreatedAt
 				}
 			}
-			out = append(out, store.PayeeCandidate{ID: p.ID, SubjectRef: p.SubjectRef, LastActivity: last})
+			if !after.CreatedAt.IsZero() && (p.CreatedAt.Before(after.CreatedAt) || p.CreatedAt.Equal(after.CreatedAt) && p.ID <= after.ID) {
+				continue
+			}
+			out = append(out, store.PayeeCandidate{ID: p.ID, SubjectRef: p.SubjectRef, Country: p.Country, CreatedAt: p.CreatedAt, LastActivity: last})
 		}
-		slices.SortFunc(out, func(a, b store.PayeeCandidate) int { return strings.Compare(a.ID, b.ID) })
+		slices.SortFunc(out, func(a, b store.PayeeCandidate) int {
+			if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+				return c
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
 		if len(out) > limit {
 			out = out[:limit]
 		}

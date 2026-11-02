@@ -2,9 +2,12 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 const (
@@ -14,11 +17,30 @@ const (
 
 var statutoryFloorMonths = map[string]int{"DE": 120, "FR": 120}
 
-func PayeeRetentionEnd(country string, lastActivity time.Time) (time.Time, bool) {
-	if statutoryFloorMonths[strings.ToUpper(strings.TrimSpace(country))] > PayeeRetentionMonths {
+func PayeeRetentionEnd(entityCountry string, lastActivity time.Time) (time.Time, bool) {
+	country := strings.ToUpper(strings.TrimSpace(entityCountry))
+	if len(country) != 2 || statutoryFloorMonths[country] > PayeeRetentionMonths {
 		return time.Time{}, false
 	}
 	return lastActivity.UTC().AddDate(0, PayeeRetentionMonths, 0), true
+}
+
+func ParseLegalEntityCountries(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		rawID, country, ok := strings.Cut(pair, "=")
+		id, valid := ids.Canonical(strings.TrimSpace(rawID))
+		country = strings.ToUpper(strings.TrimSpace(country))
+		if !ok || !valid || len(country) != 2 {
+			return nil, fmt.Errorf("LEGAL_ENTITY_COUNTRIES entry %q must be <legal entity uuid>=<ISO country>", pair)
+		}
+		out[id] = country
+	}
+	return out, nil
 }
 
 type HoldQuery struct {

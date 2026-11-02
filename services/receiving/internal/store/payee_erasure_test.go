@@ -71,7 +71,7 @@ func TestErasePayees_SubjectRunKeepsRetainedAndHeldAndErasesTheRest(t *testing.T
 	holds := &domain.FakeLegalHolds{ByRecord: map[string][]string{held: {"hold-1"}}}
 	erasureID := "00000000-0000-0000-0000-0000000000f1"
 
-	res, err := store.ErasePayees(ctx, st, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, SubjectRef: "party:42", ErasureID: erasureID, Now: erasureNow})
+	res, err := store.ErasePayees(ctx, st, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", SubjectRef: "party:42", ErasureID: erasureID, Now: erasureNow})
 	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Retained: 1, Held: 1}) {
 		t.Fatalf("result %+v %v", res, err)
 	}
@@ -88,7 +88,7 @@ func TestErasePayees_SubjectRunKeepsRetainedAndHeldAndErasesTheRest(t *testing.T
 			t.Errorf("hold query %+v", q)
 		}
 	}
-	again, err := store.ErasePayees(ctx, st, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, SubjectRef: "party:42", Now: erasureNow})
+	again, err := store.ErasePayees(ctx, st, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", SubjectRef: "party:42", Now: erasureNow})
 	if err != nil || again.Erased != 0 || again.Retained != 1 || again.Held != 1 {
 		t.Fatalf("a repeated run must not erase again: %+v %v", again, err)
 	}
@@ -106,7 +106,7 @@ func TestErasePayees_RetentionSweepAndLastActivityOfInvoices(t *testing.T) {
 		db.one.TenantID, db.one.LegalEntityID, vendorID, ledgerUUID, active, erasureNow.AddDate(-1, 0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", Now: erasureNow})
 	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Retained: 1}) {
 		t.Fatalf("sweep %+v %v", res, err)
 	}
@@ -122,7 +122,7 @@ func TestErasePayees_HoldCheckFailureChangesNothingAndOtherEntitiesAreUntouched(
 	old := erasureNow.AddDate(-8, 0, 0)
 	id := seedPayee(t, db, db.one, 1, "party:42", old)
 	boom := errors.New("compliance unreachable")
-	if _, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{Err: boom}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, SubjectRef: "party:42", Now: erasureNow}); !errors.Is(err, boom) {
+	if _, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{Err: boom}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", SubjectRef: "party:42", Now: erasureNow}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 	if readPayee(t, db, db.one, id).erasedAt != nil {
@@ -131,7 +131,7 @@ func TestErasePayees_HoldCheckFailureChangesNothingAndOtherEntitiesAreUntouched(
 
 	otherEntity := tenant.Principal{TenantID: db.one.TenantID, LegalEntityID: "00000000-0000-0000-0000-000000000008"}
 	foreign := seedPayee(t, db, otherEntity, 2, "party:42", old)
-	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: otherEntity.LegalEntityID, SubjectRef: "party:42", Now: erasureNow})
+	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: otherEntity.LegalEntityID, EntityCountry: "GB", SubjectRef: "party:42", Now: erasureNow})
 	if err != nil || res.Erased != 0 {
 		t.Fatalf("a caller must not erase another legal entity's payees: %+v %v", res, err)
 	}
@@ -143,20 +143,41 @@ func TestErasePayees_HoldCheckFailureChangesNothingAndOtherEntitiesAreUntouched(
 	}
 }
 
-func TestErasePayees_StatutoryFloorCountriesAreKept(t *testing.T) {
-	db := seedInvoice(t)
-	st := store.New(db.pool)
-	ctx := tenant.With(context.Background(), db.one)
-	old := erasureNow.AddDate(-11, 0, 0)
-	de := seedPayeeIn(t, db, db.one, 1, "", "DE", old)
-	fr := seedPayeeIn(t, db, db.one, 2, "", "FR", old)
-	gb := seedPayeeIn(t, db, db.one, 3, "", "GB", old)
-	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
-	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Retained: 2}) {
-		t.Fatalf("result %+v %v", res, err)
+func TestErasePayees_StatutoryFloorFollowsTheLegalEntityCountry(t *testing.T) {
+	cases := []struct {
+		name, entityCountry, payeeCountry string
+		age                               time.Duration
+		erased                            bool
+	}{
+		{"DE entity keeps a GB payee at 8 years", "DE", "GB", 8, false},
+		{"FR entity keeps a GB payee at 11 years", "FR", "GB", 11, false},
+		{"GB entity erases a DE payee after 84 months", "GB", "DE", 8, true},
+		{"unknown entity country keeps everything", "", "GB", 11, false},
 	}
-	if readPayee(t, db, db.one, de).erasedAt != nil || readPayee(t, db, db.one, fr).erasedAt != nil || readPayee(t, db, db.one, gb).erasedAt == nil {
-		t.Fatal("DE and FR payees must be kept; GB erased")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db := seedInvoice(t)
+			ctx := tenant.With(context.Background(), db.one)
+			id := seedPayeeIn(t, db, db.one, 1, "", c.payeeCountry, erasureNow.AddDate(-int(c.age), 0, 0))
+			res, err := store.ErasePayees(ctx, store.New(db.pool), &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: c.entityCountry, Now: erasureNow})
+			if err != nil || (res.Erased == 1) != c.erased || (res.Retained == 1) == c.erased {
+				t.Fatalf("result %+v %v", res, err)
+			}
+			if (readPayee(t, db, db.one, id).erasedAt != nil) != c.erased {
+				t.Fatal("erased state does not follow the legal entity's country")
+			}
+		})
+	}
+}
+
+func TestErasedPayeeSealedColumnsAreFrozen(t *testing.T) {
+	db := seedInvoice(t)
+	id := seedPayee(t, db, db.one, 1, "", erasureNow.AddDate(-8, 0, 0))
+	if _, err := store.ErasePayees(tenant.With(context.Background(), db.one), store.New(db.pool), &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", Now: erasureNow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.run(db.one, `update receiving_one_time_payee set name_sealed = '\x0a' where id = $1`, id); err == nil {
+		t.Fatal("an erased payee's sealed columns must not be rewritable")
 	}
 }
 
@@ -172,7 +193,7 @@ func TestErasePayees_RetainedPayeesDoNotStarveLaterExpiredOnes(t *testing.T) {
 	}
 	expired := seedPayee(t, db, db.one, 1, "", erasureNow.AddDate(-9, 0, 0))
 	seedPayee(t, db, db.one, 2, "", recent.Add(24*time.Hour))
-	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", Now: erasureNow})
 	if err != nil || res.Erased != 1 || res.Retained != store.ErasureBatch+51 {
 		t.Fatalf("result %+v %v", res, err)
 	}
@@ -200,7 +221,7 @@ func TestErasePayees_HoldPlacedDuringTheRunProtectsLaterPayees(t *testing.T) {
 	first := seedPayee(t, db, db.one, 1, "", old)
 	second := seedPayee(t, db, db.one, 2, "", old.Add(time.Hour))
 	holds := &domain.FakeLegalHolds{ByRecord: map[string][]string{}}
-	res, err := store.ErasePayees(ctx, holdAfterFirstErase{store.New(db.pool), holds, second}, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	res, err := store.ErasePayees(ctx, holdAfterFirstErase{store.New(db.pool), holds, second}, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", Now: erasureNow})
 	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Held: 1}) {
 		t.Fatalf("result %+v %v", res, err)
 	}
@@ -213,7 +234,7 @@ func TestErasedAtIsWriteOnce(t *testing.T) {
 	db := seedInvoice(t)
 	id := seedPayee(t, db, db.one, 1, "", erasureNow.AddDate(-8, 0, 0))
 	st := store.New(db.pool)
-	if _, err := store.ErasePayees(tenant.With(context.Background(), db.one), st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow}); err != nil {
+	if _, err := store.ErasePayees(tenant.With(context.Background(), db.one), st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, EntityCountry: "GB", Now: erasureNow}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.run(db.one, `update receiving_one_time_payee set erased_at = null where id = $1`, id); err == nil {

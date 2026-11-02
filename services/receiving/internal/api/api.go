@@ -56,6 +56,7 @@ type Ports struct {
 	VendorGroups       domain.VendorGroups
 	Extractor          domain.DocumentExtractor
 	LegalHolds         domain.LegalHolds
+	LegalEntityCountry map[string]string
 	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
@@ -153,7 +154,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutySheetMaintain, dutySheetAccept)).Get("/v1/receiving/service-entry-sheets/{id}", a.getServiceSheet)
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:accept", a.idempotent(a.acceptServiceSheet))
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:reject", a.idempotent(a.rejectServiceSheet))
-	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.eraseOneTimePayees)
+	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.idempotent(a.eraseOneTimePayees))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))

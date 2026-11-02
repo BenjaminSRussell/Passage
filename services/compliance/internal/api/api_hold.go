@@ -112,6 +112,9 @@ func (a *API) placeHold(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) releaseHold(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
 	id, ok := conflictID(w, r)
 	if !ok {
 		return
@@ -139,6 +142,9 @@ func (a *API) releaseHold(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getHold(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
 	id, ok := conflictID(w, r)
 	if !ok {
 		return

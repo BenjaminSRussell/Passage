@@ -123,6 +123,14 @@ func canonicalEntity(id string) string {
 	return id
 }
 
+func canonicalRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if c, ok := ids.Canonical(ref); ok {
+		return c
+	}
+	return ref
+}
+
 func lockLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) error {
 	legalEntityID = canonicalEntity(legalEntityID)
 	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+legalEntityID)
@@ -130,6 +138,7 @@ func lockLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID str
 }
 
 func coveringHolds(ctx context.Context, tx pgx.Tx, legalEntityID, subject string, classes []string, record string) ([]string, error) {
+	subject, record = canonicalRef(subject), canonicalRef(record)
 	rows, err := tx.Query(ctx, `select hold_id::text from legal_hold
 		where state = 'ACTIVE' and legal_entity_id = $1
 		  and (subject_ref is null or subject_ref = $2)
@@ -158,7 +167,7 @@ func (s *Postgres) PlaceHold(ctx context.Context, in HoldInput, key string, now 
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
 	in.LegalEntityID = canonicalEntity(in.LegalEntityID)
-	in.SubjectRef, in.RecordRef = strings.TrimSpace(in.SubjectRef), strings.TrimSpace(in.RecordRef)
+	in.SubjectRef, in.RecordRef = canonicalRef(in.SubjectRef), canonicalRef(in.RecordRef)
 	if err := in.ValidHold(); err != nil {
 		return Hold{}, err
 	}
@@ -263,7 +272,7 @@ func (s *Postgres) ListHolds(ctx context.Context, f HoldFilter) (HoldPage, error
 		add("legal_entity_id = $%d", f.LegalEntityID)
 	}
 	if f.SubjectRef != "" {
-		add("subject_ref = $%d", f.SubjectRef)
+		add("subject_ref = $%d", canonicalRef(f.SubjectRef))
 	}
 	if f.DataClass != "" {
 		add("data_class = $%d", f.DataClass)

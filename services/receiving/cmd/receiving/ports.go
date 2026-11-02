@@ -80,6 +80,12 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		slog.Warn("COMPLIANCE_URL is empty: one-time payee erasure answers 503 until it is set")
 	}
+	if ports.LegalEntityCountry, err = domain.ParseLegalEntityCountries(getenv("LEGAL_ENTITY_COUNTRIES")); err != nil {
+		return api.Ports{}, err
+	}
+	if len(ports.LegalEntityCountry) == 0 {
+		slog.Warn("LEGAL_ENTITY_COUNTRIES is empty: one-time payee erasure keeps every payee")
+	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
 	if err != nil {

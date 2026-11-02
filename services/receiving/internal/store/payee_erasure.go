@@ -29,6 +29,7 @@ type PayeeCursor struct {
 
 type ErasePayeesInput struct {
 	LegalEntityID string
+	EntityCountry string
 	SubjectRef    string
 	ErasureID     string
 	Now           time.Time
@@ -54,7 +55,7 @@ func ErasePayees(ctx context.Context, s PayeeErasureStore, holds domain.LegalHol
 			return out, err
 		}
 		for _, c := range page {
-			end, erasable := domain.PayeeRetentionEnd(c.Country, c.LastActivity)
+			end, erasable := domain.PayeeRetentionEnd(in.EntityCountry, c.LastActivity)
 			if !erasable || in.Now.Before(end) {
 				out.Retained++
 				continue

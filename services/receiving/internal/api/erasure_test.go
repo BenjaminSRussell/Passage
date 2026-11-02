@@ -24,11 +24,21 @@ const erasePath = "/v1/receiving/one-time-payees:erase"
 
 func erasureRig(t *testing.T, holds domain.LegalHolds) *rig {
 	t.Helper()
-	rg := newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) { p.LegalHolds = holds })
+	return erasureRigIn(t, holds, "GB")
+}
+
+func erasureRigIn(t *testing.T, holds domain.LegalHolds, entityCountry string) *rig {
+	t.Helper()
+	rg := newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
+		p.LegalHolds = holds
+		if entityCountry != "" {
+			p.LegalEntityCountry = map[string]string{legalEntityID: entityCountry}
+		}
+	})
 	owner := tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: legalEntityID, UserID: "alice"}
 	old := time.Now().UTC().AddDate(-8, 0, 0)
 	for i, subject := range []string{"party:42", "party:42", "party:43"} {
-		payee := store.OneTimePayee{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), LegalEntityID: legalEntityID, Country: "DE", SubjectRef: subject, CreatedAt: old}
+		payee := store.OneTimePayee{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), LegalEntityID: legalEntityID, Country: "GB", SubjectRef: subject, CreatedAt: old}
 		if i == 1 {
 			payee.CreatedAt = time.Now().UTC()
 		}
@@ -99,6 +109,29 @@ func TestEraseOneTimePayees_SubjectRunReportsErasedRetainedAndHeld(t *testing.T)
 		if q.DataClass != domain.PayeeDataClass || q.LegalEntityID != legalEntityID || q.RecordRef == "" {
 			t.Errorf("hold query %+v", q)
 		}
+	}
+}
+
+func TestEraseOneTimePayees_KeepsEverythingWhenTheEntityCountryHasAHigherFloorOrIsUnknown(t *testing.T) {
+	body := fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID)
+	for name, country := range map[string]string{"DE": "DE", "FR": "FR", "unknown": ""} {
+		rg := erasureRigIn(t, &domain.FakeLegalHolds{}, country)
+		if got := erase(rg, body); got.Code != http.StatusOK || got.Body["erased"] != float64(0) || got.Body["retained"] != float64(3) {
+			t.Errorf("%s entity: %d %v", name, got.Code, got.Body)
+		}
+	}
+}
+
+func TestEraseOneTimePayees_RequiresAndReplaysTheIdempotencyKey(t *testing.T) {
+	rg := erasureRig(t, &domain.FakeLegalHolds{})
+	body := fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID)
+	if rec := rg.call(http.MethodPost, erasePath, body, duty("receiving.payee.erase", "")); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing key: %d", rec.Code)
+	}
+	first := rg.call(http.MethodPost, erasePath, body, duty("receiving.payee.erase", "erase-1"))
+	second := rg.call(http.MethodPost, erasePath, body, duty("receiving.payee.erase", "erase-1"))
+	if first.Code != http.StatusOK || second.Header().Get("Idempotent-Replayed") != "true" || first.Body.String() != second.Body.String() {
+		t.Fatalf("replay: %d %d %q", first.Code, second.Code, second.Header().Get("Idempotent-Replayed"))
 	}
 }
 
