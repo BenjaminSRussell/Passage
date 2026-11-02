@@ -36,6 +36,10 @@ fieldCrypt:
   keysSecret: ""
   currentKeyId: ""
 
+# Service tokens from receiving (the legal hold check); publicKeys is the PASSAGE_SERVICE_PUBLIC_KEYS value.
+serviceIdentity:
+  publicKeys: ""
+
 resources:
   requests:
     cpu: 100m

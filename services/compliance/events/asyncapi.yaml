@@ -35,6 +35,18 @@ channels:
     messages:
       requestCompleted:
         $ref: "#/components/messages/RequestCompleted"
+  holdPlaced:
+    address: passage.privacy.hold
+    messages:
+      holdPlaced:
+        $ref: "#/components/messages/HoldPlaced"
+      holdReleased:
+        $ref: "#/components/messages/HoldReleased"
+  erasureRequested:
+    address: passage.privacy.erasure
+    messages:
+      erasureRequested:
+        $ref: "#/components/messages/ErasureRequested"
 operations:
   publishConflictDetected:
     action: send
@@ -71,6 +83,31 @@ operations:
       late-closure justification kept on the request. Consumers - audit.
     messages:
       - {$ref: "#/channels/requestCompleted/messages/requestCompleted"}
+  publishHoldPlaced:
+    action: send
+    channel: {$ref: "#/channels/holdPlaced"}
+    summary: >-
+      A legal hold was placed on a subject, data class or record of a legal
+      entity (FR-48.11). The reason stays in the store. Consumers - audit,
+      services that purge or erase.
+    messages:
+      - {$ref: "#/channels/holdPlaced/messages/holdPlaced"}
+  publishHoldReleased:
+    action: send
+    channel: {$ref: "#/channels/holdPlaced"}
+    summary: A legal hold was released (FR-48.11). Consumers - audit, services that purge or erase.
+    messages:
+      - {$ref: "#/channels/holdPlaced/messages/holdReleased"}
+  publishErasureRequested:
+    action: send
+    channel: {$ref: "#/channels/erasureRequested"}
+    summary: >-
+      An erasure of a subject in one legal entity that no legal hold covered
+      when it was requested (FR-48.10, FR-48.11, AC-48.7). Participating
+      services pseudonymize or purge the subject's records once retention allows
+      and re-check holds before they act. Consumers - receiving (one-time payees).
+    messages:
+      - {$ref: "#/channels/erasureRequested/messages/erasureRequested"}
 components:
   messages:
     ConflictDetected:
@@ -101,6 +138,27 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/RequestCompletedData"
+    HoldPlaced:
+      name: dev.passage.privacy.hold.placed.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/HoldPlacedData"
+    HoldReleased:
+      name: dev.passage.privacy.hold.released.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/HoldReleasedData"
+    ErasureRequested:
+      name: dev.passage.privacy.erasure.requested.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ErasureRequestedData"
   schemas:
     CloudEventHeaders:
       type: object
@@ -164,3 +222,35 @@ components:
         delivered_at: {type: string, format: date-time}
         closed_at: {type: string, format: date-time}
         late: {type: boolean}
+    HoldPlacedData:
+      type: object
+      required: [hold_id, legal_entity_id, placed_by, placed_at]
+      properties:
+        hold_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        subject_ref: {type: string}
+        data_class: {type: string, enum: [AP_PAYEE, FINANCIAL_RECORD, EMPLOYMENT, CANDIDATE, SYSTEM_LOG]}
+        record_ref: {type: string}
+        placed_by: {type: string}
+        placed_at: {type: string, format: date-time}
+    HoldReleasedData:
+      type: object
+      required: [hold_id, legal_entity_id, released_by, released_at]
+      properties:
+        hold_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        released_by: {type: string}
+        released_at: {type: string, format: date-time}
+    ErasureRequestedData:
+      type: object
+      required: [erasure_id, legal_entity_id, subject_ref, data_classes, requested_at]
+      properties:
+        erasure_id: {type: string, format: uuid}
+        request_id: {type: string, format: uuid, description: the approved ERASURE subject request this command fulfils, when there is one}
+        legal_entity_id: {type: string, format: uuid}
+        subject_ref: {type: string}
+        data_classes:
+          type: array
+          items: {type: string, enum: [AP_PAYEE, FINANCIAL_RECORD, EMPLOYMENT, CANDIDATE, SYSTEM_LOG]}
+          description: empty means every class
+        requested_at: {type: string, format: date-time}

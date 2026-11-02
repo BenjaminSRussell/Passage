@@ -808,12 +808,55 @@ func invoiceKey(vendorID, number string) string { return vendorID + "|" + string
 
 func (s *Store) CreateOneTimePayee(ctx context.Context, in store.OneTimePayee) (out store.OneTimePayee, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
-		in.CreatedAt = time.Now().UTC()
+		if in.CreatedAt.IsZero() {
+			in.CreatedAt = time.Now().UTC()
+		}
 		t.payees[in.ID] = in
 		out = in
 		return nil
 	})
 	return out, err
+}
+
+func (s *Store) PayeeCandidates(ctx context.Context, legalEntityID, subjectRef string, limit int) (out []store.PayeeCandidate, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		principal, _ := tenant.FromContext(ctx)
+		for _, p := range t.payees {
+			if p.ErasedAt != nil || p.LegalEntityID != legalEntityID || !tenant.InLegalEntityScope(principal, p.LegalEntityID) || (subjectRef != "" && p.SubjectRef != subjectRef) {
+				continue
+			}
+			last := p.CreatedAt
+			for _, inv := range t.invoiceDocs {
+				if inv.OneTimePayeeID == p.ID && inv.CreatedAt.After(last) {
+					last = inv.CreatedAt
+				}
+			}
+			out = append(out, store.PayeeCandidate{ID: p.ID, SubjectRef: p.SubjectRef, LastActivity: last})
+		}
+		slices.SortFunc(out, func(a, b store.PayeeCandidate) int { return strings.Compare(a.ID, b.ID) })
+		if len(out) > limit {
+			out = out[:limit]
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) MarkPayeesErased(ctx context.Context, legalEntityID string, ids []string, _ string, now time.Time) (n int, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		principal, _ := tenant.FromContext(ctx)
+		for _, id := range ids {
+			p, ok := t.payees[id]
+			if !ok || p.ErasedAt != nil || p.LegalEntityID != legalEntityID || !tenant.InLegalEntityScope(principal, p.LegalEntityID) {
+				continue
+			}
+			at := now
+			t.payees[id] = store.OneTimePayee{ID: p.ID, LegalEntityID: p.LegalEntityID, Country: p.Country, SubjectRef: p.SubjectRef, CreatedBy: p.CreatedBy, CreatedAt: p.CreatedAt, ErasedAt: &at}
+			n++
+		}
+		return nil
+	})
+	return n, err
 }
 
 func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.InvoiceFunc) (out store.Invoice, err error) {

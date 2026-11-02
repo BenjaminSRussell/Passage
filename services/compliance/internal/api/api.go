@@ -73,6 +73,12 @@ type Store interface {
 	ListRequests(ctx context.Context, f store.RequestFilter) (store.RequestPage, error)
 	GetRequest(ctx context.Context, id string) (store.SubjectRequest, error)
 	ActOnRequest(ctx context.Context, id string, expected int, in store.RequestActionInput, now time.Time) (store.SubjectRequest, error)
+	PlaceHold(ctx context.Context, in store.HoldInput, key string, now time.Time) (store.Hold, error)
+	ReleaseHold(ctx context.Context, id string, expected int, reason string, now time.Time) (store.Hold, error)
+	GetHold(ctx context.Context, id string) (store.Hold, error)
+	ListHolds(ctx context.Context, f store.HoldFilter) (store.HoldPage, error)
+	CheckHolds(ctx context.Context, target domain.HoldScope) (store.HoldCheck, error)
+	RequestErasure(ctx context.Context, in store.ErasureInput, key string, now time.Time) (store.ErasureCommand, error)
 }
 
 // Config carries the tenant policies the service reads from its environment

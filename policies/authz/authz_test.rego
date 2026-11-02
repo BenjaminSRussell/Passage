@@ -1100,3 +1100,43 @@ test_hr_performance_duties_reach_only_their_routes if {
 	not allowed("hr.performance.self", "GET", "/v1/hr/workers/w-1/reviews")
 	not allowed("hr.performance.self", "POST", "/v1/hr/workers/w-1/goals")
 }
+
+test_compliance_legal_hold_duties_reach_only_their_routes if {
+	allowed("compliance.legal_hold.place", "POST", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.place", "GET", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.place", "POST", "/v1/privacy/holds/h-1/release")
+	allowed("compliance.legal_hold.release", "POST", "/v1/privacy/holds/h-1/release")
+	not allowed("compliance.legal_hold.release", "POST", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.release", "GET", "/v1/privacy/holds/h-1")
+	allowed("compliance.legal_hold.read", "GET", "/v1/privacy/holds")
+	allowed("compliance.legal_hold.read", "GET", "/v1/privacy/holds/h-1")
+	not allowed("compliance.legal_hold.read", "GET", "/v1/privacy/holds:check")
+	not allowed("compliance.legal_hold.read", "POST", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.read", "DELETE", "/v1/privacy/holds/h-1")
+}
+
+test_compliance_hold_check_is_service_only_and_granted_to_receiving if {
+	allowed("compliance.legal_hold.check", "GET", "/v1/privacy/holds:check")
+	not allowed("compliance.legal_hold.check", "GET", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.check", "POST", "/v1/privacy/holds")
+	not allowed("compliance.legal_hold.check", "POST", "/v1/privacy/erasures")
+	data.duties["compliance.legal_hold.check"].service_only
+	data.service_grants.receiving.compliance == ["compliance.legal_hold.check"]
+	data.service_principals["receiving-erasure"] == ["compliance.legal_hold.check"]
+}
+
+test_compliance_erasure_and_retention_duties if {
+	allowed("compliance.erasure.request", "POST", "/v1/privacy/erasures")
+	not allowed("compliance.erasure.request", "GET", "/v1/privacy/erasures")
+	not allowed("compliance.erasure.request", "POST", "/v1/privacy/holds")
+	allowed("compliance.retention.read", "GET", "/v1/privacy/retention-policies")
+	not allowed("compliance.retention.read", "POST", "/v1/privacy/retention-policies")
+	not allowed("compliance.retention.read", "POST", "/v1/privacy/erasures")
+}
+
+test_receiving_payee_erase_reaches_only_the_erase_route if {
+	allowed("receiving.payee.erase", "POST", "/v1/receiving/one-time-payees:erase")
+	not allowed("receiving.payee.erase", "POST", "/v1/receiving/one-time-payees")
+	not allowed("receiving.payee.erase", "GET", "/v1/receiving/one-time-payees:erase")
+	not allowed("VendorInvoicePost", "POST", "/v1/receiving/one-time-payees:erase")
+}

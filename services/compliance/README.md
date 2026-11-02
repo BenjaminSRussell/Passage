@@ -52,6 +52,12 @@ campaign, incident step and export policy screens.
 | `POST /v1/privacy/requests/{id}/actions` | PrivacyOfficer | slice 5: `If-Match` required; VERIFY, DISCOVER, RELEASE_HOLD, APPROVE, DELIVER, CLOSE or REJECT on the stored state; CLOSE emits `privacy.request.completed` |
 | `POST /v1/privacy/requests/{id}/erasure-preview` | PrivacyOfficer | slice 5, read-only: the BR-48.5 pseudonymization of one record of the subject, refused under a legal hold |
 | `POST /v1/privacy/retention:purge-check` | PrivacyOfficer | slice 5, read-only: BR-48.6 skip reasons for one record |
+| `POST /v1/privacy/holds` | `compliance.legal_hold.place` | slice 6: `Idempotency-Key` required; places a legal hold on a subject, a data class, a record or a combination in one legal entity of the caller's scope; emits `privacy.hold.placed` |
+| `GET /v1/privacy/holds`, `GET /v1/privacy/holds/{id}` | `compliance.legal_hold.read` | slice 6: filter by state, legal entity, subject, data class; keyset paging; `ETag` is the version |
+| `POST /v1/privacy/holds/{id}/release` | `compliance.legal_hold.release` | slice 6: `If-Match` and a reason of 10+ characters; emits `privacy.hold.released`; the row is kept |
+| `GET /v1/privacy/holds:check` | `compliance.legal_hold.check` (service only) | slice 6: the hold check participants call, see "Legal holds" below |
+| `POST /v1/privacy/erasures` | `compliance.erasure.request` | slice 6: `Idempotency-Key` required; 422 `PRV-1201` and no event when a hold covers the subject, otherwise stores the command and emits `privacy.erasure.requested` |
+| `GET /v1/privacy/retention-policies` | `compliance.retention.read` | slice 6: the default retention per data class |
 | `POST /v1/sod/campaigns:plan` | SoDAdmin | slice 5, read-only: campaign close instant (14 days default, 3..60) |
 | `POST /v1/sod/campaigns:close` | SoDAdmin | slice 5, read-only: progress, and after `closesAt` the BR-48.9 revocations and flags |
 | `POST /v1/security/incidents:transition` | SecurityIncidentManage | slice 5, read-only: one incident lifecycle step with the breach clocks and closure rule |
@@ -60,7 +66,9 @@ campaign, incident step and export policy screens.
 
 - Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`,
   `dev.passage.trade.screening.hit.v1` (slice 4, keyed by hit id, written with the hit),
-  `dev.passage.privacy.request.completed.v1` (slice 5, keyed by request id, written with the close). The
+  `dev.passage.privacy.request.completed.v1` (slice 5, keyed by request id, written with the close),
+  `dev.passage.privacy.hold.placed.v1` and `.released.v1` (slice 6, keyed by hold id; the reason is not in the event),
+  `dev.passage.privacy.erasure.requested.v1` (slice 6, keyed by erasure id, topic `passage.privacy.erasure`). The
   slice 2 and 3 endpoints, the export check and the slice 5 rule endpoints store nothing and emit nothing.
 - `GET /readyz` pings Postgres; admin `/metrics` counts simulations and blocked simulations.
 
@@ -166,6 +174,46 @@ Slice 5 screens: `/compliance/privacy/requests` (list by deadline, days left red
 erasure preview), `/compliance/campaigns` (plan and close check), `/compliance/incidents/step`
 (incident lifecycle check) and `/compliance/export-policy` (export decision and read-log check).
 
+Slice 6 (FR-48.11, FR-48.10, AC-48.7; `0006_legal_hold.sql`, `0007_service_token_replay.sql`):
+
+## Legal holds, retention and erasure
+
+- `legal_hold` (RLS on tenant and, restrictively, on legal-entity scope; `passage_app` has no DELETE): a hold names a
+  legal entity and at least one of `subjectRef`, `dataClass`, `recordRef`. Every field set on the hold must equal the
+  target's, and a hold on a data class also covers a target that names no class (an erasure of a subject reaches every
+  class). A target without a `subjectRef` is not covered by a subject hold, so the holder names the record or class too
+  when the subject is unknown. A hold is ACTIVE until released with a reason; holds are per legal entity, so a subject
+  held in two entities needs two holds. Placing and erasing serialize per (tenant, legal entity) under an advisory lock,
+  so a hold cannot slip in between an erasure's check and its command.
+- Retention defaults (`GET /v1/privacy/retention-policies`, `domain.DefaultRetention`; per-entity overrides
+  `retention.<record_class>` and the `LOC-0502` statutory floor are not stored yet):
+
+| Data class | Retention | Counted from | Source |
+|---|---|---|---|
+| `AP_PAYEE` | 84 months | last activity | owner decision 2026-11: 7 years after last activity |
+| `FINANCIAL_RECORD` | 84 months | last activity | owner decision 2026-11: 7 years after last activity |
+| `EMPLOYMENT` | 72 months | termination | PRD FR-48.11: HR 6 years post-termination |
+| `CANDIDATE` | 6 months | rejection | PRD wave 42: candidate data deleted 6 months after rejection, retention class `CANDIDATE` |
+| `SYSTEM_LOG` | 12 months | creation | PRD FR-48.11: logs 1 year |
+
+- Erasure: `POST /v1/privacy/erasures` takes `legalEntityId`, `subjectRef`, optional `dataClasses` (none means every
+  class) and an optional `requestId` of an approved or delivered ERASURE subject request of the same subject. A covering
+  hold refuses it (`PRV-1201`, nothing stored, nothing emitted). Otherwise the append-only `erasure_command` and
+  `privacy.erasure.requested.v1` commit together (`erasure_id`, `request_id`, `legal_entity_id`, `subject_ref`,
+  `data_classes`, `requested_at`). The event says only that no hold covered the subject then. Participants must apply
+  their own retention (a record inside it is kept and picked up by their retention sweep) and re-check holds through
+  `holds:check` before they change anything, and must not erase when the check cannot be answered.
+- Hold check contract (for the HR candidate purge, #266, and any other participant):
+  `GET /v1/privacy/holds:check?legalEntityId=&subjectRef=&dataClass=&recordRef=` answers `{"held": bool, "holdIds": [...]}`.
+  The caller signs a service token for audience `compliance` with the duty `compliance.legal_hold.check` (grant
+  `service_grants.<caller>.compliance` in `policies/authz/data.json`, mirrored in `platform/go/tenant`), the legal entity
+  must be in the token's scope, and any non-200 or unparsable answer means held. HR would call it per candidate with
+  `dataClass=CANDIDATE`, the candidate's `recordRef` and `subjectRef`, and keep the candidate when `held` is true.
+- Participants today: `receiving` (one-time payees, `AP_PAYEE`): consumer `receiving-erasure` on
+  `passage.privacy.erasure` and `POST /v1/receiving/one-time-payees:erase`.
+- Verifying service tokens needs `PASSAGE_SERVICE_NAME=compliance` and `PASSAGE_SERVICE_PUBLIC_KEYS` (chart
+  `serviceIdentity.publicKeys`); the shared replay cache is `service_token_replay` (`0007`).
+
 ## Run and test
 
 ```
@@ -261,6 +309,10 @@ document, the case machine never skips a state and no break-glass session exceed
 | `PRV-1209` | 404 | no subject request with that id |
 | `PRV-1210` | 412 | stale `If-Match` on a subject request action (missing `If-Match` is 428 `SOD-1109`) |
 | `PRV-1211` | 503 | no pseudonymization key configured; the erasure changed nothing |
+| `PRV-1220` | 422 | legal hold without a scope or with an unknown data class, or a reason under 10 characters |
+| `PRV-1221` | 404 | no legal hold with that id (or outside the caller's legal-entity scope) |
+| `PRV-1222` | 422 | the hold is already released |
+| `PRV-1223` | 412 | stale `If-Match` on a hold release (missing `If-Match` is 428 `SOD-1109`) |
 | `SOD-1120` | 422 | campaign start or close missing, or window outside 3..60 days |
 | `SOD-1121` | 422 | a manager cannot certify their own roles |
 | `SOD-1122` | 422 | campaign line incomplete, duplicated or with an unknown decision |

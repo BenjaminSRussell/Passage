@@ -35,6 +35,7 @@ type fakeStore struct {
 	evaluated []domain.Role
 	trade     fakeTrade
 	privacy   fakePrivacy
+	holds     fakeHolds
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -132,6 +133,7 @@ type call struct {
 	user         string
 	duties       []string
 	headers      map[string]string
+	legalEntity  string
 }
 
 func serve(t *testing.T, h http.Handler, c call) *httptest.ResponseRecorder {
@@ -142,7 +144,7 @@ func serve(t *testing.T, h http.Handler, c call) *httptest.ResponseRecorder {
 			t.Fatal(err)
 		}
 	}
-	p := tenant.Principal{TenantID: ids.New(), UserID: c.user, Duties: map[string]struct{}{}}
+	p := tenant.Principal{TenantID: ids.New(), LegalEntityID: c.legalEntity, UserID: c.user, Duties: map[string]struct{}{}}
 	for _, d := range c.duties {
 		p.Duties[d] = struct{}{}
 	}

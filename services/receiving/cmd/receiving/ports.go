@@ -7,6 +7,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/compliance"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
@@ -69,6 +70,15 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 		ports.VendorGroups = domain.FakeVendorGroups{}
 	default:
 		slog.Warn("PARTY_URL is empty: invoice.posted carries no vendor_group_id")
+	}
+	switch url := getenv("COMPLIANCE_URL"); {
+	case url != "":
+		ports.LegalHolds = compliance.New(url, nil).WithSigner(signer)
+	case allowFakes:
+		slog.Warn("COMPLIANCE_URL is empty: no legal hold covers anything", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.LegalHolds = &domain.FakeLegalHolds{}
+	default:
+		slog.Warn("COMPLIANCE_URL is empty: one-time payee erasure answers 503 until it is set")
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile

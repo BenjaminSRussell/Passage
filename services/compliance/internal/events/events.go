@@ -26,11 +26,40 @@ var (
 	ScreeningHit = events.Type(TradeContext, "screening", "hit", 1)
 	// RequestCompleted is emitted when a delivered subject request is closed (FR-48.10).
 	RequestCompleted = events.Type(PrivacyContext, "request", "completed", 1)
+	HoldPlaced       = events.Type(PrivacyContext, "hold", "placed", 1)
+	HoldReleased     = events.Type(PrivacyContext, "hold", "released", 1)
+	ErasureRequested = events.Type(PrivacyContext, "erasure", "requested", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{ConflictDetected, MitigationApproved, ScreeningHit, RequestCompleted}
+	return []string{ConflictDetected, MitigationApproved, ScreeningHit, RequestCompleted, HoldPlaced, HoldReleased, ErasureRequested}
+}
+
+type HoldPlacedData struct {
+	HoldID        string    `json:"hold_id"`
+	LegalEntityID string    `json:"legal_entity_id"`
+	SubjectRef    string    `json:"subject_ref,omitempty"`
+	DataClass     string    `json:"data_class,omitempty"`
+	RecordRef     string    `json:"record_ref,omitempty"`
+	PlacedBy      string    `json:"placed_by"`
+	PlacedAt      time.Time `json:"placed_at"`
+}
+
+type HoldReleasedData struct {
+	HoldID        string    `json:"hold_id"`
+	LegalEntityID string    `json:"legal_entity_id"`
+	ReleasedBy    string    `json:"released_by"`
+	ReleasedAt    time.Time `json:"released_at"`
+}
+
+type ErasureRequestedData struct {
+	ErasureID     string    `json:"erasure_id"`
+	RequestID     string    `json:"request_id,omitempty"`
+	LegalEntityID string    `json:"legal_entity_id"`
+	SubjectRef    string    `json:"subject_ref"`
+	DataClasses   []string  `json:"data_classes"`
+	RequestedAt   time.Time `json:"requested_at"`
 }
 
 // ConflictDetectedData is the data member of sod.conflict.detected.v1

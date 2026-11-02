@@ -35,6 +35,8 @@ type OneTimePayee struct {
 	TaxID         string
 	Email         string
 	Bank          *domain.PayeeBank
+	SubjectRef    string
+	ErasedAt      *time.Time
 	CreatedBy     string
 	CreatedAt     time.Time
 }
@@ -86,9 +88,9 @@ func (s *Postgres) CreateOneTimePayee(ctx context.Context, in OneTimePayee) (One
 		}
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO receiving_one_time_payee (tenant_id, id, legal_entity_id, country, name_sealed, address_sealed, tax_id_sealed, email_sealed, bank_sealed, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING created_at`,
-			tenantID, in.ID, in.LegalEntityID, in.Country, name, address, taxID, email, bank, in.CreatedBy).Scan(&in.CreatedAt)
+		return tx.QueryRow(ctx, `INSERT INTO receiving_one_time_payee (tenant_id, id, legal_entity_id, country, name_sealed, address_sealed, tax_id_sealed, email_sealed, bank_sealed, created_by, subject_ref)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, nullif($11, '')) RETURNING created_at`,
+			tenantID, in.ID, in.LegalEntityID, in.Country, name, address, taxID, email, bank, in.CreatedBy, in.SubjectRef).Scan(&in.CreatedAt)
 	})
 	return in, err
 }

@@ -64,6 +64,7 @@ var serviceGrants = map[string]map[string][]string{
 		"purchasing": {"procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"},
 		"inventory":  {"inventory.ownership-change.read"},
 		"party":      {"party.read"},
+		"compliance": {"compliance.legal_hold.check"},
 	},
 	"tax": {
 		"ledger": {"ledger.balance.read"},

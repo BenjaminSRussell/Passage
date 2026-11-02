@@ -20,6 +20,7 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 var servicePrincipals = map[string][]string{
 	"integration-hub":         {"migration.outbound.render", "migration.xref.record"},
 	"migration-loader":        {"party.import.write", "product.import.write", "receivables.import.write"},
+	"receiving-erasure":       {"compliance.legal_hold.check"},
 	"receiving-ers":           {"VendorInvoicePost"},
 	"scheduling-downtime":     {"scheduling.downtime.apply"},
 	"scheduling-order-import": {"scheduling.order.import"},
@@ -32,6 +33,7 @@ var servicePrincipals = map[string][]string{
 var servicePrincipalIssuers = map[string][]string{
 	"integration-hub":         {"integration-hub"},
 	"migration-loader":        {"migration", "migration-factory"},
+	"receiving-erasure":       {"receiving"},
 	"receiving-ers":           {"receiving"},
 	"scheduling-downtime":     {"scheduling"},
 	"scheduling-order-import": {"scheduling"},
