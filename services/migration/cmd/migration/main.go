@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
@@ -20,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/probe"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/syncer"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/target"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
@@ -127,10 +129,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// Scheduled delta sync (integration track S4, decision B5) runs in this process on every replica; a due binding is
+	// taken by one conditional UPDATE. It needs the same wiring live runs need, so it is off without it.
+	sched := newScheduler(getenv, st, a, targets.Configured())
+	if sched != nil {
+		go sched.Run(ctx)
+	}
+	admin.Handle("/metrics", metrics(a.Metrics(), sched))
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
@@ -142,4 +150,46 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// newScheduler builds the delta-sync scheduler, or nil when it is off: MIG_SYNC_ENABLED=false, or no target wiring
+// (a run could not load anything). MIG_SYNC_INTERVAL (a Go duration, default 30s) is how often a replica looks for
+// due bindings.
+func newScheduler(getenv func(string) string, st *store.Postgres, a *api.API, wired bool) *syncer.Scheduler {
+	if !wired || getenv("MIG_SYNC_ENABLED") == "false" {
+		slog.Info("delta sync scheduler is off", "wired", wired)
+		return nil
+	}
+	interval := syncer.DefaultInterval
+	if v := getenv("MIG_SYNC_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Second {
+			slog.Warn("MIG_SYNC_INTERVAL is not a duration of at least 1s; using the default", "value", v)
+		} else {
+			interval = d
+		}
+	}
+	return &syncer.Scheduler{Store: st, Runner: a.SyncRunner(), Interval: interval}
+}
+
+// metrics serves the API counters and, when the scheduler runs, its own.
+func metrics(base http.Handler, s *syncer.Scheduler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base.ServeHTTP(w, r)
+		if s == nil {
+			return
+		}
+		claimed, ok, failed, scanErrs := s.Stats()
+		for _, m := range []struct {
+			name, help string
+			value      int64
+		}{
+			{"migration_sync_claims_total", "Due bindings this replica claimed.", claimed},
+			{"migration_sync_runs_succeeded_total", "Delta sync runs that ended succeeded or partial.", ok},
+			{"migration_sync_runs_failed_total", "Delta sync runs that failed (watermark kept).", failed},
+			{"migration_sync_scan_errors_total", "Scheduler scans that failed.", scanErrs},
+		} {
+			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", m.name, m.help, m.value)
+		}
+	})
 }

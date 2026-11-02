@@ -205,10 +205,14 @@ func (s sourceFailures) Extract(ctx context.Context, entity string) ([]domain.Re
 	if err == nil {
 		return rows, nil
 	}
+	return nil, s.classify(err)
+}
+
+func (s sourceFailures) classify(err error) error {
 	var p *httpx.Problem
 	if errors.As(err, &p) {
-		return nil, err
+		return err
 	}
 	f := probe.Classify(err, s.secret)
-	return nil, httpx.NewProblem(http.StatusBadGateway, CodeExtractFailed, fmt.Sprintf("%s: %s", f.Code, f.Message))
+	return httpx.NewProblem(http.StatusBadGateway, CodeExtractFailed, fmt.Sprintf("%s: %s", f.Code, f.Message))
 }

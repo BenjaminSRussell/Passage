@@ -64,6 +64,8 @@ type RunFilter struct {
 	Entity    string
 	Status    string
 	ProjectID string
+	// BindingID keeps the runs the sync scheduler made for one entity binding.
+	BindingID string
 	After     *RunCursor
 	Limit     int
 }
@@ -88,6 +90,7 @@ type Run struct {
 	MappingSpecID  string          `json:"mappingSpecId,omitempty"`
 	DataTemplateID string          `json:"dataTemplateId,omitempty"`
 	ProjectID      string          `json:"projectId,omitempty"`
+	BindingID      string          `json:"bindingId,omitempty"`
 	Report         domain.Report   `json:"report"`
 	CreatedAt      time.Time       `json:"createdAt"`
 }
@@ -146,6 +149,7 @@ type Store interface {
 	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
 	XrefSummary(ctx context.Context) ([]XrefCount, error)
+	SyncStore
 	Xref() domain.XrefStore
 	Ping(ctx context.Context) error
 }
@@ -162,12 +166,12 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 func (s *Postgres) Xref() domain.XrefStore { return pgXref{s.pool} }
 
-const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), coalesce(data_template_id::text, ''), report, created_at, coalesce(project_id::text, '')`
+const runColumns = `id, source_system, mode, entity, dry_run, mapping_version, mapping, coalesce(parent_run_id::text, ''), coalesce(mapping_spec_id::text, ''), coalesce(data_template_id::text, ''), report, created_at, coalesce(project_id::text, ''), coalesce(binding_id::text, '')`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var report []byte
-	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &r.DataTemplateID, &report, &r.CreatedAt, &r.ProjectID); err != nil {
+	if err := row.Scan(&r.ID, &r.SourceSystem, &r.Mode, &r.Entity, &r.DryRun, &r.MappingVersion, &r.Mapping, &r.ParentRunID, &r.MappingSpecID, &r.DataTemplateID, &report, &r.CreatedAt, &r.ProjectID, &r.BindingID); err != nil {
 		return Run{}, err
 	}
 	return r, json.Unmarshal(report, &r.Report)
@@ -175,7 +179,7 @@ func scanRun(row pgx.Row) (Run, error) {
 
 func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) (Run, error) {
 	p, _ := tenant.FromContext(ctx)
-	var key, parent, specID, templateID, projectID *string
+	var key, parent, specID, templateID, projectID, bindingID *string
 	if idempotencyKey != "" {
 		key = &idempotencyKey
 	}
@@ -191,6 +195,9 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 	if run.ProjectID != "" {
 		projectID = &run.ProjectID
 	}
+	if run.BindingID != "" {
+		bindingID = &run.BindingID
+	}
 	report, err := json.Marshal(run.Report)
 	if err != nil {
 		return Run{}, err
@@ -200,10 +207,10 @@ func (s *Postgres) SaveRun(ctx context.Context, run Run, idempotencyKey string) 
 	}
 	replayed := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id, data_template_id, project_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		tag, err := tx.Exec(ctx, `insert into migration.run (tenant_id, id, source_system, mode, entity, status, dry_run, mapping_version, mapping, parent_run_id, report, idempotency_key, mapping_spec_id, data_template_id, project_id, binding_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 			on conflict (tenant_id, idempotency_key) do nothing`,
-			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID, templateID, projectID)
+			p.TenantID, run.ID, run.SourceSystem, run.Mode, run.Entity, run.Report.Status, run.DryRun, run.MappingVersion, run.Mapping, parent, report, key, specID, templateID, projectID, bindingID)
 		if err != nil {
 			return err
 		}
@@ -288,9 +295,9 @@ func (s *Postgres) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+runColumns+` from migration.run
 			where tenant_id = $1 and ($2 = '' or entity = $2) and ($3 = '' or status = $3)
-			and ($4 = '' or project_id = nullif($4, '')::uuid)
+			and ($4 = '' or project_id = nullif($4, '')::uuid) and ($9 = '' or binding_id = nullif($9, '')::uuid)
 			and ($5::boolean is false or (created_at, id) < ($6::timestamptz, $7::uuid))
-			order by created_at desc, id desc limit $8`, p.TenantID, f.Entity, f.Status, f.ProjectID, f.After != nil, afterAt, afterID, clampLimit(f.Limit))
+			order by created_at desc, id desc limit $8`, p.TenantID, f.Entity, f.Status, f.ProjectID, f.After != nil, afterAt, afterID, clampLimit(f.Limit), f.BindingID)
 		if err != nil {
 			return err
 		}
@@ -573,6 +580,8 @@ type Mem struct {
 	cnState  *memConnections
 	bnOnce   sync.Once
 	bnState  *memBindings
+	syOnce   sync.Once
+	syState  *memSync
 }
 
 func NewMem() *Mem {
@@ -641,7 +650,7 @@ func (m *Mem) ListRuns(_ context.Context, f RunFilter) ([]Run, error) {
 		if f.After != nil && newestFirst(r, Run{CreatedAt: f.After.CreatedAt, ID: f.After.ID}) <= 0 {
 			continue
 		}
-		if (f.Entity == "" || r.Entity == f.Entity) && (f.Status == "" || r.Report.Status == f.Status) && (f.ProjectID == "" || r.ProjectID == f.ProjectID) {
+		if (f.Entity == "" || r.Entity == f.Entity) && (f.Status == "" || r.Report.Status == f.Status) && (f.ProjectID == "" || r.ProjectID == f.ProjectID) && (f.BindingID == "" || r.BindingID == f.BindingID) {
 			out = append(out, r)
 		}
 	}

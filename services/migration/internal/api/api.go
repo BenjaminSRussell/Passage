@@ -121,6 +121,8 @@ type runView struct {
 	MappingSpecID  string                  `json:"mappingSpecId,omitempty"`
 	DataTemplateID string                  `json:"dataTemplateId,omitempty"`
 	ProjectID      string                  `json:"projectId,omitempty"`
+	BindingID      string                  `json:"bindingId,omitempty"`
+	Watermark      string                  `json:"watermark,omitempty"`
 	ParentRunID    string                  `json:"parentRunId,omitempty"`
 	Counts         counts                  `json:"counts"`
 	Rejects        []domain.RowReject      `json:"rejects"`
@@ -131,14 +133,15 @@ type runView struct {
 }
 
 type counts struct {
-	Extracted int `json:"extracted"`
-	Mapped    int `json:"mapped"`
-	Created   int `json:"created"`
-	Updated   int `json:"updated"`
-	Unchanged int `json:"unchanged"`
-	Templated int `json:"templated"`
-	Rejected  int `json:"rejected"`
-	Warned    int `json:"warned"`
+	Extracted  int `json:"extracted"`
+	Mapped     int `json:"mapped"`
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Unchanged  int `json:"unchanged"`
+	Templated  int `json:"templated"`
+	Conflicted int `json:"conflicted"`
+	Rejected   int `json:"rejected"`
+	Warned     int `json:"warned"`
 }
 
 func New(s store.Store, backends BackendFactory) *API {
@@ -162,6 +165,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerProjects(r)
 	a.registerConnections(r)
 	a.registerBindings(r)
+	a.registerSync(r)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -454,7 +458,11 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(map[string]string{"projectId": "must be a UUID"}))
 		return
 	}
-	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), ProjectID: q.Get("projectId"), After: after, Limit: limit + 1})
+	if bid := q.Get("bindingId"); bid != "" && !ids.Valid(bid) {
+		fail(w, r, validation(map[string]string{"bindingId": "must be a UUID"}))
+		return
+	}
+	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), ProjectID: q.Get("projectId"), BindingID: q.Get("bindingId"), After: after, Limit: limit + 1})
 	if err != nil {
 		a.logFailure(r, "list migration runs failed", err)
 		fail(w, r, err)
@@ -632,9 +640,9 @@ func view(run store.Run) runView {
 	rep := run.Report
 	v := runView{
 		ID: run.ID, SourceSystem: run.SourceSystem, Mode: run.Mode, Entity: run.Entity, Status: rep.Status, DryRun: run.DryRun,
-		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, DataTemplateID: run.DataTemplateID, ProjectID: run.ProjectID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
+		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, DataTemplateID: run.DataTemplateID, ProjectID: run.ProjectID, BindingID: run.BindingID, Watermark: rep.Watermark, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
 		Reconciliation: rep.Reconciliation, CreatedAt: run.CreatedAt,
-		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Templated: rep.Templated, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
+		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Templated: rep.Templated, Conflicted: rep.Conflicted, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
 	}
 	if v.Rejects == nil {
 		v.Rejects = []domain.RowReject{}

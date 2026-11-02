@@ -88,6 +88,12 @@ spec:
 {{- with .Values.targets.receivablesUrl }}
             - { name: MIG_TARGET_RECEIVABLES_URL, value: {{ . | quote }} }
 {{- end }}
+{{- if eq (toString .Values.sync.enabled) "false" }}
+            - { name: MIG_SYNC_ENABLED, value: "false" }
+{{- end }}
+{{- with .Values.sync.interval }}
+            - { name: MIG_SYNC_INTERVAL, value: {{ . | quote }} }
+{{- end }}
           {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
 {{- if .Values.fieldCrypt.keysSecret }}

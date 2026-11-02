@@ -97,6 +97,30 @@ type RunSpec struct {
 	Passthrough bool
 	// Template supplies default values for absent source fields (FR-10.18); nil applies none.
 	Template *DataTemplate
+	// Since is the watermark of the last committed delta run (integration track S4): an extractor that can read a
+	// delta returns only rows changed after it. "" reads everything, and so does an extractor without a cursor.
+	Since string
+	// HoldExisting is set when Passage is the source of truth of the binding: a row whose record an earlier run
+	// loaded and whose mapped content now differs is reported as a conflict (MIG-TARGET-DRIFT) and not applied.
+	HoldExisting bool
+	// Acknowledged holds, per source key, the content hash of a legacy row an operator chose to leave out
+	// ("keep Passage"); the same row is not reported again, a row that changed again is.
+	Acknowledged map[string]string
+}
+
+// CodeSourceOfTruth is the reject code of a held row. It is the code the loader uses for a record changed in Passage
+// since the last load, because to the operator both mean the same thing: Passage and the legacy system disagree.
+const CodeSourceOfTruth = "MIG-TARGET-DRIFT"
+
+// CodeTargetUnavailable is the loader's reject code for a target service that did not answer (retries exhausted).
+const CodeTargetUnavailable = "MIG-TARGET-UNAVAILABLE"
+
+// Conflict is a legacy row held back because Passage is the source of truth.
+type Conflict struct {
+	SourceKey   string
+	TargetID    string
+	ContentHash string
+	Fields      map[string]any
 }
 
 type RowReject struct {
@@ -128,6 +152,15 @@ type Report struct {
 	Ledger         []LedgerEntry    `json:"-"`
 	Absent         []string         `json:"absent"`
 	Reconciliation *ReconcileReport `json:"reconciliation,omitempty"`
+	// Watermark is the largest change cursor the extractor read ("" without a cursor); the sync scheduler stores it
+	// only after the run ends without failing.
+	Watermark string `json:"watermark,omitempty"`
+	// Conflicted counts held rows (each also has a MIG-TARGET-DRIFT reject); Conflicts carries them for storage.
+	Conflicted int `json:"conflicted,omitempty"`
+	// Transient counts rows refused for a reason a later run can cure (a target service that did not answer); the
+	// rows were not loaded, so a delta run that has any must not move its watermark.
+	Transient int        `json:"transient,omitempty"`
+	Conflicts []Conflict `json:"-"`
 }
 
 type Pipeline struct {
@@ -165,7 +198,13 @@ func IdempotencyKey(sourceSystem, entity, sourceKey, contentHash string) string 
 
 func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	rep := Report{DryRun: spec.DryRun, Status: StatusFailed}
-	rows, err := p.Extractor.Extract(ctx, spec.Entity)
+	var rows []Record
+	var err error
+	if d, ok := p.Extractor.(DeltaExtractor); ok {
+		rows, rep.Watermark, err = d.ExtractSince(ctx, spec.Entity, spec.Since)
+	} else {
+		rows, err = p.Extractor.Extract(ctx, spec.Entity)
+	}
 	if err != nil {
 		return rep, fmt.Errorf("extract %s: %w", spec.Entity, err)
 	}
@@ -216,6 +255,16 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	for _, r := range mapped {
 		hash := ContentHash(r.Fields)
 		x, found := known[r.Key]
+		if spec.HoldExisting && found && x.ContentHash != "" && x.ContentHash != hash {
+			if spec.Acknowledged[r.Key] == hash {
+				rep.Unchanged++
+				continue
+			}
+			rep.Conflicted++
+			rep.Conflicts = append(rep.Conflicts, Conflict{SourceKey: r.Key, TargetID: x.TargetID, ContentHash: hash, Fields: r.Fields})
+			rep.Rejects = append(rep.Rejects, RowReject{r.Key, []Reject{{"", CodeSourceOfTruth, "Passage is the source of truth for this binding; the legacy row differs from the loaded record and was not applied"}}})
+			continue
+		}
 		idemKey := IdempotencyKey(spec.SourceSystem, spec.Entity, r.Key, hash)
 		if found && x.ContentHash == hash {
 			rep.Unchanged++
@@ -252,12 +301,13 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	if err != nil {
 		return rep, err
 	}
-	if spec.OnlyKeys == nil {
+	if spec.OnlyKeys == nil && spec.Since == "" {
 		if rep.Absent, err = p.absent(ctx, spec, seen); err != nil {
 			return rep, err
 		}
 	}
-	if p.Reader != nil && !spec.DryRun && spec.OnlyKeys == nil {
+	// A delta or a run that holds rows back covers only part of the source, so it is not tied out to the target.
+	if p.Reader != nil && !spec.DryRun && spec.OnlyKeys == nil && spec.Since == "" && !spec.HoldExisting {
 		target, err := p.Reader.Read(ctx, spec.Entity)
 		if err != nil {
 			return rep, fmt.Errorf("read target %s: %w", spec.Entity, err)
@@ -404,6 +454,9 @@ func (p *Pipeline) load(ctx context.Context, spec RunSpec, rep *Report, todo []p
 					detail = "target did not accept the row"
 				}
 				rep.Rejects = append(rep.Rejects, RowReject{b.entry.SourceKey, []Reject{{"", code, detail}}})
+				if code == CodeLoadFailed || code == CodeTargetUnavailable {
+					rep.Transient++
+				}
 				continue
 			}
 			rebind := false

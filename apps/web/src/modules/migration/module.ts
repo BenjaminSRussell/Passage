@@ -6,6 +6,7 @@ import { NewPackagePage, PackageDetailPage, PackagesPage } from "./PackagePages"
 import { NewProjectPage, ProjectDetailPage, ProjectsPage } from "./ProjectPages";
 import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
 import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePages";
+import { SyncDetailPage, SyncPage } from "./SyncPages";
 import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
@@ -40,6 +41,8 @@ const migration: PassageModule = {
     { path: "/migration/bindings", element: createElement(BindingsPage), handle: { title: "Entity bindings" } },
     { path: "/migration/bindings/new", element: createElement(NewBindingPage), handle: { title: "New entity binding" } },
     { path: "/migration/bindings/:id", element: createElement(BindingDetailPage), handle: { title: "Entity binding" } },
+    { path: "/migration/sync", element: createElement(SyncPage), handle: { title: "Delta sync" } },
+    { path: "/migration/sync/:bindingId", element: createElement(SyncDetailPage), handle: { title: "Delta sync status" } },
     { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
@@ -47,6 +50,7 @@ const migration: PassageModule = {
     { label: "Migration projects", to: "/migration/projects" },
     { label: "Connections", to: "/migration/connections", duty: "migration.run" },
     { label: "Entity bindings", to: "/migration/bindings", duty: "migration.run" },
+    { label: "Delta sync", to: "/migration/sync", duty: "migration.run" },
     { label: "Mapping specs", to: "/migration/specs" },
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },

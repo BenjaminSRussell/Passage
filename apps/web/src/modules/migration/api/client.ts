@@ -48,8 +48,12 @@ export interface MigrationRun {
   dataTemplateId?: string;
   /** The migrate project the run belongs to, when it was started under one. */
   projectId?: string;
+  /** The entity binding a scheduled delta sync run read. */
+  bindingId?: string;
+  /** The largest change cursor the run read. */
+  watermark?: string;
   parentRunId?: string;
-  counts: { extracted: number; mapped: number; created: number; updated: number; unchanged: number; templated?: number; rejected: number; warned: number };
+  counts: { extracted: number; mapped: number; created: number; updated: number; unchanged: number; templated?: number; conflicted?: number; rejected: number; warned: number };
   rejects: { sourceKey: string; rejects: RowIssue[] }[];
   warnings: { sourceKey: string; warnings: RowIssue[] }[];
   absent: string[];
@@ -150,7 +154,7 @@ function query(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-export const listRunsPage = (filter: { entity?: string; status?: string; projectId?: string; cursor?: string }, signal?: AbortSignal) =>
+export const listRunsPage = (filter: { entity?: string; status?: string; projectId?: string; bindingId?: string; cursor?: string; limit?: string }, signal?: AbortSignal) =>
   page<MigrationRun>(`/migration-runs${query(filter)}`, signal);
 
 export const getRun = (id: string, signal?: AbortSignal) => send<MigrationRun>(`/migration-runs/${encodeURIComponent(id)}`, {}, signal);
@@ -530,3 +534,69 @@ export const previewBinding = (id: string, options: PreviewOptions) =>
 /** The same for a binding that is not saved yet. */
 export const previewDraftBinding = (input: BindingInput, options: PreviewOptions) =>
   send<BindingPreview>("/entity-bindings:preview", { method: "POST", body: JSON.stringify({ ...input, ...options }) });
+
+// ---- Delta sync (integration track S4) ----
+
+export type SourceOfTruth = "legacy" | "passage";
+export type SyncRunStatus = "succeeded" | "partial" | "failed" | "abandoned";
+
+export interface SyncStatus {
+  bindingId: string;
+  entity: string;
+  connectionProfileId: string;
+  connectionProfileName: string;
+  bindingStatus: "active" | "disabled";
+  projectId?: string;
+  /** Empty when no active migrate project on the profile has a schedule. */
+  scheduleCron?: string;
+  sourceOfTruth: SourceOfTruth;
+  paused: boolean;
+  watermark: string;
+  nextDueAt?: string;
+  running: boolean;
+  lastRunId?: string;
+  lastRunAt?: string;
+  lastSuccessAt?: string;
+  lastStatus?: SyncRunStatus;
+  lastError?: string;
+  consecutiveFailures: number;
+  rowsLoaded: number;
+  rowsRejected: number;
+  openConflicts: number;
+  version: number;
+}
+
+export type ConflictStatus = "open" | "kept" | "accepted";
+export type ConflictResolution = "accept_legacy" | "keep_passage";
+
+export interface SyncConflict {
+  id: string;
+  bindingId: string;
+  entity: string;
+  runId?: string;
+  sourceKey: string;
+  targetId?: string;
+  legacyFields: Record<string, unknown>;
+  status: ConflictStatus;
+  detectedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  /** Bumped when a run holds different legacy values for the row; a resolution names the version it was decided on. */
+  version: number;
+}
+
+export const listSync = (filter: { paused?: string; failing?: string; cursor?: string; limit?: string }, signal?: AbortSignal) =>
+  page<SyncStatus>(`/sync-status${query(filter)}`, signal);
+
+export const getSync = (bindingId: string, signal?: AbortSignal) => send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, {}, signal);
+
+/** Pauses or resumes a schedule, sets the source of truth or makes the binding due now, under the status's version. */
+export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; runNow?: boolean }) =>
+  send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+export const listConflicts = (filter: { bindingId?: string; status?: string; cursor?: string; limit?: string }, signal?: AbortSignal) =>
+  page<SyncConflict>(`/sync-conflicts${query(filter)}`, signal);
+
+/** Resolves a conflict as reviewed at `version`; a run that replaced the held values since answers 409 MIG-VERSION-CONFLICT. */
+export const resolveConflict = (id: string, version: number, resolution: ConflictResolution) =>
+  send<SyncConflict>(`/sync-conflicts/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ resolution, version }) });

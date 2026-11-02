@@ -24,6 +24,11 @@ targets:
   partyUrl: ""        # for example http://party.passage-party.svc:8080
   productUrl: ""
   receivablesUrl: ""
+# Scheduled delta sync (integration track S4): runs on every replica, only where the loader is wired (targets and
+# serviceIdentity above). interval is a Go duration, how often a replica looks for due bindings (default 30s).
+sync:
+  enabled: true
+  interval: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

@@ -16,6 +16,7 @@ paths:
         - { name: entity, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string, enum: [succeeded, partial, failed] } }
         - { name: projectId, in: query, description: Only runs started under this migration project., schema: { type: string, format: uuid } }
+        - { name: bindingId, in: query, description: Only the delta runs the sync scheduler made for this entity binding., schema: { type: string, format: uuid } }
         - { name: cursor, in: query, description: "The nextCursor of the previous page. It holds only the position, so send the same filters again; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
@@ -637,6 +638,107 @@ paths:
           description: MIG-EXTRACT-NOT-CONFIGURED, or MIG-SECRETS-NOT-CONFIGURED when the profile needs a secret.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/sync-status:
+    get:
+      operationId: listSyncStatus
+      summary: List delta sync status per entity binding
+      description: One row per entity binding that has a schedule (the scheduleCron of a migrate project on its connection profile) or has been configured, in entity order. Shows the last run, the last success, the watermark, when the binding is next due (which already includes the failure backoff), consecutive failures, rows loaded and rejected so far, and open conflicts. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: paused, in: query, description: Only paused (true) or only running (false) schedules., schema: { type: boolean } }
+        - { name: failing, in: query, description: Only bindings whose last runs failed (consecutiveFailures above 0)., schema: { type: boolean } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Sync status rows. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SyncStatus' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/sync-status/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: The entity binding id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getSyncStatus
+      summary: Get the delta sync status of an entity binding
+      description: A binding that was never scheduled answers version 0 with no times. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The sync status.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncStatus' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateSyncStatus
+      summary: Pause, resume or configure the delta sync of an entity binding
+      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSyncStatus' } } }
+      responses:
+        '200':
+          description: The updated status with its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncStatus' } } }
+        '400':
+          description: COM-0001, the version is missing, sourceOfTruth is not legacy or passage, or nothing to change was sent.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/sync-conflicts:
+    get:
+      operationId: listSyncConflicts
+      summary: List sync conflicts
+      description: Legacy rows held back because Passage is the source of truth of their binding, newest first, with the legacy values that were not applied. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: bindingId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, kept, accepted] } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Conflicts. Pass nextCursor as cursor for the next page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SyncConflict' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/sync-conflicts/{id}:resolve:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: resolveSyncConflict
+      summary: Resolve a sync conflict
+      description: Send the conflict's version as read; a run that replaced the held legacy values since makes it stale (409 MIG-VERSION-CONFLICT), so nothing is decided on values the operator did not see. keep_passage closes the conflict and remembers the legacy row's content hash, so the same row is not reported again until legacy changes it again. accept_legacy writes the held legacy values into the Passage record through the loader, under the version recorded at the last load, and closes the conflict only when the owning service accepted them; if the record changed in Passage after that load the owning service refuses (409 MIG-SYNC-ACCEPT-FAILED) and the conflict stays open, because the loader cannot yet read the current version to overwrite it.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [resolution, version], properties: { resolution: { type: string, enum: [accept_legacy, keep_passage] }, version: { type: integer, minimum: 1, description: The conflict version the decision was made on. } } } } }
+      responses:
+        '200':
+          description: The resolved conflict.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncConflict' } } }
+        '400':
+          description: COM-0001, resolution is not accept_legacy or keep_passage, or the version is missing.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: AUTH-0404, no conflict with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-CONFLICT-RESOLVED, the conflict is already resolved; MIG-VERSION-CONFLICT, a run replaced the held legacy values after the version sent; MIG-SYNC-ACCEPT-FAILED, the owning service refused the legacy values.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-SYNC-ACCEPT-UNAVAILABLE, the deployment has no loader wiring (target addresses and signing key).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '502':
+          description: MIG-SYNC-ACCEPT-FAILED, the owning service could not be reached.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
     get:
       operationId: listConfigPackages
@@ -777,10 +879,12 @@ components:
         mappingSpecId: { type: string, format: uuid }
         dataTemplateId: { type: string, format: uuid, description: "The data template the run applied, kept on re-runs." }
         projectId: { type: string, format: uuid, description: "The migrate project the run belongs to, kept on re-runs." }
+        bindingId: { type: string, format: uuid, description: "The entity binding a scheduled delta sync run read; absent on runs started by a person." }
+        watermark: { type: string, description: "The largest change cursor the run read; the sync scheduler stores it only when the run did not fail." }
         counts:
           type: object
-          required: [extracted, mapped, created, updated, unchanged, templated, rejected, warned]
-          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, templated: { type: integer, description: Mapped rows that took at least one data template default. }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
+          required: [extracted, mapped, created, updated, unchanged, templated, conflicted, rejected, warned]
+          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, templated: { type: integer, description: Mapped rows that took at least one data template default. }, conflicted: { type: integer, description: Legacy rows held back because Passage is the source of truth (each also appears in rejects as MIG-TARGET-DRIFT). }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
         rejects:
           type: array
           items:
@@ -1287,6 +1391,56 @@ components:
             properties: { tenantId: { type: string, format: uuid }, appliedAt: { type: string, format: date-time }, idempotencyKey: { type: string }, diffCounts: { $ref: '#/components/schemas/PackageCounts' } }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
+    SyncStatus:
+      type: object
+      required: [bindingId, entity, connectionProfileId, connectionProfileName, bindingStatus, sourceOfTruth, paused, watermark, running, consecutiveFailures, rowsLoaded, rowsRejected, openConflicts, version]
+      properties:
+        bindingId: { type: string, format: uuid }
+        entity: { type: string }
+        connectionProfileId: { type: string, format: uuid }
+        connectionProfileName: { type: string }
+        bindingStatus: { type: string, enum: [active, disabled] }
+        projectId: { type: string, format: uuid, description: The migrate project whose scheduleCron drives the binding. }
+        scheduleCron: { type: string, description: "Five-field cron in UTC, at least 15 minutes between runs. Empty when no active migrate project on the profile has a schedule." }
+        sourceOfTruth: { type: string, enum: [legacy, passage] }
+        paused: { type: boolean }
+        watermark: { type: string, description: "The high-water mark of the last run that did not fail. The next run reads from a little before it (5 minutes for a timestamp cursor, the value itself for an integer or row version) so rows committed late with the same or a slightly earlier cursor are not skipped; rows read again are unchanged and not loaded. Empty before the first run, or without a cursor on the binding (every run is then a full read); editing the entity binding discards it." }
+        nextDueAt: { type: string, format: date-time, description: "Includes the failure backoff." }
+        running: { type: boolean }
+        lastRunId: { type: string, format: uuid }
+        lastRunAt: { type: string, format: date-time }
+        lastSuccessAt: { type: string, format: date-time }
+        lastStatus: { type: string, enum: [succeeded, partial, failed, abandoned] }
+        lastError: { type: string }
+        consecutiveFailures: { type: integer, description: "From 3 the next run waits 15 minutes, doubling per failure up to 24 hours." }
+        rowsLoaded: { type: integer, format: int64 }
+        rowsRejected: { type: integer, format: int64 }
+        openConflicts: { type: integer }
+        version: { type: integer }
+    UpdateSyncStatus:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 0 }
+        paused: { type: boolean }
+        sourceOfTruth: { type: string, enum: [legacy, passage] }
+        runNow: { type: boolean }
+    SyncConflict:
+      type: object
+      required: [id, bindingId, entity, sourceKey, legacyFields, status, detectedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        bindingId: { type: string, format: uuid }
+        entity: { type: string }
+        runId: { type: string, format: uuid }
+        sourceKey: { type: string }
+        targetId: { type: string, description: The Passage record the legacy row was loaded into. }
+        legacyFields: { type: object, additionalProperties: true, description: The mapped values the legacy row would have written. }
+        status: { type: string, enum: [open, kept, accepted] }
+        detectedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        resolvedBy: { type: string }
+        version: { type: integer, minimum: 1, description: "Starts at 1; bumped when a run holds different legacy values for the row and when it is resolved." }
     Problem:
       type: object
       required: [type, title, status]

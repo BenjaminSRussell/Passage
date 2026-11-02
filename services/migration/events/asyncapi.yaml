@@ -1,7 +1,59 @@
 asyncapi: 3.0.0
 info:
   title: migration
-  version: 0.1.0
-  description: The migration framework publishes and consumes no domain events. Target contexts emit their own events when rows are loaded through their public batch APIs.
-channels: {}
-operations: {}
+  version: 0.2.0
+  description: |
+    CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member. The scheduled delta sync
+    (integration track S4) publishes one event per sync run through the outbox, in the transaction that ends the run's
+    claim and moves (or keeps) the binding's watermark. Target contexts emit their own events when rows are loaded
+    through their public APIs.
+channels:
+  passage.migration.syncrun:
+    address: passage.migration.syncrun
+    messages:
+      completed:
+        $ref: '#/components/messages/syncRunCompleted'
+      failed:
+        $ref: '#/components/messages/syncRunFailed'
+operations:
+  onSyncRunCompleted:
+    action: send
+    channel: { $ref: '#/channels/passage.migration.syncrun' }
+    messages: [{ $ref: '#/channels/passage.migration.syncrun/messages/completed' }]
+  onSyncRunFailed:
+    action: send
+    channel: { $ref: '#/channels/passage.migration.syncrun' }
+    messages: [{ $ref: '#/channels/passage.migration.syncrun/messages/failed' }]
+components:
+  messages:
+    syncRunCompleted:
+      name: completed
+      title: Sync run completed
+      description: A scheduled delta run ended succeeded or partial. The watermark in the payload is the one now stored for the binding (unchanged when the source has no cursor). Rejected counts rows refused by the mapping or a target, and conflicted counts legacy rows held back because Passage is the source of truth.
+      payload:
+        $ref: '#/components/schemas/SyncRunData'
+      x-passage-type: dev.passage.migration.syncrun.completed.v1
+    syncRunFailed:
+      name: failed
+      title: Sync run failed
+      description: A scheduled delta run failed (source unreachable, mapping missing, or rows a target did not take). The binding's watermark was not moved, so the next run reads the same rows again; consecutiveFailures drives the backoff (15 minutes doubling from the third failure, at most 24 hours) and nextDueAt includes it.
+      payload:
+        $ref: '#/components/schemas/SyncRunData'
+      x-passage-type: dev.passage.migration.syncrun.failed.v1
+  schemas:
+    SyncRunData:
+      type: object
+      required: [bindingId, entity, status, extracted, loaded, rejected, conflicted, watermark, consecutiveFailures]
+      properties:
+        bindingId: { type: string, format: uuid }
+        entity: { type: string }
+        runId: { type: string, format: uuid, description: The migration run row; absent when the run could not be recorded. }
+        status: { type: string, enum: [succeeded, partial, failed] }
+        extracted: { type: integer }
+        loaded: { type: integer, description: Rows created or updated in the target contexts. }
+        rejected: { type: integer }
+        conflicted: { type: integer }
+        watermark: { type: string }
+        consecutiveFailures: { type: integer }
+        nextDueAt: { type: string, format: date-time }
+        error: { type: string, description: Credential-free reason, on failed only. }

@@ -216,3 +216,59 @@ func ValidateRewriteRules(rules []KeyRewrite) map[string]string {
 	}
 	return bad
 }
+
+// CronNext returns the first firing of a five-field cron expression strictly after the given instant, in UTC (the
+// tenant time zone is not read yet). Day of month and day of week follow the usual rule: when both are restricted a
+// day matches if either does. False means the expression is invalid or never fires within five years.
+func CronNext(expr string, after time.Time) (time.Time, bool) {
+	sets, ok := cronFields(expr)
+	if !ok {
+		return time.Time{}, false
+	}
+	restricted := func(i int) bool {
+		for v := cronBounds[i][0]; v <= cronBounds[i][1]; v++ {
+			if !sets[i][v] {
+				return true
+			}
+		}
+		return false
+	}
+	domSet, dowSet := restricted(2), restricted(4)
+	dayOK := func(t time.Time) bool {
+		dom := sets[2][t.Day()]
+		wd := int(t.Weekday())
+		dow := sets[4][wd] || (wd == 0 && sets[4][7])
+		switch {
+		case domSet && dowSet:
+			return dom || dow
+		case domSet:
+			return dom
+		case dowSet:
+			return dow
+		}
+		return true
+	}
+	start := after.UTC().Truncate(time.Minute).Add(time.Minute)
+	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	for d := 0; d < 366*5; d++ {
+		t := day.AddDate(0, 0, d)
+		if !sets[3][int(t.Month())] || !dayOK(t) {
+			continue
+		}
+		for h := 0; h < 24; h++ {
+			if !sets[1][h] {
+				continue
+			}
+			for m := 0; m < 60; m++ {
+				if !sets[0][m] {
+					continue
+				}
+				at := t.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+				if !at.Before(start) {
+					return at, true
+				}
+			}
+		}
+	}
+	return time.Time{}, false
+}

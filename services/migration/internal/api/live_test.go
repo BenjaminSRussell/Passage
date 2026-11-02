@@ -36,6 +36,7 @@ type liveRig struct {
 	drop    string
 	profile connBody
 	project projectBody
+	api     *api.API
 }
 
 const liveDuties = "migration.run,migration.connection.write,migration.project.write,tenant.administer"
@@ -55,12 +56,13 @@ func newLiveRigWith(t *testing.T, env connector.Env, drop, profile string) *live
 	}
 	cfg := target.Config{PartyURL: l.fakes.PartyURL, ProductURL: l.fakes.ProductURL, ReceivablesURL: l.fakes.ReceivablesURL, Signer: l.fakes.Signer, Concurrency: 1, Sleep: func(context.Context, time.Duration) error { return nil }}
 	router := httpx.NewRouter()
-	api.New(l.store, api.NotConfigured).
+	l.api = api.New(l.store, api.NotConfigured).
 		WithConnections(testKeys(t), &recordingProber{}).
 		WithExtraction(env).
 		WithTargets(func(_ context.Context, run api.TargetRun) (domain.TargetLoader, domain.TargetReader, error) {
 			return target.New(cfg, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: l.store.Xref()}), nil, nil
-		}).Register(router)
+		})
+	l.api.Register(router)
 	l.r = router
 	l.profile = createConn(t, l.r, profile)
 	rec := do(l.r, http.MethodPost, projectsPath, `{"name":"Acme cutover","projectType":"migrate","sourceSystem":"custom_acme","targetLegalEntityId":"`+leTarget+`","connectionProfileId":"`+l.profile.ID+`"}`, liveDuties, true)
