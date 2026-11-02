@@ -2257,7 +2257,9 @@
       {"resource": "/v1/production/orders/*/costs", "methods": ["GET"]},
       {"resource": "/v1/production/variances", "methods": ["GET"]},
       {"resource": "/v1/production/wip-balances", "methods": ["GET"]},
-      {"resource": "/v1/production/wip-reconciliation", "methods": ["GET"]}
+      {"resource": "/v1/production/wip-reconciliation", "methods": ["GET"]},
+      {"resource": "/v1/production/cost-snapshots", "methods": ["GET"]},
+      {"resource": "/v1/production/cost-snapshots:run", "methods": ["POST"]}
     ]},
     "production.formula.write": {"permissions": [{"resource": "/v1/production/formulas", "methods": ["POST"]}]},
     "production.journal.over-consume": {"flag": true, "permissions": []},
