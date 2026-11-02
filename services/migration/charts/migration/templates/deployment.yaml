@@ -79,6 +79,11 @@ spec:
             - { name: PASSAGE_SERVICE_KEY_ID, value: {{ .Values.serviceIdentity.keyId | quote }} }
 {{- end }}
 {{- end }}
+{{- with .Values.serviceIdentity.publicKeys }}
+            # Callers' public keys (name[:kid]=base64,...): the integration hub's key lets it call the outbound render
+            # and xref:record routes (integration track S5).
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ . | quote }} }
+{{- end }}
 {{- with .Values.targets.partyUrl }}
             - { name: MIG_TARGET_PARTY_URL, value: {{ . | quote }} }
 {{- end }}

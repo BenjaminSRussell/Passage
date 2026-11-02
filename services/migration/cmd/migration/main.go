@@ -94,6 +94,11 @@ func targetConfig(getenv func(string) string) (target.Config, error) {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	// The integration hub calls the outbound render and xref:record routes with a service token; the verifier is built
+	// from PASSAGE_SERVICE_NAME and PASSAGE_SERVICE_PUBLIC_KEYS. A malformed list stops the service at start.
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")

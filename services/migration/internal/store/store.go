@@ -150,6 +150,7 @@ type Store interface {
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
 	XrefSummary(ctx context.Context) ([]XrefCount, error)
 	SyncStore
+	OutboundStore
 	Xref() domain.XrefStore
 	Ping(ctx context.Context) error
 }
@@ -582,6 +583,8 @@ type Mem struct {
 	bnState  *memBindings
 	syOnce   sync.Once
 	syState  *memSync
+	obOnce   sync.Once
+	obState  *memOutbound
 }
 
 func NewMem() *Mem {

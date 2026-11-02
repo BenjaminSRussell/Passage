@@ -600,3 +600,94 @@ export const listConflicts = (filter: { bindingId?: string; status?: string; cur
 /** Resolves a conflict as reviewed at `version`; a run that replaced the held values since answers 409 MIG-VERSION-CONFLICT. */
 export const resolveConflict = (id: string, version: number, resolution: ConflictResolution) =>
   send<SyncConflict>(`/sync-conflicts/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ resolution, version }) });
+
+// ---- Outbound mappings (integration track S5): Passage events pushed to the legacy ERP ----
+
+export type OutboundStatus = "active" | "archived";
+
+export interface OutboundXrefLookup {
+  name: string;
+  entity: string;
+  idPath: string;
+  optional?: boolean;
+}
+
+/** One version of an outbound mapping. `mapping` is the mapping DSL read in the Passage-to-legacy direction. */
+export interface OutboundDefinition {
+  eventType: string;
+  subject?: { entity: string; idPath: string };
+  xrefs?: OutboundXrefLookup[];
+  decimalsAsNumbers?: boolean;
+  mapping: Record<string, unknown>;
+}
+
+export interface OutboundMapping {
+  id: string;
+  name: string;
+  sourceSystem: SourceSystem;
+  eventType: string;
+  status: OutboundStatus;
+  version: number;
+  checksum?: string;
+  /** Present on the single-mapping read, not on lists. */
+  definition?: OutboundDefinition;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutboundVersion {
+  version: number;
+  checksum: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface OutboundEdit {
+  name?: string;
+  status?: OutboundStatus;
+  definition?: OutboundDefinition;
+}
+
+export interface UnresolvedRef {
+  name: string;
+  entity: string;
+  id?: string;
+  reason: string;
+}
+
+export interface OutboundPreview {
+  status: "ok" | "unresolved" | "rejected" | "invalid";
+  body?: Record<string, unknown>;
+  idempotencyKey?: string;
+  refs?: { entity: string; id: string }[];
+  warnings?: RowIssue[];
+  unresolved?: UnresolvedRef[];
+  rejects?: RowIssue[];
+  code?: string;
+  detail?: string;
+}
+
+export const listOutboundMappings = (filter: { status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) => {
+  const { limit = 50, ...rest } = filter;
+  return page<OutboundMapping>(`/outbound-mappings${query({ ...rest, limit: String(limit) })}`, signal);
+};
+
+export const getOutboundMapping = (id: string, version?: number, signal?: AbortSignal) =>
+  send<OutboundMapping>(`/outbound-mappings/${encodeURIComponent(id)}${query({ version: version ? String(version) : undefined })}`, {}, signal);
+
+export const listOutboundVersions = (id: string, signal?: AbortSignal) => items<OutboundVersion>(`/outbound-mappings/${encodeURIComponent(id)}/versions`, signal);
+
+export const createOutboundMapping = (input: { name: string; sourceSystem: SourceSystem; definition: OutboundDefinition }, key: string = newKey()) =>
+  send<OutboundMapping>("/outbound-mappings", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+export const updateOutboundMapping = (id: string, version: number, edit: OutboundEdit) =>
+  send<OutboundMapping>(`/outbound-mappings/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+/** Renders a sample event through a stored mapping; reads only. A problem with the sample is a normal answer (status). */
+export const previewOutboundMapping = (id: string, event: unknown, version?: number) =>
+  send<OutboundPreview>(`/outbound-mappings/${encodeURIComponent(id)}:preview`, { method: "POST", body: JSON.stringify({ event, ...(version ? { version } : {}) }) });
+
+/** The same for a definition that is not saved yet. */
+export const previewOutboundDraft = (sourceSystem: SourceSystem, definition: OutboundDefinition, event: unknown) =>
+  send<OutboundPreview>("/outbound-mappings:preview", { method: "POST", body: JSON.stringify({ sourceSystem, definition, event }) });

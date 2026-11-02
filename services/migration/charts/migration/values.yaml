@@ -29,9 +29,13 @@ targets:
 sync:
   enabled: true
   interval: ""
+# publicKeys: public keys of the services that call this one with a service token, as name[:kid]=base64 Ed25519 key,
+# comma-separated. The integration hub's entry (integration-hub=<key>) lets it render outbound mappings and record
+# the legacy keys it receives; the grant itself is in platform/go/tenant (handoff, NOT-IMPLEMENTED.md).
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""
 
 # Egress guard (MIG_EGRESS_ALLOW): the only way a connection profile can reach a private address (10.0.0.0/8,
 # 172.16.0.0/12, 192.168.0.0/16, fc00::/7). allowCidrs are CIDRs; allowHostPorts are host:port entries (a NetworkPolicy

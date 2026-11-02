@@ -166,6 +166,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerConnections(r)
 	a.registerBindings(r)
 	a.registerSync(r)
+	a.registerOutbound(r)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -717,6 +718,8 @@ type problemBody struct {
 	ServiceCode string            `json:"serviceCode"`
 	TraceID     string            `json:"traceId,omitempty"`
 	Errors      map[string]string `json:"errors,omitempty"`
+	// Unresolved lists, for MIG-XREF-UNRESOLVED, every lookup that found no legacy key.
+	Unresolved []domain.UnresolvedRef `json:"unresolved,omitempty"`
 }
 
 func fail(w http.ResponseWriter, r *http.Request, err error) {

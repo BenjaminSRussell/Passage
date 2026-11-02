@@ -7,6 +7,7 @@ import { NewProjectPage, ProjectDetailPage, ProjectsPage } from "./ProjectPages"
 import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
 import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePages";
 import { SyncDetailPage, SyncPage } from "./SyncPages";
+import { NewOutboundPage, OutboundDetailPage, OutboundListPage } from "./OutboundPages";
 import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
@@ -18,7 +19,7 @@ import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 const migration: PassageModule = {
   id: "migration",
   title: "Data migration",
-  description: "Map, validate, load and reconcile legacy AX, SAP and custom ERP data: connections to the source system, entity bindings with a preview of the mapped records, versioned mapping specs, data templates, migration runs with their exception queue and re-run.",
+  description: "Map, validate, load and reconcile legacy AX, SAP and custom ERP data, and push Passage orders and invoices back through outbound mappings: connections to the source system, entity bindings with a preview of the mapped records, versioned mapping specs, data templates, migration runs with their exception queue and re-run.",
   routes: [
     { path: "/migration", element: createElement(RunsPage), handle: { title: "Migration runs" } },
     { path: "/migration/runs/new", element: createElement(NewRunPage), handle: { title: "Start migration run", duty: "migration.run" } },
@@ -43,6 +44,9 @@ const migration: PassageModule = {
     { path: "/migration/bindings/:id", element: createElement(BindingDetailPage), handle: { title: "Entity binding" } },
     { path: "/migration/sync", element: createElement(SyncPage), handle: { title: "Delta sync" } },
     { path: "/migration/sync/:bindingId", element: createElement(SyncDetailPage), handle: { title: "Delta sync status" } },
+    { path: "/migration/outbound", element: createElement(OutboundListPage), handle: { title: "Outbound mappings" } },
+    { path: "/migration/outbound/new", element: createElement(NewOutboundPage), handle: { title: "New outbound mapping" } },
+    { path: "/migration/outbound/:id", element: createElement(OutboundDetailPage), handle: { title: "Outbound mapping" } },
     { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
@@ -51,6 +55,7 @@ const migration: PassageModule = {
     { label: "Connections", to: "/migration/connections", duty: "migration.run" },
     { label: "Entity bindings", to: "/migration/bindings", duty: "migration.run" },
     { label: "Delta sync", to: "/migration/sync", duty: "migration.run" },
+    { label: "Outbound mappings", to: "/migration/outbound", duty: "migration.run" },
     { label: "Mapping specs", to: "/migration/specs" },
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },

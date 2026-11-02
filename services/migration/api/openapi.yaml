@@ -807,6 +807,191 @@ paths:
           description: MIG-NOT-CONFIGURED, no package target or tenant signing key is wired in this deployment.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings:
+    get:
+      operationId: listOutboundMappings
+      summary: List outbound mappings
+      description: Outbound mappings (Passage events pushed to a legacy ERP) in name order, optionally filtered by status, paged with the opaque nextCursor. Each row is the header of the current version; the definition is read with the single-mapping route. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of outbound mappings; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OutboundMapping' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createOutboundMapping
+      summary: Create an outbound mapping
+      description: Defines how one Passage CloudEvent type (an exact type or a pattern such as dev.passage.sales.order.*.v1) becomes the request body the integration hub pushes to the customer's legacy ERP. The definition reuses the mapping DSL in the Passage-to-legacy direction. Version 1 is stored; every later change writes a new immutable version. The legacy source system is fixed at creation.
+      x-passage-duty: migration.project.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateOutboundMapping' } } }
+      responses:
+        '201':
+          description: The mapping was created at version 1.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundMapping' } } }
+        '200':
+          description: The Idempotency-Key was replayed; the stored mapping is returned.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundMapping' } } }
+        '409':
+          description: MIG-OUTBOUND-NAME-EXISTS, a mapping with this name already exists.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-OUTBOUND-INVALID or MIG-MAP-*, the definition is not valid; or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOutboundMapping
+      summary: Get an outbound mapping
+      description: Returns the mapping with the definition of its current version, or of the version named in the query.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: version, in: query, description: A version to read instead of the current one., schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The mapping and one version's definition.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundMapping' } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND or MIG-OUTBOUND-VERSION-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateOutboundMapping
+      summary: Change an outbound mapping
+      description: Writes the next version under the caller's version (409 MIG-VERSION-CONFLICT when it is stale). A new definition replaces the whole mapping; a rename or an archive carries the current definition into the new version. An archived mapping is not rendered; it can only be reactivated.
+      x-passage-duty: migration.project.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateOutboundMapping' } } }
+      responses:
+        '200':
+          description: The mapping at its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundMapping' } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, MIG-OUTBOUND-NAME-EXISTS or MIG-OUTBOUND-ARCHIVED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-OUTBOUND-INVALID or MIG-MAP-*, the definition is not valid.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings/{id}/versions:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listOutboundMappingVersions
+      summary: List the versions of an outbound mapping
+      description: The history of a mapping, newest first, with each version's checksum, author and time.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The versions.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OutboundVersion' } } } } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings/{id}:preview:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: previewOutboundMapping
+      summary: Preview a stored outbound mapping
+      description: Renders a sample event through the mapping (current version, or the one named) and shows the result, or why there is none. It reads the cross-reference and writes nothing. A problem with the sample (an unresolved reference, a rejected field) is a 200 with status unresolved or rejected.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewOutboundMapping' } } }
+      responses:
+        '200':
+          description: The preview.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundPreview' } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND or MIG-OUTBOUND-VERSION-NOT-FOUND.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings:preview:
+    post:
+      operationId: previewOutboundDraft
+      summary: Preview an outbound mapping draft
+      description: Renders a sample event through a definition that is not saved, so a mapping can be tried before it is created. An invalid definition is a 200 with status invalid.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewOutboundDraft' } } }
+      responses:
+        '200':
+          description: The preview.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutboundPreview' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/outbound-mappings/{id}:render:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: renderOutboundMapping
+      summary: Render an event for the legacy ERP
+      description: "Called by the integration hub (service token, issuer integration-hub). Builds the request body for one CloudEvent through the mapping. It is pure: the same mapping version and event give the same answer, nothing is written and nothing is sent. The event's legalentityid extension must be the legal entity of the service token. The idempotencyKey is derived from the mapping id and the event id only, so it is the same for every render of one event whatever the mapping version. A reference the event carries that has no legacy key yet is 422 MIG-XREF-UNRESOLVED, listing each one."
+      x-passage-duty: migration.outbound.render
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RenderOutboundMapping' } } }
+      responses:
+        '200':
+          description: The request body, the idempotency key and the Passage records the legacy key of the push belongs to (passed back to xref:record).
+          content: { application/json: { schema: { $ref: '#/components/schemas/RenderedOutbound' } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND or MIG-OUTBOUND-VERSION-NOT-FOUND (always with a problem code; a 404 without one means the route is not deployed).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003, the caller is not the integration hub; or MIG-OUTBOUND-LEGAL-ENTITY, the event's legalentityid is missing or is not the legal entity of the service token.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-OUTBOUND-ARCHIVED, the mapping is archived.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-XREF-UNRESOLVED (the unresolved array lists every reference with no legacy key), MIG-OUTBOUND-REJECTED, MIG-OUTBOUND-EVENT-INVALID or MIG-OUTBOUND-EVENT-MISMATCH.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/UnresolvedProblem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref:record:
+    post:
+      operationId: recordOutboundXref
+      summary: Record the legacy key of a pushed record
+      description: "Called by the integration hub (service token, issuer integration-hub) after the legacy ERP accepted a push and answered with the key it assigned. Stores the key in the cross-reference so later events about the record resolve it, and the record resolves in both directions. Only the subject entity of the mapping is recorded, and an existing cross-reference row is never repointed. Idempotent on eventId: a repeat of the same call is 204 again; the same event with another key is 409."
+      x-passage-duty: migration.xref.record
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RecordOutboundXref' } } }
+      responses:
+        '204': { description: The legacy key is recorded (or was already, for the same event). }
+        '400':
+          description: COM-0001, a field is missing or malformed (more than one ref, a ref id that is not a UUID, an empty legacy key or event id).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003, the caller is not the integration hub.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: MIG-OUTBOUND-NOT-FOUND, no outbound mapping with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-XREF-EVENT-CONFLICT (the event already recorded another key or record) or MIG-XREF-CONFLICT (the legacy key belongs to another Passage record).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-XREF-REF-MISMATCH, the ref's entity is not the subject entity of the mapping.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
     post:
       operationId: createParallelRunDiff
@@ -1441,6 +1626,151 @@ components:
         resolvedAt: { type: string, format: date-time }
         resolvedBy: { type: string }
         version: { type: integer, minimum: 1, description: "Starts at 1; bumped when a run holds different legacy values for the row and when it is resolved." }
+    CreateOutboundMapping:
+      type: object
+      additionalProperties: false
+      required: [name, sourceSystem, definition]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
+        definition: { $ref: '#/components/schemas/OutboundDefinition' }
+    UpdateOutboundMapping:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1, description: The mapping version the change is based on. }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        status: { type: string, enum: [active, archived] }
+        definition: { $ref: '#/components/schemas/OutboundDefinition' }
+    OutboundDefinition:
+      type: object
+      additionalProperties: false
+      required: [eventType, mapping]
+      properties:
+        eventType: { type: string, description: "An exact CloudEvents type or a pattern: * stands for one dotted segment, a trailing ** for the rest (dev.passage.sales.order.*.v1)." }
+        subject:
+          type: object
+          additionalProperties: false
+          required: [entity, idPath]
+          description: The Passage record an event is about. Its legacy key is recorded against it by xref:record, so a later event about the same record reads it as xref.self (an update).
+          properties:
+            entity: { type: string }
+            idPath: { type: string, description: Dotted path of the record's id in the event, for example data.order_id. }
+        xrefs:
+          type: array
+          maxItems: 8
+          description: Passage ids the event carries (a customer, a product), each resolved to the legacy key an earlier load recorded and offered to the mapping as xref.<name>. A lookup that finds nothing fails the render with MIG-XREF-UNRESOLVED unless it is optional.
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, entity, idPath]
+            properties:
+              name: { type: string }
+              entity: { type: string, description: The entity name the cross-reference holds, for example customer. }
+              idPath: { type: string }
+              optional: { type: boolean }
+        decimalsAsNumbers: { type: boolean, description: Write decimal fields as exact JSON numbers instead of strings. }
+        mapping: { type: object, description: "Mapping DSL document: entity is the legacy entity, fields read the event (data.*, id, type, time, subject) and xref.<name>; a target with dots nests (Header.CustomerRef). Its version is set by the service." }
+    OutboundMapping:
+      type: object
+      required: [id, name, sourceSystem, eventType, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
+        eventType: { type: string }
+        status: { type: string, enum: [active, archived] }
+        version: { type: integer, minimum: 1 }
+        checksum: { type: string, description: SHA-256 of the version's canonical definition (present with a definition). }
+        definition: { $ref: '#/components/schemas/OutboundDefinition' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OutboundVersion:
+      type: object
+      required: [version, checksum, createdBy, createdAt]
+      properties:
+        version: { type: integer }
+        checksum: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    RenderOutboundMapping:
+      type: object
+      additionalProperties: false
+      required: [event]
+      properties:
+        event: { type: object, description: The CloudEvent exactly as the hub received it (id and type are required). }
+        version: { type: integer, minimum: 1, description: Render with this version instead of the current one (pinning). }
+    PreviewOutboundMapping:
+      type: object
+      additionalProperties: false
+      required: [event]
+      properties:
+        event: { type: object }
+        version: { type: integer, minimum: 1 }
+    PreviewOutboundDraft:
+      type: object
+      additionalProperties: false
+      required: [sourceSystem, definition, event]
+      properties:
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
+        definition: { $ref: '#/components/schemas/OutboundDefinition' }
+        event: { type: object }
+        version: { type: integer, minimum: 1 }
+    RenderedOutbound:
+      type: object
+      required: [body, idempotencyKey, refs]
+      properties:
+        body: { type: object, description: The request body for the legacy ERP. }
+        idempotencyKey: { type: string, description: "mig-ob-v1- and the SHA-256 of the mapping id and the event id: the same for every render of one event, whatever the mapping version." }
+        refs:
+          type: array
+          description: The Passage records the legacy key belongs to; the hub passes them back to xref:record.
+          items: { $ref: '#/components/schemas/OutboundRef' }
+    OutboundRef:
+      type: object
+      required: [entity, id]
+      properties:
+        entity: { type: string }
+        id: { type: string, format: uuid }
+    UnresolvedRef:
+      type: object
+      required: [name, entity, reason]
+      properties:
+        name: { type: string, description: The xref name in the mapping definition. }
+        entity: { type: string }
+        id: { type: string, description: The Passage id that has no legacy key; absent when the event carried none. }
+        reason: { type: string }
+    UnresolvedProblem:
+      description: A problem; for MIG-XREF-UNRESOLVED the unresolved array lists every reference without a legacy key.
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          properties:
+            unresolved: { type: array, items: { $ref: '#/components/schemas/UnresolvedRef' } }
+    OutboundPreview:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, unresolved, rejected, invalid] }
+        body: { type: object }
+        idempotencyKey: { type: string }
+        refs: { type: array, items: { $ref: '#/components/schemas/OutboundRef' } }
+        warnings: { type: array, items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
+        unresolved: { type: array, items: { $ref: '#/components/schemas/UnresolvedRef' } }
+        rejects: { type: array, items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
+        code: { type: string }
+        detail: { type: string }
+    RecordOutboundXref:
+      type: object
+      additionalProperties: false
+      required: [outboundMappingId, refs, legacyKey, eventId]
+      properties:
+        outboundMappingId: { type: string, format: uuid }
+        refs: { type: array, maxItems: 1, description: "The refs of the render: the subject (its entity must be the mapping's subject entity), or none for a mapping without a subject, in which case the event is recorded and the cross-reference is not touched.", items: { $ref: '#/components/schemas/OutboundRef' } }
+        legacyKey: { type: string, maxLength: 512, description: The key the legacy ERP assigned. }
+        eventId: { type: string, maxLength: 256, description: The event whose push produced the key; the call is idempotent on it. }
     Problem:
       type: object
       required: [type, title, status]
