@@ -617,6 +617,7 @@
       {"resource": "/v1/receivables/dunning-runs/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/interest-notes", "methods": ["GET"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["GET"]},
+      {"resource": "/v1/receivables/open-item-imports", "methods": ["GET"]},
       {"resource": "/v1/receivables/open-items", "methods": ["GET"]},
       {"resource": "/v1/receivables/payments", "methods": ["GET"]},
       {"resource": "/v1/receivables/payments/*", "methods": ["GET"]},
@@ -2139,6 +2140,9 @@
       {"resource": "/v1/product/released-products/*/site-defaults/*", "methods": ["GET"]},
       {"resource": "/v1/product/uom/convert", "methods": ["GET"]}
     ]},
+    "receivables.import.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/receivables/open-items:batch", "methods": ["POST"]}
+    ]},
     "product.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/product/products", "methods": ["POST"]},
       {"resource": "/v1/product/products/*", "methods": ["PATCH"]},
@@ -2701,11 +2705,12 @@
     },
     "migration": {
       "party": ["party.import.write"],
-      "product": ["product.import.write"]
+      "product": ["product.import.write"],
+      "receivables": ["receivables.import.write"]
     }
   },
   "service_principals": {
-    "migration-loader": ["party.import.write", "product.import.write"],
+    "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"]

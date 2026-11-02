@@ -111,8 +111,9 @@ var serviceGrants = map[string]map[string][]string{
 		"org": {"org.read"},
 	},
 	"migration": {
-		"party":   {"party.import.write"},
-		"product": {"product.import.write"},
+		"party":       {"party.import.write"},
+		"product":     {"product.import.write"},
+		"receivables": {"receivables.import.write"},
 	},
 }
 

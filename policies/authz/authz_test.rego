@@ -780,9 +780,18 @@ principal_allowed(name, method, resource) if {
 }
 
 test_migration_service_grant_reaches_only_the_import_write_routes if {
-	data.service_grants.migration == {"party": ["party.import.write"], "product": ["product.import.write"]}
+	data.service_grants.migration == {
+		"party": ["party.import.write"],
+		"product": ["product.import.write"],
+		"receivables": ["receivables.import.write"],
+	}
 	data.duties["party.import.write"].service_only
 	data.duties["product.import.write"].service_only
+	data.duties["receivables.import.write"].service_only
+	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
+	not allowed("receivables.import.write", "GET", "/v1/receivables/open-items")
+	not allowed("receivables.import.write", "POST", "/v1/receivables/payments")
+	not allowed("receivables.import.write", "POST", "/v1/receivables/open-items/o1:dispute")
 	allowed("party.import.write", "POST", "/v1/party/parties")
 	allowed("party.import.write", "PATCH", "/v1/party/parties/p1")
 	allowed("party.import.write", "POST", "/v1/party/parties/p1/vendor")
@@ -826,7 +835,9 @@ test_migration_service_grant_reaches_only_the_import_write_routes if {
 }
 
 test_migration_loader_principal_holds_only_the_import_duties if {
-	data.service_principals["migration-loader"] == ["party.import.write", "product.import.write"]
+	data.service_principals["migration-loader"] == ["party.import.write", "product.import.write", "receivables.import.write"]
+	principal_allowed("migration-loader", "POST", "/v1/receivables/open-items:batch")
+	not principal_allowed("migration-loader", "GET", "/v1/receivables/worklist")
 	principal_allowed("migration-loader", "POST", "/v1/party/parties")
 	principal_allowed("migration-loader", "PATCH", "/v1/party/parties/p1")
 	principal_allowed("migration-loader", "POST", "/v1/product/products")
