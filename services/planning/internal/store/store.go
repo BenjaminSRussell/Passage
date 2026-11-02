@@ -214,7 +214,11 @@ func priorityText(p *decimal.Decimal) *string {
 
 // Message is one action or delay message of the current version.
 type Message struct {
-	Action        string `json:"action"`
+	Action string `json:"action"`
+	// Code and Text are the message catalog entry of the action (PRD 4.22.18); empty for an
+	// action without one.
+	Code          string `json:"code,omitempty"`
+	Text          string `json:"text,omitempty"`
 	ItemID        string `json:"itemId"`
 	SupplyRef     string `json:"supplyRef"`
 	DemandRef     string `json:"demandRef"`
@@ -725,6 +729,13 @@ func (s *Postgres) ListMessages(ctx context.Context, planCode, action, sort stri
 			if err := rows.Scan(&m.Action, &m.ItemID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.PlanningPriority, &m.BufferZone); err != nil {
 				return err
 			}
+			m.Code = domain.CatalogCode(m.Action)
+			prio := ""
+			if m.PlanningPriority != nil {
+				prio = *m.PlanningPriority
+			}
+			m.Text = domain.CatalogText(domain.MessageView{Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
+				Date: m.SuggestedDate, Days: m.DelayDays, Qty: m.Qty, Priority: prio})
 			out = append(out, m)
 		}
 		return rows.Err()

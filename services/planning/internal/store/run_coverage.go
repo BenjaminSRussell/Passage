@@ -40,6 +40,8 @@ type RunCoverage struct {
 	// LeadTimeDays is the item coverage's lead-time override; nil means none.
 	LeadTimeDays     *int
 	PlannedOrderType string
+	// VendorID is the item coverage's default vendor (FR-22.3, FR-22.5); empty when none.
+	VendorID string
 }
 
 // RunCoverages returns the stored site-scope coverage of the given items at
@@ -59,7 +61,7 @@ func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, 
 			       g.positive_days, g.period_days, g.freeze_fence_days, g.action_fence_days,
 			       g.futures_fence_days, g.firming_fence_days, g.auto_firm, g.safety_stock_policy, c.min_qty::text, c.max_qty::text,
 			       c.safety_margin_receipt_days, c.lead_time_days, c.planned_order_type,
-			       c.safety_margin_issue_days, c.safety_margin_reorder_days
+			       c.safety_margin_issue_days, c.safety_margin_reorder_days, coalesce(c.vendor_id::text, '')
 			from item_coverage c
 			join coverage_group g on g.tenant_id = c.tenant_id and g.id = c.coverage_group_id
 			where c.tenant_id = $1 and c.site_id = $2::uuid and c.planning_scope = 'site'
@@ -76,7 +78,7 @@ func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, 
 			if err := rows.Scan(&c.ItemID, &c.GroupCode, &c.CoverageCode, &c.CoverageFenceDays, &c.NegativeDays,
 				&c.PositiveDays, &c.PeriodDays, &c.FreezeFenceDays, &c.ActionFenceDays, &c.FuturesFenceDays,
 				&c.FirmingFenceDays, &c.AutoFirm, &c.SafetyStockPolicy, &minQty, &maxQty, &c.MarginDays, &c.LeadTimeDays,
-				&c.PlannedOrderType, &c.IssueMarginDays, &c.ReorderMarginDays); err != nil {
+				&c.PlannedOrderType, &c.IssueMarginDays, &c.ReorderMarginDays, &c.VendorID); err != nil {
 				return err
 			}
 			if c.MinQty, err = decimal.NewFromString(minQty); err != nil {

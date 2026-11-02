@@ -159,7 +159,11 @@ components:
         plan_code: {type: string}
         version_id: {type: string, format: uuid}
         site_id: {type: string, format: uuid}
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top]}
+        action:
+          type: string
+          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]
+          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity)'
+          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224}
         item_id: {type: string, format: uuid}
         supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}

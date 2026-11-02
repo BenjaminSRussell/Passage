@@ -230,6 +230,17 @@ describe("DDMRP buffer orders (FR-22.16, AC-22.12)", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=sales-on-top"))).toBe(true));
   });
 
+  it("shows a PLAN-0008 no-vendor message with its catalog text and filters by it", async () => {
+    const none: Message = { action: "no-vendor", code: "PLAN-0008", text: "No vendor for planned purchase of item-9; using none.", itemId: buffered.itemId, supplyRef: "PLN-000003", demandRef: "", suggestedDate: "2026-11-04", delayDays: 0, qty: "17", planningPriority: null, bufferZone: null };
+    const fetchMock = stubApi(["/messages", () => json({ items: [none] })]);
+    renderAt("/planning/messages");
+    const table = await findTable({ name: "Messages" });
+    await waitFor(() => expect(within(table).getByText("No vendor")).toBeInTheDocument());
+    expect(within(table).getByText("PLAN-0008 No vendor for planned purchase of item-9; using none.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "no-vendor" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=no-vendor"))).toBe(true));
+  });
+
   it("shows the buffer priority on the order page", async () => {
     stubApi(["/pegging", () => json({ ...pegging, orderId: buffered.id, number: buffered.number })], ["/planned-orders/", () => json(buffered)]);
     renderAt(`/planning/planned-orders/${buffered.id}`);

@@ -219,8 +219,11 @@ func (c *calendarDTO) toDomain(asOf time.Time) *domain.Calendar {
 type itemDTO struct {
 	ItemID string `json:"itemId"`
 	// ItemGroup and Planner are item master attributes the plan scope filters on (FR-22.13).
-	ItemGroup   string          `json:"itemGroup,omitempty"`
-	Planner     string          `json:"planner,omitempty"`
+	ItemGroup string `json:"itemGroup,omitempty"`
+	Planner   string `json:"planner,omitempty"`
+	// VendorID is the default vendor of the item's planned purchase orders (FR-22.3);
+	// a stored site-scope item coverage supplies it when left out.
+	VendorID    string          `json:"vendorId,omitempty"`
 	Coverage    coverageDTO     `json:"coverage"`
 	OnHand      decimal.Decimal `json:"onHand"`
 	SafetyStock decimal.Decimal `json:"safetyStock"`
@@ -314,6 +317,9 @@ func (req runRequest) validate() map[string]string {
 		prefix := fmt.Sprintf("items[%d]", i)
 		if !ids.Valid(it.ItemID) {
 			fields[prefix+".itemId"] = "must be a UUID"
+		}
+		if it.VendorID != "" && !ids.Valid(it.VendorID) {
+			fields[prefix+".vendorId"] = "must be a UUID"
 		}
 		if len(it.ItemGroup) > maxAttrLen || len(it.Planner) > maxAttrLen {
 			fields[prefix+".itemGroup"] = "itemGroup and planner must be at most 64 characters"
@@ -549,6 +555,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	result = domain.ApplyDefaultVendors(result, defaultVendors(req.Items))
 	result = domain.AddBufferResults(result, buffers)
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
@@ -881,9 +888,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone or sales-on-top"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top or no-vendor"})
 		return
 	}
 	limit, ok := limitParam(w, r)

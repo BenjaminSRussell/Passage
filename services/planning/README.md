@@ -339,6 +339,9 @@ NOT-IMPLEMENTED.md):
 - Forecast consumption (FR-22.19, BR-22.13) for assemble-to-order-final; in a run the
   sales that find no forecast raise the `sales-on-top` message (PLAN-0015), and
   `mts-gross` forecast is not netted against on-hand.
+- Default vendor (FR-22.3): a run item's `vendorId`, else the default vendor of its stored item coverage, is
+  stamped on planned purchases after quota allocation; a purchase with none raises `no-vendor` (PLAN-0008).
+  `GET /messages` returns the catalog `code` and `text` of the actions that have one.
 - Supply schedule and inventory forecast (FR-22.21, FR-22.22): day, week or
   30-day month buckets; value is closing on-hand × unit cost as platform
   `money`, rounded to the currency's minor unit.

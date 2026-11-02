@@ -344,7 +344,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]}
         - name: sort
           in: query
           description: 'priority: messages about planned orders that replenish a DDMRP buffer first, lowest planning priority (net-flow position over top of green) first, then the rest in action, supply, demand order (FR-22.16). Without sort only the messages about buffer orders of items whose site-scope item coverage is priorityBased lead by priority; the rest are in action, supply, demand order'
@@ -2069,6 +2069,7 @@ components:
         itemId: {type: string, format: uuid}
         itemGroup: {type: string, maxLength: 64, description: 'Item group, matched by scope.itemGroups (FR-22.13)'}
         planner: {type: string, maxLength: 64, description: 'Planner, matched by scope.planners (FR-22.13)'}
+        vendorId: {type: string, format: uuid, description: 'Default vendor of the item''s planned purchase orders (FR-22.3); left out, it is the default vendor of the stored site-scope item coverage. A quota source''s vendor wins. A purchase with no vendor raises the PLAN-0008 message no-vendor'}
         coverage:
           type: object
           description: Omit it, or send it without a code, to use the stored item coverage of the item at the site; a block without a code is replaced whole.
@@ -2359,13 +2360,15 @@ components:
     Message:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor]}
         itemId: {type: string, format: uuid}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line)'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date; red-zone: delivery date of the buffer replenishment order; sales-on-top: date of the sales line (PLAN-0015, qty is the excess over the forecast it could consume, demandRef the sales line); no-vendor: order date of the item''s earliest purchase without a vendor (PLAN-0008, supplyRef that order)'}
         delayDays: {type: integer}
-        qty: {type: string}
+        qty: {type: string, description: 'Decimal string in the inventory unit; no-vendor: the item''s purchase quantity left without a vendor'}
+        code: {type: string, example: PLAN-0007, description: 'Message catalog code (PRD 4.22.18): PLAN-0006 postpone, PLAN-0007 delay, PLAN-0008 no-vendor, PLAN-0010 red-zone, PLAN-0015 sales-on-top; absent for the other actions'}
+        text: {type: string, description: 'The catalog user text with the message''s values filled in (the item is named by its id); absent when code is'}
         planningPriority: {type: string, nullable: true, description: 'Planning priority of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16); null otherwise'}
         bufferZone: {type: string, nullable: true, enum: [red, yellow, green, null], description: Zone of that buffer}
     Problem:

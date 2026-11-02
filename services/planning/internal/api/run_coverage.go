@@ -11,7 +11,7 @@ import (
 // model ItemCoverage): a coverage without a code is replaced by the stored
 // group's settings with the item coverage's min, max and receipt margin; an
 // empty orderType takes the stored planned order type; an absent leadTimeDays
-// takes the stored lead-time override when there is one. Inline values always
+// takes the stored lead-time override when there is one; an absent vendorId takes the stored default vendor. Inline values always
 // win. It returns one message per item that still has no coverage code or
 // order type, keyed like the request validation.
 func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) map[string]string {
@@ -26,6 +26,9 @@ func withStoredCoverage(items []itemDTO, stored map[string]store.RunCoverage) ma
 			}
 			if it.OrderType == "" {
 				it.OrderType = c.PlannedOrderType
+			}
+			if it.VendorID == "" {
+				it.VendorID = c.VendorID
 			}
 			if it.LeadTimeDays == nil && c.LeadTimeDays != nil {
 				lead := *c.LeadTimeDays
@@ -80,4 +83,16 @@ func deref(n *int) int {
 		return 0
 	}
 	return *n
+}
+
+// defaultVendors lists the default vendor of each run item that has one, after
+// withStoredCoverage has filled it from the stored item coverage.
+func defaultVendors(items []itemDTO) map[string]string {
+	out := map[string]string{}
+	for _, it := range items {
+		if it.VendorID != "" {
+			out[it.ItemID] = it.VendorID
+		}
+	}
+	return out
 }

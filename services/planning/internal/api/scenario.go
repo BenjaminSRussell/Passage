@@ -265,6 +265,7 @@ func (a *API) runScenario(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, runProblem(err))
 		return
 	}
+	result = domain.ApplyDefaultVendors(result, defaultVendors(req.Items))
 	result = domain.AddBufferResults(result, buffers)
 	v, replayed, err := a.store.RunSimulation(r.Context(), store.SimulationRequest{
 		ScenarioCode: code, LegalEntityID: req.LegalEntityID, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: planned,

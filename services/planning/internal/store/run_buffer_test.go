@@ -278,3 +278,36 @@ func TestRunPlan_StoresSalesOnTopMessage(t *testing.T) {
 		t.Fatalf("sales-on-top messages = %+v, %v", msgs, err)
 	}
 }
+
+// TestRunPlan_StoresNoVendorMessageWithCatalogText: the PLAN-0008 message of a
+// purchase without a vendor is stored (migration 0022 admits the action) and
+// read back with its catalog code and rendered text; a vendor given by the run
+// is stored on the order.
+func TestRunPlan_StoresNoVendorMessageWithCatalogText(t *testing.T) {
+	st, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read")
+	bare, withVendor, vendor := ids.New(), ids.New(), ids.New()
+	items := []domain.Item{
+		{ID: bare, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2,
+			Demand: []domain.Requirement{{Ref: "SO-1", RefType: domain.RefSales, Date: 9, Qty: decimal.NewFromInt(5)}}},
+		{ID: withVendor, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase, LeadTimeDays: 2,
+			Demand: []domain.Requirement{{Ref: "SO-2", RefType: domain.RefSales, Date: 9, Qty: decimal.NewFromInt(6)}}},
+	}
+	res, err := domain.Run(0, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = domain.ApplyDefaultVendors(res, map[string]string{withVendor: vendor})
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-vendor", "in-vendor")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionNoVendor, "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != bare || msgs[0].Code != "PLAN-0008" ||
+		msgs[0].Text != "No vendor for planned purchase of "+bare+"; using none." || !decimal.RequireFromString(msgs[0].Qty).Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("no-vendor messages = %+v, %v", msgs, err)
+	}
+	orders, err := st.ListPlannedOrders(ctx, "MAIN", store.OrderFilter{ItemID: withVendor}, 10)
+	if err != nil || len(orders) != 1 || orders[0].VendorID == nil || *orders[0].VendorID != vendor {
+		t.Fatalf("orders = %+v, %v", orders, err)
+	}
+}

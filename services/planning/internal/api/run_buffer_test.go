@@ -20,7 +20,7 @@ func (f *fakeStore) RunBuffers(_ context.Context, _, _ string, _ []string) ([]do
 // and a red-zone buffer raises the PLAN-0010 message.
 func TestRun_BufferReplenishesDecouplingPoint(t *testing.T) {
 	st := &fakeStore{runBuffers: []domain.RunBuffer{redBuffer()}}
-	_, req := runVersion(t, st, strings.Replace(runBody, `"production"`, `"purchase"`, 1), "k-buffer")
+	_, req := runVersion(t, st, strings.Replace(runBody, `"production"`, `"purchase","vendorId":"`+defaultVendor+`"`, 1), "k-buffer")
 	o := onlyOrder(t, req)
 	if !o.Qty.Equal(decimal.RequireFromString("115")) {
 		t.Fatalf("order %+v; want the buffer quantity 115, not the 120 demand", o)

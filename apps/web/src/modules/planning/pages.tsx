@@ -44,7 +44,7 @@ export const PAGE_LIMIT = 500;
 const dash = "—";
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top"] as const;
+const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -62,6 +62,7 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   increase: "warning",
   "red-zone": "danger",
   "sales-on-top": "info",
+  "no-vendor": "warning",
 };
 
 /** The DDMRP buffer priority and zone of an order that replenishes a buffer (FR-22.16). */
@@ -550,6 +551,7 @@ export function MessagesPage() {
   const state = useLoad((signal) => listMessages(plan, action, { signal }, sort), [plan, action, sort]);
   const columns: DataTableColumn<Message>[] = [
     { key: "action", header: "Action", render: (m) => <Badge tone={actionTone[m.action]}>{sentence(m.action)}</Badge> },
+    { key: "text", header: "Message", render: (m) => (m.text ? `${m.code ? `${m.code} ` : ""}${m.text}` : dash) },
     { key: "itemId", header: "Item", mono: true },
     { key: "supplyRef", header: "Supply", mono: true, render: (m) => m.supplyRef || dash },
     { key: "demandRef", header: "Demand", mono: true, render: (m) => m.demandRef || dash },

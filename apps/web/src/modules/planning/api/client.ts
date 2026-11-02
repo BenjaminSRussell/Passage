@@ -5,7 +5,7 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 export const BufferZone = z.enum(["red", "yellow", "green"]);
 export type BufferZone = z.infer<typeof BufferZone>;
@@ -49,6 +49,9 @@ export const Message = z.object({
   suggestedDate: z.string().nullish(),
   delayDays: z.number().int(),
   qty: z.string(),
+  /** Message catalog entry of the action (PRD 4.22.18); absent for an action without one. */
+  code: z.string().nullish(),
+  text: z.string().nullish(),
   /** Of the planned order the message is about when it replenishes a DDMRP buffer (FR-22.16). */
   planningPriority: z.string().nullish(),
   bufferZone: BufferZone.nullish(),
