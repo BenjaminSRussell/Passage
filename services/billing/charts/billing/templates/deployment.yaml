@@ -40,6 +40,12 @@ spec:
               value: ":{{ .Values.service.adminPort }}"
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: billing
+            {{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+            {{- end }}
             - name: BILLING_MAX_LINES
               value: {{ .Values.maxLines | quote }}
             - name: BILLING_TAX_RATES

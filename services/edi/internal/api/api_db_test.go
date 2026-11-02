@@ -36,7 +36,9 @@ func dbHandlerPool(t *testing.T) (http.Handler, *pgxpool.Pool) {
 	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return New(store.New(pool, 30)).Routes(), pool
+	a := New(store.New(pool, 30))
+	a.AllowBodyOutbound = true
+	return a.Routes(), pool
 }
 
 func do(t *testing.T, h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {

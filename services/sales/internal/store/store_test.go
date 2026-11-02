@@ -306,7 +306,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 			exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'legal_entity_id' and not a.attisdropped),
 			exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'RESTRICTIVE')
 		from pg_class c join pg_namespace n on n.oid = c.relnamespace
-		where n.nspname = current_schema() and c.relkind = 'r' and c.relname <> 'schema_migrations'`)
+		where n.nspname = current_schema() and c.relkind = 'r' and c.relname not in ('schema_migrations', 'service_token_replay')`)
 	if err != nil {
 		t.Fatal(err)
 	}

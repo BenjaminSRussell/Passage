@@ -50,10 +50,13 @@ type ASN struct {
 	ProNumber   string          `json:"proNumber,omitempty"`
 	SCAC        string          `json:"scac"`
 	GrossWeight decimal.Decimal `json:"grossWeight"`
-	WeightUnit  string          `json:"weightUnit"`
-	ShipFrom    Location        `json:"shipFrom"`
-	ShipTo      Location        `json:"shipTo"`
-	Orders      []ASNOrder      `json:"orders"`
+	// LadingQuantity is the TD102 count of top-level units (pallets and loose
+	// cartons); zero means the pack count.
+	LadingQuantity int        `json:"ladingQuantity,omitempty"`
+	WeightUnit     string     `json:"weightUnit"`
+	ShipFrom       Location   `json:"shipFrom"`
+	ShipTo         Location   `json:"shipTo"`
+	Orders         []ASNOrder `json:"orders"`
 }
 
 // ErrOutbound marks a canonical document that cannot be turned into an EDI
@@ -162,7 +165,11 @@ func Build856(a ASN) (Transaction, error) {
 	b.seg("BSN", "00", a.ShipmentID, a.ShipDate, a.ShipTime, "0001")
 	s := b.hl(0, "S")
 	// TD1: packaging PLT94, lading quantity, then TD106 G gross weight, TD107, TD108 unit.
-	b.seg("TD1", "PLT94", strconv.Itoa(packs), "", "", "", "G", a.GrossWeight.String(), a.WeightUnit)
+	lading := a.LadingQuantity
+	if lading == 0 {
+		lading = packs
+	}
+	b.seg("TD1", "PLT94", strconv.Itoa(lading), "", "", "", "G", a.GrossWeight.String(), a.WeightUnit)
 	// TD5: TD502 qualifier 2 (SCAC) is required with TD503; TD504 M motor.
 	b.seg("TD5", "", "2", a.SCAC, "M")
 	if a.BOL != "" {

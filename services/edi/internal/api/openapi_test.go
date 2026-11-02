@@ -43,7 +43,9 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	served := map[string]bool{}
-	_ = chi.Walk(New(nil).Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+	withBody := New(nil)
+	withBody.AllowBodyOutbound = true
+	_ = chi.Walk(withBody.Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if route == "/healthz" || route == "/readyz" {
 			return nil
 		}
@@ -65,7 +67,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 			t.Errorf("documented but not served: %s", op)
 		}
 	}
-	if len(served) != 17 {
+	if len(served) != 19 {
 		t.Fatalf("router walk yielded %d operations: %v", len(served), served)
 	}
 }

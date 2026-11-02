@@ -89,7 +89,9 @@ paths:
         (EDI_ISA_QUALIFIER/EDI_ISA_ID) to the partner with the next gap-free control number
         (ISA13 and GS06, BR-35.5) and records it with ackStatus PENDING until the partner's 997 is
         matched. The message stays MAPPED: AS2/SFTP transmission is not built yet. A document that
-        breaks a mapping rule is 422 EDI-0007.
+        breaks a mapping rule is 422 EDI-0007. Served only when EDI_ALLOW_BODY_OUTBOUND=true
+        (tests and development); production generates from the owning services through
+        outbound:from-source.
       x-passage-duty: EDI_OPERATE
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -120,6 +122,88 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '422':
           description: EDI-0007 — the document breaks a mapping rule; or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/partners/{id}/trade-profile:
+    put:
+      operationId: putTradeProfile
+      summary: Set the partner's trade profile (legal entity, customer, GLNs, default SCAC)
+      description: >
+        The profile ties the partner to one legal entity and one customer of the source
+        services and supplies the party names and GLNs the ASN and invoice sources do not carry.
+      x-passage-duty: EDI_ADMIN
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TradeProfile' }
+      responses:
+        '200':
+          description: Profile saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradeProfile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/outbound:from-source:
+    post:
+      operationId: outboundFromSource
+      summary: Generate the 856 from a fulfillment shipment or the 810 from a billing invoice
+      description: >
+        Reads the shipment (with its sales order for the customer PO) or the invoice from its owning
+        service under a service grant limited to the read duties fulfillment.shipment.read,
+        billing.invoice.read and sales.order.lookup, for the legal entity of the partner's trade
+        profile. The document must belong to that legal entity and customer (422 EDI-0011) and be
+        final (409 EDI-0013). Idempotent per source document: a repeat returns the recorded
+        interchange (200) and allocates no control number. This is an explicit API call; the
+        wms.load.shipped and invoice.posted consumers are not built.
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SourceOutboundRequest' }
+      responses:
+        '200':
+          description: The source document was already sent; the recorded interchange
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboundResult' }
+        '201':
+          description: Outbound interchange recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboundResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: Missing duty, or EDI-0014 a source service refused the edi service grant for the partner's legal entity
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: EDI-0011 wrong legal entity or customer, EDI-0007 mapping rule, or idempotency_key_reuse when the source changed after it was sent
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502':
+          description: EDI-0010 a source service could not be read
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: EDI-0010 source services are not configured
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -949,6 +1033,25 @@ components:
               status: { type: string, enum: [MAPPED, FAILED, POSTED] }
               error: { type: string }
         ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
+    TradeProfile:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, customerId, shipFrom, shipTo, billTo, remitTo, defaultScac]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        shipFrom: { $ref: '#/components/schemas/Location' }
+        shipTo: { $ref: '#/components/schemas/Location' }
+        billTo: { $ref: '#/components/schemas/Location' }
+        remitTo: { $ref: '#/components/schemas/Location' }
+        defaultScac: { type: string, pattern: '^[A-Z0-9]{2,4}$' }
+    SourceOutboundRequest:
+      type: object
+      additionalProperties: false
+      required: [transactionSet, sourceId]
+      properties:
+        transactionSet: { type: string, enum: ['856', '810'] }
+        sourceId: { type: string, format: uuid, description: shipment id for 856, invoice id for 810 }
     OutboundRequest:
       type: object
       additionalProperties: false

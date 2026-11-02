@@ -537,6 +537,28 @@ test_inventory_hold_duties_open_only_their_routes if {
 	not allowed("inventory.hold.apply", "POST", "/v1/inventory/journals")
 }
 
+test_edi_source_read_duties_open_only_their_get_routes if {
+	data.service_grants.edi == {
+		"fulfillment": ["fulfillment.shipment.read"],
+		"billing": ["billing.invoice.read"],
+		"sales": ["sales.order.lookup"],
+	}
+	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup"] {
+		data.duties[duty].service_only
+	}
+	allowed("fulfillment.shipment.read", "GET", "/v1/fulfillment/shipments/s1")
+	not allowed("fulfillment.shipment.read", "POST", "/v1/fulfillment/shipments/s1:confirm-pick")
+	not allowed("fulfillment.shipment.read", "GET", "/v1/fulfillment/packing-slips/p1")
+	allowed("billing.invoice.read", "GET", "/v1/billing/invoices/i1")
+	not allowed("billing.invoice.read", "POST", "/v1/billing/invoices/i1:post")
+	not allowed("billing.invoice.read", "GET", "/v1/billing/invoices/i1/trace")
+	allowed("sales.order.lookup", "GET", "/v1/sales/orders/o1")
+	not allowed("sales.order.lookup", "POST", "/v1/sales/orders/o1:confirm")
+	allowed("EDI_OPERATE", "POST", "/edi/v1/partners/p1/outbound:from-source")
+	allowed("EDI_ADMIN", "PUT", "/edi/v1/partners/p1/trade-profile")
+	not allowed("EDI_OPERATE", "PUT", "/edi/v1/partners/p1/trade-profile")
+}
+
 granted_duty_known(duty) if data.duties[duty]
 
 test_service_principals_hold_only_known_unprivileged_duties if {

@@ -121,6 +121,11 @@ var serviceGrants = map[string]map[string][]string{
 	"integration-hub": {
 		"migration": {"migration.outbound.render", "migration.xref.record"},
 	},
+	"edi": {
+		"fulfillment": {"fulfillment.shipment.read"},
+		"billing":     {"billing.invoice.read"},
+		"sales":       {"sales.order.lookup"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.

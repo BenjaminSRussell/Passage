@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
@@ -29,6 +30,9 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
+	if err := tenant.ConfigureServiceVerifier(os.Getenv); err != nil {
+		return err
+	}
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
@@ -56,6 +60,10 @@ func run() error {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
 	}
 
 	s := store.New(pool, prefix, ext)

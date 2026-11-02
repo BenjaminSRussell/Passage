@@ -35,6 +35,12 @@ spec:
               value: ":9090"
             - name: SERVICE_NAME
               value: {{ .Chart.Name | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: fulfillment
+            {{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+            {{- end }}
             - name: SERVICE_VERSION
               value: {{ .Chart.AppVersion | quote }}
             - name: DATABASE_URL

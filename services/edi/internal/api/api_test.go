@@ -51,7 +51,9 @@ func call(t *testing.T, method, path, body string, duties string, headers map[st
 		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
-	New(nil).Routes().ServeHTTP(rec, req)
+	a := New(nil)
+	a.AllowBodyOutbound = true
+	a.Routes().ServeHTTP(rec, req)
 	return rec
 }
 

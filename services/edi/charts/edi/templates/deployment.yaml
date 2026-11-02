@@ -16,6 +16,9 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -41,6 +44,26 @@ spec:
               value: {{ .Values.isaSender.qualifier | quote }}
             - name: EDI_ISA_ID
               value: {{ .Values.isaSender.id | quote }}
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_NAME
+              value: edi
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+            {{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+            {{- end }}
+            - name: EDI_FULFILLMENT_URL
+              value: {{ required "sources.fulfillmentUrl is required with serviceIdentity.signingKeySecret" .Values.sources.fulfillmentUrl | quote }}
+            - name: EDI_BILLING_URL
+              value: {{ required "sources.billingUrl is required with serviceIdentity.signingKeySecret" .Values.sources.billingUrl | quote }}
+            - name: EDI_SALES_URL
+              value: {{ required "sources.salesUrl is required with serviceIdentity.signingKeySecret" .Values.sources.salesUrl | quote }}
+            {{- end }}
+            {{- if .Values.allowBodyOutbound }}
+            - name: EDI_ALLOW_BODY_OUTBOUND
+              value: "true"
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -52,5 +75,16 @@ spec:
             httpGet: { path: /healthz, port: http }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
+          {{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+      {{- end }}
