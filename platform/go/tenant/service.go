@@ -118,6 +118,9 @@ var serviceGrants = map[string]map[string][]string{
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "ARView"},
 	},
+	"integration-hub": {
+		"migration": {"migration.outbound.render", "migration.xref.record"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.

@@ -834,6 +834,21 @@ test_migration_service_grant_reaches_only_the_import_write_routes if {
 	}
 }
 
+test_integration_hub_reaches_only_render_and_xref_record if {
+	data.service_grants["integration-hub"] == {"migration": ["migration.outbound.render", "migration.xref.record"]}
+	data.service_principals["integration-hub"] == ["migration.outbound.render", "migration.xref.record"]
+	data.duties["migration.outbound.render"].service_only
+	data.duties["migration.xref.record"].service_only
+	allowed("migration.outbound.render", "POST", "/v1/integration/outbound-mappings/m1:render")
+	allowed("migration.xref.record", "POST", "/v1/integration/xref:record")
+	not allowed("migration.outbound.render", "POST", "/v1/integration/outbound-mappings")
+	not allowed("migration.outbound.render", "GET", "/v1/integration/outbound-mappings/m1")
+	not allowed("migration.xref.record", "GET", "/v1/integration/xref")
+	not allowed("migration.xref.record", "POST", "/v1/integration/migration-runs")
+	principal_allowed("integration-hub", "POST", "/v1/integration/xref:record")
+	not principal_allowed("integration-hub", "POST", "/v1/receivables/open-items:batch")
+}
+
 test_migration_factory_grant_reaches_only_the_receivables_import if {
 	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "ARView"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")

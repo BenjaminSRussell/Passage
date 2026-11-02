@@ -1824,6 +1824,11 @@
     ]},
     "migration.package.apply": {"permissions": [{"resource": "/v1/integration/config-packages:apply", "methods": ["POST"]}]},
     "migration.run": {"permissions": [
+      {"resource": "/v1/integration/outbound-mappings", "methods": ["GET"]},
+      {"resource": "/v1/integration/outbound-mappings/*", "methods": ["GET"]},
+      {"resource": "/v1/integration/outbound-mappings/*/versions", "methods": ["GET"]},
+      {"resource": "/v1/integration/outbound-mappings/*:preview", "methods": ["POST"]},
+      {"resource": "/v1/integration/outbound-mappings:preview", "methods": ["POST"]},
       {"resource": "/v1/integration/sync-conflicts", "methods": ["GET"]},
       {"resource": "/v1/integration/sync-conflicts/*:resolve", "methods": ["POST"]},
       {"resource": "/v1/integration/sync-status", "methods": ["GET"]},
@@ -1860,6 +1865,8 @@
       {"resource": "/v1/integration/mapping-specs", "methods": ["POST"]}
     ]},
     "migration.project.write": {"permissions": [
+      {"resource": "/v1/integration/outbound-mappings", "methods": ["POST"]},
+      {"resource": "/v1/integration/outbound-mappings/*", "methods": ["PATCH"]},
       {"resource": "/v1/integration/sync-status/*", "methods": ["PATCH"]},
       {"resource": "/v1/integration/projects", "methods": ["POST"]},
       {"resource": "/v1/integration/projects/*", "methods": ["PATCH"]},
@@ -2147,6 +2154,12 @@
       {"resource": "/v1/product/released-products/*/process-policy", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/site-defaults/*", "methods": ["GET"]},
       {"resource": "/v1/product/uom/convert", "methods": ["GET"]}
+    ]},
+    "migration.outbound.render": {"service_only": true, "permissions": [
+      {"resource": "/v1/integration/outbound-mappings/*:render", "methods": ["POST"]}
+    ]},
+    "migration.xref.record": {"service_only": true, "permissions": [
+      {"resource": "/v1/integration/xref:record", "methods": ["POST"]}
     ]},
     "receivables.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/receivables/open-items:batch", "methods": ["POST"]}
@@ -2718,9 +2731,13 @@
     },
     "migration-factory": {
       "receivables": ["receivables.import.write", "ARView"]
+    },
+    "integration-hub": {
+      "migration": ["migration.outbound.render", "migration.xref.record"]
     }
   },
   "service_principals": {
+    "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "migration-loader": ["party.import.write", "product.import.write", "receivables.import.write"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
