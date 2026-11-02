@@ -459,6 +459,9 @@ func loadLedger(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Ledger{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found")
 	}
+	if p, ok := tenant.FromContext(ctx); ok && err == nil && !tenant.InLegalEntityScope(p, l.LegalEntityID) {
+		return Ledger{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found")
+	}
 	return l, err
 }
 
