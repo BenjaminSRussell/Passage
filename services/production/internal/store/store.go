@@ -824,7 +824,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 					return domainProblem(err)
 				}
 			}
-			if err := settleOrder(ctx, tx, p.TenantID, h, t.Actor); err != nil {
+			if err := settleOrder(ctx, tx, p.TenantID, h, t.Actor, prm.ReworkCapitalize); err != nil {
 				return err
 			}
 		case domain.CmdStart:

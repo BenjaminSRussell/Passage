@@ -106,3 +106,26 @@ func ReworkVariances(byGroup map[CostGroup]decimal.Decimal) []Variance {
 	}
 	return out
 }
+
+// PostReworkCapitalized is the posting type of the capitalization of a rework order's
+// remaining WIP balance into finished goods (FR-21.20, `rework.capitalize`).
+const PostReworkCapitalized = "rework-capitalized"
+
+// ReworkCapitalizationPostings settles a rework order at End when the site capitalizes rework
+// (PRD 4.21.13 `rework.capitalize`): the whole WIP balance (the rework cost, after the
+// receipts took the reworked units back at their existing cost) moves into finished goods,
+// Dr Finished goods / Cr WIP, so the reworked units carry the rework cost and no variance is
+// posted. A negative balance reverses the sides. It needs the profile's finished goods account.
+func ReworkCapitalizationPostings(p Profile, balance decimal.Decimal) ([]Posting, error) {
+	if balance.IsZero() {
+		return nil, nil
+	}
+	if p.FinishedGoods == "" {
+		return nil, &Error{Code: CodeNoPostingProfile, Detail: "the posting profile " + p.ItemGroup + " × " + p.SiteID + " has no finished goods account to capitalize rework into"}
+	}
+	out := pair(PostReworkCapitalized, p.FinishedGoods, false, PostWIPSettlement, p.WIP, true, balance)
+	if !Balanced(out) {
+		return nil, &Error{Code: CodeUnbalanced, Detail: "the settlement debits and credits differ"}
+	}
+	return out, nil
+}

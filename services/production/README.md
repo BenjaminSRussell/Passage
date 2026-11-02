@@ -559,3 +559,11 @@ Slice 18:
 - `GET /v1/production/jobs` (by resource, order, site, job type, order status and a from/to window,
   keyset pages, totals over the filter) and `GET /v1/production/orders/{id}/jobs`; duty
   `production.order.read`. `:schedule` keeps `production.order.write`.
+
+Slice 23:
+
+- Capitalize rework (`reworkCapitalize` parameter per site, default off; migration 0021): `:end` of a
+  rework order with output moves its remaining WIP into the profile's finished goods account (posting
+  type `rework-capitalized`) instead of posting a `rework` variance (one ended without output still
+  posts it); `order.settled` carries `reworkCapitalized` for inventory and costing to add to the
+  receipts' value (handoff). The parameters page has the setting.

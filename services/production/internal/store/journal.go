@@ -1198,7 +1198,8 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 // End date before the last posting, computes actual cost from the posted
 // journals, decomposes it against the estimate, clears the WIP balance into
 // the variance accounts, stores the variances and enqueues order.settled.
-func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, actor string) error {
+// capitalizeRework is the site's rework.capitalize parameter as of this End.
+func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, actor string, capitalizeRework bool) error {
 	var drafts int
 	var lastPosted *string
 	if err := tx.QueryRow(ctx, `select count(*) filter (where not posted), max(posting_date) filter (where posted)::text
@@ -1226,14 +1227,19 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 		return err
 	}
 	var vars []domain.Variance
-	if h.rework() {
-		// FR-21.20, AC-21.15: rework is not capitalized; the WIP balance is rework cost.
+	// FR-21.20: the site's rework.capitalize parameter moves the WIP balance of a rework
+	// order into finished goods (no variance rows), but only onto units it received: a
+	// rework order ended without output has no stock to carry the cost, so it is expensed.
+	capitalize := h.rework() && capitalizeRework && h.qtyRAF.IsPositive()
+	if h.rework() && !capitalize {
+		// AC-21.15: rework is not capitalized by default; the WIP balance is rework cost
+		// and settles as rework variances.
 		byGroup, err := wipBalanceByGroup(ctx, tx, tenantID, h.id)
 		if err != nil {
 			return err
 		}
 		vars = domain.ReworkVariances(byGroup)
-	} else {
+	} else if !h.rework() {
 		// FR-21.14: co-product output counts toward the share of planned cost earned.
 		cos, err := loadCoProducts(ctx, tx, tenantID, h.id)
 		if err != nil {
@@ -1250,7 +1256,12 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 		if err != nil {
 			return err
 		}
-		if postings, err = domain.SettlementPostings(profile, balance, vars); err != nil {
+		if capitalize {
+			postings, err = domain.ReworkCapitalizationPostings(profile, balance)
+		} else {
+			postings, err = domain.SettlementPostings(profile, balance, vars)
+		}
+		if err != nil {
 			return domainProblem(err)
 		}
 		if err := insertPostings(ctx, tx, tenantID, h, nil, date, postings); err != nil {
@@ -1260,6 +1271,9 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 	data := prodevents.OrderSettledData{OrderID: h.id, Currency: h.currency, PostingDate: date, QtyRAF: h.qtyRAF.String(),
 		WIPCleared: balance.String(), PlannedCost: byGroup(planned), ActualCost: byGroup(actual),
 		Variances: []prodevents.VarianceAmount{}, Postings: eventPostings(postings)}
+	if capitalize && !balance.IsZero() {
+		data.ReworkCapitalized = balance.String()
+	}
 	for _, v := range vars {
 		if _, err := tx.Exec(ctx, `insert into production_variance (tenant_id, id, legal_entity_id, order_id, variance_type, cost_group, amount, currency)
 			values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, ids.New(), h.legalEntityID, h.id, string(v.Type), string(v.Group), v.Amount.String(), h.currency); err != nil {

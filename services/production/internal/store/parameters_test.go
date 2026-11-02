@@ -268,3 +268,22 @@ func TestParameters_RowLevelSecurity(t *testing.T) {
 		t.Fatalf("another tenant sees %d rows (%v)", len(foreign), err)
 	}
 }
+
+// A replace that leaves reworkCapitalize out keeps the stored value; one that sets it changes it.
+func TestParameters_ReworkCapitalizeKeptOnReplace(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(71))
+	le := ids.New()
+	if p := saveParams(t, s, ctx, le, nil, domain.AllKey, 0); p.ReworkCapitalize {
+		t.Fatalf("created with the default: %+v", p)
+	}
+	saveParams(t, s, ctx, le, func(p *domain.Parameters) { p.ReworkCapitalize = true }, domain.AllKey, 1)
+	prm := plantParams(domain.AllKey)
+	out, _, err := s.SaveParameters(ctx, ParametersSave{LegalEntityID: le, Parameters: prm, IfMatch: 2, Actor: "admin", Keep: KeepParameters{ReworkCapitalize: true}})
+	if err != nil || !out.ReworkCapitalize {
+		t.Fatalf("replace keeping reworkCapitalize: %+v %v", out, err)
+	}
+	if out, _, err = s.SaveParameters(ctx, ParametersSave{LegalEntityID: le, Parameters: prm, IfMatch: 3, Actor: "admin"}); err != nil || out.ReworkCapitalize {
+		t.Fatalf("replace setting it off: %+v %v", out, err)
+	}
+}

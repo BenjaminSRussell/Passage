@@ -95,6 +95,8 @@ type parametersRequest struct {
 	AutoEndEnabled      *bool           `json:"autoEndEnabled"`
 	// EndJobs (slice 22) is optional the same way; a create takes it on (the PRD default).
 	EndJobs *bool `json:"endJobs"`
+	// ReworkCapitalize (slice 23) is optional too; a create takes it off (the PRD default).
+	ReworkCapitalize *bool `json:"reworkCapitalize"`
 }
 
 func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +142,7 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 		prm.AutoEndEnabled = *req.AutoEndEnabled
 	}
 	prm.EndJobs = req.EndJobs == nil || *req.EndJobs
+	prm.ReworkCapitalize = req.ReworkCapitalize != nil && *req.ReworkCapitalize
 	missing := "is required"
 	if req.RAFTolerancePct == nil {
 		fields["rafTolerancePct"] = missing
@@ -175,7 +178,7 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keep := store.KeepParameters{PickingListProposal: req.PickingListProposal == "", RouteCardProposal: req.RouteCardProposal == "",
-		StaleOrderDays: req.StaleOrderDays == nil, AutoEndEnabled: req.AutoEndEnabled == nil, EndJobs: req.EndJobs == nil}
+		StaleOrderDays: req.StaleOrderDays == nil, AutoEndEnabled: req.AutoEndEnabled == nil, EndJobs: req.EndJobs == nil, ReworkCapitalize: req.ReworkCapitalize == nil}
 	saved, created, err := a.store.SaveParameters(r.Context(), store.ParametersSave{LegalEntityID: req.LegalEntityID, Parameters: prm, IfMatch: ifMatch,
 		Actor: p.UserID, Keep: keep})
 	if err != nil {

@@ -122,3 +122,29 @@ func TestSettlementPostings_ReworkAccountRequired(t *testing.T) {
 		t.Fatalf("postings: %+v %v", ps, err)
 	}
 }
+
+// With rework.capitalize the whole WIP balance moves into finished goods and no variance is posted.
+func TestReworkCapitalizationPostings(t *testing.T) {
+	p := Profile{ItemGroup: AllKey, SiteID: AllKey, WIP: "1450", FinishedGoods: "1400"}
+	ps, err := ReworkCapitalizationPostings(p, d("60"))
+	if err != nil || len(ps) != 2 || ps[0].Account != "1400" || !ps[0].Dr.Equal(d("60")) || ps[0].WIP ||
+		ps[1].Account != "1450" || !ps[1].Cr.Equal(d("60")) || !ps[1].WIP || ps[0].Type != PostReworkCapitalized {
+		t.Fatalf("postings: %+v %v", ps, err)
+	}
+	if !Net(ps, true).Equal(d("-60")) {
+		t.Fatalf("WIP net %s, want -60", Net(ps, true))
+	}
+	// A negative balance (more received than issued) reverses the sides.
+	ps, err = ReworkCapitalizationPostings(p, d("-5"))
+	if err != nil || !Balanced(ps) || !ps[0].Cr.Equal(d("5")) || !ps[1].Dr.Equal(d("5")) {
+		t.Fatalf("negative: %+v %v", ps, err)
+	}
+	// Nothing to capitalize, nothing posted, even without accounts.
+	if ps, err = ReworkCapitalizationPostings(Profile{}, decimal.Zero); err != nil || len(ps) != 0 {
+		t.Fatalf("zero: %+v %v", ps, err)
+	}
+	// The finished goods account is required.
+	if _, err = ReworkCapitalizationPostings(Profile{ItemGroup: AllKey, SiteID: AllKey, WIP: "1450"}, d("60")); err == nil || err.(*Error).Code != CodeNoPostingProfile {
+		t.Fatalf("missing finished goods account: %v", err)
+	}
+}

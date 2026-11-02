@@ -51,6 +51,9 @@ type Parameters struct {
 	// report as finished brings the reported quantity up to the order quantity (PRD 4.21.13
 	// "End jobs on last RAF", FR-21.7); a reversal that takes the quantity back reopens them.
 	EndJobs bool `json:"endJobs"`
+	// ReworkCapitalize capitalizes the cost of a rework order into finished goods at End
+	// instead of posting it as a rework variance (PRD 4.21.13 `rework.capitalize`, FR-21.20).
+	ReworkCapitalize bool `json:"reworkCapitalize"`
 }
 
 // DefaultStaleOrderDays is the PRD's age for cancel-stale-created-orders.

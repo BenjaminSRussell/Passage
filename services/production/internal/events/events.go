@@ -315,6 +315,9 @@ type OrderSettledData struct {
 	ActualCost  CostByGroup      `json:"actualCost"`
 	Variances   []VarianceAmount `json:"variances"`
 	Postings    []Posting        `json:"postings"`
+	// ReworkCapitalized is the rework cost moved into finished goods instead of variances
+	// (`rework.capitalize`); omitted for every other settlement.
+	ReworkCapitalized string `json:"reworkCapitalized,omitempty"`
 }
 
 // AsBuiltData is the payload of asbuilt.assigned.v1 and asbuilt.detached.v1
@@ -418,6 +421,7 @@ type ParametersSavedData struct {
 	StaleOrderDays       int    `json:"staleOrderDays"`
 	AutoEndEnabled       bool   `json:"autoEndEnabled"`
 	EndJobs              bool   `json:"endJobs"`
+	ReworkCapitalize     bool   `json:"reworkCapitalize"`
 	Version              int    `json:"version"`
 	Actor                string `json:"actor"`
 	OccurredAt           string `json:"occurredAt"`

@@ -308,6 +308,7 @@ components:
           actualCost: { $ref: '#/components/schemas/costByGroup' }
           variances: { type: array, items: { $ref: '#/components/schemas/variance' } }
           postings: { type: array, items: { $ref: '#/components/schemas/posting' } }
+          reworkCapitalized: { type: string, description: 'Rework orders with output at a site with rework.capitalize only: the remaining WIP (the rework cost; negative when more was received than consumed) moved into finished goods (posting type rework-capitalized) instead of variances; absent otherwise. Inventory and costing add it to the value of the order''s report-finished receipts in proportion to their quantity, without a GL voucher of their own (the settlement postings carry it).' }
       x-passage-type: dev.passage.production.order.settled.v1
     orderBOMEdited:
       name: bomedited
@@ -607,7 +608,7 @@ components:
       description: 'Emitted in the transaction of `PUT /v1/production/parameters` when the parameters of a site (or All sites) of a legal entity are created or replaced (PRD 4.21.13). The payload is the row after the save. Consumers: audit, analytics.'
       payload:
         type: object
-        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled, endJobs, version, actor, occurredAt]
+        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled, endJobs, reworkCapitalize, version, actor, occurredAt]
         properties:
           legalEntityId: { type: string, format: uuid }
           siteId: { type: string, description: A site UUID, or All. }
@@ -623,6 +624,7 @@ components:
           staleOrderDays: { type: integer, description: 'Age after which an order still Created is cancelled by the cancel-stale job; 0 never.' }
           autoEndEnabled: { type: boolean }
           endJobs: { type: boolean, description: 'The last report as finished closes every job of the order (PRD 4.21.13 End jobs on last RAF).' }
+          reworkCapitalize: { type: boolean, description: 'Ending a rework order capitalizes its cost into finished goods instead of posting a rework variance (PRD 4.21.13 rework.capitalize).' }
           version: { type: integer }
           actor: { type: string }
           occurredAt: { type: string, format: date-time }

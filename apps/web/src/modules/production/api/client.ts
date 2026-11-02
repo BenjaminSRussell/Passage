@@ -1624,6 +1624,8 @@ export interface ProductionParametersInput {
   autoEndEnabled: boolean;
   /** The report as finished that completes the order quantity finishes every job of the order. */
   endJobs: boolean;
+  /** Ending a rework order capitalizes its cost into finished goods instead of posting a rework variance. */
+  reworkCapitalize: boolean;
 }
 
 export type RouteCardProposal = "remaining" | "proportional";

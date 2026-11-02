@@ -1112,6 +1112,7 @@ components:
         staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Age in days after which cancel-stale-created-orders cancels an order still Created; 0 never cancels.' }
         autoEndEnabled: { type: boolean, description: 'Opts the site in to auto-end-fully-reported.' }
         endJobs: { type: boolean, description: 'The report as finished that brings the reported quantity up to the order quantity finishes every job of the order (End jobs on last RAF); a reversal below the quantity reopens them.' }
+        reworkCapitalize: { type: boolean, description: 'Ending a rework order with output moves its remaining WIP (the rework cost) into finished goods instead of posting a rework variance (rework.capitalize, FR-21.20); a rework order ended without output still posts the variance. Off by default.' }
     ProductionParametersInput:
       type: object
       required: [rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired]
@@ -1131,6 +1132,7 @@ components:
         staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Optional: omitted, a replace keeps the stored value and a create takes 90.' }
         autoEndEnabled: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes off.' }
         endJobs: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes on (the PRD default).' }
+        reworkCapitalize: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes off (the PRD default).' }
     ProductionParameters:
       allOf:
         - $ref: '#/components/schemas/ParameterValues'
@@ -2716,7 +2718,7 @@ paths:
       description: |
         Creating takes no If-Match; replacing needs If-Match with the row version. The settings
         before slice 17 are required, so a missing one is refused rather than switching a flag off;
-        pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled and endJobs are optional: an
+        pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled, endJobs and reworkCapitalize are optional: an
         omitted one keeps its stored value on a replace (so an older client cannot reset a site's
         stale-order age or auto-end opt-in) and takes remaining, remaining, 90 and off on a create (they set the journal proposal that a
         create request naming none uses, and the two housekeeping jobs). The tolerances
@@ -2724,7 +2726,8 @@ paths:
         (FR-21.6), estimate on create to new orders, the split allocation to a split that names
         none (FR-21.15), trigger points enabled to route-card trigger evaluation (FR-21.17) and
         asBuiltRequired to `:end` (FR-21.19, PRODUCTION_AS_BUILT_REQUIRED) and endJobs to the report
-        as finished that completes the order quantity (FR-21.7).
+        as finished that completes the order quantity (FR-21.7); reworkCapitalize makes `:end` of a
+        rework order capitalize its cost into finished goods instead of posting a rework variance (FR-21.20).
       x-passage-duty: production.setup.write
       parameters:
         - { name: If-Match, in: header, required: false, description: 'The row version, quoted; required to replace.', schema: { type: string } }

@@ -166,3 +166,23 @@ func TestParameters_HousekeepingSettingsDefaultAndSave(t *testing.T) {
 		t.Fatalf("list defaults: %+v", list.Defaults)
 	}
 }
+
+func TestParameters_ReworkCapitalizeDefaultsOffAndIsKept(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	put := func(body string) int {
+		return do(h, call{method: http.MethodPut, path: "/v1/production/parameters", duties: []string{DutySetupWrite}, body: body}).Code
+	}
+	if code := put(fullParameters); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	if got := f.params.saved[0]; got.Parameters.ReworkCapitalize || !got.Keep.ReworkCapitalize {
+		t.Fatalf("omitted: capitalize %v, keep %v", got.Parameters.ReworkCapitalize, got.Keep.ReworkCapitalize)
+	}
+	if code := put(fullParameters[:len(fullParameters)-1] + `,"reworkCapitalize":true}`); code != http.StatusCreated {
+		t.Fatalf("create with it: %d", code)
+	}
+	if got := f.params.saved[1]; !got.Parameters.ReworkCapitalize || got.Keep.ReworkCapitalize {
+		t.Fatalf("named: capitalize %v, keep %v", got.Parameters.ReworkCapitalize, got.Keep.ReworkCapitalize)
+	}
+}
