@@ -1854,7 +1854,8 @@
       {"resource": "/v1/integration/projects/*/key-rewrite-rules", "methods": ["GET"]},
       {"resource": "/v1/integration/projects/*/key-rewrite-rules:preview", "methods": ["POST"]},
       {"resource": "/v1/integration/connection-profiles", "methods": ["GET"]},
-      {"resource": "/v1/integration/connection-profiles/*", "methods": ["GET"]}
+      {"resource": "/v1/integration/connection-profiles/*", "methods": ["GET"]},
+      {"resource": "/v1/integration/sync-status/*/absent", "methods": ["GET"]}
     ]},
     "migration.connection.write": {"permissions": [
       {"resource": "/v1/integration/connection-profiles", "methods": ["POST"]},
