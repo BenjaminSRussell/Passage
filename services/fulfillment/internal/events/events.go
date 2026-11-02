@@ -32,6 +32,7 @@ var (
 	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
 	DropShipCancelled = events.Type(Context, "dropship", "cancelled", 1)
+	DropShipClosed    = events.Type(Context, "dropship", "closed", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
@@ -39,7 +40,7 @@ func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
 		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged,
-		DropShipCreated, DropShipConfirmed, DropShipCancelled,
+		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed,
 	}
 }
 
@@ -332,8 +333,11 @@ type PackingSlipCancelledData struct {
 }
 
 // DropShipData is published when a drop-ship is created (FR-28.7), confirmed
-// by the vendor or cancelled. The confirmed event carries the journal (Dr 5000
-// / Cr 2110 at the purchase order cost) for the ledger; no inventory moves.
+// by the vendor (once per vendor shipment), closed short or cancelled. The
+// confirmed event carries the journal of that confirmation (Dr 5000 / Cr 2110
+// at the purchase order cost for ConfirmedQty) for the ledger; no inventory
+// moves. Qty is the ordered quantity; QtyConfirmed and QtyClosed are the
+// running totals after the event.
 type DropShipData struct {
 	DropShipID        string         `json:"drop_ship_id"`
 	DropShipNumber    string         `json:"drop_ship_number"`
@@ -353,5 +357,9 @@ type DropShipData struct {
 	VendorShipmentRef string         `json:"vendor_shipment_ref,omitempty"`
 	ShippedOn         string         `json:"shipped_on,omitempty"`
 	PostingDate       string         `json:"posting_date,omitempty"`
+	QtyConfirmed      string         `json:"qty_confirmed"`
+	QtyClosed         string         `json:"qty_closed"`
+	ConfirmationSeq   int            `json:"confirmation_seq,omitempty"`
+	ConfirmedQty      string         `json:"confirmed_qty,omitempty"`
 	Journal           []JournalEntry `json:"journal"`
 }

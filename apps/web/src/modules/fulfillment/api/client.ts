@@ -850,8 +850,19 @@ export async function returnableAging(
   return body;
 }
 
-export type DropShipStatus = "OPEN" | "CONFIRMED" | "CANCELLED";
-export const DROP_SHIP_STATUSES: DropShipStatus[] = ["OPEN", "CONFIRMED", "CANCELLED"];
+export type DropShipStatus = "OPEN" | "PARTIALLY_CONFIRMED" | "CONFIRMED" | "CANCELLED";
+export const DROP_SHIP_STATUSES: DropShipStatus[] = ["OPEN", "PARTIALLY_CONFIRMED", "CONFIRMED", "CANCELLED"];
+
+/** One vendor shipment of a drop-ship with the journal it booked. */
+export interface DropShipConfirmation {
+  seq: number;
+  qty: string;
+  vendorShipmentRef: string | null;
+  shippedOn: string;
+  postingDate: string;
+  journal: JournalEntry[];
+  createdAt: string;
+}
 
 /** A sales order line fulfilled by a vendor, linked to its purchase order line (FR-28.7). */
 export interface DropShip {
@@ -866,6 +877,10 @@ export interface DropShip {
   unit: string;
   /** Decimal strings. */
   qty: string;
+  /** Shipped and confirmed by the vendor so far, closed without shipping, and still open. */
+  qtyConfirmed: string;
+  qtyClosed: string;
+  qtyOpen: string;
   vendorId: string;
   purchaseOrderId: string;
   purchaseOrderLineId: string;
@@ -874,8 +889,10 @@ export interface DropShip {
   vendorShipmentRef: string | null;
   shippedOn: string | null;
   postingDate: string | null;
-  /** Dr 5000 / Cr 2110 once CONFIRMED; empty before. */
+  /** Dr 5000 / Cr 2110 of every vendor confirmation so far; empty before the first. */
   journal: JournalEntry[];
+  /** The vendor's shipments in order; returned by the read, empty in the list. */
+  confirmations: DropShipConfirmation[];
   version: number;
   createdAt: string;
 }
@@ -907,9 +924,14 @@ export function createDropShip(input: DropShipInput, key: string): Promise<DropS
   return command<DropShip>("/drop-ships", input, key);
 }
 
-/** The vendor's ship confirmation: books Dr 5000 / Cr 2110 at the PO cost (AC-28.5); final. Needs PurchaseOrderConfirm. */
-export function confirmDropShip(id: string, version: number, input: { shippedOn: string; vendorShipmentRef?: string; postingDate?: string }, key: string): Promise<DropShip> {
+/** The vendor's ship confirmation of all or `qty` of the open quantity: books Dr 5000 / Cr 2110 at the PO cost (AC-28.5); final. Needs PurchaseOrderConfirm. */
+export function confirmDropShip(id: string, version: number, input: { shippedOn: string; qty?: string; vendorShipmentRef?: string; postingDate?: string }, key: string): Promise<DropShip> {
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:confirm`, input, key, version);
+}
+
+/** The vendor will not ship the rest of a partly confirmed drop-ship: closes the open quantity without booking it. Needs WarehouseRelease. */
+export function closeDropShipRemainder(id: string, version: number, key: string): Promise<DropShip> {
+  return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:close-remainder`, undefined, key, version);
 }
 
 export function cancelDropShip(id: string, version: number, key: string): Promise<DropShip> {

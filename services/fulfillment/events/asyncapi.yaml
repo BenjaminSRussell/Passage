@@ -66,6 +66,11 @@ channels:
     messages:
       dropShipCancelled:
         $ref: "#/components/messages/DropShipCancelled"
+  dropShipClosed:
+    address: passage.fulfillment.dropship
+    messages:
+      dropShipClosed:
+        $ref: "#/components/messages/DropShipClosed"
   pickTracked:
     address: passage.fulfillment.pick
     messages:
@@ -167,6 +172,11 @@ operations:
     channel: { $ref: "#/channels/dropShipCancelled" }
     messages:
       - $ref: "#/channels/dropShipCancelled/messages/dropShipCancelled"
+  publishDropShipClosed:
+    action: send
+    channel: { $ref: "#/channels/dropShipClosed" }
+    messages:
+      - $ref: "#/channels/dropShipClosed/messages/dropShipClosed"
   publishPickTracked:
     action: send
     channel: { $ref: "#/channels/pickTracked" }
@@ -422,11 +432,20 @@ components:
       name: dev.passage.fulfillment.dropship.confirmed.v1
       title: Drop-ship confirmed by the vendor
       summary: >
-        The vendor shipped the drop-ship line (AC-28.5). The journal is Dr 5000 / Cr 2110 at the
-        purchase order cost for the ledger to post with Idempotency-Key = drop_ship_id; there is no
-        inventory transaction. The confirmation is final. No packingslip.posted is published for a
-        drop-ship line, so this event is how sales (wave 27) learns that order_line_id shipped qty
-        (it marks the line shipped) and how billing (wave 29) learns it can invoice it.
+        The vendor shipped the drop-ship line, all of it or one part of it (AC-28.5). Published once
+        per vendor shipment: a whole confirmation sends one event with confirmation_seq 1,
+        confirmed_qty equal to qty, status CONFIRMED and the whole-line journal, exactly as before
+        partial confirmations existed; a vendor that ships in parts sends one event per shipment
+        (status PARTIALLY_CONFIRMED until the quantity is all confirmed or closed, then CONFIRMED).
+        Consumers act on confirmed_qty and this event's journal, never on qty (the ordered
+        quantity), and de-duplicate on drop_ship_id plus confirmation_seq; qty_confirmed is the
+        running total. The journal is Dr 5000 / Cr 2110 at the purchase order cost for
+        confirmed_qty (the cost of the confirmed total rounded once, less what earlier confirmations
+        booked, so the parts add up to the whole-line amount), for the ledger to post with
+        Idempotency-Key = drop_ship_id plus confirmation_seq; there is no inventory transaction. No
+        packingslip.posted is published for a drop-ship line, so this event is how sales (wave 27)
+        learns that order_line_id shipped confirmed_qty (it marks that much shipped) and how billing
+        (wave 29) learns it can invoice confirmed_qty.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -434,6 +453,16 @@ components:
       name: dev.passage.fulfillment.dropship.cancelled.v1
       title: Drop-ship cancelled
       summary: An OPEN drop-ship was cancelled before the vendor confirmed; nothing was booked.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DropShipPayload"
+    DropShipClosed:
+      name: dev.passage.fulfillment.dropship.closed.v1
+      title: Drop-ship remainder closed
+      summary: >
+        The vendor shipped part of the drop-ship and will not ship the rest. qty_closed is the
+        quantity that never shipped, the status is CONFIRMED, and the journal is empty (nothing is
+        booked for the closed quantity). Sales may cancel the order line remainder from it.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DropShipPayload"
@@ -638,18 +667,18 @@ components:
   schemas:
     DropShipPayload:
       type: object
-      required: [drop_ship_id, drop_ship_number, status, legal_entity_id, order_id, order_line_id, customer_id, product_id, unit, qty, vendor_id, purchase_order_id, purchase_order_line_id, unit_cost, currency, journal]
+      required: [drop_ship_id, drop_ship_number, status, legal_entity_id, order_id, order_line_id, customer_id, product_id, unit, qty, vendor_id, purchase_order_id, purchase_order_line_id, unit_cost, currency, qty_confirmed, qty_closed, journal]
       properties:
         drop_ship_id: { type: string, format: uuid }
         drop_ship_number: { type: string, example: "DS-0000001" }
-        status: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] }
+        status: { type: string, enum: [OPEN, PARTIALLY_CONFIRMED, CONFIRMED, CANCELLED] }
         legal_entity_id: { type: string, format: uuid }
         order_id: { type: string, format: uuid }
         order_line_id: { type: string, format: uuid }
         customer_id: { type: string, format: uuid }
         product_id: { type: string, format: uuid }
         unit: { type: string }
-        qty: { type: string }
+        qty: { type: string, description: "The ordered quantity of the drop-ship; not the quantity of a confirmation (confirmed_qty)." }
         vendor_id: { type: string, format: uuid }
         purchase_order_id: { type: string, format: uuid }
         purchase_order_line_id: { type: string, format: uuid }
@@ -658,9 +687,13 @@ components:
         vendor_shipment_ref: { type: string }
         shipped_on: { type: string, format: date }
         posting_date: { type: string, format: date }
+        qty_confirmed: { type: string, description: "Quantity confirmed by the vendor so far, including this event." }
+        qty_closed: { type: string, description: "Quantity closed without shipping, set by dropship.closed." }
+        confirmation_seq: { type: integer, minimum: 1, description: "The number of this vendor confirmation on the drop-ship (1, 2, ...), always set in dropship.confirmed and absent from the other events; with drop_ship_id it identifies the confirmation." }
+        confirmed_qty: { type: string, description: "The quantity of this vendor shipment, always set in dropship.confirmed (equal to qty for a whole confirmation) and absent from the other events." }
         journal:
           type: array
-          description: Empty unless CONFIRMED.
+          description: The journal of this confirmation in dropship.confirmed; empty in every other event.
           items: { $ref: "#/components/schemas/JournalEntry" }
     SlipLine:
       type: object

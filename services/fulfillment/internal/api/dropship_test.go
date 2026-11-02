@@ -41,6 +41,11 @@ func (f *fakeStore) CancelDropShip(_ context.Context, id string, version int, id
 	return store.DropShip{ID: id, Status: "CANCELLED", Version: version + 1, Journal: []store.JournalEntry{}}, nil
 }
 
+func (f *fakeStore) CloseDropShipRemainder(_ context.Context, id string, version int, idem store.Idem) (store.DropShip, error) {
+	f.lastIdem = idem
+	return store.DropShip{ID: id, Status: "CONFIRMED", Version: version + 1, Journal: []store.JournalEntry{}}, nil
+}
+
 func dropShipBody(mut func(string) string) string {
 	b := `{"legalEntityId":"` + ids.New() + `","orderId":"` + ids.New() + `","orderLineId":"` + ids.New() + `","customerId":"` + ids.New() +
 		`","productId":"` + ids.New() + `","unit":"EA","qty":"4","vendorId":"` + ids.New() + `","purchaseOrderId":"` + ids.New() +
@@ -136,5 +141,41 @@ func TestDropShip_ListGetCancel(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodPost, base+"/"+id+":cancel", "", map[string]string{"Idempotency-Key": "x-2", "If-Match": `"4"`}); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "CANCELLED") {
 		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDropShip_PartialConfirmQtyAndCloseRemainder(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	id := ids.New()
+	path := "/v1/fulfillment/drop-ships/" + id + ":confirm"
+	today := time.Now().UTC().Format(dateLayout)
+	hdr := func(k string) map[string]string {
+		return map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": k, "If-Match": `"1"`}
+	}
+	lastConfirm = store.DropShipConfirmInput{}
+	if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+today+`","qty":"2.5"}`, hdr("q-1")); rec.Code != http.StatusOK || lastConfirm.Qty == nil || lastConfirm.Qty.String() != "2.5" {
+		t.Fatalf("partial confirm: %d %s qty=%v", rec.Code, rec.Body.String(), lastConfirm.Qty)
+	}
+	lastConfirm = store.DropShipConfirmInput{}
+	if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+today+`"}`, hdr("q-2")); rec.Code != http.StatusOK || lastConfirm.Qty != nil {
+		t.Fatalf("whole confirm: %d qty=%v, want nil", rec.Code, lastConfirm.Qty)
+	}
+	for _, q := range []string{"0", "-1", "abc", "0.0000001"} {
+		if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+today+`","qty":"`+q+`"}`, hdr("q-bad"+q)); rec.Code == http.StatusOK {
+			t.Fatalf("qty %q accepted", q)
+		}
+	}
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/drop-ships?status=PARTIALLY_CONFIRMED", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("list partially confirmed: %d", rec.Code)
+	}
+	closePath := "/v1/fulfillment/drop-ships/" + id + ":close-remainder"
+	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-1"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("close without If-Match: %d", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-2", "If-Match": `"3"`, "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("close as a viewer: %d, want 403", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-3", "If-Match": `"3"`}); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"4"` {
+		t.Fatalf("close: %d %q %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
 }

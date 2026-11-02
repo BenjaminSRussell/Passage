@@ -11,8 +11,8 @@ import { useLoad } from "./useLoad";
 
 const DUTY_CREATE = "WarehouseRelease";
 
-const TONES: Record<DropShipStatus, BadgeTone> = { OPEN: "info", CONFIRMED: "success", CANCELLED: "neutral" };
-const LABELS: Record<DropShipStatus, string> = { OPEN: "Open", CONFIRMED: "Confirmed", CANCELLED: "Cancelled" };
+const TONES: Record<DropShipStatus, BadgeTone> = { OPEN: "info", PARTIALLY_CONFIRMED: "warning", CONFIRMED: "success", CANCELLED: "neutral" };
+const LABELS: Record<DropShipStatus, string> = { OPEN: "Open", PARTIALLY_CONFIRMED: "Partly confirmed", CONFIRMED: "Confirmed", CANCELLED: "Cancelled" };
 
 export function DropShipStatusBadge({ status }: { status: DropShipStatus }) {
   return <Badge tone={TONES[status] ?? "neutral"}>{LABELS[status] ?? status}</Badge>;
@@ -25,6 +25,7 @@ const columns: DataTableColumn<DropShip>[] = [
   { key: "vendorId", header: "Vendor", mono: true, render: (row) => shortId(row.vendorId) },
   { key: "purchaseOrderId", header: "Purchase order", mono: true, render: (row) => shortId(row.purchaseOrderId) },
   { key: "qty", header: "Quantity", align: "end", render: (row) => `${row.qty} ${row.unit}` },
+  { key: "qtyConfirmed", header: "Qty shipped", align: "end", render: (row) => `${row.qtyConfirmed} ${row.unit}` },
   { key: "unitCost", header: "Cost", align: "end", render: (row) => formatMoney(row.unitCost, row.currency) },
   { key: "shippedOn", header: "Shipped", render: (row) => (row.shippedOn ? formatDate(row.shippedOn) : dash) },
 ];

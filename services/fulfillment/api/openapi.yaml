@@ -181,36 +181,60 @@ components:
         updatedAt: { type: [string, "null"], format: date-time }
     DropShip:
       type: object
-      required: [id, dropShipNumber, status, legalEntityId, orderId, orderLineId, customerId, productId, unit, qty, vendorId, purchaseOrderId, purchaseOrderLineId, unitCost, currency, journal, version]
+      required: [id, dropShipNumber, status, legalEntityId, orderId, orderLineId, customerId, productId, unit, qty, qtyConfirmed, qtyClosed, qtyOpen, vendorId, purchaseOrderId, purchaseOrderLineId, unitCost, currency, journal, version]
       description: >
         A sales order line fulfilled by a vendor straight to the customer, linked to its purchase
-        order line (FR-28.7). OPEN until the vendor confirms; CONFIRMED books the journal; CANCELLED
-        books nothing.
+        order line (FR-28.7). OPEN until the vendor confirms; PARTIALLY_CONFIRMED while the vendor
+        has shipped part of the quantity and some is still open; CONFIRMED once all of it is
+        confirmed or closed; CANCELLED books nothing. Each vendor confirmation books its own
+        journal at the purchase order cost.
       properties:
         id: { type: string, format: uuid }
         dropShipNumber: { type: string, description: "DS- number, gap-free per legal entity." }
-        status: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] }
+        status: { type: string, enum: [OPEN, PARTIALLY_CONFIRMED, CONFIRMED, CANCELLED] }
         legalEntityId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
         orderLineId: { type: string, format: uuid }
         customerId: { type: string, format: uuid }
         productId: { type: string, format: uuid }
         unit: { type: string }
-        qty: { type: string, description: "Decimal string." }
+        qty: { type: string, description: "Ordered quantity, decimal string." }
+        qtyConfirmed: { type: string, description: "Quantity the vendor has shipped and confirmed so far." }
+        qtyClosed: { type: string, description: "Quantity closed without shipping (close-remainder)." }
+        qtyOpen: { type: string, description: "Quantity the vendor still has to ship or close: qty less qtyConfirmed less qtyClosed; 0 once CONFIRMED or CANCELLED." }
         vendorId: { type: string, format: uuid }
         purchaseOrderId: { type: string, format: uuid }
         purchaseOrderLineId: { type: string, format: uuid }
         unitCost: { type: string, description: "Purchase order cost per unit, decimal string." }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
-        vendorShipmentRef: { type: [string, "null"], description: "The vendor's shipment or tracking reference, from the confirmation." }
-        shippedOn: { type: [string, "null"], format: date }
-        postingDate: { type: [string, "null"], format: date, description: "The day the cost was booked; null until confirmed." }
+        vendorShipmentRef: { type: [string, "null"], description: "The vendor's shipment or tracking reference of the latest confirmation." }
+        shippedOn: { type: [string, "null"], format: date, description: "Ship date of the latest confirmation." }
+        postingDate: { type: [string, "null"], format: date, description: "The day the latest confirmation was booked; null until confirmed." }
         journal:
           type: array
-          description: "Dr 5000 / Cr 2110 at the purchase order cost once CONFIRMED (debits positive, credits negative); empty before."
-          items: { type: object, required: [account, amount, currency, orderLineId], properties: { account: { type: string }, amount: { type: string }, currency: { type: string }, orderLineId: { type: string, format: uuid } } }
+          description: "Dr 5000 / Cr 2110 at the purchase order cost of every confirmation so far (debits positive, credits negative); empty before the first."
+          items: { $ref: "#/components/schemas/DropShipJournalEntry" }
+        confirmations:
+          type: array
+          description: "The vendor's shipments in order with the journal each booked. Returned by the read, empty in the list."
+          items:
+            type: object
+            required: [seq, qty, shippedOn, postingDate, journal, createdAt]
+            properties:
+              seq: { type: integer, minimum: 1 }
+              qty: { type: string, description: "Quantity of this vendor shipment." }
+              vendorShipmentRef: { type: [string, "null"] }
+              shippedOn: { type: string, format: date-time }
+              postingDate: { type: string, format: date-time }
+              journal: { type: array, items: { $ref: "#/components/schemas/DropShipJournalEntry" } }
+              createdAt: { type: string, format: date-time }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
+    DropShipJournalEntry:
+      type: object
+      required: [account, amount, currency, orderLineId]
+      description: A journal line of a drop-ship confirmation; debits are positive, credits negative.
+      properties: { account: { type: string }, amount: { type: string }, currency: { type: string }, orderLineId: { type: string, format: uuid } }
     ShipmentLine:
       type: object
       properties:
@@ -2072,7 +2096,7 @@ paths:
       description: Drop-ships newest first, filtered by status, order and vendor; scoped by legal entity.
       x-passage-duty: WarehouseView
       parameters:
-        - { name: status, in: query, schema: { type: string, enum: [OPEN, CONFIRMED, CANCELLED] } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, PARTIALLY_CONFIRMED, CONFIRMED, CANCELLED] } }
         - { name: orderId, in: query, schema: { type: string, format: uuid } }
         - { name: vendorId, in: query, schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/Limit" }
@@ -2108,12 +2132,16 @@ paths:
       operationId: confirmDropShip
       summary: Record the vendor's ship confirmation (FR-28.7, AC-28.5)
       description: >
-        The vendor shipped the line. The drop-ship becomes CONFIRMED and books Dr 5000 cost of goods
-        sold / Cr 2110 goods received not invoiced at the purchase order cost, with no inventory
-        transaction (BR-28.1). The cost is booked on postingDate, else on shippedOn. Publishes
-        dropship.confirmed with the journal. Only an OPEN drop-ship can be confirmed (FUL-0001).
-        The confirmation is final: a CONFIRMED drop-ship cannot be cancelled. Section 5.28.5 names
-        the purchasing confirmation duty (PurchasingConfirm), seeded as PurchaseOrderConfirm.
+        The vendor shipped the line, all of it or one part of it. It books Dr 5000 cost of goods
+        sold / Cr 2110 goods received not invoiced at the purchase order cost for qty (everything
+        still open when qty is left out), with no inventory transaction (BR-28.1). The drop-ship is
+        PARTIALLY_CONFIRMED while quantity is open and CONFIRMED when none is. The cost is booked on
+        postingDate, else on shippedOn. Publishes dropship.confirmed with the journal of this
+        confirmation. Only an OPEN or PARTIALLY_CONFIRMED drop-ship can be confirmed (FUL-0001); a
+        qty above the open quantity is refused (FUL-0063) and so is a vendorShipmentRef already
+        booked on the drop-ship (FUL-0064). A booked confirmation is final: a drop-ship with a
+        confirmation cannot be cancelled, close its remainder instead. Section 5.28.5 names the
+        purchasing confirmation duty (PurchasingConfirm), seeded as PurchaseOrderConfirm.
       x-passage-duty: PurchaseOrderConfirm
       parameters:
         - { $ref: "#/components/parameters/DropShipId" }
@@ -2129,11 +2157,12 @@ paths:
               required: [shippedOn]
               properties:
                 shippedOn: { type: string, format: date, description: "The day the vendor shipped; not in the future." }
+                qty: { type: string, description: "Quantity of this vendor shipment, positive with at most 6 decimals and not above the open quantity; everything still open when left out." }
                 vendorShipmentRef: { type: string, maxLength: 64, description: "The vendor's shipment or tracking reference." }
                 postingDate: { type: string, format: date, description: "The day the cost is booked; defaults to shippedOn." }
       responses:
         "200":
-          description: The CONFIRMED drop-ship with its journal; ETag carries the new version
+          description: The PARTIALLY_CONFIRMED or CONFIRMED drop-ship with its journal; ETag carries the new version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DropShip" }
@@ -2141,7 +2170,8 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 the drop-ship is not OPEN, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0064 the vendor shipment reference is already booked on the drop-ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the drop-ship is not OPEN or PARTIALLY_CONFIRMED; FUL-0063 qty above the open quantity; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/drop-ships/{id}:cancel:
     post:
@@ -2149,7 +2179,8 @@ paths:
       summary: Cancel an OPEN drop-ship (FR-28.7)
       description: >
         Cancels a drop-ship the vendor has not confirmed; nothing was booked, and the order line can
-        be drop-shipped again. A CONFIRMED drop-ship is booked and cannot be cancelled (FUL-0001). Publishes
+        be drop-shipped again. A drop-ship with a vendor confirmation is booked and cannot be
+        cancelled (FUL-0001); close the remainder of a PARTIALLY_CONFIRMED one instead. Publishes
         dropship.cancelled.
       x-passage-duty: WarehouseRelease
       parameters:
@@ -2167,4 +2198,31 @@ paths:
         "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 the drop-ship is not OPEN, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/drop-ships/{id}:close-remainder:
+    post:
+      operationId: closeDropShipRemainder
+      summary: Close the open remainder of a partly shipped drop-ship (FR-28.7)
+      description: >
+        The vendor shipped part of the quantity and will not ship the rest. The open quantity moves to
+        qtyClosed, the drop-ship is CONFIRMED and nothing is booked for the closed quantity (the
+        confirmations already booked stand). Only a PARTIALLY_CONFIRMED drop-ship has a remainder
+        (FUL-0001); an OPEN one is cancelled instead. Publishes dropship.closed, which sales may use
+        to cancel the order line remainder.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/DropShipId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: The CONFIRMED drop-ship with qtyClosed set; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DropShip" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the drop-ship is not PARTIALLY_CONFIRMED, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

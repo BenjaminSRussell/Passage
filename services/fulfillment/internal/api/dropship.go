@@ -30,6 +30,7 @@ func (a *API) routesDropShip(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/drop-ships/{id}", a.getDropShip)
 	r.With(authz.RequireDuty(dutyVendorConfirm)).Post("/v1/fulfillment/drop-ships/{id}:confirm", a.confirmDropShip)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/drop-ships/{id}:cancel", a.cancelDropShip)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/drop-ships/{id}:close-remainder", a.closeDropShipRemainder)
 }
 
 const maxVendorShipmentRef = 64
@@ -50,6 +51,7 @@ type dropShipRequest struct {
 }
 
 type dropShipConfirmRequest struct {
+	Qty               string `json:"qty"`
 	VendorShipmentRef string `json:"vendorShipmentRef"`
 	ShippedOn         string `json:"shippedOn"`
 	PostingDate       string `json:"postingDate"`
@@ -104,9 +106,9 @@ func (a *API) listDropShips(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.DropShipFilter{Status: q.Get("status"), OrderID: q.Get("orderId"), VendorID: q.Get("vendorId")}
 	switch f.Status {
-	case "", domain.DropShipOpen, domain.DropShipConfirmed, domain.DropShipCancelled:
+	case "", domain.DropShipOpen, domain.DropShipPartial, domain.DropShipConfirmed, domain.DropShipCancelled:
 	default:
-		fail(w, r, "status", "must be OPEN, CONFIRMED or CANCELLED")
+		fail(w, r, "status", "must be OPEN, PARTIALLY_CONFIRMED, CONFIRMED or CANCELLED")
 		return
 	}
 	if f.OrderID != "" && !ids.Valid(f.OrderID) {
@@ -199,6 +201,14 @@ func (a *API) confirmDropShip(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "vendorShipmentRef", "must be at most 64 characters")
 		return
 	}
+	if req.Qty != "" {
+		qty, err := positive(req.Qty)
+		if err != nil {
+			fail(w, r, "qty", "must be a positive decimal with at most 6 decimals, or left out to confirm everything still open")
+			return
+		}
+		in.Qty = &qty
+	}
 	if req.PostingDate != "" {
 		pd, err := time.Parse(dateLayout, req.PostingDate)
 		if err != nil {
@@ -227,6 +237,25 @@ func (a *API) cancelDropShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := a.store.CancelDropShip(r.Context(), id, version, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, d.Version)
+	httpx.JSON(w, http.StatusOK, d)
+}
+
+func (a *API) closeDropShipRemainder(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := dropShipCommand(w, r)
+	if !ok {
+		return
+	}
+	_, idem, err := command(r, nil)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	d, err := a.store.CloseDropShipRemainder(r.Context(), id, version, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
