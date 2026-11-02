@@ -8,6 +8,11 @@ image:
 databaseSecret: revrec-db
 # Dev only: apply migrations at start. Elsewhere the migrator job applies them.
 migrateOnStart: false
+# Unset, the ledger postings and the GL 2400 reconciliation answer 503 REV-0200.
+ledgerUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
 replicaCount: 2
 service:
   port: 8080

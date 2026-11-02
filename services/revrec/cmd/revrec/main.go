@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/api"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/store"
 	"github.com/BenjaminSRussell/passage/services/revrec/migrations"
@@ -58,7 +59,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	st := store.New(pool)
+	a := api.New(st)
+	ledger, err := ledgerclient.FromEnv(getenv, "revrec")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		a.WithLedger(ledger, st)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

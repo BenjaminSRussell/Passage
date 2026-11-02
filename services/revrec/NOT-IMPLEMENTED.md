@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED — revrec (PSG-29, wave 29, slices 1–4)
+# NOT-IMPLEMENTED — revrec (PSG-29, wave 29, slices 1–5)
 
 Slice 1 built the pure ASC 606 allocation and ratable schedule with a stateless
 preview. Slice 2 built persisted revenue contracts (obligations, schedule lines,
@@ -10,16 +10,18 @@ Slice 3 changed nothing in revrec. Slice 4 adds the ratable basis (DAILY or MONT
 stored per contract), the roll-forward drill-down to one contract, the obligation
 method filter and cursor pagination on the contracts list, and the matching screens
 (basis on the contract form and detail, the contract's roll-forward by month on its
-detail page, "Load more" on the contracts list). Everything below is outstanding. Status is `later slice of PSG-29` (same service,
+detail page, "Load more" on the contracts list). Slice 5 posts the recognized revenue to the general ledger (Dr 2400 / Cr 4000 through
+the ledger's journal API, with the service token) and reconciles the roll-forward to
+the ledger's 2400 balance. Everything below is outstanding. Status is `later slice of PSG-29` (same service,
 later build) or `handoff` (needs another owner).
 
 | # | Ticket item / acceptance criterion | Status | Reason |
 |---|---|---|---|
 | 1 | D2 `:allocate` custom method and SSP adjustments on an existing contract (`POST /revrec/contracts/{id}:allocate`, RevRecMaintain; contract modifications) | later slice of PSG-29 | Contracts are allocated once, at creation (`POST /revrec/contracts`); re-allocation must also re-plan unrecognized lines and post a catch-up, which belongs with the modification and credit-note work |
 | 2 | D2 Contracts created from `invoice.posted` (revrec consumes billing lines → obligations; one contract per order or bundle template per product) | later slice of PSG-29 | Needs the event inbox (kernel) and the order/bundle references on invoice lines (waves 26, 28 and the bundle slice); contracts are created through the API until then |
-| 3 | D2 Deferred revenue postings: Dr 2400 / Cr 4000 journal per recognized line (`journal_posting_id`) | handoff | The ledger posts from `schedule.recognized` (wave 11); `journal_posting_id` stays null until it answers |
+| 3 | D2 Deferred revenue postings: Dr 2400 / Cr 4000 journal per recognized line (`journal_posting_id`) | met (slice 5) | `POST /v1/revrec/journal-postings` claims the recognized RATABLE and MILESTONE lines (`revenue_schedule.journal_posting_id`) and posts one ledger entry per legal entity, currency and month through `platform/ledgerclient` (`ledger.entry.post`, idempotency key = the posting id). Open: the posting is requested through the API, not triggered by the period close (item 15), and the ledger accounts are the 2400 / 4000 the events carry, not a per-entity setting |
 | 4 | D2 Usage recognition (FR-29.8 USAGE) | later slice of PSG-29 | Usage ingestion is billing's subscription slice; a USAGE obligation is stored with no schedule line and keeps its contract OPEN |
-| 5 | §5.29.9 reconciliation: roll-forward = GL 2400 (nightly check 02:30, alert on diff ≠ 0) and the `GL 2400 diff` column | handoff | Needs GL 2400 balances from the ledger (wave 11), which does not consume `schedule.recognized` yet. `TestASC606Fixture40_RecognizeAndReconcileGL2400` proves the events carry what that account needs: for the 40 fixture contracts, every month's roll-forward closing equals the 2400 balance of a ledger fed only by the outbox (`contract.allocated` deferred shares less `schedule.recognized`) |
+| 5 | §5.29.9 reconciliation: roll-forward = GL 2400 (nightly check 02:30, alert on diff ≠ 0) and the `GL 2400 diff` column | met in part (slice 5) | `GET /v1/revrec/gl-reconciliation` reads the ledger's 2400 balance through the ledger client and compares the 2400 debits with the cumulative recognized revenue of the roll-forward (`difference`, `reconciled`). Open: the credit side of 2400 is the invoice's deferral posting (billing item 5), so the closing balance itself is not compared; the nightly 02:30 job and its alert (item 19) and the `GL 2400 diff` column on the roll-forward screen. `TestASC606Fixture40_RecognizeAndReconcileGL2400` stays the event-rebuilt ledger check, and `TestJournalPostings_BookRecognizedRevenueAndReconcileGL2400` runs the real posting path against the ledger fake |
 | 6 | FR-29.9 roll-forward by fiscal period | later slice of PSG-29 + handoff | The roll-forward is per calendar month, for a legal entity and currency or (slice 4) for one contract (`GET /roll-forward?contractId=`), whose schedule lines the contract detail shows by date; fiscal periods need the fiscal calendar (wave 14) |
 | 7 | D2 SSP source order resolution (BR-29.2: EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL lookup) | handoff | Price lookup needs the pricing context (PRICE access, wave 26). The API accepts the resolved SSP and its source label and does not look them up; the RESIDUAL SSP is derived by the engine from the transaction price and the other SSPs (REV-0008 when not positive), so a RESIDUAL obligation may omit `ssp` |
 | 8 | D2 Credit-note reversal of recognized and deferred amounts (BR-29.6, AC-29.6; schedules REVERSED, roll-forward adjustments) | later slice of PSG-29 | Needs credit notes in billing; `REVERSED` exists in the schema and adjustments are reported as 0.00 |

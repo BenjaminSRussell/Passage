@@ -1583,13 +1583,18 @@
     "billing.invoice.maintain": {"permissions": [
       {"resource": "/v1/billing/credit-notes", "methods": ["POST"]},
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
-      {"resource": "/v1/billing/proposals", "methods": ["POST"]}
+      {"resource": "/v1/billing/proposals", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*:bill", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]}
     ]},
     "billing.invoice.post": {"permissions": [{"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]}]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
-      {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]}
+      {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
+      {"resource": "/v1/billing/subscriptions/*", "methods": ["GET"]}
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
@@ -2392,13 +2397,17 @@
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
     ]},
-    "revrec.post": {"permissions": [{"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]}]},
+    "revrec.post": {"permissions": [
+      {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
+      {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]}
+    ]},
     "revrec.view": {"permissions": [
       {"resource": "/v1/revrec/allocations:preview", "methods": ["POST"]},
       {"resource": "/v1/revrec/contracts", "methods": ["GET"]},
       {"resource": "/v1/revrec/contracts/*", "methods": ["GET"]},
       {"resource": "/v1/revrec/recognition-runs", "methods": ["GET"]},
-      {"resource": "/v1/revrec/roll-forward", "methods": ["GET"]}
+      {"resource": "/v1/revrec/roll-forward", "methods": ["GET"]},
+      {"resource": "/v1/revrec/gl-reconciliation", "methods": ["GET"]}
     ]},
     "sales.agreement.maintain": {"permissions": [
       {"resource": "/v1/sales/agreements", "methods": ["POST"]},
@@ -2754,6 +2763,9 @@
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "eam": {
+      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+    },
+    "revrec": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
     },
     "assets": {

@@ -9,7 +9,9 @@ by line quantity, checked against the remaining creditable amount (`BIL-0005`),
 posted with a gap-free `CN-` number and `creditnote.posted`. Slice 5 builds invoices
 from posted packing slips (FR-29.1): one per order or one consolidated invoice
 (FR-29.2), each line keeping its packing slip, order line, product and price
-explanation, a slip line invoiced once (BR-29.5), and the audit trace (FR-29.12). The screens are in
+explanation, a slip line invoiced once (BR-29.5), and the audit trace (FR-29.12). Slice 6
+adds subscriptions (FR-29.10): a plan price per billing period, plan changes and
+cancellation, billed as prorated SUBSCRIPTION invoice proposals. The screens are in
 `apps/web/src/modules/billing`. The wider wave is listed in `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -31,6 +33,7 @@ migrations/             0001_billing_init.sql (invoice, invoice_line, number_seq
                         original line, invoice_installment)
                         0003_shipment_proposals.sql (proposal_batch, line source references,
                         unique packing slip line)
+                        0007_subscriptions.sql (subscription, subscription_term, subscription_period)
 api/openapi.yaml        OpenAPI 3.1 for the eight endpoints
 events/asyncapi.yaml    AsyncAPI 3 for invoice.posted and creditnote.posted
 charts/billing/         Helm chart (deployment, service with admin port, ServiceMonitor toggle)
@@ -47,6 +50,11 @@ charts/billing/         Helm chart (deployment, service with admin port, Service
 | GET | `/v1/billing/invoices/{id}` | `billing.invoice.view` (InvoiceView) | invoice or credit note; returns `ETag` (version); a creditable invoice carries `credited` and per-line `creditedQty` |
 | POST | `/v1/billing/invoices/{id}:post` | `billing.invoice.post` (InvoicePost) | tax re-quote; idempotent by state; optional `If-Match`; refuses credit notes (409 `BIL-0101`) |
 | POST | `/v1/billing/credit-notes` | `billing.invoice.maintain` (InvoiceMaintain) | `Idempotency-Key` required; whole remainder or `lines` by quantity; tax is the original's pro rata, never re-quoted |
+| POST | `/v1/billing/subscriptions` | `billing.invoice.maintain` | `Idempotency-Key` required; plan code and price per period, `periodMonths` 1, 3, 6 or 12, start date; 201, or 200 replay |
+| GET | `/v1/billing/subscriptions/{id}` | `billing.invoice.view` | plan terms, status, `billedThrough` (end of the last invoiced period); `ETag` = version |
+| POST | `/v1/billing/subscriptions/{id}:change-plan` | `billing.invoice.maintain` | new price from `effectiveFrom`, after the current plan began and after the last invoiced period (`BIL-0107`); optional `If-Match` |
+| POST | `/v1/billing/subscriptions/{id}:cancel` | `billing.invoice.maintain` | `lastServiceDay`, not inside an invoiced period (`BIL-0107`); once (`BIL-0108`) |
+| POST | `/v1/billing/subscriptions/{id}:bill` | `billing.invoice.maintain` | `{periodFrom}` (first of a month); one line per plan term served in the period, prorated by calendar days; tax quoted; idempotent per period; overlap `BIL-0106`; nothing to bill `BIL-0105` |
 | POST | `/v1/billing/credit-notes/{id}:post` | `billing.creditnote.post` (CreditNotePost) | re-checks `BIL-0005` under the original's lock; `CN-` number; idempotent by state; optional `If-Match` |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
@@ -85,7 +93,9 @@ under `internal/domain/testdata/` (no shared code with the engine):
 `invoices-random-1k.json` (1,000 invoices in nine currencies with 0, 2, 3 and 4
 decimals, half-unit ties included; `TestComputeTotals_InvoicesRandom1k`) and
 `subscription-edges-25.json` (proration around mid-period start and cancel, the leap
-day, annual and quarterly periods; `TestProrate_SubscriptionEdges25`). Regenerate
+day, annual and quarterly periods; `TestProrate_SubscriptionEdges25` for `Prorate`, and
+`TestSubscription_SubscriptionEdges25_ThroughInvoices`, which creates each case as a
+subscription, cancels it and bills the period through the API against Postgres). Regenerate
 them with `python3 gen_*.py` in that directory. API
 tests run through the platform router (tenant headers, duties). Store tests use
 `platform/testkit` and skip without the database; the row-level-security test also
@@ -111,6 +121,11 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `BIL-0102` | 422 | A line's tax code is not known to the tax engine; nothing stored or posted |
 | `BIL-0103` | 412 | `If-Match` names a version the invoice no longer has |
 | `BIL-0104` | 409 | A packing slip line of the request is already on an invoice or proposal (BR-29.5); nothing of the request is stored |
+| `BIL-0105` | 422 | The subscription has no billable amount in the period (no zero invoice is issued) |
+| `BIL-0106` | 409 | The billing period overlaps one already invoiced |
+| `BIL-0107` | 422 | A plan change or cancellation falls inside an invoiced period; correct it with a credit note |
+| `BIL-0108` | 422 | The subscription is cancelled (cancel again, or change plan) |
+| `BIL-0109` | 503 | Subscriptions are not available in this deployment |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body |
 | `idempotency_in_progress` | 409 | A concurrent request holds the key |
 
