@@ -487,3 +487,51 @@ func TestShipPartialLinesAndPlannedReceiptDate(t *testing.T) {
 		}
 	}
 }
+
+func (f *fakeStore) EditTransfer(_ context.Context, id string, version int, e domain.TransferEdit) (domain.TransferOrder, error) {
+	f.transferVersion, f.transferEdit = version, e
+	if f.err != nil {
+		return domain.TransferOrder{}, f.err
+	}
+	return domain.TransferOrder{ID: id, Status: domain.TransferCreated, Version: version + 1}, nil
+}
+
+func TestEditTransferNeedsWriteDutyIfMatchAndValidBody(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	path := transferOrdersPathForTest + "/" + ids.New()
+	body := `{"shipDate":"2026-09-05","plannedReceiptDate":"","toSiteId":"S9","removeLineIds":["` + ids.New() + `"],` +
+		`"updateLines":[{"lineId":"` + ids.New() + `","qty":"12","overdeliveryPct":"5"}],` +
+		`"addLines":[{"productId":"` + testProduct + `","dimensions":{"site":"S1"},"unit":"EA","qty":"3"}]}`
+	if rec := do(t, h, http.MethodPatch, path, body, []string{"inventory.transfer.post"}, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("post-only edit: status %d, want 403", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPatch, path, body, []string{"inventory.transfer.write"}, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: status %d, want 428", rec.Code)
+	}
+	rec := do(t, h, http.MethodPatch, path, body, []string{"inventory.transfer.write"}, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"5"` || fs.transferVersion != 4 {
+		t.Fatalf("status %d etag %q body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	e := fs.transferEdit
+	if e.ShipDate == nil || !e.ClearPlannedReceipt || e.ToSite == nil || *e.ToSite != "S9" || len(e.Remove) != 1 ||
+		len(e.Update) != 1 || e.Update[0].Qty == nil || !e.Update[0].Qty.Equal(decimal.NewFromInt(12)) || e.Update[0].UnderPct != nil ||
+		len(e.Add) != 1 || !e.Add[0].Qty.Equal(decimal.NewFromInt(3)) {
+		t.Fatalf("edit passed to the store: %+v", e)
+	}
+	bad := `{"shipDate":"soon","updateLines":[{"lineId":"x","qty":"0"}],"removeLineIds":["y"],"addLines":[{"qty":"-1"}]}`
+	rec = do(t, h, http.MethodPatch, path, bad, []string{"inventory.transfer.write"}, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad body: status %d %s", rec.Code, rec.Body.String())
+	}
+	for _, f := range []string{"shipDate", "updateLines[0].lineId", "updateLines[0].qty", "removeLineIds[0]", "addLines[0].productId"} {
+		if !strings.Contains(rec.Body.String(), f) {
+			t.Errorf("problem lacks field %s: %s", f, rec.Body.String())
+		}
+	}
+	fs.err = httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeTransferState, "shipped")
+	rec = do(t, h, http.MethodPatch, path, body, []string{"inventory.transfer.write"}, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusUnprocessableEntity || decodeProblem(t, rec).Code != domain.CodeTransferState {
+		t.Fatalf("store problem: %d %s", rec.Code, rec.Body.String())
+	}
+}

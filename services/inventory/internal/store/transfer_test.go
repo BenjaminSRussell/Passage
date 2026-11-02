@@ -602,3 +602,78 @@ func TestPlannedReceiptDateDrivesLateReceipt(t *testing.T) {
 		t.Fatalf("a day after the planned date: %d late lines, want 1", n)
 	}
 }
+
+func TestEditTransferChangesLinesAndEmitsEvent(t *testing.T) {
+	s, _, admin := setup(t)
+	le := ids.New()
+	ctx := entityCtx(1, le)
+	p1, p2 := ids.New(), ids.New()
+	o, _, err := s.CreateTransfer(ctx, "edit-1", transferOrder(ctx, p1, "5", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newShip := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	site := "S2"
+	q := dec("8")
+	planned := newShip.AddDate(0, 0, 3)
+	e := domain.TransferEdit{ShipDate: &newShip, PlannedReceipt: &planned, ToSite: &site, Update: []domain.LineEdit{{LineID: o.Lines[0].ID, Qty: &q}},
+		Add: []domain.TransferLine{{ProductID: p2, Dims: dims(), Unit: "EA", Qty: dec("3")}}}
+	// Another legal entity, or another tenant, cannot see the order to edit it.
+	for name, other := range map[string]context.Context{"legal entity": entityCtx(1, ids.New()), "tenant": entityCtx(2, le)} {
+		if _, err := s.EditTransfer(other, o.ID, o.Version, e); problemCode(err) != domain.CodeTransferNotFound {
+			t.Fatalf("edit from another %s: %v, want %s", name, err, domain.CodeTransferNotFound)
+		}
+	}
+	if _, err := s.EditTransfer(ctx, o.ID, o.Version+1, e); problemCode(err) != store.CodeConflictVersion {
+		t.Fatalf("stale edit: %v, want %s", err, store.CodeConflictVersion)
+	}
+	got, err := s.EditTransfer(ctx, o.ID, o.Version, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != o.Version+1 || !got.ShipDate.Equal(newShip) || got.ToSite != "S2" || len(got.Lines) != 2 ||
+		!got.Lines[0].Qty.Equal(q) || got.Lines[1].LineNo != 2 || got.Lines[1].ProductID != p2 || got.Lines[1].ID == "" {
+		t.Fatalf("edited order %+v", got)
+	}
+	// Remove the first line, clear the planned receipt.
+	got2, err := s.EditTransfer(ctx, o.ID, got.Version, domain.TransferEdit{Remove: []string{got.Lines[0].ID}, ClearPlannedReceipt: true})
+	if err != nil || len(got2.Lines) != 1 || got2.Lines[0].ProductID != p2 {
+		t.Fatalf("remove: %v %+v", err, got2)
+	}
+	// Remove the highest line (2) and add one in the same edit: the new line is 3,
+	// not a reuse of the removed number.
+	got3, err := s.EditTransfer(ctx, o.ID, got2.Version, domain.TransferEdit{Remove: []string{got2.Lines[0].ID},
+		Add: []domain.TransferLine{{ProductID: p1, Dims: dims(), Unit: "EA", Qty: dec("1")}}})
+	if err != nil || len(got3.Lines) != 1 || got3.Lines[0].LineNo != 3 || got3.Lines[0].ProductID != p1 {
+		t.Fatalf("replace the highest line: %v %+v", err, got3)
+	}
+	if _, err := s.EditTransfer(ctx, o.ID, got3.Version, domain.TransferEdit{Remove: []string{got3.Lines[0].ID}}); problemCode(err) != domain.CodeInvalid {
+		t.Fatalf("remove last line: %v, want %s", err, domain.CodeInvalid)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
+		and aggregate_id = $1`, o.ID).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("transfer.changed events %d (%v), want 3", n, err)
+	}
+	// The event carries the changed header: receiving site and planned receipt date.
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
+		and aggregate_id = $1 and payload->'data'->>'toSiteId' = 'S2' and payload->'data'->>'plannedReceiptDate' = '2026-09-07'
+		and jsonb_array_length(payload->'data'->'lines') = 2`, o.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("transfer.changed with the new site and planned receipt: %d (%v), want 1", n, err)
+	}
+	// A cancelled order cannot be edited, and cancelling emits the event.
+	o2, _, err := s.CreateTransfer(ctx, "edit-2", transferOrder(ctx, p1, "5", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelTransfer(ctx, o2.ID, o2.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditTransfer(ctx, o2.ID, o2.Version+1, domain.TransferEdit{ClearPlannedReceipt: true}); problemCode(err) != domain.CodeTransferState {
+		t.Fatalf("edit cancelled: %v, want %s", err, domain.CodeTransferState)
+	}
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.inventory.transfer.changed.v1'
+		and aggregate_id = $1`, o2.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("cancel events %d (%v), want 1", n, err)
+	}
+}

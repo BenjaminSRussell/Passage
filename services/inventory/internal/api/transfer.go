@@ -53,6 +53,24 @@ type transferLineRequest struct {
 	OverdeliveryPct  string            `json:"overdeliveryPct"`
 }
 
+// transferEditRequest is the PATCH body: every field is optional, and an empty
+// plannedReceiptDate or toSiteId clears it.
+type transferEditRequest struct {
+	ShipDate           *string               `json:"shipDate"`
+	PlannedReceiptDate *string               `json:"plannedReceiptDate"`
+	ToSiteID           *string               `json:"toSiteId"`
+	AddLines           []transferLineRequest `json:"addLines"`
+	UpdateLines        []lineEditRequest     `json:"updateLines"`
+	RemoveLineIDs      []string              `json:"removeLineIds"`
+}
+
+type lineEditRequest struct {
+	LineID           string  `json:"lineId"`
+	Qty              *string `json:"qty"`
+	UnderdeliveryPct *string `json:"underdeliveryPct"`
+	OverdeliveryPct  *string `json:"overdeliveryPct"`
+}
+
 type shipRequest struct {
 	ShipDate string            `json:"shipDate"`
 	Lines    []shipLineRequest `json:"lines"`
@@ -161,6 +179,7 @@ func (a *API) registerTransfers(r chi.Router) {
 	r.With(authz.RequireDuty(dutyTransferWrite)).Post(transferOrdersPath, a.createTransfer)
 	r.With(authz.RequireDuty(dutyRead)).Get(transferOrdersPath, a.listTransfers)
 	r.With(authz.RequireDuty(dutyRead)).Get(transferOrdersPath+"/{id}", transferRoute(a.getTransfer))
+	r.With(authz.RequireDuty(dutyTransferWrite)).Patch(transferOrdersPath+"/{id}", transferRoute(a.editTransfer))
 	r.With(authz.RequireDuty(dutyTransferPost)).Post(transferOrdersPath+"/{id}:ship", transferRoute(a.shipTransfer))
 	r.With(authz.RequireDuty(dutyTransferPost)).Post(transferOrdersPath+"/{id}:receive", transferRoute(a.receiveTransfer))
 	r.With(authz.RequireDuty(dutyTransferWrite)).Post(transferOrdersPath+"/{id}:cancel", transferRoute(a.cancelTransfer))
@@ -242,27 +261,7 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	lines := make([]domain.TransferLine, 0, len(req.Lines))
 	for i, l := range req.Lines {
-		prefix := fmt.Sprintf("lines[%d].", i)
-		if !ids.Valid(l.ProductID) {
-			fields[prefix+"productId"] = "must be a UUID"
-		}
-		if !unitCode.MatchString(l.Unit) {
-			fields[prefix+"unit"] = "is required (1 to 12 characters of A-Z, 0-9, _ or -)"
-		}
-		qty, qErr := decimal.NewFromString(strings.TrimSpace(l.Qty))
-		if qErr != nil || !qty.IsPositive() {
-			fields[prefix+"qty"] = "must be a positive decimal number"
-		}
-		under, uErr := decimalOr(l.UnderdeliveryPct, decimal.Zero)
-		if uErr != nil {
-			fields[prefix+"underdeliveryPct"] = "must be a decimal number"
-		}
-		over, oErr := decimalOr(l.OverdeliveryPct, decimal.Zero)
-		if oErr != nil {
-			fields[prefix+"overdeliveryPct"] = "must be a decimal number"
-		}
-		lines = append(lines, domain.TransferLine{LineNo: i + 1, ProductID: l.ProductID, Dims: domain.Dimensions(l.Dimensions),
-			Unit: l.Unit, Qty: qty, UnderPct: under, OverPct: over})
+		lines = append(lines, parseTransferLine(fields, fmt.Sprintf("lines[%d].", i), i+1, l))
 	}
 	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
 	if key == "" || len(key) > maxKeyLength {
@@ -285,6 +284,31 @@ func (a *API) createTransfer(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeTransfer(w, status, out)
+}
+
+// parseTransferLine validates one line request into a domain line, recording
+// field problems under prefix.
+func parseTransferLine(fields map[string]string, prefix string, lineNo int, l transferLineRequest) domain.TransferLine {
+	if !ids.Valid(l.ProductID) {
+		fields[prefix+"productId"] = "must be a UUID"
+	}
+	if !unitCode.MatchString(l.Unit) {
+		fields[prefix+"unit"] = "is required (1 to 12 characters of A-Z, 0-9, _ or -)"
+	}
+	qty, qErr := decimal.NewFromString(strings.TrimSpace(l.Qty))
+	if qErr != nil || !qty.IsPositive() {
+		fields[prefix+"qty"] = "must be a positive decimal number"
+	}
+	under, uErr := decimalOr(l.UnderdeliveryPct, decimal.Zero)
+	if uErr != nil {
+		fields[prefix+"underdeliveryPct"] = "must be a decimal number"
+	}
+	over, oErr := decimalOr(l.OverdeliveryPct, decimal.Zero)
+	if oErr != nil {
+		fields[prefix+"overdeliveryPct"] = "must be a decimal number"
+	}
+	return domain.TransferLine{LineNo: lineNo, ProductID: l.ProductID, Dims: domain.Dimensions(l.Dimensions),
+		Unit: l.Unit, Qty: qty, UnderPct: under, OverPct: over}
 }
 
 func (a *API) listTransfers(w http.ResponseWriter, r *http.Request) {
@@ -426,6 +450,93 @@ func (a *API) receiveTransfer(w http.ResponseWriter, r *http.Request, id string)
 	o, err := a.store.ReceiveTransfer(r.Context(), id, version, receipts, receiptDate, a.post.Negative)
 	if err != nil {
 		a.failed(w, r, "receive transfer order", err)
+		return
+	}
+	writeTransfer(w, http.StatusOK, o)
+}
+
+// editTransfer changes a CREATED order (FR-16.15): dates, receiving site and
+// lines added, changed or removed, in one atomic step. If-Match carries the
+// order version.
+func (a *API) editTransfer(w http.ResponseWriter, r *http.Request, id string) {
+	version, err := ifMatchVersion(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	var req transferEditRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	var e domain.TransferEdit
+	if req.ShipDate != nil {
+		d, err := time.Parse(dateFormat, strings.TrimSpace(*req.ShipDate))
+		if err != nil {
+			fields["shipDate"] = "must be a date (YYYY-MM-DD)"
+		}
+		e.ShipDate = &d
+	}
+	if req.PlannedReceiptDate != nil {
+		if raw := strings.TrimSpace(*req.PlannedReceiptDate); raw == "" {
+			e.ClearPlannedReceipt = true
+		} else if d, err := time.Parse(dateFormat, raw); err != nil {
+			fields["plannedReceiptDate"] = "must be a date (YYYY-MM-DD) or empty to clear"
+		} else {
+			e.PlannedReceipt = &d
+		}
+	}
+	if req.ToSiteID != nil {
+		site := strings.TrimSpace(*req.ToSiteID)
+		code(fields, "toSiteId", site, true)
+		e.ToSite = &site
+	}
+	if n := len(req.AddLines) + len(req.UpdateLines) + len(req.RemoveLineIDs); n > maxReceiptLines {
+		fields["lines"] = fmt.Sprintf("the edit may name at most %d lines", maxReceiptLines)
+	}
+	for i, l := range req.AddLines {
+		e.Add = append(e.Add, parseTransferLine(fields, fmt.Sprintf("addLines[%d].", i), 0, l))
+	}
+	for i, u := range req.UpdateLines {
+		prefix := fmt.Sprintf("updateLines[%d].", i)
+		if !ids.Valid(u.LineID) {
+			fields[prefix+"lineId"] = "must be a UUID"
+		}
+		le := domain.LineEdit{LineID: u.LineID}
+		for _, f := range []struct {
+			name string
+			in   *string
+			out  **decimal.Decimal
+			qty  bool
+		}{{"qty", u.Qty, &le.Qty, true}, {"underdeliveryPct", u.UnderdeliveryPct, &le.UnderPct, false}, {"overdeliveryPct", u.OverdeliveryPct, &le.OverPct, false}} {
+			if f.in == nil {
+				continue
+			}
+			d, err := decimal.NewFromString(strings.TrimSpace(*f.in))
+			switch {
+			case err != nil:
+				fields[prefix+f.name] = "must be a decimal number"
+			case f.qty && !d.IsPositive():
+				fields[prefix+f.name] = "must be a positive decimal number"
+			}
+			*f.out = &d
+		}
+		e.Update = append(e.Update, le)
+	}
+	for i, lineID := range req.RemoveLineIDs {
+		if !ids.Valid(lineID) {
+			fields[fmt.Sprintf("removeLineIds[%d]", i)] = "must be a UUID"
+		}
+	}
+	e.Remove = req.RemoveLineIDs
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	o, err := a.store.EditTransfer(r.Context(), id, version, e)
+	if err != nil {
+		a.failed(w, r, "edit transfer order", err)
 		return
 	}
 	writeTransfer(w, http.StatusOK, o)

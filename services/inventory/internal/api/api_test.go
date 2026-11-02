@@ -64,6 +64,7 @@ type fakeStore struct {
 	countCanApprove  bool
 	postedParams     store.PostParams
 	transferVersion  int
+	transferEdit     domain.TransferEdit
 	transferIn       domain.TransferOrder
 	transferKey      string
 	shipDate         time.Time
@@ -658,8 +659,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 81 {
-		t.Fatalf("router walk yielded %d operations, want 81: %v", len(served), served)
+	if len(served) != 82 {
+		t.Fatalf("router walk yielded %d operations, want 82: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

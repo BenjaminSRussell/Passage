@@ -355,8 +355,83 @@ func (s *Postgres) CancelTransfer(ctx context.Context, id string, version int) (
 		if err := saveTransfer(ctx, tx, tp.TenantID, o); err != nil {
 			return err
 		}
-		out, err = loadTransfer(ctx, tx, id, false)
-		return err
+		if out, err = loadTransfer(ctx, tx, id, false); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "transfer", o.ID, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
+	})
+	return out, err
+}
+
+// orderedQty is the ordered quantity of every line of o by line id, the "moved"
+// quantity of a transfer.changed event.
+func orderedQty(o domain.TransferOrder) map[string]decimal.Decimal {
+	m := make(map[string]decimal.Decimal, len(o.Lines))
+	for _, l := range o.Lines {
+		m[l.ID] = l.Qty
+	}
+	return m
+}
+
+// EditTransfer applies one edit to a CREATED transfer order at the version the
+// caller read (If-Match): header dates and receiving site, lines added, changed
+// and removed, in one transaction with one transfer.changed event. Posting
+// nothing: nothing has moved before the first shipment. A repeated request at
+// the old version is a stale-version 412, so the edit is not applied twice.
+func (s *Postgres) EditTransfer(ctx context.Context, id string, version int, e domain.TransferEdit) (domain.TransferOrder, error) {
+	tp, _ := tenant.FromContext(ctx)
+	var out domain.TransferOrder
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		o, err := lockedTransfer(ctx, tx, id, version)
+		if err != nil {
+			return err
+		}
+		next, err := domain.ApplyTransferEdit(o, e, s.rules.MaxScale)
+		if err != nil {
+			return domainProblem(err)
+		}
+		if len(e.Add) > 0 {
+			sets := make([]domain.Dimensions, len(e.Add))
+			for i, l := range e.Add {
+				sets[i] = o.SourceDims(l)
+			}
+			if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+				return err
+			}
+		}
+		for _, lineID := range e.Remove {
+			if _, err := tx.Exec(ctx, `delete from transfer_order_line where tenant_id = $1 and transfer_order_id = $2 and id = $3`,
+				tp.TenantID, id, lineID); err != nil {
+				return err
+			}
+		}
+		for _, l := range next.Lines {
+			if l.ID != "" {
+				if _, err := tx.Exec(ctx, `update transfer_order_line set qty = $3, under_pct = $4, over_pct = $5
+					where tenant_id = $1 and id = $2`, tp.TenantID, l.ID, l.Qty.String(), l.UnderPct.String(), l.OverPct.String()); err != nil {
+					return err
+				}
+				continue
+			}
+			hash, _, err := upsertDimensionSet(ctx, tx, tp.TenantID, next.SourceDims(l))
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `insert into transfer_order_line (tenant_id, transfer_order_id, id, line_no, product_id, dimension_set_hash, unit,
+				qty, under_pct, over_pct) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+				tp.TenantID, id, ids.New(), l.LineNo, l.ProductID, hash, l.Unit, l.Qty.String(), l.UnderPct.String(), l.OverPct.String()); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `update transfer_order set ship_date = $3, planned_receipt_date = $4, to_site = $5,
+			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+			tp.TenantID, id, next.ShipDate.Format(dateLayout), optionalDate(next.PlannedReceipt), optionalText(next.ToSite)); err != nil {
+			return err
+		}
+		if out, err = loadTransfer(ctx, tx, id, false); err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "transfer", id, invevents.TransferChanged, tp.TenantID, transferData(out, orderedQty(out), time.Time{}))
 	})
 	return out, err
 }
@@ -655,7 +730,10 @@ func transferData(o domain.TransferOrder, moved map[string]decimal.Decimal, rece
 	out := invevents.TransferData{
 		TransferOrderID: o.ID, LegalEntityID: o.LegalEntityID, Number: o.Number, Status: o.Status, FromWarehouse: o.FromWarehouse,
 		ToWarehouse: o.ToWarehouse, TransitWarehouse: optionalText(o.TransitWarehouse), ShipDate: o.ShipDate.Format(dateLayout),
-		Lines: []invevents.TransferLineData{},
+		ToSiteID: optionalText(o.ToSite), Lines: []invevents.TransferLineData{},
+	}
+	if !o.PlannedReceipt.IsZero() {
+		out.PlannedReceiptDate = optionalText(o.PlannedReceipt.Format(dateLayout))
 	}
 	if !o.UseTransit {
 		out.TransitWarehouse = nil

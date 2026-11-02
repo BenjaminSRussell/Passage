@@ -53,6 +53,8 @@ channels:
         $ref: '#/components/messages/TransferShipped'
       transferReceived:
         $ref: '#/components/messages/TransferReceived'
+      transferChanged:
+        $ref: '#/components/messages/TransferChanged'
   ownershipChanged:
     address: passage.inventory.ownership
     messages:
@@ -108,7 +110,7 @@ operations:
   publishTransfer:
     action: send
     channel: { $ref: '#/channels/transfer' }
-    summary: A transfer order was shipped, or a receipt was booked against it (FR-16.15)
+    summary: A transfer order was shipped, received, edited before shipment or cancelled (FR-16.15)
   publishOwnershipChanged:
     action: send
     channel: { $ref: '#/channels/ownershipChanged' }
@@ -243,6 +245,14 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
+    TransferChanged:
+      title: Transfer changed
+      summary: A CREATED transfer order was edited (dates, receiving site, lines added, changed or removed) or an order was cancelled.
+      name: dev.passage.inventory.transfer.changed.v1
+      x-passage-type: dev.passage.inventory.transfer.changed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransferData'
     OwnershipChanged:
       title: Ownership changed
       summary: Vendor-owned consignment stock became legal-entity owned.
@@ -333,11 +343,14 @@ components:
         givenUpQty: { type: string, description: Ordered minus received }
     TransferData:
       type: object
-      required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, lines]
+      required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, toSiteId, plannedReceiptDate, lines]
       description: |
         Lines are the lines this event moved; qty is the quantity moved on the line by this event,
         shippedQty and receivedQty the line totals after it. Each movement is also a valued SOLD /
-        PURCHASED transaction pair (sourceType TRANSFER_LINE) with no GL effect.
+        PURCHASED transaction pair (sourceType TRANSFER_LINE) with no GL effect. On transfer.changed
+        the lines are every line of the order after the change, qty is the ordered quantity and
+        shippedQty, receivedQty are the line totals (zero for an order edited before shipment);
+        shipDate is the planned ship date and receiptDate is null.
       properties:
         transferOrderId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -348,6 +361,8 @@ components:
         transitWarehouse: { type: [string, 'null'], description: Null for a one-step transfer }
         shipDate: { type: string, format: date, description: 'On transfer.shipped the date of this shipment; on transfer.received the order''s ship date (its first shipment)' }
         receiptDate: { type: [string, 'null'], format: date, description: Date of this receipt; the ship date of a one-step shipment; null on a two-step shipment }
+        toSiteId: { type: [string, 'null'], description: Receiving site when it differs from the lines' site; null when not set }
+        plannedReceiptDate: { type: [string, 'null'], format: date, description: Planned receipt date of the order; null when not set }
         lines:
           type: array
           items:

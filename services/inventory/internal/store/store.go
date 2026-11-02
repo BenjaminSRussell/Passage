@@ -89,6 +89,7 @@ type Store interface {
 	ShipTransfer(ctx context.Context, id string, version int, ships []TransferShipment, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error)
 	ReceiveTransfer(ctx context.Context, id string, version int, receipts []TransferReceipt, receiptDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error)
 	CancelTransfer(ctx context.Context, id string, version int) (domain.TransferOrder, error)
+	EditTransfer(ctx context.Context, id string, version int, e domain.TransferEdit) (domain.TransferOrder, error)
 	ListInTransit(ctx context.Context) ([]InTransitRow, error)
 	ListTransferLines(ctx context.Context, f TransferLineFilter) ([]TransferLineRow, bool, error)
 	ListCountVariance(ctx context.Context, f CountVarianceFilter) ([]CountVarianceRow, bool, error)

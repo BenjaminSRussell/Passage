@@ -1231,6 +1231,42 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: editTransferOrder
+      summary: Edit a CREATED transfer order before it ships (FR-16.15)
+      description: |
+        One atomic change at the version in If-Match: the planned ship date, the planned receipt
+        date (an empty string clears it), the receiving site (an empty string clears it), lines
+        added (addLines, numbered after the highest line before the edit), lines changed (updateLines:
+        quantity and tolerances) and lines removed (removeLineIds). The result is validated like a
+        new order: at least one line, the line rules of creation, a planned receipt not before the
+        ship date. Warehouses, transit and the legal entity never change: cancel and create
+        another. Only a CREATED order can be edited (INV-TRF-006); nothing is posted. Publishes
+        transfer.changed.
+      x-passage-duty: inventory.transfer.write
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditTransferRequest' }
+      responses:
+        '200':
+          description: Edited order
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/inventory/transfer-orders/{id}:ship:
     post:
       operationId: shipTransferOrder
@@ -3141,6 +3177,44 @@ components:
               qty: { $ref: '#/components/schemas/Decimal' }
               underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
               overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+    EditTransferRequest:
+      type: object
+      additionalProperties: false
+      description: Every field is optional; at least one must be given.
+      properties:
+        shipDate: { type: string, format: date, description: Planned ship date }
+        plannedReceiptDate: { type: string, description: 'Planned receipt date (YYYY-MM-DD, not before the ship date); an empty string clears it' }
+        toSiteId: { type: string, maxLength: 60, description: Receiving site; an empty string clears it }
+        addLines:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [productId, unit, qty]
+            properties:
+              productId: { type: string, format: uuid }
+              dimensions: { $ref: '#/components/schemas/Dimensions' }
+              unit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+              overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+        updateLines:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineId]
+            properties:
+              lineId: { type: string, format: uuid }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+              overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+        removeLineIds:
+          type: array
+          maxItems: 1000
+          items: { type: string, format: uuid }
     ReceiveTransferRequest:
       type: object
       additionalProperties: false

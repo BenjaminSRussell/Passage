@@ -1139,6 +1139,26 @@ export async function receiveTransfer(id: string, version: number, receiptDate: 
   ).body;
 }
 
+/** One atomic edit of a CREATED transfer order; an empty date or site clears it. */
+export interface TransferEditInput {
+  shipDate?: string;
+  plannedReceiptDate?: string;
+  toSiteId?: string;
+  addLines?: TransferLineInput[];
+  updateLines?: { lineId: string; qty?: string; underdeliveryPct?: string; overdeliveryPct?: string }[];
+  removeLineIds?: string[];
+}
+
+export async function editTransfer(id: string, version: number, edit: TransferEditInput): Promise<TransferOrder> {
+  return (
+    await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify(edit),
+    })
+  ).body;
+}
+
 export async function cancelTransfer(id: string, version: number): Promise<TransferOrder> {
   return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:cancel`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
 }

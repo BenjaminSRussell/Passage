@@ -14,6 +14,7 @@ import {
 import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, today } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
+import { TransferEditForm } from "./TransferEditForm";
 import { useLoad } from "./useLoad";
 
 const lineColumns: DataTableColumn<TransferLine>[] = [
@@ -344,6 +345,18 @@ export function TransferOrderPage() {
           <Detail term="Created">{formatDateTime(order.createdAt)}</Detail>
         </dl>
       </Card>
+      {created ? (
+        <TransferEditForm
+          key={order.version}
+          order={order}
+          onDone={(next) => {
+            setFailure(null);
+            setOrder(next);
+            setNotice(`Transfer order ${next.number} updated.`);
+          }}
+          onError={setFailure}
+        />
+      ) : null}
       {shippable ? <ShipForm key={order.version} order={order} onDone={shipped} onError={setFailure} /> : null}
       {receivable ? (
         <ReceiveForm
