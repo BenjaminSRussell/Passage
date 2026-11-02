@@ -364,7 +364,7 @@ func newMatchIndex(cands map[string]Facts) *matchIndex {
 	return ix
 }
 
-func (ix *matchIndex) near(line *prepared, rules []Rule) []*prepared {
+func (ix *matchIndex) near(line *prepared, rules []Rule) ([]*prepared, bool) {
 	tolerance, window := decimal.Zero, 0
 	for _, r := range rules {
 		if r.Tolerance.Amount.GreaterThan(tolerance) {
@@ -383,8 +383,10 @@ func (ix *matchIndex) near(line *prepared, rules []Rule) []*prepared {
 			out = append(out, c)
 		}
 	}
-	return out
+	return out, len(out) < len(ix.items)
 }
+
+func excludedBound(w Weights) int { return w.Reference + w.Counterparty + max(w.Amount, w.Date) }
 
 func sharesReference(line, cand *prepared) bool {
 	return cand.reference != "" && !placeholderReference(cand.reference) && (cand.reference == line.reference || cand.reference == line.alt)
@@ -395,10 +397,10 @@ func sharesReference(line, cand *prepared) bool {
 // the earlier rule on equal scores. Candidates are keyed by ID.
 func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) Decision {
 	ix := newMatchIndex(cands)
-	return ix.matchLine(prepare("", line), ix.items, rules, t)
+	return ix.matchLine(prepare("", line), ix.items, false, rules, t)
 }
 
-func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, rules []Rule, t Thresholds) Decision {
+func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, excluded bool, rules []Rule, t Thresholds) Decision {
 	best := Decision{Status: StatusUnmatched}
 	needRef, needSim := false, false
 	for _, r := range rules {
@@ -424,6 +426,9 @@ func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, rules []Rule,
 		}
 		d := Decide(scored, t)
 		d.Rule = r.Name
+		if d.Status == StatusMatched && excluded && excludedBound(r.Weights) > d.Best.Score-t.TieMargin {
+			d.Status = StatusSuggested
+		}
 		if d.Status == StatusMatched {
 			winner := byID[d.Best.ID]
 			if (r.Strict && ix.refCount[winner.reference] > 1) || (!r.Strict && contradictsReference(line, winner)) {

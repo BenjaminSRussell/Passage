@@ -313,3 +313,18 @@ func TestMatchLine_PayerRuleDoesNotAutoMatchAContradictingReference(t *testing.T
 		})
 	}
 }
+
+func TestReconcileStatement_ExcludedCandidateWithinTieMarginBlocksAutoMatch(t *testing.T) {
+	noDate := []Rule{{Name: "no-date", Priority: 1, Weights: Weights{Amount: 50, Reference: 25, Counterparty: 25}, Tolerance: tol}}
+	leader := Item{ID: "tx-1", Facts: facts("120.00", "2026-10-22", "INV-2026-0001", "Acme Trading Ltd")}
+	line := []RecLine{{1, leader.Facts}}
+	out := reconcile(t, line, []Item{leader}, noDate, DefaultThresholds)
+	if len(out.Matches) != 1 {
+		t.Fatalf("lone leader: %+v; want an auto-match", out)
+	}
+	outside := Item{ID: "tx-2", Facts: facts("120.00", "2026-09-01", "OTHER-REF-77", "Acme Trading Ltd")}
+	out = reconcile(t, line, []Item{leader, outside}, noDate, DefaultThresholds)
+	if len(out.Matches) != 0 || len(out.Suggestions) != 1 || out.Suggestions[0].ItemID != "tx-1" {
+		t.Fatalf("outcome = %+v; a candidate outside the window that could score within the tie margin must leave the line suggested", out)
+	}
+}
