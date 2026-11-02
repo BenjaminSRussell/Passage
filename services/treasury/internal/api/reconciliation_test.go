@@ -50,7 +50,7 @@ func (f *fakeStore) CreateManualMatch(_ context.Context, in store.NewMatch, _ st
 	return store.Match{ID: testMatchID, Kind: "manual", Status: "matched", Version: 1}, f.matchErr
 }
 
-func (f *fakeStore) ListMatches(context.Context, string) ([]store.Match, error) {
+func (f *fakeStore) ListMatches(context.Context, string, int, int) ([]store.Match, error) {
 	return []store.Match{}, nil
 }
 
@@ -83,7 +83,7 @@ func ruleBody() map[string]any {
 }
 
 func runBody() map[string]any {
-	return map[string]any{"statementId": testStatement, "items": []map[string]any{
+	return map[string]any{"statementId": testStatement, "legalEntityId": testLE, "items": []map[string]any{
 		{"type": "ar", "id": "inv-1", "currency": "EUR", "amount": "120.00", "valueDate": "2026-10-22", "reference": "INV-1"},
 	}}
 }
@@ -147,20 +147,22 @@ func TestRunReconciliation_ValidatesItemsAndReturnsResult(t *testing.T) {
 		for k, v := range patch {
 			it[k] = v
 		}
-		return map[string]any{"statementId": testStatement, "items": []map[string]any{it}}
+		return map[string]any{"statementId": testStatement, "legalEntityId": testLE, "items": []map[string]any{it}}
 	}
 	dup := runBody()
 	dup["items"] = append(dup["items"].([]map[string]any), dup["items"].([]map[string]any)[0])
 	bad := map[string]map[string]any{
-		"unknown type":   item(map[string]any{"type": "po"}),
-		"zero amount":    item(map[string]any{"amount": "0"}),
-		"bad amount":     item(map[string]any{"amount": "x"}),
-		"bad currency":   item(map[string]any{"currency": "eur"}),
-		"bad value date": item(map[string]any{"valueDate": "22.10.2026"}),
-		"empty id":       item(map[string]any{"id": ""}),
-		"duplicate item": dup,
-		"no items":       {"statementId": testStatement, "items": []map[string]any{}},
-		"bad statement":  {"statementId": "x", "items": runBody()["items"]},
+		"unknown type":    item(map[string]any{"type": "po"}),
+		"zero amount":     item(map[string]any{"amount": "0"}),
+		"bad amount":      item(map[string]any{"amount": "x"}),
+		"bad currency":    item(map[string]any{"currency": "eur"}),
+		"bad value date":  item(map[string]any{"valueDate": "22.10.2026"}),
+		"empty id":        item(map[string]any{"id": ""}),
+		"duplicate item":  dup,
+		"no items":        {"statementId": testStatement, "legalEntityId": testLE, "items": []map[string]any{}},
+		"bad statement":   {"statementId": "x", "legalEntityId": testLE, "items": runBody()["items"]},
+		"no legal entity": {"statementId": testStatement, "items": runBody()["items"]},
+		"negative cursor": {"statementId": testStatement, "legalEntityId": testLE, "afterLineNo": -1, "items": runBody()["items"]},
 	}
 	for name, body := range bad {
 		if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-runs", jsonBody(t, body), "application/json", headers); rec.Code != http.StatusBadRequest {
@@ -183,7 +185,7 @@ func TestRunReconciliation_MapsStoreProblems(t *testing.T) {
 
 func TestManualMatch_ValidatesAndCreates(t *testing.T) {
 	h, fs := newTestServer(t)
-	good := map[string]any{"statementId": testStatement, "lineNos": []int{3, 4}, "reason": "split remittance",
+	good := map[string]any{"statementId": testStatement, "legalEntityId": testLE, "lineNos": []int{3, 4}, "reason": "split remittance",
 		"items": []map[string]any{{"type": "ar", "id": "inv-1", "currency": "EUR", "amount": "100.00"}}}
 	headers := map[string]string{idempotencyKey: "m-1"}
 	rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-matches", jsonBody(t, good), "application/json", headers)
@@ -207,6 +209,7 @@ func TestManualMatch_ValidatesAndCreates(t *testing.T) {
 		"no items":        patch("items", []map[string]any{}),
 		"bad item type":   patch("items", []map[string]any{{"type": "x", "id": "a", "currency": "EUR", "amount": "1"}}),
 		"bad statement":   patch("statementId", "x"),
+		"no legal entity": patch("legalEntityId", ""),
 	}
 	for name, body := range bad {
 		if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-matches", jsonBody(t, body), "application/json", headers); rec.Code != http.StatusBadRequest {
@@ -261,5 +264,52 @@ func TestReconciliationReads_NeedValidIDsAndQueries(t *testing.T) {
 	}
 	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-rules/"+testRuleID+":deactivate", nil, "", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Errorf("deactivate without If-Match: status %d", rec.Code)
+	}
+}
+
+func TestReconciliationWrites_NeedDutyAndScope(t *testing.T) {
+	h, _ := newTestServer(t)
+	noDuty := map[string]string{idempotencyKey: "k", tenant.HeaderDuties: "treasury.view"}
+	otherEntity := "0190b7a0-0000-7000-8000-0000000000ff"
+	match := map[string]any{"statementId": testStatement, "legalEntityId": testLE, "lineNos": []int{1}, "reason": "r",
+		"items": []map[string]any{{"type": "ar", "id": "a", "currency": "EUR", "amount": "1"}}}
+	foreignRun, foreignMatch := runBody(), map[string]any{}
+	foreignRun["legalEntityId"] = otherEntity
+	for k, v := range match {
+		foreignMatch[k] = v
+	}
+	foreignMatch["legalEntityId"] = otherEntity
+	unmatchPath := "/v1/treasury/reconciliation-matches/" + testMatchID + ":unmatch"
+	reason := func() *bytes.Buffer { return jsonBody(t, map[string]string{"reason": "r"}) }
+	cases := map[string]struct {
+		path    string
+		body    *bytes.Buffer
+		headers map[string]string
+	}{
+		"run without duty":     {"/v1/treasury/reconciliation-runs", jsonBody(t, runBody()), noDuty},
+		"run other entity":     {"/v1/treasury/reconciliation-runs", jsonBody(t, foreignRun), map[string]string{idempotencyKey: "k"}},
+		"match without duty":   {"/v1/treasury/reconciliation-matches", jsonBody(t, match), noDuty},
+		"match other entity":   {"/v1/treasury/reconciliation-matches", jsonBody(t, foreignMatch), map[string]string{idempotencyKey: "k"}},
+		"unmatch without duty": {unmatchPath, reason(), map[string]string{"If-Match": `"1"`, tenant.HeaderDuties: "treasury.view"}},
+	}
+	for name, c := range cases {
+		if rec := call(h, http.MethodPost, c.path, c.body, "application/json", c.headers); rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status %d; want 403", name, rec.Code)
+		}
+	}
+}
+
+func TestListMatches_PagesWithNextOffset(t *testing.T) {
+	h, _ := newTestServer(t)
+	base := "/v1/treasury/reconciliation-matches?statementId=" + testStatement
+	for path, want := range map[string]int{
+		base + "&limit=0":            http.StatusBadRequest,
+		base + "&limit=9999":         http.StatusBadRequest,
+		base + "&offset=-1":          http.StatusBadRequest,
+		base + "&limit=10&offset=20": http.StatusOK,
+	} {
+		if rec := call(h, http.MethodGet, path, nil, "", nil); rec.Code != want {
+			t.Errorf("GET %s: status %d; want %d", path, rec.Code, want)
+		}
 	}
 }

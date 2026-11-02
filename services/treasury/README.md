@@ -95,7 +95,12 @@ unmatched lines against the open items the caller offers (ledger, AR and AP own 
 matches are stored and published, N:1 batch receipts match when the items sharing the line's
 batch reference add up exactly, an item wanted by two matches is released from both, and other
 lines with a candidate become `suggested`. `POST /reconciliation-matches` matches lines to
-items by hand (reason required, must balance), `:unmatch` dissolves a match with a reason.
+items by hand (reason required, must balance), `:unmatch` dissolves a match with a reason and records who did it.
+A run and a manual match carry the `legalEntityId` of the statement (TRS-0488 when it differs, 403 outside the caller's scope).
+A run considers one page of open lines after `afterLineNo`; `remainingLines` and `nextAfterLineNo` drive the next call.
+`GET /reconciliation-matches` pages with `limit` (max 500) and `offset`, and returns `nextOffset` for a full page.
+A placeholder end-to-end id (NOTPROVIDED, NONREF) is ignored and the remittance reference is scored instead.
+A reference-only candidate (the reference agrees, amount, date or payer does not) is suggested and never auto-matched.
 All creates take `Idempotency-Key`; `:deactivate` and `:unmatch` take `If-Match`. Events:
 `dev.passage.treasury.reconciliation.matched.v1` and `...unmatched.v1`.
 
@@ -151,6 +156,8 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0484` | 404 | reconciliation match not found |
 | `TRS-0485` | 422 | the match is already unmatched |
 | `TRS-0486` | 422 | a line is not on the statement, or a line or item is not in the statement currency |
+| `TRS-0487` | 409 | the reconciliation rule is already inactive |
+| `TRS-0488` | 422 | the items or the request belong to a different legal entity than the statement |
 | `TRS-0490` | 413 | statement file exceeds `TREASURY_MAX_FILE_MB` |
 | `TRS-0491` | 400 | statement file could not be read |
 | `TRS-0493` | 422 | statement cannot be parsed as camt.053, BAI2 or MT940, or the file holds more than one statement; `errors.line` names the BAI2 / MT940 line, `errors.entry` the camt.053 entry |

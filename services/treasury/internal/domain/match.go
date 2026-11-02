@@ -89,7 +89,7 @@ var (
 func ScoreWith(line, cand Facts, tol Tolerance, w Weights) int {
 	total := float64(w.Amount)*amountResult(line.Amount, cand.Amount, tol.Amount) +
 		float64(w.Date)*dateResult(line.ValueDate, cand.ValueDate, tol.DateWindowDays) +
-		float64(w.Reference)*referenceResult(line.Reference, cand.Reference) +
+		float64(w.Reference)*math.Max(referenceResult(line.Reference, cand.Reference), referenceResult(line.AltReference, cand.Reference)) +
 		float64(w.Counterparty)*similarity(line.Counterparty, cand.Counterparty)
 	return int(math.Round(total))
 }

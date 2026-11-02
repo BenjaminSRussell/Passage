@@ -2,7 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -98,7 +103,7 @@ func lineStatuses(t *testing.T, f *reconFixture) map[int]string {
 
 func TestRunReconciliation_NeedsAnActiveRule(t *testing.T) {
 	f := newReconFixture(t)
-	_, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New())
+	_, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New())
 	if got := problemCode(t, err); got != CodeNoRules {
 		t.Fatalf("code = %s; want %s", got, CodeNoRules)
 	}
@@ -106,7 +111,7 @@ func TestRunReconciliation_NeedsAnActiveRule(t *testing.T) {
 	if _, err := f.s.DeactivateReconRule(f.ctx, rule.ID, rule.Version); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New())
+	_, err = f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New())
 	if got := problemCode(t, err); got != CodeNoRules {
 		t.Fatalf("after deactivate: code = %s; want %s", got, CodeNoRules)
 	}
@@ -117,7 +122,7 @@ func TestRunReconciliation_StoresOneToOneAndBatchMatchesOnceAndPublishesEvents(t
 	admin := f.admin
 	f.addRule(t)
 	key := ids.New()
-	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, key)
+	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,18 +147,18 @@ func TestRunReconciliation_StoresOneToOneAndBatchMatchesOnceAndPublishesEvents(t
 	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.treasury.reconciliation.matched.v1'`); n != 3 {
 		t.Fatalf("%d matched events in the outbox; want 3", n)
 	}
-	again, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, key)
+	again, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, key)
 	if err != nil || len(again.Matches) != 3 || again.Matches[0].ID != res.Matches[0].ID {
 		t.Fatalf("replay = %+v, %v; want the stored result", again, err)
 	}
 	if n := count(t, admin, `select count(*) from reconciliation_match`); n != 3 {
 		t.Fatalf("replay stored %d matches; want 3", n)
 	}
-	fresh, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New())
+	fresh, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New())
 	if err != nil || len(fresh.Matches) != 0 || fresh.ItemsConsidered != 0 {
 		t.Fatalf("second run = %+v, %v; matched items must not be offered again", fresh, err)
 	}
-	if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items[:1]}, key); problemCode(t, err) != CodeIdempotencyReuse {
+	if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items[:1]}, key); problemCode(t, err) != CodeIdempotencyReuse {
 		t.Fatalf("same key, other body: %v", err)
 	}
 }
@@ -167,7 +172,7 @@ func TestRunReconciliation_ConcurrentRunsMatchEachLineOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New()); err != nil {
+			if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New()); err != nil {
 				t.Errorf("run: %v", err)
 			}
 		}()
@@ -182,7 +187,7 @@ func TestRunReconciliation_SuggestsAndClearsStaleSuggestions(t *testing.T) {
 	f := newReconFixture(t)
 	f.addRule(t)
 	near := []RunItem{runItem("ar", "inv-near", "100.00", "INV-2026-0099", "")}
-	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: near}, ids.New())
+	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: near}, ids.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +197,7 @@ func TestRunReconciliation_SuggestsAndClearsStaleSuggestions(t *testing.T) {
 	if lineStatuses(t, f)[1] != "suggested" {
 		t.Fatalf("line 1 = %s; want suggested", lineStatuses(t, f)[1])
 	}
-	if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: []RunItem{runItem("ar", "far", "9999.00", "X", "")}}, ids.New()); err != nil {
+	if _, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: []RunItem{runItem("ar", "far", "9999.00", "X", "")}}, ids.New()); err != nil {
 		t.Fatal(err)
 	}
 	if got := lineStatuses(t, f)[1]; got != "unmatched" {
@@ -206,30 +211,30 @@ func TestManualMatch_BalanceReasonDoubleMatchAndUnmatch(t *testing.T) {
 	item := func(id, amount string) MatchItem {
 		return MatchItem{Type: "ledger", ID: id, Currency: "EUR", Amount: amount}
 	}
-	_, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{4}, Items: []MatchItem{item("je-1", "6.99")}, Reason: "typo"}, ids.New())
+	_, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4}, Items: []MatchItem{item("je-1", "6.99")}, Reason: "typo"}, ids.New())
 	if got := problemCode(t, err); got != CodeMatchUnbalanced {
 		t.Fatalf("unbalanced: code %s", got)
 	}
-	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{9}, Items: []MatchItem{item("je-1", "7.00")}, Reason: "x"}, ids.New())
+	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{9}, Items: []MatchItem{item("je-1", "7.00")}, Reason: "x"}, ids.New())
 	if got := problemCode(t, err); got != CodeMatchLine {
 		t.Fatalf("missing line: code %s", got)
 	}
 	foreign := MatchItem{Type: "ledger", ID: "je-usd", Currency: "USD", Amount: "7.00"}
-	if _, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{4}, Items: []MatchItem{foreign}, Reason: "x"}, ids.New()); problemCode(t, err) != CodeMatchLine {
+	if _, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4}, Items: []MatchItem{foreign}, Reason: "x"}, ids.New()); problemCode(t, err) != CodeMatchLine {
 		t.Fatalf("currency mismatch: %v", err)
 	}
-	m, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{4}, Items: []MatchItem{item("je-1", "7.00")}, Reason: "bank charge"}, ids.New())
+	m, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4}, Items: []MatchItem{item("je-1", "7.00")}, Reason: "bank charge"}, ids.New())
 	if err != nil || m.Kind != "manual" || m.Reason != "bank charge" || m.CreatedBy != "user-test" || len(m.Lines) != 1 {
 		t.Fatalf("manual match = %+v, %v", m, err)
 	}
 	if lineStatuses(t, f)[4] != "matched" {
 		t.Fatal("line 4 must be matched")
 	}
-	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{4}, Items: []MatchItem{item("je-2", "7.00")}, Reason: "again"}, ids.New())
+	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4}, Items: []MatchItem{item("je-2", "7.00")}, Reason: "again"}, ids.New())
 	if got := problemCode(t, err); got != CodeLineMatched {
 		t.Fatalf("line already matched: code %s", got)
 	}
-	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{1, 2}, Items: []MatchItem{item("je-1", "150.00")}, Reason: "one item, two lines"}, ids.New())
+	_, err = f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{1, 2}, Items: []MatchItem{item("je-1", "150.00")}, Reason: "one item, two lines"}, ids.New())
 	if got := problemCode(t, err); got != CodeLineMatched {
 		t.Fatalf("item already matched: code %s", got)
 	}
@@ -249,11 +254,11 @@ func TestManualMatch_BalanceReasonDoubleMatchAndUnmatch(t *testing.T) {
 	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.treasury.reconciliation.unmatched.v1'`); n != 1 {
 		t.Fatalf("%d unmatched events; want 1", n)
 	}
-	one2many, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LineNos: []int{1, 2}, Items: []MatchItem{item("je-1", "150.00")}, Reason: "one item, two lines"}, ids.New())
+	one2many, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{1, 2}, Items: []MatchItem{item("je-1", "150.00")}, Reason: "one item, two lines"}, ids.New())
 	if err != nil || len(one2many.Lines) != 2 || len(one2many.Items) != 1 {
 		t.Fatalf("one item to two lines after the unmatch freed it: %+v, %v", one2many, err)
 	}
-	list, err := f.s.ListMatches(f.ctx, f.statement.ID)
+	list, err := f.s.ListMatches(f.ctx, f.statement.ID, 100, 0)
 	if err != nil || len(list) != 2 || list[0].Status != "unmatched" || len(list[1].Lines) != 2 {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
@@ -288,7 +293,7 @@ func TestReconciliation_RulesAreScopedAndUnique(t *testing.T) {
 func TestReconciliation_OtherTenantAndOtherEntityCannotSeeOrUseMatches(t *testing.T) {
 	f := newReconFixture(t)
 	f.addRule(t)
-	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New())
+	res, err := f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New())
 	if err != nil || len(res.Matches) == 0 {
 		t.Fatalf("run: %+v %v", res, err)
 	}
@@ -296,7 +301,7 @@ func TestReconciliation_OtherTenantAndOtherEntityCannotSeeOrUseMatches(t *testin
 		if _, err := f.s.GetMatch(ctx, res.Matches[0].ID); problemCode(t, err) != CodeMatchNotFound {
 			t.Errorf("%s: GetMatch err = %v", name, err)
 		}
-		if _, err := f.s.RunReconciliation(ctx, RunInput{StatementID: f.statement.ID, Items: f.items}, ids.New()); problemCode(t, err) != CodeStatementNotFound {
+		if _, err := f.s.RunReconciliation(ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: f.items}, ids.New()); problemCode(t, err) != CodeStatementNotFound {
 			t.Errorf("%s: run err = %v", name, err)
 		}
 		if _, err := f.s.Unmatch(ctx, res.Matches[0].ID, 1, "no"); problemCode(t, err) != CodeMatchNotFound {
@@ -304,6 +309,118 @@ func TestReconciliation_OtherTenantAndOtherEntityCannotSeeOrUseMatches(t *testin
 		}
 		if rules, err := f.s.ListReconRules(ctx, f.le, ""); err != nil || len(rules) != 0 {
 			t.Errorf("%s: rules = %+v, %v", name, rules, err)
+		}
+	}
+}
+
+type recon1000Expected struct {
+	Matched   map[string][][]string `json:"matched"`
+	Suggested map[string][][]string `json:"suggested"`
+}
+
+func readRecon1000(t *testing.T, name string, into any) {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/recon1000/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AC-36.2: 1,000 statement lines from CAMT.053, BAI2 and MT940 files go through
+// the real parsers and the stored rules; at least 95% match automatically, no
+// match pairs a line with the wrong items, decoys and reference-only deltas stay open.
+func TestRunReconciliation_ThousandLinesAcrossThreeFormats(t *testing.T) {
+	s, _ := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	acct := activeAccount(t, s, ctx, le)
+	for _, r := range []NewReconRule{
+		{LegalEntityID: le, Rule: domain.Rule{Name: "reference", Priority: 1, Weights: domain.Weights{Amount: 40, Date: 20, Reference: 40},
+			Tolerance: domain.Tolerance{Amount: decimal.RequireFromString("0.05")}}},
+		{LegalEntityID: le, Rule: domain.Rule{Name: "payer", Priority: 2, Weights: domain.Weights{Amount: 40, Date: 20, Counterparty: 40},
+			Tolerance: domain.Tolerance{Amount: decimal.RequireFromString("0.05"), DateWindowDays: 2}}},
+	} {
+		if _, err := s.CreateReconRule(ctx, r, ids.New()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var items []RunItem
+	var want recon1000Expected
+	readRecon1000(t, "items.json", &items)
+	readRecon1000(t, "expected.json", &want)
+
+	joined := func(ids []string) string { return strings.Join(slices.Sorted(slices.Values(ids)), ",") }
+	totalLines, autoMatched, wrong := 0, 0, 0
+	matchedItems := map[string]bool{}
+	suggestedItems := map[string]bool{}
+	for _, file := range []string{"camt053.xml", "bai2.txt", "mt940.txt"} {
+		data, err := os.ReadFile("../../testdata/recon1000/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := domain.ParseStatements(data)
+		if err != nil || len(parsed) != 1 {
+			t.Fatalf("%s: parse = %d statements, %v", file, len(parsed), err)
+		}
+		sum := sha256.Sum256(data)
+		imp, err := s.ImportStatement(ctx, StatementImport{BankAccountID: acct.ID, FileHash: hex.EncodeToString(sum[:]), Parsed: parsed[0]})
+		if err != nil {
+			t.Fatalf("%s: import: %v", file, err)
+		}
+		expectedSets := map[string]bool{}
+		for _, ids := range want.Matched[file] {
+			expectedSets[joined(ids)] = true
+		}
+		totalLines += len(want.Matched[file]) + len(want.Suggested[file])
+		after := 0
+		for {
+			res, err := s.RunReconciliation(ctx, RunInput{StatementID: imp.Statement.ID, LegalEntityID: le, AfterLineNo: after, Items: items}, ids.New())
+			if err != nil {
+				t.Fatalf("%s: run: %v", file, err)
+			}
+			for _, m := range res.Matches {
+				autoMatched += len(m.Lines)
+				var got []string
+				for _, it := range m.Items {
+					got = append(got, it.ID)
+					matchedItems[it.ID] = true
+				}
+				if !expectedSets[joined(got)] || strings.HasPrefix(got[0], "decoy-") {
+					wrong++
+					t.Errorf("%s: wrong match %v (rule %s)", file, got, m.RuleName)
+				}
+			}
+			for _, sg := range res.Suggestions {
+				suggestedItems[sg.ItemID] = true
+			}
+			if res.RemainingLines == 0 {
+				break
+			}
+			after = res.NextAfterLineNo
+		}
+	}
+	rate := float64(autoMatched) / float64(totalLines) * 100
+	t.Logf("recon-1000: %d lines, %d auto-matched (%.1f%%), %d wrong", totalLines, autoMatched, rate, wrong)
+	if totalLines != 1000 || autoMatched < 950 || wrong != 0 {
+		t.Fatalf("lines %d, auto-matched %d, wrong %d; want 1000 lines, at least 950 auto-matched and none wrong", totalLines, autoMatched, wrong)
+	}
+	for _, ids := range func() [][]string {
+		var all [][]string
+		for _, f := range want.Suggested {
+			all = append(all, f...)
+		}
+		return all
+	}() {
+		for _, id := range ids {
+			if matchedItems[id] {
+				t.Errorf("reference-only item %s was auto-matched; it must stay suggested", id)
+			}
+			if !suggestedItems[id] {
+				t.Errorf("reference-only item %s was not suggested", id)
+			}
 		}
 	}
 }

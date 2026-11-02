@@ -773,7 +773,13 @@ paths:
       summary: Run the account's active rules over a statement against the open items offered (FR-36.3)
       description: |
         Ledger, AR and AP own the open items, so the caller offers them (at most 2,000; amounts in the
-        statement's sign convention). The first 2,000 unmatched or suggested lines are considered.
+        statement's sign convention). The next 2,000 unmatched or suggested lines after `afterLineNo` are
+        considered; `remainingLines` counts the open lines after that page and `nextAfterLineNo` is the cursor to
+        run again with. Lines of the page that an earlier run suggested but found no candidate now return to
+        unmatched; lines outside the page keep their status. `legalEntityId` must be the statement's legal entity
+        (TRS-0488) and inside the caller's scope (403). A reference-only candidate (the reference agrees but the
+        amount, date or payer does not) is suggested, never auto-matched. A placeholder end-to-end id such as
+        NOTPROVIDED is ignored; the remittance reference of the line is scored instead.
         Unique matches are stored and published; N:1 batch receipts match when the items sharing the line's
         batch reference add up to the line exactly. An item wanted by two matches is released from both.
         Other lines with a candidate become suggested and are listed. TRS-0480 when the account has no active rule.
@@ -803,7 +809,7 @@ paths:
       description: |
         Many-to-one or one-to-many. The lines' amounts must add up to the items' exactly (TRS-0481);
         lines and items must be in the statement currency (TRS-0486) and free of another active
-        match (409 TRS-0411).
+        match (409 TRS-0411). `legalEntityId` must be the statement's legal entity (TRS-0488).
       x-passage-duty: treasury.reconciliation.write
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -834,9 +840,11 @@ paths:
           in: query
           required: true
           schema: {type: string, format: uuid}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 500}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
       responses:
         "200":
-          description: Matches
+          description: A page of matches; nextOffset is present when the page is full
           content:
             application/json:
               schema:
@@ -846,6 +854,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: "#/components/schemas/ReconciliationMatch"}
+                  nextOffset: {type: integer, minimum: 1}
         "400": {$ref: "#/components/responses/Problem"}
   /v1/treasury/reconciliation-matches/{id}:
     get:
@@ -867,7 +876,7 @@ paths:
     post:
       operationId: unmatchReconciliationMatch
       summary: Dissolve a match with a reason; its lines return to unmatched and its items are free again
-      description: TRS-0485 when the match is already unmatched. The match row stays as history.
+      description: TRS-0485 when the match is already unmatched. The match row stays as history and records `unmatchedBy`.
       x-passage-duty: treasury.reconciliation.write
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1267,10 +1276,12 @@ components:
         batch: {type: string, maxLength: 140, description: Remittance or batch id; items sharing it match one batch receipt line whose reference names it}
     ReconciliationRunRequest:
       type: object
-      required: [statementId, items]
+      required: [statementId, legalEntityId, items]
       additionalProperties: false
       properties:
         statementId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: Legal entity the offered items belong to; must be the statement's}
+        afterLineNo: {type: integer, minimum: 0, default: 0, description: Only lines with a higher number are considered; pass the previous nextAfterLineNo}
         items:
           type: array
           minItems: 1
@@ -1278,7 +1289,7 @@ components:
           items: {$ref: "#/components/schemas/ReconciliationRunItem"}
     ReconciliationRunResult:
       type: object
-      required: [matches, suggestions, linesConsidered, itemsConsidered]
+      required: [matches, suggestions, linesConsidered, itemsConsidered, remainingLines, nextAfterLineNo]
       properties:
         matches:
           type: array
@@ -1295,21 +1306,24 @@ components:
               score: {type: integer, minimum: 0, maximum: 100}
         linesConsidered: {type: integer}
         itemsConsidered: {type: integer, description: Offered items in the statement currency and not already in an active match}
+        remainingLines: {type: integer, description: Open lines after this page}
+        nextAfterLineNo: {type: integer, description: Cursor for the next run; 0 when no lines remain}
     CreateManualMatchRequest:
       type: object
-      required: [statementId, lineNos, items, reason]
+      required: [statementId, legalEntityId, lineNos, items, reason]
       additionalProperties: false
       properties:
         statementId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
         lineNos:
           type: array
           minItems: 1
-          maxItems: 200
+          maxItems: 50
           items: {type: integer, minimum: 1}
         items:
           type: array
           minItems: 1
-          maxItems: 200
+          maxItems: 50
           items: {$ref: "#/components/schemas/ReconciliationItem"}
         reason: {type: string, minLength: 1, maxLength: 200}
     ReconciliationMatch:
@@ -1327,6 +1341,7 @@ components:
         difference: {$ref: "#/components/schemas/Money"}
         reason: {type: string}
         unmatchReason: {type: string}
+        unmatchedBy: {type: string}
         createdBy: {type: string}
         version: {type: integer, minimum: 1}
         lines:
