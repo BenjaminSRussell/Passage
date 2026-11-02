@@ -5,6 +5,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { PrincipalProvider } from "../../shell/principal";
 import ledger from "./module";
 
 export type Reply = { status: number; body: unknown };
@@ -47,19 +48,22 @@ function Location() {
   return <output data-testid="location">{location.pathname}</output>;
 }
 
-export function renderAt(path: string) {
+/** Renders the ledger routes at path; duties are the signed-in user's duties (none by default). */
+export function renderAt(path: string, duties: readonly string[] = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          {ledger.routes.map((route) => (
-            <Route key={route.path} path={route.path} element={route.element} />
-          ))}
-        </Routes>
-        <Location />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <PrincipalProvider duties={duties}>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            {ledger.routes.map((route) => (
+              <Route key={route.path} path={route.path} element={route.element} />
+            ))}
+          </Routes>
+          <Location />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </PrincipalProvider>,
   );
 }
 

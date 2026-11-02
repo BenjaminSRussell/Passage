@@ -17,6 +17,7 @@ import { NewRecurringJournalPage, RecurringJournalPage } from "./RecurringJourna
 import { RecurringJournalsPage } from "./RecurringJournalsPage";
 import { OpenItemsPage } from "./OpenItemsPage";
 import { OpenItemAccountsPage } from "./OpenItemAccountsPage";
+import { NewOpenItemActivationPage, OpenItemActivationsPage } from "./OpenItemActivationsPage";
 import { ClearingsPage } from "./ClearingsPage";
 import { ClearingPage } from "./ClearingPage";
 import { EditToleranceGroupPage, NewToleranceGroupPage } from "./ToleranceGroupFormPage";
@@ -54,6 +55,8 @@ const ledger: PassageModule = {
     { path: "/ledger/recurring-journals/:id", element: createElement(RecurringJournalPage), handle: { title: "Recurring journal" } },
     { path: "/ledger/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
     { path: "/ledger/open-item-accounts", element: createElement(OpenItemAccountsPage), handle: { title: "Open-item accounts" } },
+    { path: "/ledger/open-item-activations", element: createElement(OpenItemActivationsPage), handle: { title: "Open-item activation" } },
+    { path: "/ledger/open-item-activations/new", element: createElement(NewOpenItemActivationPage), handle: { title: "Activate an account" } },
     { path: "/ledger/clearings", element: createElement(ClearingsPage), handle: { title: "Clearing documents" } },
     { path: "/ledger/clearings/:id", element: createElement(ClearingPage), handle: { title: "Clearing document" } },
     { path: "/ledger/tolerance-groups", element: createElement(ToleranceGroupsPage), handle: { title: "Tolerance groups" } },
@@ -102,6 +105,7 @@ const ledger: PassageModule = {
     { label: "Open items", to: "/ledger/open-items", duty: "ledger.journal.read" },
     { label: "Clearing documents", to: "/ledger/clearings", duty: "ledger.journal.read" },
     { label: "Open-item accounts", to: "/ledger/open-item-accounts", duty: "ledger.journal.read" },
+    { label: "Open-item activation", to: "/ledger/open-item-activations", duty: "ledger.journal.read" },
     { label: "Tolerance groups", to: "/ledger/tolerance-groups", duty: "ledger.journal.read" },
     { label: "Automatic clearing", to: "/ledger/auto-clearing", duty: "ledger.journal.read" },
     { label: "Clearing rules", to: "/ledger/auto-clearing-rules", duty: "ledger.journal.read" },

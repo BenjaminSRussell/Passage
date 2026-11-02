@@ -46,13 +46,15 @@ const (
 
 // OpenItemAccount is the open-item setting of an account in one ledger.
 type OpenItemAccount struct {
-	LedgerID  string    `json:"ledgerId"`
-	Account   string    `json:"account"`
-	Name      string    `json:"name"`
-	Enabled   bool      `json:"enabled"`
-	OpenItems int       `json:"openItems"`
-	ChangedBy string    `json:"changedBy"`
-	ChangedAt time.Time `json:"changedAt"`
+	LedgerID string `json:"ledgerId"`
+	Account  string `json:"account"`
+	Name     string `json:"name"`
+	Enabled  bool   `json:"enabled"`
+	// ActivationRunID is the run that carried the balance in when the account was activated with history.
+	ActivationRunID string    `json:"activationRunId,omitempty"`
+	OpenItems       int       `json:"openItems"`
+	ChangedBy       string    `json:"changedBy"`
+	ChangedAt       time.Time `json:"changedAt"`
 }
 
 // ListOpenItemAccounts returns every account that was ever switched on or off in the ledger.
@@ -66,7 +68,7 @@ func (s *Postgres) ListOpenItemAccounts(ctx context.Context, ledgerID string) ([
 		if _, err := loadLedger(ctx, tx, p.TenantID, ledgerID, false); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select a.account_number, a.name, s.enabled, s.changed_by, s.changed_at,
+		rows, err := tx.Query(ctx, `select a.account_number, a.name, s.enabled, s.changed_by, s.changed_at, coalesce(s.activation_run_id::text, ''),
 				(select count(*)::int from open_item i where i.tenant_id = s.tenant_id and i.ledger_id = s.ledger_id
 				   and i.main_account_id = s.main_account_id and i.status in ('open', 'reset_open'))
 			from open_item_setting s
@@ -78,7 +80,7 @@ func (s *Postgres) ListOpenItemAccounts(ctx context.Context, ledgerID string) ([
 		defer rows.Close()
 		for rows.Next() {
 			a := OpenItemAccount{LedgerID: ledgerID}
-			if err := rows.Scan(&a.Account, &a.Name, &a.Enabled, &a.ChangedBy, &a.ChangedAt, &a.OpenItems); err != nil {
+			if err := rows.Scan(&a.Account, &a.Name, &a.Enabled, &a.ChangedBy, &a.ChangedAt, &a.ActivationRunID, &a.OpenItems); err != nil {
 				return err
 			}
 			out = append(out, a)
@@ -92,11 +94,18 @@ func oiViolation(code, field, message string) error {
 	return &domain.RejectedError{Violations: []domain.Violation{{Code: code, Field: field, Message: message}}}
 }
 
+// oiEligible reports whether an account may be open-item managed (BR-11.18): postable,
+// balance sheet, and not a customer or vendor reconciliation account.
+func oiEligible(accountType string, postable bool, recon string) bool {
+	balanceSheet := accountType == "asset" || accountType == "liability" || accountType == "equity"
+	return balanceSheet && postable && recon != "customer" && recon != "vendor"
+}
+
 // PutOpenItemAccount switches open-item management of an account on or off in a
 // ledger (BR-11.18). Only balance-sheet, postable accounts that are not customer
 // or vendor reconciliation accounts qualify. Switching on is refused for an
 // account with a non-zero balance in the ledger: that needs an activation run,
-// which is not built yet. Switching off needs zero open items. created reports a
+// which is ActivateOpenItemAccount. Switching off needs zero open items. created reports a
 // first setting for the account.
 func (s *Postgres) PutOpenItemAccount(ctx context.Context, ledgerID, number string, enabled bool) (OpenItemAccount, bool, error) {
 	p, err := principalOf(ctx)
@@ -131,7 +140,7 @@ func (s *Postgres) PutOpenItemAccount(ctx context.Context, ledgerID, number stri
 		}
 		created = !known
 		if enabled && !(known && current) {
-			if accountType != "asset" && accountType != "liability" && accountType != "equity" || !postable || recon == "customer" || recon == "vendor" {
+			if !oiEligible(accountType, postable, recon) {
 				return oiViolation(CodeOIAccountInvalid, "account",
 					"open-item management needs a postable balance-sheet account that is not a customer or vendor reconciliation account")
 			}
@@ -142,7 +151,7 @@ func (s *Postgres) PutOpenItemAccount(ctx context.Context, ledgerID, number stri
 			}
 			if history {
 				return oiViolation(CodeOIActivationBalance, "account",
-					"open-item activation needs an activation run because account "+number+" has a balance")
+					"open-item activation needs an activation run (POST .../open-item-accounts/"+number+":activate) because the account has a balance")
 			}
 		}
 		if !enabled && known && current {

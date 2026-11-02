@@ -78,6 +78,8 @@ type Store interface {
 	PostSetEntry(ctx context.Context, setID string, in PostInput) (EntryResult, error)
 	ListOpenItemAccounts(ctx context.Context, ledgerID string) ([]OpenItemAccount, error)
 	PutOpenItemAccount(ctx context.Context, ledgerID, number string, enabled bool) (OpenItemAccount, bool, error)
+	ActivateOpenItemAccount(ctx context.Context, in ActivationInput) (ActivationRun, bool, error)
+	ListActivationRuns(ctx context.Context, ledgerID string) ([]ActivationRun, error)
 	ListToleranceGroups(ctx context.Context, ledgerID string) ([]ToleranceGroup, error)
 	GetToleranceGroup(ctx context.Context, ledgerID, code string) (ToleranceGroup, error)
 	PutToleranceGroup(ctx context.Context, ledgerID, code string, version int, in ToleranceGroup) (ToleranceGroup, bool, error)

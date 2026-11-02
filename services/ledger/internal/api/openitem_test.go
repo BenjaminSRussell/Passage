@@ -31,6 +31,8 @@ type openItemFake struct {
 	putGroups  []store.ToleranceGroup
 	putVers    []int
 	groupNew   bool
+	activate   []store.ActivationInput
+	activated  bool
 }
 
 func (f *fakeStore) ListOpenItemAccounts(context.Context, string) ([]store.OpenItemAccount, error) {
@@ -40,6 +42,15 @@ func (f *fakeStore) ListOpenItemAccounts(context.Context, string) ([]store.OpenI
 func (f *fakeStore) PutOpenItemAccount(_ context.Context, ledgerID, number string, enabled bool) (store.OpenItemAccount, bool, error) {
 	f.oi.putAccount = append(f.oi.putAccount, enabled)
 	return store.OpenItemAccount{LedgerID: ledgerID, Account: number, Enabled: enabled}, true, f.err
+}
+
+func (f *fakeStore) ActivateOpenItemAccount(_ context.Context, in store.ActivationInput) (store.ActivationRun, bool, error) {
+	f.oi.activate = append(f.oi.activate, in)
+	return store.ActivationRun{ID: oiDoc, LedgerID: in.LedgerID, Account: in.Account, ActivationDate: in.Date.Format("2006-01-02")}, f.oi.activated, f.err
+}
+
+func (f *fakeStore) ListActivationRuns(context.Context, string) ([]store.ActivationRun, error) {
+	return []store.ActivationRun{{ID: oiDoc}}, f.err
 }
 
 func (f *fakeStore) ListToleranceGroups(context.Context, string) ([]store.ToleranceGroup, error) {
@@ -258,5 +269,48 @@ func TestPutOpenItemAccount_RequiresEnabledFlag(t *testing.T) {
 	}
 	if rec := call(h, http.MethodPut, path, `{"enabled":true}`, dutyRead, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("needs the account duty: %d", rec.Code)
+	}
+}
+
+func TestActivateOpenItemAccount_KeyDateDutyAndReplay(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	path := "/v1/ledger/ledgers/" + testLedgerID + "/open-item-accounts/2999:activate"
+	hdr := map[string]string{"Idempotency-Key": "act-1"}
+	body := `{"activationDate":"2026-04-01"}`
+	if rec := call(h, http.MethodPost, path, body, dutyRebuild, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing key: %d", rec.Code)
+	}
+	if rec := call(h, http.MethodPost, path, `{"activationDate":"1/4/2026"}`, dutyRebuild, hdr); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad date: %d", rec.Code)
+	}
+	// The PRD gives the run to "Administer ledger" (ledger.balance.rebuild here), not to the
+	// chart maintainer who may switch an account without history.
+	for _, duty := range []string{dutyRead, dutyAccountWrite} {
+		if rec := call(h, http.MethodPost, path, body, duty, hdr); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s must not activate: %d", duty, rec.Code)
+		}
+	}
+	if len(fs.oi.activate) != 0 {
+		t.Fatal("nothing may reach the store")
+	}
+	rec := call(h, http.MethodPost, path, body, dutyRebuild, hdr)
+	if rec.Code != http.StatusCreated || len(fs.oi.activate) != 1 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	in := fs.oi.activate[0]
+	if in.Account != "2999" || in.Key != "act-1" || in.Date.Format("2006-01-02") != "2026-04-01" || len(in.Hash) != 32 {
+		t.Fatalf("request not mapped: %+v", in)
+	}
+	fs.oi.activated = true
+	if rec := call(h, http.MethodPost, path, body, dutyRebuild, hdr); rec.Code != http.StatusOK {
+		t.Fatalf("replay: %d", rec.Code)
+	}
+	if string(fs.oi.activate[0].Hash) != string(fs.oi.activate[1].Hash) {
+		t.Fatal("the hash must be stable")
+	}
+	list := call(h, http.MethodGet, "/v1/ledger/ledgers/"+testLedgerID+"/open-item-activations", "", dutyRead, nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list: %d", list.Code)
 	}
 }

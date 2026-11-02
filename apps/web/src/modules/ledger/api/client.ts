@@ -1033,6 +1033,7 @@ export const openItemAccountSchema = z.object({
   account: z.string(),
   name: z.string(),
   enabled: z.boolean(),
+  activationRunId: z.string().optional(),
   openItems: z.number(),
   changedBy: z.string(),
   changedAt: z.string(),
@@ -1054,6 +1055,49 @@ export function putOpenItemAccount(ledgerId: string, account: string, enabled: b
     openItemAccountSchema,
     fetchImpl,
     { enabled },
+  );
+}
+
+export const activationRunSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  account: z.string(),
+  accountName: z.string(),
+  activationDate: z.string(),
+  itemsCreated: z.number(),
+  lineItemsCreated: z.number(),
+  totalDebit: z.string(),
+  totalCredit: z.string(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+});
+export type ActivationRun = z.infer<typeof activationRunSchema>;
+
+/** The service gives activation runs to PRD "Administer ledger", held as this duty. */
+export const DUTY_LEDGER_ADMIN = "ledger.balance.rebuild";
+
+const activationRunListSchema = z.object({ items: z.array(activationRunSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/open-item-activations */
+export async function fetchActivationRuns(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<ActivationRun[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-activations`, activationRunListSchema, fetchImpl)).items;
+}
+
+/** POST .../open-item-accounts/{account}:activate. One Idempotency-Key per user-intended run, so a retry replays. */
+export function activateOpenItemAccount(
+  ledgerId: string,
+  account: string,
+  activationDate: string,
+  idempotencyKey: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<ActivationRun> {
+  return sendJSON(
+    "POST",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-accounts/${encodeURIComponent(account)}:activate`,
+    activationRunSchema,
+    fetchImpl,
+    { activationDate },
+    { "Idempotency-Key": idempotencyKey },
   );
 }
 

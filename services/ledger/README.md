@@ -209,7 +209,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/open-item-activations`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]`, `GET /ledgers/{ledger}/auto-clearing-rules[/{id}]`, `GET /auto-clearing-runs[/{id}]` |
 | `ledger.journal.post` | Umbrella: `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post`, `POST /ledger-sets/{setId}/journal-entries` (PRD "Post ledger journals"). Each route also accepts its own narrow duty: `ledger.entry.post` (service only), `ledger.entry.validate`, `ledger.batch.post`, `ledger.set.post` |
 | `ledger.entry.lookup`, `ledger.ledger.lookup` | Service-only narrow reads, accepted beside `ledger.journal.read` on `GET /journal-lines` (which filters by `documentId`, the posting document's UUID) and `GET /ledgers/{id}` |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
@@ -219,7 +219,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.journal.approve` | `POST .../approve`, `POST .../reject` (PRD "Approve ledger journals") |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
-| `ledger.balance.rebuild` | `POST /balances:rebuild` |
+| `ledger.balance.rebuild` | `POST /balances:rebuild`, `POST /ledgers/{ledger}/open-item-accounts/{account}:activate` (PRD duty "Administer ledger") |
 | `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
 | `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}`, `PUT /ledgers/{ledger}/advanced-rules/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
@@ -252,8 +252,19 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 - `PUT /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}` `{enabled}` switches open-item
   management of an account in one ledger (`open_item_setting`). Only postable balance-sheet accounts
   that are not customer or vendor reconciliation accounts qualify (`LEDGER_OI_ACCOUNT_INVALID`). An
-  account with a non-zero balance in the ledger is refused (`LEDGER_OI_ACTIVATION_BALANCE`) because
-  the activation run is not built. Switching off needs zero open items (`LEDGER_OI_OPEN_ITEMS_EXIST`).
+  account with a non-zero balance in the ledger is refused (`LEDGER_OI_ACTIVATION_BALANCE`): it needs
+  the activation run below. Switching off needs zero open items (`LEDGER_OI_OPEN_ITEMS_EXIST`).
+- Activation run (slice 17): `POST /ledgers/{ledger}/open-item-accounts/{account}:activate`
+  `{activationDate}` with `Idempotency-Key`, duty `ledger.balance.rebuild` (PRD "Administer ledger").
+  Under the ledger lock (which every posting takes) it reads the account's lines that have no open item
+  yet: lines dated on or before `activationDate` (all periods) become one opening item per (dimension
+  combination, transaction currency) that does not net to zero (`sourceType` `activation`, assignment
+  `ACTIVATION`, dated `activationDate`); each later line becomes an ordinary `gl_line` item. The open
+  items then add up to the account balance. It stores `open_item_activation_run`, records the run id on
+  the setting and the items, switches the setting on and announces `openitem.activated.v1`. 409
+  `LEDGER_OI_ALREADY_ACTIVE` / `LEDGER_OI_OPEN_ITEMS_EXIST`; a replay returns the stored run (200).
+  No journal entry is written, so the period status of `activationDate` is not checked.
+  `GET /ledgers/{ledger}/open-item-activations` lists the runs.
 - While on, `writeEntry` creates one `open_item` per non-zero line of every posted entry on that
   account, in the posting transaction: signed amount (debit positive) in the ledger currency, the
   line's dimension combination and posting date, and `assignment` = the first 50 characters of the

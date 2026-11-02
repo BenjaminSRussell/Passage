@@ -145,6 +145,8 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/ledger/ledgers/{ledger}/realignments/{id}:post":                   dutyRealign,
 		"POST /v1/ledger/ledgers/{ledger}/realignments/{id}:reverse":                dutyRealign,
 		"POST /v1/ledger/ledgers/{ledger}/realignments/{id}:cancel":                 dutyRealign,
+		"POST /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}:activate":    dutyRebuild,
+		"GET /v1/ledger/ledgers/{ledger}/open-item-activations":                     dutyRead,
 		"GET /v1/ledger/open-items":                                                 dutyRead,
 		"POST /v1/ledger/clearings:simulate":                                        dutyClearingWrite,
 		"GET /v1/ledger/clearings":                                                  dutyRead,

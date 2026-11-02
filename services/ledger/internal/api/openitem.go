@@ -35,6 +35,8 @@ const (
 func (a *API) registerOpenItems(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/open-item-accounts", a.listOpenItemAccounts)
 	r.With(authz.RequireDuty(dutyAccountWrite)).Put("/ledgers/{ledger}/open-item-accounts/{account}", a.putOpenItemAccount)
+	r.With(authz.RequireDuty(dutyRebuild)).Post("/ledgers/{ledger}/open-item-accounts/{account}:activate", a.activateOpenItemAccount)
+	r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/open-item-activations", a.listActivationRuns)
 	r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/tolerance-groups", a.listToleranceGroups)
 	r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/tolerance-groups/{code}", a.getToleranceGroup)
 	r.With(authz.RequireDuty(dutyClearingRules)).Put("/ledgers/{ledger}/tolerance-groups/{code}", a.putToleranceGroup)
@@ -105,6 +107,63 @@ func (a *API) putOpenItemAccount(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	httpx.JSON(w, status, acc)
+}
+
+type activationRequest struct {
+	ActivationDate string `json:"activationDate"`
+}
+
+// activateOpenItemAccount runs the activation of an account with history (FR-11.19):
+// 201 for a new run, 200 for a replay of the same Idempotency-Key.
+func (a *API) activateOpenItemAccount(w http.ResponseWriter, r *http.Request) {
+	ledgerID, ok := pathLedger(w, r)
+	if !ok {
+		return
+	}
+	number := chi.URLParam(r, "account")
+	var req activationRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	key := idempotencyKey(r, fields)
+	if !accountNumberRe.MatchString(number) {
+		fields["account"] = "must be 1 to 20 characters of A-Z, a-z, 0-9, '.', '_' or '-'"
+	}
+	date, okDate := parseDate(req.ActivationDate)
+	if !okDate {
+		fields["activationDate"] = "must be a date as YYYY-MM-DD"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	hash := sha256.Sum256([]byte(ledgerID + "|" + number + "|" + req.ActivationDate))
+	run, replayed, err := a.store.ActivateOpenItemAccount(r.Context(), store.ActivationInput{LedgerID: ledgerID, Account: number, Date: date, Key: key, Hash: hash[:]})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		a.replayed.Add(1)
+		status = http.StatusOK
+	}
+	httpx.JSON(w, status, run)
+}
+
+func (a *API) listActivationRuns(w http.ResponseWriter, r *http.Request) {
+	ledgerID, ok := pathLedger(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListActivationRuns(r.Context(), ledgerID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // --- tolerance groups ---------------------------------------------------------

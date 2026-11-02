@@ -99,7 +99,7 @@ export function OpenItemAccountsPage() {
             />
           )}
           <p className={styles.note}>
-            <Link to={`/ledger/open-items${query}`}>Open items</Link>
+            <Link to={`/ledger/open-items${query}`}>Open items</Link> · <Link to={`/ledger/open-item-activations${query}`}>Open-item activation</Link>
           </p>
         </>
       )}

@@ -844,9 +844,30 @@ components:
         account: { type: string }
         name: { type: string }
         enabled: { type: boolean }
+        activationRunId: { type: string, format: uuid, description: The activation run that carried the account's balance in, when it was activated with history }
         openItems: { type: integer, description: Items still open or reset_open on the account }
         changedBy: { type: string }
         changedAt: { type: string, format: date-time }
+    OpenItemActivationBody:
+      type: object
+      required: [activationDate]
+      properties:
+        activationDate: { type: string, format: date, description: Date of the opening items; lines up to and including it are carried in as balances, later lines become items of their own }
+    OpenItemActivationRun:
+      type: object
+      required: [id, ledgerId, account, accountName, activationDate, itemsCreated, lineItemsCreated, totalDebit, totalCredit, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        accountName: { type: string }
+        activationDate: { type: string, format: date }
+        itemsCreated: { type: integer, description: "Opening items: one per (dimension combination, transaction currency) whose lines up to the activation date do not net to zero" }
+        lineItemsCreated: { type: integer, description: Lines dated after the activation date that became open items of their own }
+        totalDebit: { type: string, description: "Sum of the debit items the run created (opening and line items), decimal string in the ledger currency; totalDebit - totalCredit is the account balance at activation" }
+        totalCredit: { type: string, description: Sum of the credit items the run created, decimal string in the ledger currency }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     ToleranceGroupBody:
       type: object
       required: [name, debitLimit, creditLimit, differenceAccount]
@@ -881,7 +902,7 @@ components:
         account: { type: string }
         accountName: { type: string }
         dimensions: { type: object, additionalProperties: { type: string } }
-        sourceType: { type: string, enum: [gl_line, residual] }
+        sourceType: { type: string, enum: [gl_line, residual, activation], description: "activation is an opening item created by an activation run" }
         amount: { type: string, description: Absolute amount in the ledger currency at its minor-unit scale }
         debitCredit: { type: string, enum: [D, C] }
         currency: { type: string }
@@ -2913,7 +2934,7 @@ paths:
         (FR-11.19). Only postable balance-sheet accounts that are not customer or vendor
         reconciliation accounts qualify (LEDGER_OI_ACCOUNT_INVALID, 422). Switching on an account
         that has a non-zero balance in the ledger is refused with LEDGER_OI_ACTIVATION_BALANCE (422)
-        because that needs an activation run, which is not built yet. Switching off needs zero open
+        because that needs an activation run (POST /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}:activate). Switching off needs zero open
         items (LEDGER_OI_OPEN_ITEMS_EXIST, 409). Setting the current value again is a no-op.
       parameters:
         - name: ledger
@@ -2946,6 +2967,87 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/ClearingProblem409" }
         "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}:activate:
+    post:
+      tags: [clearing]
+      operationId: activateOpenItemAccount
+      summary: Activate open-item management for an account that has a balance
+      x-passage-duty: ledger.balance.rebuild
+      description: |
+        Activation run (FR-11.19, FAGL_SWITCH_TO_OPEN_ITEM semantics), duty "Administer ledger"
+        (ledger.balance.rebuild). In one transaction under the ledger lock, which every posting also
+        takes, it reads the account's lines in the ledger that have no open item yet and creates one
+        opening open item of source type activation for every (dimension combination, transaction
+        currency) whose lines dated on or before activationDate, across all periods, do not net to
+        zero (signed, debit positive, in the ledger currency, dated activationDate, assignment
+        ACTIVATION), plus an ordinary gl_line open item for every line dated after activationDate, so
+        the open items add up to the account balance. It stores the run, records the run id on the
+        account setting and on each item, and switches the setting on; a posting that waited for the
+        lock then makes its own item. No journal entry is written, so activationDate may fall in a
+        closed period. The account must be a postable balance-sheet account that is not a customer or
+        vendor reconciliation account (LEDGER_OI_ACCOUNT_INVALID, 422). An account that is already
+        managed answers 409 LEDGER_OI_ALREADY_ACTIVE, and one with items still open from an earlier
+        switch-off answers 409 LEDGER_OI_OPEN_ITEMS_EXIST. An account without lines is activated with
+        zero items. A repeat with the same Idempotency-Key and body returns the stored run; another
+        body under the same key is 409 LEDGER_IDEMPOTENCY_CONFLICT. Announces
+        dev.passage.ledger.openitem.activated.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: account
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenItemActivationBody" }
+      responses:
+        "200":
+          description: The same request was already made; the stored run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemActivationRun" }
+        "201":
+          description: The run, with the account now open-item managed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemActivationRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/open-item-activations:
+    get:
+      tags: [clearing]
+      operationId: listOpenItemActivations
+      summary: List open-item activation runs of a ledger
+      x-passage-duty: ledger.journal.read
+      description: The activation runs of the ledger, newest first, at most 200.
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/OpenItemActivationRun" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
   /v1/ledger/ledgers/{ledger}/tolerance-groups:
     get:
       tags: [clearing]

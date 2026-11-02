@@ -21,6 +21,9 @@ const (
 	// (PRD name open-item.cleared; the naming rule allows only letters and digits
 	// in the entity, so it is written openitem).
 	OpenItemCleared = "dev.passage.ledger.openitem.cleared.v1"
+	// OpenItemActivated is announced when an activation run switches open-item management on for an
+	// account with history (FR-11.19); it shares the open item topic.
+	OpenItemActivated = "dev.passage.ledger.openitem.activated.v1"
 	// RulesChanged is announced when a derivation strategy is activated, a lookup
 	// table it may use is replaced or a validation rule is saved (PRD rules.changed; posting caches invalidate on it).
 	RulesChanged = "dev.passage.ledger.rules.changed.v1"
@@ -67,6 +70,22 @@ type RulesChangedData struct {
 	ID       string `json:"id"`
 	Version  int    `json:"version"`
 	Actor    string `json:"actor"`
+}
+
+// OpenItemActivatedData is the payload of dev.passage.ledger.openitem.activated.v1. Totals cover every
+// item the run created (opening and line items) as decimal strings in the ledger currency, so
+// totalDebit - totalCredit is the account balance at activation.
+type OpenItemActivatedData struct {
+	RunID          string `json:"runId"`
+	LedgerID       string `json:"ledgerId"`
+	Account        string `json:"account"`
+	ActivationDate string `json:"activationDate"`
+	ItemsCreated   int    `json:"itemsCreated"`
+	// LineItemsCreated counts lines dated after the activation date that became open items of their own.
+	LineItemsCreated int    `json:"lineItemsCreated"`
+	TotalDebit       string `json:"totalDebit"`
+	TotalCredit      string `json:"totalCredit"`
+	Actor            string `json:"actor"`
 }
 
 // OpenItemClearedData is the payload of dev.passage.ledger.openitem.cleared.v1.

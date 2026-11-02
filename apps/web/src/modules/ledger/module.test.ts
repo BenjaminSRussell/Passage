@@ -39,6 +39,8 @@ describe("ledger module", () => {
       "/ledger/recurring-journals/:id",
       "/ledger/open-items",
       "/ledger/open-item-accounts",
+      "/ledger/open-item-activations",
+      "/ledger/open-item-activations/new",
       "/ledger/clearings",
       "/ledger/clearings/:id",
       "/ledger/tolerance-groups",

@@ -52,6 +52,16 @@ channels:
     messages:
       openItemCleared:
         $ref: "#/components/messages/OpenItemCleared"
+  openItemActivated:
+    address: passage.ledger.openitem
+    description: |
+      An activation run (FR-11.19) switched open-item management on for an account that had a balance
+      and carried its lines in as open items (one opening item per non-zero dimension combination and
+      transaction currency up to the activation date, one item per later line), written to the outbox in the
+      same transaction (aggregate type open_item_activation). It shares the open item topic.
+    messages:
+      openItemActivated:
+        $ref: "#/components/messages/OpenItemActivated"
   rulesChanged:
     address: passage.ledger.rules
     description: |
@@ -96,6 +106,10 @@ operations:
     action: send
     channel: { $ref: "#/channels/openItemCleared" }
     summary: Open items were cleared or a clearing was reset.
+  publishOpenItemActivated:
+    action: send
+    channel: { $ref: "#/channels/openItemActivated" }
+    summary: An account was activated for open-item management with its balance carried in as open items.
   publishRecurringGenerated:
     action: send
     channel: { $ref: "#/channels/recurringGenerated" }
@@ -277,6 +291,32 @@ components:
               residualItemId: { type: string, format: uuid, description: New open item carrying a residual outside tolerance }
               status: { type: string, enum: [cleared, reset] }
               reasonCode: { type: string, description: Reset reason code }
+              actor: { type: string }
+    OpenItemActivated:
+      name: dev.passage.ledger.openitem.activated.v1
+      title: Open-item management activated
+      summary: An activation run created the opening open items of an account.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.openitem.activated.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Activation run id }
+          data:
+            type: object
+            required: [runId, ledgerId, account, activationDate, itemsCreated, lineItemsCreated, totalDebit, totalCredit, actor]
+            properties:
+              runId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              account: { type: string, description: Account number that was activated }
+              activationDate: { type: string, format: date, description: Posting date of the opening items }
+              itemsCreated: { type: integer, description: "Opening items, one per non-zero (dimension combination, transaction currency) balance up to the activation date" }
+              lineItemsCreated: { type: integer, description: Lines dated after the activation date that became open items of their own }
+              totalDebit: { type: string, description: "Sum of the debit items the run created, decimal string in the ledger currency; totalDebit - totalCredit is the account balance" }
+              totalCredit: { type: string, description: Sum of the credit items the run created, decimal string in the ledger currency }
               actor: { type: string }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
