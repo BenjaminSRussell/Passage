@@ -1536,7 +1536,8 @@
       {"resource": "/v1/fulfillment/shipments/*:backorder-remainder", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/drop-ships/*:close-remainder", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/drop-ships/*:close-remainder", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/release-rules/*", "methods": ["PUT"]}
     ]},
     "WarehouseShip": {"permissions": [{"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]}]},
     "WarehouseView": {"permissions": [
@@ -1561,7 +1562,9 @@
       {"resource": "/v1/fulfillment/warehouse-settings", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/warehouse-settings/*", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/drop-ships", "methods": ["GET"]},
-      {"resource": "/v1/fulfillment/drop-ships/*", "methods": ["GET"]}
+      {"resource": "/v1/fulfillment/drop-ships/*", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/release-rules", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/release-rules/*", "methods": ["GET"]}
     ]},
     "audit.read": {"permissions": [
       {"resource": "/v1/audit/alerts", "methods": ["GET"]},
