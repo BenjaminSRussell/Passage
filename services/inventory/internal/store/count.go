@@ -362,6 +362,13 @@ func countVariances(ctx context.Context, tx pgx.Tx, tenantID string, sheet domai
 	slices.SortFunc(items, func(a, b counted) int {
 		return strings.Compare(rowKey(a.row.product, a.row.hash), rowKey(b.row.product, b.row.hash))
 	})
+	sets := make([]domain.Dimensions, len(items))
+	for i, it := range items {
+		sets[i] = it.row.dims
+	}
+	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
+		return nil, nil, "", err
+	}
 	var lines []domain.JournalLine
 	variances := map[string]decimal.Decimal{}
 	approval := ""
@@ -397,6 +404,13 @@ func (s *Postgres) postCountJournal(ctx context.Context, tx pgx.Tx, tenantID str
 		values ($1, $2, $3, 'COUNT', 'DRAFT', $4, $5, $6)`, tenantID, sheet.LegalEntityID, id, time.Now().UTC().Format(dateLayout), plan.Currency,
 		"count-sheet:"+sheet.ID); err != nil {
 		return "", scopeProblem(err)
+	}
+	sets := make([]domain.Dimensions, len(lines))
+	for i, l := range lines {
+		sets[i] = l.Dims
+	}
+	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
+		return "", err
 	}
 	for _, l := range lines {
 		hash, raw, err := upsertDimensionSet(ctx, tx, tenantID, l.Dims)

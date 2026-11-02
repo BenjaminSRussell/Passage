@@ -84,6 +84,13 @@ func (s *Postgres) CreateConsignment(ctx context.Context, key string, o domain.C
 			o.RequestedDate.Format(dateLayout), o.Currency); err != nil {
 			return scopeProblem(err)
 		}
+		sets := make([]domain.Dimensions, len(o.Lines))
+		for i, l := range o.Lines {
+			sets[i] = o.LineDims(l)
+		}
+		if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+			return err
+		}
 		for i, l := range o.Lines {
 			hash, _, err := upsertDimensionSet(ctx, tx, tp.TenantID, o.LineDims(l))
 			if err != nil {
@@ -212,6 +219,13 @@ func (s *Postgres) ReceiveConsignment(ctx context.Context, id string, version in
 			return err
 		}
 		doc := document{legalEntityID: o.LegalEntityID, currency: o.Currency, date: receiptDate, sourceType: sourceConsignmentLine, referenceID: o.ID}
+		sets := make([]domain.Dimensions, 0, len(order))
+		for _, k := range order {
+			sets = append(sets, rows[k].dims)
+		}
+		if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+			return err
+		}
 		for _, k := range order {
 			r := rows[k]
 			if err := lockRow(ctx, tx, tp.TenantID, o.LegalEntityID, "", r); err != nil {

@@ -142,3 +142,65 @@ func inSegment(batches []BatchStock, segment string) []BatchStock {
 	}
 	return out
 }
+
+// Reasons a candidate is listed but cannot be reserved by a policy request.
+const (
+	CandidateRestricted = "RESTRICTED"     // BLOCKED or QUARANTINE (INV-BLK-002)
+	CandidateExpires    = "EXPIRES_BEFORE" // FEFO: expires before the required date plus the margin (BR-16.7)
+	CandidateSegment    = "OTHER_SEGMENT"  // stock of a segment the demand may not take (BR-16.17)
+)
+
+// Candidate is one dimension set of a product with available quantity, as a
+// reservation dialog lists it (FR-16.7). Eligible says whether a policy
+// request would take it; Reason says why not.
+type Candidate struct {
+	BatchStock
+	Eligible bool
+	Reason   string
+}
+
+// RankCandidates lists the stock with a positive available quantity in the
+// pick order of policy, eligible stock first in that order and ineligible stock
+// after it, applying the same rules as a reservation would: restricted status,
+// the demand segment (BR-16.17: stock of the demand's segment, and unsegmented
+// stock only when fallback is set; a MANUAL reservation checks it too) and,
+// for FEFO only, the expiry cut-off. Like PlanDemandPolicy, a segmented demand
+// takes its own segment first and the unsegmented fallback after it, so those
+// come in that order. MANUAL ranks like FIFO.
+func RankCandidates(policy ReservationPolicy, stock []BatchStock, requiredDate time.Time, marginDays int, demandSegment string, fallback bool) []Candidate {
+	cutoff := requiredDate.AddDate(0, 0, marginDays)
+	var ok, rest, no []BatchStock
+	reasons := map[string]string{}
+	for _, b := range stock {
+		if b.Available.Sign() <= 0 {
+			continue
+		}
+		switch {
+		case b.Status != StockAvailable:
+			reasons[b.Key] = CandidateRestricted
+		case !SegmentEligible(b.Segment, demandSegment, fallback):
+			reasons[b.Key] = CandidateSegment
+		case policy == PolicyFEFO && b.Expiry != nil && b.Expiry.Before(cutoff):
+			reasons[b.Key] = CandidateExpires
+		case b.Segment != demandSegment:
+			rest = append(rest, b) // unsegmented fallback stock, taken after the demand's own segment
+			continue
+		default:
+			ok = append(ok, b)
+			continue
+		}
+		no = append(no, b)
+	}
+	sortByPolicy(policy, ok)
+	sortByPolicy(policy, rest)
+	sortByPolicy(policy, no)
+	ok = append(ok, rest...)
+	out := make([]Candidate, 0, len(ok)+len(no))
+	for _, b := range ok {
+		out = append(out, Candidate{BatchStock: b, Eligible: true})
+	}
+	for _, b := range no {
+		out = append(out, Candidate{BatchStock: b, Reason: reasons[b.Key]})
+	}
+	return out
+}

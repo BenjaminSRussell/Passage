@@ -81,3 +81,59 @@ func TestSelectBatches_table(t *testing.T) {
 		})
 	}
 }
+
+func TestRankCandidates(t *testing.T) {
+	r1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := decimal.NewFromInt
+	stock := []BatchStock{
+		{BatchID: "late", Key: "1", Expiry: day(30), ReceiptDate: r1, Available: n(5), Status: "AVAILABLE"},
+		{BatchID: "soon", Key: "2", Expiry: day(5), ReceiptDate: r1, Available: n(4), Status: "AVAILABLE"},
+		{BatchID: "never", Key: "3", ReceiptDate: r1, Available: n(9), Status: "AVAILABLE"},
+		{BatchID: "held", Key: "4", Expiry: day(1), ReceiptDate: r1, Available: n(3), Status: "QUARANTINE"},
+		{BatchID: "empty", Key: "5", Expiry: day(2), ReceiptDate: r1, Available: n(0), Status: "AVAILABLE"},
+		{BatchID: "seg", Key: "6", Expiry: day(40), ReceiptDate: r1, Available: n(1), Status: "AVAILABLE", Segment: "SALES_ORDER:SO-1"},
+	}
+	ids := func(c []Candidate) (out []string) {
+		for _, x := range c {
+			tag := x.BatchID
+			if !x.Eligible {
+				tag += "!" + x.Reason
+			}
+			out = append(out, tag)
+		}
+		return out
+	}
+	// FEFO: "soon" expires before day 10 (required day 0 + 10 days margin); the rest in expiry order, no expiry last.
+	got := ids(RankCandidates(PolicyFEFO, stock, *day(0), 10, "", true))
+	want := []string{"late", "never", "held!RESTRICTED", "soon!EXPIRES_BEFORE", "seg!OTHER_SEGMENT"}
+	for i := range want {
+		if i >= len(got) || got[i] != want[i] {
+			t.Fatalf("FEFO %v, want %v", got, want)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("FEFO %v: an empty row must not be listed", got)
+	}
+	// A segmented demand takes its own segment and, with fallback, unsegmented stock; without fallback only its own.
+	if got := ids(RankCandidates(PolicyFIFO, stock, *day(0), 0, "SALES_ORDER:SO-1", false)); got[0] != "seg" || len(got) != 5 || got[1] != "held!RESTRICTED" {
+		t.Fatalf("segment without fallback %v", got)
+	}
+	// With fallback the demand's own segment still comes first (as PlanDemandPolicy takes it), though "late" sorts before "seg".
+	if got := fmt.Sprint(ids(RankCandidates(PolicyFIFO, stock, *day(0), 0, "SALES_ORDER:SO-1", true))); got != "[seg late never soon held!RESTRICTED]" {
+		t.Fatalf("segment with fallback %v", got)
+	}
+	// LIFO ranks the later receipt first; MANUAL applies no expiry cut-off but keeps the
+	// segment rule, since a manual reservation of another segment's stock is INV-SEG-001.
+	stock[0].ReceiptDate = r1.AddDate(0, 0, 3)
+	if got := ids(RankCandidates(PolicyLIFO, stock, *day(0), 0, "", true)); got[0] != "late" {
+		t.Fatalf("LIFO %v", got)
+	}
+	for _, c := range RankCandidates(PolicyManual, stock, *day(60), 30, "", false) {
+		if c.BatchID == "soon" && !c.Eligible {
+			t.Fatalf("MANUAL must not apply the FEFO cut-off: %+v", c)
+		}
+		if c.BatchID == "seg" && (c.Eligible || c.Reason != CandidateSegment) {
+			t.Fatalf("MANUAL must apply the segment rule as Reserve does: %+v", c)
+		}
+	}
+}

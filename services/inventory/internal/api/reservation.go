@@ -27,6 +27,7 @@ const (
 	reservationsPath  = "/v1/inventory/reservations"
 	batchExpiriesPath = "/v1/inventory/batch-expiries"
 	transactionsPath  = "/v1/inventory/transactions"
+	candidatesPath    = "/v1/inventory/reservation-candidates"
 	defaultPageSize   = 100
 	maxPageSize       = 500
 	maxShelfLifeDays  = 365
@@ -42,6 +43,7 @@ var inquirySourceTypes = append([]string{"INVENT_JOURNAL_LINE", "BLOCKING", "TRA
 
 func (a *API) registerReservations(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(transactionsPath, a.listTransactions)
+	r.With(authz.RequireDuty(dutyRead)).Get(candidatesPath, a.listReservationCandidates)
 	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath, a.createReservation)
 	r.With(authz.RequireDuty(dutyRead)).Get(reservationsPath, a.listReservations)
 	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath+":expire", a.expireReservations)
@@ -442,4 +444,99 @@ func detail(err error) string {
 		return de.Detail
 	}
 	return err.Error()
+}
+
+type candidateResponse struct {
+	Dimensions map[string]string `json:"dimensions"`
+	BatchID    string            `json:"batchId,omitempty"`
+	Serial     string            `json:"serial,omitempty"`
+	Available  string            `json:"available"`
+	Status     string            `json:"status"`
+	Segment    string            `json:"segment,omitempty"`
+	ExpiryDate string            `json:"expiryDate,omitempty"`
+	Eligible   bool              `json:"eligible"`
+	Reason     string            `json:"reason,omitempty"`
+}
+
+// candidateDimensions are the dimensions the candidate inquiry filters by.
+var candidateDimensions = []string{domain.DimSite, domain.DimWarehouse, domain.DimLocation, domain.DimBatch, domain.DimSerial,
+	domain.DimConfig, domain.DimSize, domain.DimColor, domain.DimStyle}
+
+// listReservationCandidates lists the batches and serials a reservation could take, in the
+// pick order of the policy, with the expiry date and the reason a row is not eligible (FR-16.7).
+func (a *API) listReservationCandidates(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	fields := map[string]string{}
+	in := store.CandidateQuery{LegalEntityID: q.Get("legalEntityId"), ProductID: q.Get("productId"), SegmentFallback: true}
+	if !ids.Valid(in.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if !ids.Valid(in.ProductID) {
+		fields["productId"] = "must be a UUID"
+	}
+	in.Policy = domain.ReservationPolicy(strings.ToUpper(strings.TrimSpace(q.Get("policy"))))
+	if in.Policy == "" {
+		in.Policy = domain.PolicyFIFO
+	}
+	if !slices.Contains(domain.ReservationPolicies, in.Policy) {
+		fields["policy"] = "must be MANUAL, FIFO, FEFO or LIFO"
+	}
+	if raw := q.Get("shelfLifeMarginDays"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > maxShelfLifeDays {
+			fields["shelfLifeMarginDays"] = "must be between 0 and 365"
+		}
+		in.ShelfLifeMarginDays = n
+	}
+	in.RequiredDate = time.Now().UTC().Truncate(24 * time.Hour)
+	if raw := q.Get("requiredDate"); raw != "" {
+		d, err := time.Parse(dateLayout, raw)
+		if err != nil {
+			fields["requiredDate"] = "must be a date (YYYY-MM-DD)"
+		}
+		in.RequiredDate = d
+	}
+	if raw := q.Get("segmentFallback"); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			fields["segmentFallback"] = "must be true or false"
+		}
+		in.SegmentFallback = b
+	}
+	segment, err := domain.SegmentValue(domain.SegmentType(strings.ToUpper(strings.TrimSpace(q.Get("segmentType")))), q.Get("segmentRef"))
+	if err != nil {
+		fields["segmentType"] = detail(err)
+	}
+	in.Segment = segment
+	in.Dims = domain.Dimensions{}
+	for _, d := range candidateDimensions {
+		if v := strings.TrimSpace(q.Get(d)); v != "" {
+			in.Dims[d] = v
+		}
+	}
+	if _, err := in.Dims.Normalize(); err != nil {
+		fields["dimensions"] = err.Error()
+	}
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	found, err := a.store.ReservationCandidates(r.Context(), in)
+	if err != nil {
+		a.failed(w, r, "list reservation candidates", err)
+		return
+	}
+	items := make([]candidateResponse, 0, len(found))
+	for _, c := range found {
+		item := candidateResponse{Dimensions: c.Dims, BatchID: c.BatchID, Serial: c.Dims[domain.DimSerial], Available: c.Available.String(),
+			Status: c.Status, Segment: c.Segment, Eligible: c.Eligible, Reason: c.Reason}
+		if c.Expiry != nil {
+			item.ExpiryDate = c.Expiry.Format(dateLayout)
+		}
+		items = append(items, item)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }

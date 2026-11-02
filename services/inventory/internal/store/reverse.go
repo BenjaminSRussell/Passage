@@ -54,6 +54,13 @@ func (s *Postgres) ReverseJournal(ctx context.Context, id string, postingDate ti
 			offset, rev.Currency, "reverse:"+id, id); err != nil {
 			return scopeProblem(err)
 		}
+		sets := make([]domain.Dimensions, len(rev.Lines))
+		for i, l := range rev.Lines {
+			sets[i] = l.Dims
+		}
+		if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+			return err
+		}
 		for _, l := range rev.Lines {
 			hash, raw, err := upsertDimensionSet(ctx, tx, tp.TenantID, l.Dims)
 			if err != nil {

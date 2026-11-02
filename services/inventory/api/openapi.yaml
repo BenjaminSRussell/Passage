@@ -310,6 +310,55 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reservation-candidates:
+    get:
+      operationId: listInventoryReservationCandidates
+      summary: List the batches and serials a reservation could take, in pick order (FR-16.7)
+      description: |
+        Lists the dimension sets of one product in one legal entity that have available physical quantity,
+        for a reservation dialog. Eligible rows come first, in the pick order of the policy (FEFO: expiry,
+        then receipt date, then batch; FIFO: oldest receipt; LIFO: newest receipt), followed by rows a
+        policy request would not take, each with a reason: RESTRICTED (BLOCKED or QUARANTINE),
+        EXPIRES_BEFORE (FEFO, expires before requiredDate plus shelfLifeMarginDays) or OTHER_SEGMENT
+        (stock of a segment the demand may not take). Vendor-owned stock is left out. Dimension query
+        parameters filter by exact value. The read takes no locks, so a row can be taken before the
+        caller reserves it; the reservation re-checks under the row locks. MANUAL ranks like FIFO and
+        applies no expiry cut-off, since a manual reservation names one dimension set; the segment rule
+        applies to it as it does to a manual reservation.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, required: true, description: Legal entity of the stock, schema: { type: string, format: uuid } }
+        - { name: productId, in: query, required: true, description: Product to list stock of, schema: { type: string, format: uuid } }
+        - { name: policy, in: query, description: Pick order and rules to apply (default FIFO), schema: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO], default: FIFO } }
+        - { name: requiredDate, in: query, description: Date the demand needs the stock (default today), schema: { type: string, format: date } }
+        - { name: shelfLifeMarginDays, in: query, description: FEFO margin in days (0 to 365), schema: { type: integer, minimum: 0, maximum: 365, default: 0 } }
+        - { name: segmentType, in: query, description: Segment type of the demand (default NONE), schema: { type: string, enum: [NONE, SALES_ORDER, PROJECT] } }
+        - { name: segmentRef, in: query, description: Segment reference of the demand (with segmentType), schema: { type: string } }
+        - { name: segmentFallback, in: query, description: Let a segmented demand take unsegmented stock (default true), schema: { type: boolean, default: true } }
+        - { name: site, in: query, description: Filter by site, schema: { type: string } }
+        - { name: warehouse, in: query, description: Filter by warehouse, schema: { type: string } }
+        - { name: location, in: query, description: Filter by location, schema: { type: string } }
+        - { name: batch, in: query, description: Filter by batch, schema: { type: string } }
+        - { name: serial, in: query, description: Filter by serial, schema: { type: string } }
+        - { name: config, in: query, description: Filter by configuration, schema: { type: string } }
+        - { name: size, in: query, description: Filter by size, schema: { type: string } }
+        - { name: color, in: query, description: Filter by color, schema: { type: string } }
+        - { name: style, in: query, description: Filter by style, schema: { type: string } }
+      responses:
+        '200':
+          description: The candidates, eligible first in pick order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReservationCandidate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/reservations:expire:
     post:
       operationId: expireInventoryReservations
@@ -2867,6 +2916,19 @@ components:
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time, description: When an ACTIVE reservation lapses; absent when it holds until released }
+    ReservationCandidate:
+      type: object
+      required: [dimensions, available, status, eligible]
+      properties:
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        batchId: { type: string, description: Batch of the stock; absent when untracked }
+        serial: { type: string, description: Serial of the stock; absent when untracked }
+        available: { $ref: '#/components/schemas/Decimal', description: Available physical quantity (held and reserved quantity left out) }
+        status: { type: string, enum: [AVAILABLE, BLOCKED, QUARANTINE] }
+        segment: { type: string, description: Segment of the stock; absent when unsegmented }
+        expiryDate: { type: string, format: date, description: Batch expiry (FEFO input); absent when the batch never expires }
+        eligible: { type: boolean, description: True when a policy request would take this row }
+        reason: { type: string, enum: [RESTRICTED, EXPIRES_BEFORE, OTHER_SEGMENT], description: Why the row is not eligible }
     ReserveResponse:
       type: object
       required: [items, shortfall]

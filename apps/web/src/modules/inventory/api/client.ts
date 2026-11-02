@@ -550,6 +550,51 @@ export async function listReservations(q: ReservationQuery = {}, signal?: AbortS
   return { items: body.items ?? [], nextCursor: body.nextCursor };
 }
 
+export type CandidateReason = "RESTRICTED" | "EXPIRES_BEFORE" | "OTHER_SEGMENT";
+
+/** One dimension set a reservation could take, with the reason when a policy request would not (FR-16.7). */
+export interface ReservationCandidate {
+  dimensions: Partial<Record<string, string>>;
+  batchId?: string;
+  serial?: string;
+  available: string;
+  status: string;
+  segment?: string;
+  expiryDate?: string;
+  eligible: boolean;
+  reason?: CandidateReason;
+}
+
+export interface CandidateQuery {
+  legalEntityId: string;
+  productId: string;
+  policy?: ReservationPolicy;
+  requiredDate?: string;
+  shelfLifeMarginDays?: number;
+  segmentType?: SegmentType;
+  segmentRef?: string;
+  segmentFallback?: boolean;
+  dimensions?: Partial<Record<string, string>>;
+}
+
+/** Lists the stock a reservation could take, eligible rows first in the pick order of the policy. */
+export async function listReservationCandidates(q: CandidateQuery, signal?: AbortSignal): Promise<ReservationCandidate[]> {
+  const segmented = q.segmentType !== undefined && q.segmentType !== "NONE";
+  const params: Record<string, string | undefined> = {
+    legalEntityId: q.legalEntityId,
+    productId: q.productId,
+    policy: q.policy,
+    requiredDate: q.requiredDate,
+    shelfLifeMarginDays: q.shelfLifeMarginDays === undefined ? undefined : String(q.shelfLifeMarginDays),
+    segmentType: segmented ? q.segmentType : undefined,
+    segmentRef: segmented ? q.segmentRef : undefined,
+    segmentFallback: segmented && q.segmentFallback !== undefined ? String(q.segmentFallback) : undefined,
+    ...cleanDimensions(q.dimensions ?? {}),
+  };
+  const { body } = await send<{ items?: ReservationCandidate[] }>(`/reservation-candidates${query(params)}`, {}, signal);
+  return body.items ?? [];
+}
+
 export async function releaseReservation(id: string): Promise<Reservation> {
   return (await send<Reservation>(`/reservations/${encodeURIComponent(id)}`, { method: "DELETE" })).body;
 }

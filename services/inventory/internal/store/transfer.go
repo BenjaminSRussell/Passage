@@ -87,6 +87,15 @@ func (s *Postgres) CreateTransfer(ctx context.Context, key string, o domain.Tran
 			o.UseTransit, o.ShipDate.Format(dateLayout), optionalDate(o.PlannedReceipt)); err != nil {
 			return scopeProblem(err)
 		}
+		// Shared dimension sets in hash order first, so concurrent orders that
+		// introduce the same new sets cannot deadlock on each other's inserts.
+		sets := make([]domain.Dimensions, len(o.Lines))
+		for i, l := range o.Lines {
+			sets[i] = o.SourceDims(l)
+		}
+		if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+			return err
+		}
 		for i, l := range o.Lines {
 			hash, _, err := upsertDimensionSet(ctx, tx, tp.TenantID, o.SourceDims(l))
 			if err != nil {
@@ -444,6 +453,13 @@ func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc documen
 		legs[i] = leg{from, to}
 	}
 	slices.Sort(order)
+	sets := make([]domain.Dimensions, 0, len(order))
+	for _, k := range order {
+		sets = append(sets, rows[k].dims)
+	}
+	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
+		return err
+	}
 	for _, k := range order {
 		if err := lockRow(ctx, tx, tenantID, doc.legalEntityID, "", rows[k]); err != nil {
 			return err

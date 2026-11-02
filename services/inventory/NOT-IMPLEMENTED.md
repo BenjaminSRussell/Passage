@@ -259,6 +259,23 @@ the documentation gates. Policy bundle (#313): done, `inventory.consignment.writ
 `POST /v1/inventory/consignment-orders/*:close` and `:cancel` next to `*:receive` (no new duty). Not built: reopening an ended order,
 reversing a close, a planning (wave 22) consumer of `consignment.closed`, and closing by age.
 
+PSG-1619 (wave 16 slice 19) adds the reservation candidate list (FR-16.7) and closes the dimension-set deadlock exposure on the other
+multi-row writes. `GET /v1/inventory/reservation-candidates` (`inventory.read`; `legalEntityId` and `productId` required; `policy`, `requiredDate`,
+`shelfLifeMarginDays`, `segmentType` / `segmentRef` / `segmentFallback` and exact-value dimension filters optional) lists the dimension sets of
+one product with available physical quantity: eligible rows first in the pick order of the policy (the same ordering function `SelectBatches`
+uses), then the rows a policy request would not take, each with a reason (`RESTRICTED` for BLOCKED / QUARANTINE, `EXPIRES_BEFORE` for FEFO
+expiry inside the margin, `OTHER_SEGMENT`), with batch, serial, available quantity and expiry date. The read takes no locks (the reservation
+re-checks under the row locks), leaves vendor-owned stock out and is scoped by row-level security. No migration, table, grant, duty or event.
+Transfer order create and ship / receive, consignment order create and receive, tag transfer, the count journal and journal reversal now
+insert the dimension sets of the whole request first, in hash order (`upsertDimensionSets`), before any other lock; regression
+`TestConcurrentOrdersWithSharedNewDimensionSetsDoNotDeadlock` (transfer and consignment creates in random line orders) next to the journal one.
+Store test `TestReservationCandidatesFollowThePolicyAndExplainTheRest`; domain test `TestRankCandidates`. Web: an Available stock card on the
+new reservation form (Show available stock, with loading, empty and error states; each eligible row whose dimensions the form can name has
+Reserve this stock, which switches the form to a manual reservation of that dimension set; a list loaded for another legal entity, product or
+segment is hidden until it is shown again). The segment rule applies to MANUAL rows too, since a manual reservation checks it (INV-SEG-001). Policy bundle (#313): `GET
+/v1/inventory/reservation-candidates` needs a route row under `inventory.read` in `policies/authz/data.json` (outside this wave's paths); no new
+duty. The OpenAPI and AsyncAPI documents have no FAIL lines on the documentation gates.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -337,7 +354,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | FR-16.4 negative policy on blocking legs | by design | Blocking and release always forbid negative stock at their source, whatever the item policy: they move existing stock only. |
 | FR-16.5 warehouse mandatory per storage dimension group; active dimensions per product dimension groups | handoff — wave 8 (dimension groups) | Slice 1 enforces site on every line (`INV-DIM-001`) and accepts any known dimension; the per-product groups come from wave 8. |
 | FR-16.6 saga compensation for ledger failures | later slice of PSG-16 | No ledger call yet (see item 2). |
-| FR-16.7 batch / serial selection in the reservation dialog (pick specific batches from a candidate list) | later slice of PSG-16 | MANUAL reserves one named dimension set (batch and serial included); the dialog does not list candidates. |
+| FR-16.7 batch / serial selection in the reservation dialog (pick specific batches from a candidate list) | partial (slice 19) | Built: the candidate list and picking one dimension set into a manual reservation (see PSG-1619). Not built: allocating one request across several hand-picked rows, picking rows whose dimensions the form cannot name (status, owner, configuration, size, color, style), and picking unsegmented fallback stock for a segmented demand (the form's manual reservation names the demand's segment). |
 | FR-16.9 count freeze and recount flag | later slice of PSG-16 | See item 4. |
 | FR-16.11 physical vs financial date split and BR-16.6 backdating | partial | `physical_date` and `financial_date` are stored (both the posting date for journals). A transaction at a physical status (vendor-owned RECEIVED or DEDUCTED, slice 5) has no financial date and no posted amount; `transaction.posted` carries both as null. Backdating rule and period check need wave 14. |
 | FR-16.12 inventory-to-ledger reconciliation and `reconciliation.diff.v1` | built (slice 7) | `POST /v1/inventory/reconciliations` (InventoryAdmin) compares the sum of on-hand posted value of a legal entity in a currency with the net of the inventory account, both rounded to the minor unit, upserts one `reconciliation_run` per legal entity, account, currency and run date (RLS by tenant and legal entity) and enqueues `reconciliation.diff` in the same transaction when the difference is not zero; `GET /reconciliations` and `/reconciliations/{id}` are the report. Store tests: `TestReconcileMatchesThePostedJournals`, `TestReconcileDifferenceEmitsTheDiffEvent` (AC-16.9), `TestReconcileCountsNegativeRows`, `TestReconciliationIsScoped`; the projection = transactions check stays `TestProjectionReconcilesWithTransactionsAndLedger`. |
@@ -371,7 +388,6 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | 3 escalation route `POST /v1/inventory/blockings/{id}:block` in the policy bundle | done (seeded in `policies/authz/data.json`) | `inventory.blocking.write` carries POST `/v1/inventory/blockings/*:block` next to POST `/v1/inventory/blockings` and `/v1/inventory/blockings/*:release`. No new duty. |
 | 3.16.17 duties InventoryAdmin, InventorySetupMaintain | later slice of PSG-16 (per feature) | Built: `inventory.consignment.write` (ConsignmentMaintain, slice 5: replenishment orders, receipts and creating OWNERSHIP_CHANGE journals; approving and rejecting journals is the approval task of `inventory.journal.post`), `inventory.read`, `inventory.journal.write`, `inventory.journal.post`, `inventory.reservation.write` (InventoryReserve), `inventory.blocking.write` (InventoryBlock), `inventory.count.write` / `.post` / `.approve` (CycleCountMaintain / Post / Approve), `inventory.transfer.write` / `.post` (TransferOrderMaintain / TransferOrderPost, slice 3), `inventory.abc.write` (the ABC part of InventorySetupMaintain, slice 3), `inventory.admin` (the rebuild and reconciliation re-run parts of InventoryAdmin, slices 4 and 7), and `inventory.batch.write` for the interim batch-expiry input. Tag counting uses the cycle-count duties (marking open tags MISSING is `inventory.count.approve`); reversal uses the journal write / post duties. Segregation-of-duties pairs belong to the OPA policy bundle (platform). |
 | 3.16.19 performance budgets (k6 at 10k concurrent issues, p95 SLOs) | later slice of PSG-16 | AC1's correctness at 10,000 concurrent issues is proven at the store (`TestAC1TenThousandConcurrentIssuesOfOneSKU`); the k6 run through the gateway and the p95 SLOs need a load environment. |
-| Shared dimension-set inserts in hash order on the other multi-row writes (transfer order create / ship / receive, consignment order create, tag transfer) | later slice of PSG-16 | The Wave 16 proof found that two requests inserting the same new dimension sets in different orders deadlock (40P01); journal line adds and journal posting now insert all of a request's dimension sets first, in hash order (`upsertDimensionSets`, regression `TestConcurrentJournalsWithSharedNewDimensionSetsDoNotDeadlock`). The other paths that insert several new sets in line or row order have the same exposure and no regression test yet. |
 
 ## Ticket acceptance criteria
 

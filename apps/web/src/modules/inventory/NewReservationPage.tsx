@@ -5,10 +5,12 @@ import {
   createReservation,
   DEMAND_TYPES,
   describeProblem,
+  listReservationCandidates,
   RESERVATION_POLICIES,
   SEGMENT_TYPES,
   type DemandType,
   type Problem,
+  type ReservationCandidate,
   type Reservation,
   type ReservationPolicy,
   type ReserveResult,
@@ -85,6 +87,53 @@ const allocationColumns: DataTableColumn<Reservation>[] = [
   { key: "qty", header: "Quantity", align: "end", mono: true },
 ];
 
+const reasonText: Record<string, string> = {
+  RESTRICTED: "Blocked or in quarantine",
+  EXPIRES_BEFORE: "Expires before the required date plus the margin",
+  OTHER_SEGMENT: "Stock of another segment",
+};
+
+/** The listed stock and the legal entity, product and demand segment it was listed for ("" when unsegmented). */
+type Stock =
+  | { state: "idle" }
+  | { state: "loading" }
+  | { state: "error"; problem: Problem }
+  | { state: "ready"; rows: ReservationCandidate[]; scope: string; segment: string };
+
+/** The segment dimension value of the form's demand ("" when unsegmented). */
+const demandSegment = (values: ReservationValues): string =>
+  values.segmentType === "NONE" ? "" : `${values.segmentType}:${values.segmentRef.trim()}`;
+
+/** What a candidate list depends on beyond the policy and the filters: picking from a list of another product would reserve the wrong stock. */
+const stockScope = (values: ReservationValues): string =>
+  [values.legalEntityId.trim(), values.productId.trim(), demandSegment(values)].join("|");
+
+/**
+ * A candidate can be picked into the form when the manual reservation the form submits names exactly its
+ * dimension set: only the form's own dimensions, plus the segment the form adds for a segmented demand.
+ */
+const pickable = (row: ReservationCandidate, segment: string): boolean =>
+  row.eligible &&
+  (row.dimensions.segment ?? "") === segment &&
+  Object.keys(row.dimensions).every((name) => name === "segment" || (FORM_DIMENSIONS as readonly string[]).includes(name));
+
+const stockColumns = (pick: (row: ReservationCandidate) => void, segment: string): DataTableColumn<ReservationCandidate>[] => [
+  { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
+  { key: "available", header: "Available", align: "end", mono: true },
+  { key: "expiryDate", header: "Expires", render: (row) => row.expiryDate ?? "No expiry" },
+  { key: "eligible", header: "Policy", render: (row) => (row.eligible ? "Eligible" : (reasonText[row.reason ?? ""] ?? "Not eligible")) },
+  {
+    key: "pick",
+    header: "Action",
+    render: (row) =>
+      pickable(row, segment) ? (
+        <Button type="button" size="sm" variant="secondary" onClick={() => pick(row)}>
+          Reserve this stock
+        </Button>
+      ) : null,
+  },
+];
+
 const blank = (): ReservationValues => ({
   legalEntityId: "",
   productId: "",
@@ -115,6 +164,8 @@ export function NewReservationPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [result, setResult] = useState<ReserveResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stock, setStock] = useState<Stock>({ state: "idle" });
+  const [stockError, setStockError] = useState<Errors>({});
   // One key per filled-in form: a double submit replays instead of reserving twice.
   const key = useRef(crypto.randomUUID());
 
@@ -126,7 +177,7 @@ export function NewReservationPage() {
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     const segmented = values.segmentType !== "NONE";
-    const segment = segmented ? `${values.segmentType}:${values.segmentRef.trim()}` : "";
+    const segment = demandSegment(values);
     try {
       const out = await createReservation(
         {
@@ -159,6 +210,38 @@ export function NewReservationPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function findStock() {
+    const found: Errors = {};
+    if (!UUID.test(values.legalEntityId.trim())) found.legalEntityId = "Enter the legal entity id (a UUID).";
+    if (!UUID.test(values.productId.trim())) found.productId = "Enter the product id (a UUID).";
+    setStockError(found);
+    if (Object.keys(found).length > 0) return;
+    setStock({ state: "loading" });
+    try {
+      const rows = await listReservationCandidates({
+        legalEntityId: values.legalEntityId.trim(),
+        productId: values.productId.trim(),
+        policy: values.policy,
+        requiredDate: values.requiredDate,
+        shelfLifeMarginDays: Number(values.shelfLifeMarginDays || "0"),
+        segmentType: values.segmentType,
+        segmentRef: values.segmentRef,
+        segmentFallback: values.segmentFallback,
+        dimensions: values.dimensions,
+      });
+      setStock({ state: "ready", rows, scope: stockScope(values), segment: demandSegment(values) });
+    } catch (error) {
+      setStock({ state: "error", problem: describeProblem(error) });
+    }
+  }
+
+  // Picking a row reserves exactly that dimension set (a manual reservation).
+  function pick(row: ReservationCandidate) {
+    const dimensions = emptyDimensions();
+    for (const name of FORM_DIMENSIONS) dimensions[name] = row.dimensions[name] ?? "";
+    change({ ...values, policy: "MANUAL", dimensions });
   }
 
   const change = (next: ReservationValues) => {
@@ -287,6 +370,38 @@ export function NewReservationPage() {
             </Link>
           </div>
         </form>
+      </Card>
+      <Card title="Available stock">
+        <div className={styles.stack}>
+          <p>Lists the batches and serials of the product in the order the policy would take them. The dimensions above narrow the list.</p>
+          {stockError.legalEntityId || stockError.productId ? (
+            <Alert tone="danger" live="alert">
+              {stockError.legalEntityId ?? stockError.productId}
+            </Alert>
+          ) : null}
+          <div className={styles.formActions}>
+            <Button type="button" variant="secondary" loading={stock.state === "loading"} onClick={findStock}>
+              Show available stock
+            </Button>
+          </div>
+          {stock.state === "error" ? (
+            <Alert tone="danger" title="Could not load the stock" live="alert">
+              {stock.problem.message} ({stock.problem.code})
+            </Alert>
+          ) : null}
+          {stock.state === "ready" && stock.scope !== stockScope(values) ? (
+            <Alert tone="warning">The legal entity, product or segment changed. Show the available stock again before picking a row.</Alert>
+          ) : null}
+          {stock.state === "ready" && stock.scope === stockScope(values) ? (
+            <DataTable
+              label="Available stock"
+              columns={stockColumns(pick, stock.segment)}
+              rows={stock.rows}
+              getRowKey={(row) => JSON.stringify(row.dimensions)}
+              empty={{ title: "No available stock", description: "Nothing of this product has available quantity for these filters." }}
+            />
+          ) : null}
+        </div>
       </Card>
       {result ? (
         <Card title="Reserved">

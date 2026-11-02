@@ -217,6 +217,13 @@ func (s *Postgres) TransferTags(ctx context.Context, planID, key string, markOpe
 			return scopeProblem(err)
 		}
 		var usedIDs []string
+		sets := make([]domain.Dimensions, len(transfer.Lines))
+		for i, ln := range transfer.Lines {
+			sets[i] = ln.Dims
+		}
+		if err := upsertDimensionSets(ctx, tx, tp.TenantID, sets...); err != nil {
+			return err
+		}
 		for i, ln := range transfer.Lines {
 			hash, _, err := upsertDimensionSet(ctx, tx, tp.TenantID, ln.Dims)
 			if err != nil {

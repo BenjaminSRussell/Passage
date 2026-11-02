@@ -334,12 +334,18 @@ func (s *Postgres) UpsertBatchExpiry(ctx context.Context, productID, batchID str
 // lockProductRows locks every on-hand row of a product in a legal entity, in
 // ascending dimension-set order, and returns them by rowKey.
 func lockProductRows(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, productID string) (map[string]*row, error) {
+	return productRows(ctx, tx, tenantID, legalEntityID, productID, " for update of o")
+}
+
+// productRows reads the on-hand rows of a product in a legal entity in dimension-set
+// order; lock is "" for a plain read or a locking clause.
+func productRows(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, productID, lock string) (map[string]*row, error) {
 	rows, err := tx.Query(ctx, `select o.dimension_set_hash, d.dims, o.posted_qty::text, o.posted_value::text, o.received::text, o.registered::text,
 		o.arrived::text, o.ordered::text, o.deducted::text, o.picked::text, o.reserved_physical::text, o.held_physical::text, o.reserved_ordered::text, o.on_order::text,
 		coalesce(o.currency::text, ''), o.last_txn_seq
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and o.legal_entity_id = $2 and o.product_id = $3
-		order by o.dimension_set_hash for update of o`, tenantID, legalEntityID, productID)
+		order by o.dimension_set_hash`+lock, tenantID, legalEntityID, productID)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +427,7 @@ func policyCandidates(ctx context.Context, tx pgx.Tx, tenantID string, in Reserv
 		if status == "" {
 			status = domain.StockAvailable
 		}
-		c := domain.BatchStock{BatchID: r.dims[domain.DimBatch], Key: key, Available: r.oh.AvailPhysical(), Status: status, ReceiptDate: in.RequiredDate,
+		c := domain.BatchStock{Dims: r.dims, BatchID: r.dims[domain.DimBatch], Key: key, Available: r.oh.AvailPhysical(), Status: status, ReceiptDate: in.RequiredDate,
 			Segment: r.dims[domain.DimSegment]}
 		if e, ok := expiry[c.BatchID]; ok && c.BatchID != "" {
 			c.Expiry = &e
@@ -500,4 +506,43 @@ func reservationData(r domain.Reservation) invevents.ReservationData {
 	return invevents.ReservationData{ReservationID: r.ID, LegalEntityID: r.LegalEntityID, ProductID: r.ProductID, DimensionSet: map[string]string(r.Dims),
 		Qty: r.Qty.String(), DemandType: string(r.DemandType), DemandID: r.DemandID, DemandSegment: r.DemandSegment, Policy: string(r.Policy),
 		Status: string(r.Status)}
+}
+
+// CandidateQuery selects the stock a reservation dialog lists (FR-16.7). Dims
+// filters by dimension values (site, warehouse, location, batch ...).
+type CandidateQuery struct {
+	LegalEntityID       string
+	ProductID           string
+	Policy              domain.ReservationPolicy
+	Dims                domain.Dimensions
+	RequiredDate        time.Time
+	ShelfLifeMarginDays int
+	Segment             string
+	SegmentFallback     bool
+}
+
+// ReservationCandidates lists the dimension sets of a product with available
+// physical quantity in the pick order of the policy, marking those a policy
+// request would not take. It reads without locking: the answer can be stale by
+// the time the user reserves, and the reservation re-checks under the row locks.
+func (s *Postgres) ReservationCandidates(ctx context.Context, q CandidateQuery) ([]domain.Candidate, error) {
+	filter, err := q.Dims.Normalize()
+	if err != nil {
+		return nil, domainProblem(&domain.Error{Code: domain.CodeInvalid, Detail: err.Error()})
+	}
+	p, _ := tenant.FromContext(ctx)
+	var out []domain.Candidate
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := productRows(ctx, tx, p.TenantID, q.LegalEntityID, q.ProductID, "")
+		if err != nil {
+			return err
+		}
+		stock, err := policyCandidates(ctx, tx, p.TenantID, ReserveInput{LegalEntityID: q.LegalEntityID, ProductID: q.ProductID, RequiredDate: q.RequiredDate}, rows, filter)
+		if err != nil {
+			return err
+		}
+		out = domain.RankCandidates(q.Policy, stock, q.RequiredDate, q.ShelfLifeMarginDays, q.Segment, q.SegmentFallback)
+		return nil
+	})
+	return out, err
 }

@@ -32,6 +32,8 @@ type BatchStock struct {
 	// Segment is the stock's segment dimension value, "" when unsegmented
 	// (FR-16.20). PlanDemandPolicy matches it against the demand.
 	Segment string
+	// Dims is the stock's dimension set; the candidate inquiry shows it.
+	Dims Dimensions
 }
 
 // Allocation is the quantity taken from one batch at one dimension set.
@@ -66,23 +68,7 @@ func SelectBatches(policy ReservationPolicy, batches []BatchStock, qty decimal.D
 		}
 		eligible = append(eligible, b)
 	}
-	switch policy {
-	case PolicyFEFO:
-		slices.SortStableFunc(eligible, func(a, b BatchStock) int {
-			if c := compareExpiry(a.Expiry, b.Expiry); c != 0 {
-				return c
-			}
-			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
-		})
-	case PolicyLIFO:
-		slices.SortStableFunc(eligible, func(a, b BatchStock) int {
-			return cmp.Or(b.ReceiptDate.Compare(a.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
-		})
-	default:
-		slices.SortStableFunc(eligible, func(a, b BatchStock) int {
-			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
-		})
-	}
+	sortByPolicy(policy, eligible)
 	var sel Selection
 	remaining := qty
 	for _, b := range eligible {
@@ -110,5 +96,26 @@ func compareExpiry(a, b *time.Time) int {
 		return -1
 	default:
 		return a.Compare(*b)
+	}
+}
+
+// sortByPolicy puts batches in the pick order of policy.
+func sortByPolicy(policy ReservationPolicy, list []BatchStock) {
+	switch policy {
+	case PolicyFEFO:
+		slices.SortStableFunc(list, func(a, b BatchStock) int {
+			if c := compareExpiry(a.Expiry, b.Expiry); c != 0 {
+				return c
+			}
+			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
+		})
+	case PolicyLIFO:
+		slices.SortStableFunc(list, func(a, b BatchStock) int {
+			return cmp.Or(b.ReceiptDate.Compare(a.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
+		})
+	default:
+		slices.SortStableFunc(list, func(a, b BatchStock) int {
+			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
+		})
 	}
 }
