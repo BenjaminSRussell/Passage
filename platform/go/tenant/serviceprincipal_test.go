@@ -99,3 +99,20 @@ func TestServiceTokenActMustBeAKnownServiceActor(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceTokenActMustBeIssuedByItsOwnService(t *testing.T) {
+	// The fixture signs as "receiving": it may act as its own principal, never as another service's.
+	f := newFixture(t)
+	for act, ok := range map[string]bool{
+		"service:receiving-ers":       true,
+		"service:migration-loader":    false,
+		"service:integration-hub":     false,
+		"service:scheduling-downtime": false,
+	} {
+		f.principal.UserID = act
+		_, err := f.verifier.Verify(f.mint(t, "ledger"))
+		if (err == nil) != ok {
+			t.Errorf("act %q signed by receiving: err = %v, want accepted=%v", act, err, ok)
+		}
+	}
+}

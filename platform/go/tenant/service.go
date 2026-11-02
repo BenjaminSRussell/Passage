@@ -451,7 +451,7 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		return ServiceClaims{}, ErrServiceToken
 	}
 	now := v.now()
-	if IsServiceActor(c.Act) && !isKnownServiceActor(c.Act) {
+	if IsServiceActor(c.Act) && (!isKnownServiceActor(c.Act) || !serviceActorIssuedBy(c.Act, c.Iss)) {
 		return ServiceClaims{}, ErrServiceToken
 	}
 	if c.Aud != v.self || c.Jti == "" || c.Act == "" ||

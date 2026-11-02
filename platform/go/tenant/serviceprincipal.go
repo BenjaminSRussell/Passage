@@ -25,6 +25,18 @@ var servicePrincipals = map[string][]string{
 	"scheduling-order-import": {"scheduling.order.import"},
 }
 
+// servicePrincipalIssuers names the services whose signing key may present each
+// service principal as a token's actor. Without it any trusted issuer could act
+// as any registered principal (iss "integration-hub" with act
+// "service:migration-loader"), borrowing duties its own grant lacks.
+var servicePrincipalIssuers = map[string][]string{
+	"integration-hub":         {"integration-hub"},
+	"migration-loader":        {"migration", "migration-factory"},
+	"receiving-ers":           {"receiving"},
+	"scheduling-downtime":     {"scheduling"},
+	"scheduling-order-import": {"scheduling"},
+}
+
 func ServicePrincipalTable() map[string][]string {
 	out := make(map[string][]string, len(servicePrincipals))
 	for name, duties := range servicePrincipals {
@@ -70,4 +82,11 @@ func isKnownServiceActor(id string) bool {
 	name, ok := strings.CutPrefix(id, ServiceActorPrefix)
 	_, known := servicePrincipals[name]
 	return ok && known
+}
+
+// serviceActorIssuedBy reports whether issuer may sign tokens acting as the
+// service principal named by id.
+func serviceActorIssuedBy(id, issuer string) bool {
+	name, ok := strings.CutPrefix(id, ServiceActorPrefix)
+	return ok && slices.Contains(servicePrincipalIssuers[name], issuer)
 }
