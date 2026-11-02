@@ -167,6 +167,16 @@ func TestEcoReleaseRefusals(t *testing.T) {
 		{"unknown version", &domain.Eco{ID: "e", State: domain.EcoApproved, Replaces: []domain.Replacement{{OldVersionID: "nope", NewVersionID: "V2"}}}, releaseFixture(), "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
 		{"overlap with another active version", ecoIn(domain.EcoApproved, "2026-07-01"), overlapping, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
 	}
+	costingDraft := releaseFixture()
+	costingDraft[1].Usage = domain.UsageCosting
+	tests = append(tests, struct {
+		name     string
+		eco      *domain.Eco
+		versions []domain.BomVersion
+		today    string
+		want     string
+		state    domain.EcoState
+	}{"a costing draft cannot replace the production BOM", ecoIn(domain.EcoApproved, "2026-07-01"), costingDraft, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved})
 	endedDraft := releaseFixture()
 	endedDraft[1].EffectiveTo = date("2026-03-01")
 	for _, tt := range []struct {

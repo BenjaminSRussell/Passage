@@ -19,7 +19,22 @@ export interface BomLine {
   roundUp?: string;
   effectiveFrom?: string;
   effectiveTo?: string;
+  /** FR-9.20 alternative item group; a group needs two or more lines and one strategy (BR-9.16). */
+  altGroup?: string;
+  altStrategy?: string;
+  altPriority?: number;
+  usageProbabilityPct?: string;
+  discontinuationGroup?: string;
+  discontinueType?: string;
+  followUpGroup?: string;
+  followUpComponentId?: string;
+  discontinueOn?: string;
 }
+
+/** FR-9.19 BOM usages (SAP STLAN 1 to 6); a version without one is production. */
+export const bomUsages = ["production", "engineering", "costing", "maintenance", "sales", "universal"];
+/** FR-9.19 categories this wave maintains; equipment, functional location, sales order and project BOMs come later. */
+export const bomCategories = ["material", "document"];
 
 export interface BomVersion {
   id: string;
@@ -31,6 +46,9 @@ export interface BomVersion {
   toQty?: string;
   status: string;
   lines?: BomLine[];
+  /** FR-9.19 usage and category. */
+  usage?: string;
+  category?: string;
   /** The version this one was copied from (FR-9.12 lineage). */
   copiedFromVersionId?: string;
   /** Optimistic-locking counter of a draft (BR-9.3); send the loaded value back when saving an edit. */
@@ -45,6 +63,8 @@ export interface BomVersionInput {
   effectiveFrom: string;
   effectiveTo?: string;
   status?: string;
+  usage?: string;
+  category?: string;
   lines: BomLine[];
 }
 
@@ -52,6 +72,8 @@ export interface BomVersionFilters {
   productId?: string;
   siteId?: string;
   status?: string;
+  usage?: string;
+  category?: string;
   asOf?: string;
 }
 

@@ -24,6 +24,20 @@ const (
 
 	RoundUpQuantity = "quantity"
 
+	// FR-9.19 usages and categories. An empty usage means production and an empty category material.
+	UsageProduction  = "production"
+	UsageCosting     = "costing"
+	UsageSales       = "sales"
+	UsageUniversal   = "universal"
+	CategoryMaterial = "material"
+	CategoryDocument = "document"
+
+	// FR-9.20 alternative strategies and discontinuation types.
+	AltPriority    = "priority"
+	AltProbability = "usage_probability"
+	DiscSingle     = "single"
+	DiscSimul      = "simultaneous"
+
 	MaxLevels = 25
 	MaxNodes  = 100000
 )
@@ -41,6 +55,8 @@ type BomLine struct {
 	RoundUp            string
 	EffectiveFrom      time.Time
 	EffectiveTo        time.Time
+	Alt                Alternative
+	Discontinuation    Discontinuation
 }
 
 type BomVersion struct {
@@ -53,6 +69,9 @@ type BomVersion struct {
 	ToQty         *decimal.Decimal
 	Status        string
 	Lines         []BomLine
+	// Usage and Category are FR-9.19; empty reads as production and material.
+	Usage    string
+	Category string
 	// CopiedFrom is the version this one was copied from (FR-9.12 lineage), empty for a plain create.
 	CopiedFrom string
 	// Version is the optimistic-locking counter (BR-9.3): it starts at 1 and every edit, activation
@@ -71,6 +90,9 @@ type ExplodeRequest struct {
 	AsOf      time.Time
 	Quantity  decimal.Decimal
 	Levels    int
+	// Usage selects the BOM usage (FR-9.19); empty is production. A universal BOM is the fallback
+	// when no version of the requested usage covers the date.
+	Usage string
 }
 
 type Node struct {
@@ -79,6 +101,10 @@ type Node struct {
 	Level     int
 	Quantity  decimal.Decimal
 	Children  []*Node
+	// Alt and Discontinuation carry the line's FR-9.20 metadata unresolved: planning (wave 22)
+	// chooses among alternatives against availability.
+	Alt             Alternative
+	Discontinuation Discontinuation
 }
 
 type FlatLine struct {
@@ -86,9 +112,22 @@ type FlatLine struct {
 	Quantity  decimal.Decimal
 }
 
+// AltMember is a line in an alternative group, leaf or sub-assembly. Explosion keeps the member and
+// everything below it out of Flat, whose totals would otherwise count every alternative at once; the
+// member's own components stay in the tree under its node.
+type AltMember struct {
+	ParentProductID string
+	ProductID       string
+	LineNo          int
+	Quantity        decimal.Decimal
+	Alt             Alternative
+}
+
 type Explosion struct {
 	Root *Node
 	Flat []FlatLine
+	// Alternatives lists every line in an alternative group, unresolved, in explosion order.
+	Alternatives []AltMember
 }
 
 type UsedBy struct {
@@ -112,14 +151,49 @@ func LineActive(l BomLine, asOf time.Time) bool {
 	return (l.EffectiveFrom.IsZero() || !asOf.Before(l.EffectiveFrom)) && (l.EffectiveTo.IsZero() || !asOf.After(l.EffectiveTo))
 }
 
+func usageOf(v BomVersion) string {
+	if v.Usage == "" {
+		return UsageProduction
+	}
+	return v.Usage
+}
+
+func categoryOf(v BomVersion) string {
+	if v.Category == "" {
+		return CategoryMaterial
+	}
+	return v.Category
+}
+
+// sameStructure reports whether two versions are the same kind of BOM (FR-9.19): the overlap and
+// first-version rules apply within one usage and category, so a costing BOM can sit beside a
+// production BOM of the same product, site and dates.
+func sameStructure(a, b BomVersion) bool {
+	return usageOf(a) == usageOf(b) && categoryOf(a) == categoryOf(b)
+}
+
 func ResolveVersion(versions []BomVersion, product, site string, asOf time.Time, qty decimal.Decimal) (BomVersion, error) {
+	return ResolveVersionUsage(versions, product, site, UsageProduction, asOf, qty)
+}
+
+// ResolveVersionUsage picks the material BOM version of the requested usage covering the date and
+// quantity, preferring the site's own version and a quantity range; a universal version is used only
+// when none of the requested usage covers the date.
+func ResolveVersionUsage(versions []BomVersion, product, site, usage string, asOf time.Time, qty decimal.Decimal) (BomVersion, error) {
+	if usage == "" {
+		usage = UsageProduction
+	}
 	best, ties := -1, 0
 	var picked BomVersion
 	for _, v := range versions {
-		if v.ProductID != product || !covers(v, asOf) || !inQty(v, qty) || (v.SiteID != "" && v.SiteID != site) {
+		if v.ProductID != product || !covers(v, asOf) || !inQty(v, qty) || (v.SiteID != "" && v.SiteID != site) ||
+			categoryOf(v) != CategoryMaterial || (usageOf(v) != usage && usageOf(v) != UsageUniversal) {
 			continue
 		}
 		score := 0
+		if usageOf(v) == usage {
+			score += 4
+		}
 		if v.SiteID != "" {
 			score += 2
 		}
@@ -160,9 +234,13 @@ func Consumption(l BomLine, parentQty decimal.Decimal) decimal.Decimal {
 }
 
 type walker struct {
-	cat    Catalog
-	req    ExplodeRequest
-	flat   map[string]decimal.Decimal
+	cat  Catalog
+	req  ExplodeRequest
+	flat map[string]decimal.Decimal
+	alts []AltMember
+	// inAlt counts the alternative-group lines on the current path: below one, nothing is summed
+	// into flat, because the choice among the group's members is planning's (wave 22).
+	inAlt  int
 	onPath map[string]bool
 	path   []string
 	nodes  int
@@ -196,11 +274,11 @@ func Explode(cat Catalog, req ExplodeRequest) (Explosion, error) {
 		flat = append(flat, FlatLine{ProductID: p, Quantity: q})
 	}
 	sort.Slice(flat, func(i, j int) bool { return flat[i].ProductID < flat[j].ProductID })
-	return Explosion{Root: &Node{ProductID: req.ProductID, Quantity: req.Quantity, Children: children}, Flat: flat}, nil
+	return Explosion{Root: &Node{ProductID: req.ProductID, Quantity: req.Quantity, Children: children}, Flat: flat, Alternatives: w.alts}, nil
 }
 
 func (w *walker) resolve(product string, qty decimal.Decimal) (BomVersion, error) {
-	return ResolveVersion(w.cat.VersionsFor(product), product, w.req.SiteID, w.req.AsOf, qty)
+	return ResolveVersionUsage(w.cat.VersionsFor(product), product, w.req.SiteID, w.req.Usage, w.req.AsOf, qty)
 }
 
 func (w *walker) descend(product string, v BomVersion, qty decimal.Decimal, level int) ([]*Node, error) {
@@ -231,10 +309,13 @@ func (w *walker) descend(product string, v BomVersion, qty decimal.Decimal, leve
 		if err != nil && !missing {
 			return nil, err
 		}
-		if line.LineType == LinePhantom {
-			if missing {
-				return nil, errf(CodeBomPhantomNoBom, "Phantom %s has no active BOM on %s.", comp, w.req.AsOf.Format(dateLayout))
-			}
+		grouped := line.Alt.Group != ""
+		if line.LineType == LinePhantom && missing {
+			return nil, errf(CodeBomPhantomNoBom, "Phantom %s has no active BOM on %s.", comp, w.req.AsOf.Format(dateLayout))
+		}
+		// A phantom outside any group is resolved inline. A phantom in a group keeps its node so the
+		// group metadata stays visible, with its components below it.
+		if line.LineType == LinePhantom && !grouped {
 			inline, err := w.descend(comp, cv, compQty, level)
 			if err != nil {
 				return nil, err
@@ -242,13 +323,20 @@ func (w *walker) descend(product string, v BomVersion, qty decimal.Decimal, leve
 			out = append(out, inline...)
 			continue
 		}
-		node := &Node{ProductID: comp, LineNo: line.LineNo, Level: level + 1, Quantity: compQty}
+		node := &Node{ProductID: comp, LineNo: line.LineNo, Level: level + 1, Quantity: compQty, Alt: line.Alt, Discontinuation: line.Discontinuation}
+		if grouped {
+			w.alts = append(w.alts, AltMember{ParentProductID: product, ProductID: comp, LineNo: line.LineNo, Quantity: compQty, Alt: line.Alt})
+			w.inAlt++
+		}
 		if !missing && level+1 < w.req.Levels {
 			if node.Children, err = w.descend(comp, cv, compQty, level+1); err != nil {
 				return nil, err
 			}
 		}
-		if len(node.Children) == 0 {
+		if grouped {
+			w.inAlt--
+		}
+		if len(node.Children) == 0 && !grouped && w.inAlt == 0 {
 			w.flat[comp] = w.flat[comp].Add(compQty)
 		}
 		out = append(out, node)
@@ -300,7 +388,7 @@ func qtyOverlap(a, b BomVersion) bool {
 func CheckNoOverlap(existing []BomVersion, candidate BomVersion) error {
 	for _, other := range existing {
 		if other.ID != candidate.ID && other.Status == StatusActive && other.ProductID == candidate.ProductID &&
-			other.SiteID == candidate.SiteID && qtyOverlap(other, candidate) &&
+			other.SiteID == candidate.SiteID && sameStructure(other, candidate) && qtyOverlap(other, candidate) &&
 			rangesOverlap(other.EffectiveFrom, other.EffectiveTo, candidate.EffectiveFrom, candidate.EffectiveTo) {
 			return errf(CodeBomOverlap, "Version overlaps active version %s for this site, date and quantity.", other.ID)
 		}
@@ -313,7 +401,7 @@ func CheckDirectActivation(existing []BomVersion, candidate BomVersion) error {
 		return nil
 	}
 	for _, other := range existing {
-		if other.ID != candidate.ID && other.ProductID == candidate.ProductID && other.SiteID == candidate.SiteID {
+		if other.ID != candidate.ID && other.ProductID == candidate.ProductID && other.SiteID == candidate.SiteID && sameStructure(other, candidate) {
 			return errf(CodeBomEcoRequired, "%s already has a version for this site; create a draft and release it through an ECO.", candidate.ProductID)
 		}
 	}
@@ -332,6 +420,7 @@ func (v BomVersion) ActivatedEvent(supersedes string) events.BomVersionActivated
 	data := events.BomVersionActivatedData{
 		BomVersionID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID,
 		EffectiveFrom: v.EffectiveFrom.Format(dateLayout), LineCount: len(v.Lines), SupersedesVersionID: supersedes,
+		Usage: usageOf(v), Category: categoryOf(v),
 	}
 	if !v.EffectiveTo.IsZero() {
 		to := v.EffectiveTo.Format(dateLayout)

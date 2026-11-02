@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { ApiError, getBomVersion, updateBomVersion, type BomLine, type BomVersion } from "./api/client";
+import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { ApiError, bomCategories, bomUsages, getBomVersion, updateBomVersion, type BomLine, type BomVersion } from "./api/client";
 import styles from "./pages.module.css";
 
 const conflictCode = "ENG-BOM-VERSION-CONFLICT";
@@ -15,9 +15,16 @@ interface LineDraft {
   componentProductId: string;
   quantity: string;
   scrapVarPct: string;
+  /** FR-9.20 alternative group; empty for a line outside any group. */
+  altGroup: string;
+  altStrategy: string;
+  /** Priority (1 to 99) with the priority strategy, percent with usage_probability. */
+  altValue: string;
 }
 
 interface Header {
+  usage: string;
+  category: string;
   siteId: string;
   effectiveFrom: string;
   effectiveTo: string;
@@ -54,6 +61,11 @@ function lineFields(line: BomLine) {
     roundUp: line.roundUp ?? "",
     effectiveFrom: line.effectiveFrom ?? "",
     effectiveTo: line.effectiveTo ?? "",
+    altGroup: line.altGroup ?? "",
+    altStrategy: line.altStrategy ?? "",
+    altPriority: String(line.altPriority ?? ""),
+    usageProbabilityPct: decimalText(line.usageProbabilityPct, ""),
+    discontinuation: [line.discontinuationGroup, line.discontinueType, line.followUpGroup, line.followUpComponentId, line.discontinueOn].map((v) => v ?? "").join("|"),
   };
 }
 
@@ -66,6 +78,8 @@ function describe(line?: BomLine): string {
   if (f.lineType !== "item") parts.push(f.lineType);
   if (f.roundUp) parts.push(`round up ${f.roundUp}`);
   if (f.effectiveFrom || f.effectiveTo) parts.push(`effective ${f.effectiveFrom || "start"} to ${f.effectiveTo || "open"}`);
+  if (f.altGroup) parts.push(`alternative group ${f.altGroup} (${f.altStrategy} ${f.altPriority || f.usageProbabilityPct})`);
+  if (line.discontinueType) parts.push(`discontinued ${line.discontinueOn ?? "undated"}, ${line.discontinueType}${line.followUpComponentId ? `, follow-up ${line.followUpComponentId}` : ""}`);
   return parts.join(", ");
 }
 
@@ -83,8 +97,19 @@ export function diffLines(yours: BomLine[], server: BomLine[]): Row[] {
     .filter((row) => !row.yours || !row.server || !same(row.yours, row.server));
 }
 
+/** The group fields a save sends for a line: the group the form shows, never a stale priority or probability of the other strategy. */
+function altFields(line: LineDraft): Partial<BomLine> {
+  const altGroup = line.altGroup.trim();
+  if (!altGroup) return { altGroup: undefined, altStrategy: undefined, altPriority: undefined, usageProbabilityPct: undefined };
+  return line.altStrategy === "usage_probability"
+    ? { altGroup, altStrategy: line.altStrategy, altPriority: undefined, usageProbabilityPct: line.altValue }
+    : { altGroup, altStrategy: "priority", altPriority: Number(line.altValue), usageProbabilityPct: undefined };
+}
+
 function headerOf(version: BomVersion): Header {
   return {
+    usage: version.usage || "production",
+    category: version.category || "material",
     siteId: version.siteId ?? "",
     effectiveFrom: version.effectiveFrom,
     effectiveTo: version.effectiveTo ?? "",
@@ -94,6 +119,8 @@ function headerOf(version: BomVersion): Header {
 }
 
 const headerLabels: [keyof Header, string][] = [
+  ["usage", "usage"],
+  ["category", "category"],
   ["siteId", "site"],
   ["effectiveFrom", "effective from"],
   ["effectiveTo", "effective to"],
@@ -119,7 +146,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [baseVersion, setBaseVersion] = useState(1);
-  const [header, setHeader] = useState<Header>({ siteId: "", effectiveFrom: "", effectiveTo: "", fromQty: "", toQty: "" });
+  const [header, setHeader] = useState<Header>({ usage: "production", category: "material", siteId: "", effectiveFrom: "", effectiveTo: "", fromQty: "", toQty: "" });
   const [lines, setLines] = useState<LineDraft[]>([]);
   const nextKey = useRef(0);
   const nextLineNo = useRef(1);
@@ -137,6 +164,9 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
       componentProductId: line.componentProductId,
       quantity: line.quantity,
       scrapVarPct: line.scrapVarPct,
+      altGroup: line.altGroup ?? "",
+      altStrategy: line.altStrategy || "priority",
+      altValue: line.altStrategy === "usage_probability" ? (line.usageProbabilityPct ?? "") : line.altPriority ? String(line.altPriority) : "",
     };
   }
 
@@ -171,7 +201,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
   function addLine() {
     const key = nextKey.current++;
     const lineNo = nextLineNo.current++;
-    setLines((existing) => [...existing, { key, lineNo, componentProductId: "", quantity: "", scrapVarPct: "0" }]);
+    setLines((existing) => [...existing, { key, lineNo, componentProductId: "", quantity: "", scrapVarPct: "0", altGroup: "", altStrategy: "priority", altValue: "" }]);
   }
 
   /** Merge view: replace your line with the saved one, add the saved line you lacked, or drop the line the saved draft removed. */
@@ -191,6 +221,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
       componentProductId: line.componentProductId.trim(),
       quantity: line.quantity,
       scrapVarPct: line.scrapVarPct || "0",
+      ...altFields(line),
     }));
   }
 
@@ -202,6 +233,8 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
     setSaving(true);
     const input = {
       productId: loaded.productId,
+      usage: header.usage,
+      category: header.category,
       siteId: header.siteId.trim(),
       effectiveFrom: header.effectiveFrom,
       ...(header.effectiveTo ? { effectiveTo: header.effectiveTo } : {}),
@@ -308,6 +341,32 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
         <Card>
           <form className={styles.form} onSubmit={submit}>
             <div className={styles.field}>
+              <FormField id="edit-bom-usage" label="Usage" error={fieldErrors.usage}>
+                {(control) => (
+                  <Select {...control} value={header.usage} onChange={(e) => setHeader({ ...header, usage: e.target.value })}>
+                    {bomUsages.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            </div>
+            <div className={styles.field}>
+              <FormField id="edit-bom-category" label="Category" error={fieldErrors.category}>
+                {(control) => (
+                  <Select {...control} value={header.category} onChange={(e) => setHeader({ ...header, category: e.target.value })}>
+                    {bomCategories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            </div>
+            <div className={styles.field}>
               <FormField id="edit-bom-site" label="Site" optional error={fieldErrors.siteId}>
                 {(control) => <Input {...control} value={header.siteId} onChange={(e) => setHeader({ ...header, siteId: e.target.value })} maxLength={64} />}
               </FormField>
@@ -355,6 +414,41 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
                     )}
                   </FormField>
                 </div>
+                <div className={styles.field}>
+                  <FormField id={`edit-bom-alt-${line.key}`} label={`Alternative group ${index + 1}`} optional>
+                    {(control) => <Input {...control} value={line.altGroup} onChange={(e) => updateLine(line.key, { altGroup: e.target.value })} maxLength={2} />}
+                  </FormField>
+                </div>
+                {line.altGroup.trim() ? (
+                  <>
+                    <div className={styles.field}>
+                      <FormField id={`edit-bom-strategy-${line.key}`} label={`Alternative strategy ${index + 1}`}>
+                        {(control) => (
+                          <Select {...control} value={line.altStrategy} onChange={(e) => updateLine(line.key, { altStrategy: e.target.value })}>
+                            <option value="priority">priority</option>
+                            <option value="usage_probability">usage probability</option>
+                          </Select>
+                        )}
+                      </FormField>
+                    </div>
+                    <div className={styles.field}>
+                      <FormField id={`edit-bom-altvalue-${line.key}`} label={line.altStrategy === "priority" ? `Priority ${index + 1}` : `Probability % ${index + 1}`}>
+                        {(control) => (
+                          <Input
+                            {...control}
+                            type="number"
+                            min={line.altStrategy === "priority" ? "1" : "0.0001"}
+                            max={line.altStrategy === "priority" ? "99" : "100"}
+                            step={line.altStrategy === "priority" ? "1" : "0.0001"}
+                            value={line.altValue}
+                            onChange={(e) => updateLine(line.key, { altValue: e.target.value })}
+                            required
+                          />
+                        )}
+                      </FormField>
+                    </div>
+                  </>
+                ) : null}
                 {lines.length > 1 ? (
                   <Button size="sm" onClick={() => setLines((existing) => existing.filter((l) => l.key !== line.key))}>
                     Remove line {index + 1}

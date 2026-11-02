@@ -9,9 +9,10 @@ import (
 
 // updateBomVersion saves an edited draft BOM version (BR-9.3): the request carries the full header and
 // every line, plus the version number the editor loaded. The lines are replaced as a whole, so a line
-// left out is deleted. The product, status and id cannot change here (copy a version to change the
-// product, :activate and :cancel to change the status). A stale version number is 409
-// ENG-BOM-VERSION-CONFLICT and nothing is written; the editor reloads the draft and merges line by line.
+// left out is deleted; an omitted usage or category keeps the stored one. The product, status and id
+// cannot change here (copy a version to change the product, :activate and :cancel to change the
+// status). A stale version number is 409 ENG-BOM-VERSION-CONFLICT and nothing is written; the editor
+// reloads the draft and merges line by line.
 // Like creating a draft, saving one emits no event.
 func (a *API) updateBomVersion(w http.ResponseWriter, r *http.Request) {
 	var body bomVersionBody
@@ -51,6 +52,14 @@ func (a *API) updateBomVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.ID, draft.CopiedFrom = id, stored.CopiedFrom
+	// FR-9.19: an edit that omits usage or category keeps the stored one, so a client that predates
+	// them cannot turn a costing or document BOM into a production material BOM by saving it.
+	if body.Usage == "" {
+		draft.Usage = stored.Usage
+	}
+	if body.Category == "" {
+		draft.Category = stored.Category
+	}
 	updated, err := a.store.UpdateBomDraft(r.Context(), draft, body.Version, copyIdem(r, id, body), checkVersion(draft))
 	if err != nil {
 		if domain.HasCode(err, domain.CodeBomVersionConflict) {

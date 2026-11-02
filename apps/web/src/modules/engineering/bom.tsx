@@ -15,6 +15,8 @@ import {
 import {
   activateBomVersion,
   ApiError,
+  bomCategories,
+  bomUsages,
   cancelBomVersion,
   copyBomVersion,
   createBomVersion,
@@ -28,7 +30,7 @@ import { CopyVersionCard } from "./copyVersion";
 import styles from "./pages.module.css";
 
 const bomStatuses = ["draft", "active", "expired", "superseded", "cancelled"];
-const emptyFilters: BomVersionFilters = { productId: "", siteId: "", status: "", asOf: "" };
+const emptyFilters: BomVersionFilters = { productId: "", siteId: "", status: "", asOf: "", usage: "", category: "" };
 const notFoundCode = "ENG-BOM-NOTFOUND";
 const forbiddenStatus = 403;
 const forbiddenText = "You do not have permission to change bills of material";
@@ -41,9 +43,23 @@ function qtyRange(version: BomVersion): string {
   return `${version.fromQty ?? "0"} to ${version.toQty ?? "open"}`;
 }
 
+/** The FR-9.20 alternative group of a line, e.g. "A1 60%" or "A1 priority 2"; empty for a line outside any group. */
+function altText(line: BomLine): string {
+  if (!line.altGroup) return "";
+  return line.altStrategy === "usage_probability" ? `${line.altGroup} ${line.usageProbabilityPct ?? "?"}%` : `${line.altGroup} priority ${line.altPriority ?? "?"}`;
+}
+
+function discontinuationText(line: BomLine): string {
+  if (!line.discontinueType) return "";
+  const group = line.discontinuationGroup ? ` group ${line.discontinuationGroup}` : "";
+  const next = line.followUpComponentId ? `, then ${line.followUpComponentId}${line.followUpGroup ? ` in ${line.followUpGroup}` : ""}` : "";
+  return `${line.discontinueType}${group} on ${line.discontinueOn ?? "no date"}${next}`;
+}
+
 const bomColumns: DataTableColumn<BomVersion>[] = [
   { key: "productId", header: "Product", mono: true },
   { key: "siteId", header: "Site", render: (row) => row.siteId || "All sites" },
+  { key: "usage", header: "Usage", render: (row) => row.usage || "production" },
   { key: "effectiveFrom", header: "Effective from" },
   { key: "effectiveTo", header: "Effective to", render: (row) => row.effectiveTo ?? "open" },
   { key: "qty", header: "Quantity range", render: qtyRange },
@@ -137,6 +153,34 @@ export function BomVersionsPage({ onOpen, onCreate }: { onOpen?: (id: string) =>
           <div className={styles.field}>
             <FormField id="bom-as-of" label="Effective on" optional>
               {(control) => <Input {...control} type="date" value={draft.asOf} onChange={(e) => setDraft({ ...draft, asOf: e.target.value })} />}
+            </FormField>
+          </div>
+          <div className={styles.field}>
+            <FormField id="bom-usage" label="Usage" optional>
+              {(control) => (
+                <Select {...control} value={draft.usage ?? ""} onChange={(e) => setDraft({ ...draft, usage: e.target.value })}>
+                  <option value="">Any usage</option>
+                  {bomUsages.map((usage) => (
+                    <option key={usage} value={usage}>
+                      {usage}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          </div>
+          <div className={styles.field}>
+            <FormField id="bom-category" label="Category" optional>
+              {(control) => (
+                <Select {...control} value={draft.category ?? ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
+                  <option value="">Any category</option>
+                  {bomCategories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </FormField>
           </div>
           <div className={styles.field}>
@@ -255,6 +299,8 @@ export function BomVersionPage({
     ? [
         ["Product", version.productId],
         ["Site", version.siteId || "All sites"],
+        ["Usage", version.usage || "production"],
+        ["Category", version.category || "material"],
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
         ["Quantity range", qtyRange(version)],
         ["Status", <StatusPill status={version.status} />],
@@ -272,6 +318,8 @@ export function BomVersionPage({
     { key: "roundUp", header: "Round up" },
     { key: "effectiveFrom", header: "From" },
     { key: "effectiveTo", header: "To" },
+    { key: "alt", header: "Alternative", render: altText },
+    { key: "discontinuation", header: "Discontinuation", render: discontinuationText },
     {
       key: "where",
       header: "Where used",
@@ -372,7 +420,13 @@ interface LineDraft {
   componentProductId: string;
   quantity: string;
   scrapVarPct: string;
+  altGroup: string;
+  /** Priority (1 to 99) with the priority strategy, percent with usage_probability. */
+  altValue: string;
+  altStrategy: string;
 }
+
+const blankLine = (key: number): LineDraft => ({ key, componentProductId: "", quantity: "", scrapVarPct: "0", altGroup: "", altValue: "", altStrategy: "priority" });
 
 interface CreateErrors {
   form: string;
@@ -381,7 +435,7 @@ interface CreateErrors {
 }
 
 const noErrors: CreateErrors = { form: "", fields: {}, lines: {} };
-const headerFields = ["productId", "effectiveFrom", "effectiveTo", "status"];
+const headerFields = ["productId", "effectiveFrom", "effectiveTo", "status", "usage", "category"];
 
 /** Splits a COM-0001 problem into header field messages and per-line messages keyed by the line's row key. */
 function createErrors(error: unknown, lines: LineDraft[]): CreateErrors {
@@ -407,7 +461,9 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [effectiveTo, setEffectiveTo] = useState("");
   const [status, setStatus] = useState("draft");
-  const [lines, setLines] = useState<LineDraft[]>([{ key: 0, componentProductId: "", quantity: "", scrapVarPct: "0" }]);
+  const [usage, setUsage] = useState("production");
+  const [category, setCategory] = useState("material");
+  const [lines, setLines] = useState<LineDraft[]>([blankLine(0)]);
   const nextKey = useRef(1);
   // One key per request body: a retry of the same body after a lost response replays instead of creating a second version.
   const idempotency = useRef({ body: "", key: "" });
@@ -420,7 +476,7 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
 
   function addLine() {
     const key = nextKey.current++;
-    setLines((existing) => [...existing, { key, componentProductId: "", quantity: "", scrapVarPct: "0" }]);
+    setLines((existing) => [...existing, blankLine(key)]);
   }
 
   async function submit(event: FormEvent) {
@@ -434,12 +490,21 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
       effectiveFrom,
       ...(effectiveTo ? { effectiveTo } : {}),
       status,
+      usage,
+      category,
       lines: submitted.map((line, index) => ({
         lineNo: index + 1,
         componentProductId: line.componentProductId.trim(),
         quantity: line.quantity,
         scrapConst: "0",
         scrapVarPct: line.scrapVarPct || "0",
+        ...(line.altGroup.trim()
+          ? {
+              altGroup: line.altGroup.trim(),
+              altStrategy: line.altStrategy,
+              ...(line.altStrategy === "priority" ? { altPriority: Number(line.altValue) } : { usageProbabilityPct: line.altValue }),
+            }
+          : {}),
       })),
     };
     const body = JSON.stringify(input);
@@ -489,6 +554,32 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
               )}
             </FormField>
           </div>
+          <div className={styles.field}>
+            <FormField id="new-bom-usage" label="Usage" error={errors.fields.usage}>
+              {(control) => (
+                <Select {...control} value={usage} onChange={(e) => setUsage(e.target.value)}>
+                  {bomUsages.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          </div>
+          <div className={styles.field}>
+            <FormField id="new-bom-category" label="Category" error={errors.fields.category}>
+              {(control) => (
+                <Select {...control} value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {bomCategories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          </div>
           {lines.map((line, index) => (
             <Fragment key={line.key}>
               <div className={styles.field}>
@@ -512,6 +603,41 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
                   )}
                 </FormField>
               </div>
+              <div className={styles.field}>
+                <FormField id={`new-bom-alt-${line.key}`} label={`Alternative group ${index + 1}`} optional>
+                  {(control) => <Input {...control} value={line.altGroup} onChange={(e) => updateLine(line.key, { altGroup: e.target.value })} maxLength={2} />}
+                </FormField>
+              </div>
+              {line.altGroup.trim() ? (
+                <>
+                  <div className={styles.field}>
+                    <FormField id={`new-bom-strategy-${line.key}`} label={`Alternative strategy ${index + 1}`}>
+                      {(control) => (
+                        <Select {...control} value={line.altStrategy} onChange={(e) => updateLine(line.key, { altStrategy: e.target.value })}>
+                          <option value="priority">priority</option>
+                          <option value="usage_probability">usage probability</option>
+                        </Select>
+                      )}
+                    </FormField>
+                  </div>
+                  <div className={styles.field}>
+                    <FormField id={`new-bom-altvalue-${line.key}`} label={line.altStrategy === "priority" ? `Priority ${index + 1}` : `Probability % ${index + 1}`}>
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          min={line.altStrategy === "priority" ? "1" : "0.0001"}
+                          max={line.altStrategy === "priority" ? "99" : "100"}
+                          step={line.altStrategy === "priority" ? "1" : "0.0001"}
+                          value={line.altValue}
+                          onChange={(e) => updateLine(line.key, { altValue: e.target.value })}
+                          required
+                        />
+                      )}
+                    </FormField>
+                  </div>
+                </>
+              ) : null}
               {lines.length > 1 ? (
                 <Button size="sm" onClick={() => setLines((existing) => existing.filter((l) => l.key !== line.key))}>
                   Remove line {index + 1}

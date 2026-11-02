@@ -62,6 +62,7 @@ const (
 	CodeEcoSelfApproval        = "ENG-ECO-SELF-APPROVAL"
 	CodeEcoActorRequired       = "ENG-ECO-ACTOR-REQUIRED"
 	CodeEcoCreatorUnknown      = "ENG-ECO-CREATOR-UNKNOWN"
+	CodeAltConflict            = "ENG-ALT-CONFLICT"
 )
 
 const (

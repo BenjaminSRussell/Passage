@@ -75,6 +75,8 @@ components:
           effectiveTo: { type: string, format: date }
           lineCount: { type: integer }
           supersedesVersionId: { type: string }
+          usage: { type: string, enum: [production, engineering, costing, maintenance, sales, universal], description: 'FR-9.19 BOM usage; absent on events written before slice 22, which were all production material BOMs.' }
+          category: { type: string, enum: [material, document], description: FR-9.19 BOM category. }
       x-passage-type: dev.passage.engineering.bomversion.activated.v1
     bomVersionExpired:
       name: bomVersionExpired

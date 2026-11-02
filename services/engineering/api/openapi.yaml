@@ -18,7 +18,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
       responses:
         '201':
-          description: BOM version created as draft or active, or the original version on an Idempotency-Key replay. A cycle is ENG-BOM-CYCLE and an overlapping active range is ENG-BOM-OVERLAP.
+          description: BOM version created as draft or active, or the original version on an Idempotency-Key replay. A cycle is ENG-BOM-CYCLE and an overlapping active range is ENG-BOM-OVERLAP, and an inconsistent alternative group is 422 ENG-ALT-CONFLICT (BR-9.16).
           content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -31,6 +31,8 @@ paths:
         - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
         - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
         - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, superseded, cancelled] } }
+        - { name: usage, in: query, description: Only versions of this BOM usage (FR-9.19)., schema: { type: string, enum: [production, engineering, costing, maintenance, sales, universal] } }
+        - { name: category, in: query, description: Only versions of this BOM category (FR-9.19)., schema: { type: string, enum: [material, document] } }
         - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
       responses:
         '200':
@@ -64,7 +66,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
       responses:
         '200':
-          description: The draft as saved (BR-9.3). The site, effectivity, quantity range and every line are replaced by the request, so a line left out is deleted; version is the loaded version plus 1. The product, status and id do not change and no event is emitted, as creating a draft emits none. The version field of the request is required and must be the value the editor loaded. Lines are identified by lineNo; a line without one is numbered by its position, as on create. An Idempotency-Key replay returns the draft as it is now.
+          description: The draft as saved (BR-9.3). The site, effectivity, quantity range and every line are replaced by the request, so a line left out is deleted; version is the loaded version plus 1. The product, status and id do not change and no event is emitted, as creating a draft emits none. The version field of the request is required and must be the value the editor loaded. Lines are identified by lineNo; a line without one is numbered by its position, as on create. An omitted usage or category keeps the stored one. An Idempotency-Key replay returns the draft as it is now.
           content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
         '400':
           description: COM-0001 with per-field errors, for a missing version, a status other than draft, a changed productId, an id that differs from the path, a missing or malformed date, bad lines, an unknown field, or an id that is not a UUID.
@@ -75,7 +77,7 @@ paths:
           description: ENG-BOM-VERSION-CONFLICT, another save came first (reload the draft and merge line by line); ENG-BOM-STATE, the version is not a draft; ENG-BOM-IN-ECO, an open ECO will release this draft; or the Idempotency-Key is in flight.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: ENG-BOM-CYCLE, a component would close a cycle as of the new date; or idempotency_key_reuse, the key was used for a different request.
+          description: ENG-BOM-CYCLE, a component would close a cycle as of the new date; ENG-ALT-CONFLICT, an alternative group is inconsistent (BR-9.16); or idempotency_key_reuse, the key was used for a different request.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/bom-versions/{id}:activate:
@@ -139,7 +141,7 @@ paths:
           description: The Idempotency-Key is in flight.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: ENG-BOM-CYCLE, the copied lines would close a cycle as of the new date; or idempotency_key_reuse, the key was used for a different source or dates.
+          description: ENG-BOM-CYCLE, the copied lines would close a cycle as of the new date; ENG-ALT-CONFLICT, the copied lines leave an alternative group inconsistent; or idempotency_key_reuse, the key was used for a different source or dates.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/route-versions:
@@ -316,7 +318,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/ExplodeRequest' } } }
       responses:
         '200':
-          description: Multi-level explosion as of the requested date, with phantoms inlined and a flat component list.
+          description: 'Multi-level explosion of the requested usage (default production, falling back to a universal BOM) as of the requested date, with phantoms inlined and a flat component list. FR-9.20 contract: a line in an alternative group (a phantom one included, which keeps its node) carries its group and discontinuation data unresolved, is listed in alternatives, and neither it nor anything below it is summed into flat; flat holds only components outside every group, so a consumer that needs the full requirement resolves alternatives itself (planning, wave 22). BOMs with no group explode exactly as before.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Explosion' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/boms:where-used:
@@ -430,7 +432,7 @@ paths:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '200':
-          description: ECO approved and released. Old versions expire the day before the release date and new versions become active in one transaction. A future release date schedules the ECO. Releasing an already released ECO returns it unchanged with no side effects, so a retry under the same Idempotency-Key is safe. An approved ECO (see the decision routes) is released without asking the approval service. An unavailable approval service is 503 ENG-ECO-APPROVER-UNAVAILABLE and leaves a submitted ECO unchanged.
+          description: ECO approved and released. Old versions expire the day before the release date and new versions become active in one transaction. A future release date schedules the ECO. Each replacement must keep the BOM usage and category (FR-9.19), so a costing draft cannot expire the production BOM; otherwise 422 ENG-ECO-DRYRUN. Releasing an already released ECO returns it unchanged with no side effects, so a retry under the same Idempotency-Key is safe. An approved ECO (see the decision routes) is released without asking the approval service. An unavailable approval service is 503 ENG-ECO-APPROVER-UNAVAILABLE and leaves a submitted ECO unchanged.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/ecos/{id}:approve:
@@ -784,6 +786,15 @@ components:
         roundUp: { type: string, enum: ['', quantity] }
         effectiveFrom: { type: string, format: date }
         effectiveTo: { type: string, format: date }
+        altGroup: { type: string, maxLength: 2, description: 'FR-9.20 alternative item group; every line of a group names the same strategy. A group has at least two lines (BR-9.16, 422 ENG-ALT-CONFLICT).' }
+        altStrategy: { type: string, enum: [priority, usage_probability] }
+        altPriority: { type: integer, minimum: 1, maximum: 99, description: Required with the priority strategy and unique in the group. }
+        usageProbabilityPct: { type: string, description: 'Required with the usage_probability strategy; the group sums to exactly 100.' }
+        discontinuationGroup: { type: string, maxLength: 2 }
+        discontinueType: { type: string, enum: [single, simultaneous] }
+        followUpGroup: { type: string, maxLength: 2, description: The group the follow-up component joins; the follow-up component may not already be a member of it (BR-9.16). }
+        followUpComponentId: { type: string, maxLength: 64 }
+        discontinueOn: { type: string, format: date }
     BomVersion:
       type: object
       additionalProperties: false
@@ -797,6 +808,8 @@ components:
         fromQty: { type: string }
         toQty: { type: string }
         status: { type: string, enum: [draft, active, expired, superseded, cancelled], default: draft }
+        usage: { type: string, enum: [production, engineering, costing, maintenance, sales, universal], default: production, description: 'FR-9.19. Overlap and first-version rules apply within one usage and category; explosion resolves one usage and falls back to universal.' }
+        category: { type: string, enum: [material, document], default: material, description: Equipment, functional location, sales order and project BOMs arrive with waves 44, 27 and 41. }
         lines: { type: array, minItems: 1, maxItems: 5000, items: { $ref: '#/components/schemas/BomLine' } }
         copiedFromVersionId: { type: string, format: uuid, readOnly: true, description: The version this one was copied from (FR-9.12 lineage); ignored on create. }
         version: { type: integer, minimum: 1, description: 'The optimistic-locking counter (BR-9.3): reads return it, create ignores it, and PUT requires the value the editor loaded.' }
@@ -875,16 +888,30 @@ components:
         asOf: { type: string, format: date, description: Defaults to today }
         quantity: { type: string, description: Defaults to 1 }
         levels: { type: integer, minimum: 1, maximum: 25, default: 25 }
+        usage: { type: string, enum: [production, engineering, costing, maintenance, sales, universal], description: Defaults to production; a universal BOM is the fallback. }
     Explosion:
       type: object
       required: [root, flat]
       properties:
         root: { $ref: '#/components/schemas/Node' }
-        flat: { type: array, items: { type: object, required: [productId, quantity], properties: { productId: { type: string }, quantity: { type: string } } } }
+        flat: { type: array, description: Leaf totals outside every alternative group; group members and their components are left out and listed in alternatives., items: { type: object, required: [productId, quantity], properties: { productId: { type: string }, quantity: { type: string } } } }
+        alternatives: { type: array, description: 'Every line in an alternative group (leaf or sub-assembly), unresolved, in explosion order; planning chooses among them (wave 22). A sub-assembly member''s components are in the tree under its node.', items: { $ref: '#/components/schemas/AlternativeMember' } }
+    AlternativeGroup:
+      type: object
+      required: [group, strategy]
+      properties: { group: { type: string }, priority: { type: integer }, strategy: { type: string, enum: [priority, usage_probability] }, usageProbabilityPct: { type: string } }
+    Discontinuation:
+      type: object
+      required: [type]
+      properties: { group: { type: string }, type: { type: string, enum: [single, simultaneous] }, followUpGroup: { type: string }, followUpComponentId: { type: string }, discontinueOn: { type: string, format: date } }
+    AlternativeMember:
+      type: object
+      required: [parentProductId, productId, lineNo, quantity, alternative]
+      properties: { parentProductId: { type: string }, productId: { type: string }, lineNo: { type: integer }, quantity: { type: string }, alternative: { $ref: '#/components/schemas/AlternativeGroup' } }
     Node:
       type: object
       required: [productId, level, quantity]
-      properties: { productId: { type: string }, lineNo: { type: integer }, level: { type: integer }, quantity: { type: string }, children: { type: array, items: { $ref: '#/components/schemas/Node' } } }
+      properties: { productId: { type: string }, lineNo: { type: integer }, level: { type: integer }, quantity: { type: string }, alternative: { $ref: '#/components/schemas/AlternativeGroup' }, discontinuation: { $ref: '#/components/schemas/Discontinuation' }, children: { type: array, items: { $ref: '#/components/schemas/Node' } } }
     UsedBy:
       type: object
       required: [productId, versionId, level]

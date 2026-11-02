@@ -49,6 +49,7 @@ const (
 
 var (
 	maxDecimal = decimal.New(1, maxDecimalExp)
+	bomUsages  = map[string]bool{"production": true, "engineering": true, "costing": true, "maintenance": true, "sales": true, "universal": true}
 	lineTypes  = map[string]bool{domain.LineItem: true, domain.LinePhantom: true, domain.LineCoProduct: true, domain.LineByProduct: true}
 )
 
@@ -158,6 +159,16 @@ type bomLineBody struct {
 	RoundUp            string           `json:"roundUp,omitempty"`
 	EffectiveFrom      string           `json:"effectiveFrom,omitempty"`
 	EffectiveTo        string           `json:"effectiveTo,omitempty"`
+	// FR-9.20 alternative group and discontinuation data; explosion returns them unresolved.
+	AltGroup             string           `json:"altGroup,omitempty"`
+	AltPriority          int              `json:"altPriority,omitempty"`
+	AltStrategy          string           `json:"altStrategy,omitempty"`
+	UsageProbabilityPct  *decimal.Decimal `json:"usageProbabilityPct,omitempty"`
+	DiscontinuationGroup string           `json:"discontinuationGroup,omitempty"`
+	DiscontinueType      string           `json:"discontinueType,omitempty"`
+	FollowUpGroup        string           `json:"followUpGroup,omitempty"`
+	FollowUpComponentID  string           `json:"followUpComponentId,omitempty"`
+	DiscontinueOn        string           `json:"discontinueOn,omitempty"`
 }
 
 type bomVersionBody struct {
@@ -170,6 +181,9 @@ type bomVersionBody struct {
 	ToQty         *decimal.Decimal `json:"toQty,omitempty"`
 	Status        string           `json:"status,omitempty"`
 	Lines         []bomLineBody    `json:"lines,omitempty"`
+	// Usage and Category are FR-9.19; they default to production and material.
+	Usage    string `json:"usage,omitempty"`
+	Category string `json:"category,omitempty"`
 	// CopiedFrom is read-only (FR-9.12 lineage): create ignores it, only :copy sets it.
 	CopiedFrom string `json:"copiedFromVersionId,omitempty"`
 	// Version is the draft's optimistic-locking counter (BR-9.3). Reads return it; create ignores it and
@@ -223,7 +237,19 @@ func validID(field, value string, fields map[string]string) {
 func (b bomVersionBody) toDomain() (domain.BomVersion, map[string]string) {
 	fields := map[string]string{}
 	validID("productId", b.ProductID, fields)
-	v := domain.BomVersion{ID: ids.New(), ProductID: b.ProductID, SiteID: b.SiteID, FromQty: b.FromQty, ToQty: b.ToQty, Status: b.Status}
+	v := domain.BomVersion{ID: ids.New(), ProductID: b.ProductID, SiteID: b.SiteID, FromQty: b.FromQty, ToQty: b.ToQty, Status: b.Status, Usage: b.Usage, Category: b.Category}
+	if v.Usage == "" {
+		v.Usage = domain.UsageProduction
+	}
+	if v.Category == "" {
+		v.Category = domain.CategoryMaterial
+	}
+	if !bomUsages[v.Usage] {
+		fields["usage"] = "must be production, engineering, costing, maintenance, sales or universal"
+	}
+	if v.Category != domain.CategoryMaterial && v.Category != domain.CategoryDocument {
+		fields["category"] = "must be material or document (equipment, functional location, sales order and project BOMs arrive with their waves)"
+	}
 	if v.Status == "" {
 		v.Status = domain.StatusDraft
 	}
@@ -279,9 +305,16 @@ func (lb bomLineBody) toDomain(index int) (domain.BomLine, string) {
 	}
 	dates := map[string]string{}
 	line.EffectiveFrom, line.EffectiveTo = optionalDate("effectiveFrom", lb.EffectiveFrom, dates), optionalDate("effectiveTo", lb.EffectiveTo, dates)
+	line.Alt = domain.Alternative{Group: lb.AltGroup, Priority: lb.AltPriority, Strategy: lb.AltStrategy, ProbabilityPct: lb.UsageProbabilityPct}
+	line.Discontinuation = domain.Discontinuation{
+		Group: lb.DiscontinuationGroup, Type: lb.DiscontinueType, FollowUpGroup: lb.FollowUpGroup, FollowUpComponent: lb.FollowUpComponentID,
+		DiscontinueOn: optionalDate("discontinueOn", lb.DiscontinueOn, dates),
+	}
 	switch {
 	case len(dates) > 0:
-		return line, "effectiveFrom and effectiveTo must be dates as YYYY-MM-DD"
+		return line, "effectiveFrom, effectiveTo and discontinueOn must be dates as YYYY-MM-DD"
+	case len(lb.FollowUpComponentID) > maxIDLength || (lb.UsageProbabilityPct != nil && !finite(*lb.UsageProbabilityPct)):
+		return line, "followUpComponentId or usageProbabilityPct is out of range"
 	case !line.EffectiveTo.IsZero() && line.EffectiveTo.Before(line.EffectiveFrom):
 		return line, "effectiveTo must not be before effectiveFrom"
 	case !lineTypes[line.LineType] || (line.RoundUp != "" && line.RoundUp != domain.RoundUpQuantity):
@@ -300,13 +333,16 @@ func (lb bomLineBody) toDomain(index int) (domain.BomLine, string) {
 func bodyFromVersion(v domain.BomVersion) bomVersionBody {
 	body := bomVersionBody{
 		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo),
-		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status, CopiedFrom: v.CopiedFrom, Version: v.Version,
+		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status, CopiedFrom: v.CopiedFrom, Version: v.Version, Usage: v.Usage, Category: v.Category,
 	}
 	for _, l := range v.Lines {
 		series := l.Series
 		body.Lines = append(body.Lines, bomLineBody{
 			LineNo: l.LineNo, ComponentProductID: l.ComponentProductID, Quantity: l.Quantity, Series: &series, LineType: l.LineType,
 			ScrapConst: l.ScrapConst, ScrapVarPct: l.ScrapVarPct, RoundUp: l.RoundUp, EffectiveFrom: formatDate(l.EffectiveFrom), EffectiveTo: formatDate(l.EffectiveTo),
+			AltGroup: l.Alt.Group, AltPriority: l.Alt.Priority, AltStrategy: l.Alt.Strategy, UsageProbabilityPct: l.Alt.ProbabilityPct,
+			DiscontinuationGroup: l.Discontinuation.Group, DiscontinueType: l.Discontinuation.Type, FollowUpGroup: l.Discontinuation.FollowUpGroup,
+			FollowUpComponentID: l.Discontinuation.FollowUpComponent, DiscontinueOn: formatDate(l.Discontinuation.DiscontinueOn),
 		})
 	}
 	return body
@@ -314,6 +350,9 @@ func bodyFromVersion(v domain.BomVersion) bomVersionBody {
 
 func checkVersion(v domain.BomVersion) func(store.Snapshot) error {
 	return func(existing store.Snapshot) error {
+		if err := domain.CheckAlternatives(v.Lines); err != nil {
+			return err
+		}
 		for _, l := range v.Lines {
 			if err := domain.CheckCycle(existing, v.ProductID, l.ComponentProductID, v.EffectiveFrom); err != nil {
 				return err
@@ -357,7 +396,7 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.BomVersionFilter{ProductID: q.Get("productId"), SiteID: q.Get("siteId"), Status: q.Get("status")}
+	f := store.BomVersionFilter{ProductID: q.Get("productId"), SiteID: q.Get("siteId"), Status: q.Get("status"), Usage: q.Get("usage"), Category: q.Get("category")}
 	fields := map[string]string{}
 	for field, value := range map[string]string{"productId": f.ProductID, "siteId": f.SiteID} {
 		if len(value) > maxIDLength {
@@ -368,6 +407,12 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusSuperseded, domain.StatusCancelled:
 	default:
 		fields["status"] = "must be draft, active, expired, superseded or cancelled"
+	}
+	if f.Usage != "" && !bomUsages[f.Usage] {
+		fields["usage"] = "must be production, engineering, costing, maintenance, sales or universal"
+	}
+	if f.Category != "" && f.Category != domain.CategoryMaterial && f.Category != domain.CategoryDocument {
+		fields["category"] = "must be material or document"
 	}
 	f.AsOf = optionalDate("asOf", q.Get("asOf"), fields)
 	if len(fields) > 0 {
@@ -406,6 +451,7 @@ type explodeRequest struct {
 	AsOf      string           `json:"asOf"`
 	Quantity  *decimal.Decimal `json:"quantity"`
 	Levels    int              `json:"levels"`
+	Usage     string           `json:"usage,omitempty"`
 }
 
 type nodeBody struct {
@@ -414,6 +460,46 @@ type nodeBody struct {
 	Level     int             `json:"level"`
 	Quantity  decimal.Decimal `json:"quantity"`
 	Children  []nodeBody      `json:"children,omitempty"`
+	// Alternative and Discontinuation are the line's FR-9.20 data, returned unresolved.
+	Alternative     *altBody             `json:"alternative,omitempty"`
+	Discontinuation *discontinuationBody `json:"discontinuation,omitempty"`
+}
+
+type altBody struct {
+	Group          string           `json:"group"`
+	Priority       int              `json:"priority,omitempty"`
+	Strategy       string           `json:"strategy"`
+	ProbabilityPct *decimal.Decimal `json:"usageProbabilityPct,omitempty"`
+}
+
+type discontinuationBody struct {
+	Group             string `json:"group,omitempty"`
+	Type              string `json:"type"`
+	FollowUpGroup     string `json:"followUpGroup,omitempty"`
+	FollowUpComponent string `json:"followUpComponentId,omitempty"`
+	DiscontinueOn     string `json:"discontinueOn,omitempty"`
+}
+
+type altMemberBody struct {
+	ParentProductID string          `json:"parentProductId"`
+	ProductID       string          `json:"productId"`
+	LineNo          int             `json:"lineNo"`
+	Quantity        decimal.Decimal `json:"quantity"`
+	Alternative     altBody         `json:"alternative"`
+}
+
+func bodyFromAlt(a domain.Alternative) *altBody {
+	if a.Group == "" {
+		return nil
+	}
+	return &altBody{Group: a.Group, Priority: a.Priority, Strategy: a.Strategy, ProbabilityPct: a.ProbabilityPct}
+}
+
+func bodyFromDiscontinuation(d domain.Discontinuation) *discontinuationBody {
+	if d.Type == "" {
+		return nil
+	}
+	return &discontinuationBody{Group: d.Group, Type: d.Type, FollowUpGroup: d.FollowUpGroup, FollowUpComponent: d.FollowUpComponent, DiscontinueOn: formatDate(d.DiscontinueOn)}
 }
 
 type flatBody struct {
@@ -424,10 +510,12 @@ type flatBody struct {
 type explosionBody struct {
 	Root nodeBody   `json:"root"`
 	Flat []flatBody `json:"flat"`
+	// Alternatives lists leaf lines in an alternative group; they are left out of flat.
+	Alternatives []altMemberBody `json:"alternatives,omitempty"`
 }
 
 func bodyFromNode(n *domain.Node) nodeBody {
-	body := nodeBody{ProductID: n.ProductID, LineNo: n.LineNo, Level: n.Level, Quantity: n.Quantity}
+	body := nodeBody{ProductID: n.ProductID, LineNo: n.LineNo, Level: n.Level, Quantity: n.Quantity, Alternative: bodyFromAlt(n.Alt), Discontinuation: bodyFromDiscontinuation(n.Discontinuation)}
 	for _, c := range n.Children {
 		body.Children = append(body.Children, bodyFromNode(c))
 	}
@@ -459,6 +547,9 @@ func (a *API) explode(w http.ResponseWriter, r *http.Request) {
 	if !finite(quantity) {
 		fields["quantity"] = "must be a decimal within range"
 	}
+	if req.Usage != "" && !bomUsages[req.Usage] {
+		fields["usage"] = "must be production, engineering, costing, maintenance, sales or universal"
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -472,7 +563,7 @@ func (a *API) explode(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "load bom catalog", err, &a.bomFailed)
 		return
 	}
-	result, err := domain.Explode(snapshot, domain.ExplodeRequest{ProductID: req.ProductID, SiteID: req.SiteID, AsOf: asOf, Quantity: quantity, Levels: levels})
+	result, err := domain.Explode(snapshot, domain.ExplodeRequest{ProductID: req.ProductID, SiteID: req.SiteID, AsOf: asOf, Quantity: quantity, Levels: levels, Usage: req.Usage})
 	if err != nil {
 		a.fail(w, r, "explode bom", err, &a.bomFailed)
 		return
@@ -481,6 +572,9 @@ func (a *API) explode(w http.ResponseWriter, r *http.Request) {
 	body := explosionBody{Root: bodyFromNode(result.Root), Flat: make([]flatBody, len(result.Flat))}
 	for i, f := range result.Flat {
 		body.Flat[i] = flatBody{ProductID: f.ProductID, Quantity: f.Quantity}
+	}
+	for _, m := range result.Alternatives {
+		body.Alternatives = append(body.Alternatives, altMemberBody{ParentProductID: m.ParentProductID, ProductID: m.ProductID, LineNo: m.LineNo, Quantity: m.Quantity, Alternative: *bodyFromAlt(m.Alt)})
 	}
 	httpx.JSON(w, http.StatusOK, body)
 }

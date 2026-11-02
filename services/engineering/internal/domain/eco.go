@@ -184,6 +184,11 @@ func (e *Eco) dryRun(versions []BomVersion, date time.Time) (ReleasePlan, error)
 		if old.Status != StatusActive || nw.Status != StatusDraft || old.ProductID != nw.ProductID {
 			return ReleasePlan{}, errf(CodeEcoDryRun, "replace %s with %s needs an active version and a draft of the same product", old.ID, nw.ID)
 		}
+		// FR-9.19: an ECO replaces a BOM with one of the same usage and category, so releasing a
+		// costing draft cannot expire the production BOM it sits beside.
+		if !sameStructure(*old, *nw) {
+			return ReleasePlan{}, errf(CodeEcoDryRun, "replace %s (%s %s) with %s (%s %s) needs the same BOM usage and category", old.ID, usageOf(*old), categoryOf(*old), nw.ID, usageOf(*nw), categoryOf(*nw))
+		}
 		if date.AddDate(0, 0, -1).Before(old.EffectiveFrom) {
 			return ReleasePlan{}, errf(CodeEcoDryRun, "version %s cannot expire before it starts", old.ID)
 		}

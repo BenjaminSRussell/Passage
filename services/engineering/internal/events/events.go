@@ -16,6 +16,10 @@ type BomVersionActivatedData struct {
 	EffectiveTo         *string `json:"effectiveTo,omitempty"`
 	LineCount           int     `json:"lineCount"`
 	SupersedesVersionID string  `json:"supersedesVersionId,omitempty"`
+	// Usage and Category (FR-9.19) tell a consumer which kind of BOM changed: production order change
+	// management reacts to a production BOM, not to a costing BOM activated beside it.
+	Usage    string `json:"usage"`
+	Category string `json:"category"`
 }
 
 type BomVersionExpiredData struct {

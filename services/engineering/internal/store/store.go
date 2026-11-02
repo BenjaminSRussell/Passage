@@ -130,8 +130,8 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const (
-	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status, coalesce(copied_from_version_id::text, ''), version`
-	lineColumns    = `bom_version_id::text, line_no, component_product_id, quantity::text, series::text, line_type, scrap_const::text, scrap_var_pct::text, round_up, effective_from, effective_to`
+	versionColumns = `id::text, product_id, site_id, effective_from, effective_to, from_qty::text, to_qty::text, status, coalesce(copied_from_version_id::text, ''), version, usage, category`
+	lineColumns    = `bom_version_id::text, line_no, component_product_id, quantity::text, series::text, line_type, scrap_const::text, scrap_var_pct::text, round_up, effective_from, effective_to, alt_group, coalesce(alt_priority, 0), alt_strategy, usage_probability_pct::text, discontinuation_group, discontinue_type, follow_up_group, follow_up_component_id, discontinue_on`
 	activeStatuses = `v.status in ('active', 'expired')`
 	reachDown      = `with recursive reach(product_id) as (
 		select unnest($2::text[])
@@ -148,6 +148,20 @@ const (
 			join bom_version v on v.tenant_id = l.tenant_id and v.id = l.bom_version_id and ` + activeStatuses + `
 	) select product_id from reach`
 )
+
+func usageOrDefault(u string) string {
+	if u == "" {
+		return domain.UsageProduction
+	}
+	return u
+}
+
+func categoryOrDefault(c string) string {
+	if c == "" {
+		return domain.CategoryMaterial
+	}
+	return c
+}
 
 func zeroToNil(t time.Time) any {
 	if t.IsZero() {
@@ -197,7 +211,7 @@ func queryVersions(ctx context.Context, tx pgx.Tx, query string, args ...any) ([
 		var v domain.BomVersion
 		var to *time.Time
 		var fromQty, toQty *string
-		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status, &v.CopiedFrom, &v.Version); err != nil {
+		if err := rows.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.EffectiveFrom, &to, &fromQty, &toQty, &v.Status, &v.CopiedFrom, &v.Version, &v.Usage, &v.Category); err != nil {
 			return nil, err
 		}
 		var failure error
@@ -228,11 +242,15 @@ func loadVersions(ctx context.Context, tx pgx.Tx, tenantID, cond string, args ..
 	for rows.Next() {
 		var versionID, quantity, series, scrapConst, scrapVarPct string
 		var l domain.BomLine
-		var from, to *time.Time
-		if err := rows.Scan(&versionID, &l.LineNo, &l.ComponentProductID, &quantity, &series, &l.LineType, &scrapConst, &scrapVarPct, &l.RoundUp, &from, &to); err != nil {
+		var from, to, discontinueOn *time.Time
+		var probability *string
+		if err := rows.Scan(&versionID, &l.LineNo, &l.ComponentProductID, &quantity, &series, &l.LineType, &scrapConst, &scrapVarPct, &l.RoundUp, &from, &to,
+			&l.Alt.Group, &l.Alt.Priority, &l.Alt.Strategy, &probability, &l.Discontinuation.Group, &l.Discontinuation.Type,
+			&l.Discontinuation.FollowUpGroup, &l.Discontinuation.FollowUpComponent, &discontinueOn); err != nil {
 			return nil, err
 		}
 		var failure error
+		l.Alt.ProbabilityPct, l.Discontinuation.DiscontinueOn = parseOptional(probability, &failure), valueOrZero(discontinueOn)
 		l.Quantity, l.Series = parseDecimal(quantity, &failure), parseDecimal(series, &failure)
 		l.ScrapConst, l.ScrapVarPct = parseDecimal(scrapConst, &failure), parseDecimal(scrapVarPct, &failure)
 		l.EffectiveFrom, l.EffectiveTo = valueOrZero(from), valueOrZero(to)
@@ -361,9 +379,10 @@ func versionRoots(v domain.BomVersion) []string {
 }
 
 func insertVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.BomVersion) error {
-	if _, err := tx.Exec(ctx, `insert into bom_version (tenant_id, id, product_id, site_id, effective_from, effective_to, from_qty, to_qty, status, copied_from_version_id)
-		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, nullif($10, '')::uuid)`,
-		tenantID, v.ID, v.ProductID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), v.Status, v.CopiedFrom); err != nil {
+	if _, err := tx.Exec(ctx, `insert into bom_version (tenant_id, id, product_id, site_id, effective_from, effective_to, from_qty, to_qty, status, copied_from_version_id, usage, category)
+		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, nullif($10, '')::uuid, $11, $12)`,
+		tenantID, v.ID, v.ProductID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), v.Status, v.CopiedFrom,
+		usageOrDefault(v.Usage), categoryOrDefault(v.Category)); err != nil {
 		return err
 	}
 	return insertLines(ctx, tx, tenantID, v)
@@ -372,9 +391,12 @@ func insertVersion(ctx context.Context, tx pgx.Tx, tenantID string, v domain.Bom
 func insertLines(ctx context.Context, tx pgx.Tx, tenantID string, v domain.BomVersion) error {
 	batch := &pgx.Batch{}
 	for _, l := range v.Lines {
-		batch.Queue(`insert into bom_line (tenant_id, bom_version_id, line_no, component_product_id, quantity, series, line_type, scrap_const, scrap_var_pct, round_up, effective_from, effective_to)
-			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8::numeric, $9::numeric, $10, $11, $12)`,
-			tenantID, v.ID, l.LineNo, l.ComponentProductID, l.Quantity.String(), l.Series.String(), l.LineType, l.ScrapConst.String(), l.ScrapVarPct.String(), l.RoundUp, zeroToNil(l.EffectiveFrom), zeroToNil(l.EffectiveTo))
+		batch.Queue(`insert into bom_line (tenant_id, bom_version_id, line_no, component_product_id, quantity, series, line_type, scrap_const, scrap_var_pct, round_up, effective_from, effective_to,
+				alt_group, alt_priority, alt_strategy, usage_probability_pct, discontinuation_group, discontinue_type, follow_up_group, follow_up_component_id, discontinue_on)
+			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, nullif($14, 0), $15, $16::numeric, $17, $18, $19, $20, $21)`,
+			tenantID, v.ID, l.LineNo, l.ComponentProductID, l.Quantity.String(), l.Series.String(), l.LineType, l.ScrapConst.String(), l.ScrapVarPct.String(), l.RoundUp, zeroToNil(l.EffectiveFrom), zeroToNil(l.EffectiveTo),
+			l.Alt.Group, l.Alt.Priority, l.Alt.Strategy, decimalToNil(l.Alt.ProbabilityPct), l.Discontinuation.Group, l.Discontinuation.Type,
+			l.Discontinuation.FollowUpGroup, l.Discontinuation.FollowUpComponent, zeroToNil(l.Discontinuation.DiscontinueOn))
 	}
 	results := tx.SendBatch(ctx, batch)
 	for range v.Lines {
@@ -430,6 +452,7 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 // AsOf keeps the versions whose effective range covers that date.
 type BomVersionFilter struct {
 	ProductID, SiteID, Status string
+	Usage, Category           string
 	AsOf                      time.Time
 }
 
@@ -448,6 +471,8 @@ func (s *Postgres) ListBomVersions(ctx context.Context, f BomVersionFilter, afte
 		{f.ProductID, `v.product_id = $%d`, f.ProductID != ""},
 		{f.SiteID, `v.site_id = $%d`, f.SiteID != ""},
 		{f.Status, `v.status = $%d`, f.Status != ""},
+		{f.Usage, `v.usage = $%d`, f.Usage != ""},
+		{f.Category, `v.category = $%d`, f.Category != ""},
 		{f.AsOf, `v.effective_from <= $%[1]d and (v.effective_to is null or v.effective_to >= $%[1]d)`, !f.AsOf.IsZero()},
 	} {
 		if c.set {
@@ -806,9 +831,10 @@ func (s *Postgres) UpdateBomDraft(ctx context.Context, v domain.BomVersion, expe
 		if err := check(snapshot); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `update bom_version set site_id = $3, effective_from = $4, effective_to = $5, from_qty = $6::numeric, to_qty = $7::numeric, version = version + 1
+		tag, err := tx.Exec(ctx, `update bom_version set site_id = $3, effective_from = $4, effective_to = $5, from_qty = $6::numeric, to_qty = $7::numeric, usage = $9, category = $10, version = version + 1
 			where tenant_id = $1 and id = $2::uuid and status = 'draft' and version = $8`,
-			p.TenantID, v.ID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), expectedVersion)
+			p.TenantID, v.ID, v.SiteID, v.EffectiveFrom, zeroToNil(v.EffectiveTo), decimalToNil(v.FromQty), decimalToNil(v.ToQty), expectedVersion,
+			usageOrDefault(v.Usage), categoryOrDefault(v.Category))
 		if err != nil {
 			return err
 		}

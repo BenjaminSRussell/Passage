@@ -238,3 +238,74 @@ func TestPostgres_ReleaseEco_WritesHeadersInTheOrderReadersLockThem(t *testing.T
 		t.Fatalf("new version = %+v, %v; want active", got, err)
 	}
 }
+
+func TestPostgres_AlternativeGroupsUsageAndDiscontinuation_RoundTrip(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	v := version("PACK", domain.StatusDraft, releaseDay, "CASE", "CELL-A", "CELL-B")
+	v.Usage, v.Category = domain.UsageCosting, domain.CategoryDocument
+	p60, p40 := decimal.RequireFromString("60.5"), decimal.RequireFromString("39.5")
+	v.Lines[1].Alt = domain.Alternative{Group: "A1", Strategy: domain.AltProbability, ProbabilityPct: &p60}
+	v.Lines[2].Alt = domain.Alternative{Group: "A1", Strategy: domain.AltProbability, ProbabilityPct: &p40}
+	v.Lines[2].Discontinuation = domain.Discontinuation{Group: "D1", Type: domain.DiscSimul, FollowUpGroup: "A2", FollowUpComponent: "CELL-C", DiscontinueOn: releaseDay.AddDate(1, 0, 0)}
+	if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetBomVersion(ctx, v.ID)
+	if err != nil || got.Usage != domain.UsageCosting || got.Category != domain.CategoryDocument {
+		t.Fatalf("read = %+v, %v; want usage costing, category document", got, err)
+	}
+	if l := got.Lines[0]; l.Alt.Group != "" || l.Alt.ProbabilityPct != nil || !l.Discontinuation.DiscontinueOn.IsZero() {
+		t.Fatalf("plain line = %+v; want no group data", l)
+	}
+	if l := got.Lines[1]; l.Alt.Group != "A1" || l.Alt.Strategy != domain.AltProbability || !l.Alt.ProbabilityPct.Equal(p60) || l.Alt.Priority != 0 {
+		t.Fatalf("alt line = %+v", l)
+	}
+	if d := got.Lines[2].Discontinuation; d.Group != "D1" || d.Type != domain.DiscSimul || d.FollowUpGroup != "A2" || d.FollowUpComponent != "CELL-C" || !d.DiscontinueOn.Equal(releaseDay.AddDate(1, 0, 0)) {
+		t.Fatalf("discontinuation = %+v", d)
+	}
+
+	// Edit changes usage and replaces the group data; the list filters by usage and category.
+	next := got
+	next.Usage, next.Category = domain.UsageProduction, domain.CategoryMaterial
+	next.Lines = got.Lines[:2]
+	next.Lines[1].Alt = domain.Alternative{Group: "A1", Strategy: domain.AltPriority, Priority: 2}
+	if _, err := s.UpdateBomDraft(ctx, next, 1, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := s.ListBomVersions(ctx, store.BomVersionFilter{Usage: domain.UsageCosting}, "", 10); err != nil || len(page.Items) != 0 {
+		t.Fatalf("costing list = %+v, %v; want none after the edit", page.Items, err)
+	}
+	page, err := s.ListBomVersions(ctx, store.BomVersionFilter{Usage: domain.UsageProduction, Category: domain.CategoryMaterial}, "", 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("production list = %+v, %v", page.Items, err)
+	}
+	if l := page.Items[0]; l.Usage != domain.UsageProduction {
+		t.Fatalf("listed usage = %q", l.Usage)
+	}
+	read, _ := s.GetBomVersion(ctx, v.ID)
+	if a := read.Lines[1].Alt; a.Strategy != domain.AltPriority || a.Priority != 2 || a.ProbabilityPct != nil {
+		t.Fatalf("edited alt = %+v; want priority 2 and no probability", a)
+	}
+}
+
+func TestPostgres_ActiveBomsOfDifferentUsageCoexist(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	prod := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+	cost := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+	cost.Usage = domain.UsageCosting
+	check := func(v domain.BomVersion) func(store.Snapshot) error {
+		return func(existing store.Snapshot) error {
+			return domain.CheckNoOverlap(existing.VersionsFor(v.ProductID), v)
+		}
+	}
+	if _, err := s.CreateBomVersion(ctx, prod, store.Idem{}, check(prod)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateBomVersion(ctx, cost, store.Idem{}, check(cost)); err != nil {
+		t.Fatalf("costing BOM beside the production BOM = %v; want accepted", err)
+	}
+	again := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+	if _, err := s.CreateBomVersion(ctx, again, store.Idem{}, check(again)); !domain.HasCode(err, domain.CodeBomOverlap) {
+		t.Fatalf("second production BOM = %v; want %s", err, domain.CodeBomOverlap)
+	}
+}
