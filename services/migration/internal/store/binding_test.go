@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -101,9 +102,7 @@ func TestMem_BindingContract(t *testing.T) {
 
 func TestPostgres_EntityBindingsUnderRLS(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t) // the app role proves the 0009 grants are enough for the store
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

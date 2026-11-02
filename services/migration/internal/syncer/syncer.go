@@ -43,6 +43,9 @@ type Result struct {
 	Report domain.Report
 	// BindingVersion is the entity binding version the run read; it is stored with the watermark.
 	BindingVersion int
+	// FullRead is set when the run read the whole source (a binding without a cursor, a first or reset run, or a
+	// periodic key check); Absent is then the loaded keys the source no longer has.
+	FullRead bool
 }
 
 // Runner executes one delta run of a claimed binding: extract since st.Watermark, map, load, save the run row under
@@ -248,6 +251,7 @@ func (s *Scheduler) finish(st store.SyncState, claimID, runID string, res Result
 	rep := res.Report
 	f := store.SyncFinish{BindingID: st.BindingID, ClaimID: claimID, Entity: st.Entity, RunID: res.RunID, Status: rep.Status, BindingVersion: res.BindingVersion,
 		Extracted: rep.Extracted, Loaded: rep.Created + rep.Updated, Rejected: len(rep.Rejects), Conflicts: rep.Conflicts}
+	f.Absent = rep.Absent
 	switch {
 	case runErr != nil:
 		f.Status, f.Error, f.RunID = domain.SyncFailed, truncate(runErr.Error()), res.RunID
@@ -274,6 +278,10 @@ func (s *Scheduler) finish(st store.SyncState, claimID, runID string, res Result
 		next = s.now().Add(time.Hour)
 	}
 	f.NextCron = next
+	// Only a complete read that did not fail says which keys are gone: a failed run may not have seen every row. A
+	// full read that failed still counts as the period's attempt, so the runs after it are deltas again.
+	f.FullRead = res.FullRead && runErr == nil && f.Status != domain.SyncFailed
+	f.KeyCheckAttempted = res.FullRead
 	if f.RunID == "" && runErr == nil {
 		f.RunID = runID
 	}

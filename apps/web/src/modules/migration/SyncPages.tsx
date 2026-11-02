@@ -7,6 +7,7 @@ import {
   describeProblem,
   getRun,
   getSync,
+  listAbsent,
   listConflicts,
   listRunsPage,
   listSync,
@@ -16,6 +17,7 @@ import {
   type MigrationRun,
   type Problem,
   type SourceOfTruth,
+  type SyncAbsent,
   type SyncConflict,
   type SyncStatus,
 } from "./api/client";
@@ -60,6 +62,7 @@ const columns: DataTableColumn<SyncStatus>[] = [
   { key: "rowsLoaded", header: "Loaded", align: "end" },
   { key: "rowsRejected", header: "Rejected", align: "end" },
   { key: "openConflicts", header: "Conflicts", align: "end" },
+  { key: "absentCount", header: "Missing in legacy", align: "end" },
 ];
 
 /** Run monitor: every scheduled binding with its last run, watermark, next due time and failures. */
@@ -75,6 +78,7 @@ export function SyncPage() {
   const failing = totals.filter((s) => s.consecutiveFailures > 0).length;
   const paused = totals.filter((s) => s.paused).length;
   const conflicts = totals.reduce((n, s) => n + s.openConflicts, 0);
+  const missing = totals.reduce((n, s) => n + s.absentCount, 0);
 
   return (
     <div className={styles.stack}>
@@ -93,6 +97,7 @@ export function SyncPage() {
           <StatTile label="Failing" value={failing} tone="danger" />
           <StatTile label="Paused" value={paused} tone="warning" />
           <StatTile label="Open conflicts" value={conflicts} tone="warning" />
+          <StatTile label="Missing in legacy" value={missing} tone="warning" />
         </StatGroup>
       ) : null}
       <div className={styles.toolbar}>
@@ -171,7 +176,7 @@ export function SyncDetailPage() {
     );
   }
 
-  async function edit(current: SyncStatus, change: { paused?: boolean; sourceOfTruth?: SourceOfTruth; runNow?: boolean }) {
+  async function edit(current: SyncStatus, change: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; runNow?: boolean }) {
     setBusy(true);
     setFailure(null);
     try {
@@ -232,6 +237,7 @@ export function SyncDetailPage() {
         </dl>
       </Card>
       <SourceOfTruthCard sync={sync} canEdit={canEdit} busy={busy} onChange={(value) => edit(sync, { sourceOfTruth: value })} />
+      <DeletedRowsCard sync={sync} canEdit={canEdit && scheduled} busy={busy} onChange={(change) => edit(sync, change)} />
       <RecentRunsCard sync={sync} />
       {sync.lastRunId ? <LastRunRejectsCard runId={sync.lastRunId} /> : null}
       <ConflictsCard sync={sync} canResolve={holdsDuty(duties, DUTY_RUN)} onResolved={state.reload} />
@@ -260,6 +266,81 @@ function SourceOfTruthCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus
             </Select>
           )}
         </FormField>
+      </div>
+    </Card>
+  );
+}
+
+const KEY_CHECK_PERIODS: { hours: number; label: string }[] = [
+  { hours: 0, label: "Off" },
+  { hours: 6, label: "Every 6 hours" },
+  { hours: 24, label: "Every day" },
+  { hours: 168, label: "Every week" },
+];
+
+const absentColumns: DataTableColumn<SyncAbsent>[] = [
+  { key: "sourceKey", header: "Legacy key", mono: true },
+  { key: "targetId", header: "Passage record", mono: true, render: (row) => row.targetId ?? "" },
+  { key: "firstAbsentAt", header: "First missing", render: (row) => formatDateTime(row.firstAbsentAt) },
+  { key: "lastCheckedAt", header: "Last checked", render: (row) => formatDateTime(row.lastCheckedAt) },
+];
+
+/**
+ * Rows the legacy system deleted. A delta cannot see them, so the binding is read in full on a period and the keys
+ * loaded earlier that the read did not find are listed. Nothing is deactivated in Passage.
+ */
+function DeletedRowsCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; canEdit: boolean; busy: boolean; onChange(change: { keyCheckHours?: number; keyCheckNow?: boolean }): void }) {
+  const key = `${sync.bindingId}/${sync.lastKeyCheckAt ?? ""}/${sync.absentCount}`;
+  const state = useLoad((signal) => listAbsent(sync.bindingId, {}, signal), key);
+  const paged = usePaged(state, key, (cursor) => listAbsent(sync.bindingId, { cursor }));
+  const periods = KEY_CHECK_PERIODS.some((p) => p.hours === sync.keyCheckHours) ? KEY_CHECK_PERIODS : [...KEY_CHECK_PERIODS, { hours: sync.keyCheckHours, label: `Every ${sync.keyCheckHours} hours` }];
+  return (
+    <Card
+      title="Deleted in the legacy system"
+      actions={
+        canEdit && sync.keyCheckHours > 0 ? (
+          <Button size="sm" disabled={busy} onClick={() => onChange({ keyCheckNow: true })}>
+            Check at the next run
+          </Button>
+        ) : null
+      }
+    >
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          A delta run cannot see a row the legacy system deleted, so a binding with a change cursor is read in full on a period and every key loaded earlier that the read did not find is listed here. Nothing is deactivated in Passage.{" "}
+          {sync.lastKeyCheckAt ? `Last full read: ${formatDateTime(sync.lastKeyCheckAt)}.` : "No full read has completed yet."}
+        </p>
+        {sync.keyCheckError ? (
+          <Alert tone="warning" title="The last full read did not update this list">
+            {sync.keyCheckError}
+          </Alert>
+        ) : null}
+        <FormField id="sync-key-check" label="Full read to find deleted rows">
+          {(control) => (
+            <Select {...control} value={sync.keyCheckHours} disabled={!canEdit || busy} onChange={(event) => onChange({ keyCheckHours: Number(event.target.value) })}>
+              {periods.map((p) => (
+                <option key={p.hours} value={p.hours}>
+                  {p.label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+        {state.error ? (
+          <Alert tone="danger" title="Could not load the missing keys" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+            {state.error.message} ({state.error.code})
+          </Alert>
+        ) : (
+          <DataTable
+            label="Keys missing in the legacy system"
+            columns={absentColumns}
+            rows={paged.rows}
+            getRowKey={(row) => row.sourceKey}
+            loading={state.loading}
+            empty={{ title: "No missing keys", description: "Every key loaded earlier was found in the legacy source at the last full read." }}
+          />
+        )}
+        <LoadMore paged={paged} noun="keys" />
       </div>
     </Card>
   );

@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -27,9 +28,7 @@ func principalContext(n int) context.Context {
 func newStore(t *testing.T) *store.Postgres {
 	pool := testkit.DB(t)
 	ctx := context.Background()
-	drop := func() { _, _ = pool.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, pool)
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -262,9 +261,7 @@ func TestMem_FakeMatchesStoreContract(t *testing.T) {
 func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

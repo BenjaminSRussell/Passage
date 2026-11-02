@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -131,9 +132,7 @@ func TestMem_KeysetPagingMatchesTheListOrder(t *testing.T) {
 func TestPostgres_RunCursorBreaksCreatedAtTiesKeepsFiltersAndStaysInTheTenant(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

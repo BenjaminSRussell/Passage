@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -19,9 +20,7 @@ import (
 // 0004 grants and row-level security are what the template tests exercise.
 func newAppStore(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

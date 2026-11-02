@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/syncer"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -65,9 +66,7 @@ func inTenant(n int) context.Context {
 
 func TestScheduler_TwoLoopsOnOneDueBindingStartOneRun(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +104,7 @@ func TestScheduler_TwoLoopsOnOneDueBindingStartOneRun(t *testing.T) {
 
 func TestScheduler_NeverCrossesTenants(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -263,5 +260,33 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("condition not met within 5s")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A key check whose full read cannot finish (the row cap, the run deadline) must not turn every later run into the
+// same failing full read: the next runs are deltas again and the check is retried one period later.
+func TestScheduler_AFailingKeyCheckFallsBackToDeltas(t *testing.T) {
+	m := store.NewMem()
+	ctx := inTenant(1)
+	binding, _ := setup(t, m, ctx)
+	runner := &fakeRunner{res: func(st store.SyncState) (syncer.Result, error) {
+		if st.KeyCheckDue {
+			return syncer.Result{RunID: "r", FullRead: true}, errors.New("customer has more than 2000000 rows to extract")
+		}
+		return syncer.Result{RunID: "r", Report: domain.Report{Status: domain.StatusSucceeded, Extracted: 1, Created: 1, Watermark: "W2"}}, nil
+	}}
+	sc := &syncer.Scheduler{Store: m, Runner: runner}
+	sc.Tick(ctx) // never checked: the first run is the full read, and it fails
+	st, _ := m.GetSync(ctx, binding.ID)
+	if !runner.seen[0].KeyCheckDue || st.LastStatus != "failed" || st.KeyCheckDue || st.KeyCheckError == "" || st.LastKeyCheckAt != nil {
+		t.Fatalf("after the failed full read: %+v", st)
+	}
+	cur, _ := m.GetSync(ctx, binding.ID)
+	if _, err := m.UpdateSync(ctx, binding.ID, cur.Version, store.SyncEdit{RunNow: true}); err != nil {
+		t.Fatal(err)
+	}
+	sc.Tick(ctx)
+	if st, _ := m.GetSync(ctx, binding.ID); runner.seen[1].KeyCheckDue || st.LastStatus != "succeeded" || st.Watermark != "W2" || st.ConsecutiveFailures != 0 {
+		t.Fatalf("the run after a failed key check must be a delta: due=%v %+v", runner.seen[1].KeyCheckDue, st)
 	}
 }

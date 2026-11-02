@@ -200,3 +200,28 @@ func TestDeltaSince_LateRowsAtOrBeforeTheWatermarkAreReadAgain(t *testing.T) {
 		t.Fatal("control: a strict read from the watermark itself misses both")
 	}
 }
+
+func TestKeyCheckDue(t *testing.T) {
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	at := func(h int) *time.Time { x := now.Add(-time.Duration(h) * time.Hour); return &x }
+	cases := []struct {
+		name  string
+		hours int
+		last  *time.Time
+		want  bool
+	}{
+		{"never checked", 24, nil, true},
+		{"checked a day ago", 24, at(24), true},
+		{"checked recently", 24, at(23), false},
+		{"turned off", 0, nil, false},
+		{"turned off, old check", 0, at(1000), false},
+	}
+	for _, c := range cases {
+		if got := domain.KeyCheckDue(c.hours, c.last, now); got != c.want {
+			t.Errorf("%s: %v", c.name, got)
+		}
+	}
+	if !domain.ValidKeyCheckHours(0) || !domain.ValidKeyCheckHours(8760) || domain.ValidKeyCheckHours(-1) || domain.ValidKeyCheckHours(8761) {
+		t.Error("period bounds")
+	}
+}

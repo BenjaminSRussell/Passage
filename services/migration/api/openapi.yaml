@@ -673,7 +673,7 @@ paths:
     patch:
       operationId: updateSyncStatus
       summary: Pause, resume or configure the delta sync of an entity binding
-      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
+      description: Pauses or resumes the schedule, sets which system wins when both changed a record (sourceOfTruth legacy or passage), sets how often a binding with a cursor is read in full to find rows the legacy system deleted (keyCheckHours), asks for the next run to be a full read that looks for deleted rows (keyCheckNow), or makes the binding due now (runNow; the scheduler starts it on its next pass). Master data flows legacy to Passage (decision B4); with passage as the source of truth a legacy row that differs from the loaded record is held as a conflict and not applied. Needs the version from the status (0 for a binding never scheduled). A paused binding is skipped, keeps its watermark and resumes where it stopped.
       x-passage-duty: migration.project.write
       requestBody:
         required: true
@@ -683,13 +683,35 @@ paths:
           description: The updated status with its new version.
           content: { application/json: { schema: { $ref: '#/components/schemas/SyncStatus' } } }
         '400':
-          description: COM-0001, the version is missing, sourceOfTruth is not legacy or passage, or nothing to change was sent.
+          description: COM-0001, the version is missing, sourceOfTruth is not legacy or passage, keyCheckHours is outside 0 to 8760, or nothing to change was sent.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '404':
           description: AUTH-0404, no entity binding with this id.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
           description: MIG-VERSION-CONFLICT, the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/sync-status/{id}/absent:
+    parameters:
+      - { name: id, in: path, required: true, description: The entity binding id., schema: { type: string, format: uuid } }
+    get:
+      operationId: listSyncAbsent
+      summary: List source keys the legacy system no longer has
+      description: A delta over a cursor cannot see a row the legacy system deleted, so a binding with a cursor is read in full once its key check is due (keyCheckHours, 24 by default, 0 turns it off), and a binding without a cursor is read in full on every run. The keys a full read did not find but an earlier run loaded are listed here in source key order, with the Passage record they were loaded into; only keys of the project's source system and, for an entity scoped to a legal entity, of the project's target legal entity are listed, and keyCheckError on the status says when a full read could not produce the list. Nothing is deactivated in Passage; the list is for the operator. A key that comes back leaves the list at the next full read. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: cursor, in: query, description: "The nextCursor of the previous page; a cursor from another list is a 400 COM-0001.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Absent keys. Pass nextCursor as cursor for the next page; it is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SyncAbsent' } }, nextCursor: { type: string } } } } }
+        '400':
+          description: COM-0001, the cursor or the limit is not valid.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/sync-conflicts:
@@ -1603,6 +1625,20 @@ components:
         rowsRejected: { type: integer, format: int64 }
         openConflicts: { type: integer }
         version: { type: integer }
+        keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: "How often a binding with a cursor is read in full to find rows the legacy system deleted; 0 turns the check off. Default 24. A binding without a cursor is read in full on every run." }
+        lastKeyCheckAt: { type: string, format: date-time, description: When a full read last completed and replaced the absent list. }
+        keyCheckError: { type: string, description: "Why the last full read produced no absent list: it failed (the next one is still a period away, the runs in between are deltas), another active binding loads the same entity from the same source system into the same keys, or it found no rows at all while keys are loaded. Absent when the last one produced the list." }
+        absentCount: { type: integer, minimum: 0, description: Loaded source keys the last full read did not find in the legacy system. See listSyncAbsent. }
+    SyncAbsent:
+      type: object
+      required: [bindingId, sourceKey, firstAbsentAt, lastCheckedAt]
+      properties:
+        bindingId: { type: string, format: uuid }
+        sourceKey: { type: string, description: The legacy key that was loaded earlier and is missing from the source. }
+        targetId: { type: string, description: The Passage record the legacy row was loaded into. }
+        runId: { type: string, format: uuid, description: The run whose full read last confirmed the key absent. }
+        firstAbsentAt: { type: string, format: date-time }
+        lastCheckedAt: { type: string, format: date-time }
     UpdateSyncStatus:
       type: object
       required: [version]
@@ -1610,6 +1646,8 @@ components:
         version: { type: integer, minimum: 0 }
         paused: { type: boolean }
         sourceOfTruth: { type: string, enum: [legacy, passage] }
+        keyCheckHours: { type: integer, minimum: 0, maximum: 8760, description: Period in hours of the full read that finds deleted legacy rows; 0 turns it off. }
+        keyCheckNow: { type: boolean, description: "Makes the next run a full read that looks for deleted legacy rows, whatever the period (also after a failed one); combine with runNow to start it at once." }
         runNow: { type: boolean }
     SyncConflict:
       type: object

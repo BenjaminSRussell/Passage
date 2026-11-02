@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -220,11 +221,8 @@ func TestPostgres_XrefLegalEntityUnderRLS(t *testing.T) {
 func TestPostgres_XrefLegalEntityBackfill(t *testing.T) {
 	admin, _ := testkit.DBWithApp(t)
 	ctx := context.Background()
-	_, _ = admin.Exec(ctx, "drop schema if exists migration cascade")
+	testdb.Fresh(t, admin)
 	_, _ = admin.Exec(ctx, "drop table if exists schema_migrations")
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade")
-	})
 	before := fstest.MapFS{}
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -183,9 +184,7 @@ func TestMem_ConnectionContract(t *testing.T) {
 
 func TestPostgres_ConnectionProfilesUnderRLS(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t) // the app role proves the 0008 grants are enough for the store
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -208,9 +207,7 @@ func TestPostgres_ConnectionProfilesUnderRLS(t *testing.T) {
 // Connection profiles are tenant-wide like every migration table.
 func TestPostgres_ConnectionProfilesAreHiddenFromLegalEntityScopedCallers(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -235,9 +232,7 @@ func TestPostgres_ConnectionProfilesAreHiddenFromLegalEntityScopedCallers(t *tes
 // name does not. The project reads from a profile, lands in a target legal entity, and the foreign key holds.
 func TestPostgres_CustomSourceSystemRunXrefAndProject(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

@@ -345,9 +345,118 @@ func TestSync_AMissingMappingSpecFailsTheRunWithAReason(t *testing.T) {
 	l := s.liveRig
 	l.file("vendors.csv", "id,Party,Acct\nV1,P1,V-100\n")
 	l.bind("vendor", "vendors.csv", `"id"`)
+	// Both bindings are due and share the project, which runs one at a time (BR-10.2): whichever loses the project
+	// claim on the first pass is released and runs on the second.
+	s.sched.Tick(context.Background())
 	s.sched.Tick(context.Background())
 	rec := do(s.r, http.MethodGet, syncPath+"?failing=true", "", liveDuties, true)
 	if !strings.Contains(rec.Body.String(), "no published mapping spec for vendor") {
 		t.Fatalf("failing list = %s", rec.Body)
 	}
 }
+
+func (s *syncRig) absent() (keys []string, status int) {
+	s.t.Helper()
+	rec := do(s.r, http.MethodGet, syncPath+"/"+s.binding+"/absent", "", liveDuties, true)
+	var out struct {
+		Items []struct{ SourceKey, TargetID string }
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	for _, it := range out.Items {
+		if it.TargetID == "" {
+			s.t.Fatalf("absent key %q has no target id", it.SourceKey)
+		}
+		keys = append(keys, it.SourceKey)
+	}
+	return keys, rec.Code
+}
+
+func TestSync_AKeyCheckReadsACursorBindingInFullAndListsKeysTheLegacySystemDeleted(t *testing.T) {
+	s := newSyncRig(t)
+	ctx := context.Background()
+	s.sched.Tick(ctx) // the first run is a full read: nothing is missing yet
+	if keys, code := s.absent(); code != http.StatusOK || len(keys) != 0 {
+		t.Fatalf("absent after the first read = %v %d", keys, code)
+	}
+	st := struct {
+		syncBody
+		KeyCheckHours  int    `json:"keyCheckHours"`
+		LastKeyCheckAt string `json:"lastKeyCheckAt"`
+		AbsentCount    int    `json:"absentCount"`
+	}{}
+	get := func() {
+		rec := do(s.r, http.MethodGet, syncPath+"/"+s.binding, "", liveDuties, true)
+		st.AbsentCount = 0
+		_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	}
+	get()
+	if st.KeyCheckHours != 24 || st.LastKeyCheckAt == "" {
+		t.Fatalf("a full read counts as the key check: %+v", st)
+	}
+
+	// P2 is deleted in the legacy system. A delta cannot see it, so nothing is reported while no check is due.
+	s.file("parties.csv", "id,Name,upd\nP1,Acme GmbH,2026-11-01T08:00:00Z\nP3,Gamma,2026-11-01T10:30:00Z\n")
+	s.runNow()
+	if keys, _ := s.absent(); len(keys) != 0 {
+		t.Fatalf("a delta reported absent keys: %v", keys)
+	}
+	if got := s.runs()[0]; got.Counts["extracted"] != 1 {
+		t.Fatalf("the second run must be a delta of one row: %+v", got)
+	}
+
+	// Asking for a key check makes the next run a full read: P2 is listed, nothing is deactivated in Passage.
+	cur := s.status()
+	if rec := s.patch(`{"version":` + itoa(cur.Version) + `,"keyCheckNow":true,"runNow":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("keyCheckNow = %d %s", rec.Code, rec.Body)
+	}
+	s.sched.Tick(ctx)
+	if keys, _ := s.absent(); len(keys) != 1 || keys[0] != "P2" {
+		t.Fatalf("absent = %v, want [P2]", keys)
+	}
+	get()
+	if st.AbsentCount != 1 || st.LastKeyCheckAt == "" || len(s.fakes.Parties) != 3 {
+		t.Fatalf("status after the check: %+v parties=%d", st, len(s.fakes.Parties))
+	}
+	ev := s.store.SyncEvents()
+	last := ev[len(ev)-1]
+	if last.Type != "dev.passage.migration.syncabsent.detected.v1" && ev[len(ev)-2].Type != "dev.passage.migration.syncabsent.detected.v1" {
+		t.Fatalf("no syncabsent event among the last events: %s %s", ev[len(ev)-2].Type, last.Type)
+	}
+
+	// The same key still missing at the next full read is not announced again; a key that comes back leaves the list.
+	before := len(s.store.SyncEvents())
+	s.patch(`{"version":` + itoa(s.status().Version) + `,"keyCheckNow":true,"runNow":true}`)
+	s.sched.Tick(ctx)
+	if n := len(s.store.SyncEvents()); n != before+1 {
+		t.Fatalf("a repeated absent key published %d extra events, want only the run event", n-before-1)
+	}
+	s.file("parties.csv", "id,Name,upd\nP1,Acme GmbH,2026-11-01T08:00:00Z\nP2,Beta AG,2026-11-01T09:00:00Z\nP3,Gamma,2026-11-01T10:30:00Z\n")
+	s.patch(`{"version":` + itoa(s.status().Version) + `,"keyCheckNow":true,"runNow":true}`)
+	s.sched.Tick(ctx)
+	if keys, _ := s.absent(); len(keys) != 0 {
+		t.Fatalf("a key that came back is still listed: %v", keys)
+	}
+
+	// The period is validated and 0 turns the check off.
+	for _, bad := range []string{`-1`, `8761`} {
+		if rec := s.patch(`{"version":` + itoa(s.status().Version) + `,"keyCheckHours":` + bad + `}`); rec.Code != http.StatusBadRequest {
+			t.Fatalf("keyCheckHours %s = %d", bad, rec.Code)
+		}
+	}
+	if rec := s.patch(`{"version":` + itoa(s.status().Version) + `,"keyCheckHours":0,"keyCheckNow":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("turn off = %d %s", rec.Code, rec.Body)
+	}
+	s.file("parties.csv", "id,Name,upd\nP1,Acme GmbH,2026-11-01T08:00:00Z\n")
+	s.runNow()
+	if keys, _ := s.absent(); len(keys) != 0 {
+		t.Fatalf("a binding with the check off read in full: %v", keys)
+	}
+	if rec := do(s.r, http.MethodGet, syncPath+"/"+ids00+"/absent", "", liveDuties, true); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown binding = %d", rec.Code)
+	}
+	if rec := do(s.r, http.MethodGet, syncPath+"/"+s.binding+"/absent?cursor=zzz", "", liveDuties, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad cursor = %d", rec.Code)
+	}
+}
+
+const ids00 = "00000000-0000-7000-8000-000000000099"

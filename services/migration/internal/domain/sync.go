@@ -24,6 +24,11 @@ const (
 	ResolveAcceptLegacy = "accept_legacy"
 	ResolveKeepPassage  = "keep_passage"
 
+	// DefaultKeyCheckHours is how often a binding with a cursor is read in full to find rows the legacy system deleted.
+	DefaultKeyCheckHours = 24
+	// MaxKeyCheckHours is the longest key check period an operator may set (one year); 0 turns the check off.
+	MaxKeyCheckHours = 8760
+
 	// BackoffAfter is the number of consecutive failures after which a binding's next run is pushed out.
 	BackoffAfter = 3
 	// BackoffBase is the first delay once BackoffAfter failures are reached; each further failure doubles it.
@@ -96,3 +101,16 @@ func SyncBackoff(failures int) time.Duration {
 	}
 	return min(d, BackoffCap)
 }
+
+// KeyCheckDue reports whether a scheduled run of a binding must read the source in full to find deleted rows: the
+// binding has a cursor (without one every run is a full read already), the check is on (hours > 0) and the last one
+// is older than the period or never happened.
+func KeyCheckDue(hours int, last *time.Time, now time.Time) bool {
+	if hours <= 0 {
+		return false
+	}
+	return last == nil || !last.Add(time.Duration(hours)*time.Hour).After(now)
+}
+
+// ValidKeyCheckHours reports whether h is a period the service accepts (0 is off).
+func ValidKeyCheckHours(h int) bool { return h >= 0 && h <= MaxKeyCheckHours }

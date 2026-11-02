@@ -566,6 +566,23 @@ export interface SyncStatus {
   rowsRejected: number;
   openConflicts: number;
   version: number;
+  /** Hours between full reads that look for rows the legacy system deleted; 0 is off. */
+  keyCheckHours: number;
+  lastKeyCheckAt?: string;
+  /** Why the last full read produced no list of missing keys (it failed, the key space is shared, it found no rows). */
+  keyCheckError?: string;
+  /** Loaded legacy keys the last full read did not find. */
+  absentCount: number;
+}
+
+/** A legacy key that was loaded earlier and is missing from the source; nothing is deactivated in Passage. */
+export interface SyncAbsent {
+  bindingId: string;
+  sourceKey: string;
+  targetId?: string;
+  runId?: string;
+  firstAbsentAt: string;
+  lastCheckedAt: string;
 }
 
 export type ConflictStatus = "open" | "kept" | "accepted";
@@ -593,8 +610,11 @@ export const listSync = (filter: { paused?: string; failing?: string; cursor?: s
 export const getSync = (bindingId: string, signal?: AbortSignal) => send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, {}, signal);
 
 /** Pauses or resumes a schedule, sets the source of truth or makes the binding due now, under the status's version. */
-export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; runNow?: boolean }) =>
+export const updateSync = (bindingId: string, version: number, edit: { paused?: boolean; sourceOfTruth?: SourceOfTruth; keyCheckHours?: number; keyCheckNow?: boolean; runNow?: boolean }) =>
   send<SyncStatus>(`/sync-status/${encodeURIComponent(bindingId)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+export const listAbsent = (bindingId: string, filter: { cursor?: string; limit?: string }, signal?: AbortSignal) =>
+  page<SyncAbsent>(`/sync-status/${encodeURIComponent(bindingId)}/absent${query(filter)}`, signal);
 
 export const listConflicts = (filter: { bindingId?: string; status?: string; cursor?: string; limit?: string }, signal?: AbortSignal) =>
   page<SyncConflict>(`/sync-conflicts${query(filter)}`, signal);

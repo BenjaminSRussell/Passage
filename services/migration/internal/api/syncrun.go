@@ -73,9 +73,14 @@ func (r syncRunner) Run(ctx context.Context, st store.SyncState, runID string) (
 	if st.WatermarkBindingVersion != nil && *st.WatermarkBindingVersion == binding.Version && binding.CursorField != "" {
 		watermark = st.Watermark
 	}
+	since := domain.DeltaSince(binding.CursorType, watermark)
+	// A delta cannot see a row the legacy system deleted: once the key check is due a binding with a cursor is read in full.
+	if st.KeyCheckDue {
+		since = ""
+	}
 	pipeline := domain.Pipeline{Extractor: backend.Extractor, Loader: backend.Loader, Reader: backend.Reader, Xref: a.store.Xref(), IDGen: ids.New}
 	run.Report, err = pipeline.Run(ctx, domain.RunSpec{SourceSystem: run.SourceSystem, Entity: run.Entity, Mapping: mapping,
-		Since: domain.DeltaSince(binding.CursorType, watermark), HoldExisting: st.SourceOfTruth == domain.SourcePassage, Acknowledged: kept})
+		Since: since, HoldExisting: st.SourceOfTruth == domain.SourcePassage, Acknowledged: kept})
 	// The extractor read from a little before the watermark, so what it returns can be smaller than what is stored.
 	if run.Report.Watermark != "" || watermark != "" {
 		run.Report.Watermark = domain.MaxCursor(binding.CursorType, watermark, run.Report.Watermark)
@@ -88,7 +93,7 @@ func (r syncRunner) Run(ctx context.Context, st store.SyncState, runID string) (
 		if _, saveErr := a.store.SaveRun(ctx, run, ""); saveErr != nil {
 			return syncer.Result{}, errors.Join(err, saveErr)
 		}
-		return syncer.Result{RunID: runID, Report: run.Report, BindingVersion: binding.Version}, err
+		return syncer.Result{RunID: runID, Report: run.Report, BindingVersion: binding.Version, FullRead: since == ""}, err
 	}
 	if _, err := a.store.SaveRun(ctx, run, ""); err != nil {
 		a.failed.Add(1)
@@ -97,7 +102,7 @@ func (r syncRunner) Run(ctx context.Context, st store.SyncState, runID string) (
 	a.runs.Add(1)
 	a.loaded.Add(int64(run.Report.Created + run.Report.Updated))
 	a.rejected.Add(int64(len(run.Report.Rejects)))
-	return syncer.Result{RunID: runID, Report: run.Report, BindingVersion: binding.Version}, nil
+	return syncer.Result{RunID: runID, Report: run.Report, BindingVersion: binding.Version, FullRead: since == ""}, nil
 }
 
 // syncMapping is the mapping a scheduled run applies: the binding's own spec, else the newest published spec of its entity.

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { PrincipalProvider } from "../../shell/principal";
 import { findTable } from "../../test-utils";
-import type { MigrationRun, SyncConflict, SyncStatus } from "./api/client";
+import type { MigrationRun, SyncAbsent, SyncConflict, SyncStatus } from "./api/client";
 import migration from "./module";
 import { summarize, syncHealth } from "./SyncPages";
 
@@ -67,7 +67,11 @@ const healthy: SyncStatus = {
   rowsRejected: 1,
   openConflicts: 0,
   version: 2,
+  keyCheckHours: 24,
+  lastKeyCheckAt: "2026-11-01T09:00:00Z",
+  absentCount: 0,
 };
+const gone: SyncAbsent = { bindingId: BINDING, sourceKey: "C9", targetId: "0195f0a0-0000-7000-8000-0000000000e1", runId: RUN, firstAbsentAt: "2026-11-01T09:00:00Z", lastCheckedAt: "2026-11-02T09:00:00Z" };
 const failing: SyncStatus = { ...healthy, bindingId: "0195f0a0-0000-7000-8000-0000000000b2", entity: "vendor", consecutiveFailures: 3, lastStatus: "failed", lastError: "EGRESS-DENIED: the host is not allowed", nextDueAt: "2026-11-01T10:45:00Z" };
 const conflict: SyncConflict = { id: "0195f0a0-0000-7000-8000-0000000000d1", bindingId: BINDING, entity: "customer", sourceKey: "C1", legacyFields: { name: "Legacy name" }, status: "open", detectedAt: "2026-11-01T10:00:00Z", version: 3 };
 const run: MigrationRun = {
@@ -87,11 +91,12 @@ const run: MigrationRun = {
   createdAt: "2026-11-01T10:00:00Z",
 };
 
-function detailHandler(status: SyncStatus = healthy, conflicts: SyncConflict[] = []) {
+function detailHandler(status: SyncStatus = healthy, conflicts: SyncConflict[] = [], absent: SyncAbsent[] = []) {
   handler = (url, init) => {
     const path = url.pathname;
     if (path.endsWith(`/sync-status/${BINDING}`) && (init.method ?? "GET") === "GET") return json(200, status);
     if (path.endsWith(`/sync-status/${BINDING}`) && init.method === "PATCH") return json(200, { ...status, ...JSON.parse(String(init.body)), version: status.version + 1 });
+    if (path.endsWith(`/sync-status/${BINDING}/absent`)) return json(200, { items: absent });
     if (path.endsWith("/migration-runs")) return json(200, { items: [run] });
     if (path.endsWith(`/migration-runs/${RUN}`)) return json(200, run);
     if (path.endsWith("/sync-conflicts")) return json(200, { items: conflicts });
@@ -150,6 +155,69 @@ describe("delta sync list", () => {
     await findTable({ name: "Delta sync status" });
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await waitFor(() => expect(screen.getByRole("table")).toHaveTextContent("vendor"));
+  });
+});
+
+describe("deleted legacy rows", () => {
+  it("lists the keys the last full read did not find, with the Passage record they were loaded into", async () => {
+    detailHandler({ ...healthy, absentCount: 1 }, [], [gone]);
+    const { container } = renderAt(`/migration/sync/${BINDING}`);
+    const table = await findTable({ name: "Keys missing in the legacy system" });
+    expect(table).toHaveTextContent("C9");
+    expect(table).toHaveTextContent("0195f0a0-0000-7000-8000-0000000000e1");
+    expect(screen.getByText(/Nothing is deactivated in Passage/)).toBeInTheDocument();
+    expect(violations(container)).toEqual([]);
+  });
+
+  it("shows the empty state and sends a period change", async () => {
+    detailHandler();
+    const inner = handler;
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText("No missing keys")).toBeInTheDocument();
+    handler = (url, init) => (url.pathname.endsWith("/absent") ? json(500, { code: "COM-0500", detail: "boom" }) : inner(url, init));
+    fireEvent.change(screen.getByLabelText("Full read to find deleted rows"), { target: { value: "6" } });
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+  });
+
+  it("says why the last full read did not update the list", async () => {
+    detailHandler({ ...healthy, absentCount: 1, keyCheckError: "the full read did not complete: customer has more than 2000000 rows to extract" }, [], [gone]);
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText("The last full read did not update this list")).toBeInTheDocument();
+    expect(screen.getByText(/more than 2000000 rows/)).toBeInTheDocument();
+    expect(await findTable({ name: "Keys missing in the legacy system" })).toHaveTextContent("C9");
+  });
+
+  it("shows a load failure of the list", async () => {
+    detailHandler();
+    const inner = handler;
+    handler = (url, init) => (url.pathname.endsWith("/absent") ? json(500, { code: "COM-0500", detail: "boom" }) : inner(url, init));
+    renderAt(`/migration/sync/${BINDING}`);
+    expect(await screen.findByText(/Could not load the missing keys/)).toBeInTheDocument();
+  });
+
+  it("changes the period and asks for a check at the next run", async () => {
+    detailHandler();
+    renderAt(`/migration/sync/${BINDING}`);
+    fireEvent.change(await screen.findByLabelText("Full read to find deleted rows"), { target: { value: "168" } });
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ version: 2, keyCheckHours: 168 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Check at the next run" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ version: 3, keyCheckNow: true });
+  });
+
+  it("is read-only without migration.project.write, and offers no check when the period is off", async () => {
+    detailHandler({ ...healthy, keyCheckHours: 0 });
+    renderAt(`/migration/sync/${BINDING}`, ["migration.run"]);
+    expect(await screen.findByLabelText("Full read to find deleted rows")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Check at the next run" })).not.toBeInTheDocument();
+  });
+
+  it("totals the missing keys on the monitor", async () => {
+    handler = () => json(200, { items: [{ ...healthy, absentCount: 4 }] });
+    renderAt("/migration/sync");
+    const table = await findTable({ name: "Delta sync status" });
+    expect(table).toHaveTextContent("Missing in legacy");
+    expect(await screen.findByRole("list", { name: "Delta sync totals" })).toHaveTextContent("Missing in legacy");
   });
 });
 

@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/testdb"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -238,9 +239,7 @@ func exerciseProjectRuns(t *testing.T, s store.Store, one, two context.Context, 
 
 func TestPostgres_ProjectRunsClaimAndFilter(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t) // the app role proves the claim needs no grant beyond 0006
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -251,9 +250,7 @@ func TestPostgres_ProjectRunsClaimAndFilter(t *testing.T) {
 // and the run that held it can no longer clear the claim the next run took.
 func TestPostgres_AbandonedProjectClaimLapses(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	ctx := context.Background()
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
@@ -292,9 +289,7 @@ func TestMem_ProjectRunsClaimAndFilter(t *testing.T) {
 
 func TestPostgres_ProjectsAndRewriteRulesUnderRLS(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t) // the app role proves the 0006 grants are enough for the store
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -304,9 +299,7 @@ func TestPostgres_ProjectsAndRewriteRulesUnderRLS(t *testing.T) {
 // Projects are tenant-wide: a caller scoped to legal entities, even both of a copy project's, reads nothing.
 func TestPostgres_ProjectsAreHiddenFromLegalEntityScopedCallers(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -340,9 +333,7 @@ func TestPostgres_ProjectsAreHiddenFromLegalEntityScopedCallers(t *testing.T) {
 // Concurrent creates with one Idempotency-Key store one project and replay it to the others.
 func TestPostgres_ConcurrentCreatesWithOneKeyStoreOneProject(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -385,9 +376,7 @@ func TestPostgres_ConcurrentCreatesWithOneKeyStoreOneProject(t *testing.T) {
 
 func TestPostgres_ProjectTableRefusesInvalidCopyRows(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
-	drop := func() { _, _ = admin.Exec(context.Background(), "drop schema if exists migration cascade") }
-	drop()
-	t.Cleanup(drop)
+	testdb.Fresh(t, admin)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

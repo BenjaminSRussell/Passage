@@ -15,6 +15,11 @@ channels:
         $ref: '#/components/messages/syncRunCompleted'
       failed:
         $ref: '#/components/messages/syncRunFailed'
+  passage.migration.syncabsent:
+    address: passage.migration.syncabsent
+    messages:
+      detected:
+        $ref: '#/components/messages/syncAbsentDetected'
 operations:
   onSyncRunCompleted:
     action: send
@@ -24,6 +29,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.migration.syncrun' }
     messages: [{ $ref: '#/channels/passage.migration.syncrun/messages/failed' }]
+  onSyncAbsentDetected:
+    action: send
+    channel: { $ref: '#/channels/passage.migration.syncabsent' }
+    messages: [{ $ref: '#/channels/passage.migration.syncabsent/messages/detected' }]
 components:
   messages:
     syncRunCompleted:
@@ -40,7 +49,24 @@ components:
       payload:
         $ref: '#/components/schemas/SyncRunData'
       x-passage-type: dev.passage.migration.syncrun.failed.v1
+    syncAbsentDetected:
+      name: detected
+      title: Legacy rows no longer in the source
+      description: A full read of a binding (the periodic key check of a binding with a cursor, or any run of a binding without one) did not find source keys that earlier runs loaded, and at least one of them was not already listed as absent. Nothing is deactivated in Passage; the keys are listed at GET /v1/integration/sync-status/{id}/absent. Published in the transaction that stores the list.
+      payload:
+        $ref: '#/components/schemas/SyncAbsentData'
+      x-passage-type: dev.passage.migration.syncabsent.detected.v1
   schemas:
+    SyncAbsentData:
+      type: object
+      required: [bindingId, entity, absentCount, newlyAbsent, sampleKeys]
+      properties:
+        bindingId: { type: string, format: uuid }
+        entity: { type: string }
+        runId: { type: string, format: uuid, description: The run whose full read found the keys missing. }
+        absentCount: { type: integer, description: All keys now listed as absent for the binding. }
+        newlyAbsent: { type: integer, description: Keys that were not listed before this read. }
+        sampleKeys: { type: array, maxItems: 20, items: { type: string }, description: Up to 20 of the newly absent keys, in key order. }
     SyncRunData:
       type: object
       required: [bindingId, entity, status, extracted, loaded, rejected, conflicted, watermark, consecutiveFailures]

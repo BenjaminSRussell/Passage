@@ -58,6 +58,16 @@ type SyncState struct {
 	RowsRejected        int64      `json:"rowsRejected"`
 	OpenConflicts       int        `json:"openConflicts"`
 	Version             int        `json:"version"`
+	// KeyCheckHours is the period of the full read that finds rows the legacy system deleted (0: off), LastKeyCheckAt
+	// when one last completed, KeyCheckError why the last one produced no list ("" when it did) and AbsentCount how
+	// many loaded keys the last completed one did not find.
+	KeyCheckHours  int        `json:"keyCheckHours"`
+	LastKeyCheckAt *time.Time `json:"lastKeyCheckAt,omitempty"`
+	KeyCheckError  string     `json:"keyCheckError,omitempty"`
+	AbsentCount    int        `json:"absentCount"`
+	// KeyCheckDue is computed on the database clock from the last full read attempted (failed or not): the next run
+	// must read the source in full.
+	KeyCheckDue bool `json:"-"`
 	// WatermarkBindingVersion is the entity binding version the watermark was read under (nil before the first
 	// advance). A watermark read under another version of the binding is not used.
 	WatermarkBindingVersion *int `json:"-"`
@@ -83,7 +93,27 @@ type SyncFilter struct {
 type SyncEdit struct {
 	Paused        *bool
 	SourceOfTruth *string
-	RunNow        bool
+	KeyCheckHours *int
+	// KeyCheckNow makes the next run a full read that looks for deleted rows, whatever the period.
+	KeyCheckNow bool
+	RunNow      bool
+}
+
+// SyncAbsent is a source key loaded earlier that a full read of the legacy source did not find.
+type SyncAbsent struct {
+	BindingID     string    `json:"bindingId"`
+	SourceKey     string    `json:"sourceKey"`
+	TargetID      string    `json:"targetId,omitempty"`
+	RunID         string    `json:"runId,omitempty"`
+	FirstAbsentAt time.Time `json:"firstAbsentAt"`
+	LastCheckedAt time.Time `json:"lastCheckedAt"`
+}
+
+// AbsentFilter lists absent keys of one binding in source key order; After is the last key of the previous page.
+type AbsentFilter struct {
+	BindingID string
+	After     string
+	Limit     int
 }
 
 // SyncFinish ends a claim. Advance says whether Watermark is stored: only for a run whose loads committed.
@@ -99,6 +129,13 @@ type SyncFinish struct {
 	BackoffSecs                       float64
 	Failures                          int // consecutive failures after this run
 	Conflicts                         []domain.Conflict
+	// FullRead is set when the run read the whole source and did not fail: Absent (possibly empty) is then the
+	// complete list of loaded keys the source no longer has, and replaces the stored list.
+	FullRead bool
+	// KeyCheckAttempted is set when the run tried a full read, whether or not it completed: the next key check is
+	// due one period later, so a full read that keeps failing does not turn every run into one.
+	KeyCheckAttempted bool
+	Absent            []string
 }
 
 // SyncConflict is a legacy row held back because Passage is the source of truth.
@@ -152,6 +189,8 @@ type SyncStore interface {
 	UpdateSync(ctx context.Context, bindingID string, version int, e SyncEdit) (SyncState, error)
 	// KeptConflicts maps source key to the legacy hash an operator chose to leave out.
 	KeptConflicts(ctx context.Context, bindingID string) (map[string]string, error)
+	// ListAbsent lists the source keys the last full reads of a binding did not find.
+	ListAbsent(ctx context.Context, f AbsentFilter) ([]SyncAbsent, error)
 	ListConflicts(ctx context.Context, f ConflictFilter) ([]SyncConflict, error)
 	GetConflict(ctx context.Context, id string) (SyncConflict, error)
 	// ResolveConflict closes an open conflict decided on version; 409 MIG-CONFLICT-RESOLVED when it is no longer
@@ -182,7 +221,8 @@ const syncSelect = `select b.id::text, b.entity, b.connection_profile_id::text, 
 	case when sched.schedule_cron is null then null else s.next_due_at end, coalesce(s.claim_id is not null, false), coalesce(s.last_run_id::text, ''), s.last_run_at, s.last_success_at,
 	coalesce(s.last_status, ''), coalesce(s.last_error, ''), coalesce(s.consecutive_failures, 0), coalesce(s.rows_loaded, 0), coalesce(s.rows_rejected, 0),
 	(select count(*) from migration.sync_conflict c where c.tenant_id = b.tenant_id and c.binding_id = b.id and c.status = 'open')::int, coalesce(s.version, 0),
-	s.watermark_binding_version
+	s.watermark_binding_version, coalesce(s.keycheck_hours, 24), s.last_keycheck_at, coalesce(s.keycheck_error, ''), coalesce(s.absent_count, 0),
+	coalesce(s.keycheck_hours, 24) > 0 and (s.keycheck_attempt_at is null or s.keycheck_attempt_at + make_interval(hours => coalesce(s.keycheck_hours, 24)) <= now())
 	from migration.entity_binding b
 	join migration.connection_profile cp on cp.tenant_id = b.tenant_id and cp.id = b.connection_profile_id
 	left join migration.sync_state s on s.tenant_id = b.tenant_id and s.binding_id = b.id
@@ -192,7 +232,7 @@ const syncSelect = `select b.id::text, b.entity, b.connection_profile_id::text, 
 func scanSync(row pgx.Row) (SyncState, error) {
 	var x SyncState
 	err := row.Scan(&x.BindingID, &x.Entity, &x.ConnectionProfileID, &x.ProfileName, &x.BindingStatus, &x.ProjectID, &x.ScheduleCron, &x.SourceOfTruth, &x.Paused, &x.Watermark,
-		&x.NextDueAt, &x.Running, &x.LastRunID, &x.LastRunAt, &x.LastSuccessAt, &x.LastStatus, &x.LastError, &x.ConsecutiveFailures, &x.RowsLoaded, &x.RowsRejected, &x.OpenConflicts, &x.Version, &x.WatermarkBindingVersion)
+		&x.NextDueAt, &x.Running, &x.LastRunID, &x.LastRunAt, &x.LastSuccessAt, &x.LastStatus, &x.LastError, &x.ConsecutiveFailures, &x.RowsLoaded, &x.RowsRejected, &x.OpenConflicts, &x.Version, &x.WatermarkBindingVersion, &x.KeyCheckHours, &x.LastKeyCheckAt, &x.KeyCheckError, &x.AbsentCount, &x.KeyCheckDue)
 	return x, err
 }
 
@@ -328,6 +368,18 @@ func (s *Postgres) FinishSync(ctx context.Context, f SyncFinish) error {
 				return err
 			}
 		}
+		switch {
+		case f.FullRead && !failed:
+			if err := recordAbsent(ctx, tx, p.TenantID, f); err != nil {
+				return err
+			}
+		case f.KeyCheckAttempted || f.FullRead:
+			// The full read did not complete: the stored list stays, the next check is one period away.
+			if _, err := tx.Exec(ctx, `update migration.sync_state set keycheck_attempt_at = now(), keycheck_error = $3 where tenant_id = $1 and binding_id = $2`,
+				p.TenantID, f.BindingID, truncateKeyCheckError("the full read did not complete: "+f.Error)); err != nil {
+				return err
+			}
+		}
 		typ, errText := migevents.SyncRunCompleted, ""
 		if failed {
 			typ, errText = migevents.SyncRunFailed, f.Error
@@ -346,6 +398,157 @@ func (s *Postgres) FinishSync(ctx context.Context, f SyncFinish) error {
 			evt.ID, p.TenantID, f.BindingID, evt.Type, payload)
 		return err
 	})
+}
+
+// recordAbsent replaces the stored absent keys of a binding with those of a full read, counts the read as its key
+// check and publishes an event when keys became absent that were not before. Only keys this binding can vouch for are
+// kept: the xref row must exist in the project's source system and, for an entity scoped to a legal entity, belong to
+// the project's target legal entity. When another active binding loads the same entity from the same source system
+// (into the same legal entity, or at all for a tenant-wide entity) the key space is shared and a key missing from this
+// read may be the other binding's, so nothing is recorded. A read that found no rows at all while keys are loaded is
+// taken for a broken source (an empty export, a filter gone wrong) rather than a deleted table, and is not recorded.
+func recordAbsent(ctx context.Context, tx pgx.Tx, tenantID string, f SyncFinish) error {
+	keys := f.Absent
+	if keys == nil {
+		keys = []string{}
+	}
+	var sourceSystem, le string
+	var sharedAny, sharedSameLE bool
+	err := tx.QueryRow(ctx, `select p.source_system, coalesce(p.target_legal_entity_id::text, ''),
+		exists (select 1 from migration.entity_binding b2 join migration.project p2 on p2.tenant_id = b2.tenant_id and p2.connection_profile_id = b2.connection_profile_id
+			where b2.tenant_id = s.tenant_id and b2.id <> s.binding_id and b2.entity = $3 and b2.status = 'active'
+			and p2.project_type = 'migrate' and p2.status = 'active' and p2.source_system = p.source_system),
+		exists (select 1 from migration.entity_binding b2 join migration.project p2 on p2.tenant_id = b2.tenant_id and p2.connection_profile_id = b2.connection_profile_id
+			where b2.tenant_id = s.tenant_id and b2.id <> s.binding_id and b2.entity = $3 and b2.status = 'active'
+			and p2.project_type = 'migrate' and p2.status = 'active' and p2.source_system = p.source_system
+			and (p.target_legal_entity_id is null or p2.target_legal_entity_id is null or p2.target_legal_entity_id = p.target_legal_entity_id))
+		from migration.sync_state s join migration.project p on p.tenant_id = s.tenant_id and p.id = s.project_id
+		where s.tenant_id = $1 and s.binding_id = $2`, tenantID, f.BindingID, f.Entity).Scan(&sourceSystem, &le, &sharedAny, &sharedSameLE)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No project behind the state (it cannot be claimed then): nothing to scope the keys by.
+		_, err = tx.Exec(ctx, `update migration.sync_state set keycheck_attempt_at = now(), keycheck_error = 'the binding has no migration project' where tenant_id = $1 and binding_id = $2`, tenantID, f.BindingID)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if reason := absentRefusal(f, sharedAny, sharedSameLE); reason != "" {
+		_, err := tx.Exec(ctx, `update migration.sync_state set keycheck_attempt_at = now(), keycheck_error = $3 where tenant_id = $1 and binding_id = $2`, tenantID, f.BindingID, reason)
+		return err
+	}
+	// A row of another legal entity is another binding's; an untagged row is this binding's unless another binding
+	// of the entity exists in this source system at all.
+	rows, err := tx.Query(ctx, `insert into migration.sync_absent (tenant_id, binding_id, source_key, target_id, run_id)
+		select $1, $2, x.source_key, x.target_id::text, nullif($4, '')::uuid
+		from unnest($3::text[]) as k
+		join migration.xref x on x.tenant_id = $1 and x.source_system = $5 and x.source_entity = $6 and x.source_key = k
+		where $7 = '' or x.legal_entity_id::text = $7 or (x.legal_entity_id is null and not $8)
+		on conflict (tenant_id, binding_id, source_key) do update set run_id = excluded.run_id, target_id = excluded.target_id, last_checked_at = now()
+		returning source_key, (xmax = 0)`, tenantID, f.BindingID, keys, f.RunID, sourceSystem, f.Entity, le, sharedAny)
+	if err != nil {
+		return err
+	}
+	var kept, fresh []string
+	for rows.Next() {
+		var k string
+		var inserted bool
+		if err := rows.Scan(&k, &inserted); err != nil {
+			rows.Close()
+			return err
+		}
+		kept = append(kept, k)
+		if inserted {
+			fresh = append(fresh, k)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if kept == nil {
+		kept = []string{}
+	}
+	if _, err := tx.Exec(ctx, `delete from migration.sync_absent where tenant_id = $1 and binding_id = $2 and source_key not in (select unnest($3::text[]))`, tenantID, f.BindingID, kept); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update migration.sync_state set keycheck_attempt_at = now(), last_keycheck_at = now(), keycheck_error = '', absent_count = $3
+		where tenant_id = $1 and binding_id = $2`, tenantID, f.BindingID, len(kept)); err != nil {
+		return err
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	slices.Sort(fresh)
+	evt, err := events.New(migevents.SyncAbsentDetected, migevents.Source, f.BindingID, tenantID, absentData(f, len(kept), fresh))
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `insert into migration.outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'syncabsent', $3, $4, $5)`,
+		evt.ID, tenantID, f.BindingID, evt.Type, payload)
+	return err
+}
+
+// absentRefusal is why a completed full read cannot say which keys the legacy system deleted ("" when it can).
+func absentRefusal(f SyncFinish, sharedAny, sharedSameLE bool) string {
+	shared := sharedSameLE
+	if !domain.XrefLegalEntityScoped(f.Entity) {
+		shared = sharedAny
+	}
+	switch {
+	case shared:
+		return "another active binding loads " + f.Entity + " from the same source system into the same keys, so a key missing from this binding's read may be the other binding's; deleted rows are not listed"
+	case f.Extracted == 0 && len(f.Absent) > 0:
+		return "the full read returned no rows while keys are loaded; taken for a broken source rather than a deleted table, so the list was kept"
+	}
+	return ""
+}
+
+func truncateKeyCheckError(s string) string {
+	if len(s) > 500 {
+		return s[:500]
+	}
+	return s
+}
+
+func absentData(f SyncFinish, total int, fresh []string) migevents.SyncAbsentData {
+	return migevents.SyncAbsentData{BindingID: f.BindingID, Entity: f.Entity, RunID: f.RunID, AbsentCount: total, NewlyAbsent: len(fresh),
+		SampleKeys: slices.Clone(fresh[:min(len(fresh), migevents.MaxSampleKeys)])}
+}
+
+func (s *Postgres) ListAbsent(ctx context.Context, f AbsentFilter) ([]SyncAbsent, error) {
+	p, _ := tenant.FromContext(ctx)
+	if !ids.Valid(f.BindingID) {
+		return nil, bindingNotFound()
+	}
+	var out []SyncAbsent
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from migration.entity_binding where tenant_id = $1 and id = $2)`, p.TenantID, f.BindingID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return bindingNotFound()
+		}
+		rows, err := tx.Query(ctx, `select binding_id::text, source_key, target_id, coalesce(run_id::text, ''), first_absent_at, last_checked_at
+			from migration.sync_absent where tenant_id = $1 and binding_id = $2 and source_key > $3 order by source_key limit $4`, p.TenantID, f.BindingID, f.After, clampLimit(f.Limit))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a SyncAbsent
+			if err := rows.Scan(&a.BindingID, &a.SourceKey, &a.TargetID, &a.RunID, &a.FirstAbsentAt, &a.LastCheckedAt); err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (s *Postgres) GetSync(ctx context.Context, bindingID string) (SyncState, error) {
@@ -423,8 +626,9 @@ func (s *Postgres) UpdateSync(ctx context.Context, bindingID string, version int
 			return versionConflict(cur)
 		}
 		if _, err := tx.Exec(ctx, `update migration.sync_state set paused = coalesce($3, paused), source_of_truth = coalesce($4, source_of_truth),
+			keycheck_hours = coalesce($6::int, keycheck_hours), keycheck_attempt_at = case when $7 then null else keycheck_attempt_at end,
 			next_due_at = case when $5 and schedule_cron is not null then now() else next_due_at end, version = version + 1, updated_at = now()
-			where tenant_id = $1 and binding_id = $2`, p.TenantID, bindingID, e.Paused, e.SourceOfTruth, e.RunNow); err != nil {
+			where tenant_id = $1 and binding_id = $2`, p.TenantID, bindingID, e.Paused, e.SourceOfTruth, e.RunNow, e.KeyCheckHours, e.KeyCheckNow); err != nil {
 			return err
 		}
 		out, err = scanSync(tx.QueryRow(ctx, syncSelect+` where b.tenant_id = $1 and b.id = $2`, p.TenantID, bindingID))
@@ -549,6 +753,7 @@ type memSync struct {
 	mu        sync.Mutex
 	state     map[string]*memSyncRow
 	conflicts []SyncConflict
+	absent    []SyncAbsent
 	// Events are the sync-run events FinishSync wrote, oldest first.
 	events []events.Event
 }
@@ -559,6 +764,8 @@ type memSyncRow struct {
 	project string
 	claim   string
 	claimAt time.Time
+	// keyCheckAttemptAt is keycheck_attempt_at: the last full read tried, failed or not.
+	keyCheckAttemptAt *time.Time
 }
 
 func (m *Mem) sy() *memSync {
@@ -620,7 +827,7 @@ func (m *Mem) allBindings() []EntityBinding {
 }
 
 func (m *Mem) view(b EntityBinding, row *memSyncRow) SyncState {
-	x := SyncState{BindingID: b.ID, Entity: b.Entity, ConnectionProfileID: b.ConnectionProfileID, BindingStatus: b.Status, SourceOfTruth: domain.SourceLegacy}
+	x := SyncState{BindingID: b.ID, Entity: b.Entity, ConnectionProfileID: b.ConnectionProfileID, BindingStatus: b.Status, SourceOfTruth: domain.SourceLegacy, KeyCheckHours: domain.DefaultKeyCheckHours}
 	if cp, err := m.GetConnectionProfile(context.Background(), b.ConnectionProfileID); err == nil {
 		x.ProfileName = cp.Name
 	}
@@ -632,6 +839,11 @@ func (m *Mem) view(b EntityBinding, row *memSyncRow) SyncState {
 			x.ProfileName = cp.Name
 		}
 	}
+	var attempted *time.Time
+	if row != nil {
+		attempted = row.keyCheckAttemptAt
+	}
+	x.KeyCheckDue = domain.KeyCheckDue(x.KeyCheckHours, attempted, time.Now())
 	x.ScheduleCron = ""
 	if scheduled {
 		x.ScheduleCron = pr.ScheduleCron
@@ -667,7 +879,7 @@ func (m *Mem) SeedSync(ctx context.Context, bindingID string, next func(cron str
 	row := st.state[bindingID]
 	if row == nil {
 		now := time.Now()
-		st.state[bindingID] = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy, NextDueAt: &now, ProjectID: pr.ID}, cron: pr.ScheduleCron, project: pr.ID}
+		st.state[bindingID] = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy, NextDueAt: &now, ProjectID: pr.ID, KeyCheckHours: domain.DefaultKeyCheckHours}, cron: pr.ScheduleCron, project: pr.ID}
 		return nil
 	}
 	if row.cron != pr.ScheduleCron || row.project != pr.ID {
@@ -709,7 +921,9 @@ func (m *Mem) ReleaseSync(_ context.Context, bindingID, claimID string) error {
 	return nil
 }
 
-func (m *Mem) FinishSync(_ context.Context, f SyncFinish) error {
+func (m *Mem) FinishSync(ctx context.Context, f SyncFinish) error {
+	// Read the projects and bindings before taking the sync lock (view takes them in the other order).
+	scope := m.absentScope(ctx, f)
 	st := m.sy()
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -754,6 +968,14 @@ func (m *Mem) FinishSync(_ context.Context, f SyncFinish) error {
 				LegacyHash: c.ContentHash, LegacyFields: fields, Status: domain.ConflictOpen, DetectedAt: now, Version: 1})
 		}
 	}
+	switch {
+	case f.FullRead && !failed:
+		if err := m.recordAbsentLocked(st, row, f, scope, now); err != nil {
+			return err
+		}
+	case f.KeyCheckAttempted || f.FullRead:
+		row.keyCheckAttemptAt, row.KeyCheckError = &now, truncateKeyCheckError("the full read did not complete: "+f.Error)
+	}
 	typ, errText := migevents.SyncRunCompleted, ""
 	if failed {
 		typ, errText = migevents.SyncRunFailed, f.Error
@@ -765,6 +987,107 @@ func (m *Mem) FinishSync(_ context.Context, f SyncFinish) error {
 	}
 	st.events = append(st.events, evt)
 	return nil
+}
+
+// memAbsentScope is what recordAbsent reads from the project and the other bindings, for the in-memory store.
+type memAbsentScope struct {
+	sourceSystem, legalEntity string
+	sharedAny, sharedSameLE   bool
+}
+
+func (m *Mem) absentScope(ctx context.Context, f SyncFinish) memAbsentScope {
+	var out memAbsentScope
+	b, err := m.GetEntityBinding(ctx, f.BindingID)
+	if err != nil {
+		return out
+	}
+	pr, ok := m.memProjectFor(b)
+	if !ok {
+		return out
+	}
+	out.sourceSystem, out.legalEntity = pr.SourceSystem, pr.TargetLegalEntityID
+	pj := m.pj()
+	pj.mu.Lock()
+	projects := slices.Clone(pj.items)
+	pj.mu.Unlock()
+	for _, b2 := range m.allBindings() {
+		if b2.ID == b.ID || b2.Entity != b.Entity || b2.Status != domain.BindingActive {
+			continue
+		}
+		for _, p2 := range projects {
+			if p2.ConnectionProfileID != b2.ConnectionProfileID || p2.Type != domain.ProjectMigrate || p2.Status != domain.ProjectActive || p2.SourceSystem != pr.SourceSystem {
+				continue
+			}
+			out.sharedAny = true
+			if pr.TargetLegalEntityID == "" || p2.TargetLegalEntityID == "" || p2.TargetLegalEntityID == pr.TargetLegalEntityID {
+				out.sharedSameLE = true
+			}
+		}
+	}
+	return out
+}
+
+// recordAbsentLocked is recordAbsent for the in-memory store; st.mu is held.
+func (m *Mem) recordAbsentLocked(st *memSync, row *memSyncRow, f SyncFinish, scope memAbsentScope, now time.Time) error {
+	row.keyCheckAttemptAt = &now
+	if reason := absentRefusal(f, scope.sharedAny, scope.sharedSameLE); reason != "" {
+		row.KeyCheckError = reason
+		return nil
+	}
+	old := map[string]SyncAbsent{}
+	var kept []SyncAbsent
+	for _, a := range st.absent {
+		if a.BindingID == f.BindingID {
+			old[a.SourceKey] = a
+		} else {
+			kept = append(kept, a)
+		}
+	}
+	var fresh []string
+	total := 0
+	for _, k := range f.Absent {
+		x, found, _ := m.Xref().Get(context.Background(), domain.XrefKey{SourceSystem: scope.sourceSystem, Entity: f.Entity, SourceKey: k})
+		if !found || !(scope.legalEntity == "" || x.LegalEntityID == scope.legalEntity || (x.LegalEntityID == "" && !scope.sharedAny)) {
+			continue
+		}
+		a, ok := old[k]
+		if !ok {
+			a = SyncAbsent{BindingID: f.BindingID, SourceKey: k, FirstAbsentAt: now}
+			fresh = append(fresh, k)
+		}
+		a.TargetID, a.RunID, a.LastCheckedAt = x.TargetID, f.RunID, now
+		kept = append(kept, a)
+		total++
+	}
+	st.absent = kept
+	row.LastKeyCheckAt, row.KeyCheckError, row.AbsentCount = &now, "", total
+	if len(fresh) == 0 {
+		return nil
+	}
+	slices.Sort(fresh)
+	evt, err := events.New(migevents.SyncAbsentDetected, migevents.Source, f.BindingID, MemTenant, absentData(f, total, fresh))
+	if err != nil {
+		return err
+	}
+	st.events = append(st.events, evt)
+	return nil
+}
+
+func (m *Mem) ListAbsent(ctx context.Context, f AbsentFilter) ([]SyncAbsent, error) {
+	if _, err := m.GetEntityBinding(ctx, f.BindingID); err != nil {
+		return nil, err
+	}
+	st := m.sy()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	var out []SyncAbsent
+	for _, a := range st.absent {
+		if a.BindingID == f.BindingID && a.SourceKey > f.After {
+			out = append(out, a)
+		}
+	}
+	slices.SortFunc(out, func(a, b SyncAbsent) int { return strings.Compare(a.SourceKey, b.SourceKey) })
+	return out[:min(len(out), clampLimit(f.Limit))], nil
 }
 
 func (m *Mem) GetSync(ctx context.Context, bindingID string) (SyncState, error) {
@@ -813,7 +1136,7 @@ func (m *Mem) UpdateSync(ctx context.Context, bindingID string, version int, e S
 	st.mu.Lock()
 	row := st.state[bindingID]
 	if row == nil {
-		row = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy}}
+		row = &memSyncRow{SyncState: SyncState{BindingID: bindingID, SourceOfTruth: domain.SourceLegacy, KeyCheckHours: domain.DefaultKeyCheckHours}}
 		st.state[bindingID] = row
 	}
 	if row.Version != version {
@@ -829,6 +1152,12 @@ func (m *Mem) UpdateSync(ctx context.Context, bindingID string, version int, e S
 	}
 	if e.SourceOfTruth != nil {
 		row.SourceOfTruth = *e.SourceOfTruth
+	}
+	if e.KeyCheckHours != nil {
+		row.KeyCheckHours = *e.KeyCheckHours
+	}
+	if e.KeyCheckNow {
+		row.keyCheckAttemptAt = nil
 	}
 	if e.RunNow && row.cron != "" {
 		now := time.Now()

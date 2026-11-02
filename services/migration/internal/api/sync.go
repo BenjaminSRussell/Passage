@@ -29,6 +29,7 @@ func (a *API) registerSync(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Get(syncPath, a.listSync)
 	r.With(authz.RequireDuty(dutyRun)).Get(syncPath+"/{id}", a.getSync)
 	r.With(authz.RequireDuty(dutyProjectWrite)).Patch(syncPath+"/{id}", a.updateSync)
+	r.With(authz.RequireDuty(dutyRun)).Get(syncPath+"/{id}/absent", a.listAbsent)
 	r.With(authz.RequireDuty(dutyRun)).Get(conflictsPath, a.listConflicts)
 	r.With(authz.RequireDuty(dutyRun)).Post(conflictsPath+"/{id}:resolve", a.resolveConflict)
 }
@@ -37,6 +38,8 @@ type updateSyncRequest struct {
 	Version       *int    `json:"version"`
 	Paused        *bool   `json:"paused"`
 	SourceOfTruth *string `json:"sourceOfTruth"`
+	KeyCheckHours *int    `json:"keyCheckHours"`
+	KeyCheckNow   bool    `json:"keyCheckNow"`
 	RunNow        bool    `json:"runNow"`
 }
 
@@ -123,20 +126,58 @@ func (a *API) updateSync(w http.ResponseWriter, r *http.Request) {
 	if req.SourceOfTruth != nil && !domain.ValidSourceOfTruth(*req.SourceOfTruth) {
 		bad["sourceOfTruth"] = "must be legacy or passage"
 	}
-	if req.Paused == nil && req.SourceOfTruth == nil && !req.RunNow {
-		bad["paused"] = "send paused, sourceOfTruth or runNow"
+	if req.KeyCheckHours != nil && !domain.ValidKeyCheckHours(*req.KeyCheckHours) {
+		bad["keyCheckHours"] = fmt.Sprintf("must be between 0 (off) and %d", domain.MaxKeyCheckHours)
+	}
+	if req.Paused == nil && req.SourceOfTruth == nil && req.KeyCheckHours == nil && !req.KeyCheckNow && !req.RunNow {
+		bad["paused"] = "send paused, sourceOfTruth, keyCheckHours, keyCheckNow or runNow"
 	}
 	if len(bad) > 0 {
 		fail(w, r, validation(bad))
 		return
 	}
-	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, SourceOfTruth: req.SourceOfTruth, RunNow: req.RunNow})
+	st, err := a.store.UpdateSync(r.Context(), chi.URLParam(r, "id"), *req.Version, store.SyncEdit{Paused: req.Paused, SourceOfTruth: req.SourceOfTruth, KeyCheckHours: req.KeyCheckHours, KeyCheckNow: req.KeyCheckNow, RunNow: req.RunNow})
 	if err != nil {
 		a.logFailure(r, "update sync failed", err)
 		fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, st)
+}
+
+// listAbsent lists the source keys a full read of the binding did not find in the legacy system. Nothing is
+// deactivated in Passage: the list is for the operator to act on.
+func (a *API) listAbsent(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	f := store.AbsentFilter{BindingID: chi.URLParam(r, "id"), Limit: limit + 1}
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		k, ok := ledgerCursor(v)
+		if !ok {
+			fail(w, r, cursorProblem())
+			return
+		}
+		f.After = k
+	}
+	rows, err := a.store.ListAbsent(r.Context(), f)
+	if err != nil {
+		a.logFailure(r, "list absent keys failed", err)
+		fail(w, r, err)
+		return
+	}
+	rows, more := trimPage(rows, limit)
+	body := map[string]any{"items": nonNil(rows)}
+	if more {
+		body["nextCursor"] = encodePageCursor(struct {
+			K string `json:"k"`
+		}{rows[limit-1].SourceKey})
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) listConflicts(w http.ResponseWriter, r *http.Request) {
