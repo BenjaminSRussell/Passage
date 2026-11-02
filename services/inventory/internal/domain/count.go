@@ -22,6 +22,15 @@ const (
 	CodeCountRecount    = "INV-CNT-006" // a recount is outstanding on the sheet
 	CodeCountFourEyes   = "INV-CNT-007" // the approver also counted a line of the sheet
 	CodeCountNotReady   = "INV-CNT-008" // the sheet must be approved (or submitted) first
+	CodeCountBusy       = "INV-CNT-009" // a sheet the movement must flag for recount is locked by another action; retry
+)
+
+const (
+	// RecountBySupervisor and RecountByMovement name who flagged a line for recount.
+	RecountBySupervisor = "SUPERVISOR"
+	RecountByMovement   = "MOVEMENT"
+	// MaxCountAgeDays bounds the last-count-age plan filter.
+	MaxCountAgeDays = 3650
 )
 
 // Count sheet statuses. A sheet is OPEN while counters enter quantities;
@@ -66,6 +75,9 @@ type CountLine struct {
 	RecountRequested bool
 	RecountReason    string
 	RecountRounds    int
+	// RecountSource is who asked: RecountBySupervisor, or RecountByMovement when
+	// stock of the row moved after the line was counted (BR-16.8).
+	RecountSource string
 }
 
 // CountSheet is a generated count of one plan's stock.
@@ -110,7 +122,10 @@ type CountPlan struct {
 	LocationTo     string
 	ABCClass       string          // select products of this class in the latest ABC run; empty means all
 	SamplePct      decimal.Decimal // zero means every selected row
-	CreatedAt      time.Time
+	// MinDaysSinceCount selects only rows whose last posted count is at least this
+	// many days old, or that were never counted; zero means no age filter.
+	MinDaysSinceCount int
+	CreatedAt         time.Time
 }
 
 // ValidatePlan checks a count plan definition.
@@ -141,6 +156,9 @@ func ValidatePlan(p CountPlan) error {
 	}
 	if p.ABCClass != "" && !slices.Contains(CountABCClasses, p.ABCClass) {
 		return fail(CodeInvalid, "ABC class must be A, B or C")
+	}
+	if p.MinDaysSinceCount < 0 || p.MinDaysSinceCount > MaxCountAgeDays {
+		return fail(CodeInvalid, "days since last count must be between 1 and %d (empty means every row)", MaxCountAgeDays)
 	}
 	if p.SamplePct.IsNegative() || p.SamplePct.GreaterThan(decimal.NewFromInt(100)) || !p.SamplePct.Equal(p.SamplePct.Truncate(6)) {
 		return fail(CodeInvalid, "sample percent must be between 0 and 100 with at most 6 decimals")

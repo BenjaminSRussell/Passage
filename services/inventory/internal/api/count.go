@@ -59,25 +59,28 @@ type countPlanRequest struct {
 	LocationTo     string `json:"locationTo"`
 	ABCClass       string `json:"abcClass"`
 	SamplePct      string `json:"samplePct"`
+	// MinDaysSinceCount selects only rows not counted for this many days (absent: every row).
+	MinDaysSinceCount *int `json:"minDaysSinceCount"`
 }
 
 type countPlanResponse struct {
-	ID             string    `json:"id"`
-	LegalEntityID  string    `json:"legalEntityId"`
-	Name           string    `json:"name"`
-	Warehouse      string    `json:"warehouse,omitempty"`
-	Currency       string    `json:"currency"`
-	Unit           string    `json:"unit"`
-	TolerancePct   string    `json:"tolerancePct"`
-	ToleranceValue string    `json:"toleranceValue"`
-	Blind          bool      `json:"blind"`
-	FreezeStock    bool      `json:"freezeStock"`
-	FourEyes       bool      `json:"fourEyes"`
-	LocationFrom   string    `json:"locationFrom,omitempty"`
-	LocationTo     string    `json:"locationTo,omitempty"`
-	ABCClass       string    `json:"abcClass,omitempty"`
-	SamplePct      string    `json:"samplePct,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID                string    `json:"id"`
+	LegalEntityID     string    `json:"legalEntityId"`
+	Name              string    `json:"name"`
+	Warehouse         string    `json:"warehouse,omitempty"`
+	Currency          string    `json:"currency"`
+	Unit              string    `json:"unit"`
+	TolerancePct      string    `json:"tolerancePct"`
+	ToleranceValue    string    `json:"toleranceValue"`
+	Blind             bool      `json:"blind"`
+	FreezeStock       bool      `json:"freezeStock"`
+	FourEyes          bool      `json:"fourEyes"`
+	LocationFrom      string    `json:"locationFrom,omitempty"`
+	LocationTo        string    `json:"locationTo,omitempty"`
+	ABCClass          string    `json:"abcClass,omitempty"`
+	SamplePct         string    `json:"samplePct,omitempty"`
+	MinDaysSinceCount int       `json:"minDaysSinceCount,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 type countLineRequest struct {
@@ -102,6 +105,8 @@ type countLineResponse struct {
 	RecountRequested bool   `json:"recountRequested"`
 	RecountReason    string `json:"recountReason,omitempty"`
 	RecountRounds    int    `json:"recountRounds"`
+	// RecountSource is SUPERVISOR or MOVEMENT (stock moved after the line was counted) while a recount is requested.
+	RecountSource string `json:"recountSource,omitempty"`
 }
 
 type countSheetSummary struct {
@@ -182,6 +187,13 @@ func (a *API) createCountPlan(w http.ResponseWriter, r *http.Request) {
 	if err != nil || sample.IsNegative() || sample.GreaterThan(decimal.NewFromInt(100)) || !sample.Equal(sample.Truncate(6)) {
 		fields["samplePct"] = "must be a decimal number from 0 to 100 (0 counts every selected row)"
 	}
+	minDays := 0
+	if req.MinDaysSinceCount != nil {
+		minDays = *req.MinDaysSinceCount
+		if minDays < 1 || minDays > domain.MaxCountAgeDays {
+			fields["minDaysSinceCount"] = "must be a whole number of days from 1 to 3650 (leave it out to count every selected row)"
+		}
+	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
@@ -189,7 +201,7 @@ func (a *API) createCountPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	out, inserted, err := a.store.CreateCountPlan(r.Context(), key, domain.CountPlan{LegalEntityID: req.LegalEntityID, Name: req.Name,
 		Warehouse: req.Warehouse, Currency: req.Currency, Unit: req.Unit, TolerancePct: pct, ToleranceValue: val, Blind: req.Blind,
-		FreezeStock: req.FreezeStock, FourEyes: req.FourEyes, LocationFrom: req.LocationFrom, LocationTo: req.LocationTo, ABCClass: req.ABCClass, SamplePct: sample})
+		FreezeStock: req.FreezeStock, FourEyes: req.FourEyes, LocationFrom: req.LocationFrom, LocationTo: req.LocationTo, ABCClass: req.ABCClass, SamplePct: sample, MinDaysSinceCount: minDays})
 	if err != nil {
 		a.failed(w, r, "create count plan", err)
 		return
@@ -432,7 +444,7 @@ func decimalOr(raw string, def decimal.Decimal) (decimal.Decimal, error) {
 func toCountPlanResponse(p domain.CountPlan) countPlanResponse {
 	return countPlanResponse{ID: p.ID, LegalEntityID: p.LegalEntityID, Name: p.Name, Warehouse: p.Warehouse, Currency: p.Currency,
 		Unit: p.Unit, TolerancePct: p.TolerancePct.String(), ToleranceValue: p.ToleranceValue.String(), Blind: p.Blind, FreezeStock: p.FreezeStock, FourEyes: p.FourEyes,
-		LocationFrom: p.LocationFrom, LocationTo: p.LocationTo, ABCClass: p.ABCClass, SamplePct: samplePct(p.SamplePct), CreatedAt: p.CreatedAt}
+		LocationFrom: p.LocationFrom, LocationTo: p.LocationTo, ABCClass: p.ABCClass, SamplePct: samplePct(p.SamplePct), MinDaysSinceCount: p.MinDaysSinceCount, CreatedAt: p.CreatedAt}
 }
 
 func samplePct(d decimal.Decimal) string {
@@ -460,7 +472,7 @@ func writeCountSheet(w http.ResponseWriter, r *http.Request, status int, s domai
 	resp := countSheetResponse{countSheetSummary: summaryOfSheet(s), Lines: []countLineResponse{}}
 	for _, l := range s.Lines {
 		line := countLineResponse{ID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID, Dimensions: l.Dims, CountedBy: l.CountedBy, CountedAt: l.CountedAt,
-			RecountRequested: l.RecountRequested, RecountReason: l.RecountReason, RecountRounds: l.RecountRounds}
+			RecountRequested: l.RecountRequested, RecountReason: l.RecountReason, RecountRounds: l.RecountRounds, RecountSource: l.RecountSource}
 		if !hideExpected {
 			e := l.Expected.String()
 			line.ExpectedQty = &e

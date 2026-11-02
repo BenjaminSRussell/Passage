@@ -155,7 +155,9 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
 		return err
 	}
-	if err := checkCountFreeze(ctx, tx, tenantID, j.LegalEntityID, countSheet, orderedRows(rows, order)); err != nil {
+	// Before any row lock, so the recount flag may wait for sheet locks; a
+	// count posting already holds its sheet and rows and must not.
+	if err := checkCountFreeze(ctx, tx, tenantID, j.LegalEntityID, countSheet, countSheet != "", orderedRows(rows, order)); err != nil {
 		return err
 	}
 	serials := receiptSerials(plan)

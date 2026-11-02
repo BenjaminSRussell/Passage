@@ -38,6 +38,7 @@ const (
 	CodeOutOfScope       = "AUTH-0003"
 	eventSource          = "/passage/inventory"
 	uniqueViolation      = "23505"
+	lockNotAvailable     = "55P03" // a NOWAIT row lock found the row locked
 	rlsViolation         = "42501"
 	dateLayout           = "2006-01-02"
 )

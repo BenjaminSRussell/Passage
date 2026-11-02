@@ -788,6 +788,7 @@ export interface CountPlan {
   locationTo?: string;
   abcClass?: CountAbcClass;
   samplePct?: string;
+  minDaysSinceCount?: number;
   createdAt: string;
 }
 
@@ -806,6 +807,8 @@ export interface CountPlanInput {
   locationTo?: string;
   abcClass?: CountAbcClass | "";
   samplePct?: string;
+  /** Select only rows not counted for this many days (whole days, 1 to 3650). */
+  minDaysSinceCount?: number;
 }
 
 export interface CountSheetSummary {
@@ -844,6 +847,8 @@ export interface CountLine {
   recountRequested: boolean;
   recountReason?: string;
   recountRounds: number;
+  /** Who flagged the recount: a supervisor, or stock that moved after the line was counted. */
+  recountSource?: "SUPERVISOR" | "MOVEMENT";
 }
 
 export interface CountSheet extends CountSheetSummary {

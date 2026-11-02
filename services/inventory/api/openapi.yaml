@@ -147,6 +147,7 @@ paths:
         transaction. Rejections roll everything back. Posting a POSTED journal returns it
         unchanged.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED).
         A journal whose journal name requires approval posts only from APPROVED; a post from DRAFT
         is refused (422 INV-JNL-008).
       x-passage-duty: inventory.journal.post
@@ -454,6 +455,7 @@ paths:
         legs are on the inventory account). Physical stock is unchanged and availability drops
         (BR-16.10). The quantity must be available physical stock at the source (INV-BLK-003).
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.blocking.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -522,6 +524,7 @@ paths:
         holds, whatever the negative stock policy (422 INV-NEG-001). RETURN is not supported yet (INV-BLK-005). Requires If-Match. A released
         blocking is returned unchanged. A row held by an unfinished sheet of a freezeStock count plan is
         refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.blocking.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -562,6 +565,7 @@ paths:
         (422 INV-BLK-006 when it is no longer active, 422 INV-BLK-007 when it is already blocked).
         Requires If-Match. Emits dev.passage.inventory.blocking.escalated.v1. A row held by an
         unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.blocking.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1004,6 +1008,7 @@ paths:
         (409 INV-CNT-008); an APPROVED sheet posts its above-tolerance variances without the
         posting caller holding inventory.count.approve.
         Its COUNT journal is exempt from the sheet's own freeze but not from another unfinished freezeStock sheet on the same rows (409 INV-CNT-002). Emits countsheet.changed (POSTED).
+        Its COUNT journal also flags the counted lines of other unfinished sheets without freezeStock on the same rows (BR-16.8; 409 INV-CNT-009 when such a sheet is locked by another action, retry).
       x-passage-duty: inventory.count.post
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1247,6 +1252,7 @@ paths:
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
         mismatch); an order CANCELLED or RECEIVED is INV-TRF-006.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -1301,6 +1307,7 @@ paths:
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
         Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
         A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -2370,6 +2377,7 @@ paths:
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
         Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -2406,6 +2414,7 @@ paths:
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
         Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -2525,6 +2534,7 @@ paths:
         written in one database transaction. No GL entry is produced here: the calling document
         posts its own ledger entry. Internal path: not exposed by the web BFF.
         A move that changes the physical quantity of a row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
+        On a plan without freezeStock it flags the counted lines of such a sheet for recount instead and reopens the sheet (BR-16.8, countsheet.changed RECOUNT_REQUESTED); 409 INV-CNT-009 when that sheet is locked by another action at the moment (retry).
       x-passage-duty: inventory.transaction.apply
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3025,6 +3035,7 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean, default: false }
+        minDaysSinceCount: { type: integer, minimum: 1, maximum: 3650, description: 'Select only rows whose last posted count is at least this many days old, or that were never counted; absent counts every selected row' }
         freezeStock: { type: boolean, default: false, description: 'While a sheet of the plan is OPEN, COUNTED or APPROVED, refuse movements of its rows (409 INV-CNT-002): journal postings (including other COUNT journals), transfer ship / receive, blocking and release, and status steps that change physical stock. Reservations are not refused.' }
         fourEyes: { type: boolean, default: false, description: 'The sheet needs :submit and a separate :approve by someone who did not count before it posts (INV-CNT-007)' }
         locationFrom: { type: string, maxLength: 60, description: 'Inclusive lower bound of the location dimension, compared byte-wise (C collation)' }
@@ -3044,8 +3055,9 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean }
-        freezeStock: { type: boolean }
+        freezeStock: { type: boolean, description: 'Without it, a movement of a counted row after counting flags the line for recount (recountSource MOVEMENT, BR-16.8)' }
         fourEyes: { type: boolean }
+        minDaysSinceCount: { type: integer, description: Age filter in days; absent when the plan has none }
         locationFrom: { type: string }
         locationTo: { type: string }
         abcClass: { type: string, enum: [A, B, C] }
@@ -3094,8 +3106,9 @@ components:
                   countedBy: { type: string }
                   countedAt: { type: string, format: date-time }
                   postedVariance: { type: [string, 'null'], description: Counted minus book at posting }
-                  recountRequested: { type: boolean, description: A supervisor asked for this line to be counted again; enter it again to clear }
+                  recountRequested: { type: boolean, description: A supervisor asked for this line to be counted again, or stock of the row moved after it was counted on a plan without a freeze; enter it again to clear }
                   recountReason: { type: string }
+                  recountSource: { type: string, enum: [SUPERVISOR, MOVEMENT], description: Who flagged the recount; absent when none is outstanding }
                   recountRounds: { type: integer }
     TransferStatus:
       type: string

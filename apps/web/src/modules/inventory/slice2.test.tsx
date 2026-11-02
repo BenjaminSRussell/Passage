@@ -363,7 +363,7 @@ describe("Cycle counting", () => {
   });
 
   it("validates and creates a count plan", async () => {
-    const values = { legalEntityId: ENTITY_ID, name: "Weekly", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false, freezeStock: false, fourEyes: false, locationFrom: "", locationTo: "", abcClass: "" as const, samplePct: "" };
+    const values = { legalEntityId: ENTITY_ID, name: "Weekly", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false, freezeStock: false, fourEyes: false, locationFrom: "", locationTo: "", abcClass: "" as const, samplePct: "", minDaysSinceCount: "" };
     expect(validateCountPlan(values)).toEqual({});
     expect(validateCountPlan({ ...values, tolerancePct: "120", toleranceValue: "-1", name: "" })).toEqual({
       name: "Name the plan (up to 120 characters).",

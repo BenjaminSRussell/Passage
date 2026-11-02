@@ -73,13 +73,17 @@ func TestCountPlanSelectionIsValidated(t *testing.T) {
 		"sample":    `,"samplePct":"101"`,
 		"sample0":   `,"samplePct":"-1"`,
 		"samplenum": `,"samplePct":"abc"`,
+		"agebig":    `,"minDaysSinceCount":3651`,
+		"ageneg":    `,"minDaysSinceCount":-1`,
+		"agezero":   `,"minDaysSinceCount":0`,
+		"agefrac":   `,"minDaysSinceCount":2.5`,
 	} {
 		rec := do(t, h, http.MethodPost, "/v1/inventory/count-plans", body(extra), []string{"inventory.count.write"}, hdr)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	rec := do(t, h, http.MethodPost, "/v1/inventory/count-plans", body(`,"abcClass":"A","locationFrom":"A-1","locationTo":"A-9","samplePct":"25","freezeStock":true,"fourEyes":true`),
+	rec := do(t, h, http.MethodPost, "/v1/inventory/count-plans", body(`,"abcClass":"A","locationFrom":"A-1","locationTo":"A-9","samplePct":"25","freezeStock":true,"fourEyes":true,"minDaysSinceCount":30`),
 		[]string{"inventory.count.write"}, hdr)
 	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
 		t.Fatalf("valid plan: %d %s", rec.Code, rec.Body.String())

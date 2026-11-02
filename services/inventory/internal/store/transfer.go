@@ -465,7 +465,7 @@ func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc documen
 			return err
 		}
 	}
-	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", orderedRows(rows, order)); err != nil {
+	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", true, orderedRows(rows, order)); err != nil {
 		return err
 	}
 	type posted struct {

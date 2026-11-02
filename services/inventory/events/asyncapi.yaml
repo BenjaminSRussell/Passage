@@ -120,7 +120,7 @@ operations:
   publishCountSheetChanged:
     action: send
     channel: { $ref: '#/channels/countSheet' }
-    summary: A count sheet was submitted for review, approved, had a recount requested, was cancelled or was posted (FR-16.9); POSTED and CANCELLED lift the stock freeze
+    summary: A count sheet was submitted for review, approved, had a recount requested (by a supervisor, or by a movement of a counted row on a plan without a freeze, BR-16.8), was cancelled or was posted (FR-16.9); POSTED and CANCELLED lift the stock freeze
   publishJournalName:
     action: send
     channel: { $ref: '#/channels/journalName' }
@@ -478,7 +478,7 @@ components:
         state: { type: string, enum: [ACTIVE, RELEASED] }
     CountSheetChangedData:
       type: object
-      required: [sheetId, legalEntityId, planId, number, action, status, lineCount, countedCount, recountLines, lineId, reason]
+      required: [sheetId, legalEntityId, planId, number, action, status, lineCount, countedCount, recountLines, lineId, reason, recountSource]
       properties:
         sheetId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -489,8 +489,9 @@ components:
         lineCount: { type: integer }
         countedCount: { type: integer }
         recountLines: { type: integer, description: Lines still flagged for recount after the action }
-        lineId: { type: [string, 'null'], format: uuid, description: The line a recount was requested for }
-        reason: { type: [string, 'null'], description: The supervisor's recount reason }
+        lineId: { type: [string, 'null'], format: uuid, description: The line a supervisor requested a recount for; null for a movement flag, which may flag several lines }
+        reason: { type: [string, 'null'], description: 'The recount reason: the supervisor''s, or the fixed text of a movement flag' }
+        recountSource: { type: [string, 'null'], enum: [SUPERVISOR, MOVEMENT, null], description: 'RECOUNT_REQUESTED only: SUPERVISOR (the :recount action) or MOVEMENT (stock of a counted row moved on a plan without freezeStock, BR-16.8, raised in the movement''s transaction)' }
     ReconciliationDiffData:
       type: object
       required: [account, currency, diff, inventoryValue, ledgerBalance, ledgerSource, legalEntityId, negativeRows, runDate, runId]

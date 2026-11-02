@@ -265,7 +265,7 @@ func moveStock(ctx context.Context, tx pgx.Tx, tenantID string, doc document, fr
 			return err
 		}
 	}
-	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", []*row{first, second}); err != nil {
+	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", true, []*row{first, second}); err != nil {
 		return err
 	}
 	if check != nil {
@@ -383,6 +383,14 @@ func blockingData(b domain.Blocking) invevents.BlockingData {
 	return invevents.BlockingData{BlockingID: b.ID, LegalEntityID: b.LegalEntityID, ProductID: b.ProductID, DimensionSet: map[string]string(b.Dims),
 		Qty: b.Qty.String(), TargetStatus: b.Target, Reason: b.Reason, State: b.State, Disposition: optionalText(b.Disposition),
 		ExpectedReleaseDate: optionalText(b.ExpectedReleaseDate), ScrapJournalID: optionalText(b.ScrapJournalID)}
+}
+
+// optionalInt stores zero as NULL.
+func optionalInt(n int) *int {
+	if n == 0 {
+		return nil
+	}
+	return &n
 }
 
 func optionalText(s string) *string {

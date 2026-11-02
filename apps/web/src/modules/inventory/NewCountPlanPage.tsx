@@ -21,6 +21,7 @@ export interface CountPlanValues {
   locationTo: string;
   abcClass: "" | "A" | "B" | "C";
   samplePct: string;
+  minDaysSinceCount: string;
 }
 
 const fields = [
@@ -35,6 +36,7 @@ const fields = [
   "locationTo",
   "abcClass",
   "samplePct",
+  "minDaysSinceCount",
 ] as const;
 type Errors = Partial<Record<(typeof fields)[number], string>>;
 
@@ -56,6 +58,8 @@ export function validateCountPlan(values: CountPlanValues): Errors {
   if (from !== "" && to !== "" && from > to) errors.locationTo = "The range end must not be before its start.";
   const sample = values.samplePct.trim();
   if (sample !== "" && (!DECIMAL.test(sample) || Number(sample) < 0 || Number(sample) > 100)) errors.samplePct = "Enter a percentage from 0 to 100.";
+  const age = values.minDaysSinceCount.trim();
+  if (age !== "" && (!/^[0-9]{1,4}$/.test(age) || Number(age) < 1 || Number(age) > 3650)) errors.minDaysSinceCount = "Enter a whole number of days from 1 to 3650.";
   return errors;
 }
 
@@ -77,6 +81,7 @@ export function NewCountPlanPage() {
     locationTo: "",
     abcClass: "",
     samplePct: "",
+    minDaysSinceCount: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -89,6 +94,7 @@ export function NewCountPlanPage() {
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
+    const age = values.minDaysSinceCount.trim();
     setBusy(true);
     try {
       await createCountPlan(
@@ -107,6 +113,7 @@ export function NewCountPlanPage() {
           locationTo: values.locationTo.trim(),
           abcClass: values.abcClass,
           samplePct: values.samplePct.trim(),
+          minDaysSinceCount: age === "" ? undefined : Number(age),
         },
         key.current,
       );
@@ -176,12 +183,15 @@ export function NewCountPlanPage() {
           <FormField id="plan-sample" label="Sample (%)" optional hint="Count only this share of the selected rows." error={errors.samplePct}>
             {(control) => <Input {...control} inputMode="decimal" value={values.samplePct} onChange={set("samplePct")} invalid={Boolean(errors.samplePct)} />}
           </FormField>
+          <FormField id="plan-age" label="Not counted for (days)" optional hint="Count only rows whose last posted count is at least this many days old, or that were never counted." error={errors.minDaysSinceCount}>
+            {(control) => <Input {...control} inputMode="numeric" value={values.minDaysSinceCount} maxLength={4} onChange={set("minDaysSinceCount")} invalid={Boolean(errors.minDaysSinceCount)} />}
+          </FormField>
           <div className={styles.formActions}>
             <span className={styles.check}>
               <Input type="checkbox" id="plan-freeze" checked={values.freezeStock} onChange={(event) => change({ ...values, freezeStock: event.target.checked })} />
               <label htmlFor="plan-freeze">Freeze stock while counting</label>
             </span>
-            <span className={styles.muted}>Journals, transfers, blockings and receipts or issues that move a counted row are refused until the sheet is posted or cancelled.</span>
+            <span className={styles.muted}>Journals, transfers, blockings and receipts or issues that move a counted row are refused until the sheet is posted or cancelled. Without it, a movement after a line was counted sends that line back for recount.</span>
           </div>
           <div className={styles.formActions}>
             <span className={styles.check}>

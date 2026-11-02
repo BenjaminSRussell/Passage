@@ -74,7 +74,7 @@ const sheet = (overrides: Record<string, unknown> = {}, line: Record<string, unk
   ...overrides,
 });
 
-const base = { legalEntityId: ENTITY_ID, name: "Aisle A", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false, freezeStock: false, fourEyes: false, locationFrom: "", locationTo: "", abcClass: "" as const, samplePct: "" };
+const base = { legalEntityId: ENTITY_ID, name: "Aisle A", warehouse: "", currency: "USD", unit: "EA", tolerancePct: "5", toleranceValue: "100", blind: false, freezeStock: false, fourEyes: false, locationFrom: "", locationTo: "", abcClass: "" as const, samplePct: "", minDaysSinceCount: "" };
 
 describe("Count control", () => {
   it("validates plan selection like the service", () => {

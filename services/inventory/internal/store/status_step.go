@@ -625,5 +625,5 @@ func checkStepFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID str
 	if r.before.PhysicalInvent().Equal(r.oh.PhysicalInvent()) {
 		return nil
 	}
-	return checkCountFreeze(ctx, tx, tenantID, legalEntityID, "", []*row{r})
+	return checkCountFreeze(ctx, tx, tenantID, legalEntityID, "", true, []*row{r})
 }

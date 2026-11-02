@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -40,7 +41,20 @@ func lockedSheet(ctx context.Context, tx pgx.Tx, id string, version int) (domain
 func sheetChanged(sheet domain.CountSheet, action string, lineID, reason string) invevents.CountSheetChangedData {
 	return invevents.CountSheetChangedData{SheetID: sheet.ID, LegalEntityID: sheet.LegalEntityID, PlanID: sheet.PlanID, Number: sheet.Number,
 		Action: action, Status: sheet.Status, LineCount: sheet.LineCount, CountedCount: sheet.CountedCount, RecountLines: sheet.RecountLines,
-		LineID: optionalText(lineID), Reason: optionalText(reason)}
+		LineID: optionalText(lineID), Reason: optionalText(reason), RecountSource: recountSource(action, lineID)}
+}
+
+// recountSource names who raised a RECOUNT_REQUESTED: a supervisor's request
+// names its line, a movement's flag (which may touch several lines) does not.
+func recountSource(action, lineID string) *string {
+	switch {
+	case action != invevents.CountActionRecountRequested:
+		return nil
+	case lineID == "":
+		return optionalText(domain.RecountByMovement)
+	default:
+		return optionalText(domain.RecountBySupervisor)
+	}
 }
 
 // moveSheet updates a sheet header's status and version, reloads it and
@@ -148,7 +162,7 @@ func (s *Postgres) RequestRecount(ctx context.Context, sheetID, lineID string, v
 			return domainProblem(err)
 		}
 		tag, err := tx.Exec(ctx, `update count_sheet_line set recount_requested = true, recount_reason = $4, recount_by = $5,
-			recount_rounds = recount_rounds + 1 where tenant_id = $1 and sheet_id = $2 and id = $3 and counted_qty is not null`,
+			recount_rounds = recount_rounds + 1, recount_source = 'SUPERVISOR' where tenant_id = $1 and sheet_id = $2 and id = $3 and counted_qty is not null`,
 			tp.TenantID, sheetID, lineID, reason, optionalText(tp.UserID))
 		if err != nil {
 			return err
@@ -203,7 +217,13 @@ func (s *Postgres) CancelCountSheet(ctx context.Context, sheetID string, version
 // that posting is what the freeze waits for. Any other COUNT journal, such as
 // the reversal of an earlier count or another sheet's count, is refused like
 // any movement.
-func checkCountFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, exemptSheet string, rs []*row) error {
+//
+// On a plan without a freeze the movement flags counted lines instead
+// (flagMovedLines, BR-16.8). rowsLocked says whether the caller already holds
+// on-hand row locks (or, for a count posting, its own sheet): such a caller
+// must not wait for another sheet's lock, so it is refused with 409
+// INV-CNT-009 when one is busy.
+func checkCountFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, exemptSheet string, rowsLocked bool, rs []*row) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -225,12 +245,76 @@ func checkCountFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, e
 		order by s.number limit 1`, tenantID, legalEntityID, products, hashes, exemptSheet).Scan(&number, &dims)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return flagMovedLines(ctx, tx, tenantID, legalEntityID, exemptSheet, rowsLocked, products, hashes)
 		}
 		return err
 	}
 	return problem(http.StatusConflict, domain.CodeCountFrozen,
 		fmt.Sprintf("dimension set %s is locked by open count sheet %s; post or cancel the sheet first", describeDims(domain.Dimensions(dims)), number))
+}
+
+// movedRecountReason is the reason written on a line flagged because stock of
+// its row moved after the line was counted.
+const movedRecountReason = "Stock of this row moved after the line was counted; count it again"
+
+// flagMovedLines applies BR-16.8 to plans without a freeze: a movement on a row
+// whose line on an OPEN, COUNTED or APPROVED sheet was already counted flags
+// that line for recount (source MOVEMENT), sends the sheet back to OPEN with any
+// approval cleared and raises countsheet.changed (RECOUNT_REQUESTED), all in the
+// movement's transaction. Uncounted lines are left alone (the counter will see
+// the new quantity) and so is the sheet whose own COUNT journal is posting.
+//
+// Lock order: a journal posting calls it before any on-hand row lock, so it
+// waits for the sheets in id order like every other sheet action. A caller that
+// already holds row locks (transfers, blockings, status steps) or its own sheet
+// (a count posting, which locks the sheet and then its rows) takes the sheet
+// locks NOWAIT: waiting there would close a cycle with a count posting of the
+// same rows (sheet, then rows), so a busy sheet is a retryable 409 instead.
+func flagMovedLines(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, exemptSheet string, rowsLocked bool, products []string, hashes [][]byte) error {
+	lock := `for update of s`
+	if rowsLocked {
+		lock += ` nowait`
+	}
+	rows, err := tx.Query(ctx, `select s.id::text from count_sheet s join count_plan p on p.tenant_id = s.tenant_id and p.id = s.plan_id
+		where s.tenant_id = $1 and s.legal_entity_id = $2 and not p.freeze_stock and s.status in ('OPEN', 'COUNTED', 'APPROVED')
+		  and ($5 = '' or s.id::text <> $5)
+		  and exists (select 1 from count_sheet_line l
+		       join unnest($3::uuid[], $4::bytea[]) as r(product, hash) on r.product = l.product_id and r.hash = l.dimension_set_hash
+		       where l.tenant_id = s.tenant_id and l.sheet_id = s.id and l.counted_qty is not null and not l.recount_requested)
+		order by s.id `+lock, tenantID, legalEntityID, products, hashes, exemptSheet)
+	var sheetIDs []string
+	if err == nil {
+		sheetIDs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	if err != nil {
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == lockNotAvailable {
+			return problem(http.StatusConflict, domain.CodeCountBusy,
+				"a count sheet holding this stock is being changed by another action and must be flagged for recount; retry")
+		}
+		return err
+	}
+	for _, id := range sheetIDs {
+		// Rechecked under the sheet lock: a movement that committed while this
+		// one waited may have flagged the lines already, and then the sheet
+		// must not be reopened or announced a second time.
+		tag, err := tx.Exec(ctx, `update count_sheet_line l set recount_requested = true, recount_reason = $5, recount_by = null,
+			recount_rounds = l.recount_rounds + 1, recount_source = 'MOVEMENT'
+			from unnest($3::uuid[], $4::bytea[]) as r(product, hash)
+			where l.tenant_id = $1 and l.sheet_id = $2 and r.product = l.product_id and r.hash = l.dimension_set_hash
+			  and l.counted_qty is not null and not l.recount_requested`, tenantID, id, products, hashes, movedRecountReason)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		if _, err := moveSheet(ctx, tx, id, invevents.CountActionRecountRequested, "", movedRecountReason,
+			`status = 'OPEN', approved_by = null, approved_at = null, submitted_by = null, submitted_at = null`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // orderedRows lists rows in the given key order.

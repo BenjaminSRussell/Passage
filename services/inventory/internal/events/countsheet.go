@@ -16,8 +16,9 @@ const (
 	CountActionPosted           = "POSTED"
 )
 
-// CountSheetChangedData is the payload of countsheet.changed. LineID and Reason
-// are set only for a recount request.
+// CountSheetChangedData is the payload of countsheet.changed. Reason and
+// RecountSource are set only for a recount request; LineID only for a
+// supervisor's, which names one line (a movement may flag several, BR-16.8).
 type CountSheetChangedData struct {
 	SheetID       string  `json:"sheetId"`
 	LegalEntityID string  `json:"legalEntityId"`
@@ -30,4 +31,5 @@ type CountSheetChangedData struct {
 	RecountLines  int     `json:"recountLines"`
 	LineID        *string `json:"lineId"`
 	Reason        *string `json:"reason"`
+	RecountSource *string `json:"recountSource"`
 }

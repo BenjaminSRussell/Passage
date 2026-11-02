@@ -24,6 +24,7 @@ export function CountPlansPage() {
           row.locationFrom || row.locationTo ? `Locations ${row.locationFrom || "start"} to ${row.locationTo || "end"}` : "",
           row.abcClass ? `Class ${row.abcClass}` : "",
           row.samplePct ? `${row.samplePct} % sample` : "",
+          row.minDaysSinceCount ? `Not counted for ${row.minDaysSinceCount} days` : "",
         ]
           .filter(Boolean)
           .join(" · ") || "Everything",

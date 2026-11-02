@@ -40,13 +40,13 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `insert into count_plan (tenant_id, legal_entity_id, id, name, warehouse, currency, unit, tolerance_pct,
-			tolerance_value, blind, freeze_stock, four_eyes, location_from, location_to, abc_class, sample_pct, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			tolerance_value, blind, freeze_stock, four_eyes, location_from, location_to, abc_class, sample_pct, min_days_since_count, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 			on conflict (tenant_id, idempotency_key) do update set name = count_plan.name
 			returning id::text, (xmax = 0)`,
 			tp.TenantID, in.LegalEntityID, ids.New(), strings.TrimSpace(in.Name), optionalText(in.Warehouse), in.Currency, in.Unit,
 			in.TolerancePct.String(), in.ToleranceValue.String(), in.Blind, in.FreezeStock, in.FourEyes, optionalText(in.LocationFrom),
-			optionalText(in.LocationTo), optionalText(in.ABCClass), optionalDecimal(in.SamplePct), key).Scan(&id, &inserted); err != nil {
+			optionalText(in.LocationTo), optionalText(in.ABCClass), optionalDecimal(in.SamplePct), optionalInt(in.MinDaysSinceCount), key).Scan(&id, &inserted); err != nil {
 			return scopeProblem(err)
 		}
 		var err error
@@ -59,7 +59,7 @@ func (s *Postgres) CreateCountPlan(ctx context.Context, key string, in domain.Co
 	if !inserted && (out.LegalEntityID != in.LegalEntityID || out.Name != strings.TrimSpace(in.Name) || out.Warehouse != in.Warehouse ||
 		out.Currency != in.Currency || out.Unit != in.Unit || !out.TolerancePct.Equal(in.TolerancePct) ||
 		!out.ToleranceValue.Equal(in.ToleranceValue) || out.Blind != in.Blind || out.FreezeStock != in.FreezeStock || out.FourEyes != in.FourEyes ||
-		out.LocationFrom != in.LocationFrom || out.LocationTo != in.LocationTo || out.ABCClass != in.ABCClass || !out.SamplePct.Equal(in.SamplePct)) {
+		out.LocationFrom != in.LocationFrom || out.LocationTo != in.LocationTo || out.ABCClass != in.ABCClass || !out.SamplePct.Equal(in.SamplePct) || out.MinDaysSinceCount != in.MinDaysSinceCount) {
 		return domain.CountPlan{}, false, problem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return out, inserted, nil
@@ -136,7 +136,8 @@ func (s *Postgres) GenerateCountSheet(ctx context.Context, planID, key string) (
 // snapshotLines writes one sheet line per on-hand row of the plan holding
 // physical stock, in (product, dimension set) order. Vendor-owned rows are
 // left out: a count variance posts a valued COUNT journal, which vendor-owned
-// stock never carries (BR-16.14).
+// stock never carries (BR-16.14). A plan with MinDaysSinceCount keeps only rows
+// whose last posted count is older than that many days, or never counted.
 func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.CountPlan, sheetID string) error {
 	rows, err := tx.Query(ctx, `select o.product_id::text, o.dimension_set_hash, (o.posted_qty + o.received + o.registered - o.deducted - o.picked)::text
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
@@ -148,7 +149,10 @@ func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.
 		       and c.site = coalesce(d.dims->>'site', '') and c.class = $6
 		       and c.run_id = (select r.id from abc_run r where r.tenant_id = o.tenant_id and r.legal_entity_id = o.legal_entity_id
 		                       order by r.created_at desc, r.id desc limit 1)))
-		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse, plan.LocationFrom, plan.LocationTo, plan.ABCClass)
+		  and ($7 = 0 or not exists (select 1 from count_sheet_line cl join count_sheet cs on cs.tenant_id = cl.tenant_id and cs.id = cl.sheet_id
+		       where cl.tenant_id = o.tenant_id and cl.product_id = o.product_id and cl.dimension_set_hash = o.dimension_set_hash
+		         and cs.legal_entity_id = o.legal_entity_id and cs.status = 'POSTED' and cl.counted_qty is not null and cl.counted_at > now() - make_interval(days => $7)))
+		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse, plan.LocationFrom, plan.LocationTo, plan.ABCClass, plan.MinDaysSinceCount)
 	if err != nil {
 		return err
 	}
@@ -246,7 +250,7 @@ func (s *Postgres) EnterCount(ctx context.Context, sheetID, lineID string, versi
 		if sheet.Version != version {
 			return problem(http.StatusPreconditionFailed, CodeConflictVersion, "count sheet changed since it was read; reread and retry")
 		}
-		tag, err := tx.Exec(ctx, `update count_sheet_line set counted_qty = $4, counted_by = $5, counted_at = now(), recount_requested = false
+		tag, err := tx.Exec(ctx, `update count_sheet_line set counted_qty = $4, counted_by = $5, counted_at = now(), recount_requested = false, recount_source = null
 			where tenant_id = $1 and sheet_id = $2 and id = $3`, tp.TenantID, sheetID, lineID, counted.String(), optionalText(tp.UserID))
 		if err != nil {
 			return err
@@ -432,13 +436,13 @@ func (s *Postgres) postCountJournal(ctx context.Context, tx pgx.Tx, tenantID str
 
 const countPlanColumns = `id::text, legal_entity_id::text, name, coalesce(warehouse, ''), currency::text, unit, tolerance_pct::text,
 	tolerance_value::text, blind, freeze_stock, four_eyes, coalesce(location_from, ''), coalesce(location_to, ''), coalesce(abc_class, ''),
-	coalesce(sample_pct, 0)::text, created_at`
+	coalesce(sample_pct, 0)::text, coalesce(min_days_since_count, 0), created_at`
 
 func scanCountPlan(row pgx.Row) (domain.CountPlan, error) {
 	var p domain.CountPlan
 	var pct, val, sample string
 	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.Warehouse, &p.Currency, &p.Unit, &pct, &val, &p.Blind, &p.FreezeStock, &p.FourEyes,
-		&p.LocationFrom, &p.LocationTo, &p.ABCClass, &sample, &p.CreatedAt); err != nil {
+		&p.LocationFrom, &p.LocationTo, &p.ABCClass, &sample, &p.MinDaysSinceCount, &p.CreatedAt); err != nil {
 		return p, err
 	}
 	p.TolerancePct, p.ToleranceValue = decimal.RequireFromString(pct), decimal.RequireFromString(val)
@@ -486,7 +490,7 @@ func loadCountSheet(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (
 		return out, err
 	}
 	rows, err := tx.Query(ctx, `select l.id::text, l.line_no, l.product_id::text, d.dims, l.expected_qty::text, l.counted_qty::text,
-		coalesce(l.counted_by, ''), l.counted_at, l.posted_variance::text, l.recount_requested, coalesce(l.recount_reason, ''), l.recount_rounds
+		coalesce(l.counted_by, ''), l.counted_at, l.posted_variance::text, l.recount_requested, coalesce(l.recount_reason, ''), l.recount_rounds, coalesce(l.recount_source, '')
 		from count_sheet_line l
 		join dimension_set d on d.tenant_id = l.tenant_id and d.hash = l.dimension_set_hash
 		where l.tenant_id = $1 and l.sheet_id = $2 order by l.line_no`, tp.TenantID, id)
@@ -499,7 +503,7 @@ func loadCountSheet(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (
 		var dims []byte
 		var expected string
 		var counted, posted *string
-		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &dims, &expected, &counted, &l.CountedBy, &l.CountedAt, &posted, &l.RecountRequested, &l.RecountReason, &l.RecountRounds); err != nil {
+		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &dims, &expected, &counted, &l.CountedBy, &l.CountedAt, &posted, &l.RecountRequested, &l.RecountReason, &l.RecountRounds, &l.RecountSource); err != nil {
 			return out, err
 		}
 		if err := json.Unmarshal(dims, &l.Dims); err != nil {

@@ -206,7 +206,7 @@ export function CountSheetPage() {
       header: "Recount",
       render: (row) =>
         row.recountRequested ? (
-          <Badge tone="warning">{`Recount: ${row.recountReason ?? "requested"}`}</Badge>
+          <Badge tone="warning">{row.recountSource === "MOVEMENT" ? "Recount: stock moved after counting" : `Recount: ${row.recountReason ?? "requested"}`}</Badge>
         ) : reviewable && row.countedQty !== null ? (
           <RecountRequest
             key={`${row.id}-${sheet.version}`}
@@ -294,7 +294,8 @@ export function CountSheetPage() {
       ) : null}
       {sheet.recountLines > 0 ? (
         <Alert tone="warning" title="Recount requested">
-          {sheet.recountLines} line(s) must be entered again before the sheet can be submitted or posted.
+          {sheet.recountLines} line(s) must be entered again before the sheet can be submitted or posted.{" "}
+          {sheet.lines.some((l) => l.recountRequested && l.recountSource === "MOVEMENT") ? "Stock moved on some lines after they were counted." : ""}
         </Alert>
       ) : null}
       {sheet.fourEyes && reviewable && sheet.status !== "APPROVED" ? (
