@@ -101,14 +101,14 @@ func TestCreateRun_RoundTripAndEvent(t *testing.T) {
 		t.Fatalf("create: replayed=%v err=%v", replayed, err)
 	}
 	if !ids.Valid(rec.ID) || rec.Version != 1 || rec.Status != store.StatusCompleted || rec.CreatedBy != "user-test" ||
-		rec.InputsHash == "" || rec.UnitCount != 1 || rec.EliminationCount != 16 || !rec.CTA.Equal(dec("38000")) {
+		rec.InputsHash == "" || rec.UnitCount != 1 || rec.EliminationCount != 17 || !rec.CTA.Equal(dec("38000")) {
 		t.Fatalf("header = %+v", rec)
 	}
 	got, err := s.GetRun(ctx, rec.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Balances) != 6 || len(got.Entries) != 16 || got.GroupID != "G1" || got.Period != "2026-06" || got.Currency != "USD" {
+	if len(got.Balances) != 6 || len(got.Entries) != 17 || got.GroupID != "G1" || got.Period != "2026-06" || got.Currency != "USD" {
 		t.Fatalf("detail = %+v", got.RunRecord)
 	}
 	if got.Balances[2].Account != domain.AcctTranslationCTA || !got.Balances[2].Amount.Equal(dec("38000")) {
@@ -132,7 +132,7 @@ func TestCreateRun_RoundTripAndEvent(t *testing.T) {
 	}
 	evts := outboxTypes(t, pool, ctx)
 	if len(evts) != 1 || evts[0]["_type"] != "dev.passage.consol.run.completed.v1" || evts[0]["runId"] != rec.ID ||
-		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "38000.00" || evts[0]["currency"] != "USD" || evts[0]["eliminationCount"] != float64(16) {
+		evts[0]["groupId"] != "G1" || evts[0]["version"] != float64(1) || evts[0]["ctaAmount"] != "38000.00" || evts[0]["currency"] != "USD" || evts[0]["eliminationCount"] != float64(17) {
 		t.Fatalf("outbox = %v", evts)
 	}
 }
@@ -152,7 +152,7 @@ func TestCreateRun_RerunIsANewVersion(t *testing.T) {
 		t.Fatalf("another period starts at version 1: %+v err=%v", other, err)
 	}
 	again, err := s.GetRun(ctx, first.ID)
-	if err != nil || len(again.Entries) != 16 || !again.CTA.Equal(dec("38000")) {
+	if err != nil || len(again.Entries) != 17 || !again.CTA.Equal(dec("38000")) {
 		t.Fatalf("version 1 changed by the rerun: %+v err=%v", again.RunRecord, err)
 	}
 	page, err := s.ListRuns(ctx, store.RunFilter{GroupID: "G1", Period: "2026-06"}, "", 50)
@@ -276,7 +276,7 @@ func TestRunData_IsImmutable(t *testing.T) {
 			t.Errorf("truncate %s = %v; want the immutability trigger (55000)", table, err)
 		}
 	}
-	if got, err := s.GetRun(ctx, rec.ID); err != nil || len(got.Entries) != 16 {
+	if got, err := s.GetRun(ctx, rec.ID); err != nil || len(got.Entries) != 17 {
 		t.Fatalf("run changed: %v", err)
 	}
 }

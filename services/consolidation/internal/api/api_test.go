@@ -66,13 +66,13 @@ func TestPreviewEliminations_PSExample(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Balanced || len(got.Entries) != 16 {
+	if !got.Balanced || len(got.Entries) != 17 {
 		t.Fatalf("response = %+v", got)
 	}
-	if got.Totals["debit"] != "1032952.00" || got.Totals["credit"] != "1032952.00" {
+	if got.Totals["debit"] != "1034475.81" || got.Totals["credit"] != "1034475.81" {
 		t.Fatalf("totals = %v", got.Totals)
 	}
-	ruleDebits := map[string]string{"E1": "108000.00", "E2": "110000.00", "E3": "15552.00", "E4": "767000.00", "E5": "32400.00"}
+	ruleDebits := map[string]string{"E1": "108000.00", "E2": "110000.00", "E3": "15552.00", "E4": "768523.81", "E5": "32400.00"}
 	for rule, want := range ruleDebits {
 		if got.Rules[rule]["debit"] != want || got.Rules[rule]["credit"] != want {
 			t.Fatalf("rule %s totals = %v; want %s each side", rule, got.Rules[rule], want)

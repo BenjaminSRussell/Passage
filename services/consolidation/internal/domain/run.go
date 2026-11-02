@@ -175,7 +175,7 @@ func withUnit(unit string, err error) error {
 
 // RulesVersion names the elimination and translation rules a run was computed
 // with. It is part of the inputs hash, so a rule change never matches an older run.
-const RulesVersion = "consol-rules-1"
+const RulesVersion = "consol-rules-2"
 
 const hashScale = 6
 
@@ -196,6 +196,8 @@ type canonicalUnit struct {
 	InvestmentCost   string `json:"investmentCost"`
 	NetIncome        string `json:"netIncome"`
 	SellerIsSub      bool   `json:"sellerIsSubsidiary"`
+	ICNetInvestment  bool   `json:"icNetInvestment"`
+	FXGainLossAcct   string `json:"fxGainLossAccount"`
 	OpeningNetAssets string `json:"openingNetAssets"`
 	ClosingNetAssets string `json:"closingNetAssets"`
 }
@@ -221,7 +223,7 @@ func (in RunInput) Canonical() ([]byte, error) {
 			Opening: f(p.Rates.Opening), Historical: f(p.Rates.Historical), ICSales: f(p.ICSales), ICCost: f(p.ICCost),
 			UnsoldShare: f(p.UnsoldShare), ICReceivable: f(p.ICReceivable), PayableGroup: f(p.PayableGroup),
 			ShareCapital: f(p.ShareCapital), PreAcqRE: f(p.PreAcqRE), InvestmentCost: f(p.InvestmentCost),
-			NetIncome: f(p.NetIncome), SellerIsSub: p.SellerIsSubsidiary,
+			NetIncome: f(p.NetIncome), SellerIsSub: p.SellerIsSubsidiary, ICNetInvestment: p.ICNetInvestment, FXGainLossAcct: p.icDifferenceAccount(),
 			OpeningNetAssets: f(u.OpeningNetAssets), ClosingNetAssets: f(u.ClosingNetAssets),
 		})
 	}

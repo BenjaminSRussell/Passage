@@ -45,7 +45,7 @@ func TestComputeRun_TranslationEliminationsAndStatements(t *testing.T) {
 	if !res.CTA.Equal(dec("38000")) {
 		t.Errorf("CTA = %s, want 38000 (AC-40.6)", res.CTA)
 	}
-	if len(res.Balances) != 6 || len(res.Entries) != 16 {
+	if len(res.Balances) != 6 || len(res.Entries) != 17 {
 		t.Fatalf("balances=%d entries=%d", len(res.Balances), len(res.Entries))
 	}
 	entries := make([]Entry, 0, len(res.Entries))

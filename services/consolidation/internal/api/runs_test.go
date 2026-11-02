@@ -90,7 +90,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 	}
 	started := created[runOut](t, rec)
 	if started.Version != 1 || started.Status != "completed" || started.CreatedBy != "user-7" || started.CTAAmount != "38000.00" ||
-		started.UnitCount != 1 || started.EliminationCount != 16 || rec.Header().Get("Location") != runsPath+"/"+started.ID {
+		started.UnitCount != 1 || started.EliminationCount != 17 || rec.Header().Get("Location") != runsPath+"/"+started.ID {
 		t.Fatalf("started = %+v", started)
 	}
 
@@ -117,7 +117,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 		Balances     []struct{ Unit, Account, Amount string }
 		Eliminations []struct{ Unit, Rule, Account, Debit, Credit string }
 	}](t, call(a, http.MethodGet, runsPath+"/"+started.ID, tenantID, api.DutyView, "", ""))
-	if got.ID != started.ID || len(got.Balances) != 6 || len(got.Eliminations) != 16 || got.Balances[2].Account != "CTA" || got.Balances[2].Amount != "38000.00" {
+	if got.ID != started.ID || len(got.Balances) != 6 || len(got.Eliminations) != 17 || got.Balances[2].Account != "CTA" || got.Balances[2].Amount != "38000.00" {
 		t.Fatalf("detail = %+v", got)
 	}
 

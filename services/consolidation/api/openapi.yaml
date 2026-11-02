@@ -533,6 +533,8 @@ components:
         investmentCost: { $ref: '#/components/schemas/Decimal', description: Parent's investment in group currency }
         netIncome: { $ref: '#/components/schemas/Decimal', description: Subsidiary current-year net income }
         sellerIsSubsidiary: { type: boolean, description: Upstream sale; its unrealized profit is shared with the NCI }
+        icNetInvestment: { type: boolean, default: false, description: IC balance is part of the net investment in the foreign operation; its E2 exchange difference goes to CTA instead of profit or loss (IAS 21.32) }
+        fxGainLossAccount: { type: string, description: Account for the E2 exchange difference to profit or loss (IAS 21.45); FX_GAIN_LOSS when omitted }
     Totals:
       type: object
       required: [debit, credit]

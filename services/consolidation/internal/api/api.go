@@ -178,6 +178,8 @@ type eliminationRequest struct {
 	InvestmentCost     string    `json:"investmentCost"`
 	NetIncome          string    `json:"netIncome"`
 	SellerIsSubsidiary bool      `json:"sellerIsSubsidiary"`
+	ICNetInvestment    bool      `json:"icNetInvestment"`
+	FXGainLossAccount  string    `json:"fxGainLossAccount"`
 }
 
 type entryBody struct {
@@ -262,6 +264,8 @@ func toPair(req eliminationRequest) (domain.Pair, map[string]string) {
 		InvestmentCost:     f.get("investmentCost", req.InvestmentCost, false),
 		NetIncome:          f.get("netIncome", req.NetIncome, false),
 		SellerIsSubsidiary: req.SellerIsSubsidiary,
+		ICNetInvestment:    req.ICNetInvestment,
+		FXGainLossAccount:  req.FXGainLossAccount,
 	}
 	return p, f
 }
