@@ -1,0 +1,62 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress: the edge gateway reaches the API, Prometheus the admin port.
+# Egress: DNS, the database, Kafka, and public https webhook receivers only
+# (private, loopback, link-local and metadata ranges are excluded here as well
+# as in the application's SSRF guard).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: integration-hub
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: integration-hub
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.gatewayNamespace | quote }}
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: passage-api
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace | quote }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace | quote }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.postgres.namespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.networkPolicy.postgres.port }} }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.kafka.namespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.networkPolicy.kafka.port }} }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.networkPolicy.webhookExceptCidrs | nindent 14 }}
+      ports:
+        {{- range .Values.networkPolicy.webhookPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}

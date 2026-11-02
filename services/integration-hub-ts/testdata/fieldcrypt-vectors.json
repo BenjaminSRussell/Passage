@@ -1,0 +1,47 @@
+{
+  "currentKeyId": "k2025",
+  "generator": "platform/go/fieldcrypt Seal (envelope v1), throwaway program; regenerate with the same keys to compare",
+  "keys": "k2024=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=,k2025=//79/Pv6+fj39vX08/Lx8O/u7ezr6uno5+bl5OPi4eA=",
+  "vectors": [
+    {
+      "name": "current key",
+      "keyId": "k2025",
+      "tenantId": "6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b",
+      "field": "hub_subscription.secret",
+      "plain": "whsec_dGhpcyBpcyBhIHRlc3Qgc2VjcmV0IQ",
+      "sealed": "AQVrMjAyNbAkkxHO6u0iPrmIRLiajr1BdYgYRnif4wjiv3mchBIf7SVGsgUp9tHYa2jPh5dMUT7A7FPPBzIiWoUXYEhGlfI="
+    },
+    {
+      "name": "rotated key",
+      "keyId": "k2024",
+      "tenantId": "6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b",
+      "field": "hub_subscription.secret",
+      "plain": "whsec_sealed-under-the-old-key",
+      "sealed": "AQVrMjAyNPTFBPl8OKXh/G/OTlxAp96nsvo7RC5qGMBtjN9rUIW7n5VXlwBavL3/+oqg7O6CqyKb+2dtmI85QhA="
+    },
+    {
+      "name": "second tenant",
+      "keyId": "k2025",
+      "tenantId": "0b9a8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d",
+      "field": "hub_subscription.secret",
+      "plain": "a receiver-chosen secret of 32+ chars",
+      "sealed": "AQVrMjAyNfq0YE77+l0vuLwPmXwh05exYli0gPUa2WuICgd6Hfid5KMlLkMRS9tyRBJ3TydTtKBu8qYWpVekE2lKfqZ/hIHs"
+    },
+    {
+      "name": "empty value",
+      "keyId": "k2025",
+      "tenantId": "6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b",
+      "field": "other.field",
+      "plain": "",
+      "sealed": "AQVrMjAyNVdkIwyBc5FhmfOlBLp8lRR9444elGV7IgpmCC8="
+    },
+    {
+      "name": "unicode",
+      "keyId": "k2025",
+      "tenantId": "0b9a8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d",
+      "field": "hub_subscription.secret",
+      "plain": "sécrèt-☃-0123456789",
+      "sealed": "AQVrMjAyNbdyURq3VQronguwnLTDfRQLU0ME306XIhAQTz9cb2o2NZ2MJwf99ze35Ss6/sEoX68yWQ=="
+    }
+  ]
+}

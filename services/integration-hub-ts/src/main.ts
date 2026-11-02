@@ -1,0 +1,66 @@
+// Entry point: API on :8080, admin (/metrics, /healthz, /readyz) on :9090, the
+// Kafka consumer when KAFKA_BROKERS and HUB_TOPICS are set, and the retry poller.
+
+import { createServer } from "node:http";
+import pg from "pg";
+
+import { FieldKeys } from "./crypt.ts";
+import { consumerConfigFromEnv, startConsumer, type RunningConsumer } from "./consumer.ts";
+import { httpTransport } from "./dispatcher.ts";
+import { Metrics } from "./metrics.ts";
+import { HubStore, MIGRATIONS_DIR, migrate } from "./pgStore.ts";
+import { Poller } from "./poller.ts";
+import { createAdminServer, createHubHandler } from "./server.ts";
+import { allowHttpFromEnv } from "./ssrf.ts";
+
+const env = process.env;
+const databaseUrl = env["DATABASE_URL"];
+if (databaseUrl === undefined || databaseUrl === "") {
+  console.error("DATABASE_URL is required");
+  process.exit(1);
+}
+
+const pool = new pg.Pool({ connectionString: databaseUrl, max: Number(env["HUB_DB_POOL"] ?? 10) });
+if (env["MIGRATE_ON_START"] === "true") {
+  await migrate(pool, MIGRATIONS_DIR);
+}
+// Signing secrets are sealed at rest; without keys, creating a subscription answers 501 and the poller cannot sign.
+const keys = FieldKeys.fromEnv(env);
+if (keys === null) {
+  console.warn(JSON.stringify({ level: "warn", msg: "FIELDCRYPT_KEYS is empty: webhook subscriptions cannot be created or delivered until it is set" }));
+}
+const store = new HubStore(pool, keys);
+const metrics = new Metrics();
+const ping = async () => {
+  await pool.query("select 1");
+};
+
+const api = createServer(createHubHandler({ store, metrics, ping, guard: { allowHttp: allowHttpFromEnv() } }));
+const admin = createAdminServer(metrics, ping);
+api.listen(8080);
+admin.listen(9090);
+
+const poller = new Poller({
+  store,
+  metrics,
+  transport: httpTransport({ allowHttp: allowHttpFromEnv() }),
+  onError: (err) => console.error(JSON.stringify({ level: "error", msg: "poller", error: (err as Error).message })),
+});
+poller.start(Number(env["HUB_POLL_INTERVAL_MS"] ?? 2000));
+
+let consumer: RunningConsumer | null = null;
+const consumerConfig = consumerConfigFromEnv(env);
+if (consumerConfig !== null) {
+  consumer = await startConsumer(consumerConfig, store, metrics);
+}
+
+const shutdown = async () => {
+  api.close();
+  admin.close();
+  await poller.stop();
+  await consumer?.stop();
+  await pool.end();
+  process.exit(0);
+};
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());

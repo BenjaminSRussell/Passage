@@ -72,8 +72,8 @@ localhost that keeps an order projection (failures, a dropped connection, a lost
 a crash before recording, dead-letter after 9 attempts on the BR-35.7 schedule,
 replay into an empty consumer and from a timestamp).
 
-The Postgres store, the outbox consumer, the `next_retry_at` poller and Kafka are
-later work. See `NOT-IMPLEMENTED.md`.
+The Postgres store, the Kafka consumer and the `next_retry_at` poller are slice 6 (below).
+See `NOT-IMPLEMENTED.md`.
 
 ### Webhook SSRF guard
 
@@ -87,15 +87,85 @@ DNS change between check and connect has no effect; SNI and Host stay the hostna
 Redirects are never followed: a 3xx is a failed delivery and retries on the schedule.
 A rejected URL is "no response". `test/ssrf.test.ts` covers each range with a stub resolver.
 
+## Slice 6: the running hub
+
+`src/main.ts` starts everything: the API on :8080, the admin listener (`/metrics`,
+`/healthz`, `/readyz`) on :9090, the retry poller and, when `KAFKA_BROKERS` and
+`HUB_TOPICS` are set, the Kafka consumer. The Dispatcher is reused unchanged.
+
+- `src/pgStore.ts`: Postgres store. `migrations/0001_hub.sql` creates `hub_subscription`,
+  `hub_delivery` and `hub_attempt`, each with `tenant_id`, ENABLE + FORCE row-level
+  security, the tenant policy and the `passage_app` grants. Every query runs in a
+  transaction that sets `passage.tenant_id`. `PgDeliveryStore` implements the
+  Dispatcher's synchronous `DeliveryStore` over one subscription: it is loaded from
+  Postgres, the Dispatcher mutates it, and `flush()` writes the changes in order. It
+  loads, per aggregate, the first 100 pending events in sequence order (what one pass
+  can deliver), at most 5,000 in all, aggregates with the earliest due head first, so
+  a large backlog or replay neither breaks per-aggregate order nor fills memory.
+- `src/crypt.ts`: field encryption at rest, a node:crypto port of
+  `platform/go/fieldcrypt` envelope v1 (HKDF-SHA256 with the tenant id as salt,
+  AES-256-GCM, tenant id and field name as additional data, the master key id in the
+  envelope for rotation). Keys come from `FIELDCRYPT_KEYS_FILE` (or `FIELDCRYPT_KEYS`)
+  and `FIELDCRYPT_CURRENT_KEY_ID`. The signing secret is stored only as
+  `hub_subscription.secret_sealed` (field `hub_subscription.secret`) and opened only
+  by the poller to sign. Without keys, creating a subscription answers 501 HUB-0501.
+  `testdata/fieldcrypt-vectors.json` holds values sealed by the Go package;
+  `test/crypt.test.ts` opens them and reproduces their bytes.
+- `src/poller.ts`: every `HUB_POLL_INTERVAL_MS` (default 2000) asks `hub_due_subscriptions`
+  (SECURITY DEFINER, ids only, search_path pinned to the schema with `pg_temp` last,
+  executable by `passage_app` only, because the poller has no tenant until it finds one) for
+  subscriptions with a delivery due, takes a lease on each (`lease_until`, so replicas do
+  not double-send; a replica starts no send within 15 s of its lease ending, and gives
+  the lease back only if it still holds it) and runs `Dispatcher.tick`. The recorded outcome of each send is
+  flushed before the next send; a crash in between leaves the event pending and it is
+  sent again (at-least-once). Every delivery carries `Idempotency-Key: <event id>`,
+  the same on retries, resends and replays, so a receiver can apply it once. A 410
+  pauses the subscription (HUB-0114); `:resume` reactivates it.
+- `src/consumer.ts`: kafkajs consumer. Each message must be a CloudEvents 1.0 JSON object
+  with `id`, `type` and `tenantid`; its type is matched with `matchesAny` against the
+  tenant's subscriptions (paused ones keep collecting) and a delivery is enqueued. The
+  offset is committed after the enqueue transaction commits; the unique
+  (subscription, event id) makes a redelivered message a no-op. Ordering key: the
+  `passagesequence` extension, else the partition offset; the aggregate is `subject`.
+  A message that is not a usable CloudEvent is published to `HUB_DLQ_TOPIC` with
+  `x-dlq-reason` and the source topic, partition and offset, then committed.
+- `src/server.ts`: `/v1/hub/subscriptions` (create, list, get, patch, delete),
+  `/v1/hub/subscriptions/{id}:resume`, `:replay`, `/v1/hub/deliveries?status=`,
+  `/v1/hub/dead-letters`. Identity comes from `x-passage-tenant`, `x-passage-user` and
+  `x-passage-duties` set by the gateway (the same contract as the agents API). Duties:
+  `hub.subscription.write` for create, update, delete, resume and replay;
+  `hub.delivery.read` for lists and reads. Create and update run `validateWebhookUrl`
+  (422 HUB-0422). The signing secret is returned once, on create. `:replay` re-queues
+  the subscription's own delivered or dead-lettered events from `from` whose type
+  still matches its patterns, oldest first, up to `cap`, inside the caller's tenant,
+  and answers `{enqueued, truncated}`. `api/openapi.yaml` describes the routes.
+- `charts/integration-hub`: deployment (numeric non-root user), service, DB URL secret,
+  Kafka values, `fieldCrypt.keysSecret` / `fieldCrypt.currentKeyId`, a NetworkPolicy
+  (ingress to :8080 from the edge gateway only, :9090 from monitoring; egress to DNS,
+  Postgres, Kafka and public https), ServiceMonitor toggle. `Dockerfile` runs `node src/main.ts` (Node 24
+  strips types; no build step).
+
+Configuration: `DATABASE_URL` (required), `MIGRATE_ON_START=true`, `HUB_POLL_INTERVAL_MS`,
+`INTEGRATION_HUB_ALLOW_HTTP`, `KAFKA_BROKERS`, `KAFKA_GROUP` (default `integration-hub`),
+`HUB_TOPICS` (comma separated), `HUB_DLQ_TOPIC`, `KAFKA_USERNAME`, `KAFKA_PASSWORD_FILE`,
+`KAFKA_TLS_CA_FILE` (SASL SCRAM-SHA-512 over TLS), `FIELDCRYPT_KEYS_FILE`,
+`FIELDCRYPT_CURRENT_KEY_ID`. Migrations must run as the owner role, never `passage_app`
+(the migration refuses).
+
 ## Run and test
 
 ```sh
 cd services/integration-hub-ts
-npm test        # node --test on every file in test/ (Node 24+, native type stripping)
+npm ci
+npm run typecheck   # tsc --noEmit
+npm test            # vitest; the Postgres tests skip without PASSAGE_TEST_DATABASE_URL
 ```
 
-There are no runtime dependencies. Strict typechecking needs `@types/node` and
-`typescript`, which are not added in this slice.
+Dependencies (approved for this service): `pg`, `kafkajs`; dev: `typescript`,
+`@types/node`, `@types/pg`, `vitest`. The pure modules stay dependency-free.
+The Postgres tests need a database owner role in `PASSAGE_TEST_DATABASE_URL` and, to
+exercise row-level security as production does, a `passage_app` role (NOSUPERUSER
+NOBYPASSRLS) in `PASSAGE_TEST_APP_DATABASE_URL`; each test file works in its own schema.
 
 ## Error codes
 
@@ -104,4 +174,5 @@ There are no runtime dependencies. Strict typechecking needs `@types/node` and
 | HUB-0113 | Quota exceeded (429); `take` in `src/quota.ts` computes it and `Retry-After`, the gateway enforces it |
 | HUB-0114 | Subscription paused after a 410 Gone response |
 | HUB-0115 | Event dead-lettered after the retry schedule is exhausted |
+| HUB-0400 / 0401 / 0403 / 0404 / 0405 / 0409 / 0413 / 0422 / 0500 | API: malformed request / no identity / missing duty / not found / method not allowed / stale version / body too large / unsafe webhook URL / unexpected error |
 | EDI-0139 | PLM ECO effectivity earlier than today, moved to today (`decideEcoImport` in `src/plm.ts`) |

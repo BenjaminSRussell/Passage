@@ -7,8 +7,7 @@
 // response means the event is sent again, never dropped.
 //
 // The store is an interface; MemoryDeliveryStore backs the tests and a single
-// process. The Postgres store and the outbox consumer that feeds `enqueue` are
-// later work (NOT-IMPLEMENTED.md).
+// process, PgDeliveryStore (src/pgStore.ts) the running hub.
 
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -275,8 +274,11 @@ export class Dispatcher {
       passagesequence: e.sequence,
       data: e.data,
     });
+    // At-least-once: a retry, a resend after a crash and a replay all carry the
+    // same Idempotency-Key (the CloudEvent id), so a receiver applies the event once.
     const headers: Record<string, string> = {
       "content-type": "application/cloudevents+json",
+      "idempotency-key": e.eventId,
       "passage-signature": sign(this.#o.subscription.secret, now, body),
       ...(delivery.replay ? replayHeaders() : {}),
     };

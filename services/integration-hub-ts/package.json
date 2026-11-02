@@ -1,13 +1,25 @@
 {
   "name": "@passage/integration-hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Integration hub: webhook delivery policy (signing, retry schedule, ordering), dispatch state machine, replay planning, the client quota token bucket, subscription event-type patterns and the PLM import precedence. Dependency-free.",
+  "description": "Integration hub: webhook delivery policy, dispatcher, Postgres store, Kafka event consumer, retry poller and the /v1/hub HTTP API.",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test test/webhook.test.ts test/dispatch.test.ts test/quota.test.ts test/filter.test.ts test/plm.test.ts test/dispatcher.test.ts test/ssrf.test.ts"
+    "start": "node src/main.ts",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "kafkajs": "2.2.4",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "@types/pg": "8.15.5",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
   }
 }

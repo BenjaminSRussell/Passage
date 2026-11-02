@@ -1,0 +1,47 @@
+image: { repository: ghcr.io/benjaminsrussell/passage-integration-hub, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Secret with the key DATABASE_URL (database passage_integration_hub, role passage_app).
+databaseSecret: integration-hub-db
+migrateOnStart: false
+# Several replicas are safe: the poller takes a per-subscription lease and the consumer group splits partitions.
+replicaCount: 2
+pollIntervalMs: 2000
+# Webhook signing secrets are sealed at rest (fieldcrypt envelope v1). Secret with the key
+# "keys" (comma- or newline-separated id=base64 32-byte master keys) and the id to seal with.
+# Empty: creating a subscription answers 501 and nothing can be signed.
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""
+# Outbound webhooks are https only; INTEGRATION_HUB_ALLOW_HTTP stays off outside development.
+allowHttp: false
+kafka:
+  # Empty brokers or topics: the consumer is not started (API and poller only).
+  brokers: ""
+  group: integration-hub
+  # CloudEvents topics to consume, comma separated (passage.<context>.<entity>).
+  topics: "passage.sales.order,passage.billing.invoice"
+  dlqTopic: integration-hub.dlq
+  username: integration-hub
+  # Secret with the keys password and ca.crt (the KafkaUser secret).
+  secret: ""
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+serviceMonitor: { enabled: false, interval: 30s }
+networkPolicy:
+  enabled: true
+  gatewayNamespace: envoy-gateway-system
+  metricsNamespace: monitoring
+  # Namespaces of the database and the Kafka brokers the hub may reach.
+  postgres: { namespace: postgres, port: 5432 }
+  kafka: { namespace: kafka, port: 9093 }
+  dnsNamespace: kube-system
+  # Webhook receivers: public addresses on 443 only. These ranges are never reachable,
+  # which backs up the SSRF guard in the application.
+  webhookExceptCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 169.254.0.0/16
+    - 100.64.0.0/10
+    - 127.0.0.0/8
+  webhookPorts: [443]

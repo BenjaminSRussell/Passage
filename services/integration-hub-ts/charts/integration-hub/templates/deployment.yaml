@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: integration-hub
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: integration-hub
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: integration-hub
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's node user; numeric so the kubelet can check runAsNonRoot.
+        runAsUser: 1000
+        runAsGroup: 1000
+{{- if or .Values.kafka.secret .Values.fieldCrypt.keysSecret }}
+        # Mounted secrets are 0440: the image's node user (uid 1000) reads them through this group.
+        fsGroup: 1000
+{{- end }}
+        seccompProfile:
+          type: RuntimeDefault
+{{- if or .Values.kafka.secret .Values.fieldCrypt.keysSecret }}
+      volumes:
+{{- if .Values.kafka.secret }}
+        - name: kafka
+          secret:
+            secretName: {{ .Values.kafka.secret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
+{{- end }}
+      containers:
+        - name: integration-hub
+          image: {{ include "integration-hub.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            - name: HUB_POLL_INTERVAL_MS
+              value: {{ .Values.pollIntervalMs | quote }}
+            - name: INTEGRATION_HUB_ALLOW_HTTP
+              value: {{ ternary "1" "0" .Values.allowHttp | quote }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - name: FIELDCRYPT_KEYS_FILE
+              value: /var/run/passage/field-crypt/keys
+            - name: FIELDCRYPT_CURRENT_KEY_ID
+              value: {{ required "fieldCrypt.currentKeyId is required with fieldCrypt.keysSecret" .Values.fieldCrypt.currentKeyId | quote }}
+{{- end }}
+{{- if and .Values.kafka.brokers .Values.kafka.topics }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.kafka.brokers | quote }}
+            - name: KAFKA_GROUP
+              value: {{ .Values.kafka.group | quote }}
+            - name: HUB_TOPICS
+              value: {{ .Values.kafka.topics | quote }}
+            - name: HUB_DLQ_TOPIC
+              value: {{ required "kafka.dlqTopic is required with kafka.brokers" .Values.kafka.dlqTopic | quote }}
+{{- if .Values.kafka.secret }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.kafka.username | quote }}
+            - name: KAFKA_PASSWORD_FILE
+              value: /var/run/passage/kafka/password
+            - name: KAFKA_TLS_CA_FILE
+              value: /var/run/passage/kafka/ca.crt
+{{- end }}
+{{- end }}
+{{- if or .Values.kafka.secret .Values.fieldCrypt.keysSecret }}
+          volumeMounts:
+{{- if .Values.kafka.secret }}
+            - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+{{- end }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
+{{- end }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

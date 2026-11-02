@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: Passage integration hub
+  version: 0.1.0
+  description: |
+    Webhook subscriptions, the delivery log, the dead-letter list, resume after a
+    410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
+    edge gateway, which verifies the user's token and sets x-passage-tenant,
+    x-passage-user and x-passage-duties (client copies are stripped). Every row is
+    scoped to the caller's tenant by row-level security. Webhook signing secrets are
+    sealed at rest with field encryption. Each delivery is a structured CloudEvent
+    signed in `Passage-Signature`; its `Idempotency-Key` header is the event id and
+    stays the same on every retry, resend and replay, so a receiver applies an event
+    once. Errors are RFC 9457
+    problems with a stable `code`: HUB-04xx for HTTP-level errors, HUB-0114 (a 410
+    paused the subscription) and HUB-0115 (the retry schedule was exhausted) on
+    subscriptions and deliveries.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/hub/subscriptions:
+    post:
+      operationId: createSubscription
+      summary: Create a webhook subscription
+      description: |
+        The URL is checked by the SSRF guard (https only, public addresses only, no
+        credentials in the URL): a private, loopback or cloud-metadata address is
+        refused with 422 HUB-0422. `patterns` are CloudEvents type patterns (`*` one
+        segment, trailing `**` one or more). The signing secret is generated unless
+        supplied, is sealed at rest, and is returned only in this response. A
+        repeated Idempotency-Key returns the subscription created first, without the
+        secret. Without field encryption keys the hub cannot store secrets and
+        answers 501 HUB-0501.
+      x-passage-duty: hub.subscription.write
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewSubscription"}
+      responses:
+        "201":
+          description: The subscription was created; the body carries the signing secret once.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedSubscription"}
+        "200":
+          description: The Idempotency-Key was already used; the first subscription is returned without its secret.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Subscription"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "501": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listSubscriptions
+      summary: List the tenant's webhook subscriptions, newest first
+      description: Keyset-paged; pass `nextCursor` as `cursor` for the next page. The signing secret is never returned.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of subscriptions.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SubscriptionPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    get:
+      operationId: getSubscription
+      summary: Read one webhook subscription
+      description: Another tenant's subscription is reported as not found.
+      x-passage-duty: hub.delivery.read
+      responses:
+        "200":
+          description: The subscription.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Subscription"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateSubscription
+      summary: Change a subscription's name, URL or event patterns
+      description: |
+        Optimistic: `version` must be the version last read, otherwise 409 HUB-0409.
+        A new URL goes through the same SSRF guard as create (422 HUB-0422).
+      x-passage-duty: hub.subscription.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SubscriptionPatch"}
+      responses:
+        "200":
+          description: The updated subscription with its new version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Subscription"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    delete:
+      operationId: deleteSubscription
+      summary: Delete a subscription and its deliveries
+      description: Pending deliveries are dropped with the subscription.
+      x-passage-duty: hub.subscription.write
+      responses:
+        "204":
+          description: The subscription and its deliveries were deleted.
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:resume:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    post:
+      operationId: resumeSubscription
+      summary: Resume a subscription paused by a 410 Gone response (HUB-0114)
+      description: Idempotent; resuming an active subscription changes nothing. Held events are delivered on the next poll.
+      x-passage-duty: hub.subscription.write
+      responses:
+        "200":
+          description: The subscription, active.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Subscription"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:replay:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    post:
+      operationId: replaySubscription
+      summary: Re-deliver the subscription's recorded events from a timestamp (BR-35.9)
+      description: |
+        The subscription's own events already delivered or dead-lettered with an
+        occurrence time at or after `from`, and whose type still matches the
+        subscription's patterns, are queued again, oldest first, and sent in
+        per-aggregate sequence order marked with `ce-passagereplay: true`. `cap`
+        limits the number of events (1 to 1,000,000, the default); `truncated` says
+        more matching events remain, which a later replay from a later `from` picks up.
+        Events the subscription never recorded cannot be replayed.
+      x-passage-duty: hub.subscription.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReplayRequest"}
+      responses:
+        "202":
+          description: The events were queued for delivery.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReplayAccepted"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/deliveries:
+    get:
+      operationId: listDeliveries
+      summary: List webhook deliveries, newest first
+      description: Filter by status and subscription. Keyset-paged.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - name: status
+          in: query
+          description: Only deliveries in this state.
+          schema: {type: string, enum: [pending, delivered, dead_letter]}
+        - name: subscriptionId
+          in: query
+          description: Only deliveries of this subscription.
+          schema: {type: string, format: uuid}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of deliveries.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/hub/dead-letters:
+    get:
+      operationId: listDeadLetters
+      summary: List deliveries that exhausted the retry schedule (HUB-0115)
+      description: Deliveries still failing after the 8th retry (9 attempts). Replay a subscription to send them again.
+      x-passage-duty: hub.delivery.read
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: One page of dead-lettered deliveries.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+components:
+  parameters:
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      description: The subscription's id.
+      schema: {type: string, format: uuid}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: A caller-chosen key; a repeat returns the subscription created first.
+      schema: {type: string, maxLength: 200}
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size, 1 to 200 (default 50).
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `nextCursor` of the previous page.
+      schema: {type: string}
+  responses:
+    Problem:
+      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0409 stale version, 0413 body too large, 0422 unsafe URL, 0500 unexpected, 0501 field encryption keys not configured).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code, detail, instance]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        code: {type: string, examples: [HUB-0422]}
+        detail: {type: string}
+        instance: {type: string}
+    NewSubscription:
+      type: object
+      additionalProperties: false
+      required: [name, url, patterns]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        url: {type: string, maxLength: 2048, description: "https URL of a public host."}
+        patterns:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string, examples: ["dev.passage.sales.**"]}
+        secret: {type: string, minLength: 16, maxLength: 256, description: "Signing secret; generated when omitted."}
+    SubscriptionPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 200}
+        url: {type: string, maxLength: 2048}
+        patterns:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string}
+    Subscription:
+      type: object
+      required: [id, name, url, patterns, status, pausedReason, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        url: {type: string}
+        patterns: {type: array, items: {type: string}}
+        status: {type: string, enum: [active, paused]}
+        pausedReason: {type: [string, "null"], description: "HUB-0114 after a 410 Gone."}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CreatedSubscription:
+      allOf:
+        - {$ref: "#/components/schemas/Subscription"}
+        - type: object
+          required: [secret]
+          properties:
+            secret: {type: string, description: "The signing secret, shown once."}
+    SubscriptionPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Subscription"}}
+        nextCursor: {type: [string, "null"]}
+    ReplayRequest:
+      type: object
+      additionalProperties: false
+      required: [from]
+      properties:
+        from: {type: string, format: date-time}
+        cap: {type: integer, minimum: 1, maximum: 1000000}
+    ReplayAccepted:
+      type: object
+      required: [enqueued, truncated]
+      properties:
+        enqueued: {type: integer, description: "Events queued again."}
+        truncated: {type: boolean, description: "More matching events remain after the cap."}
+    Delivery:
+      type: object
+      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        subscriptionId: {type: string, format: uuid}
+        eventId: {type: string}
+        eventType: {type: string}
+        aggregateId: {type: string}
+        sequence: {type: integer}
+        status: {type: string, enum: [pending, delivered, dead_letter]}
+        attempts: {type: integer}
+        lastStatus: {type: [integer, "null"], description: "HTTP status of the last attempt; null when there was no response."}
+        nextRetryAt: {type: [number, "null"], description: "Unix seconds; only for pending deliveries."}
+        replay: {type: boolean}
+        deadLetterCode: {type: [string, "null"], description: "HUB-0115 for a dead letter."}
+        createdAt: {type: string, format: date-time}
+    DeliveryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Delivery"}}
+        nextCursor: {type: [string, "null"]}
