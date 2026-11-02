@@ -14,5 +14,5 @@
 | Helm chart `passage-tms-optimizer` (1–4 replicas, 2 CPU / 4 GB) (§6.34.10) | later slice of PSG-34 | The chart lives with the transport chart work; the optimizer image is not built |
 | Lockfile (`uv.lock`) and reproducible CI image | handoff (deployment-cicd) | The build pipeline owns lockfile policy |
 | `/readyz` and `/metrics` endpoints | later slice of PSG-34 | Slice 5 serves `/healthz` only |
-| Test execution in the wave build pipeline | handoff (testing-reconciliation CI) | The wave build tooling has no Python check kind; `pytest` passed in review (OR-Tools 9.15) and must be run by CI |
+| Test execution in the wave build pipeline | built | the `py` job in `.github/workflows/ci.yml` runs `pytest` for routing-py (matrix entry `routing-py`); the path filter in `gate.yml` includes `services/routing-py/**` |
 | Per-vehicle cost per km and per hour (FR-34.16) | later slice of PSG-34 | `cost_per_km` and `cost_per_hour` are per problem, not per vehicle |

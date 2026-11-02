@@ -46,6 +46,7 @@ jobs:
               - 'services/configurator-py/**'
               - 'services/scheduler-py/**'
               - 'services/dispatch-py/**'
+              - 'services/routing-py/**'
               - '.github/workflows/**'
             agents:
               - 'services/agents-ts/**'
