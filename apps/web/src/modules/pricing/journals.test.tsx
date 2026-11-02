@@ -213,6 +213,29 @@ describe("Price journal detail", () => {
     expect(alert).toHaveTextContent("line 2");
   });
 
+  it("shows who created and posted the journal, and the four-eyes refusal", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST") return json(403, { code: "PRC-0057", detail: "the user who created the journal cannot post it; another pricing manager posts it" });
+      if (url.pathname.endsWith(`/journals/${J1}`)) return json(200, { ...validated, createdBy: "ana" });
+      return undefined;
+    };
+    renderAt(`/pricing/journals/${J1}`);
+    expect(await screen.findByText("ana")).toBeInTheDocument();
+    expect(screen.getAllByText("Not posted").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Post journal" }));
+    const alert = await findAlert();
+    expect(alert).toHaveTextContent("The action failed");
+    expect(alert).toHaveTextContent("another pricing manager posts it (PRC-0057)");
+    expect(screen.getByRole("button", { name: "Post journal" })).toBeInTheDocument();
+  });
+
+  it("says when the creator was not recorded", async () => {
+    server.handler = (url) => (url.pathname.endsWith(`/journals/${J1}`) ? json(200, { ...validated, status: "POSTED", postedBy: "ben" }) : undefined);
+    renderAt(`/pricing/journals/${J1}`);
+    expect(await screen.findByText("Not recorded")).toBeInTheDocument();
+    expect(screen.getByText("ben")).toBeInTheDocument();
+  });
+
   it("shows a load error with a retry", async () => {
     server.handler = () => json(404, { code: "PRC-0034", detail: `no price journal ${J1}` });
     renderAt(`/pricing/journals/${J1}`);

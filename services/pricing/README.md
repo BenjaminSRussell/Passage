@@ -207,7 +207,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/journals/{id}` | pricing.view | with up to 1,000 lines (before / after) and every line error |
 | POST | `/v1/pricing/journals:import-csv?legalEntityId=&name=&smartRound=` | pricing.journal.post | `text/csv` body (≤ 32 MB, ≤ 100,000 rows, header row with op); same checks as `POST /journals`; row faults keyed `rows[n].column`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
-| POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); not by a commodity run's runner (PRC-0056); with `journalFourEyes` on, not by the journal's creator nor without a user (PRC-0057); records `postedBy`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:reverse` | pricing.journal.post | 201 with the reversing journal; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/agreements?legalEntityId=&partyRole=` | pricing.rebate.view | |
 | POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; `partyRole` CUSTOMER (default) or VENDOR with `vendorId` |
@@ -251,6 +251,8 @@ testdata/               fixtures
 | GET | `/v1/pricing/procedures/{id}` | pricing.view | |
 | POST | `/v1/pricing/procedures/{id}:revise` | pricing.admin | body `{revision, steps}`; DRAFT only (PRC-0008); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/procedures/{id}:activate` | pricing.admin | supersedes the ACTIVE version; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/parameters?legalEntityId=` | pricing.view | stored parameters or the defaults at version 0; 403 AUTH-0003 outside the caller's legal-entity scope |
+| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -283,11 +285,13 @@ testdata/               fixtures
 | PRC-0044 | 404 | Vendor rebate claim not found |
 | PRC-0045 | 422 | Party role mismatch: a sales invoice on a VENDOR agreement, a vendor invoice or claim on a CUSTOMER agreement |
 | PRC-0046 | 403 | The user who created a vendor rebate claim cannot approve it |
+| PRC-0056 | 403 | The user who ran a commodity price calculation cannot post its journal |
+| PRC-0057 | 403 | `journalFourEyes` is on: the journal's creator, or a caller without a user identity, cannot post it |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
 | AUTH-0001 | 401 | Missing or malformed tenant |
-| AUTH-0003 | 403 | Missing duty (kernel `authz`) |
+| AUTH-0003 | 403 | Missing duty (kernel `authz`), or a legal entity outside the caller's scope (parameters) |
 
 ## Events
 
@@ -303,6 +307,7 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
 - `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)
 - `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
+- `dev.passage.pricing.parameters.changed.v1` (a legal entity's parameters after a change, with the version and the user: the audit record)
 
 The entity segments are `conditionrecord` and `rebateaccrual` (as in `internal/events`); the PRD
 writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).

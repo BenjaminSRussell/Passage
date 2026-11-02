@@ -25,7 +25,17 @@ const (
 	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
 	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
 	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
+	// Pricing parameters (PRD 5.26.13): a legal entity's parameters were changed.
+	ParametersChanged = "dev.passage.pricing.parameters.changed.v1"
 )
+
+// ParametersChangedData is the payload of parameters.changed.
+type ParametersChangedData struct {
+	LegalEntityID   string `json:"legal_entity_id"`
+	JournalFourEyes bool   `json:"journal_four_eyes"`
+	Version         int    `json:"version"`
+	UpdatedBy       string `json:"updated_by"`
+}
 
 // VendorRebateClaimData is the payload of vendorrebateclaim.created and .approved. Amount
 // is the period's accruals less its earlier claims (BR-26.11): w19 AP settles an approved

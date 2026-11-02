@@ -89,6 +89,8 @@ type Store interface {
 	ValidateJournal(ctx context.Context, id string) (Journal, error)
 	PostJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
 	ReverseJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
+	GetParameters(ctx context.Context, legalEntityID string) (Parameters, error)
+	SetParameters(ctx context.Context, in Parameters, version int, idempotencyKey string) (Parameters, error)
 	CreateAgreement(ctx context.Context, a domain.RebateAgreement, idempotencyKey string) (domain.RebateAgreement, error)
 	GetAgreement(ctx context.Context, id string) (domain.RebateAgreement, error)
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error)

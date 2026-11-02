@@ -61,6 +61,8 @@ type journalView struct {
 	ReversedByJournalID string          `json:"reversedByJournalId,omitempty"`
 	PostedAt            *time.Time      `json:"postedAt,omitempty"`
 	CreatedAt           time.Time       `json:"createdAt"`
+	CreatedBy           string          `json:"createdBy,omitempty"`
+	PostedBy            string          `json:"postedBy,omitempty"`
 	Errors              []lineErrorView `json:"errors"`
 	// Lines is set on a single-journal read (at most maxJournalLinesShown; LinesTruncated says more exist).
 	Lines          []journalLineView `json:"lines,omitempty"`
@@ -356,7 +358,7 @@ func journalID(w http.ResponseWriter, r *http.Request) (string, bool) {
 func journalResponse(j store.Journal) journalView {
 	v := journalView{ID: j.ID, LegalEntityID: j.LegalEntityID, Name: j.Name, Status: j.Status, SmartRound: j.SmartRound,
 		LineCount: j.LineCount, ErrorCount: j.ErrorCount, ReversesJournalID: j.ReversesID, ReversedByJournalID: j.ReversedByID,
-		PostedAt: j.PostedAt, CreatedAt: j.CreatedAt, Errors: []lineErrorView{}}
+		PostedAt: j.PostedAt, CreatedAt: j.CreatedAt, CreatedBy: j.CreatedBy, PostedBy: j.PostedBy, Errors: []lineErrorView{}}
 	for _, l := range j.Lines {
 		for _, e := range l.Errors {
 			v.Errors = append(v.Errors, lineErrorView{LineNo: l.No, Code: e.Code, Detail: e.Detail})

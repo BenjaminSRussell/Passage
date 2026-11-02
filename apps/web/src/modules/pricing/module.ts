@@ -17,6 +17,7 @@ import { FundsPage } from "./FundsPage";
 import { ImportJournalPage } from "./ImportJournalPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
+import { ParametersPage } from "./ParametersPage";
 import { NewAgreementPage } from "./NewAgreementPage";
 import { NewCampaignPage } from "./NewCampaignPage";
 import { NewCommodityBasisPage } from "./NewCommodityBasisPage";
@@ -86,6 +87,7 @@ const pricing: PassageModule = {
     { path: "/pricing/promotions", element: createElement(PromotionsPage), handle: { title: "Promotions" } },
     { path: "/pricing/promotions/new", element: createElement(NewPromotionPage), handle: { title: "New promotion" } },
     { path: "/pricing/promotions/:id", element: createElement(PromotionDetailPage), handle: { title: "Promotion" } },
+    { path: "/pricing/parameters", element: createElement(ParametersPage), handle: { title: "Pricing parameters" } },
     { path: "/pricing/simulate", element: createElement(SimulatePage), handle: { title: "Price simulation" } },
   ],
   nav: [
@@ -104,6 +106,7 @@ const pricing: PassageModule = {
     { label: "Commission settlement", to: "/pricing/commission/settlement", duty: "pricing.commission.view" },
     { label: "Trade funds", to: "/pricing/funds", duty: "pricing.view" },
     { label: "Promotions", to: "/pricing/promotions", duty: "pricing.view" },
+    { label: "Parameters", to: "/pricing/parameters", duty: "pricing.view" },
     { label: "Price simulation", to: "/pricing/simulate", duty: "pricing.view" },
   ],
 };

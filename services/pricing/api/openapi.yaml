@@ -408,6 +408,60 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/parameters:
+    get:
+      operationId: getPricingParameters
+      summary: Read the pricing parameters of a legal entity.
+      description: >
+        Returns the stored parameters, or the defaults at version 0 when none are stored
+        (PRD 5.26.13). Today the parameter is journalFourEyes (default false): when true, the
+        user who created a price journal cannot post it (403 PRC-0057). A legal entity outside
+        the caller's scope is 403 AUTH-0003.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    put:
+      operationId: setPricingParameters
+      summary: Set the pricing parameters of a legal entity at the expected version.
+      description: >
+        version is the version read (0 when none was stored); a different stored version is
+        412 conflict_version. The change writes dev.passage.pricing.parameters.changed.v1 to the
+        outbox in the same transaction (the audit record: value, version and the user). Every
+        value is required, since the PUT replaces them all. A legal entity outside the caller's
+        scope is 403 AUTH-0003. A retry with the same Idempotency-Key replays the first response.
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, journalFourEyes, version]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                journalFourEyes: {type: boolean}
+                version: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The stored parameters.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PricingParameters"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/journals/{id}:post:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -421,7 +475,12 @@ paths:
         with dev.passage.pricing.conditionrecord.activated.v1 (or .withdrawn.v1) per record plus
         dev.passage.pricing.journal.posted.v1 to the outbox (FR-26.9). A journal created by a
         commodity calculation run cannot be posted by the user who ran it (403 PRC-0056,
-        CommodityPriceRun / PricingJournalPost segregation). A retry with the same
+        CommodityPriceRun / PricingJournalPost segregation). When the legal entity's
+        journalFourEyes parameter is on, the user who created a journal cannot post it, nor can
+        a caller without a user identity (403 PRC-0057, maker/checker); PRC-0056 is checked
+        first, so a commodity run's runner (its journal's creator) gets PRC-0056. A journal
+        with no recorded creator (created before parameters existed) may be posted by any
+        identified user. A retry with the same
         Idempotency-Key replays the first response.
       x-passage-duty: pricing.journal.post
       parameters:
@@ -2416,6 +2475,15 @@ components:
         lineNo: {type: integer}
         code: {type: string}
         detail: {type: string}
+    PricingParameters:
+      type: object
+      required: [legalEntityId, journalFourEyes, version]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        journalFourEyes: {type: boolean}
+        version: {type: integer, minimum: 0, description: "0 when the legal entity has no stored parameters."}
+        updatedBy: {type: string}
+        updatedAt: {type: string, format: date-time}
     Journal:
       type: object
       required: [id, legalEntityId, name, status, smartRound, lineCount, errorCount, createdAt, errors]
@@ -2431,6 +2499,8 @@ components:
         reversedByJournalId: {type: string, format: uuid}
         postedAt: {type: string, format: date-time}
         createdAt: {type: string, format: date-time}
+        createdBy: {type: string, description: "The user who created the journal (maker); the runner for a commodity run's journal, the reverser for a reversal; absent when not recorded."}
+        postedBy: {type: string, description: "The user who posted the journal (checker); absent until posted."}
         errors:
           type: array
           items: {$ref: "#/components/schemas/JournalLineError"}

@@ -50,6 +50,7 @@ describe("pricing module", () => {
       "/pricing/promotions",
       "/pricing/promotions/new",
       "/pricing/promotions/:id",
+      "/pricing/parameters",
       "/pricing/simulate",
     ]);
   });
@@ -64,6 +65,7 @@ describe("pricing module", () => {
       "/pricing/free-goods": "pricing.view",
       "/pricing/procedures": "pricing.view",
       "/pricing/journals": "pricing.view",
+      "/pricing/parameters": "pricing.view",
       "/pricing/rebates": "pricing.rebate.view",
       "/pricing/rebates/claims": "pricing.rebate.view",
       "/pricing/commission/sales-groups": "pricing.commission.view",

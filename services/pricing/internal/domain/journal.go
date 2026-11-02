@@ -233,3 +233,7 @@ func Reverse(orig Journal) Journal {
 	}
 	return rev
 }
+
+// CodeFourEyes refuses the post of a price journal by the user who created it when the legal
+// entity's journal_four_eyes parameter is on (PricingMaintain vs PricingJournalPost, PRD 5.26.17).
+const CodeFourEyes = "PRC-0057"

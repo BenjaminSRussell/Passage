@@ -43,6 +43,7 @@ type fakeStore struct {
 	claims     []store.VendorClaim
 	free       freeGoodsState
 	comd       commodityState
+	params     map[string]store.Parameters
 }
 
 func newFake() *fakeStore {

@@ -176,6 +176,12 @@ export function JournalDetailPage() {
               <Link to={`/pricing/journals/${journal.reversedByJournalId}`}>{journal.reversedByJournalId}</Link>
             </Detail>
           ) : null}
+          <Detail term="Created by" mono>
+            {journal.createdBy || "Not recorded"}
+          </Detail>
+          <Detail term="Posted by" mono>
+            {journal.postedBy || "Not posted"}
+          </Detail>
           <Detail term="Legal entity" mono>
             {journal.legalEntityId}
           </Detail>

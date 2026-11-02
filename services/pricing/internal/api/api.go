@@ -89,6 +89,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:activate", a.activateRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
 	a.registerJournalRoutes(r)
+	a.registerParameterRoutes(r)
 	a.registerRebateRoutes(r)
 	a.registerRetroRoutes(r)
 	a.registerCommissionRoutes(r)

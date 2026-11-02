@@ -42,6 +42,11 @@ type Journal struct {
 	ReversedByID string
 	PostedAt     *time.Time
 	CreatedAt    time.Time
+	// CreatedBy and PostedBy are the users who made and posted the journal (maker/checker);
+	// '' when not recorded (journals created before migration 0012, or not yet posted). A
+	// reversal records its reverser as both.
+	CreatedBy string
+	PostedBy  string
 }
 
 // JournalInput is a journal to create. CREATE lines get their record ids in the store.
@@ -65,9 +70,9 @@ func (s *Postgres) CreateJournal(ctx context.Context, in JournalInput, idempoten
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		jid := ids.New()
 		var inserted string
-		err := tx.QueryRow(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count, idempotency_key)
-			values ($1, $2, $3, $4, 'OPEN', $5, $6, $7) on conflict (tenant_id, idempotency_key) do nothing returning id::text`,
-			p.TenantID, jid, in.LegalEntityID, in.Name, in.SmartRound, len(in.Lines), key).Scan(&inserted)
+		err := tx.QueryRow(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count, idempotency_key, created_by)
+			values ($1, $2, $3, $4, 'OPEN', $5, $6, $7, $8) on conflict (tenant_id, idempotency_key) do nothing returning id::text`,
+			p.TenantID, jid, in.LegalEntityID, in.Name, in.SmartRound, len(in.Lines), key, p.UserID).Scan(&inserted)
 		if errors.Is(err, pgx.ErrNoRows) && key != nil {
 			var existing string
 			if err := tx.QueryRow(ctx, `select id::text from price_journal where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key).Scan(&existing); err != nil {
@@ -178,8 +183,10 @@ func (s *Postgres) ValidateJournal(ctx context.Context, id string) (Journal, err
 
 // PostJournal applies a VALIDATED journal in one transaction (FR-26.9). It validates
 // again under the legal entity's journal lock, so a change made since validation cannot
-// slip through. Any failure leaves every record and line unchanged. A repeated
-// Idempotency-Key replays the first response.
+// slip through. Any failure leaves every record and line unchanged. The poster is refused
+// when it ran the commodity calculation that made the journal (PRC-0056) or, under
+// journal_four_eyes, when it created the journal (PRC-0057), and is recorded as posted_by.
+// A repeated Idempotency-Key replays the first response.
 func (s *Postgres) PostJournal(ctx context.Context, id, idempotencyKey string) (Journal, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out Journal
@@ -198,6 +205,9 @@ func (s *Postgres) PostJournal(ctx context.Context, id, idempotencyKey string) (
 		if err := refuseOwnCommodityRun(ctx, tx, id, p.UserID); err != nil {
 			return err
 		}
+		if err := refuseOwnJournal(ctx, tx, p.TenantID, j, p.UserID); err != nil {
+			return err
+		}
 		if err := lockEntity(ctx, tx, p.TenantID, j.LegalEntityID); err != nil {
 			return err
 		}
@@ -214,7 +224,7 @@ func (s *Postgres) PostJournal(ctx context.Context, id, idempotencyKey string) (
 		if err := writeLines(ctx, tx, p.TenantID, id, j.Lines); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update price_journal set status = 'POSTED', posted_at = now(), error_count = 0 where id = $1`, id); err != nil {
+		if _, err := tx.Exec(ctx, `update price_journal set status = 'POSTED', posted_at = now(), error_count = 0, posted_by = $2 where id = $1`, id, p.UserID); err != nil {
 			return err
 		}
 		if err := enqueueJournal(ctx, tx, p.TenantID, id, pevents.JournalPostedData{JournalID: id, LegalEntityID: j.LegalEntityID, LineCount: len(j.Lines)}); err != nil {
@@ -253,8 +263,8 @@ func (s *Postgres) ReverseJournal(ctx context.Context, id, idempotencyKey string
 		rev := domain.Reverse(orig.Journal)
 		rev.ID = ids.New()
 		rev.Name = truncate("Reversal of "+orig.Name, 120)
-		if _, err := tx.Exec(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count, reverses_journal_id)
-			values ($1, $2, $3, $4, 'OPEN', $5, $6, $7)`, p.TenantID, rev.ID, rev.LegalEntityID, rev.Name, rev.SmartRound, len(rev.Lines), id); err != nil {
+		if _, err := tx.Exec(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count, reverses_journal_id, created_by)
+			values ($1, $2, $3, $4, 'OPEN', $5, $6, $7, $8)`, p.TenantID, rev.ID, rev.LegalEntityID, rev.Name, rev.SmartRound, len(rev.Lines), id, p.UserID); err != nil {
 			return err
 		}
 		clean, err := checkJournal(ctx, tx, &rev)
@@ -270,7 +280,7 @@ func (s *Postgres) ReverseJournal(ctx context.Context, id, idempotencyKey string
 		if err := writeLines(ctx, tx, p.TenantID, rev.ID, rev.Lines); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update price_journal set status = 'POSTED', posted_at = now() where id = $1`, rev.ID); err != nil {
+		if _, err := tx.Exec(ctx, `update price_journal set status = 'POSTED', posted_at = now(), posted_by = $2 where id = $1`, rev.ID, p.UserID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update price_journal set status = 'REVERSED', reversed_by_journal_id = $2 where id = $1`, id, rev.ID); err != nil {
@@ -286,6 +296,29 @@ func (s *Postgres) ReverseJournal(ctx context.Context, id, idempotencyKey string
 		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
 	})
 	return out, err
+}
+
+// refuseOwnJournal is the maker/checker rule (PricingMaintain vs PricingJournalPost, PRD
+// 5.26.17): when the legal entity's journal_four_eyes parameter is on, the user who created a
+// journal cannot post it (403 PRC-0057), and a post without a user identity is refused too,
+// since the rule cannot be checked. A journal with no recorded creator (created before
+// migration 0012) may be posted by any identified user. PostJournal checks PRC-0056 first, so
+// the runner of a commodity calculation, who is also its journal's creator, always gets
+// PRC-0056 whatever the parameter says.
+func refuseOwnJournal(ctx context.Context, tx pgx.Tx, tenantID string, j Journal, userID string) error {
+	if userID != "" && j.CreatedBy != userID {
+		return nil
+	}
+	par, err := loadParameters(ctx, tx, tenantID, j.LegalEntityID)
+	if err != nil || !par.JournalFourEyes {
+		return err
+	}
+	if userID == "" {
+		return httpx.NewProblem(http.StatusForbidden, domain.CodeFourEyes,
+			"journal_four_eyes is on for this legal entity: a journal post needs an identified user")
+	}
+	return httpx.NewProblem(http.StatusForbidden, domain.CodeFourEyes,
+		"journal_four_eyes is on for this legal entity: the user who created the journal cannot post it; another pricing manager posts it")
 }
 
 // refuseOwnCommodityRun enforces the PRD 5.26.17 conflict between CommodityPriceRun and
@@ -526,13 +559,13 @@ func marshalRecordPtr(r *domain.Record) (*string, error) {
 }
 
 const journalHeader = `select id::text, legal_entity_id::text, name, status, smart_round, line_count, error_count,
-	coalesce(reverses_journal_id::text, ''), coalesce(reversed_by_journal_id::text, ''), posted_at, created_at
+	coalesce(reverses_journal_id::text, ''), coalesce(reversed_by_journal_id::text, ''), posted_at, created_at, created_by, posted_by
 	from price_journal`
 
 func scanJournal(row pgx.Row) (Journal, error) {
 	var j Journal
 	err := row.Scan(&j.ID, &j.LegalEntityID, &j.Name, &j.Status, &j.SmartRound, &j.LineCount, &j.ErrorCount,
-		&j.ReversesID, &j.ReversedByID, &j.PostedAt, &j.CreatedAt)
+		&j.ReversesID, &j.ReversedByID, &j.PostedAt, &j.CreatedAt, &j.CreatedBy, &j.PostedBy)
 	return j, err
 }
 

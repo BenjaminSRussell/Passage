@@ -525,8 +525,8 @@ func (s *Postgres) RunCommodityCalc(ctx context.Context, calcID string, asOf tim
 			journalID = ids.New()
 			j := domain.Journal{ID: journalID, LegalEntityID: calc.LegalEntityID, Lines: plan.JournalLines()}
 			name := truncate(fmt.Sprintf("Commodity %s %s", calc.Name, dayStr(asOf)), 120)
-			if _, err := tx.Exec(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count)
-				values ($1, $2, $3, $4, 'OPEN', false, $5)`, p.TenantID, journalID, calc.LegalEntityID, name, len(j.Lines)); err != nil {
+			if _, err := tx.Exec(ctx, `insert into price_journal (tenant_id, id, legal_entity_id, name, status, smart_round, line_count, created_by)
+				values ($1, $2, $3, $4, 'OPEN', false, $5, $6)`, p.TenantID, journalID, calc.LegalEntityID, name, len(j.Lines), p.UserID); err != nil {
 				return err
 			}
 			clean, err := checkJournal(ctx, tx, &j)

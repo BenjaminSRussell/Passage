@@ -291,6 +291,9 @@ export interface Journal {
   reversedByJournalId?: string;
   postedAt?: string;
   createdAt: string;
+  /** The maker and the checker; with journalFourEyes on they must differ (PRC-0057). */
+  createdBy?: string;
+  postedBy?: string;
   errors: JournalLineError[];
   lines?: JournalLine[];
   linesTruncated?: boolean;
@@ -1206,4 +1209,24 @@ export async function exportCommissionSettlement(
   const rows = data.map((r) => ({ repId: r[rep] ?? "", currency: r[currency] ?? "", amount: r[amount] ?? "", transactions: Number(r[count] ?? 0) }));
   const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
   return { csv, filename: disposition?.[1] ?? `commission-settlement-${filter.target}-${filter.from}-${filter.to}.csv`, rows };
+}
+
+// ---- Pricing parameters per legal entity (PRD 5.26.13).
+
+export interface PricingParameters {
+  legalEntityId: string;
+  /** When true, the user who created a price journal cannot post it (PRC-0057). */
+  journalFourEyes: boolean;
+  /** 0 when the legal entity has no stored parameters. */
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getPricingParameters(legalEntityId: string, signal?: AbortSignal): Promise<PricingParameters> {
+  return send<PricingParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
+}
+
+export function setPricingParameters(body: { legalEntityId: string; journalFourEyes: boolean; version: number }, key: string = newKey()): Promise<PricingParameters> {
+  return send<PricingParameters>("/parameters", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }

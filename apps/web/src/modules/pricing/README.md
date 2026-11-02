@@ -26,7 +26,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/journals` | Price journal log with a status filter | `GET /journals` |
 | `/pricing/journals/new` | Create an OPEN journal from pasted `UPDATE, id, version, percent` / `DELETE, id, version` rows | `POST /journals` |
 | `/pricing/journals/import` | Import a CSV file (header row, op first; up to 100,000 rows) as an OPEN journal; row faults listed by row number | `POST /journals:import-csv` |
-| `/pricing/journals/:id` | Lines with before and after values; validate, post (PRC-0005 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
+| `/pricing/journals/:id` | Lines with before and after values, who created and who posted it; validate, post (PRC-0005, PRC-0056 and the four-eyes PRC-0057 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
 | `/pricing/rebates` | Customer and vendor rebate agreements with type, basis, period and tiers; type filter | `GET /rebates/agreements?partyRole=` |
 | `/pricing/rebates/new` | Create a tiered agreement for a customer, a customer group or (vendor rebate) a vendor; accounts follow the type (2150 / 4150 or 2160 / 5100) | `POST /rebates/agreements` |
 | `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), the retroactive recompute from pasted posted invoice lines, and for a vendor rebate the claims card: preview a period, claim it (credit note or payment deduction; PRC-0015 shown) and list its claims | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute`, `GET /rebates/agreements/{id}/claim-preview`, `GET`/`POST /rebates/vendor-claims` |
@@ -43,6 +43,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/promotions` | Promotions with event, window, baseline, forecast lift and actual lift | `GET /promotions` |
 | `/pricing/promotions/new` | Plan a promotion: event category and type, fund, product, window, 13 baseline weeks, lift and spend | `POST /promotions` |
 | `/pricing/promotions/:id` | Plan, baseline weeks, actuals and effectiveness; record actuals | `GET /promotions/{id}`, `:actuals` |
+| `/pricing/parameters` | Pricing parameters of a legal entity: `journalFourEyes` (default off), saved at the version read; read with pricing.view, the save is offered only with pricing.admin | `GET`/`PUT /parameters` |
 | `/pricing/simulate` | Simulation / explain: price lines and read the access-by-access trace | `POST /resolve?explain=true` |
 
 - `api/client.ts` calls `/api/v1/pricing/...` (the BFF rewrites to `/v1/pricing/...`). Problem
@@ -52,8 +53,8 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
   loading, empty and error states.
 - Tests: `npx vitest --run src/modules/pricing` and `npx tsc --noEmit` from `apps/web`. `testServer.tsx`
   holds the fetch stub and router used by `journals.test.tsx`, `rebates.test.tsx`, `vendorRebates.test.tsx`, `commission.test.tsx`, `funds.test.tsx`,
-  `promotions.test.tsx`, `campaigns.test.tsx`, `procedures.test.tsx` and `operations.test.tsx` (workspace expiry,
+  `promotions.test.tsx`, `campaigns.test.tsx`, `procedures.test.tsx`, `parameters.test.tsx` and `operations.test.tsx` (workspace expiry,
   journal CSV import, commission settlement); `text()` answers with a non-JSON body such as CSV.
 
-Needs: nothing from the shell beyond the existing `shell/ui` components. No npm
+Needs: nothing from the shell beyond the existing `shell/ui` components, `shell/principal` and `shell/dutyGate`. No npm
 dependencies were added.
