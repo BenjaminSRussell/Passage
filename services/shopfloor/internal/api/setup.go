@@ -26,6 +26,7 @@ func (a *API) registerSetup(r chi.Router) {
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/pay-agreements/{id}", a.getAgreement)
 	r.With(authz.RequireDuty(DutySetup)).Put("/v1/shopfloor/pay-agreements/{id}", a.updateAgreement)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers/{id}:assign-setup", a.assignSetup)
+	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers/{id}:assign-resource", a.assignResource)
 }
 
 func etag(version int) string { return `"` + strconv.Itoa(version) + `"` }
@@ -359,6 +360,53 @@ func (a *API) assignSetup(w http.ResponseWriter, r *http.Request) {
 	out, err := a.store.AssignWorkerSetup(r.Context(), id, version, req.ProfileID, req.PayAgreementID, user, idem)
 	if err != nil {
 		a.fail(w, r, "assign worker setup", err)
+		return
+	}
+	w.Header().Set("ETag", etag(out.Version))
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type assignResourceRequest struct {
+	ResourceID *string `json:"resourceId"`
+}
+
+// assignResource sets or clears the worker's home resource, whose jobs the worker's
+// dispatch list shows (GET jobs?workerId=).
+func (a *API) assignResource(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	user, ok := authenticatedUser(w, r, "assigning a home resource")
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r, store.CodeWorkerNotFound, "worker")
+	if !ok {
+		return
+	}
+	idem, ok := readIdem(w, r)
+	if !ok {
+		return
+	}
+	version, ok := ifMatch(w, r)
+	if !ok {
+		return
+	}
+	var req assignResourceRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if req.ResourceID != nil && !ids.Valid(*req.ResourceID) {
+		validationFailed(w, r, map[string]string{"resourceId": "must be a UUID or null"})
+		return
+	}
+	if a.replayed(w, r, idem) {
+		return
+	}
+	out, err := a.store.AssignWorkerResource(r.Context(), id, version, req.ResourceID, user, idem)
+	if err != nil {
+		a.fail(w, r, "assign worker resource", err)
 		return
 	}
 	w.Header().Set("ETag", etag(out.Version))

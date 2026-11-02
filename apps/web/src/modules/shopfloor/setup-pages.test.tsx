@@ -1,9 +1,9 @@
 import { findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { PayAgreement, TimeProfile, Worker } from "./api/client";
+import type { Job, Machine, PayAgreement, TimeProfile, Worker } from "./api/client";
 import shopfloor from "./module";
 import { validateAgreement } from "./NewPayAgreementPage";
 import { validateProfile, type ProfileValues } from "./NewTimeProfilePage";
@@ -90,6 +90,36 @@ const agreement: PayAgreement = {
   updatedAt: "2026-10-20T08:00:00Z",
 };
 
+const RESOURCE = "0195f0a0-0000-7000-8000-000000000071";
+const machine: Machine = {
+  id: "0195f0a0-0000-7000-8000-000000000072",
+  machineId: "PRESS-1",
+  resourceId: RESOURCE,
+  siteId: null,
+  idealCycleSeconds: "30",
+  idleThresholdSeconds: 300,
+  lastSeq: 0,
+  createdAt: "2026-10-01T08:00:00Z",
+};
+
+const CELL = "0195f0a0-0000-7000-8000-000000000073";
+const cellJob: Job = {
+  id: "0195f0a0-0000-7000-8000-000000000074",
+  orderRef: "MO-1",
+  operationRef: "OP-10",
+  resourceId: CELL,
+  status: "released",
+  plannedQuantity: "10",
+  goodQuantity: "0",
+  scrapQuantity: "0",
+  sequenceStart: "2026-10-21T07:00:00Z",
+  checks: [],
+  results: [],
+  finishedAt: null,
+  version: 1,
+  updatedAt: "2026-10-20T08:00:00Z",
+};
+
 const worker = (extra: Partial<Worker> = {}): Worker => ({
   id: ANA,
   partyId: PARTY,
@@ -103,6 +133,7 @@ const worker = (extra: Partial<Worker> = {}): Worker => ({
   createdAt: "2026-10-01T08:00:00Z",
   profileId: null,
   payAgreementId: null,
+  defaultResourceId: null,
   ...extra,
 });
 
@@ -322,6 +353,7 @@ describe("Worker pay setup", () => {
       if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, w);
       if (url.pathname.endsWith("/time-profiles")) return json(200, { items: [profile] });
       if (url.pathname.endsWith("/pay-agreements")) return json(200, { items: [agreement] });
+      if (url.pathname.endsWith("/machines")) return json(200, { items: [machine] });
       if (url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days")) return json(200, { items: [] });
       return undefined;
     };
@@ -378,5 +410,95 @@ describe("Worker pay setup", () => {
     fail = false;
     fireEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
     expect(await screen.findByLabelText("Time profile")).toBeInTheDocument();
+  });
+});
+
+describe("Worker home resource", () => {
+  function serve(w: Worker, extra?: Handler) {
+    handler = (url, init) => {
+      const custom = extra?.(url, init);
+      if (custom) return custom;
+      if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, w);
+      if (url.pathname.endsWith("/time-profiles") || url.pathname.endsWith("/pay-agreements") || url.pathname.endsWith("/registrations") || url.pathname.endsWith("/worker-days")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/machines")) return json(200, { items: [machine, { ...machine, id: "m2", machineId: "PRESS-2" }] });
+      if (url.pathname.endsWith("/jobs")) return json(200, { items: [cellJob, { ...cellJob, id: "j2", resourceId: RESOURCE }] });
+      return undefined;
+    };
+  }
+
+  it("lists each machine resource once and saves the choice with the worker version as If-Match", async () => {
+    serve(worker(), (url, init) => (init.method === "POST" && url.pathname.endsWith(":assign-resource") ? json(200, worker({ version: 4, defaultResourceId: RESOURCE })) : undefined));
+    const { container } = renderAt(`/shopfloor/workers/${ANA}`);
+    const select = await screen.findByLabelText("Home resource");
+    await screen.findByRole("option", { name: /PRESS-1, PRESS-2/ });
+    expect(screen.getByRole("button", { name: "Save home resource" })).toBeDisabled();
+    fireEvent.change(select, { target: { value: RESOURCE } });
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
+    expect(await screen.findByText("Home resource saved")).toBeInTheDocument();
+    const [assign] = posts(`/workers/${ANA}:assign-resource`);
+    expect(assign.body).toEqual({ resourceId: RESOURCE });
+    expect(header(assign, "If-Match")).toBe('"3"');
+    expect(header(assign, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("clears the resource by choosing none", async () => {
+    serve(worker({ defaultResourceId: RESOURCE }), (url, init) => (init.method === "POST" && url.pathname.endsWith(":assign-resource") ? json(200, worker({ version: 4 })) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    const select = await screen.findByLabelText("Home resource");
+    await screen.findByRole("option", { name: /PRESS-1/ });
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
+    await screen.findByText("Home resource saved");
+    expect(posts(`/workers/${ANA}:assign-resource`)[0]?.body).toEqual({ resourceId: null });
+  });
+
+  it("explains a stale version", async () => {
+    serve(worker(), (url, init) => (init.method === "POST" && url.pathname.endsWith(":assign-resource") ? json(412, { code: "SF-0143", detail: "worker was changed by someone else" }) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    const select = await screen.findByLabelText("Home resource");
+    await screen.findByRole("option", { name: /PRESS-1/ });
+    fireEvent.change(select, { target: { value: RESOURCE } });
+    fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
+    expect(await screen.findByText(/changed by someone else. Reload the page and try again. \(SF-0143\)/)).toBeInTheDocument();
+  });
+
+  it("offers a work centre that only has dispatch jobs, and still offers the machines without the dispatch duty", async () => {
+    serve(worker());
+    renderAt(`/shopfloor/workers/${ANA}`);
+    expect(await screen.findByRole("option", { name: `Resource ${CELL}` })).toBeInTheDocument();
+    // The machine's resource is listed once, by machine, even though a job runs on it too.
+    expect(within(screen.getByLabelText("Home resource")).getAllByRole("option").map((o) => o.textContent)).toEqual(["None (every job)", "PRESS-1, PRESS-2 (0195f0a0)", `Resource ${CELL}`]);
+    cleanup();
+    serve(worker(), (url) => (url.pathname.endsWith("/jobs") ? json(403, { code: "COM-0403", detail: "Forbidden" }) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    expect(await screen.findByRole("option", { name: /PRESS-1/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: `Resource ${CELL}` })).not.toBeInTheDocument();
+  });
+
+  it("explains a resource the shop floor does not know", async () => {
+    serve(worker(), (url, init) => (init.method === "POST" && url.pathname.endsWith(":assign-resource") ? json(422, { code: "SF-0156", detail: "unknown resource" }) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    const select = await screen.findByLabelText("Home resource");
+    await screen.findByRole("option", { name: /PRESS-1/ });
+    fireEvent.change(select, { target: { value: RESOURCE } });
+    fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
+    expect(await screen.findByText(/no registered machine and no dispatched jobs\. \(SF-0156\)/)).toBeInTheDocument();
+  });
+
+  it("shows an error loading the resources and retries", async () => {
+    let fail = true;
+    serve(worker(), (url) => (fail && url.pathname.endsWith("/machines") ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    expect(await screen.findByText(/Could not load the resources/)).toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("Home resource")).toBeInTheDocument();
+  });
+
+  it("says so when no machine is registered and no job is dispatched", async () => {
+    serve(worker(), (url) => (url.pathname.endsWith("/machines") || url.pathname.endsWith("/jobs") ? json(200, { items: [] }) : undefined));
+    renderAt(`/shopfloor/workers/${ANA}`);
+    expect(await screen.findByText(/No machines are registered and no jobs are dispatched yet/)).toBeInTheDocument();
   });
 });

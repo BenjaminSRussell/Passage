@@ -59,6 +59,11 @@ func (f *fakeStore) AssignWorkerSetup(_ context.Context, id string, version int,
 	return store.Worker{ID: id, ProfileID: profileID, PayAgreementID: agreementID, Version: version + 1}, nil
 }
 
+func (f *fakeStore) AssignWorkerResource(_ context.Context, id string, version int, resourceID *string, _ string, _ store.Idem) (store.Worker, error) {
+	f.resourceSet, f.updateVersion = resourceID, version
+	return store.Worker{ID: id, DefaultResourceID: resourceID, Version: version + 1}, nil
+}
+
 const profileBody = `{"code":"DAY","name":"Day shift","days":[{"dayType":"weekday","shiftStart":"07:00","shiftEnd":"15:30","breaks":[{"from":"12:00","to":"12:30"}],"roundingMinutes":5,"toleranceBeforeMin":10,"toleranceAfterMin":5,"flexAllowed":false}]}`
 const agreementBody = `{"code":"US","name":"US hourly","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1}`
 
@@ -171,6 +176,29 @@ func TestSetup_AssignWorker(t *testing.T) {
 	}
 	if rec := callWith(t, h, http.MethodPost, path, body, allDuty, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing Idempotency-Key: %d", rec.Code)
+	}
+}
+
+func TestSetup_AssignWorkerResource(t *testing.T) {
+	f := &fakeStore{}
+	h := newRouter(f)
+	path := "/v1/shopfloor/workers/" + workerID + ":assign-resource"
+	hdr := map[string]string{"Idempotency-Key": "r-1", "If-Match": `"2"`}
+	rec := callWith(t, h, http.MethodPost, path, `{"resourceId":"`+jobResource+`"}`, allDuty, hdr)
+	if rec.Code != http.StatusOK || f.resourceSet == nil || *f.resourceSet != jobResource || f.updateVersion != 2 || rec.Header().Get("ETag") != `"3"` {
+		t.Fatalf("assign: %d %s %v", rec.Code, rec.Body.String(), f.resourceSet)
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"resourceId":null}`, allDuty, hdr); rec.Code != http.StatusOK || f.resourceSet != nil {
+		t.Fatalf("clear: %d %v", rec.Code, f.resourceSet)
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"resourceId":"r1"}`, allDuty, hdr); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad resource id: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"resourceId":null}`, allDuty, map[string]string{"Idempotency-Key": "r-2"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing If-Match: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, path, `{"resourceId":null}`, "shopfloor.view", hdr); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the setup duty: %d", rec.Code)
 	}
 }
 

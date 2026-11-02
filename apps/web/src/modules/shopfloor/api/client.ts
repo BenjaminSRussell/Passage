@@ -27,6 +27,8 @@ export interface Worker {
   profileId: string | null;
   /** Pay agreement the worker's overtime follows; null means the defaults. */
   payAgreementId: string | null;
+  /** Resource whose jobs make up the worker's own dispatch list ("my jobs"); null means every job. */
+  defaultResourceId: string | null;
 }
 
 export interface NewWorker {
@@ -705,6 +707,8 @@ export interface KioskSession {
   userId: string | null;
   /** The open clock-in, or null when the worker is clocked out. */
   clockedInAt: string | null;
+  /** The worker's home resource, whose jobs the kiosk lists; null means the list holds every job. */
+  defaultResourceId: string | null;
   /** The worker's open job-starts: one job, or the jobs of one bundle (FR-25.3). */
   openJobs: CurrentJob[];
   /** Sign the worker out after this many minutes without input. */
@@ -781,6 +785,8 @@ export interface Job {
 
 export interface JobFilter {
   resourceId?: string;
+  /** The worker's own list: the jobs of the worker's home resource. Not with resourceId. */
+  workerId?: string;
   /** Omit to hide finished jobs (the dispatch view). */
   status?: JobStatus | "";
 }
@@ -805,7 +811,7 @@ export interface JobFeedbackResult {
 
 /** Dispatch list in start order; finished jobs are hidden unless status asks for them. */
 export function listJobs(filter: JobFilter = {}, signal?: AbortSignal): Promise<Job[]> {
-  return items<Job>(`/jobs${query({ resourceId: filter.resourceId, status: filter.status })}`, signal);
+  return items<Job>(`/jobs${query({ resourceId: filter.resourceId, workerId: filter.workerId, status: filter.status })}`, signal);
 }
 
 export function getJob(id: string, signal?: AbortSignal): Promise<Job> {
@@ -1003,6 +1009,18 @@ export function assignWorkerSetup(
     method: "POST",
     headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
     body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Sets or clears (null) the worker's home resource; the worker version is the If-Match entity tag (SF-0143, 412).
+ * A resource with no registered machine and no dispatch jobs is SF-0156 (422).
+ */
+export function assignWorkerResource(workerId: string, version: number, resourceId: string | null, key: string = newKey()): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:assign-resource`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ resourceId }),
   });
 }
 

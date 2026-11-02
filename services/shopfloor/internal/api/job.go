@@ -159,6 +159,13 @@ func (a *API) listJobs(w http.ResponseWriter, r *http.Request) {
 	if rid := q.Get("resourceId"); rid != "" && !ids.Valid(rid) {
 		fields["resourceId"] = "must be a UUID"
 	}
+	if wid := q.Get("workerId"); wid != "" {
+		if !ids.Valid(wid) {
+			fields["workerId"] = "must be a UUID"
+		} else if q.Get("resourceId") != "" {
+			fields["workerId"] = "cannot be combined with resourceId"
+		}
+	}
 	switch q.Get("status") {
 	case "", store.JobReleased, store.JobStarted, store.JobFinished:
 	default:
@@ -172,7 +179,7 @@ func (a *API) listJobs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	jobs, err := a.store.ListJobs(r.Context(), store.JobFilter{ResourceID: q.Get("resourceId"), Status: q.Get("status"), Limit: limit})
+	jobs, err := a.store.ListJobs(r.Context(), store.JobFilter{ResourceID: q.Get("resourceId"), WorkerID: q.Get("workerId"), Status: q.Get("status"), Limit: limit})
 	if err != nil {
 		a.fail(w, r, "list jobs", err)
 		return

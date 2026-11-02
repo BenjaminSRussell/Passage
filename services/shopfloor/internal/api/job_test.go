@@ -146,7 +146,10 @@ func TestListJobs_FiltersAndValidation(t *testing.T) {
 	if f.listed != (store.JobFilter{ResourceID: jobResource, Status: store.JobStarted, Limit: 20}) {
 		t.Fatalf("filter = %+v", f.listed)
 	}
-	for _, q := range []string{"status=paused", "resourceId=r1", "limit=0"} {
+	if rec := call(t, newRouter(f), http.MethodGet, "/v1/shopfloor/jobs?workerId="+workerID, "", registerDut); rec.Code != http.StatusOK || f.listed.WorkerID != workerID {
+		t.Fatalf("worker filter: %d %+v", rec.Code, f.listed)
+	}
+	for _, q := range []string{"status=paused", "resourceId=r1", "limit=0", "workerId=w1", "workerId=" + workerID + "&resourceId=" + jobResource} {
 		if rec := call(t, newRouter(f), http.MethodGet, "/v1/shopfloor/jobs?"+q, "", registerDut); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}

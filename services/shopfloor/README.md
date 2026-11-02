@@ -3,6 +3,22 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 16: a worker's home resource and "my jobs" (D2a')
+
+A worker has an optional home resource, the machine or work centre the worker normally runs
+(`worker.default_resource_id`, migration `0015_worker_home_resource.sql`; no new table, so no new grant).
+`POST workers/{id}:assign-resource` (duty `shopfloor.setup.maintain`, `If-Match` on the worker version,
+`Idempotency-Key`) sets or clears it and publishes `dev.passage.shopfloor.worker.assigned.v1`, whose payload
+now also carries `defaultResourceId`. `GET jobs?workerId=` (the PRD filter) returns the jobs of the worker's
+home resource; a worker without one sees every job, an unknown worker is SF-0101 (404), and `workerId`
+cannot be combined with `resourceId`. Resources belong to engineering data (w9), so the store accepts only a
+resource this tenant's shop floor knows, a registered machine's resource or one with dispatch jobs (SF-0156,
+422); the migration adds a nullable column under a `lock_timeout` and no index. The badge session carries
+`defaultResourceId` too. On the web the kiosk lists the signed-in worker's jobs and, for a worker without a
+home resource, says the list holds every job; the worker page has a *Home resource* card (choices are the
+resources of registered machines and of the jobs on the dispatch list). The OpenAPI file also lost a stray duplicate `PayRange` block that made
+it invalid YAML, so the doc gates run with no FAIL line again.
+
 ## Slice 15: supervisor reopen of a finished job (FR-25.3)
 
 A finished job takes no feedback (SF-0122) and leaves the dispatch list. `POST jobs/{id}:reopen` (duty
@@ -482,7 +498,7 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
-| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; POST `/workers/{id}:assign-setup` | `shopfloor.setup.maintain` |
+| POST and PUT `/time-profiles`, `/pay-agreements`, `/absence-codes`; POST `/workers/{id}:assign-setup` and `:assign-resource` | `shopfloor.setup.maintain` |
 | GET `/time-profiles`, `/pay-agreements`, `/absence-codes` and their `{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
@@ -571,6 +587,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0153` | 409 | An edge node with this name, or bound to this connector identity, already exists |
 | `SF-0154` | 403 | The caller is not the connector bound to this edge node (or the node has none): configuration pull and heartbeat refused |
 | `SF-0155` | 422 | The job to reopen is not finished |
+| `SF-0156` | 422 | The home resource has no registered machine and no dispatch jobs on this tenant's shop floor |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

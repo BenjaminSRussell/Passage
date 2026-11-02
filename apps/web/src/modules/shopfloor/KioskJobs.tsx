@@ -71,6 +71,8 @@ export function describeStartResults(results: readonly RegistrationResult[], job
 
 export interface KioskJobsProps {
   workerId: string;
+  /** The worker's home resource; null means the dispatch list holds every job, which the kiosk says. */
+  homeResourceId?: string | null;
   openJobs: CurrentJob[];
   onOpenJobsChange(next: CurrentJob[]): void;
 }
@@ -81,8 +83,8 @@ export interface KioskJobsProps {
  * open work on the server, which says so (SF-0002). A failed action keeps its client UUIDs,
  * so pressing the button again can never register it twice.
  */
-export function KioskJobs({ workerId, openJobs, onOpenJobsChange }: KioskJobsProps) {
-  const jobs = useLoad((signal) => listJobs({}, signal), "dispatch");
+export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJobsChange }: KioskJobsProps) {
+  const jobs = useLoad((signal) => listJobs({ workerId }, signal), `dispatch:${workerId}`);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectError, setSelectError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"start" | "bundle" | "stop" | null>(null);
@@ -213,6 +215,11 @@ export function KioskJobs({ workerId, openJobs, onOpenJobsChange }: KioskJobsPro
         )}
       </Card>
       <Card title="Start a job" padded={false}>
+        {homeResourceId ? null : (
+          <Alert tone="info" title="Showing every job">
+            You have no home resource, so this list holds the jobs of every resource. Ask your supervisor to set your home resource to see only your own jobs.
+          </Alert>
+        )}
         {jobs.error ? (
           <Alert tone="danger" title="Could not load the dispatch list" live="alert" action={<Button size="sm" onClick={jobs.reload}>Try again</Button>}>
             {jobs.error.message} ({jobs.error.code})
@@ -225,7 +232,7 @@ export function KioskJobs({ workerId, openJobs, onOpenJobsChange }: KioskJobsPro
             columns={columns}
             rows={jobs.data}
             getRowKey={(row) => row.id}
-            empty={{ title: "No jobs to start", description: "The schedule has no released or started jobs right now." }}
+            empty={{ title: "No jobs to start", description: homeResourceId ? "There are no released or started jobs for your home resource right now." : "The schedule has no released or started jobs right now." }}
           />
         )}
       </Card>

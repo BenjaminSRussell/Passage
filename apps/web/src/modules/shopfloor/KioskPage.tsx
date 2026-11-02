@@ -152,6 +152,7 @@ export function KioskPage() {
           <KioskJobs
             key={session.workerId}
             workerId={session.workerId}
+            homeResourceId={session.defaultResourceId}
             openJobs={session.openJobs ?? []}
             onOpenJobsChange={(openJobs) => setSession((s) => (s ? { ...s, openJobs } : s))}
           />

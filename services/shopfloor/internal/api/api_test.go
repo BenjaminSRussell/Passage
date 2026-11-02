@@ -51,6 +51,7 @@ type fakeStore struct {
 	agreementIn   *store.PayAgreementInput
 	updateVersion int
 	assigned      *assignRequest
+	resourceSet   *string
 	absenceIn     *store.AbsenceCodeInput
 	absences      []domain.Absence
 }

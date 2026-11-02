@@ -33,14 +33,18 @@ type Worker struct {
 	// agreement (FR-25.7); nil means the calculation defaults.
 	ProfileID      *string `json:"profileId"`
 	PayAgreementID *string `json:"payAgreementId"`
+	// DefaultResourceID is the resource (machine or work centre) the worker normally runs; the
+	// dispatch list for the worker ("my jobs", GET jobs?workerId=) is that resource's jobs. Nil
+	// means the worker sees every job.
+	DefaultResourceID *string `json:"defaultResourceId"`
 }
 
-const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text`
+const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text, default_resource_id::text`
 
 func scanWorker(row pgx.Row) (Worker, error) {
 	var w Worker
 	var rate string
-	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID); err != nil {
+	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID, &w.DefaultResourceID); err != nil {
 		return Worker{}, err
 	}
 	var err error

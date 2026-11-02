@@ -84,6 +84,7 @@ const ana: Worker = {
   createdAt: "2026-10-01T08:00:00Z",
   profileId: null,
   payAgreementId: null,
+  defaultResourceId: null,
 };
 
 describe("Absence codes list", () => {

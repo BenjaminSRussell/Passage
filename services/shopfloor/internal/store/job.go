@@ -57,8 +57,11 @@ type Job struct {
 // JobFilter narrows the dispatch list. An empty Status hides finished jobs.
 type JobFilter struct {
 	ResourceID string
-	Status     string
-	Limit      int
+	// WorkerID narrows the list to the jobs of the worker's home resource ("my jobs"); a
+	// worker without one sees every job. An unknown worker is SF-0101 (404).
+	WorkerID string
+	Status   string
+	Limit    int
 }
 
 // FeedbackInput is one operator feedback posting for a job. ID is the client UUID.
@@ -141,6 +144,21 @@ func (s *Postgres) ListJobs(ctx context.Context, f JobFilter) ([]Job, error) {
 	}
 	var out []Job
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if f.WorkerID != "" {
+			p, _ := tenant.FromContext(ctx)
+			var home *string
+			err := tx.QueryRow(ctx, `select default_resource_id::text from worker where tenant_id = $1 and id = $2`, p.TenantID, f.WorkerID).Scan(&home)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewProblem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
+			}
+			if err != nil {
+				return err
+			}
+			if home != nil {
+				args = append(args, *home)
+				where += fmt.Sprintf(" and resource_id = $%d", len(args)+1)
+			}
+		}
 		var err error
 		out, err = loadJobs(ctx, tx, where, args, "", limit)
 		return err

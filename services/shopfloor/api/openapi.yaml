@@ -1368,12 +1368,22 @@ paths:
       summary: Dispatch list (FR-25.3)
       description: |
         Jobs in sequence-start order. Finished jobs are hidden unless `status=finished`
-        asks for them. `results` is empty in the list; read one job for its results. The
-        PRD `workerId` filter needs the worker's default resource and is not built yet.
+        asks for them. `results` is empty in the list; read one job for its results.
+        `workerId` is the worker's own list ("my jobs"): the jobs of the worker's home resource
+        (`defaultResourceId`, set with `workers/{id}:assign-resource`); a worker without one sees
+        every job, so a plant that has not set home resources keeps a working kiosk. An unknown
+        worker is SF-0101 (404). It cannot be combined with `resourceId` (400).
       x-passage-duty: shopfloor.time.register
       parameters:
         - name: resourceId
           in: query
+          description: Only the jobs of this resource.
+          schema:
+            type: string
+            format: uuid
+        - name: workerId
+          in: query
+          description: Only the jobs of this worker's home resource (my jobs).
           schema:
             type: string
             format: uuid
@@ -2396,6 +2406,58 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:assign-resource:
+    post:
+      operationId: assignWorkerResource
+      summary: Set the home resource whose jobs make up a worker's dispatch list
+      description: |
+        Sets or clears (null) the worker's home resource, the machine or work centre the worker
+        normally runs. `GET jobs?workerId=` then lists that resource's jobs and the kiosk shows
+        them as the worker's own list. Resources belong to engineering data (w9), so only a resource
+        this tenant's shop floor knows is accepted: a registered machine's resource or one with
+        dispatch jobs (SF-0156, 422). `If-Match` carries the worker version you read (SF-0143, 412).
+        Publishes `dev.passage.shopfloor.worker.assigned.v1`. Pay calculation does not read the
+        resource, so no pay line changes.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignWorkerResource"
+      responses:
+        "200":
+          description: The worker with its new home resource (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     IfMatch:
@@ -2485,7 +2547,7 @@ components:
           pattern: "^[A-Z]{3}$"
     Worker:
       type: object
-      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId]
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId]
       properties:
         id:
           type: string
@@ -2518,6 +2580,10 @@ components:
           type: [string, "null"]
           format: uuid
           description: Pay agreement the worker's overtime follows; null means the defaults.
+        defaultResourceId:
+          type: [string, "null"]
+          format: uuid
+          description: Home resource whose jobs make up the worker's dispatch list; null means every job.
     BreakWindow:
       type: object
       required: [from, to]
@@ -3013,6 +3079,14 @@ components:
         premium:
           type: string
           description: Decimal string above 0 and up to 2 with up to 4 decimals; 0.15 pays 15% of the worker's rate extra.
+    AssignWorkerResource:
+      type: object
+      required: [resourceId]
+      properties:
+        resourceId:
+          type: [string, "null"]
+          format: uuid
+          description: The worker's home resource; null clears it.
     AssignWorkerSetup:
       type: object
       required: [profileId, payAgreementId]
@@ -3203,23 +3277,6 @@ components:
         clockCorrected:
           type: boolean
           description: True when the offset exceeded 5 minutes and was applied to the items.
-      type: object
-      required: [workerId, from, to]
-      properties:
-        workerId:
-          type: string
-          format: uuid
-        from:
-          type: string
-          format: date
-        to:
-          type: string
-          format: date
-          description: Inclusive; at most 28 days after from.
-        timeZone:
-          type: string
-          default: UTC
-          description: IANA time zone name.
     PayCalculateResponse:
       type: object
       required: [workerId, from, to, timeZone, days]
@@ -3827,7 +3884,7 @@ components:
             enum: [auto-stopped, auto-stop-capped]
     KioskSession:
       type: object
-      required: [workerId, partyId, name, userId, clockedInAt, openJobs, idleTimeoutMinutes]
+      required: [workerId, partyId, name, userId, clockedInAt, defaultResourceId, openJobs, idleTimeoutMinutes]
       properties:
         workerId:
           type: string
@@ -3843,6 +3900,10 @@ components:
           type: [string, "null"]
           format: date-time
           description: The open clock-in, or null when the worker is clocked out.
+        defaultResourceId:
+          type: [string, "null"]
+          format: uuid
+          description: The worker's home resource, whose jobs `GET jobs?workerId=` lists; null means that list holds every job.
         openJobs:
           type: array
           description: The worker's open job-starts, one job or the jobs of one bundle (FR-25.3).

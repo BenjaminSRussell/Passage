@@ -104,6 +104,7 @@ type Store interface {
 	CurrentEdgeConfig(ctx context.Context, edgeID, subject string) (store.EdgeConfigVersion, error)
 	Heartbeat(ctx context.Context, edgeID, subject string, in store.HeartbeatInput) (store.HeartbeatResult, error)
 	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
+	AssignWorkerResource(ctx context.Context, workerID string, version int, resourceID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
 	ListCorrections(ctx context.Context, workerID string, from, to time.Time, limit int) ([]store.Correction, error)

@@ -300,14 +300,17 @@ type PayAgreementSavedData struct {
 }
 
 // WorkerAssignedData is the payload of dev.passage.shopfloor.worker.assigned.v1,
-// published when a worker's time profile or pay agreement changes. A nil id means the
-// worker is calculated with the defaults. Days already calculated keep their pay lines
+// published when a worker's time profile, pay agreement or home resource changes. A nil
+// profile or agreement id means the worker is calculated with the defaults; a nil
+// defaultResourceId means the worker has no home resource. Days already calculated keep their pay lines
 // until a supervisor recalculates them.
 type WorkerAssignedData struct {
 	WorkerID       string  `json:"workerId"`
 	ProfileID      *string `json:"profileId"`
 	PayAgreementID *string `json:"payAgreementId"`
-	AssignedBy     string  `json:"assignedBy"`
+	// DefaultResourceID is the resource whose jobs the worker's dispatch list shows.
+	DefaultResourceID *string `json:"defaultResourceId"`
+	AssignedBy        string  `json:"assignedBy"`
 }
 
 // AbsenceCodeSavedData is the payload of dev.passage.shopfloor.absencecode.saved.v1,

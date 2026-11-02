@@ -26,6 +26,9 @@ type KioskSession struct {
 	Name        string     `json:"name"`
 	UserID      *string    `json:"userId"`
 	ClockedInAt *time.Time `json:"clockedInAt"`
+	// DefaultResourceID is the worker's home resource, whose jobs the kiosk lists (GET
+	// jobs?workerId=); nil means the list holds every job, which the kiosk says.
+	DefaultResourceID *string `json:"defaultResourceId"`
 	// OpenJobs are the worker's open job-starts (one job, or the jobs of one
 	// bundle), so the kiosk can offer to stop them (FR-25.3).
 	OpenJobs []CurrentJob `json:"openJobs"`
@@ -62,9 +65,9 @@ func (s *Postgres) BadgeLogin(ctx context.Context, badge string) (KioskSession, 
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var kind *string
 		var at *time.Time
-		err := tx.QueryRow(ctx, `select w.id::text, w.party_id::text, w.name, w.user_id, lp.kind, lp.started_at
+		err := tx.QueryRow(ctx, `select w.id::text, w.party_id::text, w.name, w.user_id, w.default_resource_id::text, lp.kind, lp.started_at
 			from worker w left join lateral (`+lastPunch+`) lp on true
-			where w.badge_id = $1 and w.active`, badge).Scan(&out.WorkerID, &out.PartyID, &out.Name, &out.UserID, &kind, &at)
+			where w.badge_id = $1 and w.active`, badge).Scan(&out.WorkerID, &out.PartyID, &out.Name, &out.UserID, &out.DefaultResourceID, &kind, &at)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeBadgeUnknown, "badge is not recognized")
 		}

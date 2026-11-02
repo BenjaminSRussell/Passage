@@ -451,7 +451,55 @@ func (s *Postgres) AssignWorkerSetup(ctx context.Context, workerID string, versi
 			return err
 		}
 		if err := enqueue(ctx, tx, workerSource, workerID, sfevents.WorkerAssigned, p.TenantID,
-			sfevents.WorkerAssignedData{WorkerID: workerID, ProfileID: out.ProfileID, PayAgreementID: out.PayAgreementID, AssignedBy: assignedBy}); err != nil {
+			sfevents.WorkerAssignedData{WorkerID: workerID, ProfileID: out.ProfileID, PayAgreementID: out.PayAgreementID, DefaultResourceID: out.DefaultResourceID, AssignedBy: assignedBy}); err != nil {
+			return err
+		}
+		return remember(ctx, tx, idem, http.StatusOK, out)
+	})
+	return out, err
+}
+
+// CodeResourceUnknown is a home resource this tenant's shop floor does not know (422).
+const CodeResourceUnknown = "SF-0156"
+
+// AssignWorkerResource sets or clears (nil) the worker's home resource, the one whose jobs
+// make up the worker's dispatch list, when version is the worker's stored version (SF-0143,
+// 412). Resources belong to engineering data (w9), so the store accepts only a resource this
+// tenant's shop floor knows: a registered machine's resource or one with dispatch jobs
+// (SF-0156, 422). It publishes dev.passage.shopfloor.worker.assigned.v1 in the same
+// transaction; pay calculation does not read the resource, so no pay line changes.
+func (s *Postgres) AssignWorkerResource(ctx context.Context, workerID string, version int, resourceID *string, assignedBy string, idem Idem) (Worker, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Worker
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select true from worker where tenant_id = $1 and id = $2 for update`, p.TenantID, workerID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
+		} else if err != nil {
+			return err
+		}
+		if resourceID != nil {
+			var known bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from machine where tenant_id = $1 and resource_id = $2)
+				or exists (select 1 from shop_job where tenant_id = $1 and resource_id = $2)`, p.TenantID, *resourceID).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeResourceUnknown,
+					"resource has no registered machine and no dispatch jobs on this shop floor")
+			}
+		}
+		var err error
+		out, err = scanWorker(tx.QueryRow(ctx, `update worker set default_resource_id = $3, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 and version = $4 returning `+workerColumns, p.TenantID, workerID, resourceID, version))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return versionMismatch("worker")
+		}
+		if err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, workerSource, workerID, sfevents.WorkerAssigned, p.TenantID,
+			sfevents.WorkerAssignedData{WorkerID: workerID, ProfileID: out.ProfileID, PayAgreementID: out.PayAgreementID, DefaultResourceID: out.DefaultResourceID, AssignedBy: assignedBy}); err != nil {
 			return err
 		}
 		return remember(ctx, tx, idem, http.StatusOK, out)

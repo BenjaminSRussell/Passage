@@ -65,6 +65,7 @@ const session = (extra: Partial<KioskSession> = {}): KioskSession => ({
   name: "Ana Silva",
   userId: null,
   clockedInAt: null,
+  defaultResourceId: null,
   openJobs: [],
   idleTimeoutMinutes: 10,
   ...extra,

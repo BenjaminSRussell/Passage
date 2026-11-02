@@ -326,3 +326,77 @@ func TestLoadPaySetup_CarriesShiftPremiums(t *testing.T) {
 		t.Fatalf("reversed %+v added %+v", r, a)
 	}
 }
+
+// A worker's home resource narrows "my jobs" (GET jobs?workerId=) to that resource's jobs; a
+// worker without one sees every job, an unknown worker is SF-0101, a stale version is SF-0143,
+// a resource the tenant's shop floor does not know is SF-0156, and each assignment publishes
+// worker.assigned with the resource in the same transaction.
+func TestAssignWorkerResource_MyJobs(t *testing.T) {
+	s, app, _ := setup(t)
+	tenantID := testkit.TenantID(71)
+	ctx := testkit.Ctx(tenantID)
+	w := mustWorker(t, s, ctx, "R-1", nil)
+	home, away := ids.New(), ids.New()
+	mine := mustJob(t, s, ctx, home, 8)
+	mustJob(t, s, ctx, away, 7)
+
+	all, err := s.ListJobs(ctx, JobFilter{WorkerID: w.ID})
+	if err != nil || len(all) != 2 {
+		t.Fatalf("worker without a home resource = %+v, %v", all, err)
+	}
+	if _, err := s.ListJobs(ctx, JobFilter{WorkerID: ids.New()}); problemCode(err) != CodeWorkerNotFound {
+		t.Fatalf("unknown worker: %v", err)
+	}
+	if _, err := s.AssignWorkerResource(ctx, w.ID, 99, &home, "admin", idem("hr-0")); problemCode(err) != CodeVersionMismatch {
+		t.Fatalf("stale version: %v", err)
+	}
+	if _, err := s.AssignWorkerResource(ctx, ids.New(), 1, &home, "admin", idem("hr-1")); problemCode(err) != CodeWorkerNotFound {
+		t.Fatalf("unknown worker assign: %v", err)
+	}
+	// Only a resource this tenant's shop floor knows: one with a registered machine or dispatch
+	// jobs. A resource known only to another tenant is as unknown as a made-up id.
+	unknown, foreign, press := ids.New(), ids.New(), ids.New()
+	mustJob(t, s, testkit.Ctx(testkit.TenantID(72)), foreign, 6)
+	for _, r := range []string{unknown, foreign} {
+		if _, err := s.AssignWorkerResource(ctx, w.ID, w.Version, &r, "admin", idem("hr-u-"+r)); problemCode(err) != CodeResourceUnknown {
+			t.Fatalf("resource %s: %v", r, err)
+		}
+	}
+	mustMachine(t, s, ctx, "PRESS-HR", press)
+	byMachine, err := s.AssignWorkerResource(ctx, w.ID, w.Version, &press, "admin", idem("hr-m"))
+	if err != nil || byMachine.DefaultResourceID == nil || *byMachine.DefaultResourceID != press {
+		t.Fatalf("machine resource without jobs = %+v, %v", byMachine, err)
+	}
+	if mine, err := s.ListJobs(ctx, JobFilter{WorkerID: w.ID}); err != nil || len(mine) != 0 {
+		t.Fatalf("my jobs on an idle machine = %+v, %v", mine, err)
+	}
+	w = byMachine
+	set, err := s.AssignWorkerResource(ctx, w.ID, w.Version, &home, "admin", idem("hr-2"))
+	if err != nil || set.DefaultResourceID == nil || *set.DefaultResourceID != home || set.Version != w.Version+1 {
+		t.Fatalf("assigned = %+v, %v", set, err)
+	}
+	mine2, err := s.ListJobs(ctx, JobFilter{WorkerID: w.ID})
+	if err != nil || len(mine2) != 1 || mine2[0].ID != mine.ID {
+		t.Fatalf("my jobs = %+v, %v", mine2, err)
+	}
+	if got, err := s.GetWorker(ctx, w.ID); err != nil || got.DefaultResourceID == nil || *got.DefaultResourceID != home {
+		t.Fatalf("get worker = %+v, %v", got, err)
+	}
+	// The kiosk learns the home resource at badge login, so it can say when it shows every job.
+	if sess, err := s.BadgeLogin(ctx, "R-1"); err != nil || sess.DefaultResourceID == nil || *sess.DefaultResourceID != home {
+		t.Fatalf("badge session = %+v, %v", sess, err)
+	}
+	if n := countEvents(t, app, tenantID, sfevents.WorkerAssigned); n != 2 {
+		t.Fatalf("worker.assigned events = %d", n)
+	}
+	cleared, err := s.AssignWorkerResource(ctx, w.ID, set.Version, nil, "admin", idem("hr-3"))
+	if err != nil || cleared.DefaultResourceID != nil {
+		t.Fatalf("cleared = %+v, %v", cleared, err)
+	}
+	if all, _ := s.ListJobs(ctx, JobFilter{WorkerID: w.ID}); len(all) != 2 {
+		t.Fatalf("after clearing: %+v", all)
+	}
+	if l, err := s.ListJobs(testkit.Ctx(testkit.TenantID(72)), JobFilter{WorkerID: w.ID}); problemCode(err) != CodeWorkerNotFound || len(l) != 0 {
+		t.Fatalf("other tenant: %+v, %v", l, err)
+	}
+}

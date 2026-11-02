@@ -11,6 +11,7 @@ const WORKER = "0195f0a0-0000-7000-8000-000000000001";
 const PARTY = "0195f0a0-0000-7000-8000-000000000020";
 const J1 = "0195f0a0-0000-7000-8000-0000000000a1";
 const J2 = "0195f0a0-0000-7000-8000-0000000000a2";
+const HOME = "0195f0a0-0000-7000-8000-0000000000c1";
 const J3 = "0195f0a0-0000-7000-8000-0000000000a3";
 const BUNDLE = "0195f0a0-0000-7000-8000-0000000000b1";
 const RESOURCE = "0195f0a0-0000-7000-8000-000000000010";
@@ -68,6 +69,7 @@ const session = (extra: Partial<KioskSession> = {}): KioskSession => ({
   name: "Ana Silva",
   userId: null,
   clockedInAt: "2026-10-21T07:00:00Z",
+  defaultResourceId: HOME,
   openJobs: [],
   idleTimeoutMinutes: 10,
   ...extra,
@@ -148,6 +150,8 @@ describe("Kiosk job actions", () => {
     expect(stop).toMatchObject({ workerId: WORKER, kind: "job-stop", jobId: J2, bundleId: null, startedAt: start.startedAt, deviceId: KIOSK_DEVICE_ID });
     expect(Date.parse(String(stop.stoppedAt))).toBeGreaterThanOrEqual(Date.parse(String(start.startedAt)));
     expect(screen.getByRole("status")).toHaveTextContent("Work stopped");
+    // The list is the signed-in worker's own (the jobs of the worker's home resource).
+    for (const c of calls.filter((c) => c.url.pathname.endsWith("/jobs"))) expect(c.url.searchParams.get("workerId")).toBe(WORKER);
     // The dispatch list is reloaded after each action so statuses are current.
     expect(calls.filter((c) => c.url.pathname.endsWith("/jobs"))).toHaveLength(3);
   });
@@ -215,7 +219,17 @@ describe("Kiosk job actions", () => {
     handler = (url) => (url.pathname.endsWith("/jobs") ? json(200, { items: [] }) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No jobs to start")).toBeInTheDocument();
+    expect(screen.getByText(/no released or started jobs for your home resource/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start job" })).toBeNull();
+    // A worker with a home resource sees only that resource's jobs, so there is nothing to explain.
+    expect(screen.queryByText("Showing every job")).toBeNull();
+  });
+
+  it("tells a worker without a home resource that the list holds every job", async () => {
+    await signIn(session({ defaultResourceId: null }), [job(J1, "OP-10")]);
+    expect(await screen.findByText("Showing every job")).toBeInTheDocument();
+    expect(screen.getByText(/Ask your supervisor to set your home resource/)).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: /OP-10/ })).toBeInTheDocument();
   });
 
   it("asks the worker to clock in before jobs are offered", async () => {
