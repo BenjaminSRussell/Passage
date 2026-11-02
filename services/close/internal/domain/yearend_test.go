@@ -2,8 +2,10 @@ package domain_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"pgregory.net/rapid"
@@ -177,4 +179,71 @@ func TestCloseYear_Property(t *testing.T) {
 			t.Fatalf("closing sums to %s and opening to %s, both must be zero", closing, opening)
 		}
 	})
+}
+
+func periodEnding(id, end string, rows ...domain.Row) domain.Period {
+	day, _ := time.Parse("2006-01-02", end)
+	return domain.Period{FiscalPeriodID: id, End: day, Rows: rows}
+}
+
+func TestPlanYear(t *testing.T) {
+	closed := domain.Row{Module: domain.ModuleAP, Status: domain.StatusClosed}
+	held := domain.Row{Module: domain.ModuleGL, Status: domain.StatusOnHold}
+	tests := []struct {
+		name    string
+		periods []domain.Period
+		closing string
+		opening string
+		code    string
+	}{
+		{"latest period end closes and the next day opens", []domain.Period{periodEnding("p12", "2026-12-31", closed, held), periodEnding("p1", "2026-01-31", closed)}, "2026-12-31", "2027-01-01", ""},
+		{"leap day end", []domain.Period{periodEnding("p", "2028-02-29", domain.Row{Module: domain.ModuleAll, Status: domain.StatusPermanentlyClosed})}, "2028-02-29", "2028-03-01", ""},
+		{"no periods", nil, "", "", domain.CodeNoPeriod},
+		{"open module", []domain.Period{periodEnding("p", "2026-12-31", closed, domain.Row{Module: domain.ModuleAR, Status: domain.StatusOpen})}, "", "", domain.CodeInvalidTransition},
+		{"non gl module on hold", []domain.Period{periodEnding("p", "2026-12-31", domain.Row{Module: domain.ModuleAP, Status: domain.StatusOnHold})}, "", "", domain.CodeInvalidTransition},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := domain.PlanYear("2026", tc.periods)
+			var de *domain.Error
+			if tc.code != "" {
+				if !errors.As(err, &de) || de.Code != tc.code {
+					t.Fatalf("got %v, want code %s", err, tc.code)
+				}
+				return
+			}
+			if err != nil || plan.ClosingDate.Format("2006-01-02") != tc.closing || plan.OpeningDate.Format("2006-01-02") != tc.opening {
+				t.Fatalf("got %+v %v", plan, err)
+			}
+		})
+	}
+}
+
+func TestClassOf(t *testing.T) {
+	want := map[string]domain.Class{"revenue": domain.ClassProfitLoss, "expense": domain.ClassProfitLoss, "asset": domain.ClassBalanceSheet, "liability": domain.ClassBalanceSheet, "equity": domain.ClassBalanceSheet}
+	for accountType, class := range want {
+		if got, err := domain.ClassOf(accountType); err != nil || got != class {
+			t.Errorf("%s: got %q %v, want %q", accountType, got, err, class)
+		}
+	}
+	var de *domain.Error
+	if _, err := domain.ClassOf("statistical"); !errors.As(err, &de) || de.Code != domain.CodeLedgerData {
+		t.Fatalf("statistical account must not carry a year-end balance: %v", err)
+	}
+}
+
+func TestDimensionKey_RoundTripsAndChecksAttributeCount(t *testing.T) {
+	dims := map[string]string{"CC": "A", "DEPT": "B"}
+	if got := domain.ParseDimensions(domain.DimensionKey(dims)); got["CC"] != "A" || got["DEPT"] != "B" || len(got) != 2 {
+		t.Fatalf("round trip lost data: %v", got)
+	}
+	if domain.DimensionKey(nil) != "" || domain.ParseDimensions("") != nil {
+		t.Fatal("no dimensions must be the empty key")
+	}
+	if err := domain.CheckDimensionAttributes([]string{"A", "B", "C", "D", "E"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := domain.CheckDimensionAttributes([]string{"A", "B", "C", "D", "E", "F"}); err == nil {
+		t.Fatal("more than five attributes must be refused")
+	}
 }

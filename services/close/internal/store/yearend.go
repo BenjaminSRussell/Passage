@@ -69,7 +69,9 @@ func (s *Postgres) YearPeriods(ctx context.Context, legalEntityID, ledgerID, yea
 	return periods, nil
 }
 
-func reuse(detail string) error { return &domain.Error{Code: domain.CodeIdempotencyReuse, Detail: detail} }
+func reuse(detail string) error {
+	return &domain.Error{Code: domain.CodeIdempotencyReuse, Detail: detail}
+}
 
 func (s *Postgres) BeginYearEnd(ctx context.Context, in domain.YearEndRun) (domain.YearEndRun, bool, error) {
 	var run domain.YearEndRun

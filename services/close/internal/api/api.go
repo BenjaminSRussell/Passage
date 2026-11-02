@@ -16,7 +16,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/close/internal/ledger"
@@ -47,7 +46,7 @@ type API struct {
 	rejections  atomic.Int64
 	failures    atomic.Int64
 	yearEnds    YearEndStore
-	postings    ledgerclient.Ledger
+	yearLedger  YearEndLedger
 	yearEndRuns atomic.Int64
 }
 

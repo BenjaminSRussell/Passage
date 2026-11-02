@@ -592,6 +592,16 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("ledger.ledger.write", "PATCH", "/v1/ledger/ledgers/l-1")
 	not allowed("ledger.ledger.write", "DELETE", "/v1/ledger/ledgers/l-1")
 	not allowed("period.check", "PUT", "/v1/close/periods/p-1")
+	allowed("ledger.account.lookup", "GET", "/v1/ledger/charts/c1/accounts")
+	not allowed("ledger.account.lookup", "PUT", "/v1/ledger/charts/c1/accounts/1000")
+	not allowed("ledger.account.lookup", "GET", "/v1/ledger/journal-lines")
+	data.duties["ledger.account.lookup"].service_only
+	data.service_grants.close.ledger == ["ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup"]
+	every duty in data.service_grants.close.ledger {
+		not allowed(duty, "POST", "/v1/ledger/ledgers")
+		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
+		not allowed(duty, "POST", "/v1/ledger/validate")
+	}
 	allowed("close.yearend.run", "POST", "/v1/close/year-end-runs")
 	not allowed("close.yearend.run", "GET", "/v1/close/year-end-runs/r-1")
 	allowed("close.yearend.read", "GET", "/v1/close/year-end-runs/r-1")

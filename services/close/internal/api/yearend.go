@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -343,5 +342,3 @@ func (a *API) getYearEnd(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, run)
 }
-
-var _ = strconv.Itoa

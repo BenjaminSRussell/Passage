@@ -18,22 +18,22 @@ const (
 )
 
 type YearEndRun struct {
-	ID                 string            `json:"id"`
-	LegalEntityID      string            `json:"legalEntityId"`
-	LedgerID           string            `json:"ledgerId"`
-	FiscalYear         string            `json:"fiscalYear"`
-	Sequence           int               `json:"sequence"`
-	SupersedesRunID    string            `json:"supersedesRunId,omitempty"`
-	Status             string            `json:"status"`
-	Currency           string            `json:"currency"`
-	ClosingDate        string            `json:"closingDate"`
-	OpeningDate        string            `json:"openingDate"`
-	RetainedEarnings   string            `json:"retainedEarningsAccount"`
-	RetainDimensions   bool              `json:"retainDimensions"`
-	Proposals          *YearEnd          `json:"proposals,omitempty"`
-	Journals           map[string]string `json:"journals"`
-	CreatedBy          string            `json:"createdBy"`
-	RequestHash        string            `json:"-"`
+	ID               string            `json:"id"`
+	LegalEntityID    string            `json:"legalEntityId"`
+	LedgerID         string            `json:"ledgerId"`
+	FiscalYear       string            `json:"fiscalYear"`
+	Sequence         int               `json:"sequence"`
+	SupersedesRunID  string            `json:"supersedesRunId,omitempty"`
+	Status           string            `json:"status"`
+	Currency         string            `json:"currency"`
+	ClosingDate      string            `json:"closingDate"`
+	OpeningDate      string            `json:"openingDate"`
+	RetainedEarnings string            `json:"retainedEarningsAccount"`
+	RetainDimensions bool              `json:"retainDimensions"`
+	Proposals        *YearEnd          `json:"proposals,omitempty"`
+	Journals         map[string]string `json:"journals"`
+	CreatedBy        string            `json:"createdBy"`
+	RequestHash      string            `json:"-"`
 }
 
 type YearEndCompleted struct {
