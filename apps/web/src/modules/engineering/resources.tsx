@@ -220,7 +220,7 @@ export function calendarLink(calendarId?: string): ReactNode {
   return calendarId ? <Link to={`/engineering/calendars/${encodeURIComponent(calendarId)}/days`}>Calendar days</Link> : "";
 }
 
-export function ResourceDetailPage({ id, onBack, onDeleted }: { id: string; onBack?: () => void; onDeleted?: () => void }) {
+export function ResourceDetailPage({ id, onBack, onDeleted, canWrite }: { id: string; onBack?: () => void; onDeleted?: () => void; canWrite?: boolean }) {
   const [resource, setResource] = useState<Resource | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -279,7 +279,7 @@ export function ResourceDetailPage({ id, onBack, onDeleted }: { id: string; onBa
       ) : null}
       {resource ? (
         <>
-          <ResourceActions key={`${resource.id}-${resource.version ?? 0}`} resource={resource} onSaved={() => setAttempt((n) => n + 1)} onDeleted={onDeleted ?? onBack} />
+          {canWrite ? <ResourceActions key={`${resource.id}-${resource.version ?? 0}`} resource={resource} onSaved={() => setAttempt((n) => n + 1)} onDeleted={onDeleted ?? onBack} /> : null}
           <Card title="Resource">
             <dl className={styles.facts}>
               {facts.map(([term, value]) => (

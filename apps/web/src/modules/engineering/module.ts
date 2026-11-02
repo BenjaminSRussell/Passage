@@ -153,7 +153,8 @@ function ResourcesRoute() {
 function ResourceRoute() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
-  return createElement(ResourceDetailPage, { id, onBack: () => navigate("/engineering/resources") });
+  const canWrite = holdsDuty(usePrincipalDuties(), dutyResourceWrite);
+  return createElement(ResourceDetailPage, { id, onBack: () => navigate("/engineering/resources"), canWrite });
 }
 
 function ResourceGroupsRoute() {

@@ -362,6 +362,12 @@ paths:
         '201':
           description: ECO created in the submitted state, or the original ECO on an Idempotency-Key replay.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
+        '403':
+          description: AUTH-0003 without engineering.bom.write, or ENG-ECO-BACKDATE-DUTY when the release date is before today's UTC date (BR-9.10; the backdate duty is not built, so every past date is refused).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-ECO-HORIZON, the release date is more than 365 days after today's UTC date (BR-9.10).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listEcos
@@ -919,7 +925,7 @@ components:
         id: { type: string, format: uuid }
         number: { type: string, maxLength: 40 }
         state: { type: string, enum: [draft, submitted, approved, scheduled, released, rejected, cancelled] }
-        releaseDate: { type: string, format: date }
+        releaseDate: { type: string, format: date, description: 'Optional. Empty releases on the day :release is called. On create it must be no earlier than today and no more than 365 days ahead, both as UTC dates.' }
         decidedBy: { type: string }
         createdBy: { type: string, readOnly: true, description: The user who created the ECO; they cannot decide it. }
         decisionReason: { type: string, readOnly: true, maxLength: 200 }

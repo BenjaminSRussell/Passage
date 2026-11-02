@@ -92,6 +92,28 @@ describe("engineering module", () => {
     expect(await screen.findByRole("button", { name: "New calendar" })).toBeInTheDocument();
   });
 
+  it("shows Edit and Delete resource on the detail route only with engineering.resource.write", async () => {
+    const mill = { id: "a", code: "M1", name: "Mill", type: "machine", siteId: "S1", exclusive: false, version: 1, capabilities: [] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => mill }));
+    const detail = engineering.routes.find((r) => r.path === "/engineering/resources/:id")!.element;
+    const reader = render(
+      <PrincipalProvider duties={["engineering.read"]}>
+        <MemoryRouter>{detail}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: /Resource/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit resource" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete resource" })).toBeNull();
+    reader.unmount();
+    render(
+      <PrincipalProvider duties={["engineering.read", "engineering.resource.write"]}>
+        <MemoryRouter>{detail}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Edit resource" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete resource" })).toBeInTheDocument();
+  });
+
   it("offers to open resources, groups and capabilities from the overview", () => {
     const opened: string[] = [];
     render(

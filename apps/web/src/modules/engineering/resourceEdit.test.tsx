@@ -19,7 +19,7 @@ function stub(handler: (url: string, init?: RequestInit) => unknown) {
 const open = (props: { onDeleted?: () => void } = {}) =>
   render(
     <MemoryRouter>
-      <ResourceDetailPage id="a" {...props} />
+      <ResourceDetailPage id="a" canWrite {...props} />
     </MemoryRouter>,
   );
 
@@ -80,5 +80,19 @@ describe("resource edit and delete", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit resource" }));
     fireEvent.click(screen.getByRole("button", { name: "Save resource" }));
     expect(await findAlert()).toHaveTextContent("You do not have permission to change resources.");
+  });
+});
+
+describe("resource edit and delete are gated on the write duty", () => {
+  it("hides Edit resource and Delete resource without canWrite", async () => {
+    stub(() => ({ ok: true, status: 200, json: async () => mill }));
+    render(
+      <MemoryRouter>
+        <ResourceDetailPage id="a" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: /Resource/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit resource" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete resource" })).toBeNull();
   });
 });

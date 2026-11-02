@@ -40,6 +40,8 @@ const (
 	CodeEcoNotApproved  = "ENG-ECO-NOT-APPROVED"
 	CodeEcoDryRun       = "ENG-ECO-DRYRUN"
 	CodeEcoDate         = "ENG-ECO-DATE"
+	CodeEcoHorizon      = "ENG-ECO-HORIZON"
+	CodeEcoBackdateDuty = "ENG-ECO-BACKDATE-DUTY"
 
 	CodeRouteOpsLimit    = "ENG-ROUTE-OPS-LIMIT"
 	CodeRouteOpDup       = "ENG-ROUTE-OP-DUP"

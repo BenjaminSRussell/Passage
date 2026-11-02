@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	platformevents "github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
@@ -215,5 +216,38 @@ func TestEcoDecisionsNeedAKnownCreator(t *testing.T) {
 	var de *domain.Error
 	if err := e.Decide(domain.EcoApproved, "alice", ""); !errors.As(err, &de) || de.Code != domain.CodeEcoCreatorUnknown || e.State != domain.EcoSubmitted || e.DecidedBy != "" {
 		t.Fatalf("decide with no creator = %v, state %s", err, e.State)
+	}
+}
+
+func TestCheckReleaseDate(t *testing.T) {
+	today := day("2026-07-01")
+	for _, tc := range []struct {
+		name, date string
+		wantCode   string
+	}{
+		{"no date", "", ""},
+		{"today", "2026-07-01", ""},
+		{"yesterday needs the backdate duty", "2026-06-30", domain.CodeEcoBackdateDuty},
+		{"long past needs the backdate duty", "2020-01-01", domain.CodeEcoBackdateDuty},
+		{"365 days ahead", "2027-07-01", ""},
+		{"366 days ahead", "2027-07-02", domain.CodeEcoHorizon},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var date time.Time
+			if tc.date != "" {
+				date = day(tc.date)
+			}
+			err := domain.CheckReleaseDate(date, today)
+			if tc.wantCode == "" {
+				if err != nil {
+					t.Fatalf("unexpected error %v", err)
+				}
+				return
+			}
+			var de *domain.Error
+			if !errors.As(err, &de) || de.Code != tc.wantCode {
+				t.Fatalf("got %v, want %s", err, tc.wantCode)
+			}
+		})
 	}
 }

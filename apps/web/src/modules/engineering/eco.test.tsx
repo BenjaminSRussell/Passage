@@ -156,6 +156,25 @@ describe("EcoCreatePage", () => {
     expect(await screen.findByText("You do not have permission to create ECOs")).toBeInTheDocument();
   });
 
+  it("puts ENG-ECO-HORIZON on the release date field", async () => {
+    stub(() => problem(422, "ENG-ECO-HORIZON", "Horizon", { detail: "Release date is more than 365 days ahead." }));
+    render(<EcoCreatePage />);
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: "Create ECO" }));
+    expect((await screen.findAllByText("Release date is more than 365 days ahead.")).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText(/Release date/)).toHaveAccessibleDescription(/365 days ahead/);
+  });
+
+  it("puts ENG-ECO-BACKDATE-DUTY on the release date field, not the permission message", async () => {
+    stub(() => problem(403, "ENG-ECO-BACKDATE-DUTY", "Backdate", { detail: "Backdated release requires the Backdate duty." }));
+    render(<EcoCreatePage />);
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: "Create ECO" }));
+    expect(screen.getByLabelText(/Release date/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText(/Release date/)).toHaveAccessibleDescription(/requires the Backdate duty/));
+    expect(screen.queryByText("You do not have permission to create ECOs")).toBeNull();
+  });
+
   it("removes a replacement row and cancels", () => {
     const cancel = vi.fn();
     render(<EcoCreatePage onCancel={cancel} />);

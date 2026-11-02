@@ -511,7 +511,10 @@ func TestCreateEco(t *testing.T) {
 		wantBody   string
 	}{
 		{"created as submitted", &fakeStore{}, `{"number":"ECO-1","replaces":[` + replace + `]}`, allDuties, http.StatusCreated, `"state":"submitted"`},
-		{"past release date accepted as draft", &fakeStore{}, `{"number":"ECO-1","releaseDate":"2020-01-01","replaces":[` + replace + `]}`, allDuties, http.StatusCreated, "2020-01-01"},
+		{"release date today", &fakeStore{}, `{"number":"ECO-1","releaseDate":"2026-07-01","replaces":[` + replace + `]}`, allDuties, http.StatusCreated, "2026-07-01"},
+		{"past release date needs the backdate duty", &fakeStore{}, `{"number":"ECO-1","releaseDate":"2026-06-30","replaces":[` + replace + `]}`, allDuties, http.StatusForbidden, domain.CodeEcoBackdateDuty},
+		{"release date exactly 365 days ahead", &fakeStore{}, `{"number":"ECO-1","releaseDate":"2027-07-01","replaces":[` + replace + `]}`, allDuties, http.StatusCreated, "2027-07-01"},
+		{"release date 366 days ahead", &fakeStore{}, `{"number":"ECO-1","releaseDate":"2027-07-02","replaces":[` + replace + `]}`, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoHorizon},
 		{"no replacements", &fakeStore{}, `{"number":"ECO-1","replaces":[]}`, allDuties, http.StatusBadRequest, `"replaces"`},
 		{"same old and new", &fakeStore{}, `{"number":"ECO-1","replaces":[{"oldVersionId":"` + oldVersion + `","newVersionId":"` + oldVersion + `"}]}`, allDuties, http.StatusBadRequest, `"replaces"`},
 		{"bad release date", &fakeStore{}, `{"number":"ECO-1","releaseDate":"soon","replaces":[` + replace + `]}`, allDuties, http.StatusBadRequest, `"releaseDate"`},
@@ -524,6 +527,34 @@ func TestCreateEco(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := newRouter(tc.store, approves)
 			rec := do(r, http.MethodPost, ecos, tc.body, tc.duties, true, "X-Passage-User", "rita")
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+// The release-date check uses the UTC calendar day, the same day release compares against: at 20:00 on
+// 30 June in UTC-7 it is already 1 July in UTC, so 30 June is a backdate and 1 July 2027 is the last
+// date inside the 365-day horizon.
+func TestCreateEcoReleaseDateUsesTheUTCDay(t *testing.T) {
+	replace := `{"oldVersionId":"` + oldVersion + `","newVersionId":"` + newVersion + `"}`
+	evening := time.Date(2026, 6, 30, 20, 0, 0, 0, time.FixedZone("UTC-7", -7*60*60))
+	for _, tc := range []struct {
+		date       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"2026-06-30", http.StatusForbidden, domain.CodeEcoBackdateDuty},
+		{"2026-07-01", http.StatusCreated, "2026-07-01"},
+		{"2027-07-01", http.StatusCreated, "2027-07-01"},
+		{"2027-07-02", http.StatusUnprocessableEntity, domain.CodeEcoHorizon},
+	} {
+		t.Run(tc.date, func(t *testing.T) {
+			a := api.New(&fakeStore{}, approves, func() time.Time { return evening })
+			r := httpx.NewRouter()
+			a.Register(r)
+			rec := do(r, http.MethodPost, ecos, `{"number":"ECO-1","releaseDate":"`+tc.date+`","replaces":[`+replace+`]}`, allDuties, true, "X-Passage-User", "rita")
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}

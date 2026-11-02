@@ -119,6 +119,28 @@ func (e *Eco) Decide(to EcoState, actor, reason string) error {
 	return e.Transition(to)
 }
 
+// MaxEcoHorizonDays is how far ahead an ECO may be scheduled (BR-9.10 default for eng.eco.max_horizon_days).
+const MaxEcoHorizonDays = 365
+
+// CheckReleaseDate applies BR-9.10 to a requested release date. Both dates are compared as calendar
+// days in their own location; the API passes today as the current UTC date, the same day Release uses.
+// An empty date means release on the day it is called and always passes. A date before today needs the
+// "Backdate engineering changes" duty, which is not built, so it is refused (ENG-ECO-BACKDATE-DUTY), and a
+// date more than MaxEcoHorizonDays after today is refused (ENG-ECO-HORIZON).
+func CheckReleaseDate(releaseDate, today time.Time) error {
+	if releaseDate.IsZero() {
+		return nil
+	}
+	date, today := day(releaseDate), day(today)
+	if date.Before(today) {
+		return errf(CodeEcoBackdateDuty, "Backdated release requires the Backdate duty.")
+	}
+	if date.After(today.AddDate(0, 0, MaxEcoHorizonDays)) {
+		return errf(CodeEcoHorizon, "Release date is more than %d days ahead.", MaxEcoHorizonDays)
+	}
+	return nil
+}
+
 func (e *Eco) Release(versions []BomVersion, today time.Time) (ReleasePlan, error) {
 	if e.State != EcoApproved && e.State != EcoScheduled {
 		return ReleasePlan{}, errf(CodeEcoNotApproved, "ECO %s must be approved before release.", e.Number)

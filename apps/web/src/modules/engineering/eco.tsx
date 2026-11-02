@@ -274,6 +274,9 @@ interface PairDraft {
   newVersionId: string;
 }
 
+// BR-9.10 refusals of the release date (past without the backdate duty, or beyond the horizon).
+const releaseDateCodes = new Set(["ENG-ECO-HORIZON", "ENG-ECO-BACKDATE-DUTY"]);
+
 export function EcoCreatePage({ onCreated, onCancel }: { onCreated?: (id: string) => void; onCancel?: () => void }) {
   const [number, setNumber] = useState("");
   const [releaseDate, setReleaseDate] = useState("");
@@ -304,7 +307,10 @@ export function EcoCreatePage({ onCreated, onCancel }: { onCreated?: (id: string
       const created = await createEco(input, idempotency.current.key);
       onCreated?.(created.id);
     } catch (e) {
-      if (e instanceof ApiError && e.status === forbiddenStatus) setError("You do not have permission to create ECOs");
+      if (e instanceof ApiError && releaseDateCodes.has(e.code ?? "")) {
+        setError(errorText(e));
+        setFields({ releaseDate: e.message });
+      } else if (e instanceof ApiError && e.status === forbiddenStatus) setError("You do not have permission to create ECOs");
       else {
         setError(errorText(e));
         if (e instanceof ApiError) setFields(e.errors);
