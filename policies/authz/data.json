@@ -831,7 +831,8 @@
       {"resource": "/api/v1/cutover/plans/*", "methods": ["GET"]},
       {"resource": "/api/v1/cutover/plans/*/rekeying/*", "methods": ["GET"]},
       {"resource": "/api/v1/cutover/plans/*/rollback", "methods": ["POST"]},
-      {"resource": "/api/v1/cutover/plans/generate", "methods": ["POST"]}
+      {"resource": "/api/v1/cutover/plans/generate", "methods": ["POST"]},
+      {"resource": "/api/v1/cutover/plans/*/go-no-go", "methods": ["GET", "POST"]}
     ]},
     "CutoverStepOwner": {"permissions": [
       {"resource": "/api/v1/cutover/plans/*/steps/*/complete", "methods": ["POST"]},
