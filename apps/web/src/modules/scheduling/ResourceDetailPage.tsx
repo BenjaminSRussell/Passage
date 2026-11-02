@@ -123,6 +123,10 @@ export function ResourceDetailPage() {
             <dt className={styles.term}>Time zone</dt>
             <dd className={styles.value}>{resource.timeZone}</dd>
           </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Engineering resource</dt>
+            <dd className={`${styles.value} ${styles.mono}`}>{resource.engineeringResourceId ?? "Not mapped"}</dd>
+          </div>
           {WEEK_ORDER.map((day) => {
             const spans = resource.shifts.filter((s) => s.weekday === day);
             return (

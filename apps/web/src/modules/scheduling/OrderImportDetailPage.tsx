@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { getOrderImport, ORDER_IMPORT_SKIP_LABELS, type OrderImportSkipped } from "./api/client";
+import { describeProblem, getOrderImport, ORDER_IMPORT_SKIP_LABELS, reimportOrder, type OrderImport, type OrderImportSkipped, type Problem } from "./api/client";
 import { dash, formatDateTime, shortId } from "./format";
 import { ImportStatusBadge } from "./OrderImportsPage";
 import styles from "./pages.module.css";
@@ -16,7 +17,22 @@ const skippedColumns: DataTableColumn<OrderImportSkipped>[] = [
 export function OrderImportDetailPage() {
   const { orderId = "" } = useParams();
   const state = useLoad((signal) => getOrderImport(orderId, signal), orderId);
-  const o = state.data;
+  const [again, setAgain] = useState<OrderImport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const o = again ?? state.data;
+
+  async function importAgain() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      setAgain(await reimportOrder(orderId));
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (state.error) {
     return (
@@ -38,6 +54,7 @@ export function OrderImportDetailPage() {
     );
   }
 
+  const missingResource = o.skipped.some((row) => row.code === "unknown-resource");
   const facts: [string, string][] = [
     ["Order", o.orderNumber || shortId(o.orderId)],
     ["Order id", o.orderId],
@@ -87,6 +104,31 @@ export function OrderImportDetailPage() {
           ))}
         </dl>
       </Card>
+      {missingResource && (
+        <Alert
+          tone="warning"
+          title="Some operations name a resource scheduling does not know"
+          action={
+            o.reimportable ? (
+              <Button size="sm" loading={busy} onClick={importAgain}>
+                Import again
+              </Button>
+            ) : undefined
+          }
+        >
+          Map the engineering resource to a scheduling resource (Edit calendar, Engineering resource id), then import the order again.{" "}
+          {o.reimportable ? "" : "This order was received before scheduling kept events; it is imported again on its next event."}{" "}
+          <Link to="/scheduling/resources">Resources</Link>
+        </Alert>
+      )}
+      {failure && (
+        <Alert tone="danger" title="Could not import the order again" live="alert">
+          {failure.message} ({failure.code})
+        </Alert>
+      )}
+      <Alert tone="success" live="status">
+        {again ? `The order was imported again: ${again.created} created, ${again.updated} updated, ${again.unchanged} unchanged, ${again.skipped.length} left out.` : ""}
+      </Alert>
       <Card title="Operations not registered">
         {o.skipped.length === 0 ? (
           <EmptyState compact headingLevel={3} title="Nothing left out" description="Every operation of the order is registered for scheduling." />

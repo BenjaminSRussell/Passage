@@ -63,6 +63,7 @@ const partial: OrderImport = {
   orderStart: "2031-03-03T06:00:00Z",
   orderEnd: "2031-03-03T18:00:00Z",
   receivedAt: "2031-03-03T06:05:00Z",
+  reimportable: true,
 };
 
 describe("Production orders received", () => {
@@ -115,5 +116,32 @@ describe("Production orders received", () => {
     handler = () => ({ status: 404, body: { code: "SCHED-0131", detail: "no production order with that id has been received" } });
     renderAt(`/scheduling/order-imports/${ORDER}`);
     expect(await findAlert()).toHaveTextContent("SCHED-0131");
+  });
+
+  it("imports a received order again after a resource was mapped", async () => {
+    const done = { ...partial, status: "imported", created: 2, skipped: [], replanRequired: false };
+    handler = (url) => (url.pathname.endsWith(":reimport") ? { status: 200, body: done } : { status: 200, body: partial });
+    renderAt(`/scheduling/order-imports/${ORDER}`);
+    expect(await screen.findByText("Some operations name a resource scheduling does not know")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import again" }));
+    expect(await screen.findByText("The order was imported again: 2 created, 1 updated, 0 unchanged, 0 left out.")).toBeInTheDocument();
+    expect(calls.some((c) => c.pathname.endsWith(`/order-imports/${ORDER}:reimport`))).toBe(true);
+    expect(screen.getByText("Nothing left out")).toBeInTheDocument();
+  });
+
+  it("shows why an import again failed, and offers no button for an order that was not kept", async () => {
+    handler = (url) =>
+      url.pathname.endsWith(":reimport")
+        ? { status: 409, body: { code: "SCHED-0133", detail: "the received order was not kept" } }
+        : { status: 200, body: partial };
+    const first = renderAt(`/scheduling/order-imports/${ORDER}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Import again" }));
+    expect(await findAlert()).toHaveTextContent("SCHED-0133");
+    first.unmount();
+
+    handler = () => ({ status: 200, body: { ...partial, reimportable: false } });
+    renderAt(`/scheduling/order-imports/${ORDER}`);
+    expect(await screen.findByText(/received before scheduling kept events/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import again" })).not.toBeInTheDocument();
   });
 });

@@ -151,6 +151,9 @@ type ResourceUpdatedData struct {
 	Shifts       []domain.Shift `json:"shifts"`
 	Version      int            `json:"version"`
 	AffectedJobs []string       `json:"affectedJobs"`
+	// EngineeringResourceID is the engineering resource this one stands for,
+	// null when unmapped.
+	EngineeringResourceID *string `json:"engineeringResourceId"`
 }
 
 // CapacityBlockUpdatedData announces a changed capacity block (FR-23.17).

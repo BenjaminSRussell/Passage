@@ -164,7 +164,7 @@ components:
         $ref: '#/components/schemas/NetworkUpdatedData'
     ResourceUpdated:
       title: Resource updated
-      summary: A resource name, time zone or weekly calendar changed; lists the booked jobs the new calendar no longer covers.
+      summary: A resource name, time zone, weekly calendar or engineering resource mapping changed; lists the booked jobs the new calendar no longer covers.
       name: dev.passage.scheduling.resource.updated.v1
       contentType: application/cloudevents+json
       payload:
@@ -363,7 +363,7 @@ components:
         version: { type: integer }
     ResourceUpdatedData:
       type: object
-      required: [resourceId, code, name, timeZone, shifts, version, affectedJobs]
+      required: [resourceId, code, name, timeZone, shifts, version, affectedJobs, engineeringResourceId]
       properties:
         resourceId: { type: string, format: uuid }
         code: { type: string }
@@ -383,6 +383,7 @@ components:
           type: array
           description: Booked jobs the new calendar no longer covers.
           items: { type: string, format: uuid }
+        engineeringResourceId: { type: string, format: uuid, nullable: true, description: The engineering resource this one stands for; null when unmapped. }
     CapacityOverrideData:
       type: object
       required: [overrideId, resourceId, kind, start, end, reason, affectedJobs]

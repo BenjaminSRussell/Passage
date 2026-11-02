@@ -38,6 +38,7 @@ type fakeStore struct {
 	lastDaily   store.DailyLoadFilter
 	lastLate    store.LateOrderFilter
 	lastImports store.OrderImportFilter
+	reimported  string
 	lastOps     store.OperationFilter
 	lastOp      store.Operation
 

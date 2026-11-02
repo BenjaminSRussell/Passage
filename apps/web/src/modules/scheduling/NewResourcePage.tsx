@@ -13,9 +13,13 @@ interface Values {
   days: number[];
   start: string;
   end: string;
+  /** Optional engineering resource id production orders use for this resource. */
+  engineeringResourceId?: string;
 }
 
-type Errors = Partial<Record<"code" | "name" | "timeZone" | "days" | "start" | "end", string>>;
+type Errors = Partial<Record<"code" | "name" | "timeZone" | "days" | "start" | "end" | "engineeringResourceId", string>>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CODE = /^[A-Z0-9][A-Z0-9_-]{0,31}$/;
 
@@ -32,6 +36,8 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
   if (start === null) errors.start = "Enter a start time.";
   if (end === null) errors.end = "Enter an end time.";
   else if (start !== null && end <= start) errors.end = "The shift must end after it starts.";
+  const engineering = (values.engineeringResourceId ?? "").trim().toLowerCase();
+  if (engineering !== "" && !UUID.test(engineering)) errors.engineeringResourceId = "Enter the engineering resource id (a UUID), or leave it empty.";
   if (Object.keys(errors).length > 0 || start === null || end === null) return { errors };
   return {
     errors,
@@ -41,6 +47,7 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
       timeZone: values.timeZone.trim(),
       finite: values.finite,
       shifts: values.days.map((weekday) => ({ weekday, startMinute: start, endMinute: end })),
+      ...(engineering === "" ? {} : { engineeringResourceId: engineering }),
     },
   };
 }
@@ -48,7 +55,7 @@ export function validateResource(values: Values): { errors: Errors; input?: NewR
 /** Create a resource with one shift on the chosen weekdays (site-local times). */
 export function NewResourcePage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<Values>({ code: "", name: "", timeZone: "UTC", finite: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "16:00" });
+  const [values, setValues] = useState<Values>({ code: "", name: "", timeZone: "UTC", finite: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "16:00", engineeringResourceId: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,11 +83,12 @@ export function NewResourcePage() {
     } catch (error) {
       const problem = describeProblem(error);
       const fieldErrors: Errors = {};
-      for (const name of ["code", "name", "timeZone"] as const) {
+      for (const name of ["code", "name", "timeZone", "engineeringResourceId"] as const) {
         if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       }
       if (problem.fields.shifts) fieldErrors.days = problem.fields.shifts;
       if (problem.code === "SCHED-0101") fieldErrors.code = "A resource with this code already exists.";
+      if (problem.code === "SCHED-0132") fieldErrors.engineeringResourceId = problem.message;
       if (Object.keys(fieldErrors).length > 0) setErrors(fieldErrors);
       else setFailure(problem);
       if (problem.code === "idempotency_key_reuse") key.current = newKey();
@@ -102,6 +110,16 @@ export function NewResourcePage() {
           </FormField>
           <FormField id="resource-tz" label="Time zone" hint="IANA name of the site's zone." error={errors.timeZone}>
             {(control) => <Input {...control} value={values.timeZone} onChange={(event) => update({ timeZone: event.target.value })} invalid={Boolean(errors.timeZone)} />}
+          </FormField>
+          <FormField id="resource-engineering" label="Engineering resource id" hint="Optional. The id production orders use for this resource." error={errors.engineeringResourceId}>
+            {(control) => (
+              <Input
+                {...control}
+                value={values.engineeringResourceId ?? ""}
+                onChange={(event) => update({ engineeringResourceId: event.target.value })}
+                invalid={Boolean(errors.engineeringResourceId)}
+              />
+            )}
           </FormField>
           <FormField id="resource-start" label="Shift start" error={errors.start}>
             {(control) => <Input {...control} type="time" value={values.start} onChange={(event) => update({ start: event.target.value })} invalid={Boolean(errors.start)} />}

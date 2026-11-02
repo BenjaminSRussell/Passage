@@ -26,6 +26,9 @@ type ResourcePatch struct {
 	Name     *string
 	TimeZone *string
 	Shifts   []domain.Shift
+	// EngineeringResourceID maps the resource to an engineering resource;
+	// the empty string removes the mapping.
+	EngineeringResourceID *string
 }
 
 // ResourceUpdate is the updated resource with the booked jobs its new
@@ -81,12 +84,22 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 		if patch.Shifts != nil {
 			cur.Shifts = patch.Shifts
 		}
+		if patch.EngineeringResourceID != nil {
+			if *patch.EngineeringResourceID == "" {
+				cur.EngineeringResourceID = nil
+			} else {
+				if err := checkEngineeringFree(ctx, tx, *patch.EngineeringResourceID, id); err != nil {
+					return err
+				}
+				cur.EngineeringResourceID = patch.EngineeringResourceID
+			}
+		}
 		shifts, err := json.Marshal(cur.Shifts)
 		if err != nil {
 			return err
 		}
-		upd, err := scanResource(tx.QueryRow(ctx, `update scheduling_resource set name = $2, time_zone = $3, shifts = $4, version = version + 1
-			where id = $1::uuid returning `+resourceCols, id, cur.Name, cur.TimeZone, shifts), nil)
+		upd, err := scanResource(tx.QueryRow(ctx, `update scheduling_resource set name = $2, time_zone = $3, shifts = $4, engineering_resource_id = $5::uuid, version = version + 1
+			where id = $1::uuid returning `+resourceCols, id, cur.Name, cur.TimeZone, shifts, cur.EngineeringResourceID), nil)
 		if err != nil {
 			return err
 		}
@@ -100,7 +113,7 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 			refs = append(refs, j.JobID)
 		}
 		if err := enqueue(ctx, tx, "resource", upd.ID, schedevents.ResourceUpdated, schedevents.ResourceUpdatedData{
-			ResourceID: upd.ID, Code: upd.Code, Name: upd.Name, TimeZone: upd.TimeZone, Shifts: upd.Shifts, Version: upd.Version, AffectedJobs: refs}); err != nil {
+			ResourceID: upd.ID, Code: upd.Code, Name: upd.Name, TimeZone: upd.TimeZone, Shifts: upd.Shifts, EngineeringResourceID: upd.EngineeringResourceID, Version: upd.Version, AffectedJobs: refs}); err != nil {
 			return err
 		}
 		if idem.Key != "" {
@@ -112,6 +125,21 @@ func (s *Postgres) UpdateResource(ctx context.Context, id string, version int, p
 		return ResourceUpdate{}, false, mapWriteErr(err, CodeIdempotencyReuse, "a concurrent request used the same Idempotency-Key; retry")
 	}
 	return out, replayed, nil
+}
+
+// checkEngineeringFree refuses a mapping to an engineering resource another
+// scheduling resource (other than selfID) already stands for.
+func checkEngineeringFree(ctx context.Context, tx pgx.Tx, engineeringID, selfID string) error {
+	var code string
+	err := tx.QueryRow(ctx, `select code from scheduling_resource where engineering_resource_id = $1::uuid and ($2 = '' or id <> $2::uuid) limit 1`,
+		engineeringID, selfID).Scan(&code)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return httpx.NewProblem(http.StatusConflict, CodeEngineeringMapped, "resource "+code+" already stands for that engineering resource")
 }
 
 // uncoveredJobs lists the booked jobs that hold the resource after from, as

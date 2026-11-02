@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at"
+	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at, engineering_resource_id::text"
 	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], secondary_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
 	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
 )
@@ -25,7 +25,7 @@ const (
 func scanResource(row pgx.Row, fp *string) (Resource, error) {
 	var r Resource
 	var shifts []byte
-	dest := []any{&r.ID, &r.Code, &r.Name, &r.Finite, &r.TimeZone, &shifts, &r.Version, &r.CreatedAt}
+	dest := []any{&r.ID, &r.Code, &r.Name, &r.Finite, &r.TimeZone, &shifts, &r.Version, &r.CreatedAt, &r.EngineeringResourceID}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
@@ -59,9 +59,15 @@ func (s *Postgres) CreateResource(ctx context.Context, in Resource, idem Idem) (
 				return err
 			}
 		}
-		row, err := scanResource(tx.QueryRow(ctx, `insert into scheduling_resource (tenant_id, id, code, name, finite, time_zone, shifts, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+resourceCols,
-			tenantOf(ctx), ids.New(), in.Code, in.Name, in.Finite, in.TimeZone, shifts, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
+		if in.EngineeringResourceID != nil {
+			if err := checkEngineeringFree(ctx, tx, *in.EngineeringResourceID, ""); err != nil {
+				return err
+			}
+		}
+		row, err := scanResource(tx.QueryRow(ctx, `insert into scheduling_resource (tenant_id, id, code, name, finite, time_zone, shifts, idempotency_key, idempotency_fingerprint,
+				engineering_resource_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid) returning `+resourceCols,
+			tenantOf(ctx), ids.New(), in.Code, in.Name, in.Finite, in.TimeZone, shifts, nullable(idem.Key), nullable(idem.Fingerprint), in.EngineeringResourceID), nil)
 		if err != nil {
 			return err
 		}

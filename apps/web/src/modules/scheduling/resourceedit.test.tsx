@@ -41,10 +41,10 @@ function renderAt(path: string) {
 }
 
 const shifts = [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 480, endMinute: 960 }));
-const resource: Resource = { id: MIX, code: "MIX-1", name: "Mixing vessel", finite: true, timeZone: "UTC", shifts, version: 3, createdAt: "2026-10-01T00:00:00Z" };
+const resource: Resource = { id: MIX, code: "MIX-1", name: "Mixing vessel", finite: true, timeZone: "UTC", shifts, version: 3, createdAt: "2026-10-01T00:00:00Z", engineeringResourceId: null };
 
 describe("validateEdit", () => {
-  const same = { name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts) };
+  const same = { name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts), engineeringResourceId: "" };
   it("sends only what changed", () => {
     expect(validateEdit({ ...same, name: " Mixer 2 " }, resource).patch).toEqual({ name: "Mixer 2" });
     const rows = same.rows.map((r) => ({ ...r, end: "14:00" }));
@@ -52,6 +52,10 @@ describe("validateEdit", () => {
   });
   it("mirrors the service rules", () => {
     expect(validateEdit(same, resource).errors.form).toBe("Nothing changed.");
+    const eng = "0e000000-0000-4000-8000-0000000000AA";
+    expect(validateEdit({ ...same, engineeringResourceId: ` ${eng} ` }, resource).patch).toEqual({ engineeringResourceId: eng.toLowerCase() });
+    expect(validateEdit({ ...same, engineeringResourceId: "nope" }, resource).errors.engineeringResourceId).toBeTruthy();
+    expect(validateEdit({ ...same, engineeringResourceId: "" }, { ...resource, engineeringResourceId: eng.toLowerCase() }).patch).toEqual({ engineeringResourceId: "" });
     expect(validateEdit({ ...same, name: " " }, resource).errors.name).toBeTruthy();
     expect(validateEdit({ ...same, timeZone: "Mars 1" }, resource).errors.timeZone).toBeTruthy();
     expect(validateEdit({ ...same, rows: [] }, resource).errors.shifts).toBeTruthy();

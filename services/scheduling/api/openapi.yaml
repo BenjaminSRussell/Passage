@@ -16,6 +16,10 @@ paths:
     post:
       operationId: createResource
       summary: Create a resource with its weekly calendar
+      description: >
+        `engineeringResourceId` optionally maps the resource to the engineering (wave 09) resource it stands for. Production
+        orders name that id on their jobs, and the order intake resolves it to this resource. Another resource that already
+        stands for the engineering resource gets 409 SCHED-0132.
       x-passage-duty: scheduling.capacity.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -64,10 +68,14 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     patch:
       operationId: updateResource
-      summary: Change a resource's name, time zone or weekly calendar and list the jobs it no longer covers (FR-23.1, AC-23.7)
+      summary: Change a resource's name, time zone, weekly calendar or engineering resource mapping and list the jobs it no longer covers (FR-23.1, AC-23.7)
       description: >
-        Send at least one of name, timeZone or shifts; shifts replace the whole
-        weekly calendar. The code and the finite flag never change. The change
+        Send at least one of name, timeZone, shifts or engineeringResourceId;
+        shifts replace the whole weekly calendar and an empty
+        engineeringResourceId removes the mapping (another resource already
+        mapped to it gets 409 SCHED-0132). A changed mapping does not touch
+        operations already registered: they keep their candidates until the
+        order's next event or a re-import. The code and the finite flag never change. The change
         needs the resource version in If-Match (the ETag of a read) so a stale
         screen cannot overwrite another planner. Booked jobs whose booking after
         the request time now lies outside the resource's open capacity (calendar
@@ -687,6 +695,31 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OrderImport' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/order-imports/{orderId}:reimport:
+    post:
+      operationId: reimportOrder
+      summary: Import a received production order again with the resources and mappings that exist now
+      description: >
+        Runs the latest received `order.scheduled.v1` of the order through the intake again, at its own version. Use it
+        after mapping a resource (`engineeringResourceId`) so operations that were left out as `unknown-resource` are
+        registered without waiting for production to send a new event. Operations already registered stay unchanged; a
+        newer event that arrived meanwhile wins and nothing changes. It needs no body and is naturally idempotent. An order
+        received before scheduling kept events gets 409 SCHED-0133 and is imported again on its next event.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The production order id.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The order's import record after the new import (an `orderimport.recorded` event is written)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderImport' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/networks:
     post:
       operationId: createNetwork
@@ -1328,6 +1361,7 @@ components:
           minItems: 1
           maxItems: 14
           items: { $ref: '#/components/schemas/Shift' }
+        engineeringResourceId: { type: string, format: uuid, description: The engineering resource this one stands for; production orders name it on their jobs. }
     Shift:
       type: object
       required: [weekday, startMinute, endMinute]
@@ -1348,6 +1382,7 @@ components:
           items: { $ref: '#/components/schemas/Shift' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+        engineeringResourceId: { type: string, format: uuid, nullable: true, description: The engineering resource this one stands for; null when unmapped. }
     ResourcePatch:
       type: object
       minProperties: 1
@@ -1359,6 +1394,7 @@ components:
           minItems: 1
           maxItems: 14
           items: { $ref: '#/components/schemas/Shift' }
+        engineeringResourceId: { type: string, description: 'The engineering resource this one stands for (a UUID), or an empty string to remove the mapping. Another resource already mapped to it gets 409 SCHED-0132.' }
     CapacityBlockUpdate:
       allOf:
         - $ref: '#/components/schemas/CapacityBlock'
@@ -1678,7 +1714,7 @@ components:
         dependentOrders: { type: integer, description: "Pegged demand: orders pegged to consume this order's output, which its lateness delays in turn." }
     OrderImport:
       type: object
-      required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt]
+      required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt, reimportable]
       properties:
         orderId: { type: string, format: uuid }
         orderNumber: { type: string }
@@ -1705,6 +1741,7 @@ components:
         orderStart: { type: string, format: date-time, nullable: true, description: The baseline start from production. }
         orderEnd: { type: string, format: date-time, nullable: true }
         receivedAt: { type: string, format: date-time }
+        reimportable: { type: boolean, description: True when the received order is kept so `:reimport` can run it again. }
     LoadJob:
       type: object
       required: [jobId, orderId, operNumber, segment, role, start, end, minutesInRange, finite, firmed, lateMinutes]

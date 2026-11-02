@@ -179,3 +179,148 @@ func TestImportProductionOrder_ConcurrentDeliveriesKeepTheNewestVersion(t *testi
 		t.Fatalf("ops %+v err=%v, want only version 2's operation 10 at 240 minutes", ops, err)
 	}
 }
+
+func TestImportProductionOrder_ResolvesEngineeringMappingAndReimports(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	m := mustResource(t, ctx, s, "M1", true)
+	other := mustResource(t, ctx, s, "M2", true)
+	engM, engOther := ids.New(), ids.New()
+	order := ids.New()
+
+	// Nothing is mapped yet: the engineering ids are unknown to scheduling.
+	first, err := s.ImportProductionOrder(ctx, importReq(order, 1,
+		pjob(10, 1, "process", m.ID, "2"), pjob(20, 1, "process", engOther, "1"), pjob(20, 2, "process", engM, "1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != store.ImportPartial || first.Created != 1 || len(first.Skipped) != 1 {
+		t.Fatalf("first = %+v, want operation 10 registered and 20 skipped", first)
+	}
+	_ = other
+
+	// Map both engineering resources (and refuse a second resource for one).
+	mv, err := patchEng(ctx, s, m, engM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mv.EngineeringResourceID == nil || *mv.EngineeringResourceID != engM {
+		t.Fatalf("mapped resource = %+v", mv)
+	}
+	if _, err := patchEng(ctx, s, other, engM); problemCode(err) != store.CodeEngineeringMapped {
+		t.Fatalf("two resources mapped to one engineering resource: err=%v", err)
+	}
+	other, _ = s.GetResource(ctx, other.ID)
+	if _, err := patchEng(ctx, s, other, engOther); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := s.ReimportProductionOrder(ctx, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Status != store.ImportImported || again.Created != 1 || again.Unchanged != 1 || len(again.Skipped) != 0 {
+		t.Fatalf("again = %+v, want operation 20 created and 10 unchanged", again)
+	}
+	ops, err := s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+	if err != nil || len(ops) != 2 || len(ops[1].ResourceIDs) != 2 || ops[1].ResourceIDs[0] != other.ID || ops[1].ResourceIDs[1] != m.ID {
+		t.Fatalf("ops %+v err=%v, want operation 20 on M2 then M1", ops, err)
+	}
+	// Repeating it changes nothing.
+	third, err := s.ReimportProductionOrder(ctx, order)
+	if err != nil || third.Created != 0 || third.Updated != 0 || third.Unchanged != 2 {
+		t.Fatalf("third = %+v err=%v", third, err)
+	}
+	// A mapping removed after the operation was registered is not applied
+	// until the order is imported again; then the operation is re-resolved.
+	other, _ = s.GetResource(ctx, other.ID)
+	if _, err := patchEng(ctx, s, other, ""); err != nil {
+		t.Fatal(err)
+	}
+	ops, _ = s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+	if len(ops) != 2 || len(ops[1].ResourceIDs) != 2 {
+		t.Fatalf("ops %+v, want operation 20 untouched by the remapping", ops)
+	}
+	fourth, err := s.ReimportProductionOrder(ctx, order)
+	if err != nil || fourth.Updated != 1 || fourth.Unchanged != 1 {
+		t.Fatalf("fourth = %+v err=%v, want operation 20 updated", fourth, err)
+	}
+	ops, _ = s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+	if len(ops) != 2 || len(ops[1].ResourceIDs) != 1 || ops[1].ResourceIDs[0] != m.ID {
+		t.Fatalf("ops %+v, want operation 20 on M1 only", ops)
+	}
+	if _, err := s.ReimportProductionOrder(ctx, ids.New()); problemCode(err) != store.CodeOrderImportNotFound {
+		t.Fatalf("reimport of an order never received: err=%v", err)
+	}
+	// Another tenant neither sees the order nor collides with the mapping.
+	if _, err := s.ReimportProductionOrder(tenantCtx(2), order); problemCode(err) != store.CodeOrderImportNotFound {
+		t.Fatalf("reimport from another tenant: err=%v", err)
+	}
+	eng := engM
+	if _, _, err := s.CreateResource(tenantCtx(2), store.Resource{Code: "M1", Name: "M1", Finite: true, TimeZone: "UTC", Shifts: weekdays(8*60, 16*60),
+		EngineeringResourceID: &eng}, store.Idem{}); err != nil {
+		t.Fatalf("same engineering id in another tenant: %v", err)
+	}
+}
+
+func TestImportProductionOrder_ReimportRacingANewerDeliveryKeepsTheNewest(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	m := mustResource(t, ctx, s, "M1", true)
+	for round := 0; round < 5; round++ {
+		order := ids.New()
+		if _, err := s.ImportProductionOrder(ctx, importReq(order, 1, pjob(10, 1, "process", m.ID, "1"), pjob(20, 1, "process", m.ID, "1"))); err != nil {
+			t.Fatal(err)
+		}
+		newer := importReq(order, 2, pjob(10, 1, "process", m.ID, "4"))
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		wg.Add(2)
+		go func() { defer wg.Done(); _, errs[0] = s.ReimportProductionOrder(ctx, order) }()
+		go func() { defer wg.Done(); _, errs[1] = s.ImportProductionOrder(ctx, newer) }()
+		wg.Wait()
+		if errs[0] != nil || errs[1] != nil {
+			t.Fatalf("errs = %v", errs)
+		}
+		got, err := s.GetOrderImport(ctx, order)
+		ops, oerr := s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+		if err != nil || oerr != nil || got.OrderVersion != 2 || len(ops) != 1 || ops[0].Minutes != 240 {
+			t.Fatalf("round %d: import %+v ops %+v err=%v/%v, want version 2's single operation whichever ran first", round, got, ops, err, oerr)
+		}
+	}
+}
+
+func TestCreateResource_ConcurrentMappingsToOneEngineeringResource(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	eng := ids.New()
+	const n = 4
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, errs[i] = s.CreateResource(ctx, store.Resource{Code: "R" + string(rune('A'+i)), Name: "R", Finite: true, TimeZone: "UTC",
+				Shifts: weekdays(8*60, 16*60), EngineeringResourceID: &eng}, store.Idem{})
+		}()
+	}
+	wg.Wait()
+	ok := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case problemCode(err) != store.CodeEngineeringMapped:
+			t.Fatalf("a losing create got %v, want %s", err, store.CodeEngineeringMapped)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d creates mapped the engineering resource, want exactly 1 (errs %v)", ok, errs)
+	}
+}
+
+func patchEng(ctx context.Context, s *store.Postgres, r store.Resource, eng string) (store.Resource, error) {
+	upd, _, err := s.UpdateResource(ctx, r.ID, r.Version, store.ResourcePatch{EngineeringResourceID: &eng}, time.Now(), store.Idem{})
+	return upd.Resource, err
+}

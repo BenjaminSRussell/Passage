@@ -247,7 +247,10 @@ reordering cannot roll an order back. Operations that cannot be registered
 cannot be decoded (no order id, start, end, version or reason, a resource id
 that is not a UUID) is dead-lettered. `GET /order-imports` and
 `GET /order-imports/{orderId}` answer what happened, and
-`orderimport.recorded` is published for every applied event.
+`orderimport.recorded` is published for every applied event. A job's `resourceId`
+is resolved through the scheduling resource's `engineeringResourceId` first and
+by scheduling id second; after mapping a resource,
+`POST /order-imports/{orderId}:reimport` imports the kept order again.
 
 ## API
 
@@ -271,6 +274,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports?status&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports/{orderId}` | `scheduling.read` |
+| POST | `/v1/scheduling/order-imports/{orderId}:reimport` | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |

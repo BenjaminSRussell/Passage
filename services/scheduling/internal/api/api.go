@@ -81,6 +81,9 @@ type resourceRequest struct {
 	Finite   *bool          `json:"finite"`
 	TimeZone string         `json:"timeZone"`
 	Shifts   []domain.Shift `json:"shifts"`
+	// EngineeringResourceID is the engineering (wave 09) resource this one
+	// stands for; optional.
+	EngineeringResourceID *string `json:"engineeringResourceId"`
 }
 
 type operationRequest struct {
@@ -184,6 +187,7 @@ func (a *API) Register(r chi.Router) {
 	// Slice 18: production orders received from wave 21 (FR-23.10).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports", a.listOrderImports)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-imports/{orderId}", a.getOrderImport)
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/order-imports/{orderId}:reimport", a.reimportOrder)
 
 	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
 	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)
@@ -326,6 +330,9 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 	if msg := validShifts(req.Shifts); msg != "" {
 		fields["shifts"] = msg
 	}
+	if req.EngineeringResourceID != nil && *req.EngineeringResourceID != "" && !ids.Valid(strings.ToLower(*req.EngineeringResourceID)) {
+		fields["engineeringResourceId"] = "must be a UUID"
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
@@ -334,8 +341,13 @@ func (a *API) createResource(w http.ResponseWriter, r *http.Request) {
 	if req.Finite != nil {
 		finite = *req.Finite
 	}
+	var engineering *string
+	if req.EngineeringResourceID != nil && *req.EngineeringResourceID != "" {
+		eid := strings.ToLower(*req.EngineeringResourceID)
+		engineering = &eid
+	}
 	res, created, err := a.store.CreateResource(r.Context(), store.Resource{Code: req.Code, Name: strings.TrimSpace(req.Name),
-		Finite: finite, TimeZone: req.TimeZone, Shifts: req.Shifts}, idem)
+		Finite: finite, TimeZone: req.TimeZone, Shifts: req.Shifts, EngineeringResourceID: engineering}, idem)
 	if err != nil {
 		slog.Error("create resource failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

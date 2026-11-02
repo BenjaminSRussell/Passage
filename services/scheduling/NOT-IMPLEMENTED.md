@@ -362,13 +362,13 @@ handoff below) and sales lines as pegged demand (pegs link orders to orders,
 see the AC-23.3 handoff).
 
 Slice 18 builds the intake of wave 21 production orders (FR-23.10, ticket
-deliverable 5). **Two handoffs below keep it from importing real orders
-today:** (a) it does not start until its service principal
+deliverable 5). **Two handoffs kept it from importing real orders
+at first (the second is done in slice 19, the first on main):** (a) it did not start until its service principal
 `service:scheduling-order-import` with duty `scheduling.order.import` is
 seeded, and (b) production's jobs name engineering (wave 09) resource ids,
 which are not scheduling resource ids, so every operation of a real order is
 left out as `unknown-resource` and the order shows as `rejected` until
-resources are mapped (wave 9 handoff, deliverable 1 below).
+resources are mapped (done in slice 19, below).
 `scheduling consume` runs a second consumer, `scheduling-order-import`, with
 its own Kafka group (`KAFKA_ORDER_GROUP`), principal, duty and dead-letter
 topic `passage.production.order.dlq`, reading
@@ -410,6 +410,60 @@ filter) and the order detail with the operations not registered, linked from
 the navigation. New duty: `scheduling.order.import`, held only by the service
 principal (no route or page action uses it). The OpenAPI and AsyncAPI specs
 have no FAIL lines on the doc gates.
+Slice 19 builds the resource mapping slice 18 needed (FR-23.10), so real orders
+are no longer rejected: a scheduling resource can stand for an engineering
+(wave 09) resource. Migration `0014_resource_mapping.sql` adds
+`scheduling_resource.engineering_resource_id` (unique per tenant when set).
+`POST /resources` takes `engineeringResourceId`; `PATCH /resources/{id}` sets it
+or removes it with an empty string (under the same If-Match version, duty
+`scheduling.capacity.write`); another resource already mapped to it is refused
+(409 SCHED-0132); `resource.updated` carries it; every resource read returns it.
+The order intake resolves each job's `resourceId` through the mapping first and
+by scheduling resource id second (so slice 18's direct ids still work), keeps a
+candidate once, and keeps the route order. The migration also keeps each
+received order (`scheduling_order_import.source`) so that
+`POST /order-imports/{orderId}:reimport` (duty `scheduling.schedule.write`) can
+import it again at its own version after a mapping was added: operations
+already registered stay unchanged, operations left out for an unknown resource
+are registered, a newer event that arrived meanwhile wins, and an
+`orderimport.recorded` event is written. The answer says `reimportable`; an order
+received before this migration has no kept source (409 SCHED-0133) and waits for
+its next event. Web: an Engineering resource id field on the new and edit
+resource pages, the id in the resources list and on the resource detail, and an
+Import again button on the production order detail when operations were left
+out for an unknown resource. No new duty. The OpenAPI and AsyncAPI specs have no
+FAIL lines on the doc gates.
+Slice 19 limits and defaults, as built:
+- The engineering resource id is checked for UUID form only. Whether wave 09
+  has such a resource (or has retired it) is not checked across services: a
+  mistyped id is accepted and simply never matches a job. A wave 9 feed that
+  creates or validates the mappings is listed below.
+- The mapping is unique per tenant (`(tenant_id, engineering_resource_id)`);
+  scheduling resources carry no legal entity, so two legal entities of one
+  tenant cannot map the same engineering resource to two scheduling resources,
+  and the same engineering id in another tenant is independent. A concurrent
+  second mapping is refused by the unique index with the same 409 SCHED-0132.
+- A changed or removed mapping does not touch operations already registered:
+  they keep the candidates resolved when they were imported, with their jobs,
+  until production's next event for the order or a `:reimport`. Then the
+  candidates are resolved again; an operation whose candidates changed is
+  updated and loses its non-firmed jobs (`replanRequired`), firmed work stays,
+  and an operation whose only resource is no longer known is listed as
+  `unknown-resource` while its existing scheduling operation stays as it was.
+- `:reimport` runs in one transaction under the order's import lock (the same
+  advisory lock as the intake), so it cannot interleave with a delivery: a
+  newer version that commits first is the one imported again, one that
+  arrives during the re-import waits and applies on top. The import row keeps
+  the version and reason of the kept event, its `eventId` becomes
+  `reimport:<uuid>` and `receivedAt` the time of the re-import.
+- `source` holds the part of `order.scheduled.v1` scheduling reads: order id,
+  number, start, end, delivery date and per job its operation, sequence, type,
+  engineering resource id and planned hours. Nothing personal or priced. It is
+  bounded by the Kafka message size of the event (one row per order, replaced
+  by each applied newer event; stale events do not touch it) and lives as long
+  as the order's import row, which has no purge yet (none of scheduling's
+  order data does; a retention policy for withdrawn and completed orders is
+  part of the order withdrawal deliverable 5 below).
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed. These handoffs
@@ -420,9 +474,10 @@ from slices 16, 17 and 18 lie outside it:
 | `policies/authz/data.json`: resource row `/v1/scheduling/capacity-load/jobs` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/capacity-load/jobs` is a row of `scheduling.read`. |
 | `policies/authz/data.json`: resource rows `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | GET `/v1/scheduling/late-orders` and `/v1/scheduling/runs/*/kpis` are rows of `scheduling.read`. |
 | `policies/authz/data.json`: resource rows `/v1/scheduling/order-imports` and `/v1/scheduling/order-imports/*` (GET) under `scheduling.read` | done (seeded in `policies/authz/data.json`) | Both GET routes are rows of `scheduling.read`. |
-| `platform/go/tenant/serviceprincipal.go` `servicePrincipals` and `policies/authz/data.json` `service_principals` (kept equal by `TestServicePrincipalTableMatchesPolicyData`): add `"scheduling-order-import": ["scheduling.order.import"]`; seed the duty `scheduling.order.import` (no resource rows: no route uses it) | handoff — platform / policy owner (#313) | Without it the order intake consumer logs a warning at start and does not run; it never borrows the downtime principal. Once seeded it starts on its own group at the earliest retained offset. |
+| `platform/go/tenant/serviceprincipal.go` `servicePrincipals` and `policies/authz/data.json` `service_principals` (kept equal by `TestServicePrincipalTableMatchesPolicyData`): `"scheduling-order-import": ["scheduling.order.import"]`; the duty `scheduling.order.import` (no resource rows: no route uses it) | done (seeded on main, 6de0ddb2) | The order intake consumer starts on its own group at the earliest retained offset. |
 | `deploy/kafka/scheduling-consumer.yaml`: ACLs for `KafkaUser` `scheduling-consumer`: Read, Describe on topic `passage.production.order` and group `scheduling-order-import`; Write, Describe on `passage.production.order.dlq`; a `KafkaTopic` `passage.production.order.dlq` like the downtime one. `deploy/kafka/connect.yaml`: an outbox connector for `passage_production` publishing `passage.production.<aggregate_type>` keyed by aggregate id | handoff — deploy owner (#313) | No production outbox connector exists yet, so nothing reaches `passage.production.order`. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-order-import"}` > 0. |
-| Mapping production (engineering, wave 09) resource ids to scheduling resources | handoff — wave 9 / wave 23 resources | Scheduling resources get their own ids (`POST /resources`), so a real order's jobs name resources scheduling does not know and are recorded as `unknown-resource`; a resource created with the engineering id, or a mapping table fed by wave 9, is needed before the intake does anything for real orders. |
+| Mapping production (engineering, wave 09) resource ids to scheduling resources | done (slice 19) | `scheduling_resource.engineering_resource_id`, set on `POST /resources` and `PATCH /resources/{id}`; the intake resolves a job's resource through it first and by scheduling id second. A wave 9 feed that creates the mappings automatically is still a handoff (below). |
+| `policies/authz/data.json`: resource row `/v1/scheduling/order-imports/*:reimport` (POST) under `scheduling.schedule.write` (an existing duty) | handoff — platform / policy owner (#313) | `POST /v1/scheduling/order-imports/{orderId}:reimport` uses the existing duty `scheduling.schedule.write`; no new duty. Without the row the gateway does not route the call and the Import again button fails with a 403/404 until it is seeded. |
 
 ## Ticket deliverables
 
@@ -448,7 +503,7 @@ from slices 16, 17 and 18 lie outside it:
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
-| 5 | Operations fed from wave 21 production orders and jobs instead of the API | built (slice 18) for `order.scheduled.v1` | `POST /operations` stays for manual entry. Not built: withdrawing an order's operations when production resets or cancels it (its `statuschanged` event carries null dates), order priority, quantities, the order's attributes and campaign key, and mapping production resource ids to scheduling resources (the event's `resourceId` must already be a scheduling resource id, otherwise the operation is recorded as left out). |
+| 5 | Operations fed from wave 21 production orders and jobs instead of the API | built (slice 18) for `order.scheduled.v1` | `POST /operations` stays for manual entry. Not built: withdrawing an order's operations when production resets or cancels it (its `statuschanged` event carries null dates), order priority, quantities, the order's attributes and campaign key, and a wave 9 feed that creates the resource mappings (slice 19 maps by hand: an event's `resourceId` that is neither mapped nor a scheduling resource id is recorded as left out). |
 | 6 | Resource networks: definition, edges, edge rules (FR-23.13, BR-23.11 wait check) | built | `POST/GET /v1/scheduling/networks`; `domain.ResourceNetwork` (`Successors` in transfer-time order, `ChainAllowed`, `WaitOK`). |
 | 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |

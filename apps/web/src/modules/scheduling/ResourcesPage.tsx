@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listResources, type Resource } from "./api/client";
-import { describeShifts } from "./format";
+import { dash, describeShifts } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -10,6 +10,7 @@ const columns: DataTableColumn<Resource>[] = [
   { key: "name", header: "Name" },
   { key: "finite", header: "Capacity", render: (row) => <Badge tone={row.finite ? "info" : "neutral"}>{row.finite ? "Finite" : "Infinite"}</Badge> },
   { key: "timeZone", header: "Time zone" },
+  { key: "engineeringResourceId", header: "Engineering resource", mono: true, render: (row) => row.engineeringResourceId ?? dash },
   { key: "shifts", header: "Calendar", render: (row) => describeShifts(row.shifts) },
 ];
 

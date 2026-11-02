@@ -19,6 +19,8 @@ export interface Resource {
   shifts: Shift[];
   version: number;
   createdAt: string;
+  /** The engineering (wave 09) resource this one stands for; production orders name that id on their jobs. */
+  engineeringResourceId?: string | null;
 }
 
 export interface NewResource {
@@ -27,6 +29,7 @@ export interface NewResource {
   finite: boolean;
   timeZone: string;
   shifts: Shift[];
+  engineeringResourceId?: string;
 }
 
 export const OPERATION_STATUSES = ["open", "scheduled", "unplaced"] as const;
@@ -324,6 +327,8 @@ export interface ResourcePatch {
   name?: string;
   timeZone?: string;
   shifts?: Shift[];
+  /** A UUID, or an empty string to remove the mapping. */
+  engineeringResourceId?: string;
 }
 
 export interface ResourceUpdate extends Resource {
@@ -505,6 +510,8 @@ export interface OrderImport {
   orderStart: string | null;
   orderEnd: string | null;
   receivedAt: string;
+  /** True when the received order is kept, so it can be imported again after a resource was mapped. */
+  reimportable: boolean;
 }
 
 export async function listOrderImports(status: string, signal?: AbortSignal): Promise<OrderImport[]> {
@@ -517,6 +524,11 @@ export async function listOrderImports(status: string, signal?: AbortSignal): Pr
 
 export function getOrderImport(orderId: string, signal?: AbortSignal): Promise<OrderImport> {
   return send<OrderImport>(`/order-imports/${encodeURIComponent(orderId)}`, {}, signal);
+}
+
+/** Imports the latest received event of the order again with the resources and mappings that exist now. */
+export function reimportOrder(orderId: string): Promise<OrderImport> {
+  return send<OrderImport>(`/order-imports/${encodeURIComponent(orderId)}:reimport`, { method: "POST" });
 }
 
 // Slice 2: resource networks, setup matrices, cleanout rules, capacity blocks

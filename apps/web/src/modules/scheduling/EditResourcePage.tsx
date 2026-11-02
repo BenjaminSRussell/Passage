@@ -16,9 +16,13 @@ export interface EditValues {
   name: string;
   timeZone: string;
   rows: ShiftRow[];
+  /** The engineering resource id this resource stands for; empty when unmapped. */
+  engineeringResourceId: string;
 }
 
-type Errors = Partial<Record<"name" | "timeZone" | "shifts" | "form", string>>;
+type Errors = Partial<Record<"name" | "timeZone" | "shifts" | "engineeringResourceId" | "form", string>>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MAX_SHIFTS = 14;
 const ORDER: readonly number[] = WEEK_ORDER;
@@ -47,10 +51,13 @@ export function validateEdit(values: EditValues, current: Resource): { errors: E
     }
     shifts.push({ weekday: row.weekday, startMinute: start, endMinute: end });
   }
+  const engineering = values.engineeringResourceId.trim().toLowerCase();
+  if (engineering !== "" && !UUID.test(engineering)) errors.engineeringResourceId = "Enter the engineering resource id (a UUID), or leave it empty.";
   if (Object.keys(errors).length > 0) return { errors };
   const patch: ResourcePatch = {};
   if (name !== current.name) patch.name = name;
   if (timeZone !== current.timeZone) patch.timeZone = timeZone;
+  if (engineering !== (current.engineeringResourceId ?? "")) patch.engineeringResourceId = engineering;
   if (JSON.stringify(rowsOf(shifts)) !== JSON.stringify(rowsOf(current.shifts))) patch.shifts = shifts;
   if (Object.keys(patch).length === 0) {
     errors.form = "Nothing changed.";
@@ -61,7 +68,7 @@ export function validateEdit(values: EditValues, current: Resource): { errors: E
 
 function Form({ initial, onReload }: { initial: Resource; onReload: () => void }) {
   const [resource, setResource] = useState<Resource>(initial);
-  const [values, setValues] = useState<EditValues>({ name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts) });
+  const [values, setValues] = useState<EditValues>({ name: resource.name, timeZone: resource.timeZone, rows: rowsOf(resource.shifts), engineeringResourceId: resource.engineeringResourceId ?? "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -94,9 +101,10 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
     } catch (error) {
       const problem = describeProblem(error);
       const fieldErrors: Errors = {};
-      for (const name of ["name", "timeZone", "shifts"] as const) {
+      for (const name of ["name", "timeZone", "shifts", "engineeringResourceId"] as const) {
         if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       }
+      if (problem.code === "SCHED-0132") fieldErrors.engineeringResourceId = problem.message;
       if (Object.keys(fieldErrors).length > 0) setErrors(fieldErrors);
       else setFailure(problem);
       if (problem.code === "idempotency_key_reuse") key.current = newKey();
@@ -113,6 +121,21 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
         </FormField>
         <FormField id="edit-tz" label="Time zone" hint="IANA name of the site's zone." error={errors.timeZone}>
           {(control) => <Input {...control} value={values.timeZone} onChange={(event) => update({ timeZone: event.target.value })} invalid={Boolean(errors.timeZone)} />}
+        </FormField>
+        <FormField
+          id="edit-engineering"
+          label="Engineering resource id"
+          hint="The id production orders use for this resource. Leave empty to remove the mapping."
+          error={errors.engineeringResourceId}
+        >
+          {(control) => (
+            <Input
+              {...control}
+              value={values.engineeringResourceId}
+              onChange={(event) => update({ engineeringResourceId: event.target.value })}
+              invalid={Boolean(errors.engineeringResourceId)}
+            />
+          )}
         </FormField>
         <fieldset className={styles.groups} aria-describedby={errors.shifts ? "edit-shifts-error" : undefined}>
           <legend className={styles.groupsLegend}>Shifts (site-local times)</legend>
@@ -214,7 +237,7 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
   );
 }
 
-/** Change a resource's name, time zone and weekly calendar (FR-23.1, AC-23.7). */
+/** Change a resource's name, time zone, weekly calendar and engineering resource mapping (FR-23.1, AC-23.7, FR-23.10). */
 export function EditResourcePage() {
   const { id = "" } = useParams();
   const state = useLoad<Resource>((signal) => getResource(id, signal), id);

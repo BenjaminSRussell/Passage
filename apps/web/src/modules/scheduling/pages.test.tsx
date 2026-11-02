@@ -480,6 +480,7 @@ describe("Resources", () => {
       days: "Choose at least one working day.",
       end: "The shift must end after it starts.",
     });
+    expect(validateResource({ code: "MIX-1", name: "Mixer", timeZone: "UTC", finite: true, days: [1], start: "08:00", end: "16:00", engineeringResourceId: "x" }).errors.engineeringResourceId).toBeTruthy();
     const ok = validateResource({ code: "MIX-1", name: "Mixer", timeZone: "Europe/Berlin", finite: false, days: [1, 2], start: "22:00", end: "00:00" });
     expect(ok.input?.shifts).toEqual([
       { weekday: 1, startMinute: 1320, endMinute: 1440 },

@@ -21,6 +21,8 @@ type resourcePatchRequest struct {
 	Name     *string        `json:"name"`
 	TimeZone *string        `json:"timeZone"`
 	Shifts   []domain.Shift `json:"shifts"`
+	// EngineeringResourceID is a UUID, or "" to remove the mapping.
+	EngineeringResourceID *string `json:"engineeringResourceId"`
 }
 
 // updateResource changes a resource's name, time zone or weekly calendar and
@@ -50,8 +52,8 @@ func (a *API) updateResource(w http.ResponseWriter, r *http.Request) {
 	idem.Fingerprint = fingerprint(id+"|"+strconv.Itoa(version), body)
 	fields := map[string]string{}
 	patch := store.ResourcePatch{}
-	if req.Name == nil && req.TimeZone == nil && req.Shifts == nil {
-		fields["body"] = "send at least one of name, timeZone or shifts"
+	if req.Name == nil && req.TimeZone == nil && req.Shifts == nil && req.EngineeringResourceID == nil {
+		fields["body"] = "send at least one of name, timeZone, shifts or engineeringResourceId"
 	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -72,6 +74,13 @@ func (a *API) updateResource(w http.ResponseWriter, r *http.Request) {
 			fields["shifts"] = msg
 		}
 		patch.Shifts = req.Shifts
+	}
+	if req.EngineeringResourceID != nil {
+		eid := strings.ToLower(*req.EngineeringResourceID)
+		if eid != "" && !ids.Valid(eid) {
+			fields["engineeringResourceId"] = "must be a UUID, or empty to remove the mapping"
+		}
+		patch.EngineeringResourceID = &eid
 	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)

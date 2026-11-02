@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -53,6 +54,9 @@ type OrderImport struct {
 	OrderStart      *time.Time                `json:"orderStart"`
 	OrderEnd        *time.Time                `json:"orderEnd"`
 	ReceivedAt      time.Time                 `json:"receivedAt"`
+	// Reimportable is true when the received order is kept, so it can be
+	// imported again (after a resource was mapped) without a new event.
+	Reimportable bool `json:"reimportable"`
 	// Stale is true on the answer to an event older than the stored one: it
 	// changed nothing. It is not stored.
 	Stale bool `json:"-"`
@@ -68,13 +72,13 @@ type OrderImportRequest struct {
 }
 
 const importCols = `order_id::text, order_number, order_version, reason, event_id, status, operations_total, created_count, updated_count,
-	unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, received_at`
+	unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, received_at, source is not null`
 
 func scanImport(row pgx.Row) (OrderImport, error) {
 	var o OrderImport
 	var skipped []byte
 	if err := row.Scan(&o.OrderID, &o.OrderNumber, &o.OrderVersion, &o.Reason, &o.EventID, &o.Status, &o.OperationsTotal, &o.Created, &o.Updated,
-		&o.Unchanged, &o.Removed, &o.KeptFirmed, &skipped, &o.ReplanRequired, &o.OrderStart, &o.OrderEnd, &o.ReceivedAt); err != nil {
+		&o.Unchanged, &o.Removed, &o.KeptFirmed, &skipped, &o.ReplanRequired, &o.OrderStart, &o.OrderEnd, &o.ReceivedAt, &o.Reimportable); err != nil {
 		return OrderImport{}, err
 	}
 	o.Skipped = []domain.SkippedOperation{}
@@ -86,6 +90,17 @@ type OrderImportStore interface {
 	ImportProductionOrder(ctx context.Context, req OrderImportRequest) (OrderImport, error)
 	ListOrderImports(ctx context.Context, f OrderImportFilter) ([]OrderImport, error)
 	GetOrderImport(ctx context.Context, orderID string) (OrderImport, error)
+	ReimportProductionOrder(ctx context.Context, orderID string) (OrderImport, error)
+}
+
+// CodeOrderNotReimportable is returned when the order was received before
+// scheduling kept the received event.
+const CodeOrderNotReimportable = "SCHED-0133"
+
+// importSource is the received order as kept on its import row.
+type importSource struct {
+	Order domain.ProductionOrder
+	End   time.Time
 }
 
 type importedRow struct {
@@ -104,248 +119,282 @@ type importedRow struct {
 func (s *Postgres) ImportProductionOrder(ctx context.Context, req OrderImportRequest) (OrderImport, error) {
 	var out OrderImport
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		// One import of an order at a time, also before its first row exists
-		// (FOR UPDATE below locks nothing then): two deliveries of the order
-		// racing across a rebalance must not both pass the version check.
-		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('scheduling-order-import:' || $1::text || ':' || $2::text, 0))`,
-			tenantOf(ctx), req.Order.OrderID); err != nil {
-			return err
-		}
-		prior, err := scanImport(tx.QueryRow(ctx, `select `+importCols+` from scheduling_order_import where order_id = $1::uuid for update`, req.Order.OrderID))
-		hasPrior := err == nil
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if hasPrior && req.Version < prior.OrderVersion {
-			out, out.Stale = prior, true
-			return nil
-		}
-		planned, skipped := domain.PlanImport(req.Order)
-
-		var wanted []string
-		for _, op := range planned {
-			wanted = append(wanted, op.ResourceIDs...)
-		}
-		zones := map[string]string{}
-		if len(wanted) > 0 {
-			rows, err := tx.Query(ctx, `select id::text, time_zone from scheduling_resource where id = any($1::uuid[])`, wanted)
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				var id, zone string
-				if err := rows.Scan(&id, &zone); err != nil {
-					rows.Close()
-					return err
-				}
-				zones[id] = zone
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return err
-			}
-		}
-		// Keep only the candidates scheduling knows; the due instant is the end
-		// of the delivery day where the order finishes, in the time zone of the
-		// preferred resource of its last registrable operation, the same for
-		// every operation so the order has one due date.
-		candidatesOf := map[int][]string{}
-		finishZone := ""
-		for _, op := range planned {
-			for _, id := range op.ResourceIDs {
-				if _, ok := zones[id]; ok {
-					candidatesOf[op.OperNumber] = append(candidatesOf[op.OperNumber], id)
-				}
-			}
-			if c := candidatesOf[op.OperNumber]; len(c) > 0 {
-				finishZone = zones[c[0]]
-			}
-		}
-		var due *time.Time
-		if req.Order.DeliveryDate != nil {
-			loc, err := time.LoadLocation(finishZone)
-			if err != nil || finishZone == "" {
-				loc = time.UTC
-			}
-			d := domain.DeliveryDue(*req.Order.DeliveryDate, loc)
-			due = &d
-		}
-
-		existing := map[int]importedRow{}
-		rows, err := tx.Query(ctx, `select id::text, oper_number from scheduling_operation where order_id = $1::uuid order by oper_number for update`, req.Order.OrderID)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var r importedRow
-			if err := rows.Scan(&r.id, &r.number); err != nil {
-				rows.Close()
-				return err
-			}
-			existing[r.number] = r
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		firmed := map[string]bool{}
-		if len(existing) > 0 {
-			rows, err := tx.Query(ctx, `select distinct job_id::text from scheduled_job where order_id = $1::uuid and firmed`, req.Order.OrderID)
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				var id string
-				if err := rows.Scan(&id); err != nil {
-					rows.Close()
-					return err
-				}
-				firmed[id] = true
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return err
-			}
-		}
-
-		res := OrderImport{OrderID: req.Order.OrderID, OrderNumber: req.Order.OrderNumber, OrderVersion: req.Version, Reason: req.Reason, EventID: req.EventID,
-			OperationsTotal: len(req.Order.OperationNumbers()), Skipped: skipped, OrderStart: nonZero(req.Order.Start), OrderEnd: nonZero(req.End)}
-		data := schedevents.OrderImportRecordedData{OrderID: req.Order.OrderID, OrderNumber: req.Order.OrderNumber, OrderVersion: req.Version, Reason: req.Reason,
-			Operations: []schedevents.OrderImportOperation{}, Skipped: []schedevents.OrderImportSkipped{}, RemovedOperNumbers: []int{}, KeptFirmed: []int{}}
-		inEvent := map[int]bool{}
-		for _, n := range req.Order.OperationNumbers() {
-			inEvent[n] = true
-		}
-
-		for _, op := range planned {
-			op.DueAt = due
-			candidates := candidatesOf[op.OperNumber]
-			if len(candidates) == 0 {
-				skipped = append(skipped, domain.SkippedOperation{OperNumber: op.OperNumber, Code: domain.SkipUnknownResource,
-					Detail: "no resource of the operation is a scheduling resource"})
-				continue
-			}
-			cur, found := existing[op.OperNumber]
-			change := "created"
-			opID := ""
-			switch {
-			case !found:
-				opID = ids.New()
-				if _, err := tx.Exec(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority,
-						candidate_resource_ids, secondary_resource_ids, setup_minutes)
-					values ($1, $2, $3, $4, $5, $6, $7, 100, $8::uuid[], '{}', $9)`,
-					tenantOf(ctx), opID, req.Order.OrderID, op.OperNumber, op.Minutes, op.DueAt, op.ReadyAt, candidates, op.SetupMinutes); err != nil {
-					return err
-				}
-				res.Created++
-			case firmed[cur.id]:
-				skipped = append(skipped, domain.SkippedOperation{OperNumber: op.OperNumber, Code: domain.SkipFirmed, Detail: "a firmed job holds this operation; it was left as it is"})
-				res.KeptFirmed++
-				data.KeptFirmed = append(data.KeptFirmed, op.OperNumber)
-				continue
-			default:
-				opID = cur.id
-				var same bool
-				if err := tx.QueryRow(ctx, `select minutes = $2 and setup_minutes = $3 and candidate_resource_ids = $4::uuid[]
-						and due_at is not distinct from $5 and ready_at is not distinct from $6
-					from scheduling_operation where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt).Scan(&same); err != nil {
-					return err
-				}
-				if same {
-					change = "unchanged"
-					res.Unchanged++
-					break
-				}
-				change = "updated"
-				res.Updated++
-				if _, err := tx.Exec(ctx, `update scheduling_operation set minutes = $2, setup_minutes = $3, candidate_resource_ids = $4::uuid[], due_at = $5, ready_at = $6
-					where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt); err != nil {
-					return err
-				}
-				dropped, err := dropJobs(ctx, tx, opID)
-				if err != nil {
-					return err
-				}
-				if dropped {
-					res.ReplanRequired = true
-				}
-			}
-			data.Operations = append(data.Operations, schedevents.OrderImportOperation{OperationID: opID, OperNumber: op.OperNumber, Minutes: op.Minutes, ResourceIDs: candidates, Change: change})
-		}
-
-		// Operations that left the route go, unless a firmed job holds them.
-		leaving := make([]int, 0)
-		for n := range existing {
-			if !inEvent[n] {
-				leaving = append(leaving, n)
-			}
-		}
-		slices.Sort(leaving)
-		for _, n := range leaving {
-			cur := existing[n]
-			if firmed[cur.id] {
-				res.KeptFirmed++
-				data.KeptFirmed = append(data.KeptFirmed, n)
-				skipped = append(skipped, domain.SkippedOperation{OperNumber: n, Code: domain.SkipFirmed, Detail: "the operation left the route but a firmed job holds it; it was kept"})
-				continue
-			}
-			if _, err := dropJobs(ctx, tx, cur.id); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `delete from scheduling_operation where id = $1::uuid`, cur.id); err != nil {
-				return err
-			}
-			res.Removed++
-			data.RemovedOperNumbers = append(data.RemovedOperNumbers, n)
-		}
-
-		slices.SortFunc(skipped, func(a, b domain.SkippedOperation) int { return a.OperNumber - b.OperNumber })
-		res.Skipped = skipped
-		failed := 0
-		for _, sk := range skipped {
-			if sk.Code != domain.SkipFirmed {
-				failed++
-			}
-		}
-		switch {
-		case failed == 0:
-			res.Status = ImportImported
-		case res.Created+res.Updated+res.Unchanged > 0:
-			res.Status = ImportPartial
-		default:
-			res.Status = ImportRejected
-		}
-		data.Status, data.ReplanRequired = res.Status, res.ReplanRequired
-		for _, sk := range skipped {
-			if sk.Code != domain.SkipFirmed {
-				data.Skipped = append(data.Skipped, schedevents.OrderImportSkipped{OperNumber: sk.OperNumber, Code: sk.Code, Detail: sk.Detail})
-			}
-		}
-		skippedJSON, err := json.Marshal(skipped)
-		if err != nil {
-			return err
-		}
-		stored, err := scanImport(tx.QueryRow(ctx, `insert into scheduling_order_import (tenant_id, order_id, order_number, order_version, reason, event_id, status,
-				operations_total, created_count, updated_count, unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end)
-			values ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-			on conflict (tenant_id, order_id) do update set order_number = excluded.order_number, order_version = excluded.order_version, reason = excluded.reason,
-				event_id = excluded.event_id, status = excluded.status, operations_total = excluded.operations_total, created_count = excluded.created_count,
-				updated_count = excluded.updated_count, unchanged_count = excluded.unchanged_count, removed_count = excluded.removed_count,
-				kept_firmed_count = excluded.kept_firmed_count, skipped = excluded.skipped, replan_required = excluded.replan_required,
-				order_start = excluded.order_start, order_end = excluded.order_end, received_at = now()
-			returning `+importCols,
-			tenantOf(ctx), res.OrderID, res.OrderNumber, res.OrderVersion, res.Reason, res.EventID, res.Status, res.OperationsTotal, res.Created, res.Updated,
-			res.Unchanged, res.Removed, res.KeptFirmed, skippedJSON, res.ReplanRequired, res.OrderStart, res.OrderEnd))
-		if err != nil {
-			return err
-		}
-		out = stored
-		return enqueue(ctx, tx, "orderimport", res.OrderID, schedevents.OrderImportRecorded, data)
+		return importOrder(ctx, tx, req, &out)
 	})
 	if err != nil {
 		return OrderImport{}, err
 	}
 	return out, nil
+}
+
+// lockOrderImport serialises the imports of one order: a delivery and a
+// re-import, or two deliveries racing across a rebalance, must not both pass
+// the version check. It holds also before the order's first row exists
+// (FOR UPDATE locks nothing then) and until the transaction ends; taking it
+// twice in one transaction is harmless.
+func lockOrderImport(ctx context.Context, tx pgx.Tx, orderID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('scheduling-order-import:' || $1::text || ':' || $2::text, 0))`,
+		tenantOf(ctx), orderID)
+	return err
+}
+
+// importOrder is ImportProductionOrder inside the caller's transaction.
+func importOrder(ctx context.Context, tx pgx.Tx, req OrderImportRequest, out *OrderImport) error {
+	if err := lockOrderImport(ctx, tx, req.Order.OrderID); err != nil {
+		return err
+	}
+	prior, err := scanImport(tx.QueryRow(ctx, `select `+importCols+` from scheduling_order_import where order_id = $1::uuid for update`, req.Order.OrderID))
+	hasPrior := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if hasPrior && req.Version < prior.OrderVersion {
+		*out = prior
+		out.Stale = true
+		return nil
+	}
+	planned, skipped := domain.PlanImport(req.Order)
+
+	var wanted []string
+	for _, op := range planned {
+		wanted = append(wanted, op.ResourceIDs...)
+	}
+	// A job names a production (engineering) resource. A scheduling resource
+	// mapped to that id (engineering_resource_id) stands for it; failing
+	// that, a scheduling resource with that very id does.
+	zones := map[string]string{}
+	resolved := map[string]string{}
+	if len(wanted) > 0 {
+		rows, err := tx.Query(ctx, `select id::text, engineering_resource_id::text, time_zone from scheduling_resource
+				where id = any($1::uuid[]) or engineering_resource_id = any($1::uuid[])`, wanted)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, zone string
+			var eng *string
+			if err := rows.Scan(&id, &eng, &zone); err != nil {
+				rows.Close()
+				return err
+			}
+			zones[id] = zone
+			if eng != nil {
+				resolved[*eng] = id
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, w := range wanted {
+			if _, mapped := resolved[w]; !mapped {
+				if _, direct := zones[w]; direct {
+					resolved[w] = w
+				}
+			}
+		}
+	}
+	// Keep only the candidates scheduling knows (once each, in the order
+	// of the route); the due instant is the end of the delivery day where
+	// the order finishes, in the time zone of the preferred resource of its
+	// last registrable operation, the same for every operation so the
+	// order has one due date.
+	candidatesOf := map[int][]string{}
+	finishZone := ""
+	for _, op := range planned {
+		for _, id := range op.ResourceIDs {
+			if rid, ok := resolved[id]; ok && !slices.Contains(candidatesOf[op.OperNumber], rid) {
+				candidatesOf[op.OperNumber] = append(candidatesOf[op.OperNumber], rid)
+			}
+		}
+		if c := candidatesOf[op.OperNumber]; len(c) > 0 {
+			finishZone = zones[c[0]]
+		}
+	}
+	var due *time.Time
+	if req.Order.DeliveryDate != nil {
+		loc, err := time.LoadLocation(finishZone)
+		if err != nil || finishZone == "" {
+			loc = time.UTC
+		}
+		d := domain.DeliveryDue(*req.Order.DeliveryDate, loc)
+		due = &d
+	}
+
+	existing := map[int]importedRow{}
+	rows, err := tx.Query(ctx, `select id::text, oper_number from scheduling_operation where order_id = $1::uuid order by oper_number for update`, req.Order.OrderID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var r importedRow
+		if err := rows.Scan(&r.id, &r.number); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[r.number] = r
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	firmed := map[string]bool{}
+	if len(existing) > 0 {
+		rows, err := tx.Query(ctx, `select distinct job_id::text from scheduled_job where order_id = $1::uuid and firmed`, req.Order.OrderID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			firmed[id] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+
+	res := OrderImport{OrderID: req.Order.OrderID, OrderNumber: req.Order.OrderNumber, OrderVersion: req.Version, Reason: req.Reason, EventID: req.EventID,
+		OperationsTotal: len(req.Order.OperationNumbers()), Skipped: skipped, OrderStart: nonZero(req.Order.Start), OrderEnd: nonZero(req.End)}
+	data := schedevents.OrderImportRecordedData{OrderID: req.Order.OrderID, OrderNumber: req.Order.OrderNumber, OrderVersion: req.Version, Reason: req.Reason,
+		Operations: []schedevents.OrderImportOperation{}, Skipped: []schedevents.OrderImportSkipped{}, RemovedOperNumbers: []int{}, KeptFirmed: []int{}}
+	inEvent := map[int]bool{}
+	for _, n := range req.Order.OperationNumbers() {
+		inEvent[n] = true
+	}
+
+	for _, op := range planned {
+		op.DueAt = due
+		candidates := candidatesOf[op.OperNumber]
+		if len(candidates) == 0 {
+			skipped = append(skipped, domain.SkippedOperation{OperNumber: op.OperNumber, Code: domain.SkipUnknownResource,
+				Detail: "no resource of the operation is a scheduling resource or is mapped to one"})
+			continue
+		}
+		cur, found := existing[op.OperNumber]
+		change := "created"
+		opID := ""
+		switch {
+		case !found:
+			opID = ids.New()
+			if _, err := tx.Exec(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority,
+						candidate_resource_ids, secondary_resource_ids, setup_minutes)
+					values ($1, $2, $3, $4, $5, $6, $7, 100, $8::uuid[], '{}', $9)`,
+				tenantOf(ctx), opID, req.Order.OrderID, op.OperNumber, op.Minutes, op.DueAt, op.ReadyAt, candidates, op.SetupMinutes); err != nil {
+				return err
+			}
+			res.Created++
+		case firmed[cur.id]:
+			skipped = append(skipped, domain.SkippedOperation{OperNumber: op.OperNumber, Code: domain.SkipFirmed, Detail: "a firmed job holds this operation; it was left as it is"})
+			res.KeptFirmed++
+			data.KeptFirmed = append(data.KeptFirmed, op.OperNumber)
+			continue
+		default:
+			opID = cur.id
+			var same bool
+			if err := tx.QueryRow(ctx, `select minutes = $2 and setup_minutes = $3 and candidate_resource_ids = $4::uuid[]
+						and due_at is not distinct from $5 and ready_at is not distinct from $6
+					from scheduling_operation where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt).Scan(&same); err != nil {
+				return err
+			}
+			if same {
+				change = "unchanged"
+				res.Unchanged++
+				break
+			}
+			change = "updated"
+			res.Updated++
+			if _, err := tx.Exec(ctx, `update scheduling_operation set minutes = $2, setup_minutes = $3, candidate_resource_ids = $4::uuid[], due_at = $5, ready_at = $6
+					where id = $1::uuid`, opID, op.Minutes, op.SetupMinutes, candidates, op.DueAt, op.ReadyAt); err != nil {
+				return err
+			}
+			dropped, err := dropJobs(ctx, tx, opID)
+			if err != nil {
+				return err
+			}
+			if dropped {
+				res.ReplanRequired = true
+			}
+		}
+		data.Operations = append(data.Operations, schedevents.OrderImportOperation{OperationID: opID, OperNumber: op.OperNumber, Minutes: op.Minutes, ResourceIDs: candidates, Change: change})
+	}
+
+	// Operations that left the route go, unless a firmed job holds them.
+	leaving := make([]int, 0)
+	for n := range existing {
+		if !inEvent[n] {
+			leaving = append(leaving, n)
+		}
+	}
+	slices.Sort(leaving)
+	for _, n := range leaving {
+		cur := existing[n]
+		if firmed[cur.id] {
+			res.KeptFirmed++
+			data.KeptFirmed = append(data.KeptFirmed, n)
+			skipped = append(skipped, domain.SkippedOperation{OperNumber: n, Code: domain.SkipFirmed, Detail: "the operation left the route but a firmed job holds it; it was kept"})
+			continue
+		}
+		if _, err := dropJobs(ctx, tx, cur.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `delete from scheduling_operation where id = $1::uuid`, cur.id); err != nil {
+			return err
+		}
+		res.Removed++
+		data.RemovedOperNumbers = append(data.RemovedOperNumbers, n)
+	}
+
+	slices.SortFunc(skipped, func(a, b domain.SkippedOperation) int { return a.OperNumber - b.OperNumber })
+	res.Skipped = skipped
+	failed := 0
+	for _, sk := range skipped {
+		if sk.Code != domain.SkipFirmed {
+			failed++
+		}
+	}
+	switch {
+	case failed == 0:
+		res.Status = ImportImported
+	case res.Created+res.Updated+res.Unchanged > 0:
+		res.Status = ImportPartial
+	default:
+		res.Status = ImportRejected
+	}
+	data.Status, data.ReplanRequired = res.Status, res.ReplanRequired
+	for _, sk := range skipped {
+		if sk.Code != domain.SkipFirmed {
+			data.Skipped = append(data.Skipped, schedevents.OrderImportSkipped{OperNumber: sk.OperNumber, Code: sk.Code, Detail: sk.Detail})
+		}
+	}
+	skippedJSON, err := json.Marshal(skipped)
+	if err != nil {
+		return err
+	}
+	sourceJSON, err := json.Marshal(importSource{Order: req.Order, End: req.End})
+	if err != nil {
+		return err
+	}
+	stored, err := scanImport(tx.QueryRow(ctx, `insert into scheduling_order_import (tenant_id, order_id, order_number, order_version, reason, event_id, status,
+				operations_total, created_count, updated_count, unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, source)
+			values ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			on conflict (tenant_id, order_id) do update set order_number = excluded.order_number, order_version = excluded.order_version, reason = excluded.reason,
+				event_id = excluded.event_id, status = excluded.status, operations_total = excluded.operations_total, created_count = excluded.created_count,
+				updated_count = excluded.updated_count, unchanged_count = excluded.unchanged_count, removed_count = excluded.removed_count,
+				kept_firmed_count = excluded.kept_firmed_count, skipped = excluded.skipped, replan_required = excluded.replan_required,
+				order_start = excluded.order_start, order_end = excluded.order_end, source = excluded.source, received_at = now()
+			returning `+importCols,
+		tenantOf(ctx), res.OrderID, res.OrderNumber, res.OrderVersion, res.Reason, res.EventID, res.Status, res.OperationsTotal, res.Created, res.Updated,
+		res.Unchanged, res.Removed, res.KeptFirmed, skippedJSON, res.ReplanRequired, res.OrderStart, res.OrderEnd, sourceJSON))
+	if err != nil {
+		return err
+	}
+	*out = stored
+	return enqueue(ctx, tx, "orderimport", res.OrderID, schedevents.OrderImportRecorded, data)
 }
 
 func nonZero(t time.Time) *time.Time {
@@ -412,4 +461,47 @@ func (s *Postgres) GetOrderImport(ctx context.Context, orderID string) (OrderImp
 		return err
 	})
 	return out, err
+}
+
+// ReimportProductionOrder imports the latest received event of an order again
+// against the resources and mappings that exist now, for a planner who has
+// mapped a resource since the order arrived. It is a normal import of the kept
+// order at its own version, in one transaction under the order's import lock,
+// so a delivery of a newer version either commits first (and its kept order is
+// the one imported again) or waits for the re-import and then applies on top.
+// Operations already registered stay unchanged unless their resolved
+// candidates changed (a remapped resource): then they are updated and lose
+// their non-firmed jobs, as for a changed event. The import row keeps the
+// version and reason of the kept event; its event id becomes
+// "reimport:<uuid>" so the record shows the last import was a re-import.
+func (s *Postgres) ReimportProductionOrder(ctx context.Context, orderID string) (OrderImport, error) {
+	var out OrderImport
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockOrderImport(ctx, tx, orderID); err != nil {
+			return err
+		}
+		var version int
+		var reason string
+		var raw []byte
+		err := tx.QueryRow(ctx, `select order_version, reason, source from scheduling_order_import where order_id = $1::uuid`, orderID).Scan(&version, &reason, &raw)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeOrderImportNotFound, "no production order with that id has been received")
+		}
+		if err != nil {
+			return err
+		}
+		if len(raw) == 0 {
+			return httpx.NewProblem(http.StatusConflict, CodeOrderNotReimportable,
+				"the received order was not kept; it is imported again when production sends its next event")
+		}
+		var src importSource
+		if err := json.Unmarshal(raw, &src); err != nil {
+			return fmt.Errorf("kept order %s: %w", orderID, err)
+		}
+		return importOrder(ctx, tx, OrderImportRequest{Order: src.Order, End: src.End, Version: version, Reason: reason, EventID: "reimport:" + ids.New()}, &out)
+	})
+	if err != nil {
+		return OrderImport{}, err
+	}
+	return out, nil
 }

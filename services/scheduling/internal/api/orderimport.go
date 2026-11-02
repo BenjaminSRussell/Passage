@@ -166,3 +166,25 @@ func (a *API) getOrderImport(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, o)
 }
+
+// reimportOrder imports the latest received event of a production order again
+// against the resources and mappings that exist now. It needs no body and is
+// naturally idempotent: a second call finds every operation unchanged.
+func (a *API) reimportOrder(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := strings.ToLower(chi.URLParam(r, "orderId"))
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeOrderImportNotFound, "no production order with that id has been received"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), orderImportTimeout)
+	defer cancel()
+	o, err := a.store.ReimportProductionOrder(ctx, id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, o)
+}

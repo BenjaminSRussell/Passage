@@ -40,10 +40,16 @@ const (
 	CodeJobNotFound        = "SCHED-0105"
 	CodeWindowTooLarge     = "SCHED-0106"
 	CodeUnknownResource    = "SCHED-0107"
-	CodeConcurrentBooking  = "SCHED-0001"
-	CodeIdempotencyReuse   = "idempotency_key_reuse"
+	// CodeEngineeringMapped is returned when another resource already stands
+	// for the engineering resource.
+	CodeEngineeringMapped = "SCHED-0132"
+	CodeConcurrentBooking = "SCHED-0001"
+	CodeIdempotencyReuse  = "idempotency_key_reuse"
 
-	uniqueViolation    = "23505"
+	uniqueViolation = "23505"
+	// engineeringIndex keeps one scheduling resource per engineering resource
+	// in a tenant (migration 0014).
+	engineeringIndex   = "scheduling_resource_engineering_id"
 	exclusionViolation = "23P01"
 	eventSource        = "scheduling"
 	scopeMove          = "move"
@@ -62,6 +68,10 @@ type Resource struct {
 	Shifts    []domain.Shift `json:"shifts"`
 	Version   int            `json:"version"`
 	CreatedAt time.Time      `json:"createdAt"`
+	// EngineeringResourceID is the id of the engineering (wave 09) resource
+	// this resource stands for; production orders name that id on their jobs
+	// (FR-23.10). Nil when the resource is not mapped.
+	EngineeringResourceID *string `json:"engineeringResourceId"`
 }
 
 // Operation is an operation of a production order waiting for, or holding, a
@@ -280,12 +290,18 @@ func reuseProblem() error {
 	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 }
 
-// mapWriteErr turns constraint violations into stable problem codes.
+// mapWriteErr turns constraint violations into stable problem codes. Two
+// resources mapped to one engineering resource at the same moment both pass
+// the check in checkEngineeringFree; the unique index refuses the second, and
+// it gets the same answer as the check gives.
 func mapWriteErr(err error, dupCode, dupDetail string) error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
 		switch pg.Code {
 		case uniqueViolation:
+			if pg.ConstraintName == engineeringIndex {
+				return httpx.NewProblem(http.StatusConflict, CodeEngineeringMapped, "another resource already stands for that engineering resource")
+			}
 			return httpx.NewProblem(http.StatusConflict, dupCode, dupDetail)
 		case exclusionViolation:
 			return httpx.NewProblem(http.StatusConflict, CodeConcurrentBooking, "a concurrent change booked the same resource; reload and try again")
