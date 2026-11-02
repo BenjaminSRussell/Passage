@@ -3,6 +3,26 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 15: supervisor reopen of a finished job (FR-25.3)
+
+A finished job takes no feedback (SF-0122) and leaves the dispatch list. `POST jobs/{id}:reopen` (duty
+`shopfloor.job.reopen`, a supervisor; not in the PRD duty table) puts it back to `started` with a reason
+(1 to 500 characters) when more must be reported: a late count, a rework pass, a finish keyed by mistake.
+`If-Match` carries the job version the supervisor read (SF-0143, 412, the version moves with every
+report), `Idempotency-Key` is required (a repeat returns the stored job and publishes nothing), and the
+caller must be an authenticated user, who is recorded. A job that is not finished is SF-0155 (422). The
+job keeps its quantities and check results, so a later finish passes the mandatory-check gate again
+(SF-0005, and the override with its own duty). The reopening is a row of `job_reopening` (migration
+`0014_job_reopenings.sql`, tenant scoped, forced RLS, append only for `passage_app`) with who, why, when,
+the finish it undid and the totals at that moment, and `dev.passage.shopfloor.job.reopened.v1` is written
+through the outbox in the same transaction, so production (w21) and quality (w33) can reopen what they
+closed on the finish. `GET jobs/{id}/reopenings` (duty `shopfloor.view`) lists them newest first.
+Counted in `shopfloor_jobs_reopened_total`. On the web the job page of a finished job shows a *Reopen
+this job* form instead of the report form to a holder of the duty (others see the finished notice), and
+the job page lists its reopenings to a holder of `shopfloor.view`. A reopening reverses nothing: time
+registrations stay, and later `job.reported` postings carry only what they add (`qtyGood`, `qtyScrap`),
+so consumers that post those deltas report nothing twice on the second finish.
+
 ## Slice 14: edge fleet and versioned connector configuration (FR-25.19)
 
 An edge node is one iot-edge connector. `POST /v1/shopfloor/edge-nodes` registers it (platform k3s,
@@ -484,6 +504,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/v1/shopfloor/registrations:auto-clock-out` | `shopfloor.time.autoclockout` (platform scheduler identity or supervisor; not in the PRD duty table) |
 | GET `/v1/shopfloor/registration-corrections` | `shopfloor.view` |
 | POST `/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
+| POST `/v1/shopfloor/jobs/{id}:reopen` | `shopfloor.job.reopen` (shop floor supervisor; not in the PRD duty table) |
+| GET `/v1/shopfloor/jobs/{id}/reopenings` | `shopfloor.view` |
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
 | GET `/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
@@ -538,7 +560,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0140` | 404 or 422 | Time profile not found (422 when named by an assignment) |
 | `SF-0141` | 404 or 422 | Pay agreement not found (422 when named by an assignment) |
 | `SF-0142` | 409 | The profile or agreement code is already used |
-| `SF-0143` | 412 | `If-Match` is not the stored version of the profile, agreement or worker |
+| `SF-0143` | 412 | `If-Match` is not the stored version of the profile, agreement, worker or job |
 | `SF-0144` | 422 | The profile or agreement newly chosen by an assignment is inactive |
 | `SF-0145` | 404 or 422 | Absence code not found (422 when named by an absence registration) |
 | `SF-0146` | 422 | The absence code named by a new absence registration is inactive |
@@ -548,6 +570,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0152` | 409 | The edge node is switched off: it refuses heartbeats and configuration pulls |
 | `SF-0153` | 409 | An edge node with this name, or bound to this connector identity, already exists |
 | `SF-0154` | 403 | The caller is not the connector bound to this edge node (or the node has none): configuration pull and heartbeat refused |
+| `SF-0155` | 422 | The job to reopen is not finished |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

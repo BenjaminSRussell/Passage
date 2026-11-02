@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 14
+# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 15
 
-Every PSG-25 deliverable and acceptance criterion that slices 1 to 14 do not build, with its
+Every PSG-25 deliverable and acceptance criterion that slices 1 to 15 do not build, with its
 status and reason. Slice 1 covers the time and attendance core of the shopfloor service
 (workers, registrations, pay calculation, approval, review lists, OEE arithmetic), the
 supervisor web pages in `apps/web/src/modules/shopfloor/`, and the iot-edge domain core.
@@ -72,6 +72,11 @@ publish and immutable once published (column grant plus trigger), the connector'
 online/offline status, the `edgenode.saved`, `edgeconfig.published` (with the document hash and allowlist
 nodes) and `edgeconfig.applied` events, the duties `shopfloor.edge.configure` and `shopfloor.edge.connect`,
 and the edge fleet web pages.
+
+Slice 15 adds the supervisor reopen of a finished job (FR-25.3 note): `jobs/{id}:reopen` with a reason, `If-Match`
+and an `Idempotency-Key`, the `job_reopening` audit table (migration 0014), `GET jobs/{id}/reopenings`, the
+`job.reopened` event, SF-0155, the duty `shopfloor.job.reopen`, and on the web the reopen form on a finished job's page and
+the reopenings list.
 
 > **Security gap (slice 14): connector identity is bound by hand, not by certificate.** The configuration
 > pull (which carries the write allowlist) and the heartbeat are refused unless the caller holds
@@ -156,7 +161,9 @@ and the edge fleet web pages.
 | Duty `shopfloor.time.autoclockout`, `registrations:auto-clock-out`, `auto-clock-outs`, flag `auto-clock-out`, SF-0130 | added (slice 10); role grant and scheduler are handoffs (policies/, platform scheduler) | Not in the PRD API, duty or catalog tables. The sweep endpoint is how the platform scheduler runs the PRD hourly job per tenant (a service identity holds the duty; a supervisor may run it by hand). The review list serves the missing clock-out confirmation of D2g. No new event: the clock-out is published as `registration.posted` with flag `auto-clock-out`, documented in the AsyncAPI. |
 | Duty `shopfloor.check.override` | added (slice 7); role grant is a handoff (policies/) | FR-25.5 says a supervisor overrides a failed mandatory check with a reason, and the PRD duty table has no duty for it; *Approve time registrations* is about pay. The grant to the shop floor supervisor role lives in policies/ (like D8f). |
 | `dev.passage.shopfloor.job.reported.v1` | added (slice 7) | Not in the PRD event table. Production (w21) needs reported quantities and the finish of an operation, quality (w33) the failed checks, andon (FR-25.11) the quality fail. Written through the outbox with the feedback; documented in the AsyncAPI. |
-| Supervisor reopen of a finished job (FR-25.3 note) | later slice of PSG-25 | A finished job is hidden from the dispatch list and refuses feedback (SF-0122); reopening needs an endpoint with a reason and its own duty. |
+| Duty `shopfloor.job.reopen`, `jobs/{id}:reopen`, `jobs/{id}/reopenings`, event `dev.passage.shopfloor.job.reopened.v1`, SF-0155 | added (slice 15); seeding is a handoff (policies/, #313) | Not in the PRD API, duty or event tables. FR-25.3 says a supervisor reopens a finished job; the PRD duty table has no duty for it. Authz seed rows for `policies/authz/data.json`: duty `shopfloor.job.reopen` (shop floor supervisor role) permission `POST /v1/shopfloor/jobs/*:reopen`; add to `shopfloor.view` `GET /v1/shopfloor/jobs/*/reopenings`. The web nav is unchanged (`shopfloor.view`); the reopen form shows on a finished job's page only to a holder of `shopfloor.job.reopen` and the reopenings list only to a holder of `shopfloor.view` (UX only; the service enforces both duties). Consumers: w21 (production journal) and w33 (quality) should reopen what they closed on the job's finish when they read `job.reopened` (its `previousFinishedAt` names the finish that no longer stands); not built here. |
+| Reopen of a finished job without a reason code list, and reopen of a job whose operation w21 already costed | not built | The reason is free text. The shop floor does not know the production order's status, so a job whose order w21 already ended or settled can still be reopened here; whether that is refused or needs a w21 adjustment is for the w21 consumer of `job.reopened`. |
+| Reopen and double reporting (slice 15 review) | built (contract) | A reopening reverses nothing: the quantities and check results stay on the job, the time registrations (labour hours, `registration.posted`) are untouched, and no negative report is published. Every later `job.reported` carries only what that posting adds in `qtyGood`/`qtyScrap`; its `goodQuantity`/`scrapQuantity` are running totals that include what was reported before the reopening. A consumer that posts the deltas reports nothing twice on the second finish; one that posted the totals on a finish would (documented in the AsyncAPI, pinned by the store test). Lowering an over-reported quantity (a finish keyed with the wrong count) needs a negative or corrective report, which is not built. |
 | Job status from registrations, auto-stop of the previous job (SF-0002) | built (slice 8) | A `job-start` moves a released job to `started`; an open start auto-stops the worker's other open unit (`domain.PlanAutoStop`). A start for a job the dispatch list does not hold is accepted without dispatch effects (the w23 feed may lag, and an offline action must not be lost). |
 | Job-card journal on stop (FR-25.4, BR-25.9) and the site setting "Post job card on stop" | handoff (w21) | Closed job-stops, including the server's auto-stops, publish `registration.posted` with `hours`, `bundleId` and `flags`; the w21 job-card consumer turns them into journals. |
 | Site setting "Auto-stop previous job" (FR-25.3, default true) | later slice of PSG-25 | Auto-stop is always on (the PRD default). Site settings are not persisted yet (like "Bundle split basis"). |

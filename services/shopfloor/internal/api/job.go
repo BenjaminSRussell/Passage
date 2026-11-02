@@ -63,6 +63,8 @@ func (a *API) registerJobs(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRegister)).Get("/v1/shopfloor/jobs", a.listJobs)
 	r.With(authz.RequireDuty(DutyRegister)).Get("/v1/shopfloor/jobs/{id}", a.getJob)
 	r.With(authz.RequireDuty(DutyRegister)).Post("/v1/shopfloor/jobs/{id}:feedback", a.recordFeedback)
+	r.With(authz.RequireDuty(DutyJobReopen)).Post("/v1/shopfloor/jobs/{id}:reopen", a.reopenJob)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/jobs/{id}/reopenings", a.listJobReopenings)
 }
 
 // upsertJob writes the plan of a job from the schedule (w23 feeds this endpoint). The

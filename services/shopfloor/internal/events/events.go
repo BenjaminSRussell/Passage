@@ -28,6 +28,9 @@ var (
 	// JobReported is not in the PRD event table: production (w21) needs the reported
 	// quantities and the finish of an operation, quality (w33) the failed checks.
 	JobReported = events.Type(Context, "job", "reported", 1)
+	// JobReopened is not in the PRD event table: production (w21) and quality (w33) must learn
+	// that a job they saw finished takes reports again.
+	JobReopened = events.Type(Context, "job", "reopened", 1)
 	// RegistrationCorrected and PaydayRevised are not in the PRD event table: payroll and
 	// the w21 job-card consumer must learn that approved or posted time changed (FR-25.8, AC-25.8).
 	RegistrationCorrected = events.Type(Context, "registration", "corrected", 1)
@@ -51,7 +54,7 @@ var (
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, AbsenceCodeSaved,
 		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied}
 }
 
@@ -138,6 +141,23 @@ type JobReportedData struct {
 	OverrideReason *string         `json:"overrideReason"`
 	RecordedBy     string          `json:"recordedBy"`
 	RecordedAt     time.Time       `json:"recordedAt"`
+}
+
+// JobReopenedData is the payload of dev.passage.shopfloor.job.reopened.v1, published when a
+// supervisor reopens a finished job. GoodQuantity and ScrapQuantity are the job's totals at the
+// reopening; PreviousFinishedAt is the finish that no longer stands.
+type JobReopenedData struct {
+	JobID              string          `json:"jobId"`
+	ReopeningID        string          `json:"reopeningId"`
+	OrderRef           string          `json:"orderRef"`
+	OperationRef       string          `json:"operationRef"`
+	ResourceID         string          `json:"resourceId"`
+	GoodQuantity       decimal.Decimal `json:"goodQuantity"`
+	ScrapQuantity      decimal.Decimal `json:"scrapQuantity"`
+	Reason             string          `json:"reason"`
+	ReopenedBy         string          `json:"reopenedBy"`
+	ReopenedAt         time.Time       `json:"reopenedAt"`
+	PreviousFinishedAt time.Time       `json:"previousFinishedAt"`
 }
 
 // OEEBucketRemovedData is the payload of dev.passage.shopfloor.oeebucket.removed.v1,

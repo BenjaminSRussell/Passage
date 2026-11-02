@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { PrincipalProvider } from "../../shell/principal";
 import type { Job } from "./api/client";
 import { toFeedbackInput, validateFeedback } from "./JobDetailPage";
 import { qty } from "./JobsPage";
@@ -41,15 +42,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderAt(path: string) {
+const OPERATOR = ["shopfloor.time.register"];
+const SUPERVISOR = ["shopfloor.time.register", "shopfloor.view", "shopfloor.job.reopen"];
+
+function renderAt(path: string, duties: readonly string[] = OPERATOR) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        {shopfloor.routes.map((route) => (
-          <Route key={route.path} path={route.path} element={route.element} />
-        ))}
-      </Routes>
-    </MemoryRouter>,
+    <PrincipalProvider duties={duties}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {shopfloor.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </PrincipalProvider>,
   );
 }
 
@@ -195,6 +201,94 @@ describe("job detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save report" }));
     expect(await screen.findByText(/is finished \(SF-0122\)/)).toBeInTheDocument();
     expect(screen.getByLabelText("Good quantity")).toHaveValue("2");
+  });
+});
+
+const finishedJob = (extra: Partial<Job> = {}) => job({ status: "finished", finishedAt: "2026-10-21T10:00:00Z", version: 6, ...extra });
+const reopeningRow = {
+  id: "0195f0a0-0000-7000-8000-000000000060",
+  jobId: JOB,
+  reason: "Late count of 12 pieces",
+  reopenedBy: "sup-1",
+  reopenedAt: "2026-10-21T11:00:00Z",
+  previousFinishedAt: "2026-10-21T10:00:00Z",
+  goodQuantity: "90.0000",
+  scrapQuantity: "0.0000",
+};
+
+describe("reopening a finished job", () => {
+  it("reopens with a reason, If-Match and one key, then offers the report form and lists the reopening", async () => {
+    let reopened = false;
+    handler = (url, init) => {
+      if (init.method === "POST") {
+        reopened = true;
+        return json(200, job({ version: 7 }));
+      }
+      if (url.pathname.endsWith("/reopenings")) return json(200, { items: reopened ? [reopeningRow] : [] });
+      return json(200, finishedJob());
+    };
+    const { container } = renderAt(`/shopfloor/jobs/${JOB}`, SUPERVISOR);
+    expect(await screen.findByText("Never reopened")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save report" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
+    expect(await screen.findByText(/Say why the job is reopened/)).toBeInTheDocument();
+    expect(posts()).toHaveLength(0);
+    fill("Reason", "  Late count of 12 pieces  ");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
+    expect(await screen.findByText("The job is reopened and is back on the dispatch list.")).toBeInTheDocument();
+    const [post] = posts();
+    expect(post.url.pathname).toBe(`/api/v1/shopfloor/jobs/${JOB}:reopen`);
+    expect(post.body).toEqual({ reason: "Late count of 12 pieces" });
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(":reopen"), expect.objectContaining({ headers: expect.any(Headers) }));
+    const headers = vi.mocked(fetch).mock.calls.find(([u]) => String(u).endsWith(":reopen"))?.[1]?.headers as Headers;
+    expect(headers.get("If-Match")).toBe('"6"');
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Save report" })).toBeInTheDocument();
+    const table = await screen.findByRole("table", { name: "Reopenings" });
+    expect(within(table).getByText("Late count of 12 pieces")).toBeInTheDocument();
+    expect(within(table).getByText("sup-1")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("keeps the reason and shows the service error when the reopen is refused", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(403, { code: "AUTH-0003", detail: "missing duty shopfloor.job.reopen" });
+      if (url.pathname.endsWith("/reopenings")) return json(200, { items: [] });
+      return json(200, finishedJob());
+    };
+    renderAt(`/shopfloor/jobs/${JOB}`, SUPERVISOR);
+    await screen.findByText("Never reopened");
+    fill("Reason", "Rework pass");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
+    expect(await screen.findByText(/missing duty shopfloor.job.reopen \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Reason")).toHaveValue("Rework pass");
+  });
+
+  it("shows a stale version as the service reports it, and a reopenings load failure with a retry", async () => {
+    let listing = 0;
+    handler = (url, init) => {
+      if (init.method === "POST") return json(412, { code: "SF-0143", detail: "job was changed by someone else" });
+      if (url.pathname.endsWith("/reopenings")) {
+        listing += 1;
+        return listing === 1 ? json(500, { code: "COM-0500", detail: "database down" }) : json(200, { items: [reopeningRow] });
+      }
+      return json(200, finishedJob());
+    };
+    renderAt(`/shopfloor/jobs/${JOB}`, SUPERVISOR);
+    expect(await screen.findByText(/database down \(COM-0500\)/)).toBeInTheDocument();
+    fill("Reason", "Late count");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
+    expect(await screen.findByText(/changed by someone else \(SF-0143\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Late count of 12 pieces")).toBeInTheDocument();
+  });
+  it("shows an operator the finished notice only: no reopen form, no reopenings list, no call for it", async () => {
+    handler = () => json(200, finishedJob());
+    renderAt(`/shopfloor/jobs/${JOB}`, OPERATOR);
+    expect(await screen.findByText("This job is finished")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen job" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Reopenings" })).not.toBeInTheDocument();
+    expect(calls.some((c) => c.url.pathname.endsWith("/reopenings"))).toBe(false);
   });
 });
 

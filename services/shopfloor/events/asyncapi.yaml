@@ -93,11 +93,13 @@ channels:
     address: passage.shopfloor.job
     description: |
       Operator feedback on a job (FR-25.4, FR-25.5): reported quantities, the finish of
-      the operation and failed quality checks. Not in the PRD event table; production
-      (w21) and quality (w33) consume it.
+      the operation and failed quality checks, and the reopening of a finished job by a
+      supervisor. Not in the PRD event table; production (w21) and quality (w33) consume it.
     messages:
       jobReported:
         $ref: "#/components/messages/JobReported"
+      jobReopened:
+        $ref: "#/components/messages/JobReopened"
   oeeBuckets:
     address: passage.shopfloor.oee
     description: |
@@ -125,6 +127,12 @@ channels:
       processMessageDeleted:
         $ref: "#/components/messages/ProcessMessageDeleted"
 operations:
+  publishJobReopened:
+    action: send
+    channel:
+      $ref: "#/channels/jobReported"
+    messages:
+      - $ref: "#/channels/jobReported/messages/jobReopened"
   publishJobReported:
     action: send
     channel:
@@ -273,6 +281,12 @@ components:
       description: Published once per stored feedback posting on a job, in the same transaction; a replayed feedbackId publishes nothing.
       payload:
         $ref: "#/components/schemas/JobReportedData"
+    JobReopened:
+      name: dev.passage.shopfloor.job.reopened.v1
+      contentType: application/cloudevents+json
+      description: Published once when a supervisor reopens a finished job (FR-25.3), in the same transaction as the reopening; a repeated Idempotency-Key publishes nothing. Nothing reported is reversed and the time registrations on the job are untouched; later job.reported postings carry only what they add (qtyGood, qtyScrap), and the next finish is a new job.reported with finished true. Consumers that closed the operation on the finish (w21 job cards, w33) reopen it on this event.
+      payload:
+        $ref: "#/components/schemas/JobReopenedData"
     OEEBucketUpdated:
       name: dev.passage.shopfloor.oeebucket.updated.v1
       contentType: application/cloudevents+json
@@ -614,12 +628,13 @@ components:
           type: [string, "null"]
         goodQuantity:
           type: string
-          description: Decimal; the job's good total after this posting.
+          description: Decimal; the job's good total after this posting. After a reopening (job.reopened) the total still includes what was reported before it, so consumers post qtyGood, never this total, or a second finish counts the earlier quantities twice.
         scrapQuantity:
           type: string
-          description: Decimal; the job's scrap total after this posting.
+          description: Decimal; the job's scrap total after this posting (see goodQuantity; post qtyScrap).
         finished:
           type: boolean
+          description: True when this posting finished the job. A job can finish more than once when a supervisor reopens it in between (job.reopened).
         failedChecks:
           type: array
           description: Codes of checks whose latest result fails.
@@ -633,6 +648,41 @@ components:
         recordedAt:
           type: string
           format: date-time
+    JobReopenedData:
+      type: object
+      required: [jobId, reopeningId, orderRef, operationRef, resourceId, goodQuantity, scrapQuantity, reason, reopenedBy, reopenedAt, previousFinishedAt]
+      additionalProperties: false
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        reopeningId:
+          type: string
+          format: uuid
+        orderRef:
+          type: string
+        operationRef:
+          type: string
+        resourceId:
+          type: string
+          format: uuid
+        goodQuantity:
+          type: string
+          description: Decimal; the job's good total at the reopening.
+        scrapQuantity:
+          type: string
+          description: Decimal; the job's scrap total at the reopening.
+        reason:
+          type: string
+        reopenedBy:
+          type: string
+        reopenedAt:
+          type: string
+          format: date-time
+        previousFinishedAt:
+          type: string
+          format: date-time
+          description: The finish that no longer stands; consumers that closed the operation on it reopen it.
     AndonRaisedData:
       type: object
       required: [alertId, resourceId, kind, severity, jobId, startedAt]

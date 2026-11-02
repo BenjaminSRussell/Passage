@@ -136,6 +136,8 @@ type Store interface {
 	GetJob(ctx context.Context, id string) (store.Job, error)
 	ListJobs(ctx context.Context, f store.JobFilter) ([]store.Job, error)
 	RecordFeedback(ctx context.Context, jobID string, in store.FeedbackInput) (store.FeedbackResult, error)
+	ReopenJob(ctx context.Context, jobID string, version int, reason, reopenedBy string, idem store.Idem) (store.Job, error)
+	ListJobReopenings(ctx context.Context, jobID string, limit int) ([]store.JobReopening, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -173,6 +175,8 @@ type API struct {
 	feedbackStored  atomic.Int64
 	feedbackReplays atomic.Int64
 	finishBlocked   atomic.Int64
+	// jobsReopened counts finished jobs a supervisor reopened (FR-25.3).
+	jobsReopened atomic.Int64
 	// corrections counts registration corrections; revisedDays approved days revised with reversal.
 	corrections atomic.Int64
 	revisedDays atomic.Int64
@@ -304,6 +308,7 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_oee_buckets_changed_total", "Stored OEE buckets the rollup inserted or changed (FR-25.10).", a.oeeChanged.Load())
 		counter("shopfloor_oee_buckets_removed_total", "Stored OEE buckets the rollup removed because their planned time is gone.", a.oeeRemoved.Load())
 		counter("shopfloor_kiosk_badge_rejected_total", "Kiosk badge logins refused as not recognized (SF-0001).", a.badgeRejected.Load())
+		counter("shopfloor_jobs_reopened_total", "Finished jobs a supervisor reopened (FR-25.3).", a.jobsReopened.Load())
 		counter("shopfloor_job_feedback_stored_total", "Job feedback postings stored (FR-25.4).", a.feedbackStored.Load())
 		counter("shopfloor_job_feedback_replays_total", "Job feedback replayed by feedbackId and not stored again.", a.feedbackReplays.Load())
 		counter("shopfloor_job_finish_blocked_total", "Job finishes refused because a mandatory check has no passing result (SF-0005).", a.finishBlocked.Load())

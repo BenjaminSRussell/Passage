@@ -570,3 +570,60 @@ func TestHTTP_ProfileAndAgreementDriveCalculation(t *testing.T) {
 		t.Fatalf("worker = %s", get.Body.String())
 	}
 }
+
+// FR-25.3 over HTTP and Postgres: a finished job leaves the dispatch list; an operator cannot
+// reopen it; a supervisor does with If-Match and a reason; it is on the list again, takes a
+// report, and the reopening is listed. A repeated key replays the stored job, a stale version
+// is SF-0143 and an open job is SF-0155.
+func TestHTTP_JobReopen(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/jobs", upsertBody, DutyJobSchedule); rec.Code != http.StatusCreated {
+		t.Fatalf("plan: %d %s", rec.Code, rec.Body.String())
+	}
+	finish := `{"feedbackId":"0195f0a0-0000-7000-8000-0000000000e1","goodQuantity":"98","finished":true,"checks":[{"code":"len","value":"11"}]}`
+	if rec := call(t, h, http.MethodPost, feedbackPath(), finish, DutyRegister); rec.Code != http.StatusCreated {
+		t.Fatalf("finish: %d %s", rec.Code, rec.Body.String())
+	}
+	var job store.Job
+	detail := call(t, h, http.MethodGet, "/v1/shopfloor/jobs/"+jobID, "", DutyRegister)
+	_ = json.Unmarshal(detail.Body.Bytes(), &job)
+	if job.Status != store.JobFinished {
+		t.Fatalf("detail: %s", detail.Body.String())
+	}
+	etagOf := func(v int) map[string]string {
+		return map[string]string{"Idempotency-Key": fmt.Sprintf("reopen-%d", v), "If-Match": fmt.Sprintf(`"%d"`, v)}
+	}
+	body := `{"reason":"Late count of 12 pieces"}`
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyRegister, etagOf(job.Version)); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator reopen: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, etagOf(job.Version-1)); rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale version: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, etagOf(job.Version))
+	var reopened store.Job
+	_ = json.Unmarshal(rec.Body.Bytes(), &reopened)
+	if rec.Code != http.StatusOK || reopened.Status != store.JobStarted || reopened.Version != job.Version+1 || rec.Header().Get("ETag") != fmt.Sprintf(`"%d"`, job.Version+1) {
+		t.Fatalf("reopen: %d %s", rec.Code, rec.Body.String())
+	}
+	if again := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, etagOf(job.Version)); again.Code != http.StatusOK || again.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replay: %d %s", again.Code, again.Body.String())
+	}
+	other := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, etagOf(reopened.Version))
+	if code, _ := problemOf(t, other.Body.Bytes()); other.Code != http.StatusUnprocessableEntity || code != "SF-0155" {
+		t.Fatalf("open job: %d %s", other.Code, other.Body.String())
+	}
+	if rec := call(t, h, http.MethodPost, feedbackPath(), `{"feedbackId":"0195f0a0-0000-7000-8000-0000000000e2","goodQuantity":"12"}`, DutyRegister); rec.Code != http.StatusCreated {
+		t.Fatalf("report after reopen: %d %s", rec.Code, rec.Body.String())
+	}
+	list := call(t, h, http.MethodGet, "/v1/shopfloor/jobs/"+jobID+"/reopenings", "", DutyView)
+	var got struct{ Items []store.JobReopening }
+	_ = json.Unmarshal(list.Body.Bytes(), &got)
+	if list.Code != http.StatusOK || len(got.Items) != 1 || got.Items[0].Reason != "Late count of 12 pieces" || got.Items[0].ReopenedBy != "supervisor-1" || got.Items[0].GoodQty.String() != "98" {
+		t.Fatalf("reopenings: %d %s", list.Code, list.Body.String())
+	}
+}

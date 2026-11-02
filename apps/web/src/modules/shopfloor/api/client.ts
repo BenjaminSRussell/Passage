@@ -821,6 +821,43 @@ export function recordJobFeedback(jobId: string, input: JobFeedbackInput): Promi
   return post<JobFeedbackResult>(`/jobs/${encodeURIComponent(jobId)}:feedback`, input);
 }
 
+/** Reopens a finished job (FR-25.3). Held by the shop floor supervisor; enforced by the service. */
+export const DUTY_JOB_REOPEN = "shopfloor.job.reopen";
+
+/** Read access to the shop floor (supervisor lists such as the reopenings of a job). */
+export const DUTY_VIEW = "shopfloor.view";
+
+/** One supervisor reopening of a finished job (slice 15). */
+export interface JobReopening {
+  id: string;
+  jobId: string;
+  reason: string;
+  reopenedBy: string;
+  reopenedAt: string;
+  /** The finish that no longer stands. */
+  previousFinishedAt: string;
+  /** Decimal strings: the job totals at the reopening. */
+  goodQuantity: string;
+  scrapQuantity: string;
+}
+
+/**
+ * Puts a finished job back to started with a reason. The job version is the If-Match entity tag
+ * (SF-0143, 412 when stale); a job that is not finished is SF-0155. Reuse one key per form.
+ */
+export function reopenJob(jobId: string, version: number, reason: string, key: string = newKey()): Promise<Job> {
+  return send<Job>(`/jobs/${encodeURIComponent(jobId)}:reopen`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** The audit list of a job's reopenings, newest first. */
+export function listJobReopenings(jobId: string, signal?: AbortSignal): Promise<JobReopening[]> {
+  return items<JobReopening>(`/jobs/${encodeURIComponent(jobId)}/reopenings`, signal);
+}
+
 // --- Time profiles and pay agreements (slice 11, D2f) ---
 
 export type DayType = "weekday" | "saturday" | "sunday";

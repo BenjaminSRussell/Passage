@@ -1481,6 +1481,101 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/jobs/{id}:reopen:
+    post:
+      operationId: reopenJob
+      summary: Reopen a finished job with a reason (FR-25.3)
+      description: |
+        A finished job takes no feedback (SF-0122) and is hidden from the dispatch list. A
+        supervisor reopens it when more must be reported: the job returns to `started`, keeps
+        its quantities and check results, and a later finish still passes the mandatory-check
+        gate (SF-0005). `If-Match` carries the job version you read (SF-0143, 412); a job that
+        is not finished is SF-0155 (422). The reason (1 to 500 characters) and the authenticated
+        user are kept in the audit list (`GET jobs/{id}/reopenings`). Publishes
+        `dev.passage.shopfloor.job.reopened.v1` in the same transaction; a repeated
+        `Idempotency-Key` returns the stored job and publishes nothing.
+      x-passage-duty: shopfloor.job.reopen
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReopenJob"
+      responses:
+        "200":
+          description: The reopened job (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The new version as an entity tag, for example "5"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/jobs/{id}/reopenings:
+    get:
+      operationId: listJobReopenings
+      summary: Reopenings of a job, newest first
+      description: The audit list of supervisor reopenings of a job with who, why, when and the totals at that moment.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: The reopenings, newest first; empty when the job was never reopened.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JobReopening"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /healthz:
     get:
       operationId: healthz
@@ -3877,6 +3972,42 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ReopenJob:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the job is reopened; trimmed.
+    JobReopening:
+      type: object
+      required: [id, jobId, reason, reopenedBy, reopenedAt, previousFinishedAt, goodQuantity, scrapQuantity]
+      properties:
+        id:
+          type: string
+          format: uuid
+        jobId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        reopenedBy:
+          type: string
+        reopenedAt:
+          type: string
+          format: date-time
+        previousFinishedAt:
+          type: string
+          format: date-time
+          description: The finish that no longer stands.
+        goodQuantity:
+          type: string
+          description: Decimal; the job's good total at the reopening.
+        scrapQuantity:
+          type: string
+          description: Decimal; the job's scrap total at the reopening.
     JobFeedback:
       type: object
       required: [feedbackId]

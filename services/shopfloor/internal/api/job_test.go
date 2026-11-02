@@ -35,12 +35,21 @@ func (f *fakeStore) RecordFeedback(context.Context, string, store.FeedbackInput)
 	return store.FeedbackResult{}, nil
 }
 
+func (f *fakeStore) ReopenJob(context.Context, string, int, string, string, store.Idem) (store.Job, error) {
+	return store.Job{}, nil
+}
+
+func (f *fakeStore) ListJobReopenings(context.Context, string, int) ([]store.JobReopening, error) {
+	return nil, nil
+}
+
 // jobFake records job calls; seen feedback ids replay as duplicates like the store.
 type jobFake struct {
 	fakeStore
 	upserted []store.Job
 	listed   store.JobFilter
 	feedback []store.FeedbackInput
+	reopened []reopenCall
 	seen     map[string]bool
 	err      error
 }
@@ -235,5 +244,96 @@ func TestFeedback_BlockedFinishIsSF0005(t *testing.T) {
 	}
 	if a.finishBlocked.Load() != 1 || a.failed.Load() != 0 {
 		t.Fatalf("finishBlocked %d failed %d", a.finishBlocked.Load(), a.failed.Load())
+	}
+}
+
+type reopenCall struct {
+	id, reason, by string
+	version        int
+}
+
+func (f *jobFake) ReopenJob(_ context.Context, id string, version int, reason, by string, _ store.Idem) (store.Job, error) {
+	if f.err != nil {
+		return store.Job{}, f.err
+	}
+	f.reopened = append(f.reopened, reopenCall{id, reason, by, version})
+	return store.Job{ID: id, Status: store.JobStarted, Version: version + 1}, nil
+}
+
+func (f *jobFake) ListJobReopenings(context.Context, string, int) ([]store.JobReopening, error) {
+	return nil, f.err
+}
+
+func reopenPath() string { return "/v1/shopfloor/jobs/" + jobID + ":reopen" }
+
+// FR-25.3: a supervisor reopens a finished job; the duty, the version, a reason and an
+// authenticated user are all required, and the user is recorded.
+func TestReopenJob_DutyVersionReasonAndUser(t *testing.T) {
+	f := &jobFake{}
+	h := newRouter(f)
+	body := `{"reason":"  late count of 12 pieces  "}`
+	ifm := map[string]string{"Idempotency-Key": "k1", "If-Match": `"4"`}
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, registerDut, ifm); rec.Code != http.StatusForbidden || len(f.reopened) != 0 {
+		t.Fatalf("operator: %d %s", rec.Code, rec.Body)
+	}
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, map[string]string{"Idempotency-Key": "k1"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no If-Match: %d %s", rec.Code, rec.Body)
+	}
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, map[string]string{"If-Match": `"4"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no Idempotency-Key: %d", rec.Code)
+	}
+	for _, bad := range []string{`{}`, `{"reason":"   "}`, `{"reason":"` + strings.Repeat("x", 501) + `"}`} {
+		rec := callWith(t, h, http.MethodPost, reopenPath(), bad, DutyJobReopen, ifm)
+		if _, fields := problemOf(t, rec.Body.Bytes()); rec.Code != http.StatusBadRequest || fields["reason"] == "" {
+			t.Fatalf("reason %q: %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	anon := map[string]string{"Idempotency-Key": "k1", "If-Match": `"4"`, "X-Passage-User": ""}
+	if rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, anon); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/jobs/nope:reopen", body, DutyJobReopen, ifm); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
+	}
+	rec := callWith(t, h, http.MethodPost, reopenPath(), body, DutyJobReopen, ifm)
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"5"` || len(f.reopened) != 1 ||
+		f.reopened[0] != (reopenCall{jobID, "late count of 12 pieces", "supervisor-1", 4}) {
+		t.Fatalf("reopen: %d %s %+v", rec.Code, rec.Body, f.reopened)
+	}
+}
+
+// The store's refusals keep their codes: a job that is not finished is SF-0155, a stale version SF-0143.
+func TestReopenJob_StoreRefusalsKeepTheirCodes(t *testing.T) {
+	ifm := map[string]string{"Idempotency-Key": "k1", "If-Match": `"4"`}
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeJobNotFinished, "not finished"), http.StatusUnprocessableEntity, "SF-0155"},
+		{httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionMismatch, "changed"), http.StatusPreconditionFailed, "SF-0143"},
+		{httpx.NewProblem(http.StatusNotFound, store.CodeJobNotFound, "gone"), http.StatusNotFound, "SF-0121"},
+	} {
+		rec := callWith(t, newRouter(&jobFake{err: c.err}), http.MethodPost, reopenPath(), `{"reason":"x"}`, DutyJobReopen, ifm)
+		if code, _ := problemOf(t, rec.Body.Bytes()); rec.Code != c.status || code != c.code {
+			t.Fatalf("%s: %d %s", c.code, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestListJobReopenings_ViewDutyAndEmptyList(t *testing.T) {
+	h := newRouter(&jobFake{})
+	path := "/v1/shopfloor/jobs/" + jobID + "/reopenings"
+	if rec := call(t, h, http.MethodGet, path, "", registerDut); rec.Code != http.StatusForbidden {
+		t.Fatalf("without view: %d", rec.Code)
+	}
+	if rec := call(t, h, http.MethodGet, path+"?limit=0", "", DutyView); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad limit: %d", rec.Code)
+	}
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/jobs/nope/reopenings", "", DutyView); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
+	}
+	if rec := call(t, h, http.MethodGet, path, "", DutyView); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"items":[]}` {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 }

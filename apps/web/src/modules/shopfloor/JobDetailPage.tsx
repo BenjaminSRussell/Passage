@@ -1,14 +1,21 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
+  DUTY_JOB_REOPEN,
+  DUTY_VIEW,
   describeProblem,
   getJob,
+  listJobReopenings,
   newKey,
   recordJobFeedback,
+  reopenJob,
   type Job,
   type JobCheck,
   type JobFeedbackInput,
+  type JobReopening,
   type Problem,
 } from "./api/client";
 import { dash, formatDateTime } from "./format";
@@ -86,6 +93,15 @@ export function JobDetailPage() {
   const [fresh, setFresh] = useState<Job | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const job = fresh && fresh.id === id ? fresh : state.data;
+  const duties = usePrincipalDuties();
+  // The dispatch list is an operator's page (shopfloor.time.register): the reopen form needs the
+  // supervisor duty and the reopenings list shopfloor.view, so an operator sees neither (nor a 403).
+  const canReopen = holdsDuty(duties, DUTY_JOB_REOPEN);
+  const canSeeReopenings = holdsDuty(duties, DUTY_VIEW);
+  const reopenings = useLoad(
+    (signal) => (canSeeReopenings ? listJobReopenings(id, signal) : Promise.resolve([])),
+    canSeeReopenings ? `${id}:reopenings` : "",
+  );
 
   const resultFor = (code: string) => job?.results.find((r) => r.code === code);
   const checkColumns: DataTableColumn<JobCheck>[] = [
@@ -176,10 +192,20 @@ export function JobDetailPage() {
               empty={{ title: "No checks on this operation", description: "The job can be finished without recording a check." }}
             />
           </Card>
-          {job.status === "finished" ? (
+          {job.status === "finished" && !canReopen ? (
             <Alert tone="info" title="This job is finished">
               It takes no more reports. A supervisor reopens a job before more is reported on it.
             </Alert>
+          ) : job.status === "finished" ? (
+            <ReopenForm
+              key={job.version}
+              job={job}
+              onDone={(saved) => {
+                setFresh(saved);
+                setNotice("The job is reopened and is back on the dispatch list.");
+                reopenings.reload();
+              }}
+            />
           ) : (
             <FeedbackForm
               key={job.version}
@@ -190,9 +216,100 @@ export function JobDetailPage() {
               }}
             />
           )}
+          {canSeeReopenings ? (
+            <Card title="Reopenings" padded={false}>
+              {reopenings.error ? (
+                <Alert tone="danger" title="Could not load the reopenings" live="alert" action={<Button size="sm" onClick={reopenings.reload}>Try again</Button>}>
+                  {reopenings.error.message} ({reopenings.error.code})
+                </Alert>
+              ) : (
+                <DataTable
+                  label="Reopenings"
+                  columns={reopeningColumns}
+                  rows={reopenings.data ?? []}
+                  getRowKey={(row) => row.id}
+                  loading={reopenings.loading && !reopenings.data}
+                  empty={{ title: "Never reopened", description: "A supervisor's reopening of this job after it was finished is listed here." }}
+                />
+              )}
+            </Card>
+          ) : null}
         </>
       )}
     </div>
+  );
+}
+
+const reopeningColumns: DataTableColumn<JobReopening>[] = [
+  { key: "at", header: "Reopened", render: (row) => formatDateTime(row.reopenedAt) },
+  { key: "by", header: "By", render: (row) => row.reopenedBy },
+  { key: "reason", header: "Reason", render: (row) => row.reason },
+  { key: "finished", header: "Finish undone", render: (row) => formatDateTime(row.previousFinishedAt) },
+  { key: "good", header: "Good then", mono: true, render: (row) => qty(row.goodQuantity) },
+  { key: "scrap", header: "Scrap then", mono: true, render: (row) => qty(row.scrapQuantity) },
+];
+
+interface ReopenFormProps {
+  job: Job;
+  onDone(saved: Job): void;
+}
+
+/** Supervisor reopen of a finished job (FR-25.3): a reason, kept in the audit list below. */
+function ReopenForm({ job, onDone }: ReopenFormProps) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One key per form: a resend after a lost response returns the stored job.
+  const key = useRef(newKey());
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const text = reason.trim();
+    if (text.length < 1 || text.length > 500) {
+      setError("Say why the job is reopened, up to 500 characters.");
+      return;
+    }
+    setError(null);
+    setFailure(null);
+    setBusy(true);
+    try {
+      onDone(await reopenJob(job.id, job.version, text, key.current));
+    } catch (failed) {
+      const problem = describeProblem(failed);
+      if (problem.fields.reason) setError(problem.fields.reason);
+      setFailure(problem);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Reopen this job" headingLevel={3}>
+      <form className={styles.form} onSubmit={submit} noValidate>
+        <div className={styles.formActions}>
+          <Alert tone="info" title="This job is finished">
+            It takes no more reports and is off the dispatch list. A supervisor can reopen it with a reason; its quantities and check results stay, and finishing it again passes
+            the mandatory checks again.
+          </Alert>
+        </div>
+        <FormField id="reopen-reason" label="Reason" hint="Kept in the reopening list, e.g. a late count." error={error ?? undefined}>
+          {(control) => <Textarea {...control} value={reason} maxLength={500} rows={3} invalid={Boolean(error)} onChange={(e) => setReason(e.target.value)} />}
+        </FormField>
+        {failure ? (
+          <div className={styles.formActions}>
+            <Alert tone="danger" title="Could not reopen the job" live="alert">
+              {failure.message} ({failure.code})
+            </Alert>
+          </div>
+        ) : null}
+        <div className={styles.formActions}>
+          <Button type="submit" variant="primary" loading={busy} disabled={busy}>
+            Reopen job
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 
