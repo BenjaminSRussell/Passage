@@ -2699,6 +2699,13 @@
     ]},
     "treasury.forecast.write": {"permissions": [{"resource": "/v1/treasury/cash-forecast-entries", "methods": ["POST"]}]},
     "treasury.loan.write": {"permissions": [{"resource": "/v1/treasury/loans", "methods": ["POST"]}]},
+    "treasury.reconciliation.write": {"permissions": [
+      {"resource": "/v1/treasury/reconciliation-matches", "methods": ["POST"]},
+      {"resource": "/v1/treasury/reconciliation-matches/*:unmatch", "methods": ["POST"]},
+      {"resource": "/v1/treasury/reconciliation-rules", "methods": ["POST"]},
+      {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
+      {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
+    ]},
     "treasury.statement.import": {"permissions": [{"resource": "/v1/treasury/statements/import", "methods": ["POST"]}]},
     "treasury.view": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts", "methods": ["GET"]},
@@ -2712,6 +2719,10 @@
       {"resource": "/v1/treasury/facilities/*/instruments", "methods": ["GET"]},
       {"resource": "/v1/treasury/loans", "methods": ["GET"]},
       {"resource": "/v1/treasury/loans/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/reconciliation-matches", "methods": ["GET"]},
+      {"resource": "/v1/treasury/reconciliation-matches/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/reconciliation-rules", "methods": ["GET"]},
+      {"resource": "/v1/treasury/reconciliation-rules/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/statements/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/statements/*/lines", "methods": ["GET"]}
     ]},

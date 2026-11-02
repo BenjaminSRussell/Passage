@@ -7,7 +7,7 @@ info:
     tenantid, correlationid, causationid, actor). Written to the transactional
     outbox in the same transaction as the state change; the outbox aggregate is
     the statement or check id, so events of one aggregate stay ordered. Other event types of the
-    treasury context (reconciled, cashposition, instrument, pdc, deal, ...) are later slices.
+    treasury context (cashposition, instrument, pdc, deal, ...) are later slices.
 defaultContentType: application/json
 channels:
   statementImported:
@@ -22,7 +22,29 @@ channels:
     messages:
       checkVoided:
         $ref: "#/components/messages/CheckVoided"
+  reconciliationMatched:
+    address: passage.treasury.reconciliation
+    description: Topic for treasury reconciliation events (Debezium outbox router).
+    messages:
+      reconciliationMatched:
+        $ref: "#/components/messages/ReconciliationMatched"
+      reconciliationUnmatched:
+        $ref: "#/components/messages/ReconciliationUnmatched"
 operations:
+  publishReconciliationMatched:
+    action: send
+    channel:
+      $ref: "#/channels/reconciliationMatched"
+    summary: Statement lines were matched to items, by a run or by hand.
+    messages:
+      - $ref: "#/channels/reconciliationMatched/messages/reconciliationMatched"
+  publishReconciliationUnmatched:
+    action: send
+    channel:
+      $ref: "#/channels/reconciliationMatched"
+    summary: A match was dissolved.
+    messages:
+      - $ref: "#/channels/reconciliationMatched/messages/reconciliationUnmatched"
   publishCheckVoided:
     action: send
     channel:
@@ -97,3 +119,62 @@ components:
               number: {type: integer, minimum: 1, description: check number, which stays consumed}
               reason: {type: string}
               positivePayVoid: {type: boolean, description: "true when the check was sent or stopped, so the bank's positive pay file needs a void record (BR-36.5)"}
+    ReconciliationMatched:
+      name: dev.passage.treasury.reconciliation.matched.v1
+      title: Reconciliation matched
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.reconciliation.matched.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: match id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [matchId, statementId, bankAccountId, legalEntityId, kind, lineCount, itemCount]
+            properties:
+              matchId: {type: string, format: uuid}
+              statementId: {type: string, format: uuid}
+              bankAccountId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              kind: {type: string, enum: [auto, manual]}
+              lineCount: {type: integer, minimum: 1}
+              itemCount: {type: integer, minimum: 1}
+              score: {type: integer, minimum: 0, maximum: 100, description: auto matches only}
+    ReconciliationUnmatched:
+      name: dev.passage.treasury.reconciliation.unmatched.v1
+      title: Reconciliation unmatched
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.reconciliation.unmatched.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: match id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [matchId, statementId, bankAccountId, legalEntityId, reason]
+            properties:
+              matchId: {type: string, format: uuid}
+              statementId: {type: string, format: uuid}
+              bankAccountId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              reason: {type: string}

@@ -171,6 +171,15 @@ type Store interface {
 	CreateLoan(ctx context.Context, in NewLoan, idempotencyKey string) (Loan, error)
 	ListLoans(ctx context.Context, legalEntityID string) ([]Loan, error)
 	GetLoan(ctx context.Context, id string) (Loan, error)
+	CreateReconRule(ctx context.Context, in NewReconRule, idempotencyKey string) (ReconRule, error)
+	ListReconRules(ctx context.Context, legalEntityID, bankAccountID string) ([]ReconRule, error)
+	GetReconRule(ctx context.Context, id string) (ReconRule, error)
+	DeactivateReconRule(ctx context.Context, id string, version int) (ReconRule, error)
+	RunReconciliation(ctx context.Context, in RunInput, idempotencyKey string) (RunResult, error)
+	CreateManualMatch(ctx context.Context, in NewMatch, idempotencyKey string) (Match, error)
+	ListMatches(ctx context.Context, statementID string) ([]Match, error)
+	GetMatch(ctx context.Context, id string) (Match, error)
+	Unmatch(ctx context.Context, id string, version int, reason string) (Match, error)
 	Ping(ctx context.Context) error
 }
 

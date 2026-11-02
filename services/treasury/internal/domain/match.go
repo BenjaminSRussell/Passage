@@ -69,7 +69,12 @@ type Tolerance struct {
 func Score(line, cand Facts, tol Tolerance) int { return ScoreWith(line, cand, tol, DefaultWeights) }
 
 // Weights are the criterion weights of one rule; they sum to 100.
-type Weights struct{ Amount, Date, Reference, Counterparty int }
+type Weights struct {
+	Amount       int `json:"amount"`
+	Date         int `json:"date"`
+	Reference    int `json:"reference"`
+	Counterparty int `json:"counterparty"`
+}
 
 var (
 	DefaultWeights   = Weights{WeightAmount, WeightDate, WeightReference, WeightCounterparty}
@@ -182,6 +187,7 @@ type Decision struct {
 	Status Status
 	Best   *Candidate  // nil when unmatched
 	Ranked []Candidate // top three, best first, for suggestions
+	Rule   string      // name of the rule that produced Best, set by MatchLine
 }
 
 // Decide applies the thresholds. A line auto-matches only when its best
@@ -218,15 +224,37 @@ const MinStrictReferenceLen = 8
 // a placeholder, and no other open item may carry the same reference.
 type Rule struct {
 	Name      string
+	Priority  int
 	Weights   Weights
 	Tolerance Tolerance
 	Strict    bool
 }
 
+// Validate enforces the stored-rule ranges: weights sum to 100 and the amount
+// carries at least 20 of them, a non-negative tolerance and a window of 0 to 30 days.
+func (r Rule) Validate() error {
+	w := r.Weights
+	switch {
+	case w.Amount < 20 || w.Date < 0 || w.Reference < 0 || w.Counterparty < 0:
+		return errors.New("amount weight must be at least 20 and no weight may be negative")
+	case w.Amount+w.Date+w.Reference+w.Counterparty != 100:
+		return errors.New("weights must sum to 100")
+	case r.Tolerance.Amount.IsNegative():
+		return errors.New("amountTolerance must not be negative")
+	case r.Tolerance.DateWindowDays < 0 || r.Tolerance.DateWindowDays > 30:
+		return errors.New("dateWindowDays must be 0 to 30")
+	case r.Priority < 1 || r.Priority > 1000:
+		return errors.New("priority must be 1 to 1000")
+	case strings.TrimSpace(r.Name) == "" || len(r.Name) > 80:
+		return errors.New("name must be 1 to 80 characters")
+	}
+	return nil
+}
+
 // DefaultRules run the balanced rule first, then the strict reference rule that
 // carries lines whose counterparty text the bank garbled.
 func DefaultRules(tol Tolerance) []Rule {
-	return []Rule{{"balanced", DefaultWeights, tol, false}, {"reference", ReferenceWeights, tol, true}}
+	return []Rule{{Name: "balanced", Priority: 1, Weights: DefaultWeights, Tolerance: tol}, {Name: "reference", Priority: 2, Weights: ReferenceWeights, Tolerance: tol, Strict: true}}
 }
 
 func normalizedReference(s string) string { return refStrip.ReplaceAllString(strings.ToUpper(s), "") }
@@ -259,6 +287,7 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 			scored = append(scored, Candidate{ID: id, Score: score})
 		}
 		d := Decide(scored, t)
+		d.Rule = r.Name
 		if d.Status == StatusMatched && r.Strict && sameReference > 1 {
 			d.Status = StatusSuggested
 		}

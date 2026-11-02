@@ -20,6 +20,9 @@ func TestAll_EveryTypeFollowsTheNamingRule(t *testing.T) {
 	want := map[string]string{
 		StatementImported: events.Type(Context, "statement", "imported", 1),
 		CheckVoided:       events.Type(Context, "check", "voided", 1),
+
+		ReconciliationMatched:   events.Type(Context, "reconciliation", "matched", 1),
+		ReconciliationUnmatched: events.Type(Context, "reconciliation", "unmatched", 1),
 	}
 	if len(All()) != len(want) {
 		t.Fatalf("All() = %v, want %d types", All(), len(want))
