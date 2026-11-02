@@ -26,7 +26,10 @@ paths:
     post:
       operationId: createMigrationRun
       summary: Run a migration
-      description: Extracts, maps, validates, loads and reconciles one entity from a legacy system. Give the mapping inline or reference a published mapping spec by id. The run executes inside the request.
+      description: |
+        Extracts, maps, validates, loads and reconciles one entity from a legacy system. Give the mapping inline or reference a published mapping spec by id. The run executes inside the request.
+
+        When the deployment has target addresses and a signing key (MIG_TARGET_PARTY_URL, MIG_TARGET_PRODUCT_URL, MIG_TARGET_RECEIVABLES_URL, PASSAGE_SERVICE_SIGNING_KEY), rows are read from the active entity binding of the connection profile (the project's, else the one active profile of the source system) and loaded into the owning services' APIs as the service principal migration-loader. Entities with a target: party, customer and vendor (party service), product and item (product service, created as a draft then moved to the lifecycle state the mapping names, so the required-attribute check applies), ar_open_item (receivables, POST /v1/receivables/open-items:batch). Any other entity is rejected row by row with MIG-TARGET-NOT-AVAILABLE. A target's refusal (4xx) rejects that row under the target's own code and is not retried; a 5xx, 429 or timeout is retried with backoff and then rejects the row as MIG-TARGET-UNAVAILABLE. The legal entity of a row is the project's target legal entity (a row whose legalEntityId names another is rejected MIG-LOAD-LEGAL-ENTITY), else the row's legalEntityId field (MIG-LOAD-LEGAL-ENTITY without one). The mapping's targets must be fields of the entity's target API, or start with _ to stay local (rules and change detection).
       x-passage-duty: migration.run
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
@@ -40,13 +43,16 @@ paths:
             Location: { schema: { type: string } }
           content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRunAccepted' } } }
         '501':
-          description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
+          description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment (the service was started without target addresses).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
           description: MIG-RUN-ACTIVE, another run holds the project (one active run per project, BR-10.2); the detail names that run's id, which the run is recorded under when it finishes (GET answers 404 until then), and a claim older than 40 minutes counts as abandoned; MIG-PROJECT-ARCHIVED, the project is archived. No backend is called for an archived project and the run is not recorded.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: MIG-PROJECT-UNKNOWN, projectId names no migration project; MIG-PROJECT-NOT-MIGRATE, only a migrate project takes runs; MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request. No backend is called.
+          description: MIG-PROJECT-UNKNOWN, projectId names no migration project; MIG-PROJECT-NOT-MIGRATE, only a migrate project takes runs; MIG-MAP-TEST-FAIL, one or more mapping tests failed (errors maps each failed test name to its reason); MIG-SPEC-UNKNOWN, mappingSpecId names no published spec; MIG-TEMPLATE-UNKNOWN, dataTemplateId names no published template; MIG-TEMPLATE-INVALID, the template does not fit the mapping; idempotency_key_reuse, the key was used with a different request; MIG-NO-CONNECTION, no active connection profile reads the source system (or the project's profile reads another); MIG-CONNECTION-AMBIGUOUS, several do and the run is not under a project that names one; MIG-NO-BINDING, the profile has no active entity binding for the mapping's entity; MIG-MAP-TARGET-UNKNOWN, the mapping writes targets the entity's target API does not take (errors names each). No backend is called.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '502':
+          description: MIG-EXTRACT-FAILED, the legacy system could not be read; the detail carries the classified, credential-free reason.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-runs/{id}:

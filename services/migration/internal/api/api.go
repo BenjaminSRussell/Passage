@@ -69,6 +69,7 @@ type API struct {
 	keys     *fieldcrypt.Keys
 	prober   Prober
 	env      *connector.Env
+	targets  TargetFactory
 	runs     atomic.Int64
 	failed   atomic.Int64
 	loaded   atomic.Int64
@@ -351,7 +352,7 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 			return
 		}
 	}
-	backend, err := a.backends(ctx, run.SourceSystem)
+	backend, err := a.backend(ctx, run)
 	if err != nil {
 		a.failed.Add(1)
 		a.logFailure(r, "migration backend unavailable", err)
@@ -360,6 +361,10 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 			return
 		}
 		fail(w, r, err)
+		return
+	}
+	if p := unknownTargets(backend.Loader, mapping); p != nil {
+		fail(w, r, p)
 		return
 	}
 	if run.ProjectID != "" {

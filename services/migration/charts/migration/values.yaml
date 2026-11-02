@@ -15,6 +15,19 @@ fieldCrypt:
   keysSecret: ""
   currentKeyId: ""
 
+# Loader (integration track S3). The owning services' in-cluster addresses; a run loads into the ones set and rejects
+# rows of the others as "target not available". signingKeySecret is a Secret with key signing-key (the base64 32-byte
+# Ed25519 seed) of the service named "migration"; each target must trust its public key (their serviceIdentity
+# publicKeys, deploy handoff). With no address set POST /v1/integration/migration-runs answers 501
+# MIG-BACKEND-NOT-CONFIGURED; an address without a signing key stops the service at start.
+targets:
+  partyUrl: ""        # for example http://party.passage-party.svc:8080
+  productUrl: ""
+  receivablesUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+
 # Egress guard (MIG_EGRESS_ALLOW): the only way a connection profile can reach a private address (10.0.0.0/8,
 # 172.16.0.0/12, 192.168.0.0/16, fc00::/7). allowCidrs are CIDRs; allowHostPorts are host:port entries (a NetworkPolicy
 # cannot express those: add their peers under networkPolicy.extraEgress). Set per environment by the operator, never

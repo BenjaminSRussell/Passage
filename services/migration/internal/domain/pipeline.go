@@ -34,9 +34,21 @@ type LoadItem struct {
 	SourceKey      string
 	IdempotencyKey string
 	Fields         map[string]any
+	// Existing is true when an earlier run already loaded this key (the cross-reference holds its content hash), so
+	// the target record is updated instead of created. TargetVersion is the version the target answered then.
+	Existing      bool
+	TargetVersion int
 }
 
-type LoadResult struct{ Code string }
+// LoadResult is the target's answer for one row. Code is "" when the row was accepted; otherwise it is the target's
+// refusal code and Detail says why. A target that assigns its own ids returns TargetID (and the version of the record
+// it holds in TargetVersion) so the cross-reference records the real record, not the id the pipeline reserved.
+type LoadResult struct {
+	Code          string
+	Detail        string
+	TargetID      string
+	TargetVersion int
+}
 
 type Extractor interface {
 	Extract(ctx context.Context, entity string) ([]Record, error)
@@ -52,7 +64,14 @@ type TargetReader interface {
 
 type XrefKey struct{ SourceSystem, Entity, SourceKey string }
 
-type XrefEntry struct{ TargetID, ContentHash string }
+type XrefEntry struct {
+	TargetID, ContentHash string
+	// TargetVersion is the version of the target record after the last load (0 when the target keeps none).
+	TargetVersion int
+	// Rebind, on a put, replaces the stored target id with TargetID. It is set when the target assigned its own id
+	// to a record the pipeline had reserved another for; every other put keeps the id first reserved.
+	Rebind bool
+}
 
 type XrefItem struct {
 	SourceKey string
@@ -217,7 +236,8 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			rep.Ledger = append(rep.Ledger, entry)
 			continue
 		}
-		todo = append(todo, pending{entry, LoadItem{x.TargetID, r.Key, idemKey, r.Fields}, r.Key, action})
+		item := LoadItem{TargetID: x.TargetID, SourceKey: r.Key, IdempotencyKey: idemKey, Fields: r.Fields, Existing: found && x.ContentHash != "", TargetVersion: x.TargetVersion}
+		todo = append(todo, pending{entry, item, r.Key, action})
 	}
 	won, err := p.reserveXrefs(ctx, spec, reserve)
 	if err != nil {
@@ -379,10 +399,18 @@ func (p *Pipeline) load(ctx context.Context, spec RunSpec, rep *Report, todo []p
 		var loaded []XrefItem
 		for i, b := range batch {
 			if code := results[i].Code; code != "" {
-				rep.Rejects = append(rep.Rejects, RowReject{b.entry.SourceKey, []Reject{{"", code, "target did not accept the row"}}})
+				detail := results[i].Detail
+				if detail == "" {
+					detail = "target did not accept the row"
+				}
+				rep.Rejects = append(rep.Rejects, RowReject{b.entry.SourceKey, []Reject{{"", code, detail}}})
 				continue
 			}
-			loaded = append(loaded, XrefItem{b.key, XrefEntry{b.entry.TargetID, b.entry.ContentHash}})
+			rebind := false
+			if id := results[i].TargetID; id != "" {
+				rebind, b.entry.TargetID = id != b.entry.TargetID, id
+			}
+			loaded = append(loaded, XrefItem{b.key, XrefEntry{TargetID: b.entry.TargetID, ContentHash: b.entry.ContentHash, TargetVersion: results[i].TargetVersion, Rebind: rebind}})
 			rep.count(b.action)
 			rep.Ledger = append(rep.Ledger, b.entry)
 		}
@@ -422,6 +450,7 @@ func (m *MemXref) Get(_ context.Context, k XrefKey) (XrefEntry, bool, error) {
 
 func (m *MemXref) Put(_ context.Context, k XrefKey, e XrefEntry) error {
 	m.Puts++
+	e.Rebind = false
 	m.Entries[k] = e
 	return nil
 }

@@ -419,9 +419,9 @@ func (x pgXref) Get(ctx context.Context, k domain.XrefKey) (domain.XrefEntry, bo
 	p, _ := tenant.FromContext(ctx)
 	var e domain.XrefEntry
 	err := dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select target_id::text, content_hash from migration.xref
+		return tx.QueryRow(ctx, `select target_id::text, content_hash, target_version from migration.xref
 			where tenant_id = $1 and source_system = $2 and source_entity = $3 and source_key = $4`,
-			p.TenantID, k.SourceSystem, k.Entity, k.SourceKey).Scan(&e.TargetID, &e.ContentHash)
+			p.TenantID, k.SourceSystem, k.Entity, k.SourceKey).Scan(&e.TargetID, &e.ContentHash, &e.TargetVersion)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.XrefEntry{}, false, nil
@@ -432,11 +432,12 @@ func (x pgXref) Get(ctx context.Context, k domain.XrefKey) (domain.XrefEntry, bo
 func (x pgXref) Put(ctx context.Context, k domain.XrefKey, e domain.XrefEntry) error {
 	p, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, content_hash)
-			values ($1, $2, $3, $4, $5, $6)
+		_, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, content_hash, target_version)
+			values ($1, $2, $3, $4, $5, $6, $7)
 			on conflict (tenant_id, source_system, source_entity, source_key)
-			do update set content_hash = excluded.content_hash, updated_at = now()`,
-			p.TenantID, k.SourceSystem, k.Entity, k.SourceKey, e.TargetID, e.ContentHash)
+			do update set target_id = case when $8 then excluded.target_id else migration.xref.target_id end,
+				content_hash = excluded.content_hash, target_version = excluded.target_version, updated_at = now()`,
+			p.TenantID, k.SourceSystem, k.Entity, k.SourceKey, e.TargetID, e.ContentHash, e.TargetVersion, e.Rebind)
 		return err
 	})
 }
@@ -445,7 +446,7 @@ func (x pgXref) GetMany(ctx context.Context, sourceSystem, entity string, source
 	p, _ := tenant.FromContext(ctx)
 	found := make(map[string]domain.XrefEntry, len(sourceKeys))
 	err := dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select source_key, target_id::text, content_hash from migration.xref
+		rows, err := tx.Query(ctx, `select source_key, target_id::text, content_hash, target_version from migration.xref
 			where tenant_id = $1 and source_system = $2 and source_entity = $3 and source_key = any($4)`,
 			p.TenantID, sourceSystem, entity, sourceKeys)
 		if err != nil {
@@ -455,7 +456,7 @@ func (x pgXref) GetMany(ctx context.Context, sourceSystem, entity string, source
 		for rows.Next() {
 			var key string
 			var e domain.XrefEntry
-			if err := rows.Scan(&key, &e.TargetID, &e.ContentHash); err != nil {
+			if err := rows.Scan(&key, &e.TargetID, &e.ContentHash, &e.TargetVersion); err != nil {
 				return err
 			}
 			found[key] = e
@@ -470,17 +471,26 @@ func (x pgXref) PutMany(ctx context.Context, sourceSystem, entity string, items 
 		return nil
 	}
 	p, _ := tenant.FromContext(ctx)
-	keys, targets, hashes := make([]string, len(items)), make([]string, len(items)), make([]string, len(items))
+	keys, targets, hashes, versions := make([]string, len(items)), make([]string, len(items)), make([]string, len(items)), make([]int32, len(items))
+	rebinds := make([]bool, len(items))
 	for i, it := range items {
-		keys[i], targets[i], hashes[i] = it.SourceKey, it.Entry.TargetID, it.Entry.ContentHash
+		keys[i], targets[i], hashes[i], versions[i], rebinds[i] = it.SourceKey, it.Entry.TargetID, it.Entry.ContentHash, int32(it.Entry.TargetVersion), it.Entry.Rebind
 	}
 	return dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, content_hash)
-			select $1, $2, $3, i.source_key, i.target_id::uuid, i.content_hash
-			from unnest($4::text[], $5::text[], $6::text[]) as i(source_key, target_id, content_hash)
+		_, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, content_hash, target_version)
+			select $1, $2, $3, i.source_key, i.target_id::uuid, i.content_hash, i.target_version
+			from unnest($4::text[], $5::text[], $6::text[], $7::int[]) as i(source_key, target_id, content_hash, target_version)
 			on conflict (tenant_id, source_system, source_entity, source_key)
-			do update set content_hash = excluded.content_hash, updated_at = now()`,
-			p.TenantID, sourceSystem, entity, keys, targets, hashes)
+			do update set content_hash = excluded.content_hash, target_version = excluded.target_version, updated_at = now()`,
+			p.TenantID, sourceSystem, entity, keys, targets, hashes, versions)
+		if err != nil || !slices.Contains(rebinds, true) {
+			return err
+		}
+		// The target assigned its own ids to these records: point the keys at them.
+		_, err = tx.Exec(ctx, `update migration.xref x set target_id = i.target_id::uuid
+			from unnest($4::text[], $5::text[], $6::bool[]) as i(source_key, target_id, rebind)
+			where x.tenant_id = $1 and x.source_system = $2 and x.source_entity = $3 and x.source_key = i.source_key and i.rebind`,
+			p.TenantID, sourceSystem, entity, keys, targets, rebinds)
 		return err
 	})
 }

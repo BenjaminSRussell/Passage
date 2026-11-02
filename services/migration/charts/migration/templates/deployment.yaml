@@ -16,17 +16,23 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        {{- if .Values.fieldCrypt.keysSecret }}
+        {{- if or .Values.fieldCrypt.keysSecret .Values.serviceIdentity.signingKeySecret }}
         fsGroup: 65532
         {{- end }}
         seccompProfile:
           type: RuntimeDefault
-      {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim }}
+      {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim .Values.serviceIdentity.signingKeySecret }}
       volumes:
 {{- if .Values.fieldCrypt.keysSecret }}
         - name: field-crypt
           secret:
             secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
             defaultMode: 0440
 {{- end }}
 {{- if .Values.dropRoot.existingClaim }}
@@ -64,10 +70,31 @@ spec:
 {{- if .Values.dropRoot.path }}
             - { name: MIG_DROP_ROOT, value: {{ .Values.dropRoot.path | quote }} }
 {{- end }}
-          {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim }}
+            # The loader signs its calls to the owning services as the service named "migration". With any address set
+            # and a signing key, POST /v1/integration/migration-runs extracts and loads; without them it answers 501.
+            - { name: PASSAGE_SERVICE_NAME, value: migration }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: PASSAGE_SERVICE_SIGNING_KEY_FILE, value: /var/run/passage/service-identity/signing-key }
+{{- if .Values.serviceIdentity.keyId }}
+            - { name: PASSAGE_SERVICE_KEY_ID, value: {{ .Values.serviceIdentity.keyId | quote }} }
+{{- end }}
+{{- end }}
+{{- with .Values.targets.partyUrl }}
+            - { name: MIG_TARGET_PARTY_URL, value: {{ . | quote }} }
+{{- end }}
+{{- with .Values.targets.productUrl }}
+            - { name: MIG_TARGET_PRODUCT_URL, value: {{ . | quote }} }
+{{- end }}
+{{- with .Values.targets.receivablesUrl }}
+            - { name: MIG_TARGET_RECEIVABLES_URL, value: {{ . | quote }} }
+{{- end }}
+          {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
 {{- if .Values.fieldCrypt.keysSecret }}
             - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
 {{- end }}
 {{- if .Values.dropRoot.existingClaim }}
             - { name: drop-root, mountPath: {{ .Values.dropRoot.path | quote }}, readOnly: true }

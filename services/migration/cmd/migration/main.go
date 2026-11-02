@@ -7,16 +7,20 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/api"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/connector"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/probe"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/target"
 	"github.com/BenjaminSRussell/passage/services/migration/migrations"
 )
 
@@ -58,12 +62,45 @@ func connectionDeps(getenv func(string) string) (*fieldcrypt.Keys, *probe.Prober
 	return keys, &probe.Prober{Guard: &egress.Guard{Policy: policy}, DropRoot: getenv("MIG_DROP_ROOT")}, nil
 }
 
+// targetConfig reads the owning services' base URLs (MIG_TARGET_PARTY_URL, MIG_TARGET_PRODUCT_URL,
+// MIG_TARGET_RECEIVABLES_URL) and the service signing key the loader's calls are signed with. The key must belong to
+// the service named "migration" (PASSAGE_SERVICE_NAME), the caller the service grants are written for. An address
+// without a key stops the service: loading unsigned would be refused by every target.
+func targetConfig(getenv func(string) string) (target.Config, error) {
+	cfg := target.Config{PartyURL: getenv("MIG_TARGET_PARTY_URL"), ProductURL: getenv("MIG_TARGET_PRODUCT_URL"), ReceivablesURL: getenv("MIG_TARGET_RECEIVABLES_URL")}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return target.Config{}, err
+	}
+	for name, raw := range map[string]string{"MIG_TARGET_PARTY_URL": cfg.PartyURL, "MIG_TARGET_PRODUCT_URL": cfg.ProductURL, "MIG_TARGET_RECEIVABLES_URL": cfg.ReceivablesURL} {
+		if raw == "" {
+			continue
+		}
+		if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return target.Config{}, fmt.Errorf("%s must be an http or https base address such as http://party:8080", name)
+		}
+	}
+	anyURL := cfg.PartyURL != "" || cfg.ProductURL != "" || cfg.ReceivablesURL != ""
+	switch {
+	case signer == nil && anyURL:
+		return target.Config{}, errors.New("MIG_TARGET_*_URL is set but no service signing key is (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+	case signer != nil && getenv(tenant.EnvServiceName) != target.Caller:
+		return target.Config{}, fmt.Errorf("%s must be %q for the loader's service grants", tenant.EnvServiceName, target.Caller)
+	}
+	cfg.Signer = signer
+	return cfg, nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
 	keys, prober, err := connectionDeps(getenv)
+	if err != nil {
+		return err
+	}
+	targets, err := targetConfig(getenv)
 	if err != nil {
 		return err
 	}
@@ -78,7 +115,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	// Without fieldcrypt keys the secret and test routes answer 501 MIG-SECRETS-NOT-CONFIGURED.
-	a := api.New(store.New(pool), api.NotConfigured).WithConnections(keys, prober).WithExtraction(connector.Env{Guard: prober.Guard, DropRoot: prober.DropRoot})
+	st := store.New(pool)
+	a := api.New(st, api.NotConfigured).WithConnections(keys, prober).WithExtraction(connector.Env{Guard: prober.Guard, DropRoot: prober.DropRoot})
+	if targets.Configured() {
+		// With the owning services' addresses and a signing key, runs extract from the entity binding and load
+		// through their APIs. Without them POST /migration-runs keeps answering 501 MIG-BACKEND-NOT-CONFIGURED.
+		a = a.WithTargets(func(_ context.Context, run api.TargetRun) (domain.TargetLoader, domain.TargetReader, error) {
+			return target.New(targets, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: st.Xref()}), nil, nil
+		})
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

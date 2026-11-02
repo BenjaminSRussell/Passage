@@ -490,3 +490,36 @@ func TestPostgres_XrefBrowseKeysetFiltersAndSummary(t *testing.T) {
 		t.Fatalf("a legal-entity-scoped summary = %+v, %v", got, err)
 	}
 }
+
+func TestPostgres_XrefKeepsTheTargetVersionAndRebindsOnlyWhenAsked(t *testing.T) {
+	x := newStore(t).Xref()
+	ctx := principalContext(1)
+	reserved := "00000000-0000-7000-8000-000000000001"
+	real := "00000000-0000-7000-8000-0000000000aa"
+	key := domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: "C1"}
+	if err := x.Put(ctx, key, domain.XrefEntry{TargetID: reserved}); err != nil {
+		t.Fatal(err)
+	}
+	// The target assigned its own id and answered version 3.
+	if err := x.PutMany(ctx, "ax2012", "customer", []domain.XrefItem{
+		{SourceKey: "C1", Entry: domain.XrefEntry{TargetID: real, ContentHash: "h1", TargetVersion: 3, Rebind: true}},
+		{SourceKey: "C2", Entry: domain.XrefEntry{TargetID: "00000000-0000-7000-8000-000000000002", ContentHash: "h2", TargetVersion: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := x.Get(ctx, key)
+	if err != nil || !found || got.TargetID != real || got.ContentHash != "h1" || got.TargetVersion != 3 || got.Rebind {
+		t.Fatalf("after rebind = %+v, %v, %v", got, found, err)
+	}
+	// A later put without Rebind updates the hash and version and leaves the id alone.
+	if err := x.Put(ctx, key, domain.XrefEntry{TargetID: reserved, ContentHash: "h2", TargetVersion: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.PutMany(ctx, "ax2012", "customer", []domain.XrefItem{{SourceKey: "C1", Entry: domain.XrefEntry{TargetID: reserved, ContentHash: "h3", TargetVersion: 5}}}); err != nil {
+		t.Fatal(err)
+	}
+	many, err := x.GetMany(ctx, "ax2012", "customer", []string{"C1", "C2"})
+	if err != nil || many["C1"].TargetID != real || many["C1"].TargetVersion != 5 || many["C1"].ContentHash != "h3" || many["C2"].TargetVersion != 1 {
+		t.Fatalf("GetMany = %+v, %v", many, err)
+	}
+}

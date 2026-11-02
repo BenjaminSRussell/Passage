@@ -413,3 +413,61 @@ func TestPipeline_RejectWhenQueuesRowWithReasonCodeAndLoadsTheRest(t *testing.T)
 		t.Fatalf("created=%d rejects=%+v", rep.Created, rep.Rejects)
 	}
 }
+
+// versionedLoader plays a target that assigns its own ids and versions records.
+type versionedLoader struct {
+	items   []domain.LoadItem
+	version int
+}
+
+func (v *versionedLoader) LoadBatch(_ context.Context, _ string, items []domain.LoadItem) ([]domain.LoadResult, error) {
+	v.items = append(v.items, items...)
+	out := make([]domain.LoadResult, len(items))
+	for i, it := range items {
+		v.version++
+		out[i] = domain.LoadResult{TargetID: "target-" + it.SourceKey, TargetVersion: v.version}
+		if it.SourceKey == "C2" {
+			out[i] = domain.LoadResult{Code: "TGT-NO", Detail: "the target said no"}
+		}
+	}
+	return out, nil
+}
+
+func TestPipeline_RecordsTheTargetsIDVersionAndRefusalDetail(t *testing.T) {
+	rows := []domain.Record{
+		{Key: "C1", Fields: map[string]any{"AccountNum": "C1", "Name": "Acme"}},
+		{Key: "C2", Fields: map[string]any{"AccountNum": "C2", "Name": "Beta"}},
+	}
+	p, xref, _ := newPipeline(rows)
+	loader := &versionedLoader{}
+	p.Loader, p.Reader = loader, nil
+	rep, err := p.Run(context.Background(), spec(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Created != 1 || len(rep.Rejects) != 1 || rep.Rejects[0].Rejects[0].Code != "TGT-NO" || rep.Rejects[0].Rejects[0].Detail != "the target said no" {
+		t.Fatalf("report = %+v", rep)
+	}
+	if loader.items[0].Existing || loader.items[0].TargetVersion != 0 {
+		t.Fatalf("first load must be a create: %+v", loader.items[0])
+	}
+	e := xref.Entries[domain.XrefKey{SourceSystem: system, Entity: "customer", SourceKey: "C1"}]
+	if e.TargetID != "target-C1" || e.TargetVersion != 1 || e.ContentHash == "" || rep.Ledger[0].TargetID != "target-C1" {
+		t.Fatalf("xref = %+v, ledger = %+v", e, rep.Ledger)
+	}
+
+	// The next run sees the recorded id and version, and an edited row is an update of that record.
+	rows[0].Fields["Name"] = "Acme Holding"
+	p.Extractor = sliceExtractor{rows: rows[:1]}
+	loader.items = nil
+	if _, err := p.Run(context.Background(), spec(t)); err != nil {
+		t.Fatal(err)
+	}
+	got := loader.items[0]
+	if !got.Existing || got.TargetID != "target-C1" || got.TargetVersion != 1 {
+		t.Fatalf("update item = %+v", got)
+	}
+	if e := xref.Entries[domain.XrefKey{SourceSystem: system, Entity: "customer", SourceKey: "C1"}]; e.TargetVersion != 3 {
+		t.Fatalf("version after update = %d", e.TargetVersion)
+	}
+}
