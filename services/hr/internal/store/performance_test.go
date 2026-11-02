@@ -190,21 +190,21 @@ func TestReviewTwoStepLifecycle(t *testing.T) {
 	manager := employedWorker(t, s, ctx, "M", le, "J")
 	start, end := day(time.January, 1), day(time.December, 31)
 
-	review, inserted, err := s.OpenReview(ctx, w.ID, start, end, "rev-key")
+	review, inserted, err := s.OpenReview(ctx, w.ID, nil, start, end, "rev-key")
 	if err != nil || !inserted || review.Status != domain.ReviewDraft || review.PeriodStart != "2026-01-01" || review.PeriodEnd != "2026-12-31" {
 		t.Fatalf("open = %+v inserted=%v err=%v", review, inserted, err)
 	}
-	again, inserted, err := s.OpenReview(ctx, w.ID, start, end, "")
+	again, inserted, err := s.OpenReview(ctx, w.ID, nil, start, end, "")
 	if err != nil || inserted || again.ID != review.ID {
 		t.Fatalf("open again for the period = %+v inserted=%v err=%v, want the stored review", again, inserted, err)
 	}
-	replay, inserted, err := s.OpenReview(ctx, w.ID, start, end, "rev-key")
+	replay, inserted, err := s.OpenReview(ctx, w.ID, nil, start, end, "rev-key")
 	if err != nil || inserted || replay.ID != review.ID {
 		t.Fatalf("replayed key = %+v inserted=%v err=%v", replay, inserted, err)
 	}
-	_, _, err = s.OpenReview(ctx, w.ID, start, day(time.June, 30), "rev-key")
+	_, _, err = s.OpenReview(ctx, w.ID, nil, start, day(time.June, 30), "rev-key")
 	requireCode(t, err, CodeIdempotencyReuse)
-	_, _, err = s.OpenReview(ctx, ids.New(), start, end, "")
+	_, _, err = s.OpenReview(ctx, ids.New(), nil, start, end, "")
 	requireCode(t, err, CodeWorkerNotFound)
 
 	_, _, err = s.SignOffReview(ctx, review.ID, manager.ID, nil, nil)
@@ -264,7 +264,7 @@ func TestGrants_PerformancePathsWorkAsAppRole(t *testing.T) {
 	if _, _, err := s.CreateGoal(ctx, Goal{WorkerID: w.ID, Title: "goal"}, ""); err != nil {
 		t.Fatalf("goal as the app role: %v", err)
 	}
-	review, _, err := s.OpenReview(ctx, w.ID, day(time.January, 1), day(time.December, 31), "")
+	review, _, err := s.OpenReview(ctx, w.ID, nil, day(time.January, 1), day(time.December, 31), "")
 	if err != nil {
 		t.Fatalf("open review as the app role: %v", err)
 	}
@@ -287,5 +287,63 @@ func TestGrants_PerformancePathsWorkAsAppRole(t *testing.T) {
 	}
 	if err := s.RemoveJobRequirement(ctx, job.ID, "PLC"); err != nil {
 		t.Fatalf("remove job requirement as the app role: %v", err)
+	}
+}
+
+func TestPerformanceNeedsALegalEntityAndHonoursTheRequestedOne(t *testing.T) {
+	s, ctx := appStore(t)
+	at(s, day(time.March, 1))
+	le1, le2 := ids.New(), ids.New()
+	w := mustWorker(t, s, ctx, "Multi")
+	mustEmployment(t, s, ctx, w.ID, le1, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, ctx, w.ID, le2, "CONCURRENT", day(time.January, 1))
+
+	_, _, err := s.CreateGoal(ctx, Goal{WorkerID: w.ID, Title: "g"}, "")
+	requireCode(t, err, CodeEntityRequired)
+	_, _, err = s.OpenReview(ctx, w.ID, nil, day(time.January, 1), day(time.December, 31), "")
+	requireCode(t, err, CodeEntityRequired)
+
+	goal, _, err := s.CreateGoal(ctx, Goal{WorkerID: w.ID, Title: "g", LegalEntityID: &le2}, "k")
+	if err != nil || goal.LegalEntityID == nil || *goal.LegalEntityID != le2 {
+		t.Fatalf("goal in the second entity = %+v err %v", goal, err)
+	}
+	desc := "different"
+	_, _, err = s.CreateGoal(ctx, Goal{WorkerID: w.ID, Title: "g", Description: &desc, LegalEntityID: &le2}, "k")
+	requireCode(t, err, CodeIdempotencyReuse)
+	review, _, err := s.OpenReview(ctx, w.ID, &le1, day(time.January, 1), day(time.December, 31), "")
+	if err != nil || review.LegalEntityID == nil || *review.LegalEntityID != le1 {
+		t.Fatalf("review in the first entity = %+v err %v", review, err)
+	}
+	other := ids.New()
+	_, _, err = s.OpenReview(ctx, w.ID, &other, day(time.February, 1), day(time.February, 28), "")
+	requireCode(t, err, CodeEntityMismatch)
+
+	bare := mustWorker(t, s, ctx, "Bare")
+	_, _, err = s.CreateGoal(ctx, Goal{WorkerID: bare.ID, Title: "g"}, "")
+	requireCode(t, err, CodeEntityRequired)
+	_, _, err = s.OpenReview(ctx, bare.ID, nil, day(time.January, 1), day(time.December, 31), "")
+	requireCode(t, err, CodeEntityRequired)
+}
+
+func TestGoalStateRules(t *testing.T) {
+	s, ctx := appStore(t)
+	at(s, day(time.March, 1))
+	w := employedWorker(t, s, ctx, "S", ids.New(), "J")
+	goal, _, err := s.CreateGoal(ctx, Goal{WorkerID: w.ID, Title: "g"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	achieved, low := domain.GoalAchieved, 60
+	_, err = s.UpdateGoal(ctx, goal.ID, &achieved, &low)
+	requireCode(t, err, CodeGoalState)
+	cancelled := domain.GoalCancelled
+	if _, err := s.UpdateGoal(ctx, goal.ID, &cancelled, nil); err != nil {
+		t.Fatal(err)
+	}
+	reopen := domain.GoalOpen
+	_, err = s.UpdateGoal(ctx, goal.ID, &reopen, nil)
+	requireCode(t, err, CodeGoalState)
+	if again, err := s.UpdateGoal(ctx, goal.ID, &cancelled, nil); err != nil || again.Status != domain.GoalCancelled {
+		t.Fatalf("cancelling again = %+v err %v, want a no-op", again, err)
 	}
 }

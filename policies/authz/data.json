@@ -1044,13 +1044,17 @@
       {"resource": "/v1/hr/positions", "methods": ["GET"]},
       {"resource": "/v1/hr/positions/*", "methods": ["GET"]},
       {"resource": "/v1/hr/positions/*/skill-requirements", "methods": ["GET"]},
+      {"resource": "/v1/hr/jobs/*/skill-requirements", "methods": ["GET"]},
+      {"resource": "/v1/hr/jobs/*/skill-gaps", "methods": ["GET"]},
       {"resource": "/v1/hr/skills/search", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/skill-gap", "methods": ["GET"]}
     ]},
     "HcmOrgMaintain": {"permissions": [
       {"resource": "/v1/hr/positions", "methods": ["POST"]},
       {"resource": "/v1/hr/positions/*/skill-requirements", "methods": ["POST"]},
-      {"resource": "/v1/hr/positions/*/skill-requirements/*", "methods": ["DELETE"]}
+      {"resource": "/v1/hr/positions/*/skill-requirements/*", "methods": ["DELETE"]},
+      {"resource": "/v1/hr/jobs/*/skill-requirements", "methods": ["POST"]},
+      {"resource": "/v1/hr/jobs/*/skill-requirements/*", "methods": ["DELETE"]}
     ]},
     "HcmRecruitMaintain": {"permissions": [
       {"resource": "/v1/hr/candidates/*", "methods": ["GET"]},

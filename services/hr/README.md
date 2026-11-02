@@ -245,7 +245,12 @@ legal-entity scope hides do not contribute workers.
 Goals (FR-42.11): a manager (or `hr.performance.admin`) adds a goal for a worker
 (title, description, due date) and sets its status (OPEN, ACHIEVED, CANCELLED)
 and progress percent; ACHIEVED without a percent sets 100. The worker reads
-their goals at `/v1/hr/me/goals`.
+their goals at `/v1/hr/me/goals`. A goal or review carries the legal entity of
+the worker's employment: pass `legalEntityId` when the worker has several
+employments (else 422 `HCM-ENTITY-REQUIRED`); a worker with no visible employment
+is refused the same way, so no row has a NULL entity. Nobody sets or changes
+their own goals (403 `HCM-GOAL-SELF`); ACHIEVED needs 100 percent and a
+cancelled goal is final (`HCM-GOAL-STATE`).
 
 Reviews (FR-42.11): one two-step template, no calibration and no rating
 distribution. A manager opens a review for a worker and period (`draft`; one per
@@ -512,6 +517,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-SKL-REQ-NOT-FOUND` | 404 | The position or job does not require that skill |
 | `HCM-GOAL-NOT-FOUND` / `HCM-REV-NOT-FOUND` | 404 | Unknown goal or review, or one outside the caller's team or legal-entity scope |
 | `HCM-REV-STATE` | 409 | Review step out of order (sign-off before the self-assessment, or a changed text after submit) |
+| `HCM-GOAL-STATE` / `HCM-GOAL-SELF` | 409 or 422 / 403 | Achieved below 100 percent or a change to a cancelled goal / setting your own goal |
 | `HCM-REV-SELF` | 403 | A worker cannot sign off their own review |
 | `HCM-CERT-DUPLICATE` | 409 | The worker already has a certificate with that code and issue date |
 | `HCM-CRS-001` | 422 | The session and its waitlist are full |

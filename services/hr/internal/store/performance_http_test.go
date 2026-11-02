@@ -118,3 +118,22 @@ func TestPerformanceGoalsOverHTTP(t *testing.T) {
 		t.Fatalf("unlinked sign-in: status %d, want 404", rec.Code)
 	}
 }
+
+func TestPerformanceManagerCannotSetTheirOwnGoals(t *testing.T) {
+	o := newOrg(t)
+	mgr := o.workers["mgr"].ID
+	if rec := o.as(o.users["mgr"], http.MethodPost, "/v1/hr/workers/"+mgr+"/goals", `{"title":"Give myself a goal"}`, dutyPerfManage); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), store.CodeGoalSelf) {
+		t.Fatalf("own goal: status %d body %s, want 403 %s", rec.Code, rec.Body.String(), store.CodeGoalSelf)
+	}
+	if rec := o.as(o.users["mgr"], http.MethodPost, "/v1/hr/workers/"+o.workers["rep"].ID+"/goals", `{"title":"x","legalEntityId":"nope"}`, dutyPerfManage); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad legalEntityId: status %d, want 400", rec.Code)
+	}
+	created := o.as(o.users["ceo"], http.MethodPost, "/v1/hr/workers/"+mgr+"/goals", `{"title":"From the boss"}`, dutyPerfManage)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("boss sets the manager's goal: status %d body %s", created.Code, created.Body.String())
+	}
+	goal := decodeBody[store.Goal](t, created)
+	if rec := o.as(o.users["mgr"], http.MethodPost, "/v1/hr/goals/"+goal.ID+"/progress", `{"progressPercent":100}`, dutyPerfManage); rec.Code != http.StatusForbidden {
+		t.Fatalf("own goal progress: status %d, want 403", rec.Code)
+	}
+}

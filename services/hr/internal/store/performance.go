@@ -19,6 +19,8 @@ const (
 	CodeReviewNotFound = "HCM-REV-NOT-FOUND"
 	CodeReviewState    = "HCM-REV-STATE"
 	CodeReviewSelf     = "HCM-REV-SELF"
+	CodeGoalState      = "HCM-GOAL-STATE"
+	CodeGoalSelf       = "HCM-GOAL-SELF"
 
 	maxPerformanceRows = 500
 )
@@ -92,6 +94,17 @@ func samePtr[T comparable](a, b *T) bool {
 	return *a == *b
 }
 
+func performanceEntity(ctx context.Context, tx pgx.Tx, tenantID, workerID, on string, requested *string) (*string, error) {
+	entity, err := workerEntity(ctx, tx, tenantID, workerID, on, requested)
+	if err != nil {
+		return nil, err
+	}
+	if entity == nil {
+		return nil, problem(http.StatusUnprocessableEntity, CodeEntityRequired, "the worker has no employment in a legal entity you can see")
+	}
+	return entity, nil
+}
+
 func requireWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) error {
 	var exists bool
 	if err := tx.QueryRow(ctx, `select exists (select 1 from worker where tenant_id = $1 and id = $2)`, tenantID, workerID).Scan(&exists); err != nil {
@@ -101,6 +114,11 @@ func requireWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) er
 		return problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
 	return nil
+}
+
+func sameGoalRequest(stored, in Goal) bool {
+	return stored.WorkerID == in.WorkerID && stored.Title == in.Title && samePtr(stored.Description, in.Description) &&
+		samePtr(stored.DueOn, in.DueOn) && (in.LegalEntityID == nil || samePtr(stored.LegalEntityID, in.LegalEntityID))
 }
 
 // CreateGoal adds a goal for a worker in the legal entity of their employment
@@ -124,7 +142,7 @@ func (s *Postgres) CreateGoal(ctx context.Context, in Goal, idempotencyKey strin
 		if err := requireWorker(ctx, tx, p.TenantID, in.WorkerID); err != nil {
 			return err
 		}
-		entity, err := workerEntity(ctx, tx, p.TenantID, in.WorkerID, s.now().UTC().Format(absDateLayout), in.LegalEntityID)
+		entity, err := performanceEntity(ctx, tx, p.TenantID, in.WorkerID, s.now().UTC().Format(absDateLayout), in.LegalEntityID)
 		if err != nil {
 			return err
 		}
@@ -140,7 +158,7 @@ func (s *Postgres) CreateGoal(ctx context.Context, in Goal, idempotencyKey strin
 	if pgCode(err, rlsViolation) {
 		return Goal{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
-	if err == nil && !inserted && (out.WorkerID != in.WorkerID || out.Title != in.Title) {
+	if err == nil && !inserted && !sameGoalRequest(out, in) {
 		return Goal{}, false, idempotencyReuse()
 	}
 	return out, inserted, err
@@ -220,6 +238,12 @@ func (s *Postgres) UpdateGoal(ctx context.Context, id string, status *string, pr
 			out = current
 			return nil
 		}
+		if current.Status == domain.GoalCancelled {
+			return problem(http.StatusConflict, CodeGoalState, "a cancelled goal cannot change")
+		}
+		if newStatus == domain.GoalAchieved && newProgress < 100 {
+			return problem(http.StatusUnprocessableEntity, CodeGoalState, "an achieved goal must be at 100 percent")
+		}
 		out, err = scanGoal(tx.QueryRow(ctx, `update hr_goal set status = $3, progress_pct = $4, updated_at = now()
 			where tenant_id = $1 and id = $2 returning `+goalColumns, p.TenantID, id, newStatus, newProgress))
 		return err
@@ -229,7 +253,7 @@ func (s *Postgres) UpdateGoal(ctx context.Context, id string, status *string, pr
 
 // OpenReview starts the review of a worker for a period in draft. A review for
 // the same worker and period that exists is returned with inserted false.
-func (s *Postgres) OpenReview(ctx context.Context, workerID string, start, end time.Time, idempotencyKey string) (Review, bool, error) {
+func (s *Postgres) OpenReview(ctx context.Context, workerID string, legalEntityID *string, start, end time.Time, idempotencyKey string) (Review, bool, error) {
 	p := principal(ctx)
 	key := idemKey(idempotencyKey)
 	var out Review
@@ -248,7 +272,7 @@ func (s *Postgres) OpenReview(ctx context.Context, workerID string, start, end t
 		if err := requireWorker(ctx, tx, p.TenantID, workerID); err != nil {
 			return err
 		}
-		entity, err := workerEntity(ctx, tx, p.TenantID, workerID, end.Format(absDateLayout), nil)
+		entity, err := performanceEntity(ctx, tx, p.TenantID, workerID, end.Format(absDateLayout), legalEntityID)
 		if err != nil {
 			return err
 		}
@@ -273,7 +297,8 @@ func (s *Postgres) OpenReview(ctx context.Context, workerID string, start, end t
 	if pgCode(err, rlsViolation) {
 		return Review{}, false, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
-	if err == nil && !inserted && key != nil && (out.WorkerID != workerID || out.PeriodStart != start.Format(absDateLayout) || out.PeriodEnd != end.Format(absDateLayout)) {
+	if err == nil && !inserted && key != nil && (out.WorkerID != workerID || out.PeriodStart != start.Format(absDateLayout) || out.PeriodEnd != end.Format(absDateLayout) ||
+		(legalEntityID != nil && !samePtr(out.LegalEntityID, legalEntityID))) {
 		return Review{}, false, idempotencyReuse()
 	}
 	return out, inserted, err

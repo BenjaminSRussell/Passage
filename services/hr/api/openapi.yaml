@@ -1531,6 +1531,12 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-ENTITY-REQUIRED (several employments and no legalEntityId, or none visible) or HCM-ENTITY-MISMATCH
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/goals/{id}/progress:
     post:
       operationId: updateGoalProgress
@@ -1560,6 +1566,18 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-GOAL-STATE (a cancelled goal cannot change)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-GOAL-STATE (ACHIEVED needs 100 percent)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/workers/{id}/reviews:
     get:
       operationId: listWorkerReviews
@@ -1609,6 +1627,12 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-ENTITY-REQUIRED (several employments and no legalEntityId, or none visible) or HCM-ENTITY-MISMATCH
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/hr/reviews/{id}:
     get:
       operationId: getReview
@@ -6174,6 +6198,7 @@ components:
         title: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, maxLength: 2000}
         dueOn: {type: string, format: date}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker has several employments on the date; must be one of them.}
     GoalProgressRequest:
       type: object
       additionalProperties: false
@@ -6211,6 +6236,7 @@ components:
       properties:
         periodStart: {type: string, format: date}
         periodEnd: {type: string, format: date}
+        legalEntityId: {type: string, format: uuid, description: Required when the worker has several employments on the period end; must be one of them.}
     SelfAssessmentRequest:
       type: object
       additionalProperties: false

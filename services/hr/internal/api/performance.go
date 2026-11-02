@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
@@ -24,9 +25,10 @@ const (
 )
 
 type goalRequest struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	DueOn       *string `json:"dueOn"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	DueOn         *string `json:"dueOn"`
+	LegalEntityID *string `json:"legalEntityId"`
 }
 
 type goalProgressRequest struct {
@@ -35,8 +37,9 @@ type goalProgressRequest struct {
 }
 
 type reviewRequest struct {
-	PeriodStart string `json:"periodStart"`
-	PeriodEnd   string `json:"periodEnd"`
+	PeriodStart   string  `json:"periodStart"`
+	PeriodEnd     string  `json:"periodEnd"`
+	LegalEntityID *string `json:"legalEntityId"`
 }
 
 type selfAssessmentRequest struct {
@@ -106,6 +109,28 @@ func (a *API) confineByOwner(w http.ResponseWriter, r *http.Request, lookup func
 	return a.confinePerformance(w, r, owner, code, detail)
 }
 
+func (a *API) ownWorker(r *http.Request) (string, error) {
+	self, err := a.store.SelfWorkerID(r.Context())
+	var p *httpx.Problem
+	if errors.As(err, &p) && p.Code == store.CodeNoLinkedWorker {
+		return "", nil
+	}
+	return self, err
+}
+
+func (a *API) blockOwnGoal(w http.ResponseWriter, r *http.Request, workerID string) bool {
+	self, err := a.ownWorker(r)
+	if err != nil {
+		a.failStore(w, r, "resolve own worker", err)
+		return true
+	}
+	if self != "" && self == workerID {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, store.CodeGoalSelf, "you cannot set or change your own goals"))
+		return true
+	}
+	return false
+}
+
 func (a *API) createGoal(w http.ResponseWriter, r *http.Request, workerID string) {
 	var req goalRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -125,14 +150,17 @@ func (a *API) createGoal(w http.ResponseWriter, r *http.Request, workerID string
 	if !ok {
 		fields["dueOn"] = "must be YYYY-MM-DD"
 	}
+	if req.LegalEntityID != nil && !ids.Valid(*req.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
-	if !a.confineWorker(w, r, workerID) {
+	if !a.confineWorker(w, r, workerID) || a.blockOwnGoal(w, r, workerID) {
 		return
 	}
-	in := store.Goal{WorkerID: workerID, Title: title, Description: description}
+	in := store.Goal{WorkerID: workerID, Title: title, Description: description, LegalEntityID: req.LegalEntityID}
 	if due != nil {
 		d := due.Format(dateLayout)
 		in.DueOn = &d
@@ -198,7 +226,12 @@ func (a *API) updateGoal(w http.ResponseWriter, r *http.Request, id string) {
 		validationFailed(w, r, fields)
 		return
 	}
-	if !a.confineByOwner(w, r, func(id string) (string, error) { return a.store.GoalWorker(r.Context(), id) }, id, store.CodeGoalNotFound, "goal not found") {
+	owner, err := a.store.GoalWorker(r.Context(), id)
+	if err != nil {
+		a.failStore(w, r, "resolve goal owner", err)
+		return
+	}
+	if !a.confinePerformance(w, r, owner, store.CodeGoalNotFound, "goal not found") || a.blockOwnGoal(w, r, owner) {
 		return
 	}
 	goal, err := a.store.UpdateGoal(r.Context(), id, req.Status, req.ProgressPercent)
@@ -231,10 +264,14 @@ func (a *API) openReview(w http.ResponseWriter, r *http.Request, workerID string
 		validationFailed(w, r, fields)
 		return
 	}
+	if req.LegalEntityID != nil && !ids.Valid(*req.LegalEntityID) {
+		validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+		return
+	}
 	if !a.confineWorker(w, r, workerID) {
 		return
 	}
-	review, inserted, err := a.store.OpenReview(r.Context(), workerID, start, end, r.Header.Get(idempotencyKey))
+	review, inserted, err := a.store.OpenReview(r.Context(), workerID, req.LegalEntityID, start, end, r.Header.Get(idempotencyKey))
 	if err != nil {
 		a.failStore(w, r, "open review", err)
 		return
@@ -343,11 +380,7 @@ func (a *API) signOffReview(w http.ResponseWriter, r *http.Request, id string) {
 	if !a.confineByOwner(w, r, func(id string) (string, error) { return a.store.ReviewWorker(r.Context(), id) }, id, store.CodeReviewNotFound, "review not found") {
 		return
 	}
-	signer, err := a.store.SelfWorkerID(r.Context())
-	var p *httpx.Problem
-	if errors.As(err, &p) && p.Code == store.CodeNoLinkedWorker {
-		signer, err = "", nil
-	}
+	signer, err := a.ownWorker(r)
 	if err != nil {
 		a.failStore(w, r, "resolve own worker", err)
 		return
