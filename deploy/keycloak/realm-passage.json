@@ -52,14 +52,15 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "https://app.passage.example.invalid/*"
+        "https://app.passage.example.invalid/auth/callback"
       ],
       "webOrigins": [
         "https://app.passage.example.invalid"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "access.token.lifespan": "300"
+        "access.token.lifespan": "300",
+        "post.logout.redirect.uris": "https://app.passage.example.invalid/"
       },
       "protocolMappers": [
         {
@@ -243,7 +244,8 @@
         "validateSignature": "true",
         "useJwksUrl": "true",
         "defaultScope": "openid email profile"
-      }
+      },
+      "postBrokerLoginFlowAlias": "passage-post-broker-mfa"
     },
     {
       "alias": "corporate-saml",
@@ -261,7 +263,8 @@
         "wantAssertionsSigned": "true",
         "validateSignature": "true",
         "postBindingResponse": "true"
-      }
+      },
+      "postBrokerLoginFlowAlias": "passage-post-broker-mfa"
     }
   ],
   "authenticationFlows": [
@@ -320,20 +323,105 @@
     },
     {
       "alias": "passage-browser-mfa second factor",
-      "description": "OTP or WebAuthn",
+      "description": "WebAuthn when enrolled, then OTP (enrols if missing)",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
       "authenticationExecutions": [
         {
-          "requirement": "ALTERNATIVE",
+          "requirement": "CONDITIONAL",
           "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": true,
+          "flowAlias": "passage-browser-mfa webauthn"
+        },
+        {
+          "requirement": "REQUIRED",
+          "priority": 20,
           "userSetupAllowed": false,
           "autheticatorFlow": false,
           "authenticator": "auth-otp-form"
+        }
+      ]
+    },
+    {
+      "alias": "passage-browser-mfa webauthn",
+      "description": "Runs only when the user has a WebAuthn credential",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "conditional-user-configured"
         },
         {
-          "requirement": "ALTERNATIVE",
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "webauthn-authenticator"
+        }
+      ]
+    },
+    {
+      "alias": "passage-post-broker-mfa",
+      "description": "Second factor after federated login",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": true,
+          "flowAlias": "passage-post-broker-mfa second factor"
+        }
+      ]
+    },
+    {
+      "alias": "passage-post-broker-mfa second factor",
+      "description": "WebAuthn when enrolled, then OTP (enrols if missing)",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "CONDITIONAL",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": true,
+          "flowAlias": "passage-post-broker-mfa webauthn"
+        },
+        {
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "auth-otp-form"
+        }
+      ]
+    },
+    {
+      "alias": "passage-post-broker-mfa webauthn",
+      "description": "Runs only when the user has a WebAuthn credential",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "requirement": "REQUIRED",
           "priority": 20,
           "userSetupAllowed": false,
           "autheticatorFlow": false,

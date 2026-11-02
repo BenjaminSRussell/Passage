@@ -48,6 +48,10 @@ render() {
 assert_rules defaults "$(render)" 8080 scoped
 grep -Fq 'gateway.envoyproxy.io/owning-gateway-name: passage-api' <(helm template identity "$chart_dir")
 
+gateway_ns_render="$(helm template identity "$chart_dir" --namespace hello-ledger --set-json 'networkPolicy.gatewayNamespaces=["hello-ledger"]')"
+grep -Fq 'kubernetes.io/metadata.name: hello-ledger' <<<"$gateway_ns_render"
+assert_rules gateway-namespace-mode "$(ingress_rules <<<"$gateway_ns_render")" 8080 scoped
+
 assert_rules same-namespace-opt-in "$(render --set networkPolicy.allowSameNamespace=true)" 8080 same-namespace
 assert_rules no-peers "$(render --set-json 'networkPolicy.gatewayNamespaces=[]')" 8080 closed
 assert_rules bundle "$(render --set bundle.enabled=true)" 8443 labelled

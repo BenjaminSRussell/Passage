@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"html"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +25,7 @@ const (
 	realmName        = "passage"
 	realmAudience    = "passage-api"
 	loginTenantID    = "6f1c2f3e-5a52-4f0e-9f3a-0d2f1b6a7c11"
+	webCallbackURL   = "https://app.passage.example.invalid/auth/callback"
 	loginUserName    = "ci-login-user"
 	loginUserSecret  = "ci-Login-Passw0rd-1234"
 	keycloakURLEnv   = "PASSAGE_TEST_KEYCLOAK_URL"
@@ -45,6 +49,7 @@ type realmClient struct {
 	ClientID       string            `json:"clientId"`
 	PublicClient   bool              `json:"publicClient"`
 	DirectGrants   bool              `json:"directAccessGrantsEnabled"`
+	RedirectURIs   []string          `json:"redirectUris"`
 	Attributes     map[string]string `json:"attributes"`
 	ProtocolMapper []realmMapper     `json:"protocolMappers"`
 }
@@ -56,19 +61,22 @@ type realmMapper struct {
 }
 
 type realmIdP struct {
-	Alias      string            `json:"alias"`
-	ProviderID string            `json:"providerId"`
-	Enabled    bool              `json:"enabled"`
-	Config     map[string]string `json:"config"`
+	Alias          string            `json:"alias"`
+	ProviderID     string            `json:"providerId"`
+	Enabled        bool              `json:"enabled"`
+	PostBrokerFlow string            `json:"postBrokerLoginFlowAlias"`
+	Config         map[string]string `json:"config"`
 }
 
 type realmFlow struct {
-	Alias      string `json:"alias"`
-	Executions []struct {
-		Authenticator string `json:"authenticator"`
-		FlowAlias     string `json:"flowAlias"`
-		Requirement   string `json:"requirement"`
-	} `json:"authenticationExecutions"`
+	Alias      string      `json:"alias"`
+	Executions []realmExec `json:"authenticationExecutions"`
+}
+
+type realmExec struct {
+	Authenticator string `json:"authenticator"`
+	FlowAlias     string `json:"flowAlias"`
+	Requirement   string `json:"requirement"`
 }
 
 type realmAction struct {
@@ -132,8 +140,12 @@ func TestKeycloakRealmMatchesIdentityExpectations(t *testing.T) {
 			}
 		}
 	}
-	if web := findClient(realm, "passage-web"); web == nil || !web.PublicClient || web.Attributes["pkce.code.challenge.method"] != "S256" {
-		t.Error("passage-web must be a public client with PKCE S256")
+	web := findClient(realm, "passage-web")
+	if web == nil || !web.PublicClient || web.Attributes["pkce.code.challenge.method"] != "S256" {
+		t.Fatal("passage-web must be a public client with PKCE S256")
+	}
+	if !slices.Equal(web.RedirectURIs, []string{webCallbackURL}) || web.Attributes["post.logout.redirect.uris"] == "" {
+		t.Errorf("passage-web redirectUris = %v, want exactly %s plus explicit post.logout.redirect.uris", web.RedirectURIs, webCallbackURL)
 	}
 }
 
@@ -149,7 +161,7 @@ func TestKeycloakRealmRequiresMFAAndHoldsNoSecrets(t *testing.T) {
 		t.Fatalf("browserFlow %q is not defined in the export", realm.BrowserFlow)
 	}
 	if !secondFactorRequired(realm, bound) {
-		t.Error("bound browser flow must require a second-factor subflow offering both OTP and WebAuthn")
+		t.Error("bound browser flow must require a second-factor subflow: required OTP after a conditional WebAuthn step")
 	}
 	if !flowReachesRequired(realm, bound, "auth-username-password-form") {
 		t.Error("bound browser flow never requires the username/password form")
@@ -244,23 +256,42 @@ func flowReachesRequired(realm realmExport, flow *realmFlow, authenticator strin
 	return false
 }
 
+func findFlow(realm realmExport, alias string) *realmFlow {
+	i := slices.IndexFunc(realm.AuthenticationFlows, func(f realmFlow) bool { return f.Alias == alias })
+	if i < 0 {
+		return nil
+	}
+	return &realm.AuthenticationFlows[i]
+}
+
+func conditionalWebAuthnStep(realm realmExport, flow *realmFlow) bool {
+	for _, exec := range flow.Executions {
+		sub := findFlow(realm, exec.FlowAlias)
+		if exec.Requirement != "CONDITIONAL" || sub == nil {
+			continue
+		}
+		var configured, webauthn bool
+		for _, inner := range sub.Executions {
+			configured = configured || (inner.Authenticator == "conditional-user-configured" && inner.Requirement == "REQUIRED")
+			webauthn = webauthn || (inner.Authenticator == "webauthn-authenticator" && inner.Requirement == "REQUIRED")
+		}
+		if configured && webauthn {
+			return true
+		}
+	}
+	return false
+}
+
 func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
 	for _, exec := range flow.Executions {
-		if exec.FlowAlias == "" {
+		sub := findFlow(realm, exec.FlowAlias)
+		if sub == nil {
 			continue
 		}
-		subIndex := slices.IndexFunc(realm.AuthenticationFlows, func(f realmFlow) bool { return f.Alias == exec.FlowAlias })
-		if subIndex < 0 {
-			continue
-		}
-		sub := &realm.AuthenticationFlows[subIndex]
-		offered := map[string]bool{}
-		for _, inner := range sub.Executions {
-			if inner.Requirement == "ALTERNATIVE" {
-				offered[inner.Authenticator] = true
-			}
-		}
-		if exec.Requirement == "REQUIRED" && offered["auth-otp-form"] && offered["webauthn-authenticator"] {
+		otpRequired := slices.ContainsFunc(sub.Executions, func(inner realmExec) bool {
+			return inner.Authenticator == "auth-otp-form" && inner.Requirement == "REQUIRED"
+		})
+		if exec.Requirement == "REQUIRED" && otpRequired && conditionalWebAuthnStep(realm, sub) {
 			return true
 		}
 		if secondFactorRequired(realm, sub) {
@@ -325,7 +356,8 @@ func tokenRequest(t *testing.T, client *http.Client, base, realm string, form ur
 	return body.AccessToken
 }
 
-func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
+func keycloakAdminOrSkip(t *testing.T) (*keycloakAdmin, string, *http.Client) {
+	t.Helper()
 	base := strings.TrimRight(os.Getenv(keycloakURLEnv), "/")
 	if base == "" {
 		t.Skipf("%s is not set; the keycloak CI job runs this test against a container", keycloakURLEnv)
@@ -336,6 +368,11 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 		"grant_type": {"password"}, "client_id": {"admin-cli"},
 		"username": {os.Getenv(keycloakAdminEnv)}, "password": {os.Getenv(keycloakPassEnv)},
 	})
+	return admin, base, client
+}
+
+func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
+	admin, base, client := keycloakAdminOrSkip(t)
 
 	var clients []map[string]any
 	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/clients?clientId=passage-web", nil, http.StatusOK), &clients); err != nil || len(clients) != 1 {
@@ -393,5 +430,74 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 	}
 	if claims["duties"] != "ap_clerk,approver" || claims["tier"] != "starter" {
 		t.Fatalf("claims duties/tier = %v/%v, want the single-string values", claims["duties"], claims["tier"])
+	}
+}
+
+var formAction = regexp.MustCompile(`action="([^"]*)"`)
+
+func browserPasswordLogin(t *testing.T, base, username, password string) *http.Response {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noRedirect := &http.Client{Timeout: 15 * time.Second, Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	query := url.Values{
+		"client_id": {"passage-web"}, "response_type": {"code"}, "scope": {"openid"}, "redirect_uri": {webCallbackURL},
+		"code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}, "code_challenge_method": {"S256"}, "state": {"s1"},
+	}
+	page, err := noRedirect.Get(base + "/realms/" + realmName + "/protocol/openid-connect/auth?" + query.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	_, _ = body.ReadFrom(page.Body)
+	_ = page.Body.Close()
+	match := formAction.FindSubmatch(body.Bytes())
+	if page.StatusCode != http.StatusOK || match == nil {
+		t.Fatalf("login page: status %d, no form action", page.StatusCode)
+	}
+	resp, err := noRedirect.PostForm(html.UnescapeString(string(match[1])), url.Values{"username": {username}, "password": {password}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func createLoginUser(t *testing.T, admin *keycloakAdmin, username string, clearRequiredActions bool) {
+	t.Helper()
+	admin.do(http.MethodPost, "/admin/realms/"+realmName+"/users", map[string]any{
+		"username": username, "email": username + "@example.test", "emailVerified": true, "enabled": true,
+		"firstName": "Ci", "lastName": "Flow",
+		"attributes":  map[string][]string{"tenant_id": {loginTenantID}},
+		"credentials": []map[string]any{{"type": "password", "value": loginUserSecret, "temporary": false}},
+	}, http.StatusCreated)
+	if !clearRequiredActions {
+		return
+	}
+	var found []map[string]any
+	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/users?username="+username+"&exact=true", nil, http.StatusOK), &found); err != nil || len(found) != 1 {
+		t.Fatalf("user %s not found: %v", username, err)
+	}
+	admin.do(http.MethodPut, "/admin/realms/"+realmName+"/users/"+found[0]["id"].(string), map[string]any{"requiredActions": []string{}}, http.StatusNoContent)
+}
+
+func TestKeycloakBrowserLoginEnrolsOTPForUserWithoutFactor(t *testing.T) {
+	admin, base, _ := keycloakAdminOrSkip(t)
+	createLoginUser(t, admin, "ci-new-user", false)
+	resp := browserPasswordLogin(t, base, "ci-new-user", loginUserSecret)
+	location := resp.Header.Get("Location")
+	if resp.StatusCode != http.StatusFound || !strings.Contains(location, "required-action") || !strings.Contains(location, "execution=CONFIGURE_TOTP") {
+		t.Fatalf("new user after password: status %d location %q, want 302 to required-action CONFIGURE_TOTP", resp.StatusCode, location)
+	}
+}
+
+func TestKeycloakBrowserLoginNeverCompletesOnPasswordAlone(t *testing.T) {
+	admin, base, _ := keycloakAdminOrSkip(t)
+	createLoginUser(t, admin, "ci-no-factor-user", true)
+	resp := browserPasswordLogin(t, base, "ci-no-factor-user", loginUserSecret)
+	if location := resp.Header.Get("Location"); strings.HasPrefix(location, webCallbackURL) || strings.Contains(location, "code=") {
+		t.Fatalf("password-only login completed: status %d location %q", resp.StatusCode, location)
 	}
 }

@@ -85,13 +85,13 @@ jobs:
           echo "PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
       - run: >-
           docker run -d --name keycloak -p 8080:8080
-          -e KC_BOOTSTRAP_ADMIN_USERNAME=$PASSAGE_TEST_KEYCLOAK_ADMIN
-          -e KC_BOOTSTRAP_ADMIN_PASSWORD=$PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD
+          -e KC_BOOTSTRAP_ADMIN_USERNAME="$PASSAGE_TEST_KEYCLOAK_ADMIN"
+          -e KC_BOOTSTRAP_ADMIN_PASSWORD="$PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD"
           -e KC_HOSTNAME_STRICT=false
           -v "$PWD/deploy/keycloak/realm-passage.json:/opt/keycloak/data/import/realm-passage.json:ro"
           quay.io/keycloak/keycloak:26.0.8 start-dev --import-realm
       - run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             curl -fsS http://localhost:8080/realms/passage/.well-known/openid-configuration >/dev/null && exit 0
             sleep 3
           done
