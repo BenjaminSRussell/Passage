@@ -33,6 +33,8 @@ var (
 
 	BackorderRunCommitted = events.Type(Context, "backorderrun", "committed", 1)
 	ParametersChanged     = events.Type(Context, "parameters", "changed", 1)
+	IntakeErrorRecorded   = events.Type(Context, "intakeerror", "recorded", 1)
+	IntakeErrorResolved   = events.Type(Context, "intakeerror", "resolved", 1)
 
 	OrderChangeRequested = events.Type(Context, "orderchange", "requested", 1)
 	OrderChangeApproved  = events.Type(Context, "orderchange", "approved", 1)
@@ -46,7 +48,7 @@ func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		AgreementChanged, AgreementClosed, AgreementReturned,
 		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
-		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged,
+		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged}
 }
 
@@ -239,12 +241,15 @@ type ConfirmedLine struct {
 
 // OrderConfirmedData is the data member of order.confirmed.v1.
 type OrderConfirmedData struct {
-	OrderID    string          `json:"order_id"`
-	CustomerID string          `json:"customer_id"`
-	Currency   string          `json:"currency"`
-	Lines      []ConfirmedLine `json:"lines"`
-	NetTotal   string          `json:"net_total"`
-	Version    int             `json:"version"`
+	OrderID    string `json:"order_id"`
+	CustomerID string `json:"customer_id"`
+	// OrderType lets consumers honour BR-27.7: a JOURNAL order never
+	// reserves or consumes ATP, so inventory and planning skip its lines.
+	OrderType string          `json:"order_type"`
+	Currency  string          `json:"currency"`
+	Lines     []ConfirmedLine `json:"lines"`
+	NetTotal  string          `json:"net_total"`
+	Version   int             `json:"version"`
 	// OneTime marks a one-time customer order (FR-27.22); absent otherwise.
 	OneTime *OneTimeRef `json:"one_time,omitempty"`
 }
@@ -392,4 +397,20 @@ type ChangePolicyChangedData struct {
 	ApprovalRequired bool   `json:"approval_required"`
 	Actor            string `json:"actor"`
 	Version          int    `json:"version"`
+}
+
+// IntakeErrorData is the data member of intakeerror.recorded.v1 and
+// intakeerror.resolved.v1: a channel order was refused (recorded, once per
+// attempt) or an operator closed the failure (resolved). The payload is never
+// carried, only its hash.
+type IntakeErrorData struct {
+	IntakeErrorID string `json:"intake_error_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Channel       string `json:"channel"`
+	ExternalRef   string `json:"external_ref,omitempty"`
+	RequestHash   string `json:"request_hash"`
+	ErrorCode     string `json:"error_code"`
+	Attempts      int    `json:"attempts"`
+	Actor         string `json:"actor,omitempty"`
+	Version       int    `json:"version"`
 }

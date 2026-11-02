@@ -169,6 +169,7 @@ export function SalesWorkspacePage() {
             <StatTile label="Backorder lines" value={summary.backorderLines} tone="warning" hint="Promised late or not at all" />
             <StatTile label="Quotes expiring in 7 days" value={summary.quotationsExpiring} tone="warning" hint="Draft or sent, still valid" />
             <StatTile label="Lapsed, not yet expired" value={summary.quotationsLapsed} tone="danger" hint="Past validity, still open" />
+            <StatTile label="Intake errors" value={summary.openIntakeErrors} tone="danger" hint="Channel orders refused, not yet closed" />
           </StatGroup>
           <h2 className={styles.sectionTitle}>Quotation pipeline</h2>
           <p className={styles.muted}>The status, probability and validity filters narrow this table only; the tiles and the conversion rate cover every quotation.</p>

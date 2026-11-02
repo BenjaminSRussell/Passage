@@ -347,7 +347,7 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 			return err
 		}
 		checked := false
-		if o.Status == domain.OrderConfirmed && o.NetTotal.GreaterThan(oldTotal) {
+		if o.Status == domain.OrderConfirmed && o.OrderType != domain.OrderTypeJournal && o.NetTotal.GreaterThan(oldTotal) {
 			if checked, err = checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm); err != nil {
 				return err
 			}

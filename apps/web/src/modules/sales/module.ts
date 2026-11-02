@@ -17,6 +17,8 @@ import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage
 import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
 import { OrderDetailPage } from "./OrderDetailPage";
+import { IntakeErrorDetailPage } from "./IntakeErrorDetailPage";
+import { IntakeErrorsPage } from "./IntakeErrorsPage";
 import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
@@ -75,6 +77,8 @@ const sales: PassageModule = {
     { path: "/sales/product-proposals", element: createElement(ProposalRulesPage) },
     { path: "/sales/alternative-items", element: createElement(AlternativeItemsPage) },
     { path: "/sales/alternative-items/new", element: createElement(NewAlternativeRulePage), handle: { title: "New alternative item rule" } },
+    { path: "/sales/intake-errors", element: createElement(IntakeErrorsPage), handle: { title: "Intake errors", duty: "sales.order.read" } },
+    { path: "/sales/intake-errors/:id", element: createElement(IntakeErrorDetailPage), handle: { title: "Intake error" } },
     { path: "/sales/parameters", element: createElement(ParametersPage), handle: { title: "Sales parameters" } },
     { path: "/sales/allocation-quotas", element: createElement(AllocationQuotasPage) },
     { path: "/sales/allocation-quotas/new", element: createElement(NewAllocationQuotaPage), handle: { title: "New allocation quota" } },
@@ -100,6 +104,7 @@ const sales: PassageModule = {
     { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
     { label: "Alternative items", to: "/sales/alternative-items", duty: "sales.order.read" },
     { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
+    { label: "Intake errors", to: "/sales/intake-errors", duty: "sales.order.read" },
     { label: "Sales parameters", to: "/sales/parameters", duty: "sales.order.read" },
   ],
 };

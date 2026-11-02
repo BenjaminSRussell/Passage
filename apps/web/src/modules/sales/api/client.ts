@@ -1478,6 +1478,8 @@ export interface SalesSummary {
   backorderLines: number;
   quotationsExpiring: number;
   quotationsLapsed: number;
+  /** OPEN intake errors: channel orders refused at intake that nobody has closed. */
+  openIntakeErrors: number;
   pipeline: PipelineCurrency[];
   windowDays: number;
   won: number;
@@ -1586,4 +1588,51 @@ export function putChangePolicy(legalEntityId: string, customerId: string, appro
     body: JSON.stringify({ approvalRequired }),
     headers: { "If-Match": etag },
   });
+}
+
+export const INTAKE_ERROR_STATUSES = ["OPEN", "RESOLVED"] as const;
+export type IntakeErrorStatus = (typeof INTAKE_ERROR_STATUSES)[number];
+
+/** A channel order refused at intake (PRD §5.27.14). The payload is not kept, only its hash. */
+export interface IntakeError {
+  id: string;
+  legalEntityId: string;
+  channel: string;
+  externalRef?: string;
+  requestHash: string;
+  errorCode: string;
+  message: string;
+  status: IntakeErrorStatus;
+  attempts: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionNote?: string;
+  version: number;
+}
+
+export interface IntakeErrorFilter {
+  legalEntityId?: string;
+  channel?: string;
+  status?: IntakeErrorStatus;
+  errorCode?: string;
+}
+
+export async function listIntakeErrors(filter: IntakeErrorFilter = {}, signal?: AbortSignal): Promise<IntakeError[]> {
+  const body = await json<{ items?: IntakeError[] }>(
+    `/intake-errors${query({ legalEntityId: filter.legalEntityId, channel: filter.channel, status: filter.status, errorCode: filter.errorCode })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getIntakeError(id: string, signal?: AbortSignal): Promise<Versioned<IntakeError>> {
+  return versioned<IntakeError>(`/intake-errors/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Closes an OPEN intake error at its ETag with a note (1 to 500 characters). */
+export function resolveIntakeError(id: string, etag: string, note: string): Promise<Versioned<IntakeError>> {
+  return versioned<IntakeError>(`/intake-errors/${encodeURIComponent(id)}:resolve`, { method: "POST", body: JSON.stringify({ note }), headers: { "If-Match": etag } });
 }

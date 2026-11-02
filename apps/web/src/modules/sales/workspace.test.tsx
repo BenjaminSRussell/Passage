@@ -48,6 +48,7 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
   backorderLines: 5,
   quotationsExpiring: 3,
   quotationsLapsed: 2,
+  openIntakeErrors: 7,
   pipeline: [{ currency: "USD", openCount: 4, openNet: "1200", weightedNet: "640.5" }],
   windowDays: 90,
   won: 3,
@@ -89,6 +90,7 @@ describe("Sales workspace", () => {
     const table = await findTable({ name: "Open quotation pipeline" });
     expect(within(table).getByText("640.5")).toBeInTheDocument();
     expect(screen.getByLabelText("Sales attention")).toHaveTextContent("5");
+    expect(screen.getByLabelText("Sales attention")).toHaveTextContent(/Intake errors\s*7/);
     expect(screen.getByLabelText("Conversion over the last 90 days")).toHaveTextContent("42.9%");
     expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
   });

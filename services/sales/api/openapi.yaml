@@ -1982,6 +1982,82 @@ paths:
                     items: {$ref: "#/components/schemas/Proposal"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/intake-errors:
+    get:
+      summary: Intake errors - channel orders refused at intake, most recently seen first (PRD 5.27.14)
+      operationId: listIntakeErrors
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: channel, in: query, description: only this channel, schema: {type: string, maxLength: 40}}
+        - {name: status, in: query, schema: {type: string, enum: [OPEN, RESOLVED]}}
+        - {name: errorCode, in: query, description: only this problem code such as SLS-0007, schema: {type: string, maxLength: 40}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: intake errors, most recently seen first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/IntakeError"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/intake-errors/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read one intake error
+      operationId: getIntakeError
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the intake error; the ETag header carries its version
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntakeError"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/intake-errors/{id}:resolve:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      summary: Close an open intake error with a note (the sender was corrected or will not retry)
+      operationId: resolveIntakeError
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: If-Match, in: header, required: true, description: the ETag of the intake error, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: the resolved intake error
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntakeError"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0116 the intake error is already resolved
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/alternative-item-rules:
     get:
       summary: Alternative item rules in the caller's scope, by ordered product and priority (FR-27.13)
@@ -2200,12 +2276,13 @@ components:
         weightedNet: {allOf: [{$ref: "#/components/schemas/Money"}], description: sum of net total times win probability}
     SalesSummary:
       type: object
-      required: [activeHolds, backorderLines, quotationsExpiring, quotationsLapsed, pipeline, windowDays, won, lost, expired]
+      required: [activeHolds, backorderLines, quotationsExpiring, quotationsLapsed, openIntakeErrors, pipeline, windowDays, won, lost, expired]
       properties:
         activeHolds: {type: integer, description: ACTIVE order holds of every type}
         backorderLines: {type: integer, description: BACKORDER and UNPROMISED schedule lines of CONFIRMED orders}
         quotationsExpiring: {type: integer, description: open quotations whose last valid day is today or one of the next 6 days}
         quotationsLapsed: {type: integer, description: open quotations already past their validity that no expiry run has closed}
+        openIntakeErrors: {type: integer, description: OPEN intake errors - channel orders refused at intake that nobody has closed}
         pipeline:
           type: array
           description: valid DRAFT and SENT quotations per currency, narrowed by the pipeline filters
@@ -3168,6 +3245,25 @@ components:
         priority: {type: integer, minimum: 1, maximum: 99, default: 1, description: 1 is offered first}
         validFrom: {type: string, format: date, description: first requested date the rule applies to}
         validTo: {type: string, format: date, description: last requested date the rule applies to; not before validFrom}
+    IntakeError:
+      type: object
+      required: [id, legalEntityId, channel, requestHash, errorCode, message, status, attempts, firstSeenAt, lastSeenAt, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        channel: {type: string}
+        externalRef: {type: string, description: absent when the request had none}
+        requestHash: {type: string, description: hash of the refused payload; the payload is not kept}
+        errorCode: {type: string, description: problem code of the refusal such as SLS-0007 or COM-0001}
+        message: {type: string}
+        status: {type: string, enum: [OPEN, RESOLVED]}
+        attempts: {type: integer, minimum: 1, description: times the same payload failed with the same code}
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+        resolvedBy: {type: string}
+        resolvedAt: {type: string, format: date-time}
+        resolutionNote: {type: string}
+        version: {type: integer}
     AlternativeRule:
       allOf:
         - $ref: "#/components/schemas/AlternativeRuleRequest"

@@ -90,7 +90,7 @@ func buildOrder(req createOrderRequest) (store.NewOrder, map[string]string) {
 	if !channelName.MatchString(channel) {
 		f["channel"] = "must be 1 to 40 letters, digits, - or _"
 	}
-	if req.ExternalRef != nil && (*req.ExternalRef == "" || len(*req.ExternalRef) > 100) {
+	if req.ExternalRef != nil && (*req.ExternalRef == "" || len(*req.ExternalRef) > maxExternalRef) {
 		f["externalRef"] = "must be 1 to 100 characters"
 	}
 	if req.CustomerGroup != nil && (*req.CustomerGroup == "" || len(*req.CustomerGroup) > maxScopeKey) {
@@ -195,6 +195,9 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		fields[idempotencyKey] = "is required"
 	}
 	if len(fields) > 0 {
+		pb := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+		pb.Errors = fields
+		a.logIntakeFailure(r, req, pb)
 		validationFailed(w, r, fields)
 		return
 	}
@@ -203,6 +206,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.checkConfigurations(r.Context(), in.LegalEntityID, in.Lines); err != nil {
+		a.logIntakeFailure(r, req, err)
 		a.fail(w, r, "check configurations", err)
 		return
 	}
@@ -218,6 +222,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	in.OrderDate = a.now()
 	order, created, err := a.store.CreateOrder(r.Context(), in)
 	if err != nil {
+		a.logIntakeFailure(r, req, err)
 		a.fail(w, r, "create order", err)
 		return
 	}

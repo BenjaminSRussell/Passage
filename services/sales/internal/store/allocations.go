@@ -313,6 +313,9 @@ func lockOrderQuotasTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order)
 // then roll back, because lines drawn before the refused one stay drawn.
 func allocateOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, lineNos map[int]bool) (allocation, error) {
 	out := allocation{Moved: map[int]string{}}
+	if o.OrderType == domain.OrderTypeJournal {
+		return out, nil // a JOURNAL order never consumes ATP or quota (BR-27.7)
+	}
 	lines := make([]Line, 0, len(o.Lines))
 	for _, l := range o.Lines {
 		if l.LineStatus == domain.LineCancelled || (lineNos != nil && !lineNos[l.LineNo]) {

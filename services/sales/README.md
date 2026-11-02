@@ -141,7 +141,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/quotations/{id}:convert` | `sales.quotation.maintain` | `If-Match`; optional `{lineNos, listingOverrideReason}` (empty converts every open line); 201 with the CONVERTED quotation and one DRAFT order; emits `quotation.converted` |
 | GET | `/v1/sales/holds` | `sales.credit.release` or `sales.order.hold` | Release queue: ACTIVE holds oldest first (`legalEntityId`, `holdType`, `limit`) with the failed credit rule, the customer's credit limit and the order version for the release call |
 | POST | `/v1/sales/quotations:expire` | `sales.quotation.maintain` | Expiry run (`legalEntityId` optional): DRAFT and SENT quotations past their validity become EXPIRED, oldest first, up to 500 per run (`more` says to call again), each with a version bump and `quotation.expired` in the same transaction; state-based, so a repeat expires nothing twice |
-| GET | `/v1/sales/summary` | `sales.order.read` | Workspace tiles (ACTIVE holds, backorder schedule lines, quotations ending within 7 days, lapsed open quotations), the open pipeline per currency (count, net, probability-weighted net) narrowed by `status`, `minProbabilityPct` and `expiringWithinDays`, and won/lost/expired with the conversion rate over `windowDays` (default 90) |
+| GET | `/v1/sales/summary` | `sales.order.read` | Workspace tiles (ACTIVE holds, backorder schedule lines, quotations ending within 7 days, lapsed open quotations, OPEN intake errors), the open pipeline per currency (count, net, probability-weighted net) narrowed by `status`, `minProbabilityPct` and `expiringWithinDays`, and won/lost/expired with the conversion rate over `windowDays` (default 90) |
 | GET / POST | `/v1/sales/supplementary-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, `parentProductId`, `limit`); create a rule (one per parent, customer or all customers, and item) |
 | DELETE | `/v1/sales/supplementary-item-rules/{id}` | `sales.listing.maintain` | Remove a rule |
 | POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
@@ -153,6 +153,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
 | GET / POST | `/v1/sales/alternative-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) by ordered product and priority; create a rule (ordered product, alternative, optional customer, `priority` 1 to 99, optional `validFrom` / `validTo`; one per ordered product, customer or all customers, and alternative, else `SLS-0055`) |
 | DELETE | `/v1/sales/alternative-item-rules/{id}` | `sales.listing.maintain` | Remove a rule (`SLS-0113` when absent) |
+| GET | `/v1/sales/intake-errors`, `/v1/sales/intake-errors/{id}` | `sales.order.read` | Channel orders refused at intake (`legalEntityId`, `channel`, `status`, `errorCode`, `limit`), most recently seen first; a retry of the same payload raises `attempts` and reopens a resolved row. The payload is not kept, only its hash |
+| POST | `/v1/sales/intake-errors/{id}:resolve` | `sales.order.write` | Close an OPEN intake error with a `note` (`If-Match`; `SLS-0116` when already resolved) |
 | POST | `/v1/sales/alternative-items:evaluate` | `sales.order.read` | Stateless: when the ordered product cannot ship the whole quantity by the requested date, the applicable alternatives that can, each with its available quantity and promise, from ATP buckets in the request |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
@@ -352,6 +354,8 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0112` | 404 | Change request not found |
 | `SLS-0113` | 404 | Alternative item rule not found |
 | `SLS-0114` | 403 | Only the user who requested a change can withdraw it |
+| `SLS-0115` | 404 | Intake error not found |
+| `SLS-0116` | 409 | Intake error is already resolved |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

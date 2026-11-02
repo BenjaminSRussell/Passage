@@ -367,13 +367,50 @@ works from before CR-4 holds orders); the web credit profile list has a
 table: the list uses `sales.order.read` on the existing route, and
 `sales_parameter` and `sales_order` are already granted.
 
+Slice 20 adds the intake error log and the JOURNAL order rules. A channel
+order (any channel but `UI`) that `POST /orders` refuses, by validation (400
+`COM-0001`), a listing denial, a differing payload (409 `SLS-0007`), a
+configuration problem or any other 4xx, is written to `intake_error`
+(migration 0024) in its own transaction, because the request's transaction
+rolls back: one row per legal entity, channel, external reference, payload
+hash and error code, with `attempts`, first and last seen, the message and
+the status OPEN or RESOLVED; the payload itself is not kept, only its hash.
+A retry of the same payload raises `attempts` and reopens a resolved row.
+Server faults (5xx), requests whose legal entity is missing or outside the
+caller's scope, and the 409 `SLS-0007` of a concurrent request that stored the
+same order first (a retry returns the order, so nothing was refused) are not
+logged; a replay of the same payload is answered 200 and never reaches the
+log. The write runs under the caller's tenant and legal-entity scope
+(row-level security refuses a row for another entity) and a failure to write
+it is only logged, so the refusal answered is unchanged. A reference refused
+for its length is kept to its first 100 characters. Each refused request adds
+at most one row; the log has no per-sender cap, as a cap would hide real
+refusals, and a sender's volume is bounded by the intake rate limit
+(gateway) like its orders. Retention and purge of resolved rows are not built
+(w48 retention). `GET /intake-errors` (filters legal entity,
+channel, status, error code), `GET /intake-errors/{id}` and
+`POST /intake-errors/{id}:resolve` (`If-Match`, a note of 1 to 500
+characters; `SLS-0116` when already resolved) use the existing duties
+`sales.order.read` and `sales.order.write`; `intakeerror.recorded.v1` (per
+attempt) and `intakeerror.resolved.v1` go through the outbox in the same
+transaction. The web gets the list and the detail with the close form. BR-27.7
+for JOURNAL orders is completed: a JOURNAL order takes no credit check at
+confirm or on a total-raising change (it already took none at entry and
+counts for no exposure), and draws no allocation quota at confirm or on a
+change; it still could not be promised. `order.confirmed.v1` now carries
+`order_type`, so the w16 reservation and w22 planning consumers can skip a
+JOURNAL order's lines (BR-27.7: never reserve or consume ATP); the order type
+cannot be changed after creation, so a JOURNAL order cannot be confirmed
+unchecked and then turned into an ORDER. The workspace gets the intake errors
+tile (`openIntakeErrors` on `GET /summary`, OPEN rows of the legal entity).
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Quotation → order conversion, quotation lifecycle (`:send`, `:convert`, expiry, probability) | implemented in part | Built: priced quotations with validity (default +30 days, at most 365) and win probability (default 50), `SQ-` numbering per legal entity, list and read, `:send` (DRAFT, still valid), `:lose` with a reason, and `:convert` of all or selected open lines into one DRAFT order (channel `QUOTE`) at the quoted price and discount under the quotation's row lock, with the converted lines naming the order and `quotation.converted` in the same transaction; later conversions take the remaining lines. Slice 12 adds `POST /quotations:expire`, which sets EXPIRED (see slice 12 above). Not built: the scheduler that calls it hourly (handoff, below), CANCELLED, editing a quotation's lines or pricing them through the w26 resolver (lines are entered with prices and fixed at creation), `price_explain_ref` on quotation and order lines (FR-27.1 "preserving explain refs"; the w26 explain reference does not exist on either line yet), the quotation document (PDF, email, UBL JSON; PRD §5.27.15) and the lost/expired notice, the `quotation_expiry_days` and `quotation_probability_default` parameters (constants 30 and 50), a listing check at quotation entry (the check runs at conversion), and the customer group on the converted order (group listing entries apply only to orders that name it). `:send` and `:convert` are versioned by `If-Match` rather than the PRD's `Idempotency-Key`: a retry with the old ETag is refused (412) instead of replayed, as for holds. |
 | 1 | Sales agreements, release orders, commitment decrement (FR-27.10, BR-27.9, AC-27.9 `AGREEMENT_EXHAUSTED`) | implemented in part | Built: one-product quantity commitments at an agreed price with validity, `SA-` numbering, list and read with release history, and `:release-order`, which under the agreement's row lock refuses a release beyond the remaining quantity (`SLS-0008`) or outside the validity period (`SLS-0029`), creates a DRAFT order (channel `AGREEMENT`) of one line at the agreement price and stores the release, all in one transaction. Not built: commitments by amount or for several products, the `overdelivery_pct` parameter (0 is applied), re-pricing of already released draft orders when the agreement price changes (BR-27.9; a revised price applies to later releases only), `agreement_line_id` on the order line (the link is `agreement_release.sales_order_id`), returning quantity when a released order's lines are reduced by PATCH (only whole-order cancellation returns), and the agreement confirmation document (PRD §5.27.15). |
-| 1 | Order types JOURNAL / SUBSCRIPTION / RETURNED behaviour | later slice of PSG-27 | Types are accepted on create and stored, but JOURNAL no-reserve/no-ATP (BR-27.7) and the subscription/returned flows are not implemented. RETURNED order flow is wave 30. |
+| 1 | Order types JOURNAL / SUBSCRIPTION / RETURNED behaviour | JOURNAL implemented (slice 20); later slice of PSG-27 for SUBSCRIPTION and RETURNED | JOURNAL orders take no credit check, no allocation quota and no promise, and count for no exposure (BR-27.7); reservation is w16. The subscription and returned flows are not implemented. RETURNED order flow is wave 30. |
 | 2 | Cumulative ATP on stored supply and demand (`atp_bucket` projection, lag < 30 s, planning batch-end marker) | later slice of PSG-27 | Only the pure cumulative/promise computation and a stateless `POST /v1/sales/atp:check` exist. The projection needs supply/demand events from w16/w17/w21/w22. |
 | 2 | Delivery date control per line (NONE / SALES_LEAD_TIME / ATP / CTP; transport days; receiving calendar; past-date warning; fence-end TIME_FENCE) (FR-27.3, BR-27.2) | later slice of PSG-27 | Domain promise logic exists; per-line control, calendar and transport days are not wired into confirm. Calendar comes from w6/w48. |
 | 2 | Schedule lines persisted per line (`order_schedule_line`, partial delivery split, AC-27.8 backorder list) | implemented in part | Built: see slice 8 above. Not built: `partial_delivery_allowed` / `overdelivery` parameters per customer (the caller chooses `completeOnly` per promise), manual split or merge of schedule lines, quantities delivered per schedule line (shipments are wave 28, which will drive the status of a schedule line), and a cancel-remainder action (`remaining_qty = 0` needs delivered quantities). A PATCH that changes a line's quantity or date resets its schedule to one line at the confirmed date, dropping a split, until the projection re-promises it. |
@@ -494,6 +531,10 @@ consumers depend on it.
 | Config flags (`sales.ctp`, `sales.alternative_items`, `sales.change_approval`) and `ATP_*`, `CREDIT_CHECK_POINTS` | later slice of PSG-27 | Not read by the service yet. Change approval is always available; a customer without a saved policy needs no approval, so it is off until someone switches a customer on. |
 | Quotation expiry hourly: scheduler calling `POST /v1/sales/quotations:expire` | handoff (deployment-cicd: a CronJob with a service identity holding `sales.quotation.maintain`) | The endpoint is built and safe to repeat; nothing in the chart calls it yet. The PRD partitions the job by legal entity: the scheduler either calls it once with an all-scope identity or once per legal entity with `legalEntityId`, and calls again while `more` is true. The monitor "none expired for 2 days while candidates exist" can read `quotationsLapsed` from `GET /summary`; no alert rule is built. |
 | Duty for the quotation expiry run | done (seeded in `policies/authz/data.json`) | `sales.quotation.maintain` is seeded with the quotation expiry run. |
+| Intake retry / DLQ replay every 5 min, DLQ after 10 attempts (PRD §5.27.10) | later slice of PSG-27; handoff for the replay worker (deployment-cicd) | The log keeps the hash and attempts only; replaying needs the stored payload and a worker. Not built. |
+| Authz seed for the intake error routes | handoff (authz seed, #313) | Seed `{"resource": "/v1/sales/intake-errors", "methods": ["GET"]}` and `{"resource": "/v1/sales/intake-errors/*", "methods": ["GET"]}` under `sales.order.read`, and `{"resource": "/v1/sales/intake-errors/*:resolve", "methods": ["POST"]}` under `sales.order.write`, in `policies/authz/data.json`. No new duty. |
+| JOURNAL orders take no credit check at confirm or on a change | decision to confirm | BR-27.7 says only that a JOURNAL order never reserves or consumes ATP. As at entry (slice 18) and in the exposure (JOURNAL orders count for none), the credit check is skipped at confirm and on a total-raising change, since in AX a journal-type order posts no packing slip or invoice. This holds only while w28/w29 refuse to ship or invoice a JOURNAL order (they can read `order_type` from `order.confirmed`); if JOURNAL orders may ship, they need the credit check back. |
+| Which intake refusals are logged | decision to confirm | Logged: every 4xx refusal of a non-`UI` channel order in the caller's scope (validation `COM-0001`, `idempotency_key_reuse`, `SLS-0007` for a reference reused with a different payload, listing, one-time limit, configuration). Not logged: replays (200), the concurrent-request 409, 5xx, out-of-scope legal entities and malformed JSON (no legal entity to log under). Credit holds are not refusals (the order is stored) and are not logged. |
 | Jobs: ATP rebuild 01:00, credit review daily, order auto-close, intake DLQ replay | later slice of PSG-27 | No jobs built. |
 | SLO alerts (lag > 120 s, hold queue age, intake 5xx) and runbooks | handoff (deployment-cicd) | Alert rules live in deploy/ (outside owned paths). |
 
@@ -509,7 +550,7 @@ consumers depend on it.
 |---|---|---|
 | Sales orders list, order detail (confirm, release, credit rules), new order form, credit profiles list and form, ATP check | implemented | Routes under `/sales/...` registered in `module.ts`; pages use the shell design system with loading, empty and error states, and vitest tests in `pages.test.tsx`. |
 | Allocation quotas list (filter by product, customer and date, share used), new quota (with the overlap error), quota detail (facts, change quantity with the below-consumed error, draw history including returned draws), and the `SLS-0013` warning on the order detail after a confirm | implemented | Routes `/sales/allocation-quotas`, `/sales/allocation-quotas/new` and `/sales/allocation-quotas/:id` in `module.ts`; `AllocationQuotasPage.tsx`, `AllocationQuotaDetailPage.tsx`; vitest tests in `allocations.test.tsx`. Product and customer are entered as UUIDs until the w7/w8 pickers exist. |
-| Sales workspace (`/sales/workspace`): tiles for orders on hold, backorder lines, quotes expiring in 7 days and lapsed-not-expired, the open pipeline per currency, conversion rate, and the expire-lapsed-quotations action | implemented | Reads `GET /summary`; loading, empty and error states and vitest tests in `workspace.test.tsx`. Not built: the PRD's intake errors tile (§5.27.6; the service keeps no intake error log yet, and the Intake errors inquiry of §5.27.14 is not built), and the tiles drill into the existing lists without carrying the tile's filter. |
+| Sales workspace (`/sales/workspace`): tiles for orders on hold, backorder lines, quotes expiring in 7 days and lapsed-not-expired, the open pipeline per currency, conversion rate, and the expire-lapsed-quotations action | implemented | Reads `GET /summary`; loading, empty and error states and vitest tests in `workspace.test.tsx`. The intake errors tile (§5.27.6) counts OPEN intake errors since slice 20 (the list is under Intake errors in the navigation). Not built: the tiles drill into the existing lists without carrying the tile's filter. |
 | Supplementary lines on orders: the order detail marks each supplementary line with its parent line and, after creation, lists the items added (`SLS-0012`); the change screen locks a supplementary line's quantity and date, refuses edits to them and explains that they follow the parent | implemented | `OrderDetailPage.tsx`, `NewOrderPage.tsx`, `ChangeOrderPage.tsx`; vitest tests in `supplementary-lines.test.tsx`. The quotation conversion and agreement release screens open the created order without the added-items notice; the order detail still marks the lines. |
 | Quotations list, new quotation, quotation detail (send, convert selected lines with an optional listing override, mark lost); credit release queue with release; supplementary item rules list, new rule, remove, and the order-line check | implemented | Routes `/sales/quotations`, `/sales/quotations/new`, `/sales/quotations/:id`, `/sales/credit-holds` (now on `GET /holds`), `/sales/supplementary-items` and `/sales/supplementary-items/new` in `module.ts`; vitest tests in `quotations-supplementary.test.tsx`. |
 | Quotations pipeline KPI (count, weighted value, conversion rate; PRD §5.27.14) | implemented | On the workspace page, with the PRD filters status, expiry window and minimum probability on the pipeline table. Not built: a pipeline by customer, sales rep or month, and the conversion rate by value (it is by count). |

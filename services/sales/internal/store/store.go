@@ -302,6 +302,10 @@ type Store interface {
 	RejectChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
 	WithdrawChangeRequest(ctx context.Context, id string, version int, comment, actor string, now time.Time) (OrderChangeRequest, error)
 	RecordLineProduction(ctx context.Context, in LineProduction) error
+	RecordIntakeError(ctx context.Context, in NewIntakeError, now time.Time) (IntakeError, error)
+	ListIntakeErrors(ctx context.Context, f IntakeErrorFilter) ([]IntakeError, error)
+	GetIntakeError(ctx context.Context, id string) (IntakeError, error)
+	ResolveIntakeError(ctx context.Context, id string, version int, note, actor string, now time.Time) (IntakeError, error)
 	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
 	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error
@@ -371,7 +375,7 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		return Order{}, false, problem(http.StatusConflict, CodeDuplicateIntake, "a concurrent request stored this order first; retry to receive it")
+		return Order{}, false, ConcurrentIntake{httpx.NewProblem(http.StatusConflict, CodeDuplicateIntake, "a concurrent request stored this order first; retry to receive it")}
 	}
 	if err != nil {
 		return Order{}, false, err
@@ -680,10 +684,13 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 				return err
 			}
 		}
+		// A JOURNAL order bills and reserves nothing against the customer
+		// (BR-27.7), so it takes no credit check.
 		checked, err := checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm)
 		if err != nil {
 			return err
 		}
+		checked = checked && o.OrderType != domain.OrderTypeJournal
 		eval := domain.CreditEvaluation{Outcome: domain.RulePass}
 		if checked {
 			if eval, err = evaluateCreditTx(ctx, tx, p.TenantID, o, domain.CheckPointConfirm, now); err != nil {
@@ -859,7 +866,7 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ConfirmedShipDate: *l.ConfirmedShipDate, ConfigurationID: l.ConfigurationID})
 	}
 	data := salesevents.OrderConfirmedData{
-		OrderID: o.ID, CustomerID: o.CustomerID, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
+		OrderID: o.ID, CustomerID: o.CustomerID, OrderType: o.OrderType, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
 	if confirmed.isOneTime() {
 		// The buyer's name, address and tax id stay in sales (sealed); the
 		// event marks the order and gives the country only.

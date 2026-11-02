@@ -140,13 +140,16 @@ type Summary struct {
 	// QuotationsExpiring counts open quotations whose last valid day falls in
 	// the ExpiringSoonDays days starting today; QuotationsLapsed counts open
 	// quotations already past their validity that no expiry run has closed.
-	QuotationsExpiring int                `json:"quotationsExpiring"`
-	QuotationsLapsed   int                `json:"quotationsLapsed"`
-	Pipeline           []PipelineCurrency `json:"pipeline"`
-	WindowDays         int                `json:"windowDays"`
-	Won                int                `json:"won"`
-	Lost               int                `json:"lost"`
-	Expired            int                `json:"expired"`
+	QuotationsExpiring int `json:"quotationsExpiring"`
+	QuotationsLapsed   int `json:"quotationsLapsed"`
+	// OpenIntakeErrors counts OPEN intake errors: channel orders refused at
+	// intake that nobody has closed (PRD 5.27.6 intake errors tile).
+	OpenIntakeErrors int                `json:"openIntakeErrors"`
+	Pipeline         []PipelineCurrency `json:"pipeline"`
+	WindowDays       int                `json:"windowDays"`
+	Won              int                `json:"won"`
+	Lost             int                `json:"lost"`
+	Expired          int                `json:"expired"`
 	// ConversionRatePct is won / (won + lost + expired) over the window, in
 	// percent at one place; nil when nothing closed in the window.
 	ConversionRatePct *decimal.Decimal `json:"conversionRatePct,omitempty"`
@@ -175,6 +178,10 @@ func (s *Postgres) Summary(ctx context.Context, f SummaryFilter) (Summary, error
 				count(*) filter (where valid_until < $3::date)
 			from sales_quotation where tenant_id = $1 and status in ('DRAFT', 'SENT') and ($2 = '' or legal_entity_id::text = $2)`,
 			p.TenantID, f.LegalEntityID, today, ExpiringSoonDays).Scan(&out.QuotationsExpiring, &out.QuotationsLapsed); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `select count(*) from intake_error where tenant_id = $1 and status = 'OPEN' and ($2 = '' or legal_entity_id::text = $2)`,
+			p.TenantID, f.LegalEntityID).Scan(&out.OpenIntakeErrors); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `select currency::text, count(*), coalesce(sum(net_total), 0)::text,

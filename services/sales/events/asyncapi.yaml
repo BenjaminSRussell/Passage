@@ -122,6 +122,16 @@ channels:
     messages:
       quotationExpired:
         $ref: "#/components/messages/QuotationExpired"
+  intakeErrorRecorded:
+    address: passage.sales.intakeerror
+    messages:
+      intakeErrorRecorded:
+        $ref: "#/components/messages/IntakeErrorRecorded"
+  intakeErrorResolved:
+    address: passage.sales.intakeerror
+    messages:
+      intakeErrorResolved:
+        $ref: "#/components/messages/IntakeErrorResolved"
   allocationQuotaCreated:
     address: passage.sales.allocationquota
     messages:
@@ -196,6 +206,18 @@ operations:
     summary: A DRAFT or SENT quotation past its validity was moved to EXPIRED by the expiry run (FR-27.1). Consumers - analytics and CRM.
     messages:
       - {$ref: "#/channels/quotationExpired/messages/quotationExpired"}
+  publishIntakeErrorRecorded:
+    action: send
+    channel: {$ref: "#/channels/intakeErrorRecorded"}
+    summary: A channel order was refused at intake and logged, once per attempt (PRD 5.27.14). Consumers - integration monitoring.
+    messages:
+      - {$ref: "#/channels/intakeErrorRecorded/messages/intakeErrorRecorded"}
+  publishIntakeErrorResolved:
+    action: send
+    channel: {$ref: "#/channels/intakeErrorResolved"}
+    summary: An operator closed an intake error with a note. Consumers - integration monitoring.
+    messages:
+      - {$ref: "#/channels/intakeErrorResolved/messages/intakeErrorResolved"}
   publishScheduleReleaseReceived:
     action: send
     channel: {$ref: "#/channels/scheduleReleaseReceived"}
@@ -338,6 +360,22 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/QuotationExpiredData"
+    IntakeErrorRecorded:
+      name: dev.passage.sales.intakeerror.recorded.v1
+      title: Intake error recorded
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/IntakeErrorData"
+    IntakeErrorResolved:
+      name: dev.passage.sales.intakeerror.resolved.v1
+      title: Intake error resolved
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/IntakeErrorData"
     OrderConfirmed:
       name: dev.passage.sales.order.confirmed.v1
       title: Sales order confirmed
@@ -673,10 +711,11 @@ components:
         dataschema: {type: string, format: uri}
     OrderConfirmedData:
       type: object
-      required: [order_id, customer_id, currency, lines, net_total, version]
+      required: [order_id, customer_id, order_type, currency, lines, net_total, version]
       properties:
         order_id: {type: string, format: uuid}
         customer_id: {type: string, format: uuid}
+        order_type: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], description: a JOURNAL order never reserves or consumes ATP (BR-27.7); inventory and planning skip its lines}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         lines:
           type: array
@@ -884,6 +923,19 @@ components:
         currency: {type: string, description: ISO 4217 alpha-3}
         actor: {type: string}
         version: {type: integer, description: quotation version produced by the expiry}
+    IntakeErrorData:
+      type: object
+      required: [intake_error_id, legal_entity_id, channel, request_hash, error_code, attempts, version]
+      properties:
+        intake_error_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        channel: {type: string}
+        external_ref: {type: string}
+        request_hash: {type: string, description: hash of the refused payload; the payload is never carried}
+        error_code: {type: string, description: problem code of the refusal}
+        attempts: {type: integer, minimum: 1}
+        actor: {type: string, description: the resolving user; absent on recorded}
+        version: {type: integer}
     CreditCheckData:
       type: object
       required: [customer_id, order_id, rules, outcome, point]
