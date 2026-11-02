@@ -49,11 +49,17 @@ Slice 1 is the pure gross-to-net engine behind a stateless HTTP preview:
 
 Post first checks that the ledger exists and belongs to the run's legal entity (422
 PAY-GL-005), then fixes the journal lines and the ledger on the run before the ledger
-call. After an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict)
-the pin stays, so a retry resends the identical entry (a different ledgerId is 409
-PAY-GL-004). After a definite refusal (a 4xx other than a conflict, e.g. an unknown,
-unpostable or suspended account) the pin is cleared, so the retry uses the corrected
-posting profile or ledger. A POSTED run posted again to another ledger is 409
+call. After an ambiguous outcome (transport error, timeout, 5xx, 401, 403, 429,
+idempotency conflict) the pin stays and the run is marked `attempted_ambiguous`, so a
+retry resends the identical entry (a different ledgerId is 409 PAY-GL-004). 401, 403 and
+429 are ambiguous because they are decided before the ledger's idempotency replay. After
+a definite refusal (HTTP 400, 404 or 422 from the ledger, e.g. an unknown, unpostable or
+suspended account) of a run with no ambiguous attempt, the pin is cleared, so the retry
+uses the corrected posting profile or ledger. Once `attempted_ambiguous` is set the pin
+is never cleared automatically, because the ledger may hold the entry: an operator must
+look up `payroll-run:<id>` in the ledger, then either finish the post (retry with the
+pinned ledger) or reverse the entry and reset `posting_lines`, `ledger_id` and
+`attempted_ambiguous` on the run. A POSTED run posted again to another ledger is 409
 PAY-GL-004. Reconciliation sums the stored journals of the POSTED runs on the
 reconciled ledger: a later posting-profile edit changes only runs not yet posted. See
 `NOT-IMPLEMENTED.md`.

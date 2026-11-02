@@ -327,14 +327,15 @@ func (a *API) postRun(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(id) {
 		fields["id"] = "must be a UUID"
 	}
-	if !ids.Valid(req.LedgerID) {
+	ledgerID, ok := ids.Canonical(req.LedgerID)
+	if !ok {
 		fields["ledgerId"] = "must be a UUID"
 	}
 	if len(fields) > 0 {
 		writeValidation(w, r, fields)
 		return
 	}
-	run, transitioned, err := a.runs.PostRun(r.Context(), a.ledger, id, req.LedgerID)
+	run, transitioned, err := a.runs.PostRun(r.Context(), a.ledger, id, ledgerID)
 	if err != nil {
 		fail(w, r, err)
 		return

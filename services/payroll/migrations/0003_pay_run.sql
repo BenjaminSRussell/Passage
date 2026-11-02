@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS pay_run (
   ledger_id uuid,
   journal_entry_id uuid,
   posting_lines jsonb,
+  attempted_ambiguous boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, legal_entity_id, calculated_by, idempotency_key),

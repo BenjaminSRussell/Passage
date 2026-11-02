@@ -1139,6 +1139,7 @@ test_receiving_payee_erase_reaches_only_the_erase_route if {
 	not allowed("receiving.payee.erase", "POST", "/v1/receiving/one-time-payees")
 	not allowed("receiving.payee.erase", "GET", "/v1/receiving/one-time-payees:erase")
 	not allowed("VendorInvoicePost", "POST", "/v1/receiving/one-time-payees:erase")
+}
 
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")

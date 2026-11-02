@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -36,6 +37,7 @@ type runServer struct {
 	h      http.Handler
 	ledger *ledgerclient.Fake
 	api    *API
+	admin  *pgxpool.Pool
 }
 
 var payrollRoles = []string{domain.AccountSalaryExpense, domain.AccountEmployerTaxExpense, domain.AccountNetPayClearing, domain.AccountFederalWHPayable,
@@ -85,13 +87,34 @@ func (l *lostAnswer) Post(ctx context.Context, e ledgerclient.Entry) (string, er
 	return id, err
 }
 
+type scriptedLedger struct {
+	*ledgerclient.Fake
+	lookupErr error
+	afterPost func()
+}
+
+func (l *scriptedLedger) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
+	if l.lookupErr != nil {
+		return "", l.lookupErr
+	}
+	return l.Fake.LegalEntity(ctx, legalEntityID, ledgerID)
+}
+
+func (l *scriptedLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	id, err := l.Fake.Post(ctx, e)
+	if l.afterPost != nil {
+		l.afterPost()
+	}
+	return id, err
+}
+
 func buildRunServer(t *testing.T, ledgerFor func(*ledgerclient.Fake) ledgerclient.Ledger) *runServer {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := &runServer{t: t, ledger: ledgerclient.NewFake()}
+	s := &runServer{t: t, ledger: ledgerclient.NewFake(), admin: admin}
 	s.ledger.AddLedger(ledgerID, legalEntity)
 	a := New(nil)
 	s.api = a
@@ -610,6 +633,9 @@ func TestRunPosting_AmbiguousFailuresKeepThePin(t *testing.T) {
 	for _, failure := range []error{
 		&ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable},
 		&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodeIdempotencyConflict},
+		&ledgerclient.Error{Op: "post", Status: http.StatusUnauthorized},
+		&ledgerclient.Error{Op: "post", Status: http.StatusForbidden},
+		&ledgerclient.Error{Op: "post", Status: http.StatusTooManyRequests},
 		errors.New("connection reset"),
 	} {
 		s.ledger.FailPosts(failure)
@@ -619,6 +645,105 @@ func TestRunPosting_AmbiguousFailuresKeepThePin(t *testing.T) {
 		if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != ledgerID {
 			t.Fatalf("pin lost after %v: %+v", failure, got)
 		}
+	}
+}
+
+func TestRunPosting_AmbiguousThenDefiniteRefusalKeepsThePin(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusForbidden})
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+		t.Fatalf("ambiguous: %d", rec.Code)
+	}
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_NOT_FOUND"})
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+		t.Fatalf("definite after ambiguous: %d", rec.Code)
+	}
+	if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != ledgerID {
+		t.Fatalf("pin cleared after an earlier ambiguous attempt: %+v", got)
+	}
+}
+
+func TestRunPosting_EachDefiniteStatusClearsThePin(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		s := newRunServer(t, true)
+		run := s.finalizedRun(workerA)
+		s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: status})
+		if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+			t.Fatalf("%d: %d", status, rec.Code)
+		}
+		if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != "" {
+			t.Fatalf("pin kept after %d: %+v", status, got)
+		}
+	}
+}
+
+func TestRunPosting_LedgerLookupFailures(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code int
+		prob string
+	}{
+		{"transport", errors.New("connection reset"), http.StatusBadGateway, store.CodeGLRefused},
+		{"unauthorized", &ledgerclient.Error{Op: "ledger", Status: http.StatusUnauthorized}, http.StatusBadGateway, store.CodeGLRefused},
+		{"forbidden", &ledgerclient.Error{Op: "ledger", Status: http.StatusForbidden}, http.StatusBadGateway, store.CodeGLRefused},
+		{"not found", &ledgerclient.Error{Op: "ledger", Status: http.StatusNotFound, Code: "LEDGER_NOT_FOUND"}, http.StatusUnprocessableEntity, store.CodeLedgerForeign},
+		{"unprocessable", &ledgerclient.Error{Op: "ledger", Status: http.StatusUnprocessableEntity}, http.StatusUnprocessableEntity, store.CodeLedgerForeign},
+	}
+	for _, c := range cases {
+		var scripted *scriptedLedger
+		s := withProfile(t, buildRunServer(t, func(f *ledgerclient.Fake) ledgerclient.Ledger {
+			scripted = &scriptedLedger{Fake: f, lookupErr: c.err}
+			return scripted
+		}))
+		run := s.finalizedRun(workerA)
+		if rec := s.post(run.ID, ledgerID); rec.Code != c.code || problemCode(rec) != c.prob {
+			t.Fatalf("%s: %d %s", c.name, rec.Code, rec.Body.String())
+		}
+		if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != "" || len(s.ledger.Entries()) != 0 {
+			t.Fatalf("%s pinned or posted: %+v", c.name, got)
+		}
+	}
+}
+
+func TestRunPosting_UpperCaseLedgerIDIsTheSameLedger(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	s.ledger.FailPosts(errors.New("connection reset"))
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+		t.Fatalf("first attempt: %d", rec.Code)
+	}
+	s.ledger.FailPosts(nil)
+	if rec := s.post(run.ID, strings.ToUpper(ledgerID)); rec.Code != http.StatusOK {
+		t.Fatalf("upper-case retry: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.post(run.ID, strings.ToUpper(ledgerID)); rec.Code != http.StatusOK {
+		t.Fatalf("upper-case replay of a posted run: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRunPosting_FailedClearOfTheJournalIsSurfaced(t *testing.T) {
+	var scripted *scriptedLedger
+	s := withProfile(t, buildRunServer(t, func(f *ledgerclient.Fake) ledgerclient.Ledger {
+		scripted = &scriptedLedger{Fake: f}
+		return scripted
+	}))
+	run := s.finalizedRun(workerA)
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_NOT_FOUND"})
+	scripted.afterPost = func() {
+		_, err := s.admin.Exec(context.Background(), `create function block_clear() returns trigger language plpgsql as $$ begin raise exception 'clear blocked'; end $$;
+			create trigger block_clear before update on pay_run for each row when (new.posting_lines is null) execute function block_clear()`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := s.post(run.ID, ledgerID)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("failed clear: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != ledgerID {
+		t.Fatalf("pin must remain when the clear failed: %+v", got)
 	}
 }
 

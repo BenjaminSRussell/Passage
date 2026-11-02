@@ -109,8 +109,9 @@ paths:
         422 PAY-RUN-005 unless the run is FINALIZED, 422 PAY-GL-005 when the ledger is unknown or belongs to another legal entity,
         502 PAY-GL-001 when the ledger refuses or does not answer (the run stays FINALIZED and can be retried),
         503 PAY-GL-002 when no ledger is configured, 409 PAY-GL-004 when the run is already fixed or posted against another ledger.
-        The journal and ledger are stored on the run before the ledger call. After an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict) retries reuse them;
-        after a definite refusal (a 4xx other than a conflict) they are cleared, so the retry uses the corrected posting profile or ledger.
+        The journal and ledger are stored on the run before the ledger call. After an ambiguous outcome (transport error, timeout, 5xx, 401, 403, 429, idempotency conflict) retries reuse them and the run is marked as ambiguously attempted;
+        after a definite refusal (HTTP 400, 404 or 422 from the ledger) of a run never ambiguously attempted they are cleared, so the retry uses the corrected posting profile or ledger.
+        An ambiguously attempted run is never cleared automatically (manual reconciliation against the ledger).
         A POSTED run on the same ledger is returned unchanged.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

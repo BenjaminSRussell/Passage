@@ -28,7 +28,7 @@ const (
 	CodeLedgerPinned  = "PAY-GL-004"
 	CodeLedgerForeign = "PAY-GL-005"
 	sourceType        = "payroll-run"
-	runColumns        = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, ''), posting_lines`
+	runColumns        = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, ''), posting_lines, attempted_ambiguous`
 	statementsOfRun   = `select worker_id::text, rule_set, hash, gross::text, net::text, employer_cost::text, lines from pay_statement where tenant_id = $1 and run_id = $2 order by worker_id`
 	postedJournals    = `select posting_lines from pay_run where tenant_id = $1 and legal_entity_id = $2 and ledger_id = $3 and status = 'POSTED'`
 	lockRun           = `select status, calculated_by from pay_run where tenant_id = $1 and id = $2 for update`
@@ -66,18 +66,19 @@ type StatementRow struct {
 }
 
 type Run struct {
-	ID             string
-	LegalEntityID  string
-	PayDate        string
-	PeriodStart    string
-	PeriodEnd      string
-	Status         domain.RunStatus
-	CalculatedBy   string
-	FinalizedBy    string
-	LedgerID       string
-	JournalEntryID string
-	PostingLines   []domain.JournalLine
-	Statements     []StatementRow
+	ID                 string
+	LegalEntityID      string
+	PayDate            string
+	PeriodStart        string
+	PeriodEnd          string
+	Status             domain.RunStatus
+	CalculatedBy       string
+	FinalizedBy        string
+	LedgerID           string
+	JournalEntryID     string
+	PostingLines       []domain.JournalLine
+	AttemptedAmbiguous bool
+	Statements         []StatementRow
 }
 
 func (r Run) Totals() (gross, net, employer decimal.Decimal) {
@@ -105,7 +106,7 @@ func loadRun(ctx context.Context, tx pgx.Tx, tenantID, id string) (Run, error) {
 	var status string
 	var postingLines []byte
 	err := tx.QueryRow(ctx, `select `+runColumns+` from pay_run where tenant_id = $1 and id = $2`, tenantID, id).
-		Scan(&run.ID, &run.LegalEntityID, &run.PayDate, &run.PeriodStart, &run.PeriodEnd, &status, &run.CalculatedBy, &run.FinalizedBy, &run.LedgerID, &run.JournalEntryID, &postingLines)
+		Scan(&run.ID, &run.LegalEntityID, &run.PayDate, &run.PeriodStart, &run.PeriodEnd, &status, &run.CalculatedBy, &run.FinalizedBy, &run.LedgerID, &run.JournalEntryID, &postingLines, &run.AttemptedAmbiguous)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, httpx.NewProblem(http.StatusNotFound, CodeRunNotFound, "pay run not found")
 	}
@@ -246,8 +247,8 @@ func journalEntry(run Run, ledgerID string, journal []domain.JournalLine) ledger
 
 // PostRun sends the balanced run journal (gross, employer cost, tax and deduction liabilities, net pay clearing) to the ledger under the key
 // payroll-run:<id> and records the journal entry on the run. The ledger must belong to the run's legal entity. The journal and ledger are fixed on the run
-// before the first ledger call, so a retry after an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict) resends the identical entry
-// whatever the posting profile or the requested ledger became since. A definite refusal (a 4xx other than a conflict) clears them, so the corrected profile or
+// before the first ledger call, so a retry after an ambiguous outcome (transport error, timeout, 5xx, 401, 403, 429, idempotency conflict; a 401/403/429 is decided before the ledger's idempotency replay) resends the identical entry
+// whatever the posting profile or the requested ledger became since. A definite refusal (HTTP 400, 404 or 422 from the ledger, or a locally invalid entry) on a run with no earlier ambiguous attempt clears them, so the corrected profile or
 // ledger is used by the next attempt. The bool reports a FINALIZED to POSTED transition made by this call; a POSTED run on the same ledger is returned unchanged.
 func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (Run, bool, error) {
 	p := principal(ctx)
@@ -283,10 +284,9 @@ func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, 
 	if err != nil {
 		code := ledgerclient.CodeOf(err)
 		slog.ErrorContext(ctx, "payroll run posting refused by the ledger", "run", id, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
-		if definiteRefusal(err) {
-			if clearErr := s.clearJournal(ctx, id); clearErr != nil {
-				slog.ErrorContext(ctx, "payroll run journal not cleared after a ledger refusal", "run", id, "err", clearErr, "correlationId", middleware.GetReqID(ctx))
-			}
+		if stateErr := s.recordFailedAttempt(ctx, run, err); stateErr != nil {
+			slog.ErrorContext(ctx, "payroll run posting state not updated after a ledger failure", "run", id, "err", stateErr, "correlationId", middleware.GetReqID(ctx))
+			return Run{}, false, stateErr
 		}
 		return Run{}, false, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not accept the payroll journal ("+code+")")
 	}
@@ -307,15 +307,43 @@ func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, 
 	return run, transitioned && err == nil, err
 }
 
+func ledgerStatus(err error) int {
+	var le *ledgerclient.Error
+	if errors.As(err, &le) {
+		return le.Status
+	}
+	return 0
+}
+
 func definiteRefusal(err error) bool {
-	return ledgerclient.Rejected(err) || errors.Is(err, ledgerclient.ErrEmptyEntry) || errors.Is(err, ledgerclient.ErrUnbalanced)
+	switch ledgerStatus(err) {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusUnprocessableEntity:
+		return true
+	case 0:
+		return errors.Is(err, ledgerclient.ErrEmptyEntry) || errors.Is(err, ledgerclient.ErrUnbalanced)
+	}
+	return false
+}
+
+func (s *Postgres) recordFailedAttempt(ctx context.Context, run Run, err error) error {
+	if definiteRefusal(err) && !run.AttemptedAmbiguous {
+		return s.clearJournal(ctx, run.ID)
+	}
+	if definiteRefusal(err) || run.AttemptedAmbiguous {
+		return nil
+	}
+	p := principal(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update pay_run set attempted_ambiguous = true where tenant_id = $1 and id = $2 and status = 'FINALIZED'`, p.TenantID, run.ID)
+		return err
+	})
 }
 
 func checkLedgerOwner(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, ledgerID string) error {
 	owner, err := ledger.LegalEntity(ctx, legalEntityID, ledgerID)
 	if err != nil {
 		slog.ErrorContext(ctx, "payroll cannot read the ledger", "ledger", ledgerID, "err", err, "correlationId", middleware.GetReqID(ctx))
-		if ledgerclient.Rejected(err) {
+		if status := ledgerStatus(err); status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerForeign, "the ledger is unknown or not readable for this legal entity ("+ledgerclient.CodeOf(err)+")")
 		}
 		return httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not answer the ledger lookup")
