@@ -152,6 +152,74 @@ Configuration: `DATABASE_URL` (required), `MIGRATE_ON_START=true`, `HUB_POLL_INT
 `FIELDCRYPT_CURRENT_KEY_ID`. Migrations must run as the owner role, never `passage_app`
 (the migration refuses).
 
+## Slice 7: generic REST push to the legacy ERP
+
+Ben's priority is integrating customers' existing ERPs. A `rest-push` subscription
+(`kind: "rest-push"` on `POST /v1/hub/subscriptions`) pushes events into a system that
+cannot receive a CloudEvents webhook:
+
+1. The consumer enqueues the event like any other. For a rest-push subscription an event
+   whose `actor` is `service:migration-loader` (the legacy ERP's own import into Passage) is
+   skipped: no echo back to the system it came from.
+2. The poller renders it through the migration service (`src/migrationClient.ts`, an
+   interface; `httpMigrationClient` calls `POST /v1/integration/outbound-mappings/{id}:render`
+   with `{event}` and reads `{body, idempotencyKey, refs}`; a 422 such as MIG-XREF-UNRESOLVED
+   is a refusal, a 5xx or silence is retried; a 404 without a problem code says the S5 route
+   is missing, and is dead-lettered, never pushed unmapped). The call carries a service token minted by
+   `src/serviceToken.ts` (same format as `services/workflow-ts`, signer `integration-hub`,
+   audience `migration`, duties `migration.outbound.render` and `migration.xref.record`, the
+   event's legal entity). An event without a `legalentityid` extension is dead-lettered
+   (HUB-0117) before the render, because the platform verifier refuses a token without
+   exactly one legal entity; Passage events do not carry the extension yet (handoff).
+3. `src/restPush.ts` fills the URL template's `{placeholders}` from the rendered body
+   (JSONPath-lite: `$.a.b[0].c`; every value is escaped as one path segment or query value,
+   `.` and `..` refused, placeholders never allowed in the scheme, host or port) and sends
+   the request (`POST`, `PUT` or `PATCH`) with the configured auth and `Idempotency-Key` = the
+   event id, the same on every retry, resend and replay.
+4. On 2xx the legacy key found at `responseKeyPath` is recorded with
+   `POST /v1/integration/xref:record` and the delivery is `delivered`. A 2xx without a key at
+   the path is dead-lettered (the record exists; an operator fixes the path and replays,
+   the Idempotency-Key makes the resend safe).
+5. Failures: a 4xx other than 410 and 429 dead-letters at once (HUB-0117) with the receiver's
+   answer kept in `responseExcerpt` (2000 characters, control characters stripped, every
+   credential value removed), unless the subscription says `onClientError: "retry"`; 5xx,
+   3xx, silence, a render outage and an xref outage follow the existing 8-step schedule
+   (HUB-0115 when spent); 429 (and a 503) honours `Retry-After` (at most 24 h); 410 pauses.
+   `POST /v1/hub/deliveries/{id}:replay` sends one dead letter again after the cause is fixed.
+
+Auth: `basic`, `bearer`, `api-key` (header name; not one the hub sets itself) and
+`oauth2-client-credentials` (token cached until 30 s before expiry, refreshed once on a 401;
+the token endpoint passes the same address checks). The secrets are sealed with
+`src/crypt.ts` (field `hub_subscription.credentials`, bound to the tenant), are write-only
+(responses show `auth.hasCredentials`, never a secret), and are opened only for a send.
+`POST /v1/hub/subscriptions/{id}:test` renders a sample event and shows the request, and with
+`send: true` sends it once without recording a delivery or a cross-reference. The test render
+runs for the caller (their user id as actor, their `X-Passage-Legal-Entity`; a sample naming
+another legal entity is 403). A Basic header's encoded pair, bearer and OAuth tokens and every
+secret value are removed from stored and returned excerpts, so an ERP echoing the request cannot leak them.
+
+Egress allowlist: private receiver addresses (10/8, 172.16/12, 192.168/16, fc00::/7) are
+refused unless the operator lists them in `INTEGRATION_HUB_EGRESS_ALLOW` (comma, space or
+newline separated CIDRs and `host:port` entries; the same rules as `MIG_EGRESS_ALLOW` in
+`services/migration/internal/egress`). Loopback, link-local (cloud metadata), CGNAT,
+unspecified, multicast, reserved, NAT64 and any private IPv4 inside a 6to4 address stay
+blocked whatever the list says. The list is deployment configuration, never tenant-settable, and
+a malformed entry stops the hub at start. `testdata/egress-vectors.json` is the shared
+vector file (`test/egress.test.ts` runs it; the Go guard can load the same file).
+
+Configuration added: `INTEGRATION_HUB_EGRESS_ALLOW`, `MIGRATION_URL`,
+`PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE` (base64 32-byte Ed25519
+seed), `PASSAGE_SERVICE_KEY_ID`. Without `MIGRATION_URL` and the key, rest-push is off and
+creating one answers 501 HUB-0502. Chart values: `egressAllow`, `restPush.*`,
+`networkPolicy.migration`, `networkPolicy.privateReceivers`. `migrations/0002_rest_push.sql`
+adds columns only (no new table).
+
+Tests: `test/restPush.unit.test.ts` (paths, templates, auth, classification, schedule, token,
+HTTP client), `test/egress.test.ts` (shared vectors) and `test/restPush.test.ts` (Postgres:
+a fake legacy ERP on an allowlisted private address, `sales.order.confirmed` to
+`POST /api/salesorders`, duplicate event, 503 then 200 on the schedule, 422 dead-lettered
+and replayed, legacy key recorded, echo skipped, credentials never in logs or responses).
+
 ## Run and test
 
 ```sh
@@ -174,5 +242,6 @@ NOBYPASSRLS) in `PASSAGE_TEST_APP_DATABASE_URL`; each test file works in its own
 | HUB-0113 | Quota exceeded (429); `take` in `src/quota.ts` computes it and `Retry-After`, the gateway enforces it |
 | HUB-0114 | Subscription paused after a 410 Gone response |
 | HUB-0115 | Event dead-lettered after the retry schedule is exhausted |
-| HUB-0400 / 0401 / 0403 / 0404 / 0405 / 0409 / 0413 / 0422 / 0500 | API: malformed request / no identity / missing duty / not found / method not allowed / stale version / body too large / unsafe webhook URL / unexpected error |
+| HUB-0117 | rest-push delivery dead-lettered at once: the receiver (4xx) or the render refused it for good |
+| HUB-0400 / 0401 / 0403 / 0404 / 0405 / 0409 / 0413 / 0422 / 0500 / 0501 / 0502 | API: malformed request / no identity / missing duty / not found / method not allowed / stale version / body too large / unsafe webhook URL / unexpected error / field encryption keys missing / rest-push not configured |
 | EDI-0139 | PLM ECO effectivity earlier than today, moved to today (`decideEcoImport` in `src/plm.ts`) |

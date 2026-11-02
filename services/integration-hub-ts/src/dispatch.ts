@@ -15,7 +15,7 @@ export type Step =
   | { kind: "delivered"; attempts: number }
   | { kind: "paused"; attempts: number }
   | { kind: "retry"; attempts: number; nextRetryAt: number }
-  | { kind: "dead_letter"; attempts: number };
+  | { kind: "dead_letter"; attempts: number; code?: "HUB-0115" | "HUB-0117" };
 
 /**
  * Decides the next step after an attempt. `retriesDone` counts retries already
@@ -132,4 +132,37 @@ export function planReplay(
 /** Headers that mark a delivery as a replay so consumers can apply it idempotently (BR-35.9). */
 export function replayHeaders(): Record<string, string> {
   return { "ce-passagereplay": "true" };
+}
+
+/** A Retry-After longer than the last schedule step is not honoured beyond it. */
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+/**
+ * The next step after a rest-push attempt. `dead` dead-letters at once (HUB-0117: a 4xx the receiver will
+ * answer the same way every time), `pause` is a 410, `retry` follows the 8-step schedule, or the receiver's
+ * Retry-After when it sent one (429 and 503), and dead-letters (HUB-0115) when the schedule is spent.
+ */
+export function restStep(
+  retriesDone: number,
+  outcome: { kind: "delivered" | "retry" | "dead" | "pause"; retryAfterSeconds?: number },
+  nowSeconds: number,
+): Step {
+  const attempts = retriesDone + 1;
+  switch (outcome.kind) {
+    case "delivered":
+      return { kind: "delivered", attempts };
+    case "pause":
+      return { kind: "paused", attempts };
+    case "dead":
+      return { kind: "dead_letter", attempts, code: "HUB-0117" };
+    case "retry": {
+      const scheduled = retryDelaySeconds(retriesDone + 1);
+      if (scheduled === null) {
+        return { kind: "dead_letter", attempts, code: "HUB-0115" };
+      }
+      const asked = outcome.retryAfterSeconds;
+      const delay = asked !== undefined && Number.isFinite(asked) && asked >= 1 ? Math.min(Math.ceil(asked), MAX_RETRY_AFTER_SECONDS) : scheduled;
+      return { kind: "retry", attempts, nextRetryAt: nowSeconds + delay };
+    }
+  }
 }

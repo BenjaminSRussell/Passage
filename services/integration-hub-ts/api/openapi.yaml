@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Passage integration hub
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Webhook subscriptions, the delivery log, the dead-letter list, resume after a
+    Webhook and rest-push subscriptions, the delivery log, the dead-letter list, resume after a
     410 pause and replay (FR-35.9, FR-35.10). Callers reach these routes through the
     edge gateway, which verifies the user's token and sets x-passage-tenant,
     x-passage-user and x-passage-duties (client copies are stripped). Every row is
@@ -15,14 +15,36 @@ info:
     problems with a stable `code`: HUB-04xx for HTTP-level errors, HUB-0114 (a 410
     paused the subscription) and HUB-0115 (the retry schedule was exhausted) on
     subscriptions and deliveries.
+
+    A `rest-push` subscription pushes events into a customer's existing ERP instead of
+    signing a webhook: the migration service renders each event through the
+    subscription's outbound mapping, the hub sends the rendered body to the URL
+    template (placeholders filled from the body, escaped), with `Idempotency-Key` = the
+    event id, and on 2xx records the legacy key found at `responseKeyPath` as the
+    cross-reference. Credentials are sealed at rest and write-only: no response ever
+    contains them. A 4xx from the receiver other than 410 and 429 dead-letters at once
+    (HUB-0117, with the response body kept, truncated); 5xx and silence follow the
+    8-step schedule; 429 honours Retry-After; 410 pauses. An event without a
+    `legalentityid` extension is dead-lettered (HUB-0117) before the render: service
+    tokens to the migration service name exactly one legal entity. Events whose actor is
+    `service:migration-loader` are not pushed back (echo suppression). Receivers on
+    private addresses are reachable only when the operator lists them in
+    INTEGRATION_HUB_EGRESS_ALLOW.
 servers:
   - url: https://api.passage.dev
 paths:
   /v1/hub/subscriptions:
     post:
       operationId: createSubscription
-      summary: Create a webhook subscription
+      summary: Create a webhook or rest-push subscription
       description: |
+        `kind` is `webhook` (default) or `rest-push`; for rest-push see the API description:
+        `outboundMappingId`, `method`, `auth` and optionally `responseKeyPath` and
+        `onClientError` are sent, no `secret`, and the response never carries credentials.
+        The `url` of a rest-push subscription is a template whose `{placeholders}` (paths
+        into the rendered body) may appear in the path and query, never in the host; the
+        host is checked at create time as for a webhook. Without a configured migration
+        client the hub answers 501 HUB-0502.
         The URL is checked by the SSRF guard (https only, public addresses only, no
         credentials in the URL): a private, loopback or cloud-metadata address is
         refused with 422 HUB-0422. `patterns` are CloudEvents type patterns (`*` one
@@ -142,6 +164,39 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/subscriptions/{subscriptionId}:test:
+    parameters:
+      - {$ref: "#/components/parameters/SubscriptionId"}
+    post:
+      operationId: testSubscription
+      summary: Test send a sample event through a rest-push subscription
+      description: |
+        Renders `event` (a CloudEvents JSON object; the tenant is the caller's) through the
+        outbound mapping and builds the request. With `send: true` the request is also sent
+        to the receiver, once, with the event id as Idempotency-Key, and the receiver's
+        status, truncated body and legacy key are returned. Nothing is recorded: no
+        delivery, no cross-reference. `stage` says how far it got (render, url, token,
+        built, sent). Only rest-push subscriptions: a webhook answers 409. The render runs
+        for the caller: the service token names the caller as actor and the legal entity
+        the edge scoped them to (X-Passage-Legal-Entity), which is also the sample's
+        `legalentityid`; a sample naming another legal entity answers 403.
+      x-passage-duty: hub.subscription.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TestSendRequest"}
+      responses:
+        "200":
+          description: How far the test got and what the receiver answered.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TestSendResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
   /v1/hub/subscriptions/{subscriptionId}:replay:
     parameters:
       - {$ref: "#/components/parameters/SubscriptionId"}
@@ -172,6 +227,36 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/hub/deliveries/{deliveryId}:replay:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        description: The delivery's id.
+        schema: {type: string, format: uuid}
+    post:
+      operationId: replayDelivery
+      summary: Send one dead-lettered delivery again
+      description: |
+        Puts the dead-lettered delivery back in the pending set, due now, with a fresh retry
+        schedule and its stored response cleared; use it after fixing the cause (a missing
+        cross-reference, a wrong key path, the receiver's data). A delivery that is not dead-lettered
+        answers 409; another tenant's delivery is reported as not found.
+      x-passage-duty: hub.subscription.write
+      responses:
+        "202":
+          description: The delivery is pending again.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [pending]}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
   /v1/hub/deliveries:
     get:
       operationId: listDeliveries
@@ -201,8 +286,11 @@ paths:
   /v1/hub/dead-letters:
     get:
       operationId: listDeadLetters
-      summary: List deliveries that exhausted the retry schedule (HUB-0115)
-      description: Deliveries still failing after the 8th retry (9 attempts). Replay a subscription to send them again.
+      summary: List dead-lettered deliveries (HUB-0115, HUB-0117)
+      description: |
+        HUB-0115: still failing after the 8th retry (9 attempts). HUB-0117: a rest-push receiver or the
+        render refused the request for good (a 4xx), after one attempt; `responseExcerpt` keeps the answer.
+        Replay a delivery (rest-push) or a subscription to send them again.
       x-passage-duty: hub.delivery.read
       parameters:
         - {$ref: "#/components/parameters/Limit"}
@@ -244,7 +332,7 @@ components:
       schema: {type: string}
   responses:
     Problem:
-      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0409 stale version, 0413 body too large, 0422 unsafe URL, 0500 unexpected, 0501 field encryption keys not configured).
+      description: An RFC 9457 problem with a stable `code` (HUB-0400 malformed, 0401 no identity, 0403 missing duty, 0404 not found, 0405 method, 0409 stale version, 0413 body too large, 0422 unsafe URL, 0500 unexpected, 0501 field encryption keys not configured, 0502 rest-push not configured).
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
@@ -259,13 +347,72 @@ components:
         code: {type: string, examples: [HUB-0422]}
         detail: {type: string}
         instance: {type: string}
+    RestAuth:
+      type: object
+      description: Write-only credentials. The shape depends on `type`; the secret fields are accepted here and never returned.
+      required: [type]
+      properties:
+        type: {type: string, enum: [basic, bearer, api-key, oauth2-client-credentials]}
+        username: {type: string, description: "basic."}
+        password: {type: string, writeOnly: true, description: "basic."}
+        token: {type: string, writeOnly: true, description: "bearer."}
+        headerName: {type: string, description: "api-key: the header carrying the key (not one the hub sets itself)."}
+        value: {type: string, writeOnly: true, description: "api-key."}
+        tokenUrl: {type: string, description: "oauth2-client-credentials: the token endpoint (same address checks as the receiver)."}
+        clientId: {type: string, description: "oauth2-client-credentials."}
+        clientSecret: {type: string, writeOnly: true, description: "oauth2-client-credentials."}
+        scope: {type: string, description: "oauth2-client-credentials."}
+    RestSettings:
+      type: object
+      description: The non-secret rest-push settings of a subscription.
+      required: [outboundMappingId, method, responseKeyPath, onClientError, auth]
+      properties:
+        outboundMappingId: {type: string, format: uuid, description: "The migration service's outbound mapping that renders the event."}
+        method: {type: string, enum: [POST, PUT, PATCH]}
+        responseKeyPath: {type: string, description: "JSONPath-lite ($.data.id, orders[0].id) to the legacy key in the response; empty when the receiver returns none."}
+        onClientError: {type: string, enum: [dead_letter, retry], description: "What a 4xx other than 410 and 429 does."}
+        auth:
+          type: object
+          required: [type, hasCredentials]
+          properties:
+            type: {type: string, enum: [basic, bearer, api-key, oauth2-client-credentials]}
+            username: {type: string}
+            headerName: {type: string}
+            tokenUrl: {type: string}
+            clientId: {type: string}
+            scope: {type: string}
+            hasCredentials: {type: boolean, const: true}
+    TestSendRequest:
+      type: object
+      additionalProperties: false
+      required: [event]
+      properties:
+        event: {type: object, description: "A CloudEvents JSON object (type, data, optional id, subject, legalentityid)."}
+        send: {type: boolean, default: false, description: "Also send the request to the receiver."}
+    TestSendResult:
+      type: object
+      required: [stage, method]
+      properties:
+        stage: {type: string, enum: [render, url, token, built, sent]}
+        method: {type: string}
+        url: {type: string}
+        body: {description: "The rendered body."}
+        status: {type: [integer, "null"], description: "The receiver's (or the render service's) status; null when nothing answered."}
+        excerpt: {type: string, description: "The answer, truncated, credentials removed."}
+        legacyKey: {type: string}
     NewSubscription:
       type: object
       additionalProperties: false
       required: [name, url, patterns]
       properties:
+        kind: {type: string, enum: [webhook, rest-push], default: webhook}
         name: {type: string, minLength: 1, maxLength: 200}
-        url: {type: string, maxLength: 2048, description: "https URL of a public host."}
+        url: {type: string, maxLength: 2048, description: "https URL of a public host (or an operator-allowlisted private one); for rest-push a template with {placeholders} in the path and query."}
+        outboundMappingId: {type: string, format: uuid, description: "rest-push, required."}
+        method: {type: string, enum: [POST, PUT, PATCH], default: POST, description: "rest-push."}
+        responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        onClientError: {type: string, enum: [dead_letter, retry], default: dead_letter, description: "rest-push."}
+        auth: {$ref: "#/components/schemas/RestAuth"}
         patterns:
           type: array
           minItems: 1
@@ -285,11 +432,21 @@ components:
           minItems: 1
           maxItems: 50
           items: {type: string}
+        outboundMappingId: {type: string, format: uuid, description: "rest-push."}
+        method: {type: string, enum: [POST, PUT, PATCH], description: "rest-push."}
+        responseKeyPath: {type: string, maxLength: 200, description: "rest-push."}
+        onClientError: {type: string, enum: [dead_letter, retry], description: "rest-push."}
+        auth: {$ref: "#/components/schemas/RestAuth"}
     Subscription:
       type: object
-      required: [id, name, url, patterns, status, pausedReason, version, createdAt, updatedAt]
+      required: [id, kind, rest, name, url, patterns, status, pausedReason, version, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
+        kind: {type: string, enum: [webhook, rest-push]}
+        rest:
+          oneOf:
+            - {$ref: "#/components/schemas/RestSettings"}
+            - {type: "null"}
         name: {type: string}
         url: {type: string}
         patterns: {type: array, items: {type: string}}
@@ -326,7 +483,7 @@ components:
         truncated: {type: boolean, description: "More matching events remain after the cap."}
     Delivery:
       type: object
-      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, createdAt]
+      required: [id, subscriptionId, eventId, eventType, aggregateId, sequence, status, attempts, lastStatus, nextRetryAt, replay, deadLetterCode, responseExcerpt, legacyKey, createdAt]
       properties:
         id: {type: string, format: uuid}
         subscriptionId: {type: string, format: uuid}
@@ -339,7 +496,9 @@ components:
         lastStatus: {type: [integer, "null"], description: "HTTP status of the last attempt; null when there was no response."}
         nextRetryAt: {type: [number, "null"], description: "Unix seconds; only for pending deliveries."}
         replay: {type: boolean}
-        deadLetterCode: {type: [string, "null"], description: "HUB-0115 for a dead letter."}
+        deadLetterCode: {type: [string, "null"], description: "HUB-0115 retries exhausted, HUB-0117 refused for good (rest-push 4xx or render refusal)."}
+        responseExcerpt: {type: [string, "null"], description: "rest-push: the receiver's last answer, truncated to 2000 characters, credentials removed."}
+        legacyKey: {type: [string, "null"], description: "rest-push: the legacy key the receiver answered with."}
         createdAt: {type: string, format: date-time}
     DeliveryPage:
       type: object

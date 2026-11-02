@@ -12,7 +12,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
-import { nextStep, planReplay, replayHeaders, REPLAY_MAX_EVENTS, type ReplayCandidate } from "./dispatch.ts";
+import { nextStep, planReplay, restStep, type Step, replayHeaders, REPLAY_MAX_EVENTS, type ReplayCandidate } from "./dispatch.ts";
 import { validateWebhookUrl, type GuardOptions, type PinnedTarget } from "./ssrf.ts";
 import { deliverableHeads, sign } from "./webhook.ts";
 
@@ -20,6 +20,10 @@ import { deliverableHeads, sign } from "./webhook.ts";
 export interface HubEvent extends ReplayCandidate {
   type: string;
   data: unknown;
+  /** The CloudEvents `legalentityid` extension, when the event carries one. */
+  legalEntityId?: string;
+  /** The CloudEvents `actor` extension: who caused the event. Not stored; used for echo suppression at enqueue. */
+  actor?: string;
 }
 
 export interface Subscription {
@@ -40,8 +44,29 @@ export interface DeadLetter {
   event: HubEvent;
   attempts: number;
   lastStatus: number | null;
-  code: "HUB-0115";
+  /** HUB-0115 retries exhausted; HUB-0117 a rest-push receiver or render refused the request for good (4xx). */
+  code: "HUB-0115" | "HUB-0117";
 }
+
+/**
+ * What one rest-push attempt came to, classified by src/restPush.ts. `status` is the receiver's (or the
+ * render service's) HTTP status, null when nothing answered.
+ */
+export type RestOutcome = (
+  | { kind: "delivered"; status: number }
+  | { kind: "retry"; status: number | null; retryAfterSeconds?: number }
+  | { kind: "dead"; status: number | null }
+  | { kind: "pause"; status: number }
+) & {
+  /** The receiver's (or the render service's) answer, truncated and with credentials removed; kept on the delivery. */
+  excerpt?: string;
+  /** The legacy key read from the response at responseKeyPath. */
+  legacyKey?: string;
+};
+
+/** Renders and pushes one event; resolves with the outcome, never throws for a receiver problem. */
+export type Deliver = (delivery: PendingDelivery, nowSeconds: number) => Promise<RestOutcome>;
+
 
 export interface DeliveryStore {
   pending(subscriptionId: string): PendingDelivery[];
@@ -148,7 +173,10 @@ export function httpTransport(options: HttpTransportOptions = {}): Transport {
 export interface DispatcherOptions {
   subscription: Subscription;
   store: DeliveryStore;
-  transport: Transport;
+  /** Webhook sender. Exactly one of transport and deliver is set. */
+  transport?: Transport;
+  /** Rest-push sender (render, push, record the legacy key). */
+  deliver?: Deliver;
   /** Unix seconds. */
   clock: () => number;
   source?: string;
@@ -221,7 +249,7 @@ export class Dispatcher {
    * due; later events of that aggregate wait for it (BR-35.7).
    */
   async tick(): Promise<TickResult> {
-    const { store, subscription, transport, clock } = this.#o;
+    const { store, subscription, transport, deliver, clock } = this.#o;
     const result: TickResult = { attempted: 0, delivered: 0, retried: 0, deadLettered: 0, paused: false };
     if (store.isPaused(subscription.id)) {
       result.paused = true;
@@ -235,9 +263,17 @@ export class Dispatcher {
       if (delivery.nextRetryAt > now) {
         continue;
       }
-      const { body, headers } = this.#request(delivery, now);
-      const status = await transport(subscription.url, headers, body);
-      const step = nextStep(delivery.retriesDone, status, clock());
+      let status: number | null;
+      let step: Step;
+      if (deliver !== undefined) {
+        const outcome = await deliver(delivery, now);
+        status = outcome.status;
+        step = restStep(delivery.retriesDone, outcome, clock());
+      } else {
+        const { body, headers } = this.#request(delivery, now);
+        status = await (transport as Transport)(subscription.url, headers, body);
+        step = nextStep(delivery.retriesDone, status, clock());
+      }
       result.attempted += 1;
       switch (step.kind) {
         case "delivered":
@@ -249,7 +285,7 @@ export class Dispatcher {
           result.retried += 1;
           break;
         case "dead_letter":
-          store.deadLetter(subscription.id, { event: delivery.event, attempts: step.attempts, lastStatus: status, code: "HUB-0115" });
+          store.deadLetter(subscription.id, { event: delivery.event, attempts: step.attempts, lastStatus: status, code: step.code ?? "HUB-0115" });
           store.remove(subscription.id, head.eventId);
           result.deadLettered += 1;
           break;

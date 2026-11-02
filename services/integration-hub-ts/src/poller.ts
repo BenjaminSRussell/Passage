@@ -8,13 +8,16 @@
 // A replica sends nothing once its lease is about to lapse, so two replicas never
 // send for one subscription at the same time.
 
-import { Dispatcher, type TickResult, type Transport } from "./dispatcher.ts";
+import { Dispatcher, type Deliver, type TickResult, type Transport } from "./dispatcher.ts";
 import { Metrics } from "./metrics.ts";
 import type { HubStore, PgDeliveryStore } from "./pgStore.ts";
+import type { RestPusher, RestTarget } from "./restPush.ts";
 
 export interface PollerOptions {
   store: HubStore;
   transport: Transport;
+  /** Sends rest-push subscriptions; without it a rest-push subscription is not worked (and is reported as a poller error). */
+  rest?: RestPusher;
   /** Unix seconds. */
   clock?: () => number;
   /** How long a replica owns a subscription it is working on. */
@@ -52,6 +55,22 @@ function recording(store: PgDeliveryStore, inner: Transport, clock: () => number
     const id = (JSON.parse(body) as { id: string }).id;
     store.recordAttempt(id, status);
     return status;
+  };
+}
+
+/** The rest-push counterpart of `recording`: flush, lease check, send, then queue the attempt with the receiver's answer. */
+function recordingRest(store: PgDeliveryStore, pusher: RestPusher, target: RestTarget, clock: () => number, leaseUntil: number): Deliver {
+  return async (delivery) => {
+    await store.flush();
+    if (clock() + LEASE_MARGIN_SECONDS > leaseUntil) {
+      throw new LeaseEndingError();
+    }
+    const outcome = await pusher.attempt(target, delivery);
+    store.recordAttempt(delivery.event.eventId, outcome.status, {
+      ...(outcome.excerpt === undefined ? {} : { excerpt: outcome.excerpt }),
+      ...(outcome.legacyKey === undefined ? {} : { legacyKey: outcome.legacyKey }),
+    });
+    return outcome;
   };
 }
 
@@ -98,10 +117,21 @@ export class Poller {
         return false;
       }
       const { store: deliveries, target } = loaded;
+      let sender: { transport: Transport } | { deliver: Deliver };
+      let secret = "";
+      if (target.kind === "rest-push") {
+        if (this.#o.rest === undefined) {
+          throw new Error(`subscription ${target.id} is rest-push but the hub has no migration client configured`);
+        }
+        sender = { deliver: recordingRest(deliveries, this.#o.rest, store.openRest(tenantId, target), () => this.#now(), leaseUntil) };
+      } else {
+        secret = store.openSecret(tenantId, target);
+        sender = { transport: recording(deliveries, this.#o.transport, () => this.#now(), leaseUntil) };
+      }
       const dispatcher = new Dispatcher({
-        subscription: { id: target.id, url: target.url, secret: store.openSecret(tenantId, target) },
+        subscription: { id: target.id, url: target.url, secret },
         store: deliveries,
-        transport: recording(deliveries, this.#o.transport, () => this.#now(), leaseUntil),
+        ...sender,
         clock: () => this.#now(),
         ...(this.#o.source === undefined ? {} : { source: this.#o.source }),
       });

@@ -59,4 +59,24 @@ spec:
         {{- range .Values.networkPolicy.webhookPorts }}
         - { protocol: TCP, port: {{ . }} }
         {{- end }}
+{{- if .Values.restPush.migrationUrl }}
+    # rest-push renders events through the migration service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.migration.namespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.networkPolicy.migration.port }} }
+{{- end }}
+{{- if .Values.networkPolicy.privateReceivers }}
+    # Customer ERPs on private addresses; keep in step with egressAllow (the application refuses any private address not listed there).
+    - to:
+        {{- range .Values.networkPolicy.privateReceivers.cidrs }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+      ports:
+        {{- range .Values.networkPolicy.privateReceivers.ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}
 {{- end }}

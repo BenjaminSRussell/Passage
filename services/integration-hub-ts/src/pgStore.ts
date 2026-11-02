@@ -16,9 +16,15 @@ import pg from "pg";
 import type { FieldKeys } from "./crypt.ts";
 import type { DeadLetter, DeliveryStore, HubEvent, PendingDelivery } from "./dispatcher.ts";
 import { matchesAny } from "./filter.ts";
+import type { RestConfig, RestCredentials, RestTarget } from "./restPush.ts";
 
 /** The fieldcrypt field name the signing secret is sealed under (bound with the tenant id). */
 export const SECRET_FIELD = "hub_subscription.secret";
+/** The field the rest-push credentials (one JSON object) are sealed under. */
+export const CREDENTIALS_FIELD = "hub_subscription.credentials";
+
+/** Events written by the migration loader (the legacy ERP's own import) are not pushed back to it. */
+export const ECHO_ACTOR = "service:migration-loader";
 
 /** Per aggregate, the pending deliveries one poller pass can reach (it stops after 100 ticks). */
 const LOAD_PER_AGGREGATE = 100;
@@ -30,10 +36,15 @@ const REPLAY_PAGE = 1_000;
 export type DeliveryStatus = "pending" | "delivered" | "dead_letter";
 export const DELIVERY_STATUSES: readonly DeliveryStatus[] = ["pending", "delivered", "dead_letter"];
 
+export type SubscriptionKind = "webhook" | "rest-push";
+
 export interface SubscriptionRecord {
   id: string;
+  kind: SubscriptionKind;
   name: string;
   url: string;
+  /** rest-push only: the settings without credentials. `auth.hasCredentials` is always true; the secrets are never returned. */
+  rest: (Omit<RestConfig, "auth"> & { auth: RestConfig["auth"] & { hasCredentials: true } }) | null;
   patterns: string[];
   status: "active" | "paused";
   pausedReason: string | null;
@@ -45,8 +56,11 @@ export interface SubscriptionRecord {
 /** What the dispatcher needs to send: the URL and the sealed signing secret (opened by openSecret). */
 export interface SubscriptionTarget {
   id: string;
+  kind: SubscriptionKind;
   url: string;
-  sealedSecret: Buffer;
+  sealedSecret: Buffer | null;
+  restConfig: RestConfig | null;
+  sealedCredentials: Buffer | null;
 }
 
 export interface DeliveryRecord {
@@ -62,6 +76,10 @@ export interface DeliveryRecord {
   nextRetryAt: number | null;
   replay: boolean;
   deadLetterCode: string | null;
+  /** The receiver's last answer, truncated, credentials removed (rest-push). */
+  responseExcerpt: string | null;
+  /** The legacy key the receiver answered with (rest-push). */
+  legacyKey: string | null;
   createdAt: string;
 }
 
@@ -119,10 +137,12 @@ export async function migrate(pool: pg.Pool, dir: URL | string): Promise<void> {
 
 export const MIGRATIONS_DIR = new URL("../migrations/", import.meta.url);
 
-const COLUMNS_SUB = "id, name, url, patterns, status, paused_reason, version, created_at, updated_at, created_at::text as cursor_ts";
+const COLUMNS_SUB = "id, kind, rest_config, name, url, patterns, status, paused_reason, version, created_at, updated_at, created_at::text as cursor_ts";
 
 interface SubRow {
   id: string;
+  kind: SubscriptionKind;
+  rest_config: RestConfig | null;
   name: string;
   url: string;
   patterns: string[];
@@ -137,6 +157,8 @@ interface SubRow {
 function toSubscription(r: SubRow): SubscriptionRecord {
   return {
     id: r.id,
+    kind: r.kind,
+    rest: r.rest_config === null ? null : { ...r.rest_config, auth: { ...r.rest_config.auth, hasCredentials: true } },
     name: r.name,
     url: r.url,
     patterns: r.patterns,
@@ -161,6 +183,8 @@ interface DeliveryRow {
   next_retry_at: number;
   replay: boolean;
   dead_letter_code: string | null;
+  response_excerpt: string | null;
+  legacy_key: string | null;
   created_at: Date;
   cursor_ts: string;
 }
@@ -179,6 +203,8 @@ function toDelivery(r: DeliveryRow): DeliveryRecord {
     nextRetryAt: r.status === "pending" ? r.next_retry_at : null,
     replay: r.replay,
     deadLetterCode: r.dead_letter_code,
+    responseExcerpt: r.response_excerpt,
+    legacyKey: r.legacy_key,
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -199,7 +225,10 @@ function decodeCursor(cursor: string): { createdAt: string; id: string } {
 export interface NewSubscription {
   name: string;
   url: string;
+  /** The webhook signing secret; empty for a rest-push subscription. */
   secret: string;
+  /** Set for a rest-push subscription. */
+  rest?: { config: RestConfig; credentials: RestCredentials };
   patterns: string[];
   createdBy: string | null;
   idempotencyKey: string | null;
@@ -210,6 +239,32 @@ export interface SubscriptionPatch {
   name?: string;
   url?: string;
   patterns?: string[];
+  /** rest-push only: replaces the whole configuration (and with it the credentials). */
+  rest?: { config: RestConfig; credentials?: RestCredentials };
+}
+
+/** A webhook-only change was asked of a rest-push subscription or the reverse. */
+export class WrongKindError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WrongKindError";
+  }
+}
+
+const TARGET_COLUMNS = "id, kind, url, secret_sealed, rest_config, credentials_sealed, status";
+
+interface TargetRow {
+  id: string;
+  kind: SubscriptionKind;
+  url: string;
+  secret_sealed: Buffer | null;
+  rest_config: RestConfig | null;
+  credentials_sealed: Buffer | null;
+  status: string;
+}
+
+function toTarget(r: TargetRow): SubscriptionTarget {
+  return { id: r.id, kind: r.kind, url: r.url, sealedSecret: r.secret_sealed, restConfig: r.rest_config, sealedCredentials: r.credentials_sealed };
 }
 
 export class HubStore {
@@ -231,7 +286,30 @@ export class HubStore {
     if (this.#keys === null) {
       throw new FieldKeysMissingError();
     }
+    if (target.sealedSecret === null) {
+      throw new WrongKindError("a rest-push subscription has no signing secret");
+    }
     return this.#keys.open(tenantId, SECRET_FIELD, target.sealedSecret).toString("utf8");
+  }
+
+  /** Opens a rest-push subscription's credentials for one send; never log or return the result. */
+  openRest(tenantId: string, target: SubscriptionTarget): RestTarget {
+    if (this.#keys === null) {
+      throw new FieldKeysMissingError();
+    }
+    if (target.restConfig === null || target.sealedCredentials === null) {
+      throw new WrongKindError("not a rest-push subscription");
+    }
+    const credentials = JSON.parse(this.#keys.open(tenantId, CREDENTIALS_FIELD, target.sealedCredentials).toString("utf8")) as RestCredentials;
+    return { tenantId, subscriptionId: target.id, urlTemplate: target.url, config: target.restConfig, credentials };
+  }
+
+  /** The target for the subscription (credentials still sealed); null when it does not exist. */
+  async getTarget(tenantId: string, id: string): Promise<SubscriptionTarget | null> {
+    return this.withTenant(tenantId, async (c) => {
+      const res = await c.query<TargetRow>(`select ${TARGET_COLUMNS} from hub_subscription where id = $1`, [id]);
+      return res.rows[0] === undefined ? null : toTarget(res.rows[0]);
+    });
   }
 
   /** Runs fn in a transaction scoped to one tenant by row-level security. */
@@ -256,14 +334,17 @@ export class HubStore {
     if (this.#keys === null) {
       throw new FieldKeysMissingError();
     }
-    const sealed = this.#keys.seal(tenantId, SECRET_FIELD, Buffer.from(input.secret, "utf8"));
+    const sealed = input.rest === undefined ? this.#keys.seal(tenantId, SECRET_FIELD, Buffer.from(input.secret, "utf8")) : null;
+    const credentials =
+      input.rest === undefined ? null : this.#keys.seal(tenantId, CREDENTIALS_FIELD, Buffer.from(JSON.stringify(input.rest.credentials), "utf8"));
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query<SubRow>(
-        `insert into hub_subscription (tenant_id, id, name, url, secret_sealed, patterns, created_by, idempotency_key)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+        `insert into hub_subscription (tenant_id, id, kind, name, url, secret_sealed, rest_config, credentials_sealed, patterns, created_by, idempotency_key)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          on conflict (tenant_id, idempotency_key) do nothing
          returning ${COLUMNS_SUB}`,
-        [tenantId, randomUUID(), input.name, input.url, sealed, input.patterns, input.createdBy, input.idempotencyKey],
+        [tenantId, randomUUID(), input.rest === undefined ? "webhook" : "rest-push", input.name, input.url, sealed,
+         input.rest === undefined ? null : JSON.stringify(input.rest.config), credentials, input.patterns, input.createdBy, input.idempotencyKey],
       );
       if (res.rows[0] !== undefined) {
         return { subscription: toSubscription(res.rows[0]), created: true };
@@ -300,23 +381,33 @@ export class HubStore {
 
   /** Optimistic update: VersionConflictError when `version` is stale, null when the subscription does not exist. */
   async patchSubscription(tenantId: string, id: string, patch: SubscriptionPatch): Promise<SubscriptionRecord | null> {
+    if (patch.rest?.credentials !== undefined && this.#keys === null) {
+      throw new FieldKeysMissingError();
+    }
+    const credentials =
+      patch.rest?.credentials === undefined ? null : (this.#keys as FieldKeys).seal(tenantId, CREDENTIALS_FIELD, Buffer.from(JSON.stringify(patch.rest.credentials), "utf8"));
     return this.withTenant(tenantId, async (c) => {
+      const kind = await c.query<{ kind: SubscriptionKind }>("select kind from hub_subscription where id = $1", [id]);
+      if (kind.rows[0] === undefined) {
+        return null;
+      }
+      if (patch.rest !== undefined && kind.rows[0].kind !== "rest-push") {
+        throw new WrongKindError("only a rest-push subscription has rest settings");
+      }
       const res = await c.query<SubRow>(
         `update hub_subscription
             set name = coalesce($3, name), url = coalesce($4, url), patterns = coalesce($5, patterns),
+                rest_config = coalesce($6::jsonb, rest_config), credentials_sealed = coalesce($7, credentials_sealed),
                 version = version + 1, updated_at = now()
           where id = $1 and version = $2
           returning ${COLUMNS_SUB}`,
-        [id, patch.version, patch.name ?? null, patch.url ?? null, patch.patterns ?? null],
+        [id, patch.version, patch.name ?? null, patch.url ?? null, patch.patterns ?? null,
+         patch.rest === undefined ? null : JSON.stringify(patch.rest.config), credentials],
       );
       if (res.rows[0] !== undefined) {
         return toSubscription(res.rows[0]);
       }
-      const exists = await c.query("select 1 from hub_subscription where id = $1", [id]);
-      if (exists.rowCount) {
-        throw new VersionConflictError();
-      }
-      return null;
+      throw new VersionConflictError();
     });
   }
 
@@ -337,7 +428,7 @@ export class HubStore {
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query<DeliveryRow>(
         `select id, subscription_id, event_id, event_type, aggregate_id, sequence, status, attempts, last_status,
-                next_retry_at, replay, dead_letter_code, created_at, created_at::text as cursor_ts
+                next_retry_at, replay, dead_letter_code, response_excerpt, legacy_key, created_at, created_at::text as cursor_ts
            from hub_delivery
           where ($1::text is null or status = $1) and ($2::uuid is null or subscription_id = $2)
             and ($3::timestamptz is null or (created_at, id) < ($3::timestamptz, $4::uuid))
@@ -354,8 +445,8 @@ export class HubStore {
   }
 
   /** The tenant's subscriptions, paused ones included: a paused subscription keeps collecting events until it is resumed. */
-  async targets(client: pg.PoolClient): Promise<{ id: string; patterns: string[] }[]> {
-    const res = await client.query<{ id: string; patterns: string[] }>("select id, patterns from hub_subscription");
+  async targets(client: pg.PoolClient): Promise<{ id: string; kind: SubscriptionKind; patterns: string[] }[]> {
+    const res = await client.query<{ id: string; kind: SubscriptionKind; patterns: string[] }>("select id, kind, patterns from hub_subscription");
     return res.rows;
   }
 
@@ -377,11 +468,16 @@ export class HubStore {
         if (!matches(sub.patterns, event.type)) {
           continue;
         }
+        // Echo suppression: a rest-push subscription never sends the legacy system what the legacy system's own
+        // import wrote into Passage.
+        if (sub.kind === "rest-push" && event.actor === ECHO_ACTOR) {
+          continue;
+        }
         const res = await c.query(
-          `insert into hub_delivery (tenant_id, id, subscription_id, event_id, event_type, aggregate_id, sequence, occurred_at, data, next_retry_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `insert into hub_delivery (tenant_id, id, subscription_id, event_id, event_type, aggregate_id, sequence, occurred_at, data, next_retry_at, event_legal_entity)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            on conflict (tenant_id, subscription_id, event_id) do nothing`,
-          [tenantId, randomUUID(), sub.id, event.eventId, event.type, event.aggregateId, event.sequence, event.occurredAt, JSON.stringify(event.data ?? null), now],
+          [tenantId, randomUUID(), sub.id, event.eventId, event.type, event.aggregateId, event.sequence, event.occurredAt, JSON.stringify(event.data ?? null), now, event.legalEntityId ?? null],
         );
         count += res.rowCount ?? 0;
       }
@@ -425,19 +521,16 @@ export class HubStore {
    */
   async loadDeliveryStore(tenantId: string, subscriptionId: string): Promise<{ store: PgDeliveryStore; target: SubscriptionTarget } | null> {
     return this.withTenant(tenantId, async (c) => {
-      const sub = await c.query<{ id: string; url: string; secret_sealed: Buffer; status: string }>(
-        "select id, url, secret_sealed, status from hub_subscription where id = $1",
-        [subscriptionId],
-      );
+      const sub = await c.query<TargetRow>(`select ${TARGET_COLUMNS} from hub_subscription where id = $1`, [subscriptionId]);
       const row = sub.rows[0];
       if (row === undefined) {
         return null;
       }
       const pending = await c.query<{
         event_id: string; event_type: string; aggregate_id: string; sequence: string; occurred_at: number; data: unknown;
-        retries_done: number; next_retry_at: number; replay: boolean;
+        retries_done: number; next_retry_at: number; replay: boolean; event_legal_entity: string | null;
       }>(
-        `select event_id, event_type, aggregate_id, sequence, occurred_at, data, retries_done, next_retry_at, replay
+        `select event_id, event_type, aggregate_id, sequence, occurred_at, data, retries_done, next_retry_at, replay, event_legal_entity
            from (select d.*,
                         row_number() over w as rn,
                         first_value(next_retry_at) over w as head_due
@@ -452,13 +545,37 @@ export class HubStore {
       const store = new PgDeliveryStore(this, tenantId, subscriptionId, row.status === "paused");
       for (const p of pending.rows) {
         store.preload({
-          event: { eventId: p.event_id, type: p.event_type, aggregateId: p.aggregate_id, sequence: Number(p.sequence), occurredAt: p.occurred_at, data: p.data },
+          event: {
+            eventId: p.event_id, type: p.event_type, aggregateId: p.aggregate_id, sequence: Number(p.sequence), occurredAt: p.occurred_at, data: p.data,
+            ...(p.event_legal_entity === null ? {} : { legalEntityId: p.event_legal_entity }),
+          },
           retriesDone: p.retries_done,
           nextRetryAt: p.next_retry_at,
           replay: p.replay,
         });
       }
-      return { store, target: { id: row.id, url: row.url, sealedSecret: row.secret_sealed } };
+      return { store, target: toTarget(row) };
+    });
+  }
+
+  /**
+   * Puts one dead-lettered delivery back in the pending set as a replay, due now, with a fresh retry schedule.
+   * "missing" when no such delivery, "not_dead" when it is not dead-lettered (pending or delivered).
+   */
+  async replayDelivery(tenantId: string, deliveryId: string, now: number): Promise<"replayed" | "missing" | "not_dead"> {
+    return this.withTenant(tenantId, async (c) => {
+      const res = await c.query(
+        `update hub_delivery
+            set status = 'pending', replay = true, retries_done = 0, next_retry_at = $2, attempts = 0,
+                dead_letter_code = null, response_excerpt = null, updated_at = now()
+          where id = $1 and status = 'dead_letter'`,
+        [deliveryId, now],
+      );
+      if ((res.rowCount ?? 0) > 0) {
+        return "replayed";
+      }
+      const exists = await c.query("select 1 from hub_delivery where id = $1", [deliveryId]);
+      return exists.rowCount ? "not_dead" : "missing";
     });
   }
 
@@ -515,7 +632,7 @@ export class HubStore {
           await c.query(
             `update hub_delivery
                 set status = 'pending', replay = true, retries_done = 0, next_retry_at = $2, attempts = 0,
-                    dead_letter_code = null, updated_at = now()
+                    dead_letter_code = null, response_excerpt = null, updated_at = now()
               where id = any($1::uuid[]) and status <> 'pending'`,
             [take, now],
           );
@@ -539,7 +656,7 @@ type Op =
   | { kind: "remove"; eventId: string }
   | { kind: "dead"; letter: DeadLetter }
   | { kind: "paused"; paused: boolean }
-  | { kind: "attempt"; eventId: string; status: number | null };
+  | { kind: "attempt"; eventId: string; status: number | null; excerpt: string | null; legacyKey: string | null };
 
 export class PgDeliveryStore implements DeliveryStore {
   readonly #db: HubStore;
@@ -601,8 +718,8 @@ export class PgDeliveryStore implements DeliveryStore {
   }
 
   /** Queues the record of one send (its HTTP status, or null for no response). */
-  recordAttempt(eventId: string, status: number | null): void {
-    this.#ops.push({ kind: "attempt", eventId, status });
+  recordAttempt(eventId: string, status: number | null, detail: { excerpt?: string; legacyKey?: string } = {}): void {
+    this.#ops.push({ kind: "attempt", eventId, status, excerpt: detail.excerpt ?? null, legacyKey: detail.legacyKey ?? null });
   }
 
   /** Writes the queued changes in order, in one tenant transaction. */
@@ -668,11 +785,12 @@ export class PgDeliveryStore implements DeliveryStore {
       case "attempt":
         await c.query(
           `with d as (
-             update hub_delivery set attempts = attempts + 1, last_status = $3, updated_at = now()
+             update hub_delivery set attempts = attempts + 1, last_status = $3, response_excerpt = $6,
+                    legacy_key = coalesce($7, legacy_key), updated_at = now()
               where subscription_id = $1 and event_id = $2 returning id, attempts)
            insert into hub_attempt (tenant_id, id, delivery_id, attempt_no, http_status)
            select $4, $5, d.id, d.attempts, $3 from d`,
-          [sub, op.eventId, op.status, this.#tenantId, randomUUID()],
+          [sub, op.eventId, op.status, this.#tenantId, randomUUID(), op.excerpt, op.legacyKey],
         );
         return;
     }

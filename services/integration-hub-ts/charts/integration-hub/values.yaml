@@ -13,6 +13,17 @@ fieldCrypt:
   currentKeyId: ""
 # Outbound webhooks are https only; INTEGRATION_HUB_ALLOW_HTTP stays off outside development.
 allowHttp: false
+# Operator allowlist for private receiver addresses (INTEGRATION_HUB_EGRESS_ALLOW): CIDRs and host:port entries,
+# comma separated, for example "10.20.0.0/16,erp.corp.example:443". Loopback, link-local and metadata stay blocked.
+egressAllow: ""
+# rest-push: the migration service renders events (POST /v1/integration/outbound-mappings/{id}:render) and records
+# legacy keys (POST /v1/integration/xref:record). The hub signs a service token (signer integration-hub) with the
+# Ed25519 seed in signingKeySecret (key "seed"); the migration service must list its public key in
+# PASSAGE_SERVICE_PUBLIC_KEYS and grant integration-hub the duties migration.outbound.render and migration.xref.record.
+restPush:
+  migrationUrl: ""
+  signingKeySecret: ""
+  keyId: ""
 kafka:
   # Empty brokers or topics: the consumer is not started (API and poller only).
   brokers: ""
@@ -35,6 +46,9 @@ networkPolicy:
   postgres: { namespace: postgres, port: 5432 }
   kafka: { namespace: kafka, port: 9093 }
   dnsNamespace: kube-system
+  migration: { namespace: migration, port: 8080 }
+  # Private receiver ranges and ports the hub may reach (match egressAllow); empty: public addresses only.
+  privateReceivers: {}
   # Webhook receivers: public addresses on 443 only. These ranges are never reachable,
   # which backs up the SSRF guard in the application.
   webhookExceptCidrs:

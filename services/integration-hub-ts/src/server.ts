@@ -7,9 +7,10 @@
 // missing user is 401; a missing duty is 403. Errors are RFC 9457 problems with
 // a stable HUB-04xx code.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
+import { parseEvent } from "./consumer.ts";
 import { REPLAY_MAX_EVENTS } from "./dispatch.ts";
 import { validatePattern } from "./filter.ts";
 import type { Metrics } from "./metrics.ts";
@@ -19,8 +20,11 @@ import {
   type DeliveryStatus,
   FieldKeysMissingError,
   type HubStore,
+  type SubscriptionPatch,
   VersionConflictError,
+  WrongKindError,
 } from "./pgStore.ts";
+import { parseRestInput, parseRestPatch, REST_FIELDS, RestConfigError, sampleUrl, type RestConfig, type RestPusher } from "./restPush.ts";
 import { UnsafeWebhookUrlError, validateWebhookUrl, type GuardOptions } from "./ssrf.ts";
 
 export const DUTY_SUBSCRIPTION_WRITE = "hub.subscription.write";
@@ -72,6 +76,12 @@ export function principalFromHeaders(h: IncomingHttpHeaders): Principal {
   return { userId, tenantId, duties };
 }
 
+/** The one legal entity the edge scoped the caller to (X-Passage-Legal-Entity), or undefined. */
+export function legalEntityFromHeaders(h: IncomingHttpHeaders): string | undefined {
+  const raw = (header(h, "x-passage-legal-entity") ?? header(h, "x-passage-legalentity"))?.trim().toLowerCase();
+  return raw !== undefined && UUID.test(raw) && raw !== NIL_UUID ? raw : undefined;
+}
+
 export function requireDuty(principal: Principal, duty: string): void {
   if (!principal.duties.has(duty)) {
     throw new ApiError(403, "HUB-0403", `you do not hold duty ${duty}`);
@@ -83,6 +93,8 @@ export interface HubApiDeps {
   metrics?: Metrics;
   /** Guard options for validateWebhookUrl (resolver, http allowance); production uses the defaults. */
   guard?: GuardOptions;
+  /** Pushes rest-push subscriptions; without it creating one answers 501 HUB-0502. */
+  rest?: RestPusher;
   /** Total events one replay may enqueue (BR-35.9); defaults to 1,000,000. */
   replayCap?: number;
   clock?: () => number;
@@ -192,7 +204,8 @@ function patternsOf(body: Record<string, unknown>): string[] {
 }
 
 const SUBSCRIPTIONS = "/v1/hub/subscriptions";
-const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay))?$`);
+const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test))?$`);
+const DELIVERY_REPLAY = /^\/v1\/hub\/deliveries\/([0-9a-fA-F-]{36}):replay$/;
 
 export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { store, metrics } = deps;
@@ -239,10 +252,38 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         if (key !== undefined && key.length > 200) {
           throw new ApiError(400, "HUB-0400", "Idempotency-Key must be at most 200 characters");
         }
-        const body = object(await readBody(req), ["name", "url", "patterns", "secret"]);
+        const body = object(await readBody(req), ["kind", "name", "url", "patterns", "secret", ...REST_FIELDS]);
+        const kind = body["kind"] ?? "webhook";
+        if (kind !== "webhook" && kind !== "rest-push") {
+          throw new ApiError(400, "HUB-0400", "kind must be webhook or rest-push");
+        }
         const name = requireString(body, "name", 200);
         const target = requireString(body, "url", 2048);
         const patterns = patternsOf(body);
+        if (kind === "rest-push") {
+          if (body["secret"] !== undefined) {
+            throw new ApiError(400, "HUB-0400", "a rest-push subscription has no signing secret; send auth instead");
+          }
+          if (deps.rest === undefined) {
+            throw new ApiError(501, "HUB-0502", "rest-push is not configured on this hub (MIGRATION_URL and the service signing key)");
+          }
+          const input = parseRestInput(body, target);
+          await checkUrl(sampleUrl(target));
+          if (input.auth.tokenUrl !== undefined) {
+            await checkUrl(input.auth.tokenUrl);
+          }
+          const { credentials, ...config } = input;
+          const { subscription, created } = await store.createSubscription(p.tenantId, {
+            name, url: target, secret: "", patterns, createdBy: p.userId, idempotencyKey: key === undefined || key === "" ? null : key,
+            rest: { config, credentials },
+          });
+          return { name: "createSubscription", status: created ? 201 : 200, body: subscription };
+        }
+        for (const f of REST_FIELDS) {
+          if (body[f] !== undefined) {
+            throw new ApiError(400, "HUB-0400", `${f} applies to rest-push subscriptions only`);
+          }
+        }
         let secret: string;
         if (body["secret"] === undefined) {
           secret = `whsec_${randomBytes(24).toString("base64url")}`;
@@ -287,16 +328,35 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         if (method === "PATCH") {
           const p = principalFromHeaders(req.headers);
           requireDuty(p, DUTY_SUBSCRIPTION_WRITE);
-          const body = object(await readBody(req), ["version", "name", "url", "patterns"]);
+          const body = object(await readBody(req), ["version", "name", "url", "patterns", ...REST_FIELDS]);
           const version = body["version"];
           if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
             throw new ApiError(400, "HUB-0400", "version must be the subscription's current version");
           }
-          const patch: { version: number; name?: string; url?: string; patterns?: string[] } = { version };
+          const patch: SubscriptionPatch = { version };
           if (body["name"] !== undefined) patch.name = requireString(body, "name", 200);
+          const current = await store.getTarget(p.tenantId, id);
+          if (current === null) {
+            throw new ApiError(404, "HUB-0404", "no such subscription");
+          }
           if (body["url"] !== undefined) {
             patch.url = requireString(body, "url", 2048);
-            await checkUrl(patch.url);
+          }
+          if (current.kind === "rest-push") {
+            const template = patch.url ?? current.url;
+            const rest = parseRestPatch(current.restConfig as RestConfig, template, body);
+            if (rest !== null) {
+              patch.rest = rest;
+              if (rest.config.auth.tokenUrl !== undefined && body["auth"] !== undefined) await checkUrl(rest.config.auth.tokenUrl);
+            }
+            if (patch.url !== undefined) await checkUrl(sampleUrl(patch.url));
+          } else {
+            for (const f of REST_FIELDS) {
+              if (body[f] !== undefined) {
+                throw new ApiError(400, "HUB-0400", `${f} applies to rest-push subscriptions only`);
+              }
+            }
+            if (patch.url !== undefined) await checkUrl(patch.url);
           }
           if (body["patterns"] !== undefined) patch.patterns = patternsOf(body);
           const sub = await store.patchSubscription(p.tenantId, id, patch);
@@ -328,6 +388,38 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         }
         return { name: "resumeSubscription", status: 200, body: sub };
       }
+      if (action === "test") {
+        const body = object(await readBody(req), ["event", "send"]);
+        const target = await store.getTarget(p.tenantId, id);
+        if (target === null) {
+          throw new ApiError(404, "HUB-0404", "no such subscription");
+        }
+        if (target.kind !== "rest-push" || deps.rest === undefined) {
+          throw new ApiError(409, "HUB-0409", "test send applies to rest-push subscriptions on a hub with rest-push configured");
+        }
+        if (typeof body["event"] !== "object" || body["event"] === null || Array.isArray(body["event"])) {
+          throw new ApiError(400, "HUB-0400", "event must be a CloudEvents JSON object");
+        }
+        // The render runs for the caller: their tenant, the legal entity the edge scoped them to, and their user id
+        // as the token's actor. A sample naming another legal entity is refused rather than rendered under the hub's grant.
+        const sample = body["event"] as Record<string, unknown>;
+        const scoped = legalEntityFromHeaders(req.headers);
+        if (sample["legalentityid"] !== undefined && (typeof sample["legalentityid"] !== "string" || sample["legalentityid"].toLowerCase() !== scoped)) {
+          throw new ApiError(403, "HUB-0403", "the sample event's legalentityid must be the legal entity you are working in");
+        }
+        const parsed = parseEvent({
+          topic: "test", partition: 0, offset: "0", key: null,
+          value: Buffer.from(JSON.stringify({
+            specversion: "1.0", id: randomUUID(), ...sample, tenantid: p.tenantId, actor: p.userId,
+            ...(scoped === undefined ? {} : { legalentityid: scoped }),
+          })),
+        });
+        if ("reason" in parsed) {
+          throw new ApiError(400, "HUB-0400", `event: ${parsed.reason}`);
+        }
+        const out = await deps.rest.preview(store.openRest(p.tenantId, target), parsed.event, body["send"] === true);
+        return { name: "testSubscription", status: 200, body: out };
+      }
       const body = object(await readBody(req), ["from", "cap"]);
       const from = typeof body["from"] === "string" && RFC3339.test(body["from"]) ? Date.parse(body["from"]) : Number.NaN;
       if (Number.isNaN(from)) {
@@ -343,6 +435,24 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         throw new ApiError(404, "HUB-0404", "no such subscription");
       }
       return { name: "replaySubscription", status: 202, body: out };
+    }
+
+    const dl = DELIVERY_REPLAY.exec(path);
+    if (dl !== null) {
+      if (method !== "POST") {
+        return allow("POST");
+      }
+      const p = principalFromHeaders(req.headers);
+      requireDuty(p, DUTY_SUBSCRIPTION_WRITE);
+      const id = (dl[1] as string).toLowerCase();
+      const out = UUID.test(id) ? await store.replayDelivery(p.tenantId, id, clock()) : "missing";
+      if (out === "missing") {
+        throw new ApiError(404, "HUB-0404", "no such delivery");
+      }
+      if (out === "not_dead") {
+        throw new ApiError(409, "HUB-0409", "only a dead-lettered delivery can be replayed");
+      }
+      return { name: "replayDelivery", status: 202, body: { status: "pending" } };
     }
 
     if (path === "/v1/hub/deliveries" || path === "/v1/hub/dead-letters") {
@@ -399,6 +509,8 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         apiErr = err;
       } else if (err instanceof VersionConflictError) {
         apiErr = new ApiError(409, "HUB-0409", err.message);
+      } else if (err instanceof RestConfigError || err instanceof WrongKindError) {
+        apiErr = new ApiError(err instanceof WrongKindError ? 409 : 400, err instanceof WrongKindError ? "HUB-0409" : "HUB-0400", err.message);
       } else if (err instanceof FieldKeysMissingError) {
         apiErr = new ApiError(501, "HUB-0501", err.message);
       } else if (err instanceof BadCursorError) {

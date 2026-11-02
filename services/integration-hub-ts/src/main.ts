@@ -1,17 +1,21 @@
 // Entry point: API on :8080, admin (/metrics, /healthz, /readyz) on :9090, the
 // Kafka consumer when KAFKA_BROKERS and HUB_TOPICS are set, and the retry poller.
 
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import pg from "pg";
 
 import { FieldKeys } from "./crypt.ts";
 import { consumerConfigFromEnv, startConsumer, type RunningConsumer } from "./consumer.ts";
 import { httpTransport } from "./dispatcher.ts";
+import { httpMigrationClient } from "./migrationClient.ts";
 import { Metrics } from "./metrics.ts";
 import { HubStore, MIGRATIONS_DIR, migrate } from "./pgStore.ts";
 import { Poller } from "./poller.ts";
 import { createAdminServer, createHubHandler } from "./server.ts";
-import { allowHttpFromEnv } from "./ssrf.ts";
+import { httpExchange, RestPusher } from "./restPush.ts";
+import { serviceTokenSignerFromEnv } from "./serviceToken.ts";
+import { allowHttpFromEnv, egressPolicyFromEnv } from "./ssrf.ts";
 
 const env = process.env;
 const databaseUrl = env["DATABASE_URL"];
@@ -35,7 +39,20 @@ const ping = async () => {
   await pool.query("select 1");
 };
 
-const api = createServer(createHubHandler({ store, metrics, ping, guard: { allowHttp: allowHttpFromEnv() } }));
+// Operator allowlist for private receiver addresses; a bad entry stops the start rather than silently widening or narrowing egress.
+const guard = { allowHttp: allowHttpFromEnv(), egressAllow: egressPolicyFromEnv(env) };
+// rest-push needs the migration service (render, xref) and a service signing key; without both it is off.
+const signer = serviceTokenSignerFromEnv(env, (path) => readFileSync(path, "utf8"));
+const migrationUrl = env["MIGRATION_URL"] ?? "";
+const rest =
+  migrationUrl !== "" && signer !== null
+    ? new RestPusher({ migration: httpMigrationClient({ baseUrl: migrationUrl, signer }), exchange: httpExchange(guard) })
+    : undefined;
+if (rest === undefined) {
+  console.warn(JSON.stringify({ level: "warn", msg: "rest-push is off: set MIGRATION_URL and PASSAGE_SERVICE_SIGNING_KEY(_FILE)" }));
+}
+
+const api = createServer(createHubHandler({ store, metrics, ping, guard, ...(rest === undefined ? {} : { rest }) }));
 const admin = createAdminServer(metrics, ping);
 api.listen(8080);
 admin.listen(9090);
@@ -43,7 +60,8 @@ admin.listen(9090);
 const poller = new Poller({
   store,
   metrics,
-  transport: httpTransport({ allowHttp: allowHttpFromEnv() }),
+  transport: httpTransport(guard),
+  ...(rest === undefined ? {} : { rest }),
   onError: (err) => console.error(JSON.stringify({ level: "error", msg: "poller", error: (err as Error).message })),
 });
 poller.start(Number(env["HUB_POLL_INTERVAL_MS"] ?? 2000));
