@@ -307,6 +307,161 @@ paths:
         '422': { $ref: '#/components/responses/Problem', description: 'AP-BNK-001 the bank account failed its checksum, IBAN country length or format check; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'RCV-CRY-001 no field encryption keys are configured.' }
+  /v1/receiving/invoice-captures:
+    post:
+      operationId: createInvoiceCapture
+      x-passage-duty: VendorInvoicePost
+      description: >-
+        Captures a vendor invoice document as a draft that posts nothing. format UBL parses a UBL 2.1 Invoice (a DOCTYPE is
+        refused); format OCR hands the PDF or image to the configured document extractor (503 COM-0503 when none is wired:
+        no OCR provider is chosen yet). The capture is CAPTURED, or NEEDS_REVIEW with reviewReasons LOW_CONFIDENCE
+        (confidence below 0.80), TOTAL_MISMATCH (total differs from the line sum by more than 0.01; the UBL total is the
+        tax-exclusive amount) or NO_VENDOR_TAX_ID. The same document (SHA-256) in the same legal entity answers 200 with the
+        existing capture instead of a second row. A person turns a capture into an invoice with POST /v1/receiving/invoices:post.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceCaptureRequest' }
+      responses:
+        '200':
+          description: The document was captured before; the existing capture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '201':
+          description: Captured.
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '413': { $ref: '#/components/responses/Problem', description: 'COM-0413 the body is over 4 MiB.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-CAP-001 the document is not a valid invoice; RCV-CAP-002 the extractor could not read it; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 no OCR extractor is configured.' }
+  /v1/receiving/invoice-captures/{id}:
+    get:
+      operationId: getInvoiceCapture
+      x-passage-duty: APInquire
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The capture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-007' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/service-entry-sheets:
+    post:
+      operationId: createServiceEntrySheet
+      x-passage-duty: ServiceEntryMaintain
+      description: >-
+        Enters a service entry sheet against lines of an APPROVED or CONFIRMED purchase order in the caller's legal entity: per
+        line the service performed (description, quantity, unit price). The vendor and currency come from the purchase order and
+        the line amounts are rounded to the currency's minor units. The sheets of one purchase order line (PENDING and ACCEPTED)
+        may not exceed the line's value, quantity times net price (AP-SES-001). The sheet starts PENDING and posts nothing.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceEntrySheetRequest' }
+      responses:
+        '201':
+          description: Entered.
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceEntrySheet' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-004 purchase order not found.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'AP-SES-001 over the line value; RCV-PO-001 PO not approved; RCV-PO-002 line cancelled; RCV-PO-003 other legal entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 purchase order lookup unavailable.' }
+  /v1/receiving/service-entry-sheets/{id}:
+    get:
+      operationId: getServiceEntrySheet
+      x-passage-duty: ServiceEntryMaintain or ServiceEntryAccept
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The sheet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceEntrySheet' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/service-entry-sheets/{id}:accept:
+    post:
+      operationId: acceptServiceEntrySheet
+      x-passage-duty: ServiceEntryAccept
+      description: Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Writes dev.passage.receiving.serviceentrysheet.decided.v1 to the outbox.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceEntrySheet' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-SES-002 the decider entered the sheet.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-SES-003 the sheet is not PENDING.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/service-entry-sheets/{id}:reject:
+    post:
+      operationId: rejectServiceEntrySheet
+      x-passage-duty: ServiceEntryAccept
+      description: Rejects a PENDING sheet with a reason, which frees its amounts for the purchase order lines. Same segregation as accept.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceEntrySheet' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-SES-002 the decider entered the sheet.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-008' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-SES-003 the sheet is not PENDING.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/invoice-adjustments:post:
     post:
       operationId: postInvoiceAdjustment
@@ -998,6 +1153,91 @@ components:
         legalEntityId: { type: string, format: uuid }
         country: { type: string, pattern: '^[A-Z]{2}$' }
         createdAt: { type: string, format: date-time }
+    InvoiceCaptureRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, format, content]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        format: { type: string, enum: [UBL, OCR] }
+        mediaType: { type: string, enum: [application/pdf, image/png, image/jpeg, image/tiff], description: Required for OCR. }
+        content: { type: string, format: byte, description: The document, base64. }
+    InvoiceCapture:
+      type: object
+      required: [id, legalEntityId, source, status, reviewReasons, vendorTaxId, invoiceNumber, invoiceDate, currency, total, confidence, lines, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        source: { type: string, enum: [UBL, OCR] }
+        status: { type: string, enum: [CAPTURED, NEEDS_REVIEW] }
+        reviewReasons: { type: array, items: { type: string, enum: [LOW_CONFIDENCE, TOTAL_MISMATCH, NO_VENDOR_TAX_ID] } }
+        vendorTaxId: { type: string }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        currency: { type: string }
+        total: { type: string }
+        confidence: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [description, unit, qty, unitPrice, amount]
+            properties:
+              description: { type: string }
+              unit: { type: string }
+              qty: { type: string }
+              unitPrice: { type: string }
+              amount: { type: string }
+    ServiceEntrySheetRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, purchaseOrderId, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [poLineNo, qty, unitPrice]
+            properties:
+              poLineNo: { type: integer, minimum: 1 }
+              description: { type: string, maxLength: 200 }
+              unit: { type: string, maxLength: 20 }
+              qty: { type: [number, string], exclusiveMinimum: 0 }
+              unitPrice: { type: [number, string], minimum: 0 }
+    ServiceEntrySheet:
+      type: object
+      required: [id, legalEntityId, vendorId, purchaseOrderId, currency, status, total, createdBy, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        currency: { type: string }
+        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED] }
+        total: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        rejectReason: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [poLineNo, description, unit, qty, unitPrice, amount]
+            properties:
+              poLineNo: { type: integer }
+              description: { type: string }
+              unit: { type: string }
+              qty: { type: string }
+              unitPrice: { type: string }
+              amount: { type: string }
     InvoiceRequest:
       type: object
       additionalProperties: false

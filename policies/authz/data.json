@@ -498,16 +498,29 @@
       {"resource": "/v1/receiving/plan-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]},
-      {"resource": "/v1/receiving/one-time-payees", "methods": ["POST"]}
+      {"resource": "/v1/receiving/one-time-payees", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-captures", "methods": ["POST"]}
     ]},
     "InvoiceAuditRelease": {"permissions": [
       {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
       {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
     ]},
+    "ServiceEntryMaintain": {"permissions": [
+      {"resource": "/v1/receiving/service-entry-sheets", "methods": ["POST"]},
+      {"resource": "/v1/receiving/service-entry-sheets/*", "methods": ["GET"]}
+    ]},
+    "ServiceEntryAccept": {"permissions": [
+      {"resource": "/v1/receiving/service-entry-sheets/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/service-entry-sheets/*:accept", "methods": ["POST"]},
+      {"resource": "/v1/receiving/service-entry-sheets/*:reject", "methods": ["POST"]}
+    ]},
     "ErsPriceConfirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
-    "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
+    "APInquire": {"permissions": [
+      {"resource": "/v1/receiving/grir", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]}
+    ]},
     "ReceivingAdmin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},
       {"resource": "/v1/receiving/pending-postings/*/resolve", "methods": ["POST"]}
