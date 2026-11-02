@@ -27,21 +27,21 @@ type CfgConstraint struct {
 
 // CfgModel is a versioned constraint model (FR-8.8).
 type CfgModel struct {
-	ID        string
-	MasterID  string
-	Version   int
-	Status    string
-	Attrs     []CfgAttribute
+	ID          string
+	MasterID    string
+	Version     int
+	Status      string
+	Attrs       []CfgAttribute
 	Constraints []CfgConstraint
-	Defaults  map[string]string
+	Defaults    map[string]string
 }
 
 // CfgResult is a solve outcome.
 type CfgResult struct {
-	Feasible     bool
-	Assignment   map[string]string
-	IIS          []string
-	ProductHint  string
+	Feasible    bool
+	Assignment  map[string]string
+	IIS         []string
+	ProductHint string
 }
 
 // DecisionTable is a named allowed-combination table (FR-8.18).

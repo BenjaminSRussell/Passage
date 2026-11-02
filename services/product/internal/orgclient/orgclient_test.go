@@ -2,6 +2,7 @@ package orgclient_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -98,5 +99,38 @@ func TestCheckerEscapesIDs(t *testing.T) {
 	_, _ = orgclient.New(srv.URL).Site(context.Background(), "a/b")
 	if !strings.HasSuffix(raw, "/a%2Fb") {
 		t.Fatalf("path = %s", raw)
+	}
+}
+
+func TestServiceCallerIsSignedOrRefusedBeforeAnyRequest(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"id":"s1","legalEntityId":"le1"}`))
+	}))
+	defer srv.Close()
+	loader, err := tenant.ServicePrincipal("migration-loader", "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000009")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.With(context.Background(), loader)
+	if _, err := orgclient.New(srv.URL).Site(ctx, "s1"); !errors.Is(err, orgclient.ErrServiceCaller) {
+		t.Fatalf("unsigned service caller err = %v, want ErrServiceCaller", err)
+	}
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("product", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = orgclient.NewSigned(srv.URL, signer).Warehouse(ctx, "w1")
+	if len(tenant.ServiceGrantTable()["product"]["org"]) == 0 {
+		if !errors.Is(err, orgclient.ErrServiceCaller) || !errors.Is(err, tenant.ErrNoServiceGrant) {
+			t.Fatalf("service caller without a product -> org grant err = %v, want ErrServiceCaller wrapping ErrNoServiceGrant", err)
+		}
+		if hits != 0 {
+			t.Fatalf("no request may reach org for an unsignable service caller, got %d", hits)
+		}
+	} else if err != nil || hits != 1 {
+		t.Fatalf("granted service caller err = %v hits=%d", err, hits)
 	}
 }

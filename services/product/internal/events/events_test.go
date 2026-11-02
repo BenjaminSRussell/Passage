@@ -9,7 +9,7 @@ import (
 
 func TestEventTypes(t *testing.T) {
 	for _, typ := range []string{
-		events.ProductCreated, events.VariantCreated, events.ProductReleased,
+		events.ProductCreated, events.ProductUpdated, events.VariantCreated, events.ProductReleased,
 		events.ReleasedUpdated, events.IdentifierAdded, events.ConfigurationSolved, events.RelationChanged,
 	} {
 		if !platformevents.ValidType(typ) {

@@ -72,3 +72,25 @@ func TranslationFallback(name, language, tenantBase, productName string) string 
 	}
 	return productName
 }
+
+// ValidLifecycle reports whether s is a product lifecycle state a patch may set.
+func ValidLifecycle(s string) bool {
+	return s == StateDraft || s == StateActive || s == StatePhaseOut || s == StateObsolete
+}
+
+// ApplyProductPatch copies the set fields of patch onto p and returns the names
+// that actually changed.
+func ApplyProductPatch(p *Product, patch ProductPatch) []string {
+	var changed []string
+	set := func(name string, dst *string, src *string) {
+		if src != nil && *src != *dst {
+			*dst = *src
+			changed = append(changed, name)
+		}
+	}
+	set("name", &p.Name, patch.Name)
+	set("description", &p.Description, patch.Description)
+	set("searchName", &p.SearchName, patch.SearchName)
+	set("lifecycleState", &p.LifecycleState, patch.LifecycleState)
+	return changed
+}

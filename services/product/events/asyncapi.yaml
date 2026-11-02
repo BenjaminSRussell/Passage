@@ -10,6 +10,8 @@ channels:
         $ref: '#/components/messages/created'
       released:
         $ref: '#/components/messages/released'
+      updated:
+        $ref: '#/components/messages/updated'
   passage.product.variant:
     address: passage.product.variant
     messages:
@@ -40,6 +42,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.product.product' }
     messages: [{ $ref: '#/channels/passage.product.product/messages/created' }]
+  onUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.product.product' }
+    messages: [{ $ref: '#/channels/passage.product.product/messages/updated' }]
   onReleased:
     action: send
     channel: { $ref: '#/channels/passage.product.product' }
@@ -79,6 +85,17 @@ components:
           productType: { type: string }
           baseUom: { type: string }
       x-passage-type: dev.passage.product.product.created.v1
+    updated:
+      name: updated
+      title: Product master data updated
+      payload:
+        type: object
+        required: [productId, changedFields, version]
+        properties:
+          productId: { type: string, format: uuid }
+          changedFields: { type: array, items: { type: string } }
+          version: { type: integer }
+      x-passage-type: dev.passage.product.product.updated.v1
     released:
       name: released
       title: Product released to a legal entity

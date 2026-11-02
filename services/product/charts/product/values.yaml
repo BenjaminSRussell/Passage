@@ -9,4 +9,8 @@ serviceMonitor: { enabled: false }
 configuratorURL: ""
 orgBaseURL: "http://org:8080"
 serviceIdentity:
+  # Secret with key signing-key: product's Ed25519 seed, used to sign the org
+  # lookups it makes for service callers (the migration loader).
+  signingKeySecret: ""
+  keyId: ""
   publicKeys: ""

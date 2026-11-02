@@ -48,9 +48,9 @@ func convertOnce(convs []Conversion, from, to string, qty decimal.Decimal, preci
 
 func convertTwoHop(convs []Conversion, from, to string, qty decimal.Decimal, precision int32) (decimal.Decimal, bool, error) {
 	type edge struct {
-		next   string
-		apply  func(decimal.Decimal) decimal.Decimal
-		class  string
+		next  string
+		apply func(decimal.Decimal) decimal.Decimal
+		class string
 	}
 	neighbours := func(unit string) []edge {
 		var out []edge

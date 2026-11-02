@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/product/internal/domain"
@@ -266,5 +268,136 @@ func TestGetSavedConfigurationBelongsToItsMasterAndItsVariants(t *testing.T) {
 	}
 	if _, err := s.GetSavedConfiguration(tenant.With(context.Background(), principal(2)), config, master.ID); err == nil {
 		t.Fatal("another tenant must not read the configuration")
+	}
+}
+
+func TestImportConflictsNameTheExistingProductAndUpdateUsesVersion(t *testing.T) {
+	s, ctx := newStore(t, 1)
+	first := testkit.TenantID(70)
+	p, err := s.CreateProduct(ctx, domain.Product{ID: first, ProductNumber: "LEG-1", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Legacy", BaseUOM: "EA"}, "")
+	if err != nil || p.ID != first {
+		t.Fatalf("create with supplied id: %v %+v", err, p)
+	}
+	_, err = s.CreateProduct(ctx, domain.Product{ID: testkit.TenantID(71), ProductNumber: "LEG-1", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Dup", BaseUOM: "EA"}, "")
+	var pr *httpx.Problem
+	if !errors.As(err, &pr) || pr.Status != 409 || pr.Errors["existingId"] != first {
+		t.Fatalf("duplicate number must be 409 naming %s, got %v", first, err)
+	}
+	_, err = s.CreateProduct(ctx, domain.Product{ID: first, ProductNumber: "LEG-2", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Other", BaseUOM: "EA"}, "")
+	if !errors.As(err, &pr) || pr.Status != 409 || pr.Code != "PRD-ID-TAKEN" {
+		t.Fatalf("taken id must be 409 PRD-ID-TAKEN, got %v", err)
+	}
+	name := "Renamed"
+	got, err := s.UpdateProduct(ctx, first, domain.ProductPatch{Name: &name}, 1)
+	if err != nil || got.Name != name || got.Version != 2 {
+		t.Fatalf("update: %v %+v", err, got)
+	}
+	if _, err := s.UpdateProduct(ctx, first, domain.ProductPatch{Name: &name}, 1); !errors.As(err, &pr) || pr.Status != 412 {
+		t.Fatalf("stale version must be 412, got %v", err)
+	}
+}
+
+// appStore runs as the NOSUPERUSER NOBYPASSRLS passage_app role so tenant
+// isolation is enforced by row-level security, not by the queries alone.
+func appStore(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
+	t.Helper()
+	admin, pool := testkit.DBWithApp(t)
+	ctx := tenant.With(context.Background(), principal(1))
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	if err := grantApp(ctx, admin, schema); err != nil {
+		t.Fatal(err)
+	}
+	return store.New(pool), admin
+}
+
+func TestImportIDsAndNumbersAreScopedToTheTenantUnderRLS(t *testing.T) {
+	s, admin := appStore(t)
+	one := tenant.With(context.Background(), principal(1))
+	two := tenant.With(context.Background(), principal(2))
+	id := testkit.TenantID(80)
+	mk := func(ctx context.Context, number string) error {
+		_, err := s.CreateProduct(ctx, domain.Product{ID: id, ProductNumber: number, Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Legacy", BaseUOM: "EA"}, "")
+		return err
+	}
+	if err := mk(one, "IMP-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Another tenant reusing the same id and number neither collides nor learns that tenant 1 has them.
+	if err := mk(two, "IMP-1"); err != nil {
+		t.Fatalf("same id and number in another tenant must be accepted, got %v", err)
+	}
+	var pr *httpx.Problem
+	if err := mk(one, "IMP-2"); !errors.As(err, &pr) || pr.Status != 409 || pr.Code != "PRD-ID-TAKEN" {
+		t.Fatalf("id reused inside the tenant = %v, want 409 PRD-ID-TAKEN", err)
+	}
+	name := "Tenant two"
+	if _, err := s.UpdateProduct(two, id, domain.ProductPatch{Name: &name}, 1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetProduct(one, id)
+	if err != nil || got.Name != "Legacy" || got.Version != 1 {
+		t.Fatalf("tenant 2's update must not touch tenant 1's product: %v %+v", err, got)
+	}
+	var events int
+	var fields string
+	if err := admin.QueryRow(context.Background(), `select count(*), coalesce(min(payload->'data'->>'changedFields'),'') from outbox where type=$1 and tenant_id=$2`,
+		"dev.passage.product.product.updated.v1", testkit.TenantID(2)).Scan(&events, &fields); err != nil || events != 1 || fields != `["name"]` {
+		t.Fatalf("one product.updated event for tenant 2 naming the changed field, got %d %s %v", events, fields, err)
+	}
+	if _, err := s.UpdateProduct(tenant.With(context.Background(), principal(3)), id, domain.ProductPatch{Name: &name}, 1); !errors.As(err, &pr) || pr.Status != 404 {
+		t.Fatalf("update from a tenant without the product = %v, want 404", err)
+	}
+}
+
+func TestUpdateProductFollowsTheLifecycleMachineAndActivationAttributes(t *testing.T) {
+	s, ctx := newStore(t, 1)
+	if err := s.UpsertAttribute(ctx, domain.AttributeType{Code: "material", Kind: "text", Required: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "LC-1", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "LC", BaseUOM: "EA"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func(v string) domain.ProductPatch { return domain.ProductPatch{LifecycleState: &v} }
+	var pr *httpx.Problem
+	if _, err := s.UpdateProduct(ctx, p.ID, state(domain.StatePhaseOut), 1); !errors.As(err, &pr) || pr.Code != domain.CodeLifecycleIllegal {
+		t.Fatalf("draft -> phase_out = %v, want %s", err, domain.CodeLifecycleIllegal)
+	}
+	if _, err := s.UpdateProduct(ctx, p.ID, state(domain.StateActive), 1); !errors.As(err, &pr) || pr.Status != 422 || pr.Code != domain.CodeAttrRequired {
+		t.Fatalf("activation without the required attribute = %v, want 422 %s (BR-8.9)", err, domain.CodeAttrRequired)
+	}
+	if err := s.SetAttributes(ctx, p.ID, map[string]string{"material": "steel"}); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		to      string
+		version int
+		ok      bool
+	}{
+		{domain.StateActive, 1, true},
+		{domain.StateDraft, 2, false},
+		{domain.StatePhaseOut, 2, true},
+		{domain.StateObsolete, 3, true},
+		{domain.StateActive, 4, false},
+		{domain.StatePhaseOut, 4, false},
+	}
+	for _, st := range steps {
+		got, err := s.UpdateProduct(ctx, p.ID, state(st.to), st.version)
+		if st.ok && (err != nil || got.LifecycleState != st.to || got.Version != st.version+1) {
+			t.Fatalf("-> %s: %v %+v", st.to, err, got)
+		}
+		if !st.ok && (!errors.As(err, &pr) || pr.Status != 422 || pr.Code != domain.CodeLifecycleIllegal) {
+			t.Fatalf("-> %s must be refused with 422 %s, got %v", st.to, domain.CodeLifecycleIllegal, err)
+		}
+	}
+	got, err := s.GetProduct(ctx, p.ID)
+	if err != nil || got.LifecycleState != domain.StateObsolete || got.Version != 4 {
+		t.Fatalf("refused moves must write nothing: %v %+v", err, got)
 	}
 }

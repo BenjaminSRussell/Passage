@@ -63,7 +63,19 @@ func (f *fakeStore) CreateProduct(_ context.Context, in domain.Product, _ string
 	if err := domain.ValidateProductNumber(in.ProductNumber); err != nil {
 		return domain.Product{}, httpx.NewProblem(http.StatusUnprocessableEntity, err.(*domain.Error).Code, err.Error())
 	}
-	in.ID = "p-" + in.ProductNumber
+	for _, e := range f.products {
+		if e.ProductNumber == in.ProductNumber {
+			pr := httpx.NewProblem(http.StatusConflict, domain.CodeNumFormat, "product number already exists")
+			pr.Errors = map[string]string{"existingId": e.ID}
+			return domain.Product{}, pr
+		}
+	}
+	if in.ID == "" {
+		in.ID = "p-" + in.ProductNumber
+	} else if _, taken := f.products[in.ID]; taken {
+		return domain.Product{}, httpx.NewProblem(http.StatusConflict, "PRD-ID-TAKEN", "product id is already in use")
+	}
+	in.Version = 1
 	f.products[in.ID] = in
 	f.created = append(f.created, in)
 	return in, nil
@@ -73,6 +85,24 @@ func (f *fakeStore) GetProduct(_ context.Context, id string) (domain.Product, er
 	if !ok {
 		return p, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
 	}
+	return p, nil
+}
+func (f *fakeStore) UpdateProduct(_ context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error) {
+	p, ok := f.products[id]
+	if !ok {
+		return p, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
+	}
+	if p.Version != version {
+		return p, httpx.NewProblem(http.StatusPreconditionFailed, "PRD-VERSION-CONFLICT", "product changed since it was read")
+	}
+	from := p.LifecycleState
+	if len(domain.ApplyProductPatch(&p, patch)) > 0 {
+		if err := domain.AssertLifecycleTransition(from, p.LifecycleState, ""); err != nil {
+			return domain.Product{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeLifecycleIllegal, err.Error())
+		}
+		p.Version++
+	}
+	f.products[id] = p
 	return p, nil
 }
 func (f *fakeStore) GetSavedConfiguration(_ context.Context, id, productID string) (domain.ConfigurationRef, error) {
@@ -439,7 +469,7 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = chi.Walk(newRouter(newFake()), func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		if !strings.Contains(string(spec), "\n  "+route+":") {
+		if !strings.Contains(string(spec), "\n  "+route+":\n") { // exact path key, so /gtins is not matched by /gtins:validate
 			t.Errorf("openapi.yaml does not document %s", route)
 		}
 		return nil

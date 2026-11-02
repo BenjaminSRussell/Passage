@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -31,16 +32,23 @@ const (
 	dutyMaintain      = "product.write"
 	dutyRelease       = "product.release"
 	dutyReleasedWrite = "product.released.write"
-	dutySetup         = "product.setup.write"
-	dutyConfigure     = "product.configure"
-	dutyGTIN          = "product.gtin.allocate"
-	dutyJobs          = "product.jobs.write"
-	dutyExplode       = "product.variants.explode"
-	dutyReleasedRead  = "product.released.read"
+	// dutyImport is held by the migration loader service token; it opens only
+	// product create/update, attributes, identifiers, relations, release and the
+	// released-product patch; release and patch stay in its own legal entity.
+	dutyImport       = "product.import.write"
+	dutySetup        = "product.setup.write"
+	dutyConfigure    = "product.configure"
+	dutyGTIN         = "product.gtin.allocate"
+	dutyJobs         = "product.jobs.write"
+	dutyExplode      = "product.variants.explode"
+	dutyReleasedRead = "product.released.read"
 
 	dutyConfigurationRead = "product.configuration.read"
 
 	codeOrgUnavailable = "PRD-ORG-UNAVAILABLE"
+	// codeOrgServiceCaller: a service caller (the migration loader) placed a
+	// site or warehouse, and product cannot sign an org lookup for it yet.
+	codeOrgServiceCaller = "PRD-ORG-SERVICE-CALLER"
 )
 
 type Solver interface {
@@ -84,17 +92,18 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/dimension-groups", a.createDimensionGroup)
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/item-groups", a.createItemGroup)
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/item-model-groups", a.createItemModelGroup)
-	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products", a.createProduct)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products", a.createProduct)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products", a.listProducts)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products:search", a.search)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}", a.getProduct)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Patch("/v1/product/products/{id}", a.updateProduct)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyExplode)).Post("/v1/product/products/{id}/variants:explode", a.explode)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}/variants:lookup", a.lookup)
-	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/attributes", a.setAttributes)
-	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/identifiers", a.addIdentifier)
-	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/product/products/{id}/relations", a.addRelation)
-	r.With(authz.RequireDuty(dutyRelease)).Post("/v1/product/releases", a.release)
-	r.With(authz.RequireDuty(dutyReleasedWrite)).Patch("/v1/product/released-products/{id}", a.patchReleased)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products/{id}/attributes", a.setAttributes)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products/{id}/identifiers", a.addIdentifier)
+	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products/{id}/relations", a.addRelation)
+	r.With(authz.RequireAnyDuty(dutyRelease, dutyImport)).Post("/v1/product/releases", a.release)
+	r.With(authz.RequireAnyDuty(dutyReleasedWrite, dutyImport)).Patch("/v1/product/released-products/{id}", a.patchReleased)
 	r.With(authz.RequireDuty(dutyReleasedWrite)).Put("/v1/product/released-products/{id}/site-defaults/{siteId}", a.putSiteDefault)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/released-products/{id}/site-defaults/{siteId}", a.getSiteDefault)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/released-products/{id}/process-policy", a.processPolicy)
@@ -252,6 +261,33 @@ type createProductRequest struct {
 	DimensionGroupID string                    `json:"dimensionGroupId"`
 	LifecycleState   string                    `json:"lifecycleState"`
 	Service          *domain.ServiceAttributes `json:"service"`
+	// ID is a caller-chosen UUID, accepted only from a caller holding product.import.write.
+	ID string `json:"id"`
+}
+
+// importScope keeps a caller admitted only by product.import.write inside its
+// own legal entity: someone holding the route's ordinary duty (holdsOrdinary,
+// computed by the caller with the duty constant inline so the identity
+// contract scan can read it) is governed by the usual scope checks, so the
+// human path is unchanged.
+func importScope(w http.ResponseWriter, r *http.Request, holdsOrdinary bool, legalEntityID string) bool {
+	p, _ := tenant.FromContext(r.Context())
+	if holdsOrdinary || tenant.InLegalEntityScope(p, legalEntityID) {
+		return true
+	}
+	httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the import token's scope"))
+	return false
+}
+
+// importID canonicalises a caller-supplied product id: the 36-character
+// hyphenated form of an RFC 9562 UUID of version 1 to 8 (so neither the nil
+// nor the max UUID), lower-cased as Postgres returns it.
+func importID(s string) (string, bool) {
+	u, err := uuid.Parse(s)
+	if err != nil || len(s) != 36 || u.Variant() != uuid.RFC4122 || u.Version() < 1 || u.Version() > 8 {
+		return "", false
+	}
+	return u.String(), true
 }
 
 func (a *API) createProduct(w http.ResponseWriter, r *http.Request) {
@@ -263,8 +299,22 @@ func (a *API) createProduct(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if req.ID != "" {
+		if p, _ := tenant.FromContext(r.Context()); !p.HasDuty(dutyImport) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a caller-supplied id needs duty "+dutyImport))
+			return
+		}
+		id, ok := importID(req.ID)
+		if !ok {
+			p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+			p.Errors = map[string]string{"id": "must be a hyphenated RFC 9562 UUID of version 1 to 8"}
+			httpx.Fail(w, r, p)
+			return
+		}
+		req.ID = id
+	}
 	in := domain.Product{
-		ProductNumber: strings.ToUpper(req.ProductNumber), Subtype: req.Subtype, ProductType: req.ProductType,
+		ID: req.ID, ProductNumber: strings.ToUpper(req.ProductNumber), Subtype: req.Subtype, ProductType: req.ProductType,
 		Name: req.Name, Description: req.Description, SearchName: req.SearchName, BaseUOM: strings.ToUpper(req.BaseUOM),
 		DimensionGroupID: req.DimensionGroupID, LifecycleState: req.LifecycleState, Service: req.Service,
 	}
@@ -297,6 +347,47 @@ func (a *API) listProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// updateProduct patches name, description, searchName and lifecycleState under
+// If-Match (the product version, as returned in the body).
+func (a *API) updateProduct(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	version, err := strconv.Atoi(strings.Trim(strings.TrimSpace(r.Header.Get("If-Match")), `"`))
+	if err != nil || version < 1 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, "PRD-VERSION-REQUIRED", "If-Match with the product version is required"))
+		return
+	}
+	if !ids.Valid(chi.URLParam(r, "id")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found"))
+		return
+	}
+	var patch domain.ProductPatch
+	if err := httpx.Decode(r, &patch); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	bad := map[string]string{}
+	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
+		bad["name"] = "must not be empty"
+	}
+	if patch.LifecycleState != nil && !domain.ValidLifecycle(*patch.LifecycleState) {
+		bad["lifecycleState"] = "must be draft, active, phase_out or obsolete"
+	}
+	if len(bad) > 0 {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+		p.Errors = bad
+		httpx.Fail(w, r, p)
+		return
+	}
+	out, err := a.store.UpdateProduct(r.Context(), chi.URLParam(r, "id"), patch, version)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (a *API) getProduct(w http.ResponseWriter, r *http.Request) {
@@ -437,6 +528,9 @@ func (a *API) release(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if p, _ := tenant.FromContext(r.Context()); !importScope(w, r, p.HasDuty(dutyRelease), req.LegalEntityID) {
+		return
+	}
 	placements := []placement{{"defaultSiteId", req.DefaultSiteID, "defaultWarehouseId", req.DefaultWarehouseID}}
 	sites := make([]string, 0, len(req.SiteDefaults))
 	for key := range req.SiteDefaults {
@@ -476,6 +570,16 @@ func (a *API) patchReleased(w http.ResponseWriter, r *http.Request) {
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	if p, _ := tenant.FromContext(r.Context()); !p.HasDuty(dutyReleasedWrite) {
+		cur, err := a.store.GetReleased(r.Context(), chi.URLParam(r, "id"))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if !importScope(w, r, false, cur.LegalEntityID) {
+			return
+		}
 	}
 	rp, err := a.store.PatchReleased(r.Context(), chi.URLParam(r, "id"), req)
 	if err != nil {
@@ -754,6 +858,11 @@ func orgProblem(r *http.Request, err error) *httpx.Problem {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+	}
+	if errors.Is(err, orgclient.ErrServiceCaller) {
+		slog.Error("org membership check cannot be signed for a service caller", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		return httpx.NewProblem(http.StatusServiceUnavailable, codeOrgServiceCaller,
+			"org cannot confirm sites and warehouses for a service caller until product holds a service grant to org (org.read) and a signing key; nothing is written")
 	}
 	slog.Warn("org membership check unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 	return httpx.NewProblem(http.StatusServiceUnavailable, codeOrgUnavailable, "org service is unavailable")

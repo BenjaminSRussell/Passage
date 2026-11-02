@@ -42,10 +42,10 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 }
 
 func TestOrgChecker(t *testing.T) {
-	if orgChecker(func(string) string { return "" }) != nil {
+	if orgChecker(func(string) string { return "" }, nil) != nil {
 		t.Fatal("empty ORG_BASE_URL must disable the check")
 	}
-	if orgChecker(func(string) string { return "http://org:8080" }) == nil {
+	if orgChecker(func(string) string { return "http://org:8080" }, nil) == nil {
 		t.Fatal("ORG_BASE_URL must enable the check")
 	}
 }

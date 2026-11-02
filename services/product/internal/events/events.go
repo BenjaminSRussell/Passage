@@ -1,13 +1,14 @@
 package events
 
 const (
-	ProductCreated     = "dev.passage.product.product.created.v1"
-	VariantCreated     = "dev.passage.product.variant.created.v1"
-	ProductReleased    = "dev.passage.product.product.released.v1"
-	ReleasedUpdated    = "dev.passage.product.releasedproduct.updated.v1"
-	IdentifierAdded    = "dev.passage.product.identifier.added.v1"
+	ProductCreated      = "dev.passage.product.product.created.v1"
+	ProductUpdated      = "dev.passage.product.product.updated.v1"
+	VariantCreated      = "dev.passage.product.variant.created.v1"
+	ProductReleased     = "dev.passage.product.product.released.v1"
+	ReleasedUpdated     = "dev.passage.product.releasedproduct.updated.v1"
+	IdentifierAdded     = "dev.passage.product.identifier.added.v1"
 	ConfigurationSolved = "dev.passage.product.configuration.solved.v1"
-	RelationChanged    = "dev.passage.product.relation.changed.v1"
+	RelationChanged     = "dev.passage.product.relation.changed.v1"
 )
 
 type ProductCreatedData struct {
@@ -18,10 +19,16 @@ type ProductCreatedData struct {
 	BaseUOM       string `json:"baseUom"`
 }
 
+type ProductUpdatedData struct {
+	ProductID     string   `json:"productId"`
+	ChangedFields []string `json:"changedFields"`
+	Version       int      `json:"version"`
+}
+
 type VariantCreatedData struct {
-	MasterID         string              `json:"masterId"`
-	VariantIDs       []string            `json:"variantIds"`
-	DimensionValues  []map[string]string `json:"dimensionValues"`
+	MasterID        string              `json:"masterId"`
+	VariantIDs      []string            `json:"variantIds"`
+	DimensionValues []map[string]string `json:"dimensionValues"`
 }
 
 type ProductReleasedData struct {
@@ -36,10 +43,10 @@ type ProductReleasedData struct {
 }
 
 type ReleasedUpdatedData struct {
-	ReleasedProductID string            `json:"releasedProductId"`
-	ChangedFields     []string          `json:"changedFields"`
-	LifecycleState    string            `json:"lifecycleState"`
-	Blocks            map[string]bool   `json:"blocks"`
+	ReleasedProductID string          `json:"releasedProductId"`
+	ChangedFields     []string        `json:"changedFields"`
+	LifecycleState    string          `json:"lifecycleState"`
+	Blocks            map[string]bool `json:"blocks"`
 }
 
 type IdentifierAddedData struct {

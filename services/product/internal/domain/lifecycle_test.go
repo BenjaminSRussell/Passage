@@ -9,14 +9,14 @@ import (
 
 func TestLifecycleMachine(t *testing.T) {
 	legal := map[[2]string]bool{
-		{domain.StateDraft, domain.StateActive}:       true,
-		{domain.StateActive, domain.StatePhaseOut}:    true,
-		{domain.StatePhaseOut, domain.StateActive}:    true,
-		{domain.StatePhaseOut, domain.StateObsolete}:  true,
-		{domain.StateDraft, domain.StateDraft}:        true,
-		{domain.StateActive, domain.StateActive}:      true,
-		{domain.StatePhaseOut, domain.StatePhaseOut}:  true,
-		{domain.StateObsolete, domain.StateObsolete}:  true,
+		{domain.StateDraft, domain.StateActive}:      true,
+		{domain.StateActive, domain.StatePhaseOut}:   true,
+		{domain.StatePhaseOut, domain.StateActive}:   true,
+		{domain.StatePhaseOut, domain.StateObsolete}: true,
+		{domain.StateDraft, domain.StateDraft}:       true,
+		{domain.StateActive, domain.StateActive}:     true,
+		{domain.StatePhaseOut, domain.StatePhaseOut}: true,
+		{domain.StateObsolete, domain.StateObsolete}: true,
 	}
 	states := []string{domain.StateDraft, domain.StateActive, domain.StatePhaseOut, domain.StateObsolete}
 	for _, from := range states {

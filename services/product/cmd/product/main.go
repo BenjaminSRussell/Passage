@@ -63,7 +63,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	a := api.New(store.New(pool)).WithOrg(orgChecker(getenv))
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	a := api.New(store.New(pool)).WithOrg(orgChecker(getenv, signer))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -84,11 +88,13 @@ func addr(getenv func(string) string, key, fallback string) string {
 	return fallback
 }
 
-func orgChecker(getenv func(string) string) orgclient.Checker {
+// orgChecker builds the org client; signer (nil without a signing key) signs
+// lookups made for service callers, whose own headers org refuses.
+func orgChecker(getenv func(string) string, signer *tenant.ServiceSigner) orgclient.Checker {
 	baseURL := getenv("ORG_BASE_URL")
 	if baseURL == "" {
 		slog.Warn("org membership check disabled: ORG_BASE_URL is empty")
 		return nil
 	}
-	return orgclient.New(baseURL)
+	return orgclient.NewSigned(baseURL, signer)
 }

@@ -29,23 +29,31 @@ const ProductNumberPattern = `^[A-Z0-9][A-Z0-9._-]{0,39}$`
 
 // Product is the shared tenant-level item, master or variant.
 type Product struct {
-	ID                      string
-	ProductNumber           string
-	Subtype                 string
-	MasterID                string
-	ProductType             string
-	Name                    string
-	Description             string
-	SearchName              string
-	BaseUOM                 string
-	DimensionGroupID        string
-	StorageDimensionGroupID string
+	ID                       string
+	ProductNumber            string
+	Subtype                  string
+	MasterID                 string
+	ProductType              string
+	Name                     string
+	Description              string
+	SearchName               string
+	BaseUOM                  string
+	DimensionGroupID         string
+	StorageDimensionGroupID  string
 	TrackingDimensionGroupID string
-	LifecycleState          string
-	DimensionValues         map[string]string
-	VariantHash             string
-	Service                 *ServiceAttributes
-	Version                 int
+	LifecycleState           string
+	DimensionValues          map[string]string
+	VariantHash              string
+	Service                  *ServiceAttributes
+	Version                  int
+}
+
+// ProductPatch is a partial update of a product; nil leaves a field alone.
+type ProductPatch struct {
+	Name           *string `json:"name"`
+	Description    *string `json:"description"`
+	SearchName     *string `json:"searchName"`
+	LifecycleState *string `json:"lifecycleState"`
 }
 
 // Dimension describes one product dimension and its allowed values.
@@ -126,36 +134,36 @@ type SiteDefault struct {
 
 // ReleaseDefaults are entity-level defaults plus optional site overrides.
 type ReleaseDefaults struct {
-	LegalEntityID     string
-	ItemGroupID       string
-	ItemModelGroupID  string
-	InventoryUOM      string
-	PurchaseUOM       string
-	SalesUOM          string
-	BOMUOM            string
-	DefaultSiteID     string
+	LegalEntityID      string
+	ItemGroupID        string
+	ItemModelGroupID   string
+	InventoryUOM       string
+	PurchaseUOM        string
+	SalesUOM           string
+	BOMUOM             string
+	DefaultSiteID      string
 	DefaultWarehouseID string
-	SiteDefaults      map[string]SiteDefault
+	SiteDefaults       map[string]SiteDefault
 }
 
 // ReleasedProduct is a product usable in one legal entity.
 type ReleasedProduct struct {
-	ID                   string
-	ProductID            string
-	LegalEntityID        string
-	ItemNumber           string
-	ItemGroupID          string
-	ItemModelGroupID     string
-	DefaultSiteID        string
-	DefaultWarehouseID   string
-	LifecycleState       string
-	BlockedPurchase      bool
-	BlockedSales         bool
-	BlockedInventory     bool
-	BlockedProduction    bool
-	SiteDefaults         map[string]SiteDefault
-	HasFinancialTxn      bool
-	Version              int
+	ID                 string
+	ProductID          string
+	LegalEntityID      string
+	ItemNumber         string
+	ItemGroupID        string
+	ItemModelGroupID   string
+	DefaultSiteID      string
+	DefaultWarehouseID string
+	LifecycleState     string
+	BlockedPurchase    bool
+	BlockedSales       bool
+	BlockedInventory   bool
+	BlockedProduction  bool
+	SiteDefaults       map[string]SiteDefault
+	HasFinancialTxn    bool
+	Version            int
 }
 
 // ServiceAttributes extend a product of type service (FR-8.17).

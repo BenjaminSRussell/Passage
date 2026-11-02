@@ -33,6 +33,7 @@ type Store interface {
 	CreateItemModelGroup(ctx context.Context, in domain.ItemModelGroup) (domain.ItemModelGroup, error)
 	CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error)
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	UpdateProduct(ctx context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error)
 	GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error)
 	ListProducts(ctx context.Context, limit int) ([]domain.Product, error)
 	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error)
@@ -226,7 +227,37 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 			ProductID: in.ID, ProductNumber: in.ProductNumber, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM,
 		})
 	})
-	return in, problem(err, domain.CodeNumFormat, "product number already exists")
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return in, s.productConflict(ctx, p.TenantID, in, err)
+	}
+	return in, err
+}
+
+// productConflict explains a unique violation on insert: the existing product
+// with that number (its id in errors.existingId, so a loader can link it), or
+// another product already using the caller-supplied id. Anything else keeps the
+// plain conflict.
+func (s *Postgres) productConflict(ctx context.Context, tenantID string, in domain.Product, cause error) error {
+	var existing string
+	_ = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select id::text from product where tenant_id=$1 and product_number=$2`, tenantID, in.ProductNumber).Scan(&existing)
+	})
+	if existing != "" {
+		pr := httpx.NewProblem(http.StatusConflict, domain.CodeNumFormat, "product number already exists")
+		pr.Errors = map[string]string{"existingId": existing}
+		return pr
+	}
+	var taken bool
+	_ = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select exists(select 1 from product where tenant_id=$1 and id=$2)`, tenantID, in.ID).Scan(&taken)
+	})
+	if taken {
+		pr := httpx.NewProblem(http.StatusConflict, "PRD-ID-TAKEN", "product id is already in use")
+		pr.Errors = map[string]string{"id": in.ID}
+		return pr
+	}
+	return problem(cause, domain.CodeNumFormat, "product number already exists")
 }
 
 func scanProduct(row pgx.Row) (domain.Product, error) {
@@ -259,6 +290,53 @@ func scanProduct(row pgx.Row) (domain.Product, error) {
 
 const productSelect = `id, product_number, subtype, master_id::text, product_type, name, description, search_name, base_uom,
 	dimension_group_id::text, storage_dimension_group_id::text, tracking_dimension_group_id::text, lifecycle_state, dimension_values, variant_hash, service, version`
+
+// UpdateProduct applies a partial update when the stored version equals version
+// (412 otherwise) and bumps it.
+func (s *Postgres) UpdateProduct(ctx context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return domain.Product{}, err
+	}
+	var out domain.Product
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, e := scanProduct(tx.QueryRow(ctx, `select `+productSelect+` from product where tenant_id=$1 and id=$2 for update`, p.TenantID, id))
+		if e != nil {
+			return e
+		}
+		if cur.Version != version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, "PRD-VERSION-CONFLICT", "product changed since it was read")
+		}
+		from := cur.LifecycleState
+		changed := domain.ApplyProductPatch(&cur, patch)
+		if cur.LifecycleState != from {
+			// BR-8.1 category machine, then BR-8.9 required attributes on the move to active.
+			if err := domain.AssertLifecycleTransition(from, cur.LifecycleState, ""); err != nil {
+				return domainProblem(err)
+			}
+			if cur.LifecycleState == domain.StateActive {
+				if err := s.assertActivation(ctx, tx, p.TenantID, id, from); err != nil {
+					return err
+				}
+			}
+		}
+		if len(changed) == 0 {
+			out = cur
+			return nil
+		}
+		if _, e := tx.Exec(ctx, `update product set name=$3, description=$4, search_name=$5, lifecycle_state=$6, version=version+1 where tenant_id=$1 and id=$2`,
+			p.TenantID, id, cur.Name, cur.Description, cur.SearchName, cur.LifecycleState); e != nil {
+			return e
+		}
+		cur.Version++
+		out = cur
+		return emit(ctx, tx, pevents.ProductUpdated, "product", id, pevents.ProductUpdatedData{ProductID: id, ChangedFields: changed, Version: cur.Version})
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
+	}
+	return out, err
+}
 
 func (s *Postgres) GetProduct(ctx context.Context, id string) (domain.Product, error) {
 	p, err := principal(ctx)
@@ -691,6 +769,33 @@ func (s *Postgres) SetAttributes(ctx context.Context, productID string, values m
 		}
 		return nil
 	})
+}
+
+// assertActivation applies BR-8.9 to a product moving from from to active: every
+// required attribute is set and every stored value is valid.
+func (s *Postgres) assertActivation(ctx context.Context, tx pgx.Tx, tenantID, productID, from string) error {
+	defs, err := loadAttributeDefs(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `select attribute_code, value from product_attribute_value where tenant_id=$1 and product_id=$2`, tenantID, productID)
+	if err != nil {
+		return err
+	}
+	values := map[string]string{}
+	for rows.Next() {
+		var code, value string
+		if err := rows.Scan(&code, &value); err != nil {
+			rows.Close()
+			return err
+		}
+		values[code] = value
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return domainProblem(domain.AssertActivationAttributes(from, domain.StateActive, defs, values))
 }
 
 func loadAttributeDefs(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.AttributeType, error) {

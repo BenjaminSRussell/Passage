@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: product
-  version: 0.3.0
+  version: 0.4.0
   description: Product master, variants, released products, GS1 identifiers and configurator.
 servers:
   - url: https://app.local.passage.dev
@@ -9,6 +9,8 @@ paths:
   /v1/product/products:
     post:
       operationId: createProduct
+      summary: Create a product
+      description: 'Also accepted with duty product.import.write (migration loader). Only that duty may supply id.'
       x-passage-duty: product.write
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
@@ -17,23 +19,49 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateProduct' } } }
       responses:
         '201': { description: Product created. }
+        '400': { description: 'Validation failed; for an import, id is not a hyphenated RFC 9562 UUID of version 1 to 8 (errors.id).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003: id supplied without duty product.import.write.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'Product number already exists (errors.existingId carries the existing product id) or, for an import, the supplied id is taken (PRD-ID-TAKEN).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listProducts
+      summary: List products
       x-passage-duty: product.read
       responses:
         '200': { description: Products and masters. }
   /v1/product/products/{id}:
     get:
       operationId: getProduct
+      summary: Get a product
       x-passage-duty: product.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Product with variant summary. }
+        '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    patch:
+      operationId: updateProduct
+      summary: Update a product
+      description: 'Partial update of name, description, searchName and lifecycleState under If-Match (the product version). lifecycleState follows BR-8.1 (draft to active, active to phase_out, phase_out to active or obsolete; obsolete is terminal) and a move to active needs every required attribute (BR-8.9). Writes product.updated with the changed fields; a patch that changes nothing keeps the version and writes no event. Also accepted with duty product.import.write.'
+      x-passage-duty: product.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string }, description: The product version. }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, description: { type: string }, searchName: { type: string }, lifecycleState: { type: string, enum: [draft, active, phase_out, obsolete] } } } } }
+      responses:
+        '200': { description: Updated product with its new version. }
+        '400': { description: Invalid field value., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1) or PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: The product changed since it was read (PRD-VERSION-CONFLICT)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match missing (PRD-VERSION-REQUIRED)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/products/{id}/variants:explode:
     post:
       operationId: explodeVariants
+      summary: Explode master variants
+      description: 'Also accepted with duty product.variants.explode (batch job).'
       x-passage-duty: product.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -56,6 +84,7 @@ paths:
   /v1/product/products/{id}/variants:lookup:
     get:
       operationId: lookupVariant
+      summary: Look up a variant by dimension values
       x-passage-duty: product.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -64,17 +93,23 @@ paths:
         - { name: style, in: query, schema: { type: string } }
       responses:
         '200': { description: Matching variant. }
+        '404': { description: No variant with these dimension values., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/releases:
     post:
       operationId: releaseProduct
+      summary: Release a product to a legal entity
+      description: 'Also accepted with duty product.import.write, only for the token legal entity. Sites and warehouses are confirmed with org when ORG_BASE_URL is set; for a service caller product signs that lookup itself.'
       x-passage-duty: product.release
       responses:
         '201': { description: Released product. }
+        '403': { description: 'AUTH-0003: an import caller named a legal entity outside its token.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRD-RELEASE-SITE-INVALID (unknown site or another legal entity) or PRD-RELEASE-WAREHOUSE-INVALID (unknown warehouse, another legal entity or not in the site); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '503': { description: 'PRD-ORG-UNAVAILABLE: the org service could not confirm sites and warehouses; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRD-ORG-UNAVAILABLE: the org service could not confirm sites and warehouses; PRD-ORG-SERVICE-CALLER: the caller is a service and product cannot sign the org lookup (no signing key or no product to org grant); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/released-products:
     get:
       operationId: listReleasedProducts
+      summary: List released product ids
+      description: 'Also accepted with duty product.released.read (batch job).'
       x-passage-duty: product.read
       parameters:
         - { name: after, in: query, schema: { type: string, format: uuid }, description: Keyset cursor; the last id of the previous page. }
@@ -85,14 +120,17 @@ paths:
   /v1/product/released-products/{id}/site-defaults/{siteId}:
     get:
       operationId: resolveSiteDefault
+      summary: Resolve a released product's site default
       x-passage-duty: product.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: siteId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: Cascaded site default. }
+        '422': { description: 'PRD-RELEASE-DEFAULT-MISSING: no site or warehouse default resolves.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     put:
       operationId: putSiteDefault
+      summary: Replace a released product's site default
       x-passage-duty: product.released.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -104,26 +142,29 @@ paths:
   /v1/product/released-products/{id}/process-policy:
     get:
       operationId: processPolicy
+      summary: Evaluate the lifecycle process policy
       x-passage-duty: product.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: process, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: Allow or warn. }
-        '422': { description: Blocked. }
+        '200': { description: 'Allow, or warn with PRD-LC-WARN.' }
+        '422': { description: 'PRD-LC-BLOCKED naming the state and process.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/gtins:validate:
     post:
       operationId: validateGTIN
+      summary: Validate a GTIN check digit
       x-passage-duty: product.read
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [value], properties: { value: { type: string } } } } }
       responses:
-        '200': { description: Check digit valid. }
-        '422': { description: Invalid check digit. }
+        '200': { description: 'Check digit valid; value, valid and identifier type.' }
+        '422': { description: 'PRD-GTIN-CHECKDIGIT: invalid check digit.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/configuration-models/{id}:solve:
     post:
       operationId: solveConfiguration
+      summary: Solve a product configuration
       x-passage-duty: product.configure
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -133,6 +174,7 @@ paths:
   /v1/product/saved-configurations/{id}:
     get:
       operationId: getSavedConfiguration
+      summary: Get a saved configuration
       x-passage-duty: product.configuration.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -146,6 +188,7 @@ paths:
   /v1/product/uom/convert:
     get:
       operationId: convertUnit
+      summary: Convert a quantity between units
       x-passage-duty: product.read
       parameters:
         - { name: product, in: query, schema: { type: string } }
@@ -153,7 +196,8 @@ paths:
         - { name: to, in: query, required: true, schema: { type: string } }
         - { name: qty, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: Converted quantity. }
+        '200': { description: 'Converted quantity, rounded half-even to the target unit (BR-8.6).' }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -170,78 +214,119 @@ paths:
   /v1/product/setup/dimension-groups:
     post:
       operationId: createDimensionGroup
+      summary: Create a dimension group
       x-passage-duty: product.setup.write
       responses:
+        '201': { description: Dimension group created. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/setup/item-groups:
     post:
       operationId: createItemGroup
+      summary: Create an item group
       x-passage-duty: product.setup.write
       responses:
+        '201': { description: Item group created. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/setup/item-model-groups:
     post:
       operationId: createItemModelGroup
+      summary: Create an item model group
       x-passage-duty: product.setup.write
       responses:
+        '201': { description: Item model group created. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/products:search:
     get:
       operationId: searchProducts
+      summary: Search products
       x-passage-duty: product.read
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Search text. }
       responses:
+        '200': { description: Up to 10 matching products. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/products/{id}/attributes:
     post:
       operationId: setProductAttributes
+      summary: Set product attributes
+      description: 'Also accepted with duty product.import.write.'
       x-passage-duty: product.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        '200': { description: Attributes stored. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/products/{id}/identifiers:
     post:
       operationId: addProductIdentifier
+      summary: Add a product identifier
+      description: 'Also accepted with duty product.import.write.'
       x-passage-duty: product.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        '201': { description: Identifier stored. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/products/{id}/relations:
     post:
       operationId: addProductRelation
+      summary: Add a product relation
+      description: 'Also accepted with duty product.import.write.'
       x-passage-duty: product.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        '201': { description: Relations after the change. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/released-products/{id}:
     patch:
       operationId: patchReleasedProduct
+      summary: Update a released product
+      description: 'Also accepted with duty product.import.write, only for released products of the token legal entity. lifecycleState follows BR-8.1 and may not be more alive than the product.'
       x-passage-duty: product.released.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        '200': { description: Updated released product. }
+        '403': { description: 'AUTH-0003: an import caller patched a released product outside its token legal entity.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/gtins:
+    post:
+      operationId: allocateGTIN
+      summary: Allocate a GTIN-13 to a product
+      description: 'Allocates the next GTIN-13 from the tenant GS1 prefix and stores it as an identifier of productId.'
+      x-passage-duty: product.gtin.allocate
+      parameters:
+        - { name: productId, in: query, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { uom: { type: string } } } } }
+      responses:
+        '201': { description: Allocated identifier. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/gtins/{gtin}:
     get:
       operationId: getGTIN
+      summary: Get the product identifier for a GTIN
       x-passage-duty: product.read
       parameters:
         - { name: gtin, in: path, required: true, schema: { type: string } }
       responses:
+        '200': { description: The identifier and its product. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/barcodes/{gtin}:
     get:
       operationId: getBarcode
+      summary: Render an EAN-13 barcode
       x-passage-duty: product.read
       parameters:
         - { name: gtin, in: path, required: true, schema: { type: string } }
       responses:
+        '200': { description: EAN-13 barcode., content: { image/svg+xml: { schema: { type: string } } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/jobs/group-change:
     post:
       operationId: runGroupChange
+      summary: Run a group change
       x-passage-duty: product.jobs.write
       requestBody:
         required: true
@@ -256,6 +341,7 @@ components:
       additionalProperties: false
       required: [productNumber, name, baseUom]
       properties:
+        id: { type: string, format: uuid, description: Caller-chosen id; only with duty product.import.write. }
         productNumber: { type: string, pattern: '^[A-Z0-9][A-Z0-9._-]{0,39}$' }
         subtype: { type: string, enum: [product, master] }
         productType: { type: string, enum: [item, service] }
