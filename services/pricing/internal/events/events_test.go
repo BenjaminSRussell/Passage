@@ -39,6 +39,11 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.ProcedureActivated, events.ProcedureActivatedData{SupersededID: "x"}},
 		{events.VendorRebateClaimCreated, events.VendorRebateClaimData{}},
 		{events.VendorRebateClaimApproved, events.VendorRebateClaimData{}},
+		{events.CommodityBasisCreated, events.CommodityBasisData{}},
+		{events.CommodityIndexRecorded, events.CommodityIndexRecordedData{}},
+		{events.CommodityCalculationCreated, events.CommodityCalculationData{}},
+		{events.CommodityCalculationWithdrawn, events.CommodityCalculationData{}},
+		{events.CommodityRunCompleted, events.CommodityRunCompletedData{JournalID: "x"}},
 	}
 	for _, c := range cases {
 		if !pevents.ValidType(c.typ) {

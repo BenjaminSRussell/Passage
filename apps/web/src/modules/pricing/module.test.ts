@@ -9,7 +9,7 @@ describe("pricing module", () => {
     expect(pricing.nav.every((n) => n.to.startsWith("/pricing"))).toBe(true);
   });
 
-  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, procedures, price journals, rebates and vendor rebate claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
+  it("has a list, a create form and a detail page for trade agreements, campaigns, free goods rules, commodity cost basis types and price calculations, procedures, price journals, rebates and vendor rebate claims, sales groups, trade funds and promotions, plus the commission inquiry and settlement export, the journal CSV import, the workspace and simulation", () => {
     expect(pricing.routes.map((r) => r.path)).toEqual([
       "/pricing",
       "/pricing/agreements",
@@ -21,6 +21,12 @@ describe("pricing module", () => {
       "/pricing/free-goods",
       "/pricing/free-goods/new",
       "/pricing/free-goods/:id",
+      "/pricing/commodity/bases",
+      "/pricing/commodity/bases/new",
+      "/pricing/commodity/bases/:id",
+      "/pricing/commodity/calculations",
+      "/pricing/commodity/calculations/new",
+      "/pricing/commodity/calculations/:id",
       "/pricing/procedures",
       "/pricing/procedures/new",
       "/pricing/procedures/:id",
@@ -53,6 +59,8 @@ describe("pricing module", () => {
       "/pricing": "pricing.view",
       "/pricing/agreements": "pricing.view",
       "/pricing/campaigns": "pricing.view",
+      "/pricing/commodity/bases": "pricing.view",
+      "/pricing/commodity/calculations": "pricing.view",
       "/pricing/free-goods": "pricing.view",
       "/pricing/procedures": "pricing.view",
       "/pricing/journals": "pricing.view",

@@ -419,7 +419,9 @@ paths:
         journal lock and refuses with 422 PRC-0005 naming the failing lines if anything changed
         since validation; nothing is written then. Otherwise writes every line in one transaction
         with dev.passage.pricing.conditionrecord.activated.v1 (or .withdrawn.v1) per record plus
-        dev.passage.pricing.journal.posted.v1 to the outbox (FR-26.9). A retry with the same
+        dev.passage.pricing.journal.posted.v1 to the outbox (FR-26.9). A journal created by a
+        commodity calculation run cannot be posted by the user who ran it (403 PRC-0056,
+        CommodityPriceRun / PricingJournalPost segregation). A retry with the same
         Idempotency-Key replays the first response.
       x-passage-duty: pricing.journal.post
       parameters:
@@ -1383,6 +1385,290 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/bases:
+    get:
+      operationId: listCommodityBases
+      summary: List commodity cost basis types ordered by code (FR-26.21).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, description: "Only rows of this legal entity.", schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Cost basis types (at most 100).
+          content:
+            application/json:
+              schema: 
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommodityBasis"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createCommodityBasis
+      summary: >
+        Create a cost basis type, the thing a commodity index is quoted for, in a currency and unit
+        (FR-26.21). 409 PRC-0054 when the legal entity already has that code.
+        Writes dev.passage.pricing.commoditybasis.created.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommodityBasisInput"}
+      responses:
+        "201":
+          description: Created at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityBasis"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/bases/{id}:
+    get:
+      operationId: getCommodityBasis
+      summary: Read one cost basis type. 404 PRC-0050 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The cost basis type.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityBasis"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/bases/{id}/index-values:
+    get:
+      operationId: listCommodityIndexValues
+      summary: >
+        List the index quotes of a cost basis type, newest day first and highest revision first
+        within a day (the Commodity prices inquiry, FR-26.21). 404 PRC-0050 when the basis is unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Index quotes (at most 100).
+          content:
+            application/json:
+              schema: 
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommodityIndexValue"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: recordCommodityIndexValue
+      summary: >
+        Record an index quote for a day (FR-26.21). Quotes are never overwritten: a second quote for
+        the same day is the next revision, and a run reads the highest. Writes
+        dev.passage.pricing.commodityindex.recorded.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommodityIndexValueInput"}
+      responses:
+        "201":
+          description: Recorded; the revision is assigned by the service.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityIndexValue"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations:
+    get:
+      operationId: listCommodityCalculations
+      summary: List commodity price calculations ordered by name, withdrawn included (FR-26.21).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, description: "Only rows of this legal entity.", schema: {type: string, format: uuid}}
+        - {name: basisId, in: query, required: false, description: "Only calculations of this cost basis type.", schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Calculations (at most 100).
+          content:
+            application/json:
+              schema: 
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommodityCalculation"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createCommodityCalculation
+      summary: >
+        Create a price calculation: price = index x factor rounded half to even to 2 to 6 decimals
+        (rounding), plus a percentage or amount margin, rounded half to even to the 6-decimal unit price,
+        for the ACTIVE PRICE records on one customer scope, product, unit and currency (quantity break 0,
+        no variant, no campaign). The factor converts the basis unit to the price unit; the currency must
+        be the basis currency (422 PRC-0055, no cross-currency conversion). 404 PRC-0050 when the basis is
+        unknown in the legal entity. Writes dev.passage.pricing.commoditycalculation.created.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommodityCalculationInput"}
+      responses:
+        "201":
+          description: Created at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityCalculation"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations/{id}:
+    get:
+      operationId: getCommodityCalculation
+      summary: Read one price calculation. 404 PRC-0051 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The calculation.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityCalculation"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations/{id}:withdraw:
+    post:
+      operationId: withdrawCommodityCalculation
+      summary: >
+        Withdraw a calculation; it takes no further runs. 409 PRC-0031 when already withdrawn; 412 on a
+        stale version. Writes dev.passage.pricing.commoditycalculation.withdrawn.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Withdrawn; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityCalculation"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations/{id}:preview:
+    post:
+      operationId: previewCommodityRun
+      summary: >
+        Preview a run without writing anything: the index used, the price and the ACTIVE records that
+        would change. 422 PRC-0052 when no index value exists on or before asOf, 422 PRC-0053 when the
+        price is not above 0 or too large for a unit price; PRC-0016 comes back as a warning when the
+        index is older than the calculation allows.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommodityRunRequest"}
+      responses:
+        "200":
+          description: The planned run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityRunPreview"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations/{id}:run:
+    post:
+      operationId: runCommodityCalculation
+      summary: >
+        Run a calculation (FR-26.21): reads the latest index on or before asOf, prices the key and, when
+        ACTIVE records differ, creates a price journal of UPDATE lines that stays VALIDATED for review
+        (OPEN with line errors when a line no longer validates). The journal is posted by the normal
+        journal post, which takes pricing.journal.post and refuses the user who ran it (403 PRC-0056).
+        The run keeps the index day, revision and value it used. 422 PRC-0052 / PRC-0053 as for the
+        preview. A repeated Idempotency-Key replays the first run.
+        Writes dev.passage.pricing.commodityrun.completed.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommodityRunRequest"}
+      responses:
+        "201":
+          description: The run; journalId is absent when no record changed price.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommodityRun"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commodity/calculations/{id}/runs:
+    get:
+      operationId: listCommodityRuns
+      summary: List the runs of one calculation, newest first. 404 PRC-0051 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Runs (at most 100).
+          content:
+            application/json:
+              schema: 
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommodityRun"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
   /v1/pricing/campaigns:
     get:
       operationId: listCampaigns
@@ -1876,6 +2162,120 @@ components:
       properties:
         version: {type: integer, minimum: 1}
         reason: {type: string, description: "Optional, recorded on withdraw."}
+    CommodityBasisInput:
+      type: object
+      required: [legalEntityId, code, name, currency, unit]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        code: {type: string, pattern: "^[A-Z0-9_-]{1,32}$", description: "Unique in the legal entity, for example CU-LME."}
+        name: {type: string, maxLength: 120}
+        currency: {type: string, pattern: "^[A-Z]{3}$", description: "Currency the index is quoted in."}
+        unit: {type: string, maxLength: 16, description: "Unit the index is quoted per."}
+    CommodityBasis:
+      allOf:
+        - $ref: "#/components/schemas/CommodityBasisInput"
+        - type: object
+          required: [id, version]
+          properties:
+            id: {type: string, format: uuid}
+            version: {type: integer, minimum: 1}
+    CommodityIndexValueInput:
+      type: object
+      required: [asOf, value]
+      properties:
+        asOf: {type: string, format: date, description: "The day the quote is for."}
+        value: {type: string, description: "Decimal greater than 0 with at most 6 decimals."}
+        source: {type: string, maxLength: 120, description: "Where the quote came from."}
+    CommodityIndexValue:
+      allOf:
+        - $ref: "#/components/schemas/CommodityIndexValueInput"
+        - type: object
+          required: [basisId, revision]
+          properties:
+            basisId: {type: string, format: uuid}
+            revision: {type: integer, minimum: 1, description: "1 for the first quote of a day; a correction is the next revision."}
+    CommodityCalculationInput:
+      type: object
+      required: [legalEntityId, name, basisId, factor, marginKind, customerKind, productId, unit, currency]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, maxLength: 120}
+        basisId: {type: string, format: uuid}
+        factor: {type: string, description: "Conversion factor from the index to the price unit, decimal greater than 0 with at most 6 decimals."}
+        marginKind: {type: string, enum: [PERCENT, AMOUNT]}
+        margin: {type: string, description: "Decimal of at least 0 (a percentage is at most 1000); default 0."}
+        rounding: {type: integer, minimum: 2, maximum: 6, default: 6, description: "Decimals for index x factor (commodity_index_rounding); the margin is added after this rounding and the price is kept at 6 decimals."}
+        maxIndexAgeDays: {type: integer, minimum: 1, maximum: 365, default: 7, description: "A newer index than this many days before the run date is not stale (PRC-0016)."}
+        customerKind: {type: string, enum: [customer, customer_group, all]}
+        customerKey: {type: string, maxLength: 64, description: "Empty when customerKind is all."}
+        productId: {type: string, maxLength: 64}
+        unit: {type: string, maxLength: 16}
+        currency: {type: string, pattern: "^[A-Z]{3}$", description: "Must be the currency the cost basis is quoted in (PRC-0055)."}
+    CommodityCalculation:
+      allOf:
+        - $ref: "#/components/schemas/CommodityCalculationInput"
+        - type: object
+          required: [id, rounding, maxIndexAgeDays, withdrawn, version]
+          properties:
+            id: {type: string, format: uuid}
+            withdrawn: {type: boolean}
+            version: {type: integer, minimum: 1}
+    CommodityRunRequest:
+      type: object
+      required: [asOf]
+      properties:
+        asOf: {type: string, format: date, description: "Run date: the latest index on or before it is used, and only records valid on it are repriced."}
+    CommodityWarning:
+      type: object
+      required: [code, detail]
+      properties:
+        code: {type: string, example: PRC-0016}
+        detail: {type: string}
+    CommodityRunPreview:
+      type: object
+      required: [calculationId, asOf, index, price, stale, indexAgeDays, warnings, changes, unchangedCount]
+      properties:
+        calculationId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        index: {$ref: "#/components/schemas/CommodityIndexValue"}
+        price: {type: string, description: "index x factor plus margin, rounded."}
+        stale: {type: boolean}
+        indexAgeDays: {type: integer}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/CommodityWarning"}
+        changes:
+          type: array
+          items:
+            type: object
+            required: [recordId, version, currentAmount, newAmount]
+            properties:
+              recordId: {type: string, format: uuid}
+              version: {type: integer, minimum: 1}
+              currentAmount: {type: string}
+              newAmount: {type: string}
+        unchangedCount: {type: integer, minimum: 0, description: "Targeted records already at the price."}
+    CommodityRun:
+      type: object
+      required: [id, legalEntityId, calculationId, asOf, indexAsOf, indexRevision, indexValue, price, changedCount, unchangedCount, stale, runBy, warnings, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        calculationId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        indexAsOf: {type: string, format: date}
+        indexRevision: {type: integer, minimum: 1}
+        indexValue: {type: string}
+        price: {type: string}
+        changedCount: {type: integer, minimum: 0}
+        unchangedCount: {type: integer, minimum: 0}
+        stale: {type: boolean}
+        journalId: {type: string, format: uuid, description: "The price journal awaiting review; absent when no record changed price."}
+        runBy: {type: string, description: "The user who ran it (empty for a service call); that user cannot post the journal (PRC-0056)."}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/CommodityWarning"}
+        createdAt: {type: string, format: date-time}
     FreeGoodsRule:
       allOf:
         - $ref: "#/components/schemas/FreeGoodsRuleInput"

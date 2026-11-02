@@ -11,6 +11,12 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
 | `/pricing/free-goods/new` | Create a rule: customers, product, unit, inclusive or exclusive, calculation, quantities, validity (overlap 409 shown) | `POST /free-goods-rules` |
 | `/pricing/free-goods/:id` | Rule detail and withdraw | `GET /free-goods-rules/{id}`, `:withdraw` |
+| `/pricing/commodity/bases` | Commodity cost basis types (FR-26.21) | `GET /commodity/bases` |
+| `/pricing/commodity/bases/new` | Create a cost basis type: code, name, currency, unit (duplicate code 409 shown) | `POST /commodity/bases` |
+| `/pricing/commodity/bases/:id` | Cost basis type, record an index quote (a second quote for a day is the next revision) and the quotes inquiry | `GET /commodity/bases/{id}`, `GET`/`POST …/index-values` |
+| `/pricing/commodity/calculations` | Commodity price calculations with status | `GET /commodity/calculations` |
+| `/pricing/commodity/calculations/new` | Create a calculation: index x factor + margin, decimals, staleness window, the product price key | `POST /commodity/calculations` |
+| `/pricing/commodity/calculations/:id` | Preview a run, run it (creates a VALIDATED price journal, link to review), run history, withdraw | `GET /commodity/calculations/{id}`, `:preview`, `:run`, `GET …/runs`, `:withdraw` |
 | `/pricing/campaigns` | Campaigns with target group, validity, budget and status (live, scheduled, ended, killed) | `GET /campaigns` |
 | `/pricing/campaigns/new` | Create a campaign: validity, target customer group, budget and currency | `POST /campaigns` |
 | `/pricing/campaigns/:id` | Terms, the campaign's agreements, kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:kill`, `:restore` |

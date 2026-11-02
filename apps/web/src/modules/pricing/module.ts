@@ -6,6 +6,10 @@ import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CommissionSettlementPage } from "./CommissionSettlementPage";
 import { CommissionTransactionsPage } from "./CommissionTransactionsPage";
+import { CommodityBasesPage } from "./CommodityBasesPage";
+import { CommodityBasisDetailPage } from "./CommodityBasisDetailPage";
+import { CommodityCalculationDetailPage } from "./CommodityCalculationDetailPage";
+import { CommodityCalculationsPage } from "./CommodityCalculationsPage";
 import { FreeGoodsDetailPage } from "./FreeGoodsDetailPage";
 import { FreeGoodsPage } from "./FreeGoodsPage";
 import { FundDetailPage } from "./FundDetailPage";
@@ -15,6 +19,8 @@ import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
 import { NewAgreementPage } from "./NewAgreementPage";
 import { NewCampaignPage } from "./NewCampaignPage";
+import { NewCommodityBasisPage } from "./NewCommodityBasisPage";
+import { NewCommodityCalculationPage } from "./NewCommodityCalculationPage";
 import { NewFundPage } from "./NewFundPage";
 import { NewFreeGoodsPage } from "./NewFreeGoodsPage";
 import { NewJournalPage } from "./NewJournalPage";
@@ -39,7 +45,7 @@ const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, free goods, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
+    "Trade agreements, campaigns, free goods, commodity index pricing, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -51,6 +57,12 @@ const pricing: PassageModule = {
     { path: "/pricing/free-goods", element: createElement(FreeGoodsPage), handle: { title: "Free goods" } },
     { path: "/pricing/free-goods/new", element: createElement(NewFreeGoodsPage), handle: { title: "New free goods rule" } },
     { path: "/pricing/free-goods/:id", element: createElement(FreeGoodsDetailPage), handle: { title: "Free goods rule" } },
+    { path: "/pricing/commodity/bases", element: createElement(CommodityBasesPage), handle: { title: "Commodity prices" } },
+    { path: "/pricing/commodity/bases/new", element: createElement(NewCommodityBasisPage), handle: { title: "New cost basis type" } },
+    { path: "/pricing/commodity/bases/:id", element: createElement(CommodityBasisDetailPage), handle: { title: "Cost basis type" } },
+    { path: "/pricing/commodity/calculations", element: createElement(CommodityCalculationsPage), handle: { title: "Price calculations" } },
+    { path: "/pricing/commodity/calculations/new", element: createElement(NewCommodityCalculationPage), handle: { title: "New price calculation" } },
+    { path: "/pricing/commodity/calculations/:id", element: createElement(CommodityCalculationDetailPage), handle: { title: "Price calculation" } },
     { path: "/pricing/procedures", element: createElement(ProceduresPage), handle: { title: "Pricing procedures" } },
     { path: "/pricing/procedures/new", element: createElement(NewProcedurePage), handle: { title: "New pricing procedure" } },
     { path: "/pricing/procedures/:id", element: createElement(ProcedureDetailPage), handle: { title: "Pricing procedure" } },
@@ -81,6 +93,8 @@ const pricing: PassageModule = {
     { label: "Trade agreements", to: "/pricing/agreements", duty: "pricing.view" },
     { label: "Campaigns", to: "/pricing/campaigns", duty: "pricing.view" },
     { label: "Free goods", to: "/pricing/free-goods", duty: "pricing.view" },
+    { label: "Commodity prices", to: "/pricing/commodity/bases", duty: "pricing.view" },
+    { label: "Price calculations", to: "/pricing/commodity/calculations", duty: "pricing.view" },
     { label: "Pricing procedures", to: "/pricing/procedures", duty: "pricing.view" },
     { label: "Price journals", to: "/pricing/journals", duty: "pricing.view" },
     { label: "Rebate agreements", to: "/pricing/rebates", duty: "pricing.rebate.view" },

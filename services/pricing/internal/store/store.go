@@ -136,6 +136,18 @@ type Store interface {
 	WithdrawFreeGoodsRule(ctx context.Context, id string, version int, idempotencyKey string) (domain.FreeGoodsDef, error)
 	ReviseAgreement(ctx context.Context, rev AgreementRevision, idempotencyKey string) (domain.RebateAgreement, error)
 	CloseAgreement(ctx context.Context, id string, version int, closeDate time.Time, idempotencyKey string) (domain.RebateAgreement, error)
+	CreateCommodityBasis(ctx context.Context, b domain.CommodityBasis, idempotencyKey string) (domain.CommodityBasis, error)
+	GetCommodityBasis(ctx context.Context, id string) (domain.CommodityBasis, error)
+	ListCommodityBases(ctx context.Context, legalEntityID string, limit int) ([]domain.CommodityBasis, error)
+	RecordIndexValue(ctx context.Context, v domain.IndexValue, idempotencyKey string) (domain.IndexValue, error)
+	ListIndexValues(ctx context.Context, basisID string, limit int) ([]domain.IndexValue, error)
+	CreateCommodityCalc(ctx context.Context, c domain.CommodityCalc, idempotencyKey string) (domain.CommodityCalc, error)
+	GetCommodityCalc(ctx context.Context, id string) (domain.CommodityCalc, error)
+	ListCommodityCalcs(ctx context.Context, legalEntityID, basisID string, limit int) ([]domain.CommodityCalc, error)
+	WithdrawCommodityCalc(ctx context.Context, id string, version int, idempotencyKey string) (domain.CommodityCalc, error)
+	PreviewCommodityRun(ctx context.Context, calcID string, asOf time.Time) (domain.CommodityCalc, domain.RunPlan, error)
+	RunCommodityCalc(ctx context.Context, calcID string, asOf time.Time, idempotencyKey string) (CommodityRun, error)
+	ListCommodityRuns(ctx context.Context, calcID string, limit int) ([]CommodityRun, error)
 	Ping(ctx context.Context) error
 }
 

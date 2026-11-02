@@ -861,6 +861,148 @@ export function withdrawFreeGoodsRule(id: string, version: number, key: string =
   return post<FreeGoodsRule>(`/free-goods-rules/${encodeURIComponent(id)}:withdraw`, { version }, key);
 }
 
+// ---- Commodity pricing (FR-26.21): cost basis types, dated index values, price calculations and runs.
+
+export interface CommodityBasisInput {
+  legalEntityId: string;
+  /** Capitals, digits, - and _, unique in the legal entity. */
+  code: string;
+  name: string;
+  currency: string;
+  unit: string;
+}
+
+export interface CommodityBasis extends CommodityBasisInput {
+  id: string;
+  version: number;
+}
+
+export interface CommodityIndexValueInput {
+  asOf: string;
+  value: string;
+  source?: string;
+}
+
+export interface CommodityIndexValue extends CommodityIndexValueInput {
+  basisId: string;
+  /** 1 for the first quote of a day; a correction is the next revision. */
+  revision: number;
+}
+
+export const MARGIN_KINDS = ["PERCENT", "AMOUNT"] as const;
+export type MarginKind = (typeof MARGIN_KINDS)[number];
+
+export interface CommodityCalculationInput {
+  legalEntityId: string;
+  name: string;
+  basisId: string;
+  factor: string;
+  marginKind: MarginKind;
+  margin: string;
+  rounding: number;
+  maxIndexAgeDays: number;
+  customerKind: FreeGoodsCustomerKind;
+  customerKey: string;
+  productId: string;
+  unit: string;
+  currency: string;
+}
+
+export interface CommodityCalculation extends CommodityCalculationInput {
+  id: string;
+  withdrawn: boolean;
+  version: number;
+}
+
+export interface CommodityWarning {
+  code: string;
+  detail: string;
+}
+
+export interface CommodityRunPreview {
+  calculationId: string;
+  asOf: string;
+  index: CommodityIndexValue;
+  price: string;
+  stale: boolean;
+  indexAgeDays: number;
+  warnings: CommodityWarning[];
+  changes: { recordId: string; version: number; currentAmount: string; newAmount: string }[];
+  unchangedCount: number;
+}
+
+export interface CommodityRun {
+  id: string;
+  legalEntityId: string;
+  calculationId: string;
+  asOf: string;
+  indexAsOf: string;
+  indexRevision: number;
+  indexValue: string;
+  price: string;
+  changedCount: number;
+  unchangedCount: number;
+  stale: boolean;
+  /** The VALIDATED price journal awaiting review; absent when no record changed price. */
+  journalId?: string;
+  /** The user who ran it; that user cannot post the journal (PRC-0056). */
+  runBy: string;
+  warnings: CommodityWarning[];
+  createdAt: string;
+}
+
+const COMMODITY = "/commodity";
+
+export function listCommodityBases(legalEntityId = "", signal?: AbortSignal): Promise<CommodityBasis[]> {
+  return items<CommodityBasis>(`${COMMODITY}/bases${query({ legalEntityId })}`, signal);
+}
+
+export function getCommodityBasis(id: string, signal?: AbortSignal): Promise<CommodityBasis> {
+  return send<CommodityBasis>(`${COMMODITY}/bases/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createCommodityBasis(body: CommodityBasisInput, key: string = newKey()): Promise<CommodityBasis> {
+  return post<CommodityBasis>(`${COMMODITY}/bases`, body, key);
+}
+
+export function listCommodityIndexValues(basisId: string, signal?: AbortSignal): Promise<CommodityIndexValue[]> {
+  return items<CommodityIndexValue>(`${COMMODITY}/bases/${encodeURIComponent(basisId)}/index-values`, signal);
+}
+
+export function recordCommodityIndexValue(basisId: string, body: CommodityIndexValueInput, key: string = newKey()): Promise<CommodityIndexValue> {
+  return post<CommodityIndexValue>(`${COMMODITY}/bases/${encodeURIComponent(basisId)}/index-values`, body, key);
+}
+
+export function listCommodityCalculations(filter: { legalEntityId?: string; basisId?: string } = {}, signal?: AbortSignal): Promise<CommodityCalculation[]> {
+  return items<CommodityCalculation>(`${COMMODITY}/calculations${query({ legalEntityId: filter.legalEntityId, basisId: filter.basisId })}`, signal);
+}
+
+export function getCommodityCalculation(id: string, signal?: AbortSignal): Promise<CommodityCalculation> {
+  return send<CommodityCalculation>(`${COMMODITY}/calculations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createCommodityCalculation(body: CommodityCalculationInput, key: string = newKey()): Promise<CommodityCalculation> {
+  return post<CommodityCalculation>(`${COMMODITY}/calculations`, body, key);
+}
+
+export function withdrawCommodityCalculation(id: string, version: number, key: string = newKey()): Promise<CommodityCalculation> {
+  return post<CommodityCalculation>(`${COMMODITY}/calculations/${encodeURIComponent(id)}:withdraw`, { version }, key);
+}
+
+/** POST :preview - plans the run and writes nothing. */
+export function previewCommodityRun(id: string, asOf: string): Promise<CommodityRunPreview> {
+  return post<CommodityRunPreview>(`${COMMODITY}/calculations/${encodeURIComponent(id)}:preview`, { asOf });
+}
+
+/** POST :run - creates the price journal that stays VALIDATED for review; posting it is a separate act. */
+export function runCommodityCalculation(id: string, asOf: string, key: string = newKey()): Promise<CommodityRun> {
+  return post<CommodityRun>(`${COMMODITY}/calculations/${encodeURIComponent(id)}:run`, { asOf }, key);
+}
+
+export function listCommodityRuns(calculationId: string, signal?: AbortSignal): Promise<CommodityRun[]> {
+  return items<CommodityRun>(`${COMMODITY}/calculations/${encodeURIComponent(calculationId)}/runs`, signal);
+}
+
 // ---- Pricing procedures (FR-26.1): versioned step sequences; ACTIVE and SUPERSEDED versions are immutable.
 
 export const PROCEDURE_STEP_TYPES = [

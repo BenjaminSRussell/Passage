@@ -211,3 +211,66 @@ type RebateAgreementData struct {
 	ValidTo       string `json:"valid_to"`
 	Version       int    `json:"version"`
 }
+
+// Commodity pricing (FR-26.21). A basis, an index quote, a price calculation and a completed
+// run each announce themselves; the run's journal is announced by journal posting.
+const (
+	CommodityBasisCreated         = "dev.passage.pricing.commoditybasis.created.v1"
+	CommodityIndexRecorded        = "dev.passage.pricing.commodityindex.recorded.v1"
+	CommodityCalculationCreated   = "dev.passage.pricing.commoditycalculation.created.v1"
+	CommodityCalculationWithdrawn = "dev.passage.pricing.commoditycalculation.withdrawn.v1"
+	CommodityRunCompleted         = "dev.passage.pricing.commodityrun.completed.v1"
+)
+
+// CommodityBasisData is the payload of commoditybasis.created.
+type CommodityBasisData struct {
+	BasisID       string `json:"basis_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Code          string `json:"code"`
+	Currency      string `json:"currency"`
+	Unit          string `json:"unit"`
+}
+
+// CommodityIndexRecordedData is the payload of commodityindex.recorded.
+type CommodityIndexRecordedData struct {
+	BasisID       string `json:"basis_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	AsOf          string `json:"as_of"`
+	Revision      int    `json:"revision"`
+	Value         string `json:"value"`
+	Source        string `json:"source"`
+}
+
+// CommodityCalculationData is the payload of commoditycalculation.created and .withdrawn.
+type CommodityCalculationData struct {
+	CalculationID string `json:"calculation_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	BasisID       string `json:"basis_id"`
+	ProductID     string `json:"product_id"`
+	CustomerKind  string `json:"customer_kind"`
+	CustomerKey   string `json:"customer_key"`
+	Unit          string `json:"unit"`
+	Currency      string `json:"currency"`
+	Factor        string `json:"factor"`
+	MarginKind    string `json:"margin_kind"`
+	Margin        string `json:"margin"`
+	Withdrawn     bool   `json:"withdrawn"`
+	Version       int    `json:"version"`
+}
+
+// CommodityRunCompletedData is the payload of commodityrun.completed. journal_id is absent
+// when no record changed price.
+type CommodityRunCompletedData struct {
+	RunID          string `json:"run_id"`
+	CalculationID  string `json:"calculation_id"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	AsOf           string `json:"as_of"`
+	IndexAsOf      string `json:"index_as_of"`
+	IndexRevision  int    `json:"index_revision"`
+	IndexValue     string `json:"index_value"`
+	Price          string `json:"price"`
+	ChangedCount   int    `json:"changed_count"`
+	UnchangedCount int    `json:"unchanged_count"`
+	Stale          bool   `json:"stale"`
+	JournalID      string `json:"journal_id,omitempty"`
+}

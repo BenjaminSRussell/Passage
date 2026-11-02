@@ -95,6 +95,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerFundRoutes(r)
 	a.registerCampaignRoutes(r)
 	a.registerFreeGoodsRoutes(r)
+	a.registerCommodityRoutes(r)
 	a.registerProcedureRoutes(r)
 	a.registerOpsRoutes(r)
 }

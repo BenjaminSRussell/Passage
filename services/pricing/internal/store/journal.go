@@ -195,6 +195,9 @@ func (s *Postgres) PostJournal(ctx context.Context, id, idempotencyKey string) (
 		if j.Status != domain.JournalValidated {
 			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "only VALIDATED journals can post; validate first")
 		}
+		if err := refuseOwnCommodityRun(ctx, tx, id, p.UserID); err != nil {
+			return err
+		}
 		if err := lockEntity(ctx, tx, p.TenantID, j.LegalEntityID); err != nil {
 			return err
 		}
@@ -283,6 +286,29 @@ func (s *Postgres) ReverseJournal(ctx context.Context, id, idempotencyKey string
 		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
 	})
 	return out, err
+}
+
+// refuseOwnCommodityRun enforces the PRD 5.26.17 conflict between CommodityPriceRun and
+// PricingJournalPost per user: the journal a commodity run created cannot be posted by the
+// user who ran it (403 PRC-0056). A run without a recorded user (a service call) and every
+// other journal are not affected.
+func refuseOwnCommodityRun(ctx context.Context, tx pgx.Tx, journalID, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	var runBy string
+	err := tx.QueryRow(ctx, `select run_by from commodity_run where journal_id = $1`, journalID).Scan(&runBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if runBy == userID {
+		return httpx.NewProblem(http.StatusForbidden, domain.CodeRunOwnJournal,
+			"the user who ran the commodity price calculation cannot post its journal; another pricing manager posts it")
+	}
+	return nil
 }
 
 // entityLockKey names the advisory lock that guards the ACTIVE records of one legal entity.
