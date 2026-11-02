@@ -1823,7 +1823,15 @@
       {"resource": "/v1/integration/projects", "methods": ["GET"]},
       {"resource": "/v1/integration/projects/*", "methods": ["GET"]},
       {"resource": "/v1/integration/projects/*/key-rewrite-rules", "methods": ["GET"]},
-      {"resource": "/v1/integration/projects/*/key-rewrite-rules:preview", "methods": ["POST"]}
+      {"resource": "/v1/integration/projects/*/key-rewrite-rules:preview", "methods": ["POST"]},
+      {"resource": "/v1/integration/connection-profiles", "methods": ["GET"]},
+      {"resource": "/v1/integration/connection-profiles/*", "methods": ["GET"]}
+    ]},
+    "migration.connection.write": {"permissions": [
+      {"resource": "/v1/integration/connection-profiles", "methods": ["POST"]},
+      {"resource": "/v1/integration/connection-profiles/*", "methods": ["PATCH"]},
+      {"resource": "/v1/integration/connection-profiles/*/secret", "methods": ["PUT"]},
+      {"resource": "/v1/integration/connection-profiles/*:test", "methods": ["POST"]}
     ]},
     "migration.spec.write": {"permissions": [
       {"resource": "/v1/integration/data-templates", "methods": ["POST"]},
@@ -2120,6 +2128,10 @@
     "product.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/product/products", "methods": ["POST"]},
       {"resource": "/v1/product/products/*", "methods": ["PATCH"]},
+      {"resource": "/v1/product/products/*/attributes", "methods": ["POST"]},
+      {"resource": "/v1/product/products/*/identifiers", "methods": ["POST"]},
+      {"resource": "/v1/product/products/*/relations", "methods": ["POST"]},
+      {"resource": "/v1/product/released-products/*", "methods": ["PATCH"]},
       {"resource": "/v1/product/releases", "methods": ["POST"]}
     ]},
     "product.release": {"permissions": [{"resource": "/v1/product/releases", "methods": ["POST"]}]},
@@ -2134,6 +2146,7 @@
     ]},
     "product.write": {"permissions": [
       {"resource": "/v1/product/products", "methods": ["POST"]},
+      {"resource": "/v1/product/products/*", "methods": ["PATCH"]},
       {"resource": "/v1/product/products/*/attributes", "methods": ["POST"]},
       {"resource": "/v1/product/products/*/identifiers", "methods": ["POST"]},
       {"resource": "/v1/product/products/*/relations", "methods": ["POST"]}

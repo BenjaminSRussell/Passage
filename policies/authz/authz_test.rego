@@ -228,7 +228,8 @@ test_view_products_can_get_but_not_post if {
 		"resource": "/v1/product/products",
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View products"]}}
-	denied == {"allow": false, "duty_missing": "product.write"}
+	denied.allow == false
+	denied.duty_missing in {"product.write", "Maintain products"}
 }
 
 test_missing_identity_denied if {
@@ -798,7 +799,14 @@ test_migration_service_grant_reaches_only_the_import_write_routes if {
 	not allowed("product.import.write", "GET", "/v1/product/products/p1")
 	not allowed("product.import.write", "DELETE", "/v1/product/products/p1")
 	not allowed("product.import.write", "POST", "/v1/product/products/p1/variants:explode")
-	not allowed("product.import.write", "PATCH", "/v1/product/released-products/r1")
+	allowed("product.import.write", "POST", "/v1/product/products/p1/attributes")
+	allowed("product.import.write", "POST", "/v1/product/products/p1/identifiers")
+	allowed("product.import.write", "POST", "/v1/product/products/p1/relations")
+	allowed("product.import.write", "PATCH", "/v1/product/released-products/r1")
+	not allowed("product.import.write", "PUT", "/v1/product/released-products/r1")
+	not allowed("product.import.write", "PUT", "/v1/product/released-products/r1/site-defaults/s1")
+	not allowed("product.import.write", "GET", "/v1/product/products/p1/attributes")
+	not allowed("product.import.write", "DELETE", "/v1/product/products/p1/relations")
 	not allowed("product.import.write", "POST", "/v1/product/jobs/group-change")
 	not allowed("product.import.write", "POST", "/v1/product/gtins")
 	not allowed("product.import.write", "POST", "/v1/party/parties")
@@ -904,4 +912,32 @@ test_pricing_parameters_read_with_view_and_change_with_admin if {
 	allowed("pricing.admin", "PUT", "/v1/pricing/parameters")
 	not allowed("pricing.admin", "GET", "/v1/pricing/parameters")
 	not allowed("pricing.admin", "POST", "/v1/pricing/parameters")
+}
+
+test_migration_connection_write_reaches_only_the_connection_profile_writes if {
+	allowed("migration.connection.write", "POST", "/v1/integration/connection-profiles")
+	allowed("migration.connection.write", "PATCH", "/v1/integration/connection-profiles/c1")
+	allowed("migration.connection.write", "PUT", "/v1/integration/connection-profiles/c1/secret")
+	allowed("migration.connection.write", "POST", "/v1/integration/connection-profiles/c1:test")
+	not allowed("migration.connection.write", "GET", "/v1/integration/connection-profiles")
+	not allowed("migration.connection.write", "GET", "/v1/integration/connection-profiles/c1")
+	not allowed("migration.connection.write", "DELETE", "/v1/integration/connection-profiles/c1")
+	not allowed("migration.connection.write", "PUT", "/v1/integration/connection-profiles/c1")
+	not allowed("migration.connection.write", "POST", "/v1/integration/migration-runs")
+}
+
+test_migration_run_reads_connection_profiles_but_cannot_change_them if {
+	allowed("migration.run", "GET", "/v1/integration/connection-profiles")
+	allowed("migration.run", "GET", "/v1/integration/connection-profiles/c1")
+	not allowed("migration.run", "POST", "/v1/integration/connection-profiles")
+	not allowed("migration.run", "PATCH", "/v1/integration/connection-profiles/c1")
+	not allowed("migration.run", "PUT", "/v1/integration/connection-profiles/c1/secret")
+	not allowed("migration.run", "POST", "/v1/integration/connection-profiles/c1:test")
+}
+
+test_product_write_can_patch_products if {
+	allowed("product.write", "PATCH", "/v1/product/products/p1")
+	allowed("product.write", "POST", "/v1/product/products")
+	not allowed("product.write", "PATCH", "/v1/product/released-products/r1")
+	not allowed("product.write", "DELETE", "/v1/product/products/p1")
 }
