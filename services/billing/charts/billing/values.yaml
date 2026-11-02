@@ -15,6 +15,10 @@ maxLines: 2000
 # Interim tax rates per tax code ("DE19=19,DE7=7,EXEMPT=0") until the wave-13 tax
 # client is wired. Empty means every quote fails closed with BIL-0001.
 taxRates: ""
+# Callers (edi reads invoices) present a signed service token verified against these
+# keys, formatted name=base64-public-key and comma separated.
+serviceIdentity:
+  publicKeys: ""
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

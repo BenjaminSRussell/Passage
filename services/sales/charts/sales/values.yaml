@@ -46,6 +46,7 @@ securityContext:
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""
 
 upstream:
   productUrl: "http://product:8080"

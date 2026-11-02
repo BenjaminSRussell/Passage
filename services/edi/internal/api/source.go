@@ -135,6 +135,10 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if len(inv.Lines) == 0 {
 			return nil, domain.ErrSourceNotReady
 		}
+		if inv.Lines[0].OrderID == "" {
+			_, err = domain.InvoiceFromBilling(p, inv, domain.SourceOrder{})
+			return nil, err
+		}
 		var o domain.SourceOrder
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, inv.Lines[0].OrderID); err != nil {
 			return nil, err

@@ -72,8 +72,9 @@ func run() error {
 	a := api.New(store.New(pool, dupDays))
 	a.Sender = sender
 	a.AllowBodyOutbound = os.Getenv("EDI_ALLOW_BODY_OUTBOUND") == "true"
-	if signer != nil {
-		a.Sources = sources.New(signer, os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL"), nil)
+	fulfillmentURL, billingURL, salesURL := os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL")
+	if signer != nil && fulfillmentURL != "" && billingURL != "" && salesURL != "" {
+		a.Sources = sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
 	}
 	return httpx.Serve(ctx, addr, a.Routes())
 }

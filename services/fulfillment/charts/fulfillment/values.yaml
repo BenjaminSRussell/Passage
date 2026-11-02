@@ -22,6 +22,11 @@ config:
   releaseRequiresFullAtp: "true"
   migrateOnStart: "false"       # dev only; stage and prod run the Argo PreSync migration Job
 
+# Callers (edi reads shipments) present a signed service token verified against these
+# keys, formatted name=base64-public-key and comma separated.
+serviceIdentity:
+  publicKeys: ""
+
 resources:
   requests:
     cpu: 100m

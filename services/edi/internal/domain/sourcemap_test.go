@@ -172,6 +172,18 @@ func TestSourceMapping_RefusesWhatDoesNotBelongOrIsNotFinal(t *testing.T) {
 			_, err := ASNFromShipment(tradeProfile(), sh, sourceOrder())
 			return err
 		}, ErrSourceNotReady},
+		{"partially shipped shipment", func() error {
+			sh := sourceShipment()
+			sh.Status = "PARTIALLY_SHIPPED"
+			_, err := ASNFromShipment(tradeProfile(), sh, sourceOrder())
+			return err
+		}, ErrOutbound},
+		{"invoice line without a sales order", func() error {
+			inv := sourceInvoice()
+			inv.Lines[0].OrderID = ""
+			_, err := InvoiceFromBilling(tradeProfile(), inv, sourceOrder())
+			return err
+		}, ErrOutbound},
 		{"shipped shipment without shipped containers", func() error {
 			sh := sourceShipment()
 			sh.Containers = sh.Containers[2:]

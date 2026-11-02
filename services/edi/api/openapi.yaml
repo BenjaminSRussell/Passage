@@ -181,7 +181,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OutboundResult' }
         '400': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: Missing duty, or EDI-0014 a source service refused the edi service grant for the partner's legal entity
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
           description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final
@@ -1031,6 +1035,7 @@ components:
         ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
     TradeProfile:
       type: object
+      additionalProperties: false
       required: [legalEntityId, customerId, shipFrom, shipTo, billTo, remitTo, defaultScac]
       properties:
         legalEntityId: { type: string, format: uuid }
@@ -1042,6 +1047,7 @@ components:
         defaultScac: { type: string, pattern: '^[A-Z0-9]{2,4}$' }
     SourceOutboundRequest:
       type: object
+      additionalProperties: false
       required: [transactionSet, sourceId]
       properties:
         transactionSet: { type: string, enum: ['856', '810'] }

@@ -60,6 +60,10 @@ spec:
                   key: {{ .Values.databaseSecret.key }}
             - name: PASSAGE_SERVICE_NAME
               value: sales
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY
               valueFrom:

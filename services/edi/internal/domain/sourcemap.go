@@ -179,7 +179,9 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 		return ASN{}, err
 	}
 	switch sh.Status {
-	case "SHIPPED", "PARTIALLY_SHIPPED", "DELIVERED":
+	case "SHIPPED", "DELIVERED":
+	case "PARTIALLY_SHIPPED":
+		return ASN{}, outboundf("shipment %s is partially shipped; one 856 is sent per shipment once it is fully shipped", sh.ShipmentNumber)
 	default:
 		return ASN{}, fmt.Errorf("%w: shipment %s is %s, not shipped", ErrSourceNotReady, sh.ShipmentNumber, sh.Status)
 	}
@@ -242,6 +244,9 @@ func InvoiceFromBilling(p TradeProfile, inv SourceInvoice, o SourceOrder) (Invoi
 		return Invoice{}, outboundf("invoice %s has no lines", inv.Number)
 	}
 	orderID := inv.Lines[0].OrderID
+	if orderID == "" {
+		return Invoice{}, outboundf("invoice %s has no sales order on its lines (credit note or free-text); an 810 needs the customer PO", inv.Number)
+	}
 	if err := orderFor(p, o, orderID); err != nil {
 		return Invoice{}, err
 	}
