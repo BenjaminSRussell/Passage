@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,6 +34,8 @@ const (
 	CodeMatchLine         = "TRS-0486"
 	CodeRuleState         = "TRS-0487"
 	CodeLegalEntity       = "TRS-0488"
+	CodeRuleLimit         = "TRS-0489"
+	MaxActiveRules        = 20
 	MaxRunLines           = 2000
 	MaxRunItems           = 2000
 	MaxMatchesListed      = 500
@@ -183,6 +186,9 @@ func (s *Postgres) CreateReconRule(ctx context.Context, in NewReconRule, key str
 		var err error
 		out, err = idempotent(ctx, tx, key, hash, func() (ReconRule, error) {
 			r := in.Rule
+			if err := checkRuleCapacity(ctx, tx, p.TenantID, in); err != nil {
+				return ReconRule{}, err
+			}
 			rule, err := scanRule(tx.QueryRow(ctx, `insert into reconciliation_rule (tenant_id, id, legal_entity_id, bank_account_id, name, priority,
 				weight_amount, weight_date, weight_reference, weight_counterparty, amount_tolerance, date_window_days, strict)
 				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning `+ruleColumns,
@@ -200,6 +206,46 @@ func (s *Postgres) CreateReconRule(ctx context.Context, in NewReconRule, key str
 		return err
 	})
 	return out, err
+}
+
+func checkRuleCapacity(ctx context.Context, tx pgx.Tx, tenantID string, in NewReconRule) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "recon-rules:"+tenantID+":"+in.LegalEntityID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `select bank_account_id::text, count(*) from reconciliation_rule
+		where tenant_id = $1 and legal_entity_id = $2 and active group by bank_account_id`, tenantID, in.LegalEntityID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	entityWide, busiestAccount, own := 0, 0, 0
+	for rows.Next() {
+		var account *string
+		var n int
+		if err := rows.Scan(&account, &n); err != nil {
+			return err
+		}
+		switch {
+		case account == nil:
+			entityWide = n
+		case in.BankAccountID != nil && strings.EqualFold(*account, *in.BankAccountID):
+			own = n
+			busiestAccount = max(busiestAccount, n)
+		default:
+			busiestAccount = max(busiestAccount, n)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	affected := busiestAccount
+	if in.BankAccountID != nil {
+		affected = own
+	}
+	if entityWide+affected >= MaxActiveRules {
+		return unprocessable(CodeRuleLimit, "a bank account may have at most "+strconv.Itoa(MaxActiveRules)+" active reconciliation rules; deactivate one first")
+	}
+	return nil
 }
 
 // ListReconRules returns the rules of a legal entity, optionally those that apply to one bank account
@@ -331,7 +377,10 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 	if err != nil {
 		return RunResult{}, err
 	}
-	outcome := domain.ReconcileStatement(lines, items, rules, domain.DefaultThresholds)
+	outcome, err := domain.ReconcileStatement(ctx, lines, items, rules, domain.DefaultThresholds)
+	if err != nil {
+		return RunResult{}, err
+	}
 	matches := make([]Match, 0, len(outcome.Matches))
 	for _, am := range outcome.Matches {
 		m := Match{ID: ids.New(), LegalEntityID: st.legalEntityID, BankAccountID: st.bankAccountID, StatementID: in.StatementID,
@@ -369,7 +418,7 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 
 func activeRules(ctx context.Context, tx pgx.Tx, tenantID string, st statementScope) ([]domain.Rule, error) {
 	rows, err := tx.Query(ctx, `select `+ruleColumns+` from reconciliation_rule where tenant_id = $1 and legal_entity_id = $2 and active
-		and (bank_account_id is null or bank_account_id = $3) order by priority, name`, tenantID, st.legalEntityID, st.bankAccountID)
+		and (bank_account_id is null or bank_account_id = $3) order by priority, name limit $4`, tenantID, st.legalEntityID, st.bankAccountID, MaxActiveRules)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +506,7 @@ func openItems(ctx context.Context, tx pgx.Tx, tenantID string, st statementScop
 		if taken[k] || it.Currency != st.currency {
 			continue
 		}
-		amount, err := decimal.NewFromString(it.Amount)
+		amount, err := parseAmount(CodeMatchLine, "item "+k+" amount", it.Amount)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -617,7 +666,12 @@ func manualMatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NewMatch
 			rows.Close()
 			return Match{}, httpx.NewProblem(http.StatusConflict, CodeLineMatched, "statement line is already matched")
 		}
-		lineTotal = lineTotal.Add(decimal.RequireFromString(l.Amount))
+		amount, err := parseAmount(CodeMatchLine, "statement line amount", l.Amount)
+		if err != nil {
+			rows.Close()
+			return Match{}, err
+		}
+		lineTotal = lineTotal.Add(amount)
 		m.Lines = append(m.Lines, l)
 	}
 	rows.Close()
@@ -631,7 +685,11 @@ func manualMatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NewMatch
 		if it.Currency != st.currency {
 			return Match{}, unprocessable(CodeMatchLine, "item currency differs from the statement currency")
 		}
-		itemTotal = itemTotal.Add(decimal.RequireFromString(it.Amount))
+		amount, err := parseAmount(CodeMatchLine, "item amount", it.Amount)
+		if err != nil {
+			return Match{}, err
+		}
+		itemTotal = itemTotal.Add(amount)
 	}
 	if !lineTotal.Equal(itemTotal) {
 		return Match{}, unprocessable(CodeMatchUnbalanced, "lines add up to "+lineTotal.String()+" but items to "+itemTotal.String())

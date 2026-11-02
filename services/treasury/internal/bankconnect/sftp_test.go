@@ -123,7 +123,7 @@ func TestSFTP_FailedRenameIsAmbiguousAndAuditedUnknown(t *testing.T) {
 }
 
 func TestSFTP_RefusesPathsOutsideTheDirectory(t *testing.T) {
-	for _, name := range []string{"", "../etc/passwd", "a/b.xml", ".hidden", `a\b.xml`, "/abs.xml"} {
+	for _, name := range []string{"", "../etc/passwd", "a/b.xml", ".hidden", `a\b.xml`, "/abs.xml", "a\x00b.xml", "a\nb.xml", "a\tb.xml", "a\x7fb.xml"} {
 		srv := newMemorySFTP()
 		f := pain001
 		f.Name = name
@@ -150,6 +150,15 @@ func TestSFTP_CancelledContextSendsNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := (SFTP{Dir: "in", Client: srv}).Send(ctx, pain001, Signature{Bytes: []byte("s")}); err == nil || srv.puts != 0 {
+		t.Fatalf("err = %v, puts = %d", err, srv.puts)
+	}
+}
+
+func TestSFTP_RefusesAFileAboveTheSizeCap(t *testing.T) {
+	srv := newMemorySFTP()
+	f := pain001
+	f.Data = make([]byte, MaxFileBytes+1)
+	if _, err := (SFTP{Dir: "in", Client: srv}).Send(context.Background(), f, Signature{Bytes: []byte("s")}); err == nil || srv.puts != 0 {
 		t.Fatalf("err = %v, puts = %d", err, srv.puts)
 	}
 }

@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode"
 )
 
-const ProtocolSFTP = "sftp"
+const (
+	ProtocolSFTP = "sftp"
+	MaxFileBytes = 50 << 20
+)
 
 // SFTPClient is the file-transfer session the adapter needs. Put and Rename
 // return an error only when the operation did not complete as asked. SFTP.Send
@@ -34,8 +38,11 @@ type SFTP struct {
 func (SFTP) Protocol() string { return ProtocolSFTP }
 
 func (s SFTP) Send(ctx context.Context, f File, sig Signature) (Receipt, error) {
-	if f.Name == "" || f.Name != path.Base(f.Name) || strings.HasPrefix(f.Name, ".") || strings.ContainsAny(f.Name, `\`) {
+	if f.Name == "" || f.Name != path.Base(f.Name) || strings.HasPrefix(f.Name, ".") || strings.ContainsAny(f.Name, `\`) || strings.IndexFunc(f.Name, unicode.IsControl) >= 0 {
 		return Receipt{}, fmt.Errorf("sftp upload refused: file name %q must be a plain name", f.Name)
+	}
+	if len(f.Data) > MaxFileBytes {
+		return Receipt{}, fmt.Errorf("sftp upload refused: file of %d bytes exceeds %d", len(f.Data), MaxFileBytes)
 	}
 	final := path.Join(path.Clean("/"+s.Dir), f.Name)
 	if err := ctx.Err(); err != nil {

@@ -1,10 +1,13 @@
 package domain
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -82,6 +85,15 @@ func recon1000() ([]Item, []reconLine) {
 	return items, lines
 }
 
+func reconcile(t *testing.T, lines []RecLine, items []Item, rules []Rule, th Thresholds) Outcome {
+	t.Helper()
+	out, err := ReconcileStatement(context.Background(), lines, items, rules, th)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestReconcileStatement_Recon1000AutoMatchesAtLeast95PercentWithoutFalseMatches(t *testing.T) {
 	items, lines := recon1000()
 	if len(lines) != 1000 {
@@ -95,7 +107,7 @@ func TestReconcileStatement_Recon1000AutoMatchesAtLeast95PercentWithoutFalseMatc
 		want[l.line.No] = strings.Join(l.want, ",")
 		group[l.line.No] = l.group
 	}
-	out := ReconcileStatement(plain, items, storedRules(), DefaultThresholds)
+	out := reconcile(t, plain, items, storedRules(), DefaultThresholds)
 	correct := map[string]int{}
 	total := 0
 	for _, m := range out.Matches {
@@ -145,7 +157,7 @@ func TestReconcileStatement_NeverAutoMatchesContestedOrUnbalancedClaims(t *testi
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out := ReconcileStatement(tc.lines, tc.items, storedRules(), DefaultThresholds)
+			out := reconcile(t, tc.lines, tc.items, storedRules(), DefaultThresholds)
 			if len(out.Matches) != tc.want {
 				t.Fatalf("matches = %+v; want %d", out.Matches, tc.want)
 			}
@@ -156,12 +168,12 @@ func TestReconcileStatement_NeverAutoMatchesContestedOrUnbalancedClaims(t *testi
 func TestReconcileStatement_ReportsSuggestionsAndRule(t *testing.T) {
 	item := Item{ID: "tx-1", Facts: facts("75.00", "2026-10-22", "1001", "Vendor A")}
 	line := RecLine{1, facts("75.00", "2026-10-23", "1001", "x")}
-	out := ReconcileStatement([]RecLine{line}, []Item{item}, storedRules(), DefaultThresholds)
+	out := reconcile(t, []RecLine{line}, []Item{item}, storedRules(), DefaultThresholds)
 	if len(out.Matches) != 0 || len(out.Suggestions) != 1 || out.Suggestions[0].ItemID != "tx-1" {
 		t.Fatalf("outcome = %+v; want one suggestion for tx-1", out)
 	}
 	exact := RecLine{1, item.Facts}
-	out = ReconcileStatement([]RecLine{exact}, []Item{item}, storedRules(), DefaultThresholds)
+	out = reconcile(t, []RecLine{exact}, []Item{item}, storedRules(), DefaultThresholds)
 	if len(out.Matches) != 1 || out.Matches[0].Rule != "balanced" || !out.Matches[0].Difference.IsZero() {
 		t.Fatalf("outcome = %+v; want a balanced match with no difference", out)
 	}
@@ -171,7 +183,7 @@ func TestReconcileStatement_OrdersRulesByPriority(t *testing.T) {
 	lo := Rule{Name: "z-first", Priority: 1, Weights: DefaultWeights, Tolerance: tol}
 	hi := Rule{Name: "a-second", Priority: 2, Weights: DefaultWeights, Tolerance: tol}
 	item := Item{ID: "tx-1", Facts: facts("10.00", "2026-10-22", "E2E00042", "Vendor")}
-	out := ReconcileStatement([]RecLine{{1, item.Facts}}, []Item{item}, []Rule{hi, lo}, DefaultThresholds)
+	out := reconcile(t, []RecLine{{1, item.Facts}}, []Item{item}, []Rule{hi, lo}, DefaultThresholds)
 	if len(out.Matches) != 1 || out.Matches[0].Rule != "z-first" {
 		t.Fatalf("matches = %+v; want the priority 1 rule to decide", out.Matches)
 	}
@@ -202,5 +214,102 @@ func TestRule_Validate(t *testing.T) {
 		if r.Validate() == nil {
 			t.Errorf("%s must be rejected", n)
 		}
+	}
+}
+
+func largeRun(n, distinctAmounts int) ([]RecLine, []Item) {
+	lines := make([]RecLine, n)
+	items := make([]Item, n)
+	for i := 0; i < n; i++ {
+		f := Facts{
+			Amount: decimal.New(int64(10000+(i%distinctAmounts)*100), -2), ValueDate: fmt.Sprintf("2026-10-%02d", 1+i%28),
+			Reference: fmt.Sprintf("E2E%05d", i), Counterparty: fmt.Sprintf("Vendor %03d Holdings", i),
+		}
+		items[i] = Item{ID: fmt.Sprintf("tx-%d", i), Facts: f}
+		lines[i] = RecLine{No: i + 1, Facts: f}
+	}
+	return lines, items
+}
+
+func unmatchableRun(n int) ([]RecLine, []Item) {
+	lines, items := largeRun(n, 1)
+	for i := range lines {
+		lines[i].Reference = fmt.Sprintf("LINE%05d", i)
+		lines[i].Counterparty = fmt.Sprintf("Payer %03d Ltd", i)
+		lines[i].ValueDate = fmt.Sprintf("2026-10-%02d", 10+i%3)
+		items[i].ValueDate = fmt.Sprintf("2026-10-%02d", 10+i%3)
+	}
+	return lines, items
+}
+
+func twentyRules() []Rule {
+	rules := make([]Rule, 20)
+	for i := range rules {
+		rules[i] = Rule{Name: fmt.Sprintf("rule-%02d", i), Priority: i + 1, Weights: DefaultWeights, Tolerance: tol}
+	}
+	return rules
+}
+
+func TestReconcileStatement_TwoThousandByTwoThousandWithTwentyRulesFinishesQuickly(t *testing.T) {
+	spread, spreadItems := largeRun(2000, 500)
+	few, fewItems := largeRun(2000, 5)
+	worst, worstItems := unmatchableRun(2000)
+	for name, run := range map[string]struct {
+		lines []RecLine
+		items []Item
+	}{"spread amounts": {spread, spreadItems}, "few distinct amounts": {few, fewItems}, "same amount, nothing matches": {worst, worstItems}} {
+		lines, items := run.lines, run.items
+		start := time.Now()
+		out := reconcile(t, lines, items, twentyRules(), DefaultThresholds)
+		elapsed := time.Since(start)
+		t.Logf("%s: 2000 lines x 2000 items x 20 rules in %s, %d matches", name, elapsed, len(out.Matches))
+		if elapsed > 5*time.Second {
+			t.Errorf("%s: run took %s; want under 5s", name, elapsed)
+		}
+	}
+}
+
+func TestReconcileStatement_StopsWhenTheContextIsCancelled(t *testing.T) {
+	lines, items := largeRun(200, 50)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ReconcileStatement(ctx, lines, items, storedRules(), DefaultThresholds); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v; want context.Canceled", err)
+	}
+}
+
+func TestMatchLine_PayerRuleDoesNotAutoMatchAContradictingReference(t *testing.T) {
+	payer := []Rule{{Name: "payer", Priority: 1, Weights: Weights{Amount: 40, Date: 20, Counterparty: 40}, Tolerance: tol}}
+	candidate := func(reference string) map[string]Facts {
+		return map[string]Facts{"tx-1": facts("120.00", "2026-10-22", reference, "Acme Trading Ltd")}
+	}
+	tests := []struct {
+		name          string
+		lineRef       string
+		altRef        string
+		candidateRef  string
+		wantAutoMatch bool
+	}{
+		{"line reference differs from the candidate", "INV-2026-0001", "", "INV-2026-0099", false},
+		{"remittance text differs from the candidate", "NOTPROVIDED", "INV-2026-0001", "INV-2026-0099", false},
+		{"line reference equals the candidate", "INV-2026-0001", "", "INV-2026-0001", true},
+		{"remittance text contains the candidate reference", "NOTPROVIDED", "PAYMENT INV-2026-0001 THANKS", "INV-2026-0001", true},
+		{"line reference is a placeholder", "NOTPROVIDED", "", "INV-2026-0099", true},
+		{"line reference is too short to trust", "1234567", "", "INV-2026-0099", true},
+		{"candidate has no reference", "INV-2026-0001", "", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			line := facts("120.00", "2026-10-22", tc.lineRef, "Acme Trading Ltd")
+			line.AltReference = tc.altRef
+			d := MatchLine(line, candidate(tc.candidateRef), payer, DefaultThresholds)
+			wantStatus := StatusSuggested
+			if tc.wantAutoMatch {
+				wantStatus = StatusMatched
+			}
+			if d.Status != wantStatus {
+				t.Fatalf("status = %s (best %+v); want %s", d.Status, d.Best, wantStatus)
+			}
+		})
 	}
 }

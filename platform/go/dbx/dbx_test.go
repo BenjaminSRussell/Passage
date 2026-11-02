@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -113,5 +115,36 @@ func TestTenantWidePredicate(t *testing.T) {
 		if err := dbx.WithTenantWideAdminTx(context.Background(), nil, c.p, duty, func(pgx.Tx) error { return nil }); !errors.Is(err, dbx.ErrNotTenantWide) {
 			t.Errorf("%s: err = %v, want ErrNotTenantWide", c.name, err)
 		}
+	}
+}
+
+func TestWithTenantTxReleasesTheConnectionWhenTheClosurePanics(t *testing.T) {
+	_, app := testkit.DBWithApp(t)
+	cfg := app.Config().Copy()
+	cfg.MaxConns = 1
+	ctx := context.Background()
+	single, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer single.Close()
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the panic must reach the caller")
+			}
+		}()
+		_ = dbx.WithTenantTx(tenant.With(ctx, principal("")), single, func(pgx.Tx) error { panic("closure failed") })
+	}()
+
+	timeout, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var one int
+	if err := single.QueryRow(timeout, `select 1`).Scan(&one); err != nil {
+		t.Fatalf("the only pooled connection was not released after a panic: %v", err)
+	}
+	if n := single.Stat().AcquiredConns(); n != 0 {
+		t.Fatalf("%d connections still acquired", n)
 	}
 }

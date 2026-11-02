@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -376,7 +375,11 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 			return err
 		}
 		if existing, err := scanStatement(tx.QueryRow(ctx, `select `+statementColumns+` from bank_statement where tenant_id = $1 and bank_account_id = $2 and statement_id = $3`, p.TenantID, in.BankAccountID, in.Parsed.StatementID)); err == nil {
-			if err := domain.Duplicate(decimal.RequireFromString(existing.ClosingBalance), in.Parsed.ClosingAmount); err != nil {
+			closing, err := parseAmount(domain.CodeStatementBalance, "stored closing balance", existing.ClosingBalance)
+			if err != nil {
+				return err
+			}
+			if err := domain.Duplicate(closing, in.Parsed.ClosingAmount); err != nil {
 				return err
 			}
 			res = ImportResult{Statement: existing, Replayed: true}

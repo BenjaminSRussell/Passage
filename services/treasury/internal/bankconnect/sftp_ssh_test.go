@@ -138,6 +138,13 @@ func TestDialSSH_RefusesAWrongHostKeyAndMissingPins(t *testing.T) {
 	if _, err := DialSSH(context.Background(), none); err == nil {
 		t.Fatal("an empty fingerprint must be refused, not skip host-key checking")
 	}
+	for _, pin := range []string{"SHA256:", "MD5:aa:bb", strings.TrimPrefix(fx.hostPrint, "SHA256:")} {
+		bad := fx.config()
+		bad.HostKeyFingerprint = pin
+		if _, err := DialSSH(context.Background(), bad); err == nil || strings.Contains(err.Error(), "does not match") {
+			t.Fatalf("pin %q must be refused before dialling: %v", pin, err)
+		}
+	}
 	stranger := fx.config()
 	stranger.Signer = newSigner(t)
 	if _, err := DialSSH(context.Background(), stranger); err == nil {
@@ -155,4 +162,15 @@ func TestSSHClient_PutOnAClosedConnectionFails(t *testing.T) {
 	if err := client.Put(context.Background(), filepath.Join(fx.rootDir, "x"), []byte("x")); err == nil {
 		t.Fatal("Put on a closed connection succeeded")
 	}
+}
+
+func TestDialSSH_TrimsWhitespaceAroundThePinnedFingerprint(t *testing.T) {
+	fx := newSSHFixture(t)
+	padded := fx.config()
+	padded.HostKeyFingerprint = " " + fx.hostPrint + "\n"
+	client, err := DialSSH(context.Background(), padded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
 }

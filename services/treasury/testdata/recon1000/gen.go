@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type item struct {
@@ -41,7 +42,9 @@ func money(c int64) string {
 
 func swift(c int64) string { return strings.Replace(money(c), ".", ",", 1) }
 
-func date(day int) string { return fmt.Sprintf("2026-10-%02d", day) }
+func date(day int) string {
+	return time.Date(2026, time.October, day, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+}
 
 func yymmdd(day int) string { return fmt.Sprintf("2610%02d", day) }
 
@@ -89,6 +92,11 @@ func main() {
 		add(id, -1250, day, ref, "Example Bank AG", "")
 		camt = append(camt, line{-1250, day, ref, "Example Bank AG", []string{id}, "fee", true})
 	}
+	for i := 620; i < 820; i++ {
+		c, day, cp := int64(10000+(i%53)*100), 1+i%28, fmt.Sprintf("Vendor %03d Holdings", i)
+		add(fmt.Sprintf("decoy-payer-1-%d", i), c, day-1, fmt.Sprintf("E2E6%05d", i), cp, "")
+		add(fmt.Sprintf("decoy-payer-2-%d", i), c, day-3, fmt.Sprintf("E2E7%05d", i), cp, "")
+	}
 	for i := 0; i < 100; i++ {
 		c, day := int64(10000+(i%53)*100), 1+i%28
 		add(fmt.Sprintf("decoy-vendor-%d", i), c, min(day+3, 31), fmt.Sprintf("E2E9%04d", i), fmt.Sprintf("Vendor %03d Holdings", i), "")
@@ -112,14 +120,18 @@ func main() {
 		}
 		return t
 	}
-	expected := map[string]map[string][][]string{"matched": {}, "suggested": {}}
+	type expectation struct {
+		LineNo int      `json:"lineNo"`
+		Items  []string `json:"items"`
+	}
+	expected := map[string]map[string][]expectation{"matched": {}, "suggested": {}}
 	for name, ls := range map[string][]line{"camt053.xml": camt, "bai2.txt": bai, "mt940.txt": mt} {
-		for _, l := range ls {
+		for i, l := range ls {
 			kind := "matched"
 			if l.group == "reference-only" {
 				kind = "suggested"
 			}
-			expected[kind][name] = append(expected[kind][name], l.items)
+			expected[kind][name] = append(expected[kind][name], expectation{LineNo: i + 1, Items: l.items})
 		}
 	}
 
@@ -159,7 +171,11 @@ func main() {
 	b.Reset()
 	b.WriteString("{1:F01BANKDEFFAXXX0000000000}{2:O9400000000000BANKDEFFAXXX00000000000000000000N}{4:\n:20:REC1000MT\n:25:DE89370400440532013000\n:28C:00001/001\n:60F:C261001EUR1000,00\n")
 	for i, l := range mt {
-		fmt.Fprintf(&b, ":61:%s%02d%02dC%sNTRFNONREF//BR%06d\n:86:166?00GUTSCHRIFT?20%s?32%s\n", yymmdd(l.day), 10, l.day, swift(l.cents), i, l.ref, l.cp)
+		bank := ""
+		if l.ref != "" {
+			bank = fmt.Sprintf("//BR%06d", i)
+		}
+		fmt.Fprintf(&b, ":61:%s%02d%02dC%sNTRFNONREF%s\n:86:166?00GUTSCHRIFT?20%s?32%s\n", yymmdd(l.day), 10, l.day, swift(l.cents), bank, l.ref, l.cp)
 	}
 	fmt.Fprintf(&b, ":62F:C261031EUR%s\n-}\n", swift(100000+sum(mt)))
 	write("mt940.txt", b.String())

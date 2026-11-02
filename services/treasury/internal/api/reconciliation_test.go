@@ -313,3 +313,31 @@ func TestListMatches_PagesWithNextOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestReconciliation_PassesTheTrimmedAmountToTheStore(t *testing.T) {
+	h, fs := newTestServer(t)
+	run := runBody()
+	run["items"].([]map[string]any)[0]["amount"] = " 120.00\t"
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-runs", jsonBody(t, run), "application/json", map[string]string{idempotencyKey: "r"}); rec.Code != http.StatusCreated {
+		t.Fatalf("run: status %d body %s", rec.Code, rec.Body)
+	}
+	if got := fs.lastRun.Items[0].Amount; got != "120.00" {
+		t.Fatalf("run item amount = %q; want 120.00", got)
+	}
+	match := map[string]any{"statementId": testStatement, "legalEntityId": testLE, "lineNos": []int{3}, "reason": "x",
+		"items": []map[string]any{{"type": "ar", "id": "inv-1", "currency": "EUR", "amount": "  7.00 "}}}
+	if rec := call(h, http.MethodPost, "/v1/treasury/reconciliation-matches", jsonBody(t, match), "application/json", map[string]string{idempotencyKey: "m"}); rec.Code != http.StatusCreated {
+		t.Fatalf("match: status %d body %s", rec.Code, rec.Body)
+	}
+	if got := fs.lastMatch.Items[0].Amount; got != "7.00" {
+		t.Fatalf("match item amount = %q; want 7.00", got)
+	}
+}
+
+func TestUnmatch_RejectsABlankReasonAfterTrimming(t *testing.T) {
+	h, _ := newTestServer(t)
+	path := "/v1/treasury/reconciliation-matches/" + testMatchID + ":unmatch"
+	if rec := call(h, http.MethodPost, path, jsonBody(t, map[string]string{"reason": "   "}), "application/json", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank reason: status %d", rec.Code)
+	}
+}

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"sort"
 
 	"github.com/shopspring/decimal"
@@ -44,7 +45,7 @@ type Outcome struct {
 // date window of the rules. The remaining lines go through MatchLine one to one.
 // An item claimed by more than one match is released from all of them, so a
 // duplicate or ambiguous claim is never auto-matched (BR-36.2).
-func ReconcileStatement(lines []RecLine, items []Item, rules []Rule, t Thresholds) Outcome {
+func ReconcileStatement(ctx context.Context, lines []RecLine, items []Item, rules []Rule, t Thresholds) (Outcome, error) {
 	ordered := append([]Rule(nil), rules...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if ordered[i].Priority != ordered[j].Priority {
@@ -72,13 +73,18 @@ func ReconcileStatement(lines []RecLine, items []Item, rules []Rule, t Threshold
 			open[it.ID] = it.Facts
 		}
 	}
+	index := newMatchIndex(open)
 	decisions := map[int]Decision{}
 	claims := map[string]int{}
 	for _, l := range lines {
 		if done[l.No] {
 			continue
 		}
-		d := MatchLine(l.Facts, open, ordered, t)
+		if err := ctx.Err(); err != nil {
+			return Outcome{}, err
+		}
+		line := prepare("", l.Facts)
+		d := index.matchLine(line, index.near(line, ordered), ordered, t)
 		decisions[l.No] = d
 		if d.Status == StatusMatched {
 			claims[d.Best.ID]++
@@ -97,7 +103,7 @@ func ReconcileStatement(lines []RecLine, items []Item, rules []Rule, t Threshold
 			out.Suggestions = append(out.Suggestions, Suggestion{LineNo: l.No, ItemID: d.Best.ID, Score: d.Best.Score})
 		}
 	}
-	return out
+	return out, nil
 }
 
 func matchBatches(lines []RecLine, items []Item, window int) []AutoMatch {

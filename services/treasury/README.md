@@ -101,6 +101,8 @@ A run considers one page of open lines after `afterLineNo`; `remainingLines` and
 `GET /reconciliation-matches` pages with `limit` (max 500) and `offset`, and returns `nextOffset` for a full page.
 A placeholder end-to-end id (NOTPROVIDED, NONREF) is ignored and the remittance reference is scored instead.
 A reference-only candidate (the reference agrees, amount, date or payer does not) is suggested and never auto-matched.
+A rule that does not require the reference never auto-matches a candidate whose reference contradicts a usable reference of the line (8 or more characters, not a placeholder); it is suggested.
+A bank account has at most 20 active rules, its own and the entity-wide ones (TRS-0489). Item amounts are trimmed before they are validated and stored.
 All creates take `Idempotency-Key`; `:deactivate` and `:unmatch` take `If-Match`. Events:
 `dev.passage.treasury.reconciliation.matched.v1` and `...unmatched.v1`.
 
@@ -158,6 +160,7 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0486` | 422 | a line is not on the statement, or a line or item is not in the statement currency |
 | `TRS-0487` | 409 | the reconciliation rule is already inactive |
 | `TRS-0488` | 422 | the items or the request belong to a different legal entity than the statement |
+| `TRS-0489` | 422 | the rule would give a bank account more than 20 active reconciliation rules |
 | `TRS-0490` | 413 | statement file exceeds `TREASURY_MAX_FILE_MB` |
 | `TRS-0491` | 400 | statement file could not be read |
 | `TRS-0493` | 422 | statement cannot be parsed as camt.053, BAI2 or MT940, or the file holds more than one statement; `errors.line` names the BAI2 / MT940 line, `errors.entry` the camt.053 entry |

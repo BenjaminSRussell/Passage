@@ -118,7 +118,6 @@ components:
               bankAccountId: {type: string, format: uuid}
               number: {type: integer, minimum: 1, description: check number, which stays consumed}
               reason: {type: string}
-              unmatchedBy: {type: string}
               positivePayVoid: {type: boolean, description: "true when the check was sent or stopped, so the bank's positive pay file needs a void record (BR-36.5)"}
     ReconciliationMatched:
       name: dev.passage.treasury.reconciliation.matched.v1

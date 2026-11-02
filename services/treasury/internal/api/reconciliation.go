@@ -196,7 +196,8 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	for i, it := range req.Items {
 		at := "items[" + strconv.Itoa(i) + "]"
-		amount, err := decimal.NewFromString(strings.TrimSpace(it.Amount))
+		req.Items[i].Amount = strings.TrimSpace(it.Amount)
+		amount, err := decimal.NewFromString(req.Items[i].Amount)
 		switch {
 		case !validItemID(it.Type, it.ID):
 			fields[at] = "type must be ledger, ar or ap and id 1 to 100 characters"
@@ -271,7 +272,8 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 	itemSeen := map[string]bool{}
 	for i, it := range req.Items {
 		at := "items[" + strconv.Itoa(i) + "]"
-		amount, err := decimal.NewFromString(strings.TrimSpace(it.Amount))
+		req.Items[i].Amount = strings.TrimSpace(it.Amount)
+		amount, err := decimal.NewFromString(req.Items[i].Amount)
 		switch {
 		case !validItemID(it.Type, it.ID):
 			fields[at] = "type must be ledger, ar or ap and id 1 to 100 characters"
@@ -377,11 +379,12 @@ func (a *API) unmatch(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	if !domain.ValidVoidReason(req.Reason) {
+	reason := strings.TrimSpace(req.Reason)
+	if !domain.ValidVoidReason(reason) {
 		validationFailed(w, r, map[string]string{"reason": "required, 1 to 200 characters"})
 		return
 	}
-	m, err := a.store.Unmatch(r.Context(), id, version, strings.TrimSpace(req.Reason))
+	m, err := a.store.Unmatch(r.Context(), id, version, reason)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return

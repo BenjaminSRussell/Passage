@@ -684,7 +684,8 @@ paths:
       description: |
         Weights (amount, date, reference, counterparty) sum to 100 and the amount carries at least 20.
         A strict rule may only auto-match on a reference of 8 or more characters. Rules run in priority
-        order (1 first). The name is unique per legal entity (TRS-0482).
+        order (1 first). The name is unique per legal entity (TRS-0482). A bank account may have at most 20 active
+        rules, counting the entity-wide ones (422 TRS-0489).
       x-passage-duty: treasury.reconciliation.write
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"

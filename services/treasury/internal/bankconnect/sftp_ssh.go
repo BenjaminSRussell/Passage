@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -36,8 +37,9 @@ type SSHClient struct {
 // DialSSH connects, verifies the host key against the pinned fingerprint and
 // authenticates with the client key.
 func DialSSH(ctx context.Context, cfg SSHConfig) (*SSHClient, error) {
-	if cfg.HostKeyFingerprint == "" || cfg.Signer == nil || cfg.User == "" || cfg.Addr == "" {
-		return nil, errors.New("sftp: address, user, client key and host key fingerprint are all required")
+	pinned := strings.TrimSpace(cfg.HostKeyFingerprint)
+	if !strings.HasPrefix(pinned, "SHA256:") || len(pinned) == len("SHA256:") || cfg.Signer == nil || cfg.User == "" || cfg.Addr == "" {
+		return nil, errors.New("sftp: address, user, client key and a SHA256: host key fingerprint are all required")
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -47,8 +49,8 @@ func DialSSH(ctx context.Context, cfg SSHConfig) (*SSHClient, error) {
 		User: cfg.User,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(cfg.Signer)},
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			if got := ssh.FingerprintSHA256(key); got != cfg.HostKeyFingerprint {
-				return fmt.Errorf("sftp: host key %s does not match the pinned %s", got, cfg.HostKeyFingerprint)
+			if got := ssh.FingerprintSHA256(key); got != pinned {
+				return fmt.Errorf("sftp: host key %s does not match the pinned %s", got, pinned)
 			}
 			return nil
 		},

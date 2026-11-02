@@ -85,50 +85,101 @@ var (
 	ReferenceWeights = Weights{Amount: 40, Date: 10, Reference: 50}
 )
 
+type prepared struct {
+	Facts
+	id        string
+	day       int
+	hasDay    bool
+	reference string
+	alt       string
+	grams     map[string]struct{}
+}
+
+func prepare(id string, f Facts) *prepared {
+	p := &prepared{Facts: f, id: id, reference: normalizedReference(f.Reference), alt: normalizedReference(f.AltReference), grams: trigrams(f.Counterparty)}
+	if d, err := time.Parse("2006-01-02", f.ValueDate); err == nil {
+		p.day, p.hasDay = int(d.Unix()/86400), true
+	}
+	return p
+}
+
+func daysApart(a, b *prepared) (int, bool) {
+	if !a.hasDay || !b.hasDay {
+		return 0, false
+	}
+	return max(a.day-b.day, b.day-a.day), true
+}
+
+func inWindow(a, b *prepared, window int) bool {
+	days, ok := daysApart(a, b)
+	return ok && days <= window
+}
+
 // ScoreWith is Score under the weights of a rule.
 func ScoreWith(line, cand Facts, tol Tolerance, w Weights) int {
-	total := float64(w.Amount)*amountResult(line.Amount, cand.Amount, tol.Amount) +
-		float64(w.Date)*dateResult(line.ValueDate, cand.ValueDate, tol.DateWindowDays) +
-		float64(w.Reference)*math.Max(referenceResult(line.Reference, cand.Reference), referenceResult(line.AltReference, cand.Reference)) +
-		float64(w.Counterparty)*similarity(line.Counterparty, cand.Counterparty)
+	return newPair(prepare("", line), prepare("", cand), true, true).score(tol, w)
+}
+
+type pair struct {
+	cand    *prepared
+	diff    decimal.Decimal
+	days    int
+	hasDays bool
+	ref     float64
+	sim     float64
+}
+
+func newPair(line, cand *prepared, needRef, needSim bool) pair {
+	p := pair{cand: cand, diff: line.Amount.Sub(cand.Amount).Abs()}
+	p.days, p.hasDays = daysApart(line, cand)
+	if needRef {
+		p.ref = math.Max(referenceResult(line.reference, cand.reference), referenceResult(line.alt, cand.reference))
+	}
+	if needSim {
+		p.sim = similarity(line.grams, cand.grams)
+	}
+	return p
+}
+
+func (p pair) score(tol Tolerance, w Weights) int {
+	total := float64(w.Amount)*amountResult(p.diff, tol.Amount) +
+		float64(w.Date)*dateResult(p.days, p.hasDays, tol.DateWindowDays) +
+		float64(w.Reference)*p.ref +
+		float64(w.Counterparty)*p.sim
 	return int(math.Round(total))
 }
 
-// amountResult is 1 for an exact amount, 1 - |delta|/tolerance inside the tolerance and 0 outside it.
-func amountResult(a, b, tolerance decimal.Decimal) float64 {
-	diff := a.Sub(b).Abs()
-	if diff.IsZero() {
+// amountResult is 1 for an exact amount, 1 - diff/tolerance inside the tolerance and 0 outside it.
+func amountResult(diff, tolerance decimal.Decimal) float64 {
+	switch {
+	case diff.IsZero():
 		return 1
-	}
-	if !tolerance.IsPositive() {
+	case !tolerance.IsPositive() || diff.Cmp(tolerance) >= 0:
 		return 0
 	}
 	return clip01(1 - diff.Div(tolerance).InexactFloat64())
 }
 
 // dateResult is 1 - |days|/window; with no window only the same day scores.
-func dateResult(a, b string, window int) float64 {
-	da, errA := time.Parse("2006-01-02", a)
-	db, errB := time.Parse("2006-01-02", b)
-	if errA != nil || errB != nil {
+func dateResult(days int, ok bool, window int) float64 {
+	if !ok {
 		return 0
 	}
-	days := math.Abs(da.Sub(db).Hours() / 24)
 	if window <= 0 {
 		if days == 0 {
 			return 1
 		}
 		return 0
 	}
-	return clip01(1 - days/float64(window))
+	return clip01(1 - float64(days)/float64(window))
 }
 
 var refStrip = regexp.MustCompile(`[^A-Z0-9]`)
 
-// referenceResult is 1 for equal references, 0.5 when one contains the other
-// (at least six characters, so a short number cannot match by accident), else 0.
-func referenceResult(a, b string) float64 {
-	na, nb := refStrip.ReplaceAllString(strings.ToUpper(a), ""), refStrip.ReplaceAllString(strings.ToUpper(b), "")
+// referenceResult takes normalized references: 1 for equal ones, 0.5 when one
+// contains the other (at least six characters, so a short number cannot match
+// by accident), else 0.
+func referenceResult(na, nb string) float64 {
 	switch {
 	case na == "" || nb == "" || placeholderReference(na) || placeholderReference(nb):
 		return 0
@@ -151,15 +202,18 @@ func placeholderReference(normalized string) bool {
 
 var nameStrip = regexp.MustCompile(`[^a-z0-9 ]`)
 
-// similarity is the Jaccard index of the trigram sets of two normalized names.
-func similarity(a, b string) float64 {
-	ta, tb := trigrams(a), trigrams(b)
+// similarity is the Jaccard index of two trigram sets of normalized names.
+func similarity(ta, tb map[string]struct{}) float64 {
 	if len(ta) == 0 || len(tb) == 0 {
 		return 0
 	}
+	small, large := ta, tb
+	if len(small) > len(large) {
+		small, large = large, small
+	}
 	shared := 0
-	for g := range ta {
-		if _, ok := tb[g]; ok {
+	for g := range small {
+		if _, ok := large[g]; ok {
 			shared++
 		}
 	}
@@ -198,15 +252,19 @@ type Decision struct {
 // candidate scores at least Auto and leads the runner-up by TieMargin (BR-36.2);
 // otherwise a best candidate scoring at least Suggest is suggested.
 func Decide(cands []Candidate, t Thresholds) Decision {
-	ranked := append([]Candidate(nil), cands...)
-	sort.SliceStable(ranked, func(i, j int) bool {
-		if ranked[i].Score != ranked[j].Score {
-			return ranked[i].Score > ranked[j].Score
+	var ranked []Candidate
+	for _, c := range cands {
+		pos := len(ranked)
+		for pos > 0 && (ranked[pos-1].Score < c.Score || ranked[pos-1].Score == c.Score && ranked[pos-1].ID > c.ID) {
+			pos--
 		}
-		return ranked[i].ID < ranked[j].ID
-	})
-	if len(ranked) > 3 {
-		ranked = ranked[:3]
+		if pos >= 3 {
+			continue
+		}
+		ranked = slices.Insert(ranked, pos, c)
+		if len(ranked) > 3 {
+			ranked = ranked[:3]
+		}
 	}
 	if len(ranked) == 0 || ranked[0].Score < t.Suggest {
 		return Decision{Status: StatusUnmatched, Ranked: ranked}
@@ -280,38 +338,97 @@ func DefaultRules(tol Tolerance) []Rule {
 func normalizedReference(s string) string { return refStrip.ReplaceAllString(strings.ToUpper(s), "") }
 
 func withinWindow(a, b string, window int) bool {
-	da, errA := time.Parse("2006-01-02", a)
-	db, errB := time.Parse("2006-01-02", b)
-	return errA == nil && errB == nil && math.Abs(da.Sub(db).Hours()/24) <= float64(window)
+	return inWindow(prepare("", Facts{ValueDate: a}), prepare("", Facts{ValueDate: b}), window)
+}
+
+type matchIndex struct {
+	items    []*prepared
+	refCount map[string]int
+}
+
+func newMatchIndex(cands map[string]Facts) *matchIndex {
+	ix := &matchIndex{refCount: map[string]int{}}
+	for id, f := range cands {
+		p := prepare(id, f)
+		ix.items = append(ix.items, p)
+		if p.reference != "" {
+			ix.refCount[p.reference]++
+		}
+	}
+	sort.Slice(ix.items, func(i, j int) bool {
+		if c := ix.items[i].Amount.Cmp(ix.items[j].Amount); c != 0 {
+			return c < 0
+		}
+		return ix.items[i].id < ix.items[j].id
+	})
+	return ix
+}
+
+func (ix *matchIndex) near(line *prepared, rules []Rule) []*prepared {
+	tolerance, window := decimal.Zero, 0
+	for _, r := range rules {
+		if r.Tolerance.Amount.GreaterThan(tolerance) {
+			tolerance = r.Tolerance.Amount
+		}
+		window = max(window, r.Tolerance.DateWindowDays)
+	}
+	low, high := line.Amount.Sub(tolerance), line.Amount.Add(tolerance)
+	start := sort.Search(len(ix.items), func(i int) bool { return ix.items[i].Amount.Cmp(low) >= 0 })
+	var out []*prepared
+	for _, c := range ix.items[start:] {
+		if c.Amount.Cmp(high) > 0 {
+			break
+		}
+		if inWindow(line, c, window) || sharesReference(line, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func sharesReference(line, cand *prepared) bool {
+	return cand.reference != "" && !placeholderReference(cand.reference) && (cand.reference == line.reference || cand.reference == line.alt)
 }
 
 // MatchLine ranks the candidates under each rule in order. The first rule that
 // auto-matches decides the line; otherwise the strongest suggestion wins, with
 // the earlier rule on equal scores. Candidates are keyed by ID.
 func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) Decision {
+	ix := newMatchIndex(cands)
+	return ix.matchLine(prepare("", line), ix.items, rules, t)
+}
+
+func (ix *matchIndex) matchLine(line *prepared, cands []*prepared, rules []Rule, t Thresholds) Decision {
 	best := Decision{Status: StatusUnmatched}
-	refs := lineReferences(line)
+	needRef, needSim := false, false
 	for _, r := range rules {
-		scored := make([]Candidate, 0, len(cands))
-		sharing := map[string]int{}
-		if r.Strict {
-			for _, c := range cands {
-				if n := normalizedReference(c.Reference); slices.Contains(refs, n) {
-					sharing[n]++
-				}
-			}
-		}
-		for id, c := range cands {
-			score := ScoreWith(line, c, r.Tolerance, r.Weights)
-			if r.Strict && !strictEligible(line, c, refs, r.Tolerance) {
+		needRef = needRef || r.Weights.Reference > 0
+		needSim = needSim || r.Weights.Counterparty > 0
+	}
+	pairs := make([]pair, len(cands))
+	for i, c := range cands {
+		pairs[i] = newPair(line, c, needRef, needSim)
+	}
+	byID := make(map[string]*prepared, len(cands))
+	for _, c := range cands {
+		byID[c.id] = c
+	}
+	scored := make([]Candidate, len(pairs))
+	for _, r := range rules {
+		for i, p := range pairs {
+			score := p.score(r.Tolerance, r.Weights)
+			if r.Strict && !strictEligible(line, p.cand, r.Tolerance) {
 				score = 0
 			}
-			scored = append(scored, Candidate{ID: id, Score: score})
+			scored[i] = Candidate{ID: p.cand.id, Score: score}
 		}
 		d := Decide(scored, t)
 		d.Rule = r.Name
-		if d.Status == StatusMatched && r.Strict && sharing[normalizedReference(cands[d.Best.ID].Reference)] > 1 {
-			d.Status = StatusSuggested
+		if d.Status == StatusMatched {
+			winner := byID[d.Best.ID]
+			if (r.Strict && ix.refCount[winner.reference] > 1) || (!r.Strict && contradictsReference(line, winner)) {
+				d.Status = StatusSuggested
+			}
 		}
 		if d.Status == StatusMatched {
 			return d
@@ -323,6 +440,32 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 	return best
 }
 
+func usableReference(n string) bool {
+	return len(n) >= MinStrictReferenceLen && !placeholderReference(n)
+}
+
+func contradictsReference(line, cand *prepared) bool {
+	if cand.reference == "" || placeholderReference(cand.reference) {
+		return false
+	}
+	usable := false
+	for _, n := range []string{line.reference, line.alt} {
+		if !usableReference(n) {
+			continue
+		}
+		usable = true
+		if referenceResult(n, cand.reference) > 0 {
+			return false
+		}
+	}
+	return usable
+}
+
+func strictEligible(line, cand *prepared, tol Tolerance) bool {
+	return usableReference(cand.reference) && (cand.reference == line.reference || cand.reference == line.alt) &&
+		inWindow(line, cand, tol.DateWindowDays)
+}
+
 func lineReferences(f Facts) []string {
 	var out []string
 	for _, ref := range []string{f.Reference, f.AltReference} {
@@ -331,10 +474,4 @@ func lineReferences(f Facts) []string {
 		}
 	}
 	return out
-}
-
-func strictEligible(line, cand Facts, refs []string, tol Tolerance) bool {
-	n := normalizedReference(cand.Reference)
-	return len(n) >= MinStrictReferenceLen && !placeholderReference(n) && slices.Contains(refs, n) &&
-		withinWindow(line.ValueDate, cand.ValueDate, tol.DateWindowDays)
 }

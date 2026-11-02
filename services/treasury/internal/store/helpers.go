@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
@@ -28,6 +30,14 @@ const (
 // unprocessable is a 422 problem with a Passage code.
 func unprocessable(code, detail string) error {
 	return httpx.NewProblem(http.StatusUnprocessableEntity, code, detail)
+}
+
+func parseAmount(code, what, s string) (decimal.Decimal, error) {
+	d, err := decimal.NewFromString(strings.TrimSpace(s))
+	if err != nil {
+		return decimal.Zero, unprocessable(code, what+" is not a decimal amount")
+	}
+	return d, nil
 }
 
 // versionMismatch is the 412 answer to a stale If-Match.

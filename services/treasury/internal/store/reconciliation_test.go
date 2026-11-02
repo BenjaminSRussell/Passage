@@ -1,12 +1,15 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -313,9 +316,14 @@ func TestReconciliation_OtherTenantAndOtherEntityCannotSeeOrUseMatches(t *testin
 	}
 }
 
+type recon1000Line struct {
+	LineNo int      `json:"lineNo"`
+	Items  []string `json:"items"`
+}
+
 type recon1000Expected struct {
-	Matched   map[string][][]string `json:"matched"`
-	Suggested map[string][][]string `json:"suggested"`
+	Matched   map[string][]recon1000Line `json:"matched"`
+	Suggested map[string][]recon1000Line `json:"suggested"`
 }
 
 func readRecon1000(t *testing.T, name string, into any) {
@@ -370,9 +378,9 @@ func TestRunReconciliation_ThousandLinesAcrossThreeFormats(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: import: %v", file, err)
 		}
-		expectedSets := map[string]bool{}
-		for _, ids := range want.Matched[file] {
-			expectedSets[joined(ids)] = true
+		expectedByLine := map[int]string{}
+		for _, l := range want.Matched[file] {
+			expectedByLine[l.LineNo] = joined(l.Items)
 		}
 		totalLines += len(want.Matched[file]) + len(want.Suggested[file])
 		after := 0
@@ -388,9 +396,9 @@ func TestRunReconciliation_ThousandLinesAcrossThreeFormats(t *testing.T) {
 					got = append(got, it.ID)
 					matchedItems[it.ID] = true
 				}
-				if !expectedSets[joined(got)] || strings.HasPrefix(got[0], "decoy-") {
+				if len(m.Lines) != 1 || expectedByLine[m.Lines[0].LineNo] != joined(got) || strings.HasPrefix(got[0], "decoy-") {
 					wrong++
-					t.Errorf("%s: wrong match %v (rule %s)", file, got, m.RuleName)
+					t.Errorf("%s: wrong match of lines %v to %v (rule %s)", file, m.Lines, got, m.RuleName)
 				}
 			}
 			for _, sg := range res.Suggestions {
@@ -407,20 +415,108 @@ func TestRunReconciliation_ThousandLinesAcrossThreeFormats(t *testing.T) {
 	if totalLines != 1000 || autoMatched < 950 || wrong != 0 {
 		t.Fatalf("lines %d, auto-matched %d, wrong %d; want 1000 lines, at least 950 auto-matched and none wrong", totalLines, autoMatched, wrong)
 	}
-	for _, ids := range func() [][]string {
-		var all [][]string
+	for _, expectation := range func() []recon1000Line {
+		var all []recon1000Line
 		for _, f := range want.Suggested {
 			all = append(all, f...)
 		}
 		return all
 	}() {
-		for _, id := range ids {
+		for _, id := range expectation.Items {
 			if matchedItems[id] {
 				t.Errorf("reference-only item %s was auto-matched; it must stay suggested", id)
 			}
 			if !suggestedItems[id] {
 				t.Errorf("reference-only item %s was not suggested", id)
 			}
+		}
+	}
+}
+
+func TestManualMatchAndRun_AnswerUnprocessableForAnAmountThatIsNotDecimal(t *testing.T) {
+	f := newReconFixture(t)
+	f.addRule(t)
+	_, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4},
+		Items: []MatchItem{{Type: "ledger", ID: "je-1", Currency: "EUR", Amount: "7.00 EUR"}}, Reason: "x"}, ids.New())
+	if got := problemCode(t, err); got != CodeMatchLine {
+		t.Fatalf("manual match with a malformed amount: code %s", got)
+	}
+	bad := append([]RunItem{runItem("ar", "inv-bad", "1,5", "INV-X", "")}, f.items...)
+	_, err = f.s.RunReconciliation(f.ctx, RunInput{StatementID: f.statement.ID, LegalEntityID: f.le, Items: bad}, ids.New())
+	if got := problemCode(t, err); got != CodeMatchLine {
+		t.Fatalf("run with a malformed amount: code %s", got)
+	}
+	if n := count(t, f.admin, `select count(*) from reconciliation_match`); n != 0 {
+		t.Fatalf("%d matches stored by refused requests", n)
+	}
+	m, err := f.s.CreateManualMatch(f.ctx, NewMatch{StatementID: f.statement.ID, LegalEntityID: f.le, LineNos: []int{4},
+		Items: []MatchItem{{Type: "ledger", ID: "je-1", Currency: "EUR", Amount: " 7.00 "}}, Reason: "x"}, ids.New())
+	if err != nil || len(m.Lines) != 1 {
+		t.Fatalf("padded amount: %+v, %v", m, err)
+	}
+}
+
+func TestCreateReconRule_CapsActiveRulesPerBankAccount(t *testing.T) {
+	f := newReconFixture(t)
+	var rules []ReconRule
+	for i := 0; i < MaxActiveRules; i++ {
+		r, err := f.s.CreateReconRule(f.ctx, refRule(f.le, &f.account.ID, fmt.Sprintf("account-%02d", i), i+1), ids.New())
+		if err != nil {
+			t.Fatalf("rule %d: %v", i, err)
+		}
+		rules = append(rules, r)
+	}
+	if _, err := f.s.CreateReconRule(f.ctx, refRule(f.le, &f.account.ID, "one-too-many", 30), ids.New()); problemCode(t, err) != CodeRuleLimit {
+		t.Fatalf("account rule beyond the cap: %v", err)
+	}
+	if _, err := f.s.CreateReconRule(f.ctx, refRule(f.le, nil, "entity-wide", 31), ids.New()); problemCode(t, err) != CodeRuleLimit {
+		t.Fatalf("entity-wide rule on top of a full account: %v", err)
+	}
+	if _, err := f.s.DeactivateReconRule(f.ctx, rules[0].ID, rules[0].Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.CreateReconRule(f.ctx, refRule(f.le, nil, "entity-wide", 31), ids.New()); err != nil {
+		t.Fatalf("entity-wide rule after a deactivation: %v", err)
+	}
+	if _, err := f.s.CreateReconRule(f.ctx, refRule(f.le, &f.account.ID, "account-again", 32), ids.New()); problemCode(t, err) != CodeRuleLimit {
+		t.Fatalf("account rule when the entity-wide rule filled the last slot: %v", err)
+	}
+	active, err := activeRulesOf(t, f)
+	if err != nil || len(active) > MaxActiveRules {
+		t.Fatalf("active rules = %d, %v", len(active), err)
+	}
+}
+
+func activeRulesOf(t *testing.T, f *reconFixture) ([]ReconRule, error) {
+	t.Helper()
+	all, err := f.s.ListReconRules(f.ctx, f.le, f.account.ID)
+	var active []ReconRule
+	for _, r := range all {
+		if r.Active {
+			active = append(active, r)
+		}
+	}
+	return active, err
+}
+
+func TestRecon1000Fixtures_MatchWhatTheGeneratorWrites(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("go", "run", "gen.go", dir)
+	cmd.Dir = "../../testdata/recon1000"
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go run gen.go: %v\n%s", err, out)
+	}
+	for _, name := range []string{"camt053.xml", "bai2.txt", "mt940.txt", "items.json", "expected.json"} {
+		generated, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := os.ReadFile("../../testdata/recon1000/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(generated, committed) {
+			t.Errorf("%s differs from the generator output; run go run gen.go . in testdata/recon1000", name)
 		}
 	}
 }
