@@ -27,6 +27,10 @@ const (
 	// OrderScheduledType is production's order.scheduled.v1 (wave 21, FR-21.2).
 	OrderScheduledType  = "dev.passage.production.order.scheduled.v1"
 	OrderScheduledTopic = "passage.production.order"
+	// OrderStatusChangedType is production's order.statuschanged.v1, on the same
+	// topic and partition (keyed by order id) as order.scheduled.v1. With no
+	// dates it says the order's schedule was withdrawn (reset, cancel, merge).
+	OrderStatusChangedType = "dev.passage.production.order.statuschanged.v1"
 	// OrderImportConsumerName is the consumer (and Kafka group) of the order
 	// intake and the service principal it runs as, service:scheduling-order-import.
 	// It is its own consumer, separate from the EAM downtime one, so it holds
@@ -61,10 +65,68 @@ type orderScheduledData struct {
 	} `json:"jobs"`
 }
 
-// OrderConsumerHandlers handles production's order.scheduled.v1 (FR-23.10)
-// on the order intake consumer, OrderImportConsumerName.
+// OrderConsumerHandlers handles production's order.scheduled.v1 and the
+// withdrawing order.statuschanged.v1 (FR-23.10) on the order intake consumer,
+// OrderImportConsumerName.
 func (a *API) OrderConsumerHandlers() map[string]eventing.Handler {
-	return map[string]eventing.Handler{OrderScheduledType: eventing.HandlerFunc(a.importScheduledOrder)}
+	return map[string]eventing.Handler{
+		OrderScheduledType:     eventing.HandlerFunc(a.importScheduledOrder),
+		OrderStatusChangedType: eventing.HandlerFunc(a.withdrawScheduledOrder),
+	}
+}
+
+// orderStatusChangedData is the part of order.statuschanged.v1 scheduling reads.
+type orderStatusChangedData struct {
+	OrderID   string  `json:"orderId"`
+	From      string  `json:"from"`
+	To        string  `json:"to"`
+	StartDate *string `json:"startDate"`
+	EndDate   *string `json:"endDate"`
+}
+
+// withdrawnStatuses are the production statuses whose entry takes the schedule
+// back (wave 21: a reset to Estimated or Created, a cancel, a merge cancelling
+// the order into another); production clears the order's dates and jobs then.
+var withdrawnStatuses = map[string]bool{"Created": true, "Estimated": true, "Cancelled": true}
+
+// withdrawScheduledOrder withdraws the operations of an order production took
+// out of schedule (FR-23.10): the order moved to Estimated, Created or
+// Cancelled and its statuschanged event carries null dates. Null dates alone
+// do not withdraw: production's journal posts (auto-start, report as finished)
+// send statuschanged without dates for an order that is still dated. Any other
+// status, an order scheduling never received, and an event older than the
+// order's last applied production event change nothing. Same principal and
+// duty as the import.
+func (a *API) withdrawScheduledOrder(ctx context.Context, _ pgx.Tx, evt events.Event) error {
+	actor, ok := tenant.FromContext(ctx)
+	if !ok || !actor.HasDuty(DutyOrderImport) {
+		return eventing.Permanent(errors.New("order intake needs a principal holding " + DutyOrderImport))
+	}
+	var data orderStatusChangedData
+	if err := json.Unmarshal(evt.Data, &data); err != nil {
+		return eventing.Permanent(fmt.Errorf("order.statuschanged data: %w", err))
+	}
+	if !ids.Valid(data.OrderID) {
+		return eventing.Permanent(errors.New("order.statuschanged needs orderId"))
+	}
+	if !withdrawnStatuses[data.To] || data.From == data.To || data.StartDate != nil || data.EndDate != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, orderImportTimeout)
+	defer cancel()
+	res, withdrawn, err := a.store.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: strings.ToLower(data.OrderID), To: data.To, EventID: evt.ID, EventTime: evt.Time})
+	if err != nil {
+		return fmt.Errorf("withdraw production order: %w", err)
+	}
+	if res.Stale {
+		slog.InfoContext(ctx, "production order withdrawal ignored: a newer production event was applied", "orderId", res.OrderID, "to", data.To,
+			"eventId", evt.ID, "tenantId", evt.TenantID)
+	}
+	if withdrawn {
+		slog.InfoContext(ctx, "production order withdrawn", "orderId", res.OrderID, "to", data.To, "removed", res.Removed, "keptFirmed", res.KeptFirmed,
+			"eventId", evt.ID, "tenantId", evt.TenantID)
+	}
+	return nil
 }
 
 // importScheduledOrder registers the operations of a dated production order.
@@ -110,7 +172,7 @@ func (a *API) importScheduledOrder(ctx context.Context, _ pgx.Tx, evt events.Eve
 	}
 	ctx, cancel := context.WithTimeout(ctx, orderImportTimeout)
 	defer cancel()
-	res, err := a.store.ImportProductionOrder(ctx, store.OrderImportRequest{Order: order, End: end.UTC(), Version: data.OrderVersion, Reason: data.Reason, EventID: evt.ID})
+	res, err := a.store.ImportProductionOrder(ctx, store.OrderImportRequest{Order: order, End: end.UTC(), Version: data.OrderVersion, Reason: data.Reason, EventID: evt.ID, EventTime: evt.Time})
 	if err != nil {
 		return fmt.Errorf("import production order: %w", err)
 	}
@@ -127,8 +189,8 @@ func (a *API) listOrderImports(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.OrderImportFilter{Limit: 50}
 	if v := q.Get("status"); v != "" {
-		if v != store.ImportImported && v != store.ImportPartial && v != store.ImportRejected {
-			invalid(w, r, map[string]string{"status": "must be imported, partial or rejected"})
+		if v != store.ImportImported && v != store.ImportPartial && v != store.ImportRejected && v != store.ImportWithdrawn {
+			invalid(w, r, map[string]string{"status": "must be imported, partial, rejected or withdrawn"})
 			return
 		}
 		f.Status = v

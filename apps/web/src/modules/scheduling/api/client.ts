@@ -496,9 +496,10 @@ export interface OrderImport {
   orderId: string;
   orderNumber: string;
   orderVersion: number;
+  /** The reason of the latest schedule event; a withdrawal keeps it. */
   reason: "schedule" | "redate";
   eventId: string;
-  status: "imported" | "partial" | "rejected";
+  status: "imported" | "partial" | "rejected" | "withdrawn";
   operationsTotal: number;
   created: number;
   updated: number;
@@ -512,6 +513,10 @@ export interface OrderImport {
   receivedAt: string;
   /** True when the received order is kept, so it can be imported again after a resource was mapped. */
   reimportable: boolean;
+  /** When production took the order out of schedule (reset, cancel or merge); null unless status is withdrawn. */
+  withdrawnAt: string | null;
+  /** The production status the order moved to when it was withdrawn. */
+  withdrawnTo: string | null;
 }
 
 export async function listOrderImports(status: string, signal?: AbortSignal): Promise<OrderImport[]> {

@@ -463,11 +463,48 @@ Slice 19 limits and defaults, as built:
   by each applied newer event; stale events do not touch it) and lives as long
   as the order's import row, which has no purge yet (none of scheduling's
   order data does; a retention policy for withdrawn and completed orders is
-  part of the order withdrawal deliverable 5 below).
+  still open, see Slice 20).
+Slice 20 builds the order withdrawal (FR-23.10). The order intake consumer also
+handles production's `order.statuschanged.v1` (same topic, same principal and
+duty `scheduling.order.import`). When the order moves to Estimated, Created or
+Cancelled and the event carries no start and end date (production reset the
+order, cancelled it or merged it into another order, and cleared its schedule)
+scheduling deletes the order's operations and their non-firmed jobs, which
+frees the capacity they booked (load and bottleneck figures are read from the
+jobs); an operation a firmed job holds stays and is listed on the import row
+(`keptFirmed`, skipped code `firmed`). Null dates alone do not withdraw:
+production's journal posts (auto-start, report as finished) send statuschanged
+without dates for an order that is still dated, so a release, start, report as
+finished or end changes nothing. The import row becomes status
+`withdrawn` with `withdrawnAt` and `withdrawnTo` (migration
+`0015_order_withdrawal.sql`, two columns and the widened status check; the
+UPDATE grant of 0013 covers it), the kept event source is cleared and one
+`orderimport.recorded` event (reason `withdraw`, `withdrawnTo`) goes through
+the outbox in the same transaction. Any other status change, an order
+scheduling never received and an order already withdrawn change nothing and
+write no event. statuschanged carries no order version, so the import row keeps
+the CloudEvent time of the latest production event it applied
+(`order_event_at`): a statuschanged older than it (a newer schedule event
+already imported the order again) withdraws nothing, and a schedule event older
+than the withdrawal is stale. A later `order.scheduled.v1` imports the order
+again and clears the withdrawal;
+`:reimport` of a withdrawn order is 409 SCHED-0134. `GET /order-imports` filters
+on `withdrawn`. Web: the production orders list filters and badges withdrawn
+orders and the detail page explains the withdrawal.
+- Withdrawn import rows are not purged (no retention policy yet).
+- The kept firmed operations of a withdrawn order keep their firmed jobs and
+  the capacity they hold. Scheduling has no operation delete outside the order
+  feed, so nothing removes them: unfirming one makes it schedulable again by the
+  next run. Removing them (on unfirm, or on withdrawal to Cancelled) is open.
+- A withdrawn order stays in its campaign (`scheduling_campaign_order`) and in
+  its order pegs (`scheduling_order_peg`); both are maintained by hand and are
+  not touched by the withdrawal.
+- Production's journal-post statuschanged events carry null dates for a dated
+  order, against its own AsyncAPI; handoff to wave 21 in the table below.
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed. These handoffs
-from slices 16, 17 and 18 lie outside it:
+from slices 16 to 20 lie outside it:
 
 | Item | Status | Reason |
 |---|---|---|
@@ -478,6 +515,7 @@ from slices 16, 17 and 18 lie outside it:
 | `deploy/kafka/scheduling-consumer.yaml`: ACLs for `KafkaUser` `scheduling-consumer`: Read, Describe on topic `passage.production.order` and group `scheduling-order-import`; Write, Describe on `passage.production.order.dlq`; a `KafkaTopic` `passage.production.order.dlq` like the downtime one. `deploy/kafka/connect.yaml`: an outbox connector for `passage_production` publishing `passage.production.<aggregate_type>` keyed by aggregate id | handoff — deploy owner (#313) | No production outbox connector exists yet, so nothing reaches `passage.production.order`. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-order-import"}` > 0. |
 | Mapping production (engineering, wave 09) resource ids to scheduling resources | done (slice 19) | `scheduling_resource.engineering_resource_id`, set on `POST /resources` and `PATCH /resources/{id}`; the intake resolves a job's resource through it first and by scheduling id second. A wave 9 feed that creates the mappings automatically is still a handoff (below). |
 | `policies/authz/data.json`: resource row `/v1/scheduling/order-imports/*:reimport` (POST) under `scheduling.schedule.write` (an existing duty) | done (seeded in `policies/authz/data.json`) | `POST /v1/scheduling/order-imports/{orderId}:reimport` uses the existing duty `scheduling.schedule.write`; no new duty. |
+| `services/production/internal/store/journal.go` `logStatus`: set `startDate`/`endDate` on the statuschanged of auto-start and report as finished (slice 20) | handoff — wave 21 | Those events carry null dates for a dated order. Scheduling withdraws only on a move to Estimated, Created or Cancelled, so it is not affected; consumers that read the dates are. No new route, duty or topic: the event is on `passage.production.order`, which the order intake already reads. |
 
 ## Ticket deliverables
 
@@ -503,7 +541,7 @@ from slices 16, 17 and 18 lie outside it:
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
-| 5 | Operations fed from wave 21 production orders and jobs instead of the API | built (slice 18) for `order.scheduled.v1` | `POST /operations` stays for manual entry. Not built: withdrawing an order's operations when production resets or cancels it (its `statuschanged` event carries null dates), order priority, quantities, the order's attributes and campaign key, and a wave 9 feed that creates the resource mappings (slice 19 maps by hand: an event's `resourceId` that is neither mapped nor a scheduling resource id is recorded as left out). |
+| 5 | Operations fed from wave 21 production orders and jobs instead of the API | built (slices 18 and 20) for `order.scheduled.v1` and the withdrawal in `order.statuschanged.v1` | `POST /operations` stays for manual entry. Built (slice 20): withdrawing an order's operations when production resets, cancels or merges it (see Slice 20 below). Not built: order priority, quantities, the order's attributes and campaign key, and a wave 9 feed that creates the resource mappings (slice 19 maps by hand: an event's `resourceId` that is neither mapped nor a scheduling resource id is recorded as left out). |
 | 6 | Resource networks: definition, edges, edge rules (FR-23.13, BR-23.11 wait check) | built | `POST/GET /v1/scheduling/networks`; `domain.ResourceNetwork` (`Successors` in transfer-time order, `ChainAllowed`, `WaitOK`). |
 | 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
 | 6 | CP-SAT `AddAllowedAssignments` for network transitions in the optimizer | built in `services/scheduler-py` | Each operation may carry the edges of the step into it; allowed machine pairs use `AddAllowedAssignments` on the choice variables, and each pair enforces its transfer time and maximum wait. Not called from the Go service yet (deliverable 4). |

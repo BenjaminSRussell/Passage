@@ -213,4 +213,7 @@ type OrderImportRecordedData struct {
 	RemovedOperNumbers []int                  `json:"removedOperNumbers"`
 	KeptFirmed         []int                  `json:"keptFirmedOperNumbers"`
 	ReplanRequired     bool                   `json:"replanRequired"`
+	// WithdrawnTo is the status production moved the order to when status is
+	// withdrawn (reason withdraw); empty otherwise.
+	WithdrawnTo string `json:"withdrawnTo,omitempty"`
 }

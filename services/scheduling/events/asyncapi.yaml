@@ -144,6 +144,10 @@ components:
         Events with reason `schedule` or `redate` are imported; an event with reason `finite` (production applying
         scheduling's own finite-capacity dates back onto the order, wave 21) is ignored and publishes nothing, so the
         two services do not loop.
+        A production order.statuschanged.v1 to Estimated, Created or Cancelled with no dates (reset, cancel or merge)
+        withdraws the order's operations and publishes this event with status `withdrawn`, reason `withdraw` and
+        `withdrawnTo`. Other statuschanged events (release, start, report as finished, end) publish nothing, and so does
+        one older than the order's last applied production event.
       name: dev.passage.scheduling.orderimport.recorded.v1
       contentType: application/cloudevents+json
       payload:
@@ -326,8 +330,9 @@ components:
         orderId: { type: string, format: uuid }
         orderNumber: { type: string }
         orderVersion: { type: integer, description: The production order version of the event that was imported. }
-        reason: { type: string, enum: [schedule, redate] }
-        status: { type: string, enum: [imported, partial, rejected], description: 'imported: every operation registered; partial: some were left out; rejected: none could be registered.' }
+        reason: { type: string, enum: [schedule, redate, withdraw] }
+        status: { type: string, enum: [imported, partial, rejected, withdrawn], description: 'imported: every operation registered; partial: some were left out; rejected: none could be registered; withdrawn: production took the order out of schedule and its operations were removed.' }
+        withdrawnTo: { type: string, description: The production status the order moved to; present only when status is withdrawn. }
         operations:
           type: array
           items:

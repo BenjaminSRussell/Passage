@@ -70,6 +70,9 @@ export function OrderImportDetailPage() {
     ["Baseline end", o.orderEnd ? formatDateTime(o.orderEnd) : dash],
     ["Received", formatDateTime(o.receivedAt)],
   ];
+  if (o.status === "withdrawn") {
+    facts.push(["Withdrawn", o.withdrawnAt ? formatDateTime(o.withdrawnAt) : dash], ["Production status", o.withdrawnTo ?? dash]);
+  }
 
   return (
     <div className={styles.stack}>
@@ -89,6 +92,12 @@ export function OrderImportDetailPage() {
           </>
         }
       />
+      {o.status === "withdrawn" && (
+        <Alert tone="info" title="Production took this order out of schedule">
+          Production moved the order to {o.withdrawnTo ?? "a status without dates"} (reset, cancelled or merged), so its operations were removed from scheduling.
+          {o.keptFirmed > 0 ? " Operations held by a firmed job were kept and still hold their capacity; unfirming one lets the next run schedule it again." : ""} The order returns here when production schedules it again.
+        </Alert>
+      )}
       {o.replanRequired && (
         <Alert tone="warning" title="Schedule this order again">
           An operation changed after it was placed, so its jobs were removed and it is open again. Start a run to place it.

@@ -6,8 +6,8 @@ import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-export const IMPORT_STATUS_LABELS: Record<OrderImport["status"], string> = { imported: "Imported", partial: "Partly imported", rejected: "Rejected" };
-const STATUS_TONES = { imported: "success", partial: "warning", rejected: "danger" } as const;
+export const IMPORT_STATUS_LABELS: Record<OrderImport["status"], string> = { imported: "Imported", partial: "Partly imported", rejected: "Rejected", withdrawn: "Withdrawn" };
+const STATUS_TONES = { imported: "success", partial: "warning", rejected: "danger", withdrawn: "neutral" } as const;
 
 export function ImportStatusBadge({ status }: { status: OrderImport["status"] }) {
   return <Badge tone={STATUS_TONES[status]}>{IMPORT_STATUS_LABELS[status]}</Badge>;
@@ -48,6 +48,7 @@ export function OrderImportsPage() {
               <option value="imported">Imported</option>
               <option value="partial">Partly imported</option>
               <option value="rejected">Rejected</option>
+              <option value="withdrawn">Withdrawn by production</option>
             </Select>
           )}
         </FormField>

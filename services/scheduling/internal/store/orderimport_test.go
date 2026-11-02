@@ -324,3 +324,109 @@ func patchEng(ctx context.Context, s *store.Postgres, r store.Resource, eng stri
 	upd, _, err := s.UpdateResource(ctx, r.ID, r.Version, store.ResourcePatch{EngineeringResourceID: &eng}, time.Now(), store.Idem{})
 	return upd.Resource, err
 }
+
+func TestWithdrawProductionOrder_RemovesOperationsKeepsFirmedAndImportsAgain(t *testing.T) {
+	s, _, admin := setup(t)
+	ctx := tenantCtx(1)
+	m := mustResource(t, ctx, s, "M1", true)
+	order := ids.New()
+
+	// Never received: nothing is written.
+	if _, changed, err := s.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: order, To: "Created", EventID: ids.New()}); err != nil || changed {
+		t.Fatalf("withdraw of an unknown order: changed=%v err=%v", changed, err)
+	}
+
+	if _, err := s.ImportProductionOrder(ctx, importReq(order, 2, pjob(10, 1, "process", m.ID, "2"), pjob(20, 1, "process", m.ID, "1"), pjob(30, 1, "process", m.ID, "1"))); err != nil {
+		t.Fatal(err)
+	}
+	ops, err := s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+	if err != nil || len(ops) != 3 {
+		t.Fatalf("ops %+v err=%v", ops, err)
+	}
+	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.FirmJob(ctx, ops[1].ID, true, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, changed, err := s.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: order, To: "Estimated", EventID: ids.New()})
+	if err != nil || !changed {
+		t.Fatalf("withdraw: changed=%v err=%v", changed, err)
+	}
+	if res.Status != store.ImportWithdrawn || res.Removed != 2 || res.KeptFirmed != 1 || res.WithdrawnAt == nil || res.WithdrawnTo == nil || *res.WithdrawnTo != "Estimated" || res.Reimportable {
+		t.Fatalf("withdrawn = %+v", res)
+	}
+	left, err := s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10})
+	if err != nil || len(left) != 1 || left[0].OperNumber != 20 {
+		t.Fatalf("operations left %+v err=%v, want only the firmed operation 20", left, err)
+	}
+	var jobs int
+	if err := admin.QueryRow(context.Background(), `select count(*) from scheduled_job where order_id = $1::uuid and oper_number <> 20`, order).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("%d jobs left for withdrawn operations, err=%v", jobs, err)
+	}
+
+	// Withdrawing again changes nothing and writes no second event.
+	if _, changed, err := s.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: order, To: "Created", EventID: ids.New()}); err != nil || changed {
+		t.Fatalf("second withdraw: changed=%v err=%v", changed, err)
+	}
+	var events int
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox where type = 'dev.passage.scheduling.orderimport.recorded.v1' and payload::text like '%"withdrawn"%'`).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("%d withdrawal events, err=%v, want 1", events, err)
+	}
+	if _, err := s.ReimportProductionOrder(ctx, order); problemCode(err) != store.CodeOrderWithdrawn {
+		t.Fatalf("reimport of a withdrawn order: err=%v", err)
+	}
+	list, err := s.ListOrderImports(ctx, store.OrderImportFilter{Status: store.ImportWithdrawn, Limit: 10})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("withdrawn list %+v err=%v", list, err)
+	}
+	// Another tenant does not see or withdraw it.
+	if _, changed, err := s.WithdrawProductionOrder(tenantCtx(2), store.OrderWithdrawal{OrderID: order, To: "Created", EventID: ids.New()}); err != nil || changed {
+		t.Fatalf("withdraw from another tenant: changed=%v err=%v", changed, err)
+	}
+
+	// Production schedules the order again: it is imported and no longer withdrawn.
+	back, err := s.ImportProductionOrder(ctx, importReq(order, 3, pjob(10, 1, "process", m.ID, "2"), pjob(20, 1, "process", m.ID, "1")))
+	if err != nil || back.Status != store.ImportImported || back.Created != 1 || back.WithdrawnAt != nil || back.WithdrawnTo != nil || !back.Reimportable {
+		t.Fatalf("back = %+v err=%v", back, err)
+	}
+}
+
+func TestWithdrawProductionOrder_EventOrderDecidesBetweenWithdrawalAndSchedule(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	m := mustResource(t, ctx, s, "M1", true)
+	order := ids.New()
+	t0 := time.Date(2031, 3, 3, 6, 0, 0, 0, time.UTC)
+
+	req := importReq(order, 2, pjob(10, 1, "process", m.ID, "2"))
+	req.EventTime = t0
+	if _, err := s.ImportProductionOrder(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	// A reset produced before the schedule event that was already imported.
+	old, changed, err := s.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: order, To: "Estimated", EventID: ids.New(), EventTime: t0.Add(-time.Minute)})
+	if err != nil || changed || !old.Stale || old.Status != store.ImportImported {
+		t.Fatalf("older withdrawal: %+v changed=%v err=%v, want stale and still imported", old, changed, err)
+	}
+	if _, changed, err := s.WithdrawProductionOrder(ctx, store.OrderWithdrawal{OrderID: order, To: "Cancelled", EventID: ids.New(), EventTime: t0.Add(time.Minute)}); err != nil || !changed {
+		t.Fatalf("newer withdrawal: changed=%v err=%v", changed, err)
+	}
+	// A schedule event produced before the withdrawal, even with a newer order
+	// version than the one imported, does not bring the order back.
+	late := importReq(order, 3, pjob(10, 1, "process", m.ID, "2"))
+	late.EventTime = t0.Add(30 * time.Second)
+	got, err := s.ImportProductionOrder(ctx, late)
+	if err != nil || !got.Stale || got.Status != store.ImportWithdrawn {
+		t.Fatalf("schedule event older than the withdrawal: %+v err=%v, want stale and withdrawn", got, err)
+	}
+	if ops, err := s.ListOperations(ctx, store.OperationFilter{OrderID: order, Limit: 10}); err != nil || len(ops) != 0 {
+		t.Fatalf("operations %+v err=%v, want none", ops, err)
+	}
+	next := importReq(order, 4, pjob(10, 1, "process", m.ID, "2"))
+	next.EventTime = t0.Add(2 * time.Minute)
+	if got, err := s.ImportProductionOrder(ctx, next); err != nil || got.Stale || got.Status != store.ImportImported || got.Created != 1 {
+		t.Fatalf("newer schedule event: %+v err=%v, want imported", got, err)
+	}
+}

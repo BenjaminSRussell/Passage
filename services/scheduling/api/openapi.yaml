@@ -657,7 +657,7 @@ paths:
           in: query
           required: false
           description: Only orders with this outcome.
-          schema: { type: string, enum: [imported, partial, rejected] }
+          schema: { type: string, enum: [imported, partial, rejected, withdrawn] }
         - name: limit
           in: query
           required: false
@@ -704,7 +704,8 @@ paths:
         after mapping a resource (`engineeringResourceId`) so operations that were left out as `unknown-resource` are
         registered without waiting for production to send a new event. Operations already registered stay unchanged; a
         newer event that arrived meanwhile wins and nothing changes. It needs no body and is naturally idempotent. An order
-        received before scheduling kept events gets 409 SCHED-0133 and is imported again on its next event.
+        received before scheduling kept events gets 409 SCHED-0133 and is imported again on its next event; a withdrawn order
+        gets 409 SCHED-0134 and returns with production's next schedule event.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - name: orderId
@@ -1714,14 +1715,14 @@ components:
         dependentOrders: { type: integer, description: "Pegged demand: orders pegged to consume this order's output, which its lateness delays in turn." }
     OrderImport:
       type: object
-      required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt, reimportable]
+      required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt, reimportable, withdrawnAt, withdrawnTo]
       properties:
         orderId: { type: string, format: uuid }
         orderNumber: { type: string }
         orderVersion: { type: integer, description: The production order version of the latest event; an older event is ignored. }
-        reason: { type: string, enum: [schedule, redate] }
+        reason: { type: string, enum: [schedule, redate], description: The reason of the latest schedule event; a withdrawal keeps it. }
         eventId: { type: string }
-        status: { type: string, enum: [imported, partial, rejected], description: 'imported: every operation registered; partial: some left out; rejected: none registered.' }
+        status: { type: string, enum: [imported, partial, rejected, withdrawn], description: 'imported: every operation registered; partial: some left out; rejected: none registered; withdrawn: production took the order out of schedule (reset, cancel or merge) and its operations were removed.' }
         operationsTotal: { type: integer, description: Operations in the event. }
         created: { type: integer }
         updated: { type: integer, description: Operations whose minutes, setup, resources or dates changed; their jobs were dropped. }
@@ -1742,6 +1743,8 @@ components:
         orderEnd: { type: string, format: date-time, nullable: true }
         receivedAt: { type: string, format: date-time }
         reimportable: { type: boolean, description: True when the received order is kept so `:reimport` can run it again. }
+        withdrawnAt: { type: string, format: date-time, nullable: true, description: When production took the order out of schedule; null unless status is withdrawn. }
+        withdrawnTo: { type: string, nullable: true, description: The production status the order moved to when it was withdrawn. }
     LoadJob:
       type: object
       required: [jobId, orderId, operNumber, segment, role, start, end, minutesInRange, finite, firmed, lateMinutes]

@@ -29,6 +29,9 @@ const (
 	ImportImported = "imported"
 	ImportPartial  = "partial"
 	ImportRejected = "rejected"
+	// ImportWithdrawn marks an order production took out of schedule (reset,
+	// cancel or merge): its operations were withdrawn.
+	ImportWithdrawn = "withdrawn"
 )
 
 // OrderImport records what scheduling did with the latest order.scheduled.v1
@@ -57,6 +60,13 @@ type OrderImport struct {
 	// Reimportable is true when the received order is kept, so it can be
 	// imported again (after a resource was mapped) without a new event.
 	Reimportable bool `json:"reimportable"`
+	// WithdrawnAt and WithdrawnTo are set while the order is withdrawn: when
+	// production took it out of schedule and the status it moved to.
+	WithdrawnAt *time.Time `json:"withdrawnAt"`
+	WithdrawnTo *string    `json:"withdrawnTo"`
+	// EventAt is the time of the latest production event applied to the row;
+	// an older event does not undo it. It is not part of the API.
+	EventAt *time.Time `json:"-"`
 	// Stale is true on the answer to an event older than the stored one: it
 	// changed nothing. It is not stored.
 	Stale bool `json:"-"`
@@ -69,16 +79,18 @@ type OrderImportRequest struct {
 	Version int
 	Reason  string
 	EventID string
+	// EventTime is the CloudEvent time of the event; zero when unknown.
+	EventTime time.Time
 }
 
 const importCols = `order_id::text, order_number, order_version, reason, event_id, status, operations_total, created_count, updated_count,
-	unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, received_at, source is not null`
+	unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, received_at, source is not null, withdrawn_at, withdrawn_to, order_event_at`
 
 func scanImport(row pgx.Row) (OrderImport, error) {
 	var o OrderImport
 	var skipped []byte
 	if err := row.Scan(&o.OrderID, &o.OrderNumber, &o.OrderVersion, &o.Reason, &o.EventID, &o.Status, &o.OperationsTotal, &o.Created, &o.Updated,
-		&o.Unchanged, &o.Removed, &o.KeptFirmed, &skipped, &o.ReplanRequired, &o.OrderStart, &o.OrderEnd, &o.ReceivedAt, &o.Reimportable); err != nil {
+		&o.Unchanged, &o.Removed, &o.KeptFirmed, &skipped, &o.ReplanRequired, &o.OrderStart, &o.OrderEnd, &o.ReceivedAt, &o.Reimportable, &o.WithdrawnAt, &o.WithdrawnTo, &o.EventAt); err != nil {
 		return OrderImport{}, err
 	}
 	o.Skipped = []domain.SkippedOperation{}
@@ -91,11 +103,16 @@ type OrderImportStore interface {
 	ListOrderImports(ctx context.Context, f OrderImportFilter) ([]OrderImport, error)
 	GetOrderImport(ctx context.Context, orderID string) (OrderImport, error)
 	ReimportProductionOrder(ctx context.Context, orderID string) (OrderImport, error)
+	WithdrawProductionOrder(ctx context.Context, req OrderWithdrawal) (OrderImport, bool, error)
 }
 
 // CodeOrderNotReimportable is returned when the order was received before
 // scheduling kept the received event.
 const CodeOrderNotReimportable = "SCHED-0133"
+
+// CodeOrderWithdrawn is returned when a withdrawn order is imported again: it
+// is no longer scheduled in production and returns with its next schedule event.
+const CodeOrderWithdrawn = "SCHED-0134"
 
 // importSource is the received order as kept on its import row.
 type importSource struct {
@@ -148,7 +165,9 @@ func importOrder(ctx context.Context, tx pgx.Tx, req OrderImportRequest, out *Or
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	if hasPrior && req.Version < prior.OrderVersion {
+	// An older order version is stale, and so is a schedule event older than
+	// the statuschanged event that withdrew the order (it carries no version).
+	if hasPrior && (req.Version < prior.OrderVersion || (prior.Status == ImportWithdrawn && olderThan(req.EventTime, prior.EventAt))) {
 		*out = prior
 		out.Stale = true
 		return nil
@@ -380,21 +399,38 @@ func importOrder(ctx context.Context, tx pgx.Tx, req OrderImportRequest, out *Or
 		return err
 	}
 	stored, err := scanImport(tx.QueryRow(ctx, `insert into scheduling_order_import (tenant_id, order_id, order_number, order_version, reason, event_id, status,
-				operations_total, created_count, updated_count, unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, source)
-			values ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+				operations_total, created_count, updated_count, unchanged_count, removed_count, kept_firmed_count, skipped, replan_required, order_start, order_end, source, order_event_at)
+			values ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 			on conflict (tenant_id, order_id) do update set order_number = excluded.order_number, order_version = excluded.order_version, reason = excluded.reason,
 				event_id = excluded.event_id, status = excluded.status, operations_total = excluded.operations_total, created_count = excluded.created_count,
 				updated_count = excluded.updated_count, unchanged_count = excluded.unchanged_count, removed_count = excluded.removed_count,
 				kept_firmed_count = excluded.kept_firmed_count, skipped = excluded.skipped, replan_required = excluded.replan_required,
-				order_start = excluded.order_start, order_end = excluded.order_end, source = excluded.source, received_at = now()
+				order_start = excluded.order_start, order_end = excluded.order_end, source = excluded.source, received_at = now(),
+				withdrawn_at = null, withdrawn_to = null, order_event_at = coalesce(excluded.order_event_at, scheduling_order_import.order_event_at)
 			returning `+importCols,
 		tenantOf(ctx), res.OrderID, res.OrderNumber, res.OrderVersion, res.Reason, res.EventID, res.Status, res.OperationsTotal, res.Created, res.Updated,
-		res.Unchanged, res.Removed, res.KeptFirmed, skippedJSON, res.ReplanRequired, res.OrderStart, res.OrderEnd, sourceJSON))
+		res.Unchanged, res.Removed, res.KeptFirmed, skippedJSON, res.ReplanRequired, res.OrderStart, res.OrderEnd, sourceJSON, eventTime(req.EventTime)))
 	if err != nil {
 		return err
 	}
 	*out = stored
 	return enqueue(ctx, tx, "orderimport", res.OrderID, schedevents.OrderImportRecorded, data)
+}
+
+// eventTime is an event's time as stored (microseconds, UTC); nil when unknown.
+func eventTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	u := t.UTC().Truncate(time.Microsecond)
+	return &u
+}
+
+// olderThan reports whether an event at t is older than the stored event time;
+// an unknown time on either side is not older.
+func olderThan(t time.Time, stored *time.Time) bool {
+	at := eventTime(t)
+	return at != nil && stored != nil && at.Before(*stored)
 }
 
 func nonZero(t time.Time) *time.Time {
@@ -481,14 +517,18 @@ func (s *Postgres) ReimportProductionOrder(ctx context.Context, orderID string) 
 			return err
 		}
 		var version int
-		var reason string
+		var reason, status string
 		var raw []byte
-		err := tx.QueryRow(ctx, `select order_version, reason, source from scheduling_order_import where order_id = $1::uuid`, orderID).Scan(&version, &reason, &raw)
+		err := tx.QueryRow(ctx, `select order_version, reason, status, source from scheduling_order_import where order_id = $1::uuid`, orderID).Scan(&version, &reason, &status, &raw)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, CodeOrderImportNotFound, "no production order with that id has been received")
 		}
 		if err != nil {
 			return err
+		}
+		if status == ImportWithdrawn {
+			return httpx.NewProblem(http.StatusConflict, CodeOrderWithdrawn,
+				"production withdrew the order from schedule; it is imported when production schedules it again")
 		}
 		if len(raw) == 0 {
 			return httpx.NewProblem(http.StatusConflict, CodeOrderNotReimportable,

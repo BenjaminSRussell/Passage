@@ -64,6 +64,8 @@ const partial: OrderImport = {
   orderEnd: "2031-03-03T18:00:00Z",
   receivedAt: "2031-03-03T06:05:00Z",
   reimportable: true,
+  withdrawnAt: null,
+  withdrawnTo: null,
 };
 
 describe("Production orders received", () => {
@@ -142,6 +144,17 @@ describe("Production orders received", () => {
     handler = () => ({ status: 200, body: { ...partial, reimportable: false } });
     renderAt(`/scheduling/order-imports/${ORDER}`);
     expect(await screen.findByText(/received before scheduling kept events/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import again" })).not.toBeInTheDocument();
+  });
+
+  it("explains an order production withdrew from schedule", async () => {
+    const withdrawn: OrderImport = { ...partial, status: "withdrawn", skipped: [], replanRequired: false, reimportable: false, removed: 2, keptFirmed: 1, withdrawnAt: "2031-03-04T08:00:00Z", withdrawnTo: "Estimated" };
+    handler = () => ({ status: 200, body: withdrawn });
+    renderAt(`/scheduling/order-imports/${ORDER}`);
+    expect(await screen.findByText("Production took this order out of schedule")).toBeInTheDocument();
+    expect(screen.getAllByText("Withdrawn").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Estimated").length).toBeGreaterThan(0);
+    expect(screen.getByText(/held by a firmed job were kept and still hold their capacity/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Import again" })).not.toBeInTheDocument();
   });
 });

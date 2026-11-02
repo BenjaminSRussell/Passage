@@ -23,6 +23,10 @@ func (f *fakeStore) ReimportProductionOrder(_ context.Context, id string) (store
 	return store.OrderImport{OrderID: id, OrderNumber: "PO-7", Status: store.ImportImported, Skipped: []domain.SkippedOperation{}}, nil
 }
 
+func (f *fakeStore) WithdrawProductionOrder(_ context.Context, _ store.OrderWithdrawal) (store.OrderImport, bool, error) {
+	return store.OrderImport{}, false, f.err
+}
+
 func (f *fakeStore) ListOrderImports(_ context.Context, lf store.OrderImportFilter) ([]store.OrderImport, error) {
 	f.lastImports = lf
 	if f.err != nil {
