@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/connector"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
 )
@@ -67,6 +68,7 @@ type API struct {
 	packages PackageFactory
 	keys     *fieldcrypt.Keys
 	prober   Prober
+	env      *connector.Env
 	runs     atomic.Int64
 	failed   atomic.Int64
 	loaded   atomic.Int64
@@ -158,6 +160,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerPackages(r)
 	a.registerProjects(r)
 	a.registerConnections(r)
+	a.registerBindings(r)
 }
 
 func (a *API) Metrics() http.Handler {

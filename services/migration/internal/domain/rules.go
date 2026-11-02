@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -180,7 +181,7 @@ func (f FieldRule) text(row map[string]any) (string, bool, *Reject) {
 	case RuleConcat:
 		var parts []string
 		for _, s := range f.Sources {
-			text, present, scalar := sourceText(row[s])
+			text, present, scalar := sourceText(lookup(row, s))
 			if !scalar {
 				return "", false, &Reject{f.Target, CodeMapCoerce, s + " is not a scalar"}
 			}
@@ -193,7 +194,7 @@ func (f FieldRule) text(row map[string]any) (string, bool, *Reject) {
 		}
 		return strings.Join(parts, f.Separator), true, nil
 	}
-	text, present, scalar := sourceText(row[f.Source])
+	text, present, scalar := sourceText(lookup(row, f.Source))
 	if !scalar {
 		return "", false, &Reject{f.Target, CodeMapCoerce, f.Source + " is not a scalar"}
 	}
@@ -241,7 +242,7 @@ func (m Mapping) coerceFn(f FieldRule, text string, row map[string]any) (any, *W
 		if f.TimeSource == "" {
 			return d.Format(dateLayout), nil, nil
 		}
-		tims, present, scalar := sourceText(row[f.TimeSource])
+		tims, present, scalar := sourceText(lookup(row, f.TimeSource))
 		if !scalar {
 			return nil, nil, badValue(f, CodeMapCoerce, "time column is not a scalar")
 		}
@@ -267,3 +268,35 @@ func (m Mapping) coerceFn(f FieldRule, text string, row map[string]any) (any, *W
 	}
 	return nil, nil, badValue(f, CodeMapInvalid, "has an unknown function")
 }
+
+// Lookup reads a source field. A key of the object wins as it is (a column may contain a dot, a JSON key may be
+// "@odata.nextLink"); otherwise a dotted path descends into nested objects, and a numeric segment indexes an array:
+// "address.city", "lines.0.sku".
+func Lookup(v any, path string) any {
+	if m, ok := v.(map[string]any); ok {
+		if x, ok := m[path]; ok {
+			return x
+		}
+	}
+	if !strings.Contains(path, ".") {
+		return nil
+	}
+	cur := v
+	for _, seg := range strings.Split(path, ".") {
+		switch x := cur.(type) {
+		case map[string]any:
+			cur = x[seg]
+		case []any:
+			i, err := strconv.Atoi(seg)
+			if err != nil || i < 0 || i >= len(x) {
+				return nil
+			}
+			cur = x[i]
+		default:
+			return nil
+		}
+	}
+	return cur
+}
+
+func lookup(row map[string]any, path string) any { return Lookup(row, path) }

@@ -440,3 +440,93 @@ export const setConnectionSecret = (id: string, secret: string) =>
   send<ConnectionProfile>(`/connection-profiles/${encodeURIComponent(id)}/secret`, { method: "PUT", body: JSON.stringify({ secret }) });
 
 export const testConnection = (id: string) => send<ConnectionTestResult>(`/connection-profiles/${encodeURIComponent(id)}:test`, { method: "POST" });
+
+export type CursorType = "timestamp" | "int" | "rowversion";
+export type BindingSource = Record<string, unknown>;
+
+/** Which table, query, endpoint or file of a connection feeds which Passage entity. */
+export interface EntityBinding {
+  id: string;
+  connectionProfileId: string;
+  entity: string;
+  source: BindingSource;
+  keyFields: string[];
+  cursorField?: string;
+  cursorType?: CursorType;
+  mappingSpecId?: string;
+  status: ConnectionStatus;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BindingInput {
+  connectionProfileId: string;
+  entity: string;
+  source: BindingSource;
+  keyFields: string[];
+  cursorField?: string;
+  cursorType?: CursorType;
+  mappingSpecId?: string;
+}
+
+export interface BindingEdit {
+  source?: BindingSource;
+  keyFields?: string[];
+  cursorField?: string;
+  cursorType?: CursorType | "";
+  mappingSpecId?: string;
+  status?: ConnectionStatus;
+}
+
+export interface PreviewOptions {
+  limit?: number;
+  mappingSpecId?: string;
+  /** A file connection can be previewed from an upload instead of the drop directory. */
+  upload?: { name: string; contentBase64: string };
+}
+
+export interface PreviewRow {
+  index: number;
+  sourceKey?: string;
+  source: Record<string, unknown>;
+  target?: Record<string, unknown>;
+  warnings?: RowIssue[];
+  rejects?: RowIssue[];
+}
+
+export interface BindingPreview {
+  ok: boolean;
+  durationMs: number;
+  failure?: { code: string; message: string };
+  mapping?: { entity: string; version: number; mappingSpecId?: string };
+  rows?: PreviewRow[];
+  columns?: string[];
+  more?: boolean;
+  mapped?: number;
+  rejected?: number;
+  duplicateKeys?: string[];
+  watermark?: string;
+}
+
+export const listBindings = (filter: { connectionProfileId?: string; entity?: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) => {
+  const { limit = 50, ...rest } = filter;
+  return page<EntityBinding>(`/entity-bindings${query({ ...rest, limit: String(limit) })}`, signal);
+};
+
+export const getBinding = (id: string, signal?: AbortSignal) => send<EntityBinding>(`/entity-bindings/${encodeURIComponent(id)}`, {}, signal);
+
+export const createBinding = (input: BindingInput, key: string = newKey()) =>
+  send<EntityBinding>("/entity-bindings", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+export const updateBinding = (id: string, version: number, edit: BindingEdit) =>
+  send<EntityBinding>(`/entity-bindings/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+/** Extracts a few rows through the stored binding and runs its mapping; nothing is loaded. */
+export const previewBinding = (id: string, options: PreviewOptions) =>
+  send<BindingPreview>(`/entity-bindings/${encodeURIComponent(id)}:preview`, { method: "POST", body: JSON.stringify(options) });
+
+/** The same for a binding that is not saved yet. */
+export const previewDraftBinding = (input: BindingInput, options: PreviewOptions) =>
+  send<BindingPreview>("/entity-bindings:preview", { method: "POST", body: JSON.stringify({ ...input, ...options }) });

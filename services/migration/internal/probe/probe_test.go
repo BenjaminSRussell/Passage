@@ -248,8 +248,8 @@ func TestSQLDriverRegistryMatchesTheValidatedDrivers(t *testing.T) {
 		t.Fatalf("registry %v, domain.SQLDrivers %v", got, want)
 	}
 	r := (&probe.Prober{Guard: &egress.Guard{}}).Probe(context.Background(), probe.Target{Kind: domain.ConnSQL, Secret: "x",
-		Config: map[string]any{"driver": "sqlserver", "host": "erp.acme.example", "database": "erp", "user": "svc"}})
-	if r.OK || r.Failure.Code != probe.CodeProbeFailed || !strings.Contains(r.Failure.Message, "sqlserver") {
+		Config: map[string]any{"driver": "db2", "host": "erp.acme.example", "database": "erp", "user": "svc"}})
+	if r.OK || r.Failure.Code != probe.CodeProbeFailed || !strings.Contains(r.Failure.Message, "db2") {
 		t.Fatalf("unregistered driver: %+v", r)
 	}
 }

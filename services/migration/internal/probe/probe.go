@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	mssql "github.com/microsoft/go-mssqldb"
 
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/oauth"
 )
 
 // Failure codes a probe reports (the HTTP call itself still answers 200: the probe ran, the connection did not work).
@@ -120,7 +122,7 @@ func (p *Prober) Probe(ctx context.Context, t Target) Result {
 	res.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		res.OK = false
-		res.Failure = classify(err, t.Secret)
+		res.Failure = Classify(err, t.Secret)
 	} else {
 		res.OK = true
 	}
@@ -131,9 +133,11 @@ type failure struct{ code, msg string }
 
 func (f *failure) Error() string { return f.msg }
 
-func classify(err error, secret string) *Failure {
+// Classify turns an error from a connection or a read into a failure code and a scrubbed, capped message.
+func Classify(err error, secret string) *Failure {
 	var f *failure
 	var pg *pgconn.PgError
+	var ms mssql.Error
 	code := CodeConnectFailed
 	switch {
 	case errors.As(err, &f):
@@ -141,6 +145,8 @@ func classify(err error, secret string) *Failure {
 	case errors.Is(err, egress.ErrDenied):
 		code = CodeEgressDenied
 	case errors.As(err, &pg) && strings.HasPrefix(pg.Code, "28"):
+		code = CodeAuthFailed
+	case errors.As(err, &ms) && ms.Number == 18456: // SQL Server: login failed
 		code = CodeAuthFailed
 	case errors.Is(err, context.DeadlineExceeded):
 		return &Failure{CodeConnectFailed, "timed out"}
@@ -178,7 +184,7 @@ func (p *Prober) rest(ctx context.Context, t Target, res *Result) error {
 		authType = "none"
 	}
 	if authType != "none" && t.Secret == "" {
-		return &failure{CodeNoSecret, "no secret is set for this connection; set the " + map[string]string{"basic": "password", "bearer": "token", "header": "header value"}[authType] + " first"}
+		return &failure{CodeNoSecret, "no secret is set for this connection; set the " + map[string]string{"basic": "password", "bearer": "token", "header": "header value", domain.AuthOAuth2: "client secret"}[authType] + " first"}
 	}
 	target := strings.TrimRight(str(t.Config, "baseUrl"), "/") + str(t.Config, "probePath")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -194,6 +200,12 @@ func (p *Prober) rest(ctx context.Context, t Target, res *Result) error {
 		req.Header.Set("Authorization", "Bearer "+t.Secret)
 	case "header":
 		req.Header.Set(str(t.Config, "headerName"), t.Secret)
+	case domain.AuthOAuth2:
+		tok, err := oauth.ClientCredentials(ctx, p.Guard.HTTPClient(), str(t.Config, "authUrl"), str(t.Config, "clientId"), t.Secret, str(t.Config, "scope"))
+		if err != nil {
+			return &failure{CodeAuthFailed, err.Error()}
+		}
+		req.Header.Set("Authorization", "Bearer "+tok.Value)
 	}
 	resp, err := p.Guard.HTTPClient().Do(req)
 	if err != nil {

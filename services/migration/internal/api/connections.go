@@ -273,20 +273,12 @@ func (a *API) testConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	target := probe.Target{Kind: c.Kind, Config: c.Config}
 	if c.SecretSet && a.keys != nil {
-		sealed, _, err := a.store.ConnectionSecret(r.Context(), id)
+		secret, err := a.openConnectionSecret(r, id)
 		if err != nil {
-			a.logFailure(r, "read connection secret failed", err)
 			fail(w, r, err)
 			return
 		}
-		p, _ := tenant.FromContext(r.Context())
-		plain, err := a.keys.Open(p.TenantID, secretFieldPrefix+id, sealed)
-		if err != nil {
-			a.logFailure(r, "open connection secret failed", errors.New("open failed"))
-			fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeSecretUnreadable, "the stored secret cannot be opened with the current keys; set it again"))
-			return
-		}
-		target.Secret = string(plain)
+		target.Secret = secret
 	}
 	res := a.prober.Probe(r.Context(), target)
 	if !res.OK && res.Failure != nil {
@@ -305,4 +297,20 @@ func needsSecret(c store.ConnectionProfile) bool {
 		return auth != "" && auth != "none"
 	}
 	return false
+}
+
+// openConnectionSecret opens a profile's stored secret with the current keys. The plaintext goes to the caller only.
+func (a *API) openConnectionSecret(r *http.Request, id string) (string, error) {
+	sealed, _, err := a.store.ConnectionSecret(r.Context(), id)
+	if err != nil {
+		a.logFailure(r, "read connection secret failed", err)
+		return "", err
+	}
+	p, _ := tenant.FromContext(r.Context())
+	plain, err := a.keys.Open(p.TenantID, secretFieldPrefix+id, sealed)
+	if err != nil {
+		a.logFailure(r, "open connection secret failed", errors.New("open failed"))
+		return "", httpx.NewProblem(http.StatusUnprocessableEntity, CodeSecretUnreadable, "the stored secret cannot be opened with the current keys; set it again")
+	}
+	return string(plain), nil
 }

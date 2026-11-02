@@ -157,7 +157,7 @@ func TestConnections_CreateReplayGetListAndPatch(t *testing.T) {
 	if stale := patch(`{"version":1,"name":"again"}`); stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), store.CodeVersionConflict) {
 		t.Fatalf("stale = %d %s", stale.Code, stale.Body)
 	}
-	if bad := patch(`{"version":2,"config":{"driver":"oracle","host":"x","database":"d","user":"u"}}`); bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), "config.driver") {
+	if bad := patch(`{"version":2,"config":{"driver":"db2","host":"x","database":"d","user":"u"}}`); bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), "config.driver") {
 		t.Fatalf("bad driver = %d %s", bad.Code, bad.Body)
 	}
 	if bad := patch(`{"version":2,"status":"paused"}`); bad.Code != http.StatusBadRequest {

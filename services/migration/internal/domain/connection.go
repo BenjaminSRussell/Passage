@@ -29,6 +29,10 @@ func ValidSourceSystem(s string) bool {
 	return slices.Contains(legacySystems, s) || customSystem.MatchString(s)
 }
 
+// AuthOAuth2 is the rest authType for OAuth 2.0 client credentials: config authUrl (the token endpoint), clientId and
+// optionally scope; the sealed secret is the client secret.
+const AuthOAuth2 = "oauth2_client"
+
 // Connection profile kinds and statuses.
 const (
 	ConnSQL      = "sql"
@@ -44,8 +48,8 @@ const (
 )
 
 // SQLDrivers lists the database drivers this build links; internal/probe keeps the registry that opens them (a test
-// keeps both lists equal). Later slices add sqlserver, oracle and mysql; today pgx stdlib is the only one.
-var SQLDrivers = []string{"postgres"}
+// keeps both lists equal). Oracle and mysql are the next entries.
+var SQLDrivers = []string{"postgres", "sqlserver", "mysql", "oracle"}
 
 // ConnectionProfile is the non-secret part of a connection profile.
 type ConnectionProfile struct {
@@ -65,7 +69,7 @@ var (
 
 var configKeys = map[string][]string{
 	ConnSQL:  {"driver", "host", "port", "database", "user", "sslmode", "codepage", "timezone"},
-	ConnREST: {"baseUrl", "authType", "username", "headerName", "pagingStyle", "probePath", "codepage", "timezone"},
+	ConnREST: {"baseUrl", "authType", "username", "headerName", "authUrl", "clientId", "scope", "pagingStyle", "probePath", "codepage", "timezone"},
 	ConnFile: {"dropDir", "format", "delimiter", "filePattern", "codepage", "timezone"},
 }
 
@@ -74,7 +78,7 @@ var configKeys = map[string][]string{
 // password or token, nor reuse a token as a basic-auth password.
 var secretBound = map[string][]string{
 	ConnSQL:  {"driver", "host", "port", "database", "user", "sslmode"},
-	ConnREST: {"baseUrl", "authType", "username", "headerName"},
+	ConnREST: {"baseUrl", "authType", "username", "headerName", "authUrl", "clientId", "scope"},
 }
 
 // SecretInvalidated reports whether a config change touches a setting the stored secret is bound to.
@@ -163,7 +167,7 @@ func ValidateConnection(c ConnectionProfile) map[string]string {
 		str("user", true)
 		oneOf("sslmode", false, "disable", "require", "verify-ca", "verify-full")
 	case ConnREST:
-		auth := oneOf("authType", false, "none", "basic", "bearer", "header")
+		auth := oneOf("authType", false, "none", "basic", "bearer", "header", AuthOAuth2)
 		if raw := str("baseUrl", true); raw != "" {
 			u, err := url.Parse(raw)
 			switch {
@@ -180,6 +184,15 @@ func ValidateConnection(c ConnectionProfile) map[string]string {
 		switch auth {
 		case "basic":
 			str("username", true)
+		case AuthOAuth2:
+			str("clientId", true)
+			str("scope", false)
+			if raw := str("authUrl", true); raw != "" {
+				u, err := url.Parse(raw)
+				if err != nil || u.Host == "" || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+					bad["config.authUrl"] = "must be an absolute https:// token endpoint URL without credentials, query or fragment"
+				}
+			}
 		case "header":
 			if h := str("headerName", true); h != "" && !headerRe.MatchString(h) {
 				bad["config.headerName"] = "must be a header name (letters, digits and hyphens)"

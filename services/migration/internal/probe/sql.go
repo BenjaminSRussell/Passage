@@ -10,10 +10,13 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
 )
 
 // statementTimeoutMs bounds every probe statement on the source server, inside the probe's overall deadline.
@@ -42,14 +45,96 @@ type SQLDriver struct {
 	// Inspect reports the server version, schemas, tables and the first tables' columns, each list bounded, without
 	// reading row data, in a read-only transaction and under a statement timeout.
 	Inspect func(ctx context.Context, db *sql.DB, res *Result) error
+	// Begin starts the transaction extraction reads in: read-only where the engine enforces it, with a statement
+	// timeout where the engine has one (every read also runs under the caller's context deadline).
+	Begin func(ctx context.Context, db *sql.DB) (*sql.Tx, error)
+	// Dialect says how this engine spells parameters, quoting and row limits in the generated extraction SQL.
+	Dialect Dialect
+}
+
+// LimitStyle is where an engine puts the row limit of a SELECT.
+type LimitStyle int
+
+const (
+	LimitClause LimitStyle = iota // ... LIMIT n
+	LimitTop                      // SELECT TOP (n) ...
+	LimitFetch                    // ... FETCH FIRST n ROWS ONLY (Oracle 12c and later)
+)
+
+// Dialect is the SQL syntax the extractors need from an engine.
+type Dialect struct {
+	Param func(n int) string        // the n-th (1-based) bind parameter
+	Quote func(ident string) string // a validated identifier, quoted
+	Limit LimitStyle
+	// TimestampText binds timestamp cursors as ISO 8601 text with no zone (up to 7 fractional digits) instead of a
+	// time value, so the server converts the text to the column's own type before comparing. SQL Server needs it: a
+	// time parameter is a datetimeoffset, and comparing a datetime column with one converts the column exactly
+	// (1/300 s ticks), so a page boundary on a rounded value would read the same rows again.
+	TimestampText bool
 }
 
 // sqlDrivers is the registry, keyed by config.driver; domain.SQLDrivers lists the same names for validation (a test
-// keeps the two equal). The approved next entries are sqlserver (github.com/microsoft/go-mssqldb: a Config with a
-// Dialer and NewConnectorConfig), oracle (github.com/sijms/go-ora/v2: a connector with a custom dialer) and mysql
-// (github.com/go-sql-driver/mysql: Config with DialFunc and NewConnector).
+// keeps the two equal). sqlserver is github.com/microsoft/go-mssqldb (a msdsn.Config and a Connector whose Dialer is the
+// guard), mysql is github.com/go-sql-driver/mysql (Config.DialFunc) and oracle is github.com/sijms/go-ora/v2 (a Dialer
+// on its connector). HANA and ODBC have no approved driver.
 var sqlDrivers = map[string]SQLDriver{
-	"postgres": {DefaultPort: 5432, Connector: postgresConnector, Inspect: postgresInspect},
+	"postgres": {DefaultPort: 5432, Connector: postgresConnector, Inspect: postgresInspect, Begin: postgresReadOnly, Dialect: Dialect{
+		Param: func(n int) string { return "$" + strconv.Itoa(n) },
+		Quote: func(id string) string { return `"` + strings.ReplaceAll(id, `"`, `""`) + `"` },
+	}},
+	"sqlserver": {DefaultPort: 1433, Connector: sqlserverConnector, Inspect: sqlserverInspect, Begin: sqlserverBegin, Dialect: Dialect{
+		Param:         func(n int) string { return "@p" + strconv.Itoa(n) },
+		Quote:         func(id string) string { return "[" + strings.ReplaceAll(id, "]", "]]") + "]" },
+		Limit:         LimitTop,
+		TimestampText: true,
+	}},
+	"mysql": {DefaultPort: 3306, Connector: mysqlConnector, Inspect: mysqlInspect, Begin: mysqlBegin, Dialect: Dialect{
+		Param: func(int) string { return "?" },
+		Quote: func(id string) string { return "`" + strings.ReplaceAll(id, "`", "``") + "`" },
+	}},
+	"oracle": {DefaultPort: 1521, Connector: oracleConnector, Inspect: oracleInspect, Begin: oracleBegin, Dialect: Dialect{
+		Param: func(n int) string { return ":" + strconv.Itoa(n) },
+		Quote: func(id string) string { return `"` + strings.ReplaceAll(id, `"`, `""`) + `"` },
+		Limit: LimitFetch,
+	}},
+}
+
+// LookupSQLDriver returns the registry entry for a config.driver name.
+func LookupSQLDriver(name string) (SQLDriver, bool) {
+	d, ok := sqlDrivers[name]
+	return d, ok
+}
+
+// SettingsFromConfig reads a sql profile's non-secret settings and its opened secret.
+func SettingsFromConfig(cfg map[string]any, defaultPort uint16, secret string) SQLSettings {
+	s := SQLSettings{Host: str(cfg, "host"), Port: defaultPort, Database: str(cfg, "database"), User: str(cfg, "user"),
+		Password: secret, SSLMode: str(cfg, "sslmode")}
+	if f, ok := cfg["port"].(float64); ok && f >= 1 && f <= 65535 {
+		s.Port = uint16(f)
+	}
+	return s
+}
+
+// OpenSQL opens a database/sql handle for a sql profile whose every connection goes through guard. The caller closes it.
+func OpenSQL(guard *egress.Guard, cfg map[string]any, secret string) (*sql.DB, SQLDriver, error) {
+	if guard == nil {
+		return nil, SQLDriver{}, &failure{CodeEgressDenied, "outbound connections are not configured on this deployment"}
+	}
+	name := str(cfg, "driver")
+	drv, ok := sqlDrivers[name]
+	if !ok {
+		return nil, SQLDriver{}, &failure{CodeProbeFailed, "database driver " + name + " is not available in this build"}
+	}
+	if secret == "" {
+		return nil, SQLDriver{}, &failure{CodeNoSecret, "no secret is set for this connection; set the password first"}
+	}
+	conn, err := drv.Connector(SettingsFromConfig(cfg, drv.DefaultPort, secret), guard.DialContext, guard.TLS)
+	if err != nil {
+		return nil, SQLDriver{}, &failure{CodeProbeFailed, "invalid connection settings"}
+	}
+	db := sql.OpenDB(conn)
+	db.SetMaxOpenConns(1)
+	return db, drv, nil
 }
 
 // SQLDriverNames lists the registered drivers in name order.
@@ -63,29 +148,11 @@ func SQLDriverNames() []string {
 }
 
 func (p *Prober) sql(ctx context.Context, t Target, res *Result) error {
-	if p.Guard == nil {
-		return &failure{CodeEgressDenied, "outbound connections are not configured on this deployment"}
-	}
-	name := str(t.Config, "driver")
-	drv, ok := sqlDrivers[name]
-	if !ok {
-		return &failure{CodeProbeFailed, "database driver " + name + " is not available in this build"}
-	}
-	if t.Secret == "" {
-		return &failure{CodeNoSecret, "no secret is set for this connection; set the password first"}
-	}
-	s := SQLSettings{Host: str(t.Config, "host"), Port: drv.DefaultPort, Database: str(t.Config, "database"), User: str(t.Config, "user"),
-		Password: t.Secret, SSLMode: str(t.Config, "sslmode")}
-	if f, ok := t.Config["port"].(float64); ok && f >= 1 && f <= 65535 {
-		s.Port = uint16(f)
-	}
-	conn, err := drv.Connector(s, p.Guard.DialContext, p.Guard.TLS)
+	db, drv, err := OpenSQL(p.Guard, t.Config, t.Secret)
 	if err != nil {
-		return &failure{CodeProbeFailed, "invalid connection settings"}
+		return err
 	}
-	db := sql.OpenDB(conn)
 	defer db.Close()
-	db.SetMaxOpenConns(1)
 	return drv.Inspect(ctx, db, res)
 }
 
@@ -274,4 +341,88 @@ func postgresCatalog(ctx context.Context, q querier, res *Result) error {
 		}
 	}
 	return rows.Err()
+}
+
+// catalogQueries are an engine's catalog queries for inspectCatalog. Schemas and Tables take the row limit as their one
+// parameter, Columns takes schema, table and the limit.
+type catalogQueries struct{ Version, Schemas, Tables, Columns string }
+
+// inspectCatalog fills a Result from catalog queries inside a read-only transaction, each list bounded. Used by the
+// engines whose catalog is information_schema or the Oracle dictionary; the first two engines keep their own.
+func inspectCatalog(ctx context.Context, db *sql.DB, begin func(context.Context, *sql.DB) (*sql.Tx, error), res *Result, q catalogQueries) error {
+	tx, err := begin(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.QueryRowContext(ctx, q.Version).Scan(&res.ServerVersion); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, q.Schemas, maxSchemas+1)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return err
+		}
+		res.Schemas = append(res.Schemas, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(res.Schemas) > maxSchemas {
+		res.Schemas, res.Truncated = res.Schemas[:maxSchemas], true
+	}
+	rows, err = tx.QueryContext(ctx, q.Tables, maxTables+1)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var t Table
+		if err := rows.Scan(&t.Schema, &t.Name, &t.Type); err != nil {
+			rows.Close()
+			return err
+		}
+		res.Tables = append(res.Tables, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(res.Tables) > maxTables {
+		res.Tables, res.Truncated = res.Tables[:maxTables], true
+	}
+	n := min(len(res.Tables), maxColumnTables)
+	if len(res.Tables) > n {
+		res.Truncated = true
+	}
+	for i := range res.Tables[:n] {
+		crows, err := tx.QueryContext(ctx, q.Columns, res.Tables[i].Schema, res.Tables[i].Name, maxColumnsPerTable+1)
+		if err != nil {
+			return err
+		}
+		for crows.Next() {
+			var c Column
+			var nullable int
+			if err := crows.Scan(&c.Name, &c.Type, &nullable); err != nil {
+				crows.Close()
+				return err
+			}
+			c.Nullable = nullable == 1
+			if len(res.Tables[i].Columns) >= maxColumnsPerTable {
+				res.Truncated = true
+			} else {
+				res.Tables[i].Columns = append(res.Tables[i].Columns, c)
+			}
+		}
+		crows.Close()
+		if err := crows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

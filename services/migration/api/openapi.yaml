@@ -483,7 +483,7 @@ paths:
     post:
       operationId: testConnectionProfile
       summary: Test a connection profile
-      description: Connects the way an extractor will and reports what it found. SQL connects through the driver named in config.driver (postgres is the only one in this build), inside a read-only transaction with a 5-second statement timeout, and lists at most 50 schemas, 200 tables and the columns of the first 20 tables (no row data); REST sends one GET to baseUrl plus probePath with the configured authentication and reads at most 64 KiB of the answer, which it does not return; file checks the drop directory under the operator-mounted drop root and counts matching files. Every network connection passes the egress guard, which refuses loopback, link-local and metadata addresses always, refuses private addresses unless the operator lists them in MIG_EGRESS_ALLOW, pins the connection to the checked address and never follows redirects. The call answers 200 whether or not the connection worked; read ok and failure in the body. It needs the write duty because it opens the stored secret.
+      description: Connects the way an extractor will and reports what it found. SQL connects through the driver named in config.driver (postgres, sqlserver, mysql or oracle), inside a read-only transaction with a 5-second statement timeout, and lists at most 50 schemas, 200 tables and the columns of the first 20 tables (no row data); REST sends one GET to baseUrl plus probePath with the configured authentication and reads at most 64 KiB of the answer, which it does not return; file checks the drop directory under the operator-mounted drop root and counts matching files. Every network connection passes the egress guard, which refuses loopback, link-local and metadata addresses always, refuses private addresses unless the operator lists them in MIG_EGRESS_ALLOW, pins the connection to the checked address and never follows redirects. The call answers 200 whether or not the connection worked; read ok and failure in the body. It needs the write duty because it opens the stored secret.
       x-passage-duty: migration.connection.write
       responses:
         '200':
@@ -497,6 +497,138 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '501':
           description: MIG-SECRETS-NOT-CONFIGURED, the service has no field-encryption keys and the profile needs a secret (SQL, and REST with authentication), or MIG-PROBE-NOT-CONFIGURED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/entity-bindings:
+    get:
+      operationId: listEntityBindings
+      summary: List entity bindings
+      description: Entity bindings in entity order, optionally filtered by connection profile, entity and status, paged with the opaque nextCursor. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: connectionProfileId, in: query, schema: { type: string, format: uuid } }
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of bindings; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EntityBinding' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createEntityBinding
+      summary: Create an entity binding
+      description: Says which table or read-only query (sql), endpoint (rest) or file (file) of a connection profile feeds which Passage entity, which fields make up a source row's key, and optionally the change cursor delta sync will read. The source object is checked against the profile's kind; a sql query must be one read-only SELECT. mappingSpecId must be a UUID naming a published spec for the same entity (400 when it is not a UUID or maps another entity, 422 MIG-SPEC-UNKNOWN when there is no such spec). The profile and entity are fixed once created, and a profile has one binding per entity.
+      x-passage-duty: migration.connection.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateEntityBinding' } } }
+      responses:
+        '201':
+          description: The binding was created.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/EntityBinding' } } }
+        '200':
+          description: The Idempotency-Key was replayed; the stored binding is returned.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EntityBinding' } } }
+        '409':
+          description: MIG-BINDING-EXISTS, the profile already has a binding for this entity; or MIG-CONNECTION-DISABLED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-CONNECTION-UNKNOWN, MIG-SPEC-UNKNOWN, or idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/entity-bindings/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getEntityBinding
+      summary: Get an entity binding
+      description: Returns one entity binding with its current version.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The binding.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EntityBinding' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateEntityBinding
+      summary: Change an entity binding
+      description: Changes the source, key fields, cursor, mapping spec or status under the binding's version; an omitted field is unchanged and the result is checked again against the profile's kind, and a new mappingSpecId must be a UUID naming a spec for the binding's entity. A binding is disabled, never deleted. A stale version is a conflict.
+      x-passage-duty: migration.connection.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateEntityBinding' } } }
+      responses:
+        '200':
+          description: The updated binding with its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EntityBinding' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-SPEC-UNKNOWN, mappingSpecId names no published spec.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/entity-bindings/{id}:preview:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: previewEntityBinding
+      summary: Preview a stored entity binding
+      description: Extracts a few rows (default 10, at most 100) from the binding's source through the connection profile, derives each row's source key and, with a mapping, runs the mapping and its rules to show the target record, rejects and warnings per row. The mapping is the inline mapping, else the published spec named by mappingSpecId, else the binding's own spec; the mapping's own test cases must pass. A file profile may be previewed from an upload (base64, at most 4 MiB) instead of the drop directory. Nothing is loaded, stored or logged beyond the usual request log. The whole preview has a 60-second deadline. The call answers 200 whether or not the source could be read in time; read ok and failure in the body. It needs the write duty because it opens the stored secret.
+      x-passage-duty: migration.connection.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewEntityBinding' } } }
+      responses:
+        '200':
+          description: The sampled rows and what the mapping made of them, or ok false with the failure.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BindingPreview' } } }
+        '404':
+          description: AUTH-0404, no entity binding with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-BINDING-DISABLED or MIG-CONNECTION-DISABLED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-MAP-INVALID, MIG-MAP-TEST-FAIL, MIG-SPEC-UNKNOWN or MIG-SECRET-UNREADABLE.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-EXTRACT-NOT-CONFIGURED, or MIG-SECRETS-NOT-CONFIGURED when the profile needs a secret.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/entity-bindings:preview:
+    post:
+      operationId: previewDraftEntityBinding
+      summary: Preview an entity binding before saving it
+      description: Same as previewing a stored binding, for a binding that is not saved yet. The request carries the binding's own fields (connectionProfileId, entity, source, keyFields, cursor) next to the preview options. Use it to try a table, query, endpoint or file and its mapping before creating the binding.
+      x-passage-duty: migration.connection.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewDraftEntityBinding' } } }
+      responses:
+        '200':
+          description: The sampled rows and what the mapping made of them, or ok false with the failure.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BindingPreview' } } }
+        '409':
+          description: MIG-CONNECTION-DISABLED.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-CONNECTION-UNKNOWN, MIG-MAP-INVALID, MIG-MAP-TEST-FAIL, MIG-SPEC-UNKNOWN or MIG-SECRET-UNREADABLE.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-EXTRACT-NOT-CONFIGURED, or MIG-SECRETS-NOT-CONFIGURED when the profile needs a secret.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
@@ -600,7 +732,7 @@ paths:
 components:
   responses:
     Problem:
-      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 409 MIG-VERSION-CONFLICT, 422 idempotency_key_reuse, MIG-MAP-*, MIG-PKG-* or MIG-CONNECTION-UNKNOWN, 501 MIG-SECRETS-NOT-CONFIGURED.
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 409 MIG-VERSION-CONFLICT, 422 idempotency_key_reuse, MIG-MAP-*, MIG-PKG-*, MIG-CONNECTION-UNKNOWN or MIG-SPEC-UNKNOWN, 501 MIG-SECRETS-NOT-CONFIGURED or MIG-EXTRACT-NOT-CONFIGURED.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   schemas:
     CreateMigrationRun:
@@ -708,6 +840,154 @@ components:
       type: string
       pattern: '^(ax2012|d365fo|sap_ecc|sap_s4|custom_[a-z0-9_]{1,40})$'
       description: ax2012, d365fo, sap_ecc, sap_s4, or custom_<name> (lowercase letters, digits and underscores, 1 to 40 after custom_) for a customer's own ERP.
+    EntityBinding:
+      type: object
+      required: [id, connectionProfileId, entity, source, keyFields, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        connectionProfileId: { type: string, format: uuid }
+        entity: { type: string, description: The Passage entity this source feeds, for example customer. }
+        source: { $ref: '#/components/schemas/BindingSource' }
+        keyFields: { type: array, minItems: 1, maxItems: 5, items: { type: string }, description: The columns or JSON paths whose values joined with "|" make the source key used by the cross-reference. }
+        cursorField: { type: string, description: The change stamp column or JSON path delta sync will compare. }
+        cursorType: { type: string, enum: [timestamp, int, rowversion] }
+        mappingSpecId: { type: string, format: uuid, description: The published mapping spec previews use by default. }
+        status: { type: string, enum: [active, disabled] }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    BindingSource:
+      type: object
+      additionalProperties: false
+      description: Where the rows are. The allowed keys depend on the profile's kind; any other key is refused.
+      properties:
+        schema: { type: string, description: sql. Optional schema of the table. }
+        table: { type: string, description: sql. A plain table or view name; give this or query. }
+        columns: { type: array, maxItems: 200, items: { type: string }, description: sql, with table. Must include the key fields and the cursor field. }
+        query: { type: string, maxLength: 8000, description: "sql. One read-only SELECT, optionally led by WITH, accepted by the read-only query guard: no second statement, no word that writes, locks, waits or reaches outside the database, and no construct engines read differently (backslashes or prefixes on string literals, # or /*! */ or nested comments, -- without a following space, $ ? @ { }, a call through a quoted name); quote unusual names with double quotes. It may use :watermark once or more as the bind value of the last watermark. Comments are dropped and the query is wrapped as a derived table (or the last CTE after WITH) and paged by keyset on the cursor field and key fields, so do not add ORDER BY or a row limit; a NULL in a key or cursor column fails the extraction. The profile's login must be read-only: on SQL Server it and this guard are the only protection against writes." }
+        path: { type: string, description: "rest. Absolute path under the profile's baseUrl, without query or fragment." }
+        recordsPath: { type: string, description: "rest and file (json). Dotted path of the record array in the JSON body; omit when the body is the array." }
+        params: { type: object, additionalProperties: { type: string }, description: "rest. Plain query parameters, at most 20. Credentials belong in the connection profile." }
+        changedSinceParam: { type: string, description: "rest. Query parameter that carries the last watermark so the source filters; without it rows are filtered after reading." }
+        paging:
+          type: object
+          additionalProperties: false
+          description: rest. How the endpoint pages.
+          properties:
+            style: { type: string, enum: [none, page, offset, cursor, link, odata, skiptoken] }
+            pageSize: { type: integer, minimum: 1, maximum: 1000 }
+            limitParam: { type: string }
+            offsetParam: { type: string }
+            pageParam: { type: string }
+            firstPage: { type: integer, enum: [0, 1] }
+            cursorParam: { type: string }
+            cursorPath: { type: string, description: Dotted path of the next cursor in the response; required for style cursor. }
+        file: { type: string, description: "file. A plain file name in the profile's drop directory." }
+        filePattern: { type: string, description: "file. A name pattern with * and ?; the newest match by name is read." }
+    CreateEntityBinding:
+      type: object
+      additionalProperties: false
+      required: [connectionProfileId, entity, source, keyFields]
+      properties:
+        connectionProfileId: { type: string, format: uuid }
+        entity: { type: string, pattern: '^[a-z][a-z0-9_.\-]{0,63}$' }
+        source: { $ref: '#/components/schemas/BindingSource' }
+        keyFields: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+        cursorField: { type: string }
+        cursorType: { type: string, enum: [timestamp, int, rowversion] }
+        mappingSpecId: { type: string, format: uuid }
+    UpdateEntityBinding:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        source: { $ref: '#/components/schemas/BindingSource' }
+        keyFields: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+        cursorField: { type: string }
+        cursorType: { type: string, enum: ['', timestamp, int, rowversion] }
+        mappingSpecId: { type: string, description: "A published spec id (a UUID) for the binding's entity, or empty to clear." }
+        status: { type: string, enum: [active, disabled] }
+    PreviewEntityBinding:
+      type: object
+      additionalProperties: false
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100, default: 10 }
+        mappingSpecId: { type: string, format: uuid }
+        mapping: { type: object, description: An inline mapping document for the binding's entity. }
+        upload:
+          type: object
+          additionalProperties: false
+          required: [name, contentBase64]
+          description: file profiles only. Read this content instead of the drop directory.
+          properties:
+            name: { type: string, description: The file name, which picks the format by its extension. }
+            contentBase64: { type: string, description: Base64 content, at most 4 MiB decoded. }
+    PreviewDraftEntityBinding:
+      type: object
+      additionalProperties: false
+      required: [connectionProfileId, entity, source, keyFields]
+      properties:
+        connectionProfileId: { type: string, format: uuid }
+        entity: { type: string }
+        source: { $ref: '#/components/schemas/BindingSource' }
+        keyFields: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+        cursorField: { type: string }
+        cursorType: { type: string, enum: [timestamp, int, rowversion] }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 10 }
+        mappingSpecId: { type: string, format: uuid }
+        mapping: { type: object }
+        upload:
+          type: object
+          additionalProperties: false
+          required: [name, contentBase64]
+          properties:
+            name: { type: string }
+            contentBase64: { type: string }
+    BindingPreview:
+      type: object
+      required: [ok, durationMs]
+      properties:
+        ok: { type: boolean }
+        durationMs: { type: integer }
+        failure:
+          type: object
+          required: [code, message]
+          description: Present when ok is false. Codes are those of a connection test (MIG-EGRESS-DENIED, MIG-CONNECT-FAILED, MIG-AUTH-FAILED, MIG-PROBE-FAILED, MIG-SECRET-MISSING) with the source's own message, which never contains the secret.
+          properties:
+            code: { type: string }
+            message: { type: string }
+        mapping:
+          type: object
+          description: The mapping that was run; absent when the preview ran without one.
+          properties:
+            entity: { type: string }
+            version: { type: integer }
+            mappingSpecId: { type: string, format: uuid }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [index, source]
+            properties:
+              index: { type: integer, minimum: 1 }
+              sourceKey: { type: string, description: Absent when a key field is missing. }
+              source: { type: object, description: The row as read, long text cut at 500 bytes. }
+              target: { type: object, description: The mapped record; absent when the row is rejected or no mapping ran. }
+              warnings:
+                type: array
+                items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } }
+              rejects:
+                type: array
+                description: Rule errors, or MIG-ROW-NO-KEY when a key field is missing.
+                items: { type: object, properties: { field: { type: string }, code: { type: string }, detail: { type: string } } }
+        columns: { type: array, items: { type: string }, description: Source column or field names seen in the sample. }
+        more: { type: boolean, description: True when the source holds more rows than the sample. }
+        mapped: { type: integer, description: Sampled rows with no reject; 0 without a mapping. }
+        rejected: { type: integer }
+        duplicateKeys: { type: array, items: { type: string }, description: Source keys that repeat inside the sample. }
+        watermark: { type: string, description: The largest cursor value in the sample. }
     ConnectionProfile:
       type: object
       required: [id, name, kind, sourceSystem, config, secretSet, status, version, createdBy, createdAt, updatedAt]
@@ -729,14 +1009,17 @@ components:
       additionalProperties: false
       description: Non-secret settings only. The allowed keys depend on the kind; a key that looks like a secret is refused with 400 and the value is set with PUT .../secret.
       properties:
-        driver: { type: string, enum: [postgres], description: sql. The only driver in this build. }
+        driver: { type: string, enum: [postgres, sqlserver, mysql, oracle], description: "sql. sqlserver is go-mssqldb, mysql is go-sql-driver/mysql, oracle is go-ora (the service name goes in database)." }
         host: { type: string, maxLength: 253, description: sql. A host name or IP address. }
-        port: { type: integer, minimum: 1, maximum: 65535, description: sql. Default 5432. }
+        port: { type: integer, minimum: 1, maximum: 65535, description: sql. Default 5432 (postgres), 1433 (sqlserver), 3306 (mysql), 1521 (oracle). }
         database: { type: string, maxLength: 255, description: sql. }
         user: { type: string, maxLength: 255, description: sql. The password is the secret. }
         sslmode: { type: string, enum: [disable, require, verify-ca, verify-full], description: sql. Default require. }
         baseUrl: { type: string, maxLength: 255, description: "rest. https URL (http only without authentication) with no credentials, query or fragment." }
-        authType: { type: string, enum: [none, basic, bearer, header], description: "rest. The secret is the password, token or header value." }
+        authType: { type: string, enum: [none, basic, bearer, header, oauth2_client], description: "rest. The secret is the password, token, header value or OAuth2 client secret." }
+        authUrl: { type: string, maxLength: 512, description: "rest, authType oauth2_client. The token endpoint (https)." }
+        clientId: { type: string, maxLength: 255, description: "rest, authType oauth2_client." }
+        scope: { type: string, maxLength: 255, description: "rest, authType oauth2_client. Space separated." }
         username: { type: string, maxLength: 255, description: "rest, authType basic." }
         headerName: { type: string, maxLength: 64, description: "rest, authType header." }
         pagingStyle: { type: string, enum: [none, offset, page, cursor, link], description: rest. }

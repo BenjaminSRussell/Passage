@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/api"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/connector"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/egress"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/probe"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
@@ -77,7 +78,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	// Without fieldcrypt keys the secret and test routes answer 501 MIG-SECRETS-NOT-CONFIGURED.
-	a := api.New(store.New(pool), api.NotConfigured).WithConnections(keys, prober)
+	a := api.New(store.New(pool), api.NotConfigured).WithConnections(keys, prober).WithExtraction(connector.Env{Guard: prober.Guard, DropRoot: prober.DropRoot})
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

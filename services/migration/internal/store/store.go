@@ -138,6 +138,11 @@ type Store interface {
 	UpdateConnectionProfile(ctx context.Context, id string, version int, edit func(*ConnectionProfile) error) (ConnectionProfile, error)
 	SetConnectionSecret(ctx context.Context, id string, sealed []byte, keyID string) (ConnectionProfile, error)
 	ConnectionSecret(ctx context.Context, id string) (sealed []byte, keyID string, err error)
+	// Entity bindings (integration track S2): a table, query, endpoint or file of a profile feeding one entity.
+	SaveEntityBinding(ctx context.Context, b EntityBinding, idempotencyKey string) (saved EntityBinding, created bool, err error)
+	GetEntityBinding(ctx context.Context, id string) (EntityBinding, error)
+	ListEntityBindings(ctx context.Context, f BindingFilter) ([]EntityBinding, error)
+	UpdateEntityBinding(ctx context.Context, id string, version int, edit func(*EntityBinding) error) (EntityBinding, error)
 	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
 	XrefSummary(ctx context.Context) ([]XrefCount, error)
@@ -556,6 +561,8 @@ type Mem struct {
 	pjState  *memProjects
 	cnOnce   sync.Once
 	cnState  *memConnections
+	bnOnce   sync.Once
+	bnState  *memBindings
 }
 
 func NewMem() *Mem {

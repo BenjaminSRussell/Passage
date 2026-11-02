@@ -144,7 +144,7 @@ func (m Mapping) applyTemplated(row map[string]any, template map[string]string) 
 		if present && isNullMarker(f.Fn, text) {
 			present = false
 		}
-		if present && f.Type == TypeDecimal && len(f.Enum) == 0 && isNumber(row[f.Source]) {
+		if present && f.Type == TypeDecimal && len(f.Enum) == 0 && isNumber(lookup(row, f.Source)) {
 			// A JSON number is already a machine number, not text in the column's locale: 1.234 stays 1.234
 			// under decimal_comma instead of being read as 1234. (A number under YYYYMMDD is still read as a date.)
 			f.Format = ""

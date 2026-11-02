@@ -215,9 +215,9 @@ const COMMON_FIELDS: ConnectionField[] = [
 /** The non-secret settings of each kind. The password, token or key is never a field here: it is set on its own. */
 export const CONNECTION_FIELDS: Record<ConnectionKind, ConnectionField[]> = {
   sql: [
-    { key: "driver", label: "Driver", required: true, options: ["postgres"], hint: "PostgreSQL is the only driver in this build." },
+    { key: "driver", label: "Driver", required: true, options: ["postgres", "sqlserver", "mysql", "oracle"], hint: "For Oracle, the database is the service name." },
     { key: "host", label: "Host", required: true, hint: "A host name or IP address. A private address works only when the operator has allowlisted it." },
-    { key: "port", label: "Port", number: true, hint: "Default 5432." },
+    { key: "port", label: "Port", number: true, hint: "Default 5432 (postgres), 1433 (sqlserver), 3306 (mysql), 1521 (oracle)." },
     { key: "database", label: "Database", required: true },
     { key: "user", label: "User", required: true, hint: "The password is set separately, after the connection exists." },
     { key: "sslmode", label: "TLS mode", options: ["require", "verify-full", "verify-ca", "disable"], hint: "Default require." },
@@ -225,7 +225,10 @@ export const CONNECTION_FIELDS: Record<ConnectionKind, ConnectionField[]> = {
   ],
   rest: [
     { key: "baseUrl", label: "Base URL", required: true, hint: "https:// with no credentials or query. http:// only for an endpoint without authentication." },
-    { key: "authType", label: "Authentication", options: ["none", "basic", "bearer", "header"], hint: "The password, token or header value is set separately." },
+    { key: "authType", label: "Authentication", options: ["none", "basic", "bearer", "header", "oauth2_client"], hint: "The password, token, header value or OAuth2 client secret is set separately." },
+    { key: "authUrl", label: "Token URL", hint: "For OAuth2 client credentials: the https token endpoint." },
+    { key: "clientId", label: "Client ID", hint: "For OAuth2 client credentials." },
+    { key: "scope", label: "Scope", hint: "For OAuth2 client credentials, space separated." },
     { key: "username", label: "User name", hint: "For basic authentication." },
     { key: "headerName", label: "Header name", hint: "For header authentication, for example X-Api-Key." },
     { key: "pagingStyle", label: "Paging style", options: ["none", "offset", "page", "cursor", "link"] },
@@ -307,6 +310,8 @@ export function secretNoun(kind: ConnectionKind, config: Record<string, string |
       return "token";
     case "header":
       return "header value";
+    case "oauth2_client":
+      return "client secret";
     default:
       return null;
   }
