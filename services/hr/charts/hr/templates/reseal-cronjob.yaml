@@ -1,0 +1,75 @@
+{{- if .Values.reseal.enabled }}
+{{- if not .Values.reseal.tenantIds }}
+{{- fail "reseal.tenantIds must list at least one tenant UUID when reseal.enabled is true" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-passage-hr-reseal-pii
+  labels:
+    app.kubernetes.io/name: passage-hr-reseal-pii
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  schedule: {{ .Values.reseal.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: passage-hr-reseal-pii
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          volumes:
+            - name: field-crypt
+              secret:
+                secretName: {{ .Values.secret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ .Values.secret.fieldcryptKeysKey }}
+                    path: keys
+          containers:
+            - name: reseal-pii
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - reseal-pii
+                {{- range .Values.reseal.tenantIds }}
+                - {{ . | quote }}
+                {{- end }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secret.name }}
+                      key: {{ .Values.secret.databaseUrlKey }}
+                - name: HR_PII_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secret.name }}
+                      key: {{ .Values.secret.piiKeyKey }}
+                      optional: true
+                - name: FIELDCRYPT_KEYS_FILE
+                  value: /var/run/passage/field-crypt/keys
+                - name: FIELDCRYPT_CURRENT_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secret.name }}
+                      key: {{ .Values.secret.fieldcryptCurrentKeyIdKey }}
+              volumeMounts:
+                - name: field-crypt
+                  mountPath: /var/run/passage/field-crypt
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+{{- end }}

@@ -309,20 +309,103 @@ func (a *API) expiringCertifications(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, expiringList{AsOf: asOf.Format(dateLayout), WithinDays: within, Items: page.Items, NextCursor: cursor(page.NextAfter)})
 }
 
-// skillGap is GET /v1/hr/workers/{id}/skill-gap?positionId= (FR-42.18).
+// skillGap is GET /v1/hr/workers/{id}/skill-gap?positionId= or ?jobId= (FR-42.18).
 func (a *API) skillGap(w http.ResponseWriter, r *http.Request, workerID string) {
-	positionID := r.URL.Query().Get("positionId")
-	if !ids.Valid(positionID) {
-		validationFailed(w, r, map[string]string{"positionId": "must be a UUID"})
+	positionID, jobID := r.URL.Query().Get("positionId"), r.URL.Query().Get("jobId")
+	if (positionID == "") == (jobID == "") {
+		validationFailed(w, r, map[string]string{"positionId": "give exactly one of positionId or jobId"})
 		return
 	}
-	gap, err := a.store.SkillGapFor(r.Context(), workerID, positionID)
+	var gap store.SkillGap
+	var err error
+	switch {
+	case positionID != "" && !ids.Valid(positionID):
+		validationFailed(w, r, map[string]string{"positionId": "must be a UUID"})
+		return
+	case jobID != "" && !ids.Valid(jobID):
+		validationFailed(w, r, map[string]string{"jobId": "must be a UUID"})
+		return
+	case positionID != "":
+		gap, err = a.store.SkillGapFor(r.Context(), workerID, positionID)
+	default:
+		gap, err = a.store.SkillGapForJob(r.Context(), workerID, jobID)
+	}
 	if err != nil {
 		logFailure(r, "skill gap", err)
 		httpx.Fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, gap)
+}
+
+// jobSkillGaps is GET /v1/hr/jobs/{id}/skill-gaps?asOf=: the gaps of every
+// worker who holds the job on the date.
+func (a *API) jobSkillGaps(w http.ResponseWriter, r *http.Request, jobID string) {
+	asOf, ok := asOfParam(w, r)
+	if !ok {
+		return
+	}
+	gaps, err := a.store.JobGaps(r.Context(), jobID, asOf)
+	if err != nil {
+		logFailure(r, "job skill gaps", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, gaps)
+}
+
+// setJobRequirement is POST /v1/hr/jobs/{id}/skill-requirements
+// (HcmOrgMaintain). It sets or replaces one skill's minimum, so a retry is safe.
+func (a *API) setJobRequirement(w http.ResponseWriter, r *http.Request, jobID string) {
+	var req requirementRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !jobCode.MatchString(req.SkillCode) {
+		fields["skillCode"] = codeShape
+	}
+	if req.MinRating == nil {
+		fields["minRating"] = "is required"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.store.SetJobRequirement(r.Context(), jobID, req.SkillCode, *req.MinRating)
+	if err != nil {
+		logFailure(r, "set job skill requirement", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// removeJobRequirement is DELETE /v1/hr/jobs/{id}/skill-requirements/{skillCode}.
+func (a *API) removeJobRequirement(w http.ResponseWriter, r *http.Request, jobID string) {
+	code := chi.URLParam(r, "skillCode")
+	if !jobCode.MatchString(code) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeRequirementNotFound, "the job does not require that skill"))
+		return
+	}
+	if err := a.store.RemoveJobRequirement(r.Context(), jobID, code); err != nil {
+		logFailure(r, "remove job skill requirement", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// listJobRequirements is GET /v1/hr/jobs/{id}/skill-requirements.
+func (a *API) listJobRequirements(w http.ResponseWriter, r *http.Request, jobID string) {
+	items, err := a.store.ListJobRequirements(r.Context(), jobID)
+	if err != nil {
+		logFailure(r, "list job skill requirements", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.JobRequirement]{Items: items})
 }
 
 // skillSearchResponse carries the matches and the as-of date of the

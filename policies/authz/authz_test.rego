@@ -1061,3 +1061,42 @@ test_tax_duties_reach_only_their_routes if {
 	data.service_grants.tax.ledger == ["ledger.balance.read"]
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
 }
+
+test_hr_job_skill_routes_are_granted if {
+	allowed("HcmOrgInquire", "GET", "/v1/hr/jobs/j-1/skill-requirements")
+	allowed("HcmOrgInquire", "GET", "/v1/hr/jobs/j-1/skill-gaps")
+	allowed("HcmOrgMaintain", "POST", "/v1/hr/jobs/j-1/skill-requirements")
+	allowed("HcmOrgMaintain", "DELETE", "/v1/hr/jobs/j-1/skill-requirements/WELDING")
+	not allowed("HcmOrgInquire", "POST", "/v1/hr/jobs/j-1/skill-requirements")
+	not allowed("HcmOrgInquire", "DELETE", "/v1/hr/jobs/j-1/skill-requirements/WELDING")
+	not allowed("HcmOrgMaintain", "GET", "/v1/hr/jobs/j-1/skill-gaps")
+}
+
+test_hr_performance_every_route_is_granted if {
+	every duty in ["hr.performance.manage", "hr.performance.admin"] {
+		allowed(duty, "GET", "/v1/hr/workers/w-1/goals")
+		allowed(duty, "POST", "/v1/hr/workers/w-1/goals")
+		allowed(duty, "POST", "/v1/hr/goals/g-1/progress")
+		allowed(duty, "GET", "/v1/hr/workers/w-1/reviews")
+		allowed(duty, "POST", "/v1/hr/workers/w-1/reviews")
+		allowed(duty, "GET", "/v1/hr/reviews/r-1")
+		allowed(duty, "POST", "/v1/hr/reviews/r-1/sign-off")
+	}
+	allowed("hr.performance.self", "GET", "/v1/hr/me/goals")
+	allowed("hr.performance.self", "GET", "/v1/hr/me/reviews")
+	allowed("hr.performance.self", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
+}
+
+test_hr_performance_duties_reach_only_their_routes if {
+	allowed("hr.performance.manage", "POST", "/v1/hr/workers/w-1/goals")
+	allowed("hr.performance.manage", "POST", "/v1/hr/reviews/r-1/sign-off")
+	allowed("hr.performance.admin", "GET", "/v1/hr/reviews/r-1")
+	not allowed("hr.performance.manage", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
+	not allowed("hr.performance.manage", "DELETE", "/v1/hr/reviews/r-1")
+	not allowed("hr.performance.manage", "GET", "/v1/hr/workers/w-1/pii")
+	allowed("hr.performance.self", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
+	allowed("hr.performance.self", "GET", "/v1/hr/me/goals")
+	not allowed("hr.performance.self", "POST", "/v1/hr/reviews/r-1/sign-off")
+	not allowed("hr.performance.self", "GET", "/v1/hr/workers/w-1/reviews")
+	not allowed("hr.performance.self", "POST", "/v1/hr/workers/w-1/goals")
+}

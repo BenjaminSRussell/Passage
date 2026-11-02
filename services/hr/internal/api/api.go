@@ -89,6 +89,10 @@ type API struct {
 	checklistsCompleted  atomic.Int64
 	tasksFinished        atomic.Int64
 	questionnaireAnswers atomic.Int64
+	goalsCreated         atomic.Int64
+	reviewsOpened        atomic.Int64
+	reviewsSelfSubmitted atomic.Int64
+	reviewsSignedOff     atomic.Int64
 }
 
 // Sequencer allocates the next formatted number of a numbering sequence.
@@ -149,6 +153,13 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/positions/{id}/skill-requirements", positionRoute(a.listRequirements))
 	r.With(authz.RequireDuty(dutyOrgMaintain)).Post("/v1/hr/positions/{id}/skill-requirements", positionRoute(a.setRequirement))
 	r.With(authz.RequireDuty(dutyOrgMaintain)).Delete("/v1/hr/positions/{id}/skill-requirements/{skillCode}", positionRoute(a.removeRequirement))
+	jobRoute := func(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+		return idRoute(store.CodeJobNotFound, "job not found", next)
+	}
+	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/jobs/{id}/skill-requirements", jobRoute(a.listJobRequirements))
+	r.With(authz.RequireDuty(dutyOrgMaintain)).Post("/v1/hr/jobs/{id}/skill-requirements", jobRoute(a.setJobRequirement))
+	r.With(authz.RequireDuty(dutyOrgMaintain)).Delete("/v1/hr/jobs/{id}/skill-requirements/{skillCode}", jobRoute(a.removeJobRequirement))
+	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/jobs/{id}/skill-gaps", jobRoute(a.jobSkillGaps))
 	r.With(authz.RequireDuty(dutyLearningAdmin)).Post("/v1/hr/courses", a.createCourse)
 	r.With(authz.RequireDuty(dutyEssLearning)).Get("/v1/hr/courses", a.listCourses)
 	r.With(authz.RequireDuty(dutyEssLearning)).Get("/v1/hr/courses/{id}", courseRoute(a.getCourse))
@@ -187,6 +198,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Post("/v1/hr/questionnaires/schedules/{id}/answers", scheduleRoute(a.submitAnswers))
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}/results", scheduleRoute(a.scheduleResults))
 	a.registerSelfService(r)
+	a.registerPerformance(r)
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within
@@ -246,6 +258,10 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_checklists_completed_total", "Checklists completed.", a.checklistsCompleted.Load())
 		counter("hr_worker_tasks_finished_total", "Worker tasks marked done or skipped.", a.tasksFinished.Load())
 		counter("hr_questionnaire_answers_total", "Questionnaire answer sessions recorded.", a.questionnaireAnswers.Load())
+		counter("hr_goals_created_total", "Goals created; idempotent replays are not counted.", a.goalsCreated.Load())
+		counter("hr_reviews_opened_total", "Reviews opened; repeats for a period are not counted.", a.reviewsOpened.Load())
+		counter("hr_reviews_self_submitted_total", "Self-assessments newly submitted.", a.reviewsSelfSubmitted.Load())
+		counter("hr_reviews_signed_off_total", "Reviews newly signed off by a manager.", a.reviewsSignedOff.Load())
 	})
 }
 

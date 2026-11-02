@@ -101,7 +101,8 @@ type PositionRequirement struct {
 // Comparison has every requirement; Gaps only the unmet ones (AC-42.16).
 type SkillGap struct {
 	WorkerID   string          `json:"workerId"`
-	PositionID string          `json:"positionId"`
+	PositionID string          `json:"positionId,omitempty"`
+	JobID      string          `json:"jobId,omitempty"`
 	Met        bool            `json:"met"`
 	Comparison []domain.GapRow `json:"comparison"`
 	Gaps       []domain.GapRow `json:"gaps"`
