@@ -115,6 +115,9 @@ var serviceGrants = map[string]map[string][]string{
 		"product":     {"product.import.write"},
 		"receivables": {"receivables.import.write"},
 	},
+	"migration-factory": {
+		"receivables": {"receivables.import.write", "ARView"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.

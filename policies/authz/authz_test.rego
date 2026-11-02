@@ -834,6 +834,13 @@ test_migration_service_grant_reaches_only_the_import_write_routes if {
 	}
 }
 
+test_migration_factory_grant_reaches_only_the_receivables_import if {
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "ARView"]}
+	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
+	allowed("ARView", "GET", "/v1/receivables/open-item-imports")
+	not allowed("ARView", "POST", "/v1/receivables/open-items:batch")
+}
+
 test_migration_loader_principal_holds_only_the_import_duties if {
 	data.service_principals["migration-loader"] == ["party.import.write", "product.import.write", "receivables.import.write"]
 	principal_allowed("migration-loader", "POST", "/v1/receivables/open-items:batch")

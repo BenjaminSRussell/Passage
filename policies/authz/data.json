@@ -1140,6 +1140,7 @@
     "MigrationRun": {"permissions": [
       {"resource": "/api/v1/migration/packs/*/runs", "methods": ["POST"]},
       {"resource": "/api/v1/migration/parallel-runs", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
     "MigrationView": {"permissions": [
@@ -1149,6 +1150,8 @@
       {"resource": "/api/v1/migration/runs", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/control-totals", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]}
     ]},
     "MssApprove": {"permissions": [
@@ -2707,6 +2710,9 @@
       "party": ["party.import.write"],
       "product": ["product.import.write"],
       "receivables": ["receivables.import.write"]
+    },
+    "migration-factory": {
+      "receivables": ["receivables.import.write", "ARView"]
     }
   },
   "service_principals": {
