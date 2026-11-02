@@ -44,7 +44,7 @@ const (
 
 var errOperatorNotRegistered = errors.New("operator tenant is not registered in identity_operator; refusing to publish an empty policy")
 
-var bundleRoots = []string{"authz", "assignments", "duties", "service_grants"}
+var bundleRoots = []string{"authz", "assignments", "duties", "service_grants", "service_principals"}
 
 const compiledAssignmentsQuery = `select a.tenant_id::text, u.idp_subject, a.role
 from identity_role_assignments a
