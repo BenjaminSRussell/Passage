@@ -383,7 +383,7 @@ components:
             required: [ledgerId, kind, id, version, actor]
             properties:
               ledgerId: { type: string, format: uuid }
-              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule, advanced_rule, splitting_rule] }
+              kind: { type: string, enum: [derivation_strategy, lookup_table, validation_rule, advanced_rule, splitting_rule, ledger_settings] }
               id: { type: string, format: uuid }
               version: { type: integer, description: Strategy version number, the lookup table replacement counter or the validation rule or advanced rule lockVersion }
               actor: { type: string, description: User who activated, replaced or saved }

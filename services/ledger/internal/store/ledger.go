@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	ledgerevents "github.com/BenjaminSRussell/passage/services/ledger/internal/events"
 )
 
 // ReconNone is the default reconciliation account type.
@@ -119,6 +120,42 @@ func (s *Postgres) GetLedger(ctx context.Context, id string) (Ledger, error) {
 		return err
 	})
 	return l, err
+}
+
+// LedgerSettings are the optional accounting properties of a ledger (FR-12.7). A nil field keeps the
+// stored value; an empty string clears it.
+type LedgerSettings struct {
+	CalendarCode        *string
+	AccountingPrinciple *string
+	ReportingCurrency   *string
+}
+
+func (s *Postgres) UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return Ledger{}, err
+	}
+	var out Ledger
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := loadLedger(ctx, tx, p.TenantID, id, true)
+		if err != nil {
+			return err
+		}
+		if version > 0 && cur.Version != version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "the ledger changed since it was read; reload it and try again")
+		}
+		out, err = scanLedger(tx.QueryRow(ctx, `update ledger set calendar_code = case when $3::text is null then calendar_code else nullif($3, '') end,
+				accounting_principle = case when $4::text is null then accounting_principle else nullif($4, '') end,
+				reporting_currency = case when $5::text is null then reporting_currency else nullif($5, '') end,
+				settings_version = settings_version + 1
+			where tenant_id = $1 and id = $2 returning `+ledgerFields, p.TenantID, id, in.CalendarCode, in.AccountingPrinciple, in.ReportingCurrency))
+		if err != nil {
+			return err
+		}
+		return enqueueFor(ctx, tx, "ledger", id, ledgerevents.RulesChanged, p.TenantID, ledgerevents.RulesChangedData{
+			LedgerID: id, Kind: "ledger_settings", ID: id, Version: out.Version, Actor: p.UserID})
+	})
+	return out, err
 }
 
 func derefString(s *string) string {

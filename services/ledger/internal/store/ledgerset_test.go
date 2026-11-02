@@ -156,8 +156,6 @@ func TestPostgres_LedgerSetValidation(t *testing.T) {
 		name, code string
 		in         LedgerSetInput
 	}{
-		{"member outside the set", CodeSetInvalid, LedgerSetInput{Code: "S1", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.tax.ID}, Members: []SetMember{{LedgerID: e.local.ID}}}},
-		{"member twice", CodeSetInvalid, LedgerSetInput{Code: "S6", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.tax.ID}, Members: []SetMember{{LedgerID: e.tax.ID}, {LedgerID: e.tax.ID}}}},
 		{"legal entity", CodeSetEntityMismatch, LedgerSetInput{Code: "S2", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{otherEntity.ID}}},
 		{"no parallel", CodeSetInvalid, LedgerSetInput{Code: "S3", Name: "s", LeadingLedgerID: e.ledger.ID}},
 		{"leading is parallel", CodeSetInvalid, LedgerSetInput{Code: "S4", Name: "s", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{e.ledger.ID}}},

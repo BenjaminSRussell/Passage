@@ -165,7 +165,6 @@ components:
           items: { $ref: "#/components/schemas/PostLine" }
         ledgerLines:
           type: array
-          maxItems: 1
           items: { $ref: "#/components/schemas/LedgerLines" }
     SetEntryRequest:
       type: object
@@ -181,8 +180,10 @@ components:
         A member ledger kept in another currency than the leading ledger gets the common lines translated at the
         spot rate of the posting date (services/fx, rounded to the member's minor units; a rounding residual of a
         balanced document goes to the largest line of the heavier side, so each ledger still balances alone). A pair
-        without a rate gives 422 LEDGER_FX_RATE_MISSING (also when FX_URL is not configured) and an unreachable fx
-        service 503 LEDGER_FX_UNAVAILABLE; nothing is written either way. ledgerLines are not translated: they are
+        without a rate gives 422 LEDGER_RATE_MISSING (also when FX_URL is not configured; other fx rejections such
+        as FX_RATE_DATE_FUTURE are relayed as 422 with the fx code), an fx service that refuses the lookup 502
+        LEDGER_FX_MISCONFIGURED and an unreachable one 503 LEDGER_FX_UNAVAILABLE; nothing is written in any case.
+        A line that absorbs a rounding difference carries roundingAdjustment (BR-12.4). ledgerLines are not translated: they are
         written in the named ledger's own currency (a different currency is 422 LEDGER_CURRENCY_MISMATCH).
       properties:
         documentId: { type: string, format: uuid }
@@ -233,6 +234,7 @@ components:
         reversalOfLineId: { type: string, format: uuid }
         negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
         derivedByStepIds: { type: array, items: { type: string, format: uuid }, description: Derivation steps that filled dimensions on the line (FR-11.22) }
+        roundingAdjustment: { type: boolean, description: The line absorbed a currency translation rounding difference (BR-12.4) }
     LedgerLine:
       type: object
       description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
@@ -334,7 +336,18 @@ components:
         futurePostingDays: { type: integer, minimum: 0, maximum: 730 }
         reversalReasonRequired: { type: boolean }
         negativePostingEnabled: { type: boolean }
+        calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Fiscal calendar the ledger follows (FR-12.7); stored, not consumed by posting yet }
+        accountingPrinciple: { type: string, enum: [IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
+        reportingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        version: { type: integer, minimum: 1, description: Changes with every settings update; sent back as If-Match }
         createdAt: { type: string, format: date-time }
+    LedgerSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$|^$', description: An empty string clears the value }
+        accountingPrinciple: { type: string, enum: ["", IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT] }
+        reportingCurrency: { type: string, pattern: '^[A-Z]{3}$|^$' }
     LedgerSetRequest:
       type: object
       required: [code, name, leadingLedgerId, parallelLedgerIds]
@@ -347,19 +360,6 @@ components:
           minItems: 1
           maxItems: 20
           items: { type: string, format: uuid }
-        members:
-          type: array
-          maxItems: 21
-          description: Optional per-ledger settings of members of the set (at most one entry per ledger, each a member). Ledgers of a set may be kept in different currencies.
-          items: { $ref: "#/components/schemas/LedgerSetMember" }
-    LedgerSetMember:
-      type: object
-      required: [ledgerId]
-      properties:
-        ledgerId: { type: string, format: uuid }
-        calendarCode: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Fiscal calendar the ledger follows; held for the fiscal calendar (not consumed by posting yet) }
-        accountingPrinciple: { type: string, pattern: '^[A-Z0-9_.-]{1,20}$', description: "Accounting principle code, for example IFRS" }
-        reportingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
     LedgerSet:
       type: object
       properties:
@@ -371,9 +371,6 @@ components:
         ledgerIds:
           type: array
           items: { type: string, format: uuid }
-        members:
-          type: array
-          items: { $ref: "#/components/schemas/LedgerSetMember" }
         createdAt: { type: string, format: date-time }
     AccountMappingRequest:
       type: object
@@ -2010,6 +2007,37 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+    patch:
+      tags: [ledgers]
+      operationId: updateLedgerSettings
+      summary: Change the calendar, accounting principle or reporting currency of a ledger
+      description: |
+        Fields that are omitted keep their value; an empty string clears one. If-Match carries the ledger version
+        (412 LEDGER_VERSION_CONFLICT when it changed). Each change announces dev.passage.ledger.rules.changed.v1
+        with kind ledger_settings.
+      x-passage-duty: ledger.ledger.write
+      parameters:
+        - $ref: "#/components/parameters/LedgerId"
+        - name: If-Match
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LedgerSettingsRequest" }
+      responses:
+        "200":
+          description: Ledger with its new version in the ETag header
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
   /v1/ledger/charts/{chart}/accounts:
     get:
       tags: [charts]

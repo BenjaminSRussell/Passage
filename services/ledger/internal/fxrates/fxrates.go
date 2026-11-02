@@ -21,12 +21,18 @@ import (
 
 const (
 	Timeout         = 2 * time.Second
-	RateType        = "spot"
 	ratesPath       = "/v1/fx/rates"
 	audience        = "fx"
 	dutyRateLookup  = "fx.rate.lookup"
 	maxResponseSize = 1 << 20
 )
+
+func cmpOr(preferred, fallback string) string {
+	if preferred != "" {
+		return preferred
+	}
+	return fallback
+}
 
 type Client struct {
 	baseURL string
@@ -48,7 +54,7 @@ func (c *Client) Rate(ctx context.Context, legalEntityID, from, to string, date 
 	if !ok {
 		return decimal.Decimal{}, errors.New("fx: no principal in context")
 	}
-	query := url.Values{"type": {RateType}, "from": {from}, "to": {to}, "date": {date.Format(time.DateOnly)}}
+	query := url.Values{"type": {store.RateTypeSpot}, "from": {from}, "to": {to}, "date": {date.Format(time.DateOnly)}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+ratesPath+"?"+query.Encode(), nil)
 	if err != nil {
 		return decimal.Decimal{}, fmt.Errorf("fx: %w", err)
@@ -68,7 +74,19 @@ func (c *Client) Rate(ctx context.Context, legalEntityID, from, to string, date 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnprocessableEntity:
-		return decimal.Decimal{}, fmt.Errorf("%w: %s to %s on %s", store.ErrRateUnavailable, from, to, query.Get("date"))
+		var problem struct {
+			Code        string `json:"code"`
+			ServiceCode string `json:"serviceCode"`
+			Detail      string `json:"detail"`
+		}
+		if json.Unmarshal(raw, &problem) != nil {
+			return decimal.Decimal{}, errors.New("fx: unreadable rejection")
+		}
+		code := cmpOr(cmpOr(problem.ServiceCode, problem.Code), store.CodeRateMissing)
+		return decimal.Decimal{}, &store.RateRejected{Code: code, Detail: problem.Detail}
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+		slog.ErrorContext(ctx, "fx refused rate lookup", "status", resp.StatusCode, "from", from, "to", to, "correlationId", middleware.GetReqID(ctx))
+		return decimal.Decimal{}, &store.RateRefused{Status: resp.StatusCode}
 	default:
 		slog.ErrorContext(ctx, "fx rejected rate lookup", "status", resp.StatusCode, "from", from, "to", to, "correlationId", middleware.GetReqID(ctx))
 		return decimal.Decimal{}, fmt.Errorf("fx: unexpected status %d", resp.StatusCode)
