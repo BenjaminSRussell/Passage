@@ -186,7 +186,9 @@ func TestFromSource_RefusalsAndErrors(t *testing.T) {
 		{"shipment partially shipped", func(f *fakeSources) { f.shipment.Status = "PARTIALLY_SHIPPED" }, "856", srcShipment, 422, CodeOutbound},
 		{"invoice without lines", func(f *fakeSources) { f.invoice.Lines = nil }, "810", srcInvoice, 422, CodeOutbound},
 		{"credit note", func(f *fakeSources) { f.invoice.Type = "CREDIT_NOTE" }, "810", srcInvoice, 422, CodeOutbound},
-		{"invoice without sales order",func(f *fakeSources) { f.invoice.Lines[0].OrderID = "" }, "810", srcInvoice, 422, CodeOutbound},
+		{"credit note of another customer", func(f *fakeSources) { f.invoice.Type = "CREDIT_NOTE"; f.invoice.CustomerID = other }, "810", srcInvoice, 422, CodeSourceScope},
+		{"draft invoice without lines", func(f *fakeSources) { f.invoice.Status = "PROPOSAL"; f.invoice.Lines = nil }, "810", srcInvoice, 409, CodeSourceNotFinal},
+		{"invoice without sales order", func(f *fakeSources) { f.invoice.Lines[0].OrderID = "" }, "810", srcInvoice, 422, CodeOutbound},
 		{"source not found", func(f *fakeSources) { f.err = sources.ErrNotFound }, "856", srcShipment, 404, CodeNotFound},
 		{"source refuses the grant", func(f *fakeSources) { f.err = sources.ErrForbidden }, "810", srcInvoice, 403, CodeSourceForbidden},
 		{"source down", func(f *fakeSources) { f.err = context.DeadlineExceeded }, "810", srcInvoice, 502, CodeSourceDown},
@@ -201,6 +203,16 @@ func TestFromSource_RefusalsAndErrors(t *testing.T) {
 		rec := fromSource(t, h, partner, c.set, c.id)
 		if rec.Code != c.status || problemCode(t, rec) != c.code {
 			t.Errorf("%s: %d %s", c.name, rec.Code, rec.Body.String())
+		}
+		if c.code == CodeSourceScope || c.code == CodeSourceNotFinal {
+			for _, kind := range f.reads {
+				if kind == "order" {
+					t.Errorf("%s: the sales order must not be read before the source document passes scope and status", c.name)
+				}
+			}
+			if c.code == CodeSourceScope && (strings.Contains(rec.Body.String(), "INV-") || strings.Contains(rec.Body.String(), "SHP-0")) {
+				t.Errorf("%s: refusal names the source document: %s", c.name, rec.Body.String())
+			}
 		}
 		var n int
 		if err := pool.QueryRow(context.Background(), `select count(*) from interchange`).Scan(&n); err != nil || n != 0 {

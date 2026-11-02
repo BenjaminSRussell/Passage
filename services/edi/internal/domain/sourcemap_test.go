@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -135,7 +136,6 @@ func TestInvoiceFromBilling_DiscountBecomesAllowanceAndChargeStaysSeparate(t *te
 func TestInvoiceFromBilling_CreditNote(t *testing.T) {
 	src := sourceInvoice()
 	src.Type = "CREDIT_NOTE"
-	src.Lines[0].OrderID, src.Lines[1].OrderID = "", ""
 	if _, err := InvoiceFromBilling(tradeProfile(), src, sourceOrder()); !errors.Is(err, ErrOutbound) {
 		t.Fatalf("credit note must be refused with ErrOutbound, got %v", err)
 	}
@@ -150,16 +150,25 @@ func TestASNFromShipment_PalletsAreWeighedOnceAndCartonsArePacks(t *testing.T) {
 		{SSCC: sscc("00345678900011"), Status: "SHIPPED", GrossKg: dec("100"), ParentContainerID: &p1, Lines: []SourceContainerLine{{ShipmentLineID: "sl-1", Qty: dec("10")}}},
 		{SSCC: sscc("00345678900012"), Status: "SHIPPED", GrossKg: dec("90"), ParentContainerID: &p1, Lines: []SourceContainerLine{{ShipmentLineID: "sl-2", Qty: dec("4")}}},
 		{SSCC: sscc("00345678900021"), Status: "SHIPPED", GrossKg: dec("80"), ParentContainerID: &p2, Lines: []SourceContainerLine{{ShipmentLineID: "sl-1", Qty: dec("5")}}},
+		{SSCC: sscc("00345678900031"), Status: "SHIPPED", GrossKg: dec("40"), Lines: []SourceContainerLine{{ShipmentLineID: "sl-1", Qty: dec("2")}}},
 	}
 	asn, err := ASNFromShipment(tradeProfile(), sh, sourceOrder())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(asn.Orders[0].Packs); got != 3 {
-		t.Fatalf("packs = %d, want the 3 cartons", got)
+	var got []string
+	for _, pk := range asn.Orders[0].Packs {
+		got = append(got, pk.SSCC)
 	}
-	if !asn.GrossWeight.Equal(dec("350")) {
-		t.Fatalf("gross = %s, want 350 (pallets only)", asn.GrossWeight)
+	want := []string{sscc("00345678900011"), sscc("00345678900012"), sscc("00345678900021"), sscc("00345678900031")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("packs = %v, want %v", got, want)
+	}
+	if !asn.GrossWeight.Equal(dec("390")) {
+		t.Fatalf("gross = %s, want 390 (two pallets and the loose carton)", asn.GrossWeight)
+	}
+	if asn.LadingQuantity != 3 {
+		t.Fatalf("lading quantity = %d, want 3 top-level units", asn.LadingQuantity)
 	}
 }
 

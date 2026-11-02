@@ -122,6 +122,9 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, err
 		}
+		if err = domain.ValidateShipmentSource(p, sh); err != nil {
+			return nil, err
+		}
 		var o domain.SourceOrder
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, sh.OrderID); err != nil {
 			return nil, err
@@ -130,6 +133,9 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 	default:
 		var inv domain.SourceInvoice
 		if inv, err = a.Sources.Invoice(ctx, p.LegalEntityID, req.SourceID); err != nil {
+			return nil, err
+		}
+		if err = domain.ValidateInvoiceSource(p, inv); err != nil {
 			return nil, err
 		}
 		var orderID string

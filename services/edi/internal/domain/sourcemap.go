@@ -167,6 +167,34 @@ func orderFor(p TradeProfile, o SourceOrder, orderID string) error {
 	return nil
 }
 
+func ValidateShipmentSource(p TradeProfile, sh SourceShipment) error {
+	if err := checkScope(p, sh.LegalEntityID, sh.CustomerID); err != nil {
+		return err
+	}
+	switch sh.Status {
+	case "SHIPPED", "DELIVERED":
+	case "PARTIALLY_SHIPPED":
+		return outboundf("shipment %s is partially shipped; one 856 is sent per shipment once it is fully shipped", sh.ShipmentNumber)
+	default:
+		return fmt.Errorf("%w: shipment %s is %s, not shipped", ErrSourceNotReady, sh.ShipmentNumber, sh.Status)
+	}
+	if sh.ActualShipDate == nil {
+		return fmt.Errorf("%w: shipment %s has no actual ship date", ErrSourceNotReady, sh.ShipmentNumber)
+	}
+	return nil
+}
+
+func ValidateInvoiceSource(p TradeProfile, inv SourceInvoice) error {
+	if err := checkScope(p, inv.LegalEntityID, inv.CustomerID); err != nil {
+		return err
+	}
+	switch inv.Status {
+	case "POSTED", "PARTIALLY_SETTLED", "SETTLED":
+		return nil
+	}
+	return fmt.Errorf("%w: invoice %s is %s, not posted", ErrSourceNotReady, inv.Number, inv.Status)
+}
+
 func InvoiceOrderID(inv SourceInvoice) (string, error) {
 	switch {
 	case len(inv.Lines) == 0:
@@ -185,21 +213,11 @@ func compactDate(t time.Time) string { return t.UTC().Format("20060102") }
 // and its sales order. Only SHIPPED containers become packs; each pack's items
 // use the sales order line number and the product id as the vendor part (VP).
 func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, error) {
-	if err := checkScope(p, sh.LegalEntityID, sh.CustomerID); err != nil {
+	if err := ValidateShipmentSource(p, sh); err != nil {
 		return ASN{}, err
 	}
 	if err := orderFor(p, o, sh.OrderID); err != nil {
 		return ASN{}, err
-	}
-	switch sh.Status {
-	case "SHIPPED", "DELIVERED":
-	case "PARTIALLY_SHIPPED":
-		return ASN{}, outboundf("shipment %s is partially shipped; one 856 is sent per shipment once it is fully shipped", sh.ShipmentNumber)
-	default:
-		return ASN{}, fmt.Errorf("%w: shipment %s is %s, not shipped", ErrSourceNotReady, sh.ShipmentNumber, sh.Status)
-	}
-	if sh.ActualShipDate == nil {
-		return ASN{}, fmt.Errorf("%w: shipment %s has no actual ship date", ErrSourceNotReady, sh.ShipmentNumber)
 	}
 	shipLines := make(map[string]SourceShipLine, len(sh.Lines))
 	for _, l := range sh.Lines {
@@ -208,12 +226,14 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 	poLines := orderLines(o)
 	var packs []ASNPack
 	gross := decimal.Zero
+	topLevel := 0
 	for _, c := range sh.Containers {
 		if c.Status != "SHIPPED" {
 			continue
 		}
 		if c.ParentContainerID == nil || *c.ParentContainerID == "" {
 			gross = gross.Add(c.GrossKg)
+			topLevel++
 		}
 		if len(c.Lines) == 0 {
 			continue
@@ -240,7 +260,7 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 	at := sh.ActualShipDate.UTC()
 	return ASN{
 		ShipmentID: sh.ShipmentNumber, ShipDate: compactDate(at), ShipTime: at.Format("1504"),
-		SCAC: scac, GrossWeight: gross, WeightUnit: "KG", ShipFrom: p.ShipFrom, ShipTo: p.ShipTo,
+		SCAC: scac, GrossWeight: gross, LadingQuantity: topLevel, WeightUnit: "KG", ShipFrom: p.ShipFrom, ShipTo: p.ShipTo,
 		Orders: []ASNOrder{{PONumber: o.ExternalRef, PODate: compactDate(o.CreatedAt), Packs: packs}},
 	}, nil
 }
@@ -250,13 +270,8 @@ func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, err
 // C310) so quantity times unit price stays the IT1 extension; header charges
 // are one SAC ZZZZ; tax is one TXI ST with the effective percent.
 func InvoiceFromBilling(p TradeProfile, inv SourceInvoice, o SourceOrder) (Invoice, error) {
-	if err := checkScope(p, inv.LegalEntityID, inv.CustomerID); err != nil {
+	if err := ValidateInvoiceSource(p, inv); err != nil {
 		return Invoice{}, err
-	}
-	switch inv.Status {
-	case "POSTED", "PARTIALLY_SETTLED", "SETTLED":
-	default:
-		return Invoice{}, fmt.Errorf("%w: invoice %s is %s, not posted", ErrSourceNotReady, inv.Number, inv.Status)
 	}
 	orderID, err := InvoiceOrderID(inv)
 	if err != nil {
