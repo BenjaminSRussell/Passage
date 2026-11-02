@@ -88,6 +88,14 @@ func TestPostgres_LedgerSettingsAreVersionedAuditedAndClearable(t *testing.T) {
 	if _, err := e.store.UpdateLedgerSettings(principalCtx(e.tenant, "00000000-0000-0000-0000-0000000000aa"), eur.ID, 0, LedgerSettings{CalendarCode: strPtr("X")}); problemCode(err) != "LEDGER_NOT_FOUND" {
 		t.Fatalf("another legal entity: %v", err)
 	}
+	other := principalCtx(e.tenant, "00000000-0000-0000-0000-0000000000aa")
+	if _, err := e.store.GetLedger(other, eur.ID); problemCode(err) != "LEDGER_NOT_FOUND" {
+		t.Fatalf("another legal entity must not read the ledger: %v", err)
+	}
+	unchanged, err := e.store.GetLedger(e.ctx, eur.ID)
+	if err != nil || unchanged.Version != 3 || unchanged.CalendarCode != nil {
+		t.Fatalf("the refused patch changed the ledger: %+v %v", unchanged, err)
+	}
 }
 
 func TestPostgres_MixedCurrencySetTranslatesOnceAndEachLedgerBalances(t *testing.T) {
