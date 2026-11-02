@@ -67,9 +67,9 @@ const params = {
 };
 
 describe("validateParameters", () => {
-  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const, creditCheckPoints: ["confirm" as const, "release" as const] };
+  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const, creditCheckPoints: ["confirm" as const, "release" as const], intakeDedupWindowDays: "30" };
   it("accepts the defaults and returns numbers", () => {
-    expect(validateParameters(ok).input).toEqual({ quotationExpiryDays: 30, quotationProbabilityDefault: 50, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["confirm", "release"] });
+    expect(validateParameters(ok).input).toEqual({ quotationExpiryDays: 30, quotationProbabilityDefault: 50, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["confirm", "release"], intakeDedupWindowDays: 30 });
   });
   it("needs the confirm check point and sends the points in service order", () => {
     expect(Object.keys(validateParameters({ ...ok, creditCheckPoints: [] }).errors)).toEqual(["creditCheckPoints"]);
@@ -77,12 +77,14 @@ describe("validateParameters", () => {
     expect(validateParameters({ ...ok, creditCheckPoints: ["release", "confirm", "entry"] }).input?.creditCheckPoints).toEqual(["entry", "confirm", "release"]);
   });
   it("accepts the PRD bounds", () => {
-    expect(validateParameters({ ...ok, quotationExpiryDays: "365", quotationProbabilityDefault: "0", creditReleaseValidityDays: "30", creditHoldSlaBusinessDays: "10" }).input).toBeDefined();
+    expect(validateParameters({ ...ok, quotationExpiryDays: "365", quotationProbabilityDefault: "0", creditReleaseValidityDays: "30", creditHoldSlaBusinessDays: "10", intakeDedupWindowDays: "90" }).input).toBeDefined();
+    expect(validateParameters({ ...ok, intakeDedupWindowDays: "1" }).input?.intakeDedupWindowDays).toBe(1);
   });
   it("refuses values outside the service's ranges", () => {
-    const { errors, input } = validateParameters({ ...ok, quotationExpiryDays: "366", quotationProbabilityDefault: "101", creditReleaseValidityDays: "31", creditHoldSlaBusinessDays: "11" });
+    const { errors, input } = validateParameters({ ...ok, quotationExpiryDays: "366", quotationProbabilityDefault: "101", creditReleaseValidityDays: "31", creditHoldSlaBusinessDays: "11", intakeDedupWindowDays: "91" });
     expect(input).toBeUndefined();
-    expect(Object.keys(errors).sort()).toEqual(["creditHoldSlaBusinessDays", "creditReleaseValidityDays", "quotationExpiryDays", "quotationProbabilityDefault"]);
+    expect(Object.keys(errors).sort()).toEqual(["creditHoldSlaBusinessDays", "creditReleaseValidityDays", "intakeDedupWindowDays", "quotationExpiryDays", "quotationProbabilityDefault"]);
+    expect(Object.keys(validateParameters({ ...ok, intakeDedupWindowDays: "0" }).errors)).toEqual(["intakeDedupWindowDays"]);
     expect(Object.keys(validateParameters({ ...ok, creditHoldSlaBusinessDays: "x", creditReleaseValidityDays: "0" }).errors).sort()).toEqual(["creditHoldSlaBusinessDays", "creditReleaseValidityDays"]);
   });
 });
@@ -108,6 +110,8 @@ describe("Sales parameters page", () => {
     expect(screen.queryByRole("option", { name: "Returned" })).not.toBeInTheDocument();
     fill(/Quotation expiry/, "45");
     fill(/Default win probability/, "35");
+    expect(screen.getByLabelText(/Order intake dedup window/)).toHaveValue("30");
+    fill(/Order intake dedup window/, "90");
     expect(screen.getByLabelText("Confirm")).toBeChecked();
     expect(screen.getByLabelText("Entry")).not.toBeChecked();
     fireEvent.click(screen.getByLabelText("Entry"));
@@ -115,7 +119,7 @@ describe("Sales parameters page", () => {
     expect(await screen.findByText("Sales parameters saved.")).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.headers.get("If-Match")).toBe('"0"');
-    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["entry", "confirm", "release"] });
+    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["entry", "confirm", "release"], intakeDedupWindowDays: 90 });
   });
 
   it("shows the values without a save action to a caller lacking the maintain duty", async () => {

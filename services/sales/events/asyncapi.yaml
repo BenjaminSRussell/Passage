@@ -612,7 +612,7 @@ components:
         version: {type: integer, description: version after the change}
     ParametersChangedData:
       type: object
-      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, actor, version]
+      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, intake_dedup_window_days, actor, version]
       properties:
         legal_entity_id: {type: string, format: uuid}
         quotation_expiry_days: {type: integer, minimum: 1, maximum: 365}
@@ -623,6 +623,7 @@ components:
         one_time_order_limit: {type: string, description: the one-time order limit as a decimal string; absent when the defaults apply}
         one_time_order_limit_currency: {type: string, pattern: "^[A-Z]{3}$"}
         credit_check_points: {type: array, minItems: 1, items: {type: string, enum: [entry, confirm, release, packing_slip, invoice]}, description: "where the credit rules run for the legal entity; always includes confirm. packing_slip and invoice are PRD values sales refuses until the fulfillment and billing waves run them, listed so consumers accept them then"}
+        intake_dedup_window_days: {type: integer, minimum: 1, maximum: 90, description: how many days a (channel, externalRef) pair identifies one order of the legal entity}
         actor: {type: string}
         version: {type: integer, description: version after the change}
     AllocationQuotaData:

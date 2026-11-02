@@ -559,8 +559,9 @@ export function releaseHold(orderId: string, holdId: string, etag: string): Prom
   });
 }
 
-export async function listCreditProfiles(legalEntityId = "", signal?: AbortSignal): Promise<CreditProfile[]> {
-  const body = await json<{ items?: CreditProfile[] }>(`/credit-profiles${query({ legalEntityId, limit: 200 })}`, {}, signal);
+/** reviewDueBy (YYYY-MM-DD) lists only profiles whose review date is on or before it, oldest first. */
+export async function listCreditProfiles(legalEntityId = "", signal?: AbortSignal, reviewDueBy = ""): Promise<CreditProfile[]> {
+  const body = await json<{ items?: CreditProfile[] }>(`/credit-profiles${query({ legalEntityId, reviewDueBy, limit: 200 })}`, {}, signal);
   return body.items ?? [];
 }
 
@@ -589,6 +590,8 @@ export interface SalesParametersInput {
   oneTimeOrderLimitCurrency?: string;
   /** Where the credit rules run; the service defaults to confirm and release when absent. */
   creditCheckPoints?: CreditCheckPoint[];
+  /** Days a (channel, externalRef) pair identifies one order, 1 to 90; the service defaults to 30 when absent. */
+  intakeDedupWindowDays?: number;
 }
 
 /** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */

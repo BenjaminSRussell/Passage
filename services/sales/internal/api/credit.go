@@ -179,7 +179,17 @@ func (a *API) listCreditProfiles(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"limit": fmt.Sprintf("must be 1 to %d", maxPageSize)})
 		return
 	}
-	profiles, err := a.store.ListCreditProfiles(r.Context(), legalEntity, limit)
+	var profiles []store.CreditProfile
+	var err error
+	if due := r.URL.Query().Get("reviewDueBy"); due != "" {
+		if _, perr := time.Parse("2006-01-02", due); perr != nil {
+			validationFailed(w, r, map[string]string{"reviewDueBy": "must be a date such as 2027-03-04"})
+			return
+		}
+		profiles, err = a.store.ListCreditProfilesReviewDue(r.Context(), legalEntity, due, limit)
+	} else {
+		profiles, err = a.store.ListCreditProfiles(r.Context(), legalEntity, limit)
+	}
 	if err != nil {
 		a.fail(w, r, "list credit profiles", err)
 		return

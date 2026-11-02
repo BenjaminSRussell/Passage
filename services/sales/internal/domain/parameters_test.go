@@ -31,6 +31,8 @@ func TestParametersValidate(t *testing.T) {
 		{"no blocking check point", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointEntry, CheckPointRelease} }, "creditCheckPoints"},
 		{"packing slip not active", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointConfirm, CheckPointPackingSlip} }, "creditCheckPoints"},
 		{"invoice not active", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointConfirm, CheckPointInvoice} }, "creditCheckPoints"},
+		{"dedup window zero", func(p *Parameters) { p.IntakeDedupWindowDays = 0 }, "intakeDedupWindowDays"},
+		{"dedup window over 90 days", func(p *Parameters) { p.IntakeDedupWindowDays = 91 }, "intakeDedupWindowDays"},
 		{"returned is not an allowed default", func(p *Parameters) { p.DefaultOrderType = "RETURNED" }, "defaultOrderType"},
 	}
 	for _, tc := range tests {
@@ -47,12 +49,12 @@ func TestParametersValidate(t *testing.T) {
 func TestParametersValidate_AcceptsBounds(t *testing.T) {
 	p := Parameters{QuotationExpiryDays: 365, QuotationProbabilityDefault: 0, CreditReleaseValidityDays: 30,
 		CreditHoldSLABusinessDays: 10, DefaultOrderType: OrderTypeJournal,
-		CreditCheckPoints: []string{CheckPointEntry, CheckPointConfirm, CheckPointRelease}}
+		CreditCheckPoints: []string{CheckPointEntry, CheckPointConfirm, CheckPointRelease}, IntakeDedupWindowDays: 90}
 	if f := p.Validate(); len(f) != 0 {
 		t.Fatalf("upper bounds must validate: %v", f)
 	}
 	p = Parameters{QuotationExpiryDays: 1, QuotationProbabilityDefault: 100, CreditReleaseValidityDays: 1,
-		CreditHoldSLABusinessDays: 1, DefaultOrderType: "SUBSCRIPTION", CreditCheckPoints: []string{CheckPointConfirm}}
+		CreditHoldSLABusinessDays: 1, DefaultOrderType: "SUBSCRIPTION", CreditCheckPoints: []string{CheckPointConfirm}, IntakeDedupWindowDays: 1}
 	if f := p.Validate(); len(f) != 0 {
 		t.Fatalf("lower bounds must validate: %v", f)
 	}

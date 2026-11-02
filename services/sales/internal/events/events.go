@@ -351,6 +351,7 @@ type ParametersChangedData struct {
 	OneTimeOrderLimit         *string  `json:"one_time_order_limit,omitempty"`
 	OneTimeOrderLimitCurrency *string  `json:"one_time_order_limit_currency,omitempty"`
 	CreditCheckPoints         []string `json:"credit_check_points"`
+	IntakeDedupWindowDays     int      `json:"intake_dedup_window_days"`
 	Actor                     string   `json:"actor"`
 	Version                   int      `json:"version"`
 }

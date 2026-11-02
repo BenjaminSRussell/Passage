@@ -288,6 +288,21 @@ describe("Credit profiles", () => {
     expect(await screen.findByRole("heading", { name: "Credit profile" })).toBeInTheDocument();
   });
 
+  it("lists the reviews due by a day and explains when none are", async () => {
+    handler = (url) => ({ status: 200, body: { items: url.searchParams.get("reviewDueBy") === "2027-04-30" ? [profile] : [] } });
+    renderAt("/sales/credit-profiles");
+    await findTable({ name: "Credit profiles" });
+    expect(calls[0].url.searchParams.has("reviewDueBy")).toBe(false);
+    fireEvent.change(screen.getByLabelText(/Review due by/), { target: { value: "2027-04-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("reviewDueBy") === "2027-04-30")).toBe(true));
+    const table = await findTable({ name: "Credit profiles" });
+    expect(within(table).getByText("10000 USD")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Review due by/), { target: { value: "2027-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    expect(await screen.findByRole("heading", { name: "No credit reviews due" })).toBeInTheDocument();
+  });
+
   it("explains an empty list and shows errors", async () => {
     handler = () => ({ status: 200, body: { items: [] } });
     const { unmount } = renderAt("/sales/credit-profiles");

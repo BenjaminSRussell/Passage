@@ -83,7 +83,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Order"}
         "200":
-          description: idempotent replay or (channel, externalRef) duplicate with the same body; returns the original order
+          description: idempotent replay or (channel, externalRef) duplicate for the same legal entity with the same body inside its intake_dedup_window_days; returns the original order
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
           content:
@@ -987,10 +987,11 @@ paths:
       x-passage-duty: sales.order.read
       parameters:
         - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: reviewDueBy, in: query, description: "only profiles whose reviewDate is on or before this day (YYYY-MM-DD), oldest review date first: the credit review list ahead of the CR-4 review-date rule", schema: {type: string, format: date}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
         "200":
-          description: profiles ordered by legal entity and customer
+          description: profiles ordered by legal entity and customer, or by review date with reviewDueBy
           content:
             application/json:
               schema:
@@ -2702,6 +2703,7 @@ components:
           uniqueItems: true
           items: {type: string, enum: [entry, confirm, release]}
           description: "where the credit rules run (credit_check_points, FR-27.7); optional, default confirm and release. entry checks a new order (also a converted quotation or an agreement release) and records the result without a hold, confirm places the CREDIT hold, release records the position when a CREDIT hold is released. confirm is required, as the only point that holds an order; a set without it is refused with 400 (switch credit control off for a customer with limitType NONE). The PRD values packing_slip and invoice are refused with 400 as not active yet: their checks come with the fulfillment and billing waves"
+        intakeDedupWindowDays: {type: integer, minimum: 1, maximum: 90, default: 30, description: "how many days a (channel, externalRef) pair identifies one order of the legal entity (intake_dedup_window_days, BR-27.10); optional, default 30. A repeat of the pair for the same legal entity whose order is younger than the window returns the stored order, or 409 SLS-0007 when the body differs; once the order is that many days old the same reference opens a new order. An Idempotency-Key never expires"}
     SalesParameters:
       allOf:
         - $ref: "#/components/schemas/SalesParametersRequest"

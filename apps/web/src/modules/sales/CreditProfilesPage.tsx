@@ -16,13 +16,18 @@ const columns: DataTableColumn<CreditProfile>[] = [
   { key: "reviewDate", header: "Review date", mono: true, render: (row) => row.reviewDate ?? dash },
 ];
 
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /** Credit profiles per customer and legal entity (PRD §5.27.14 "Credit exposure by customer"). */
 export function CreditProfilesPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   const [legalEntityId, setLegalEntityId] = useState("");
+  const [dueDraft, setDueDraft] = useState("");
+  const [reviewDueBy, setReviewDueBy] = useState("");
   const invalid = draft.trim() !== "" && !UUID.test(draft.trim());
-  const state = useLoad((signal) => listCreditProfiles(legalEntityId, signal), legalEntityId);
+  const dueInvalid = dueDraft !== "" && !DAY.test(dueDraft);
+  const state = useLoad((signal) => listCreditProfiles(legalEntityId, signal, reviewDueBy), `${legalEntityId}|${reviewDueBy}`);
 
   return (
     <div className={styles.stack}>
@@ -39,11 +44,16 @@ export function CreditProfilesPage() {
         className={styles.toolbar}
         onSubmit={(e) => {
           e.preventDefault();
-          if (!invalid) setLegalEntityId(draft.trim());
+          if (invalid || dueInvalid) return;
+          setLegalEntityId(draft.trim());
+          setReviewDueBy(dueDraft);
         }}
       >
         <FormField id="profiles-le" label="Legal entity" hint="Leave empty for every legal entity you can see." error={invalid ? "Enter a legal entity UUID." : undefined} optional>
           {(control) => <Input {...control} className={styles.mono} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={invalid} />}
+        </FormField>
+        <FormField id="profiles-due" label="Review due by" hint="Only profiles whose review date is on or before this day, oldest first. Past it, the check holds orders (CR-4)." error={dueInvalid ? "Enter a date." : undefined} optional>
+          {(control) => <Input {...control} type="date" value={dueDraft} onChange={(e) => setDueDraft(e.target.value)} invalid={dueInvalid} />}
         </FormField>
         <Button type="submit">Filter</Button>
       </form>
@@ -58,7 +68,11 @@ export function CreditProfilesPage() {
           rows={state.data ?? []}
           getRowKey={(row) => `${row.legalEntityId}/${row.customerId}`}
           loading={state.loading}
-          empty={{ title: "No credit profiles yet", description: "Without a profile, orders confirm without a credit limit unless the check is mandatory." }}
+          empty={
+            reviewDueBy
+              ? { title: "No credit reviews due", description: `No profile has a review date on or before ${reviewDueBy}.` }
+              : { title: "No credit profiles yet", description: "Without a profile, orders confirm without a credit limit unless the check is mandatory." }
+          }
           onRowOpen={(row) => navigate(`/sales/credit-profiles/${row.legalEntityId}/${row.customerId}`)}
         />
       )}

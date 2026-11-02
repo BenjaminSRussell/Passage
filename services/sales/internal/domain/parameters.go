@@ -23,6 +23,10 @@ type Parameters struct {
 	// are refused until the fulfillment and billing waves run them.
 	CreditCheckPoints []string `json:"creditCheckPoints"`
 
+	// IntakeDedupWindowDays is intake_dedup_window_days (BR-27.10): how long a
+	// (channel, externalRef) pair identifies one order.
+	IntakeDedupWindowDays int `json:"intakeDedupWindowDays"`
+
 	// OneTimeOrderLimit and its currency are one_time_order_limit (FR-27.22);
 	// both are set or both are absent, and absent means the currency defaults.
 	OneTimeOrderLimit         *decimal.Decimal `json:"oneTimeOrderLimit,omitempty"`
@@ -37,13 +41,18 @@ const (
 	DefaultCreditHoldSLABusinessDays = 2
 	// MaxCreditHoldSLABusinessDays bounds credit_hold_sla_business_days.
 	MaxCreditHoldSLABusinessDays = 10
+	// DefaultIntakeDedupWindowDays is intake_dedup_window_days when none is saved.
+	DefaultIntakeDedupWindowDays = 30
+	// MaxIntakeDedupWindowDays bounds intake_dedup_window_days (1 to 90, PRD 5.27.13).
+	MaxIntakeDedupWindowDays = 90
 )
 
 // DefaultParameters returns the settings used when none are stored.
 func DefaultParameters() Parameters {
 	return Parameters{QuotationExpiryDays: QuotationExpiryDays, QuotationProbabilityDefault: DefaultProbabilityPct,
 		CreditReleaseValidityDays: CreditReleaseDays, CreditHoldSLABusinessDays: DefaultCreditHoldSLABusinessDays,
-		DefaultOrderType: "ORDER", CreditCheckPoints: []string{CheckPointConfirm, CheckPointRelease}}
+		DefaultOrderType: "ORDER", CreditCheckPoints: []string{CheckPointConfirm, CheckPointRelease},
+		IntakeDedupWindowDays: DefaultIntakeDedupWindowDays}
 }
 
 // The credit_check_points values.
@@ -102,6 +111,9 @@ func (p Parameters) Validate() map[string]string {
 	}
 	if !parameterOrderTypes[p.DefaultOrderType] {
 		f["defaultOrderType"] = "must be JOURNAL, ORDER or SUBSCRIPTION"
+	}
+	if p.IntakeDedupWindowDays < 1 || p.IntakeDedupWindowDays > MaxIntakeDedupWindowDays {
+		f["intakeDedupWindowDays"] = fmt.Sprintf("must be 1 to %d", MaxIntakeDedupWindowDays)
 	}
 	if msg := validateCheckPoints(p.CreditCheckPoints); msg != "" {
 		f["creditCheckPoints"] = msg

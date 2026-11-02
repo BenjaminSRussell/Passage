@@ -246,6 +246,7 @@ type Store interface {
 	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
+	ListCreditProfilesReviewDue(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error)
 	PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error)
 	ApplyHold(ctx context.Context, orderID string, version int, in HoldRequest, actor string) (Order, error)
 	CreateListing(ctx context.Context, in ProductListing) (ProductListing, error)
@@ -345,7 +346,11 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 	var out Order
 	created := false
 	err := s.orderTx(ctx, p.TenantID, &out, func(tx pgx.Tx) error {
-		existing, found, err := findIntake(ctx, tx, p.TenantID, in)
+		params, err := loadParameters(ctx, tx, p.TenantID, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		existing, found, err := findIntake(ctx, tx, p.TenantID, in, params.IntakeDedupWindowDays)
 		if err != nil {
 			return err
 		}
@@ -355,10 +360,6 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			return nil
 		}
 		if in.OrderType == "" {
-			params, err := loadParameters(ctx, tx, p.TenantID, in.LegalEntityID)
-			if err != nil {
-				return err
-			}
 			in.OrderType = params.DefaultOrderType
 		}
 		out, err = createOrderTx(ctx, tx, p.TenantID, in)
@@ -474,14 +475,32 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	return o, err
 }
 
-func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (Order, bool, error) {
+// findIntake finds the order a repeated intake refers to: the same
+// Idempotency-Key (never expires), or the same (channel, externalRef) of the
+// same legal entity created less than the legal entity's
+// intake_dedup_window_days ago (BR-27.10). The reference is matched within the
+// legal entity, not across the tenant, so the result does not depend on which
+// legal entities row-level security lets the caller see. Intakes of one
+// reference are serialised by an advisory lock held to the end of the
+// transaction (read committed, so the lookup after the lock sees an order the
+// previous holder committed), so two concurrent first intakes cannot both
+// create an order; after the window the reference opens a new order.
+func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder, windowDays int) (Order, bool, error) {
 	var id, hash string
 	var byKey bool
+	if in.ExternalRef != nil {
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('sales.intake:' || $1 || ':' || $2 || ':' || $3 || ':' || $4, 0))`,
+			tenantID, in.LegalEntityID, in.Channel, *in.ExternalRef); err != nil {
+			return Order{}, false, err
+		}
+	}
 	err := tx.QueryRow(ctx, `select id::text, request_hash, coalesce(idempotency_key = $2::text, false)
 		from sales_order
 		where tenant_id = $1 and (($2::text is not null and idempotency_key = $2::text)
-			or ($3::text is not null and channel = $4 and external_ref = $3::text))
-		limit 1`, tenantID, in.IdempotencyKey, in.ExternalRef, in.Channel).Scan(&id, &hash, &byKey)
+			or ($3::text is not null and legal_entity_id = $6::uuid and channel = $4 and external_ref = $3::text
+				and created_at > now() - make_interval(days => $5::int)))
+		order by (idempotency_key = $2::text) desc nulls last, created_at desc
+		limit 1`, tenantID, in.IdempotencyKey, in.ExternalRef, in.Channel, windowDays, in.LegalEntityID).Scan(&id, &hash, &byKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, false, nil
 	}
@@ -1133,12 +1152,28 @@ func (s *Postgres) ListOrders(ctx context.Context, f OrderFilter) (OrderPage, er
 // ListCreditProfiles returns the credit profiles of one legal entity, or of
 // every legal entity in the caller's scope when legalEntityID is empty.
 func (s *Postgres) ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error) {
+	return s.listProfiles(ctx, legalEntityID, "", limit)
+}
+
+// ListCreditProfilesReviewDue returns the profiles whose review date is on or
+// before dueBy (a YYYY-MM-DD day), oldest review date first: the list a credit
+// manager works from before the CR-4 review-date rule holds orders (PRD 5.27.6).
+func (s *Postgres) ListCreditProfilesReviewDue(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error) {
+	return s.listProfiles(ctx, legalEntityID, dueBy, limit)
+}
+
+func (s *Postgres) listProfiles(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error) {
 	p, _ := tenant.FromContext(ctx)
+	var due *string // null lists every profile; a day lists the reviews due by it
+	if dueBy != "" {
+		due = &dueBy
+	}
 	out := []CreditProfile{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+profileColumns+` from credit_profile
 			where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2)
-			order by legal_entity_id, customer_id limit $3`, p.TenantID, legalEntityID, limit)
+				and ($4::date is null or review_date <= $4::date)
+			order by case when $4::date is null then null else review_date end, legal_entity_id, customer_id limit $3`, p.TenantID, legalEntityID, limit, due)
 		if err != nil {
 			return err
 		}

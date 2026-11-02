@@ -33,10 +33,10 @@ func loadParameters(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID stri
 	var updatedAt time.Time
 	var oneTimeLimit *string
 	err := tx.QueryRow(ctx, `select quotation_expiry_days, quotation_probability_default, credit_release_validity_days,
-			credit_hold_sla_business_days, default_order_type, one_time_order_limit::text, one_time_order_limit_currency, credit_check_points, version, updated_by, updated_at
+			credit_hold_sla_business_days, default_order_type, one_time_order_limit::text, one_time_order_limit_currency, credit_check_points, intake_dedup_window_days, version, updated_by, updated_at
 		from sales_parameter where tenant_id = $1 and legal_entity_id = $2`, tenantID, legalEntityID).
 		Scan(&out.QuotationExpiryDays, &out.QuotationProbabilityDefault, &out.CreditReleaseValidityDays,
-			&out.CreditHoldSLABusinessDays, &out.DefaultOrderType, &oneTimeLimit, &out.OneTimeOrderLimitCurrency, &out.CreditCheckPoints, &out.Version, &out.UpdatedBy, &updatedAt)
+			&out.CreditHoldSLABusinessDays, &out.DefaultOrderType, &oneTimeLimit, &out.OneTimeOrderLimitCurrency, &out.CreditCheckPoints, &out.IntakeDedupWindowDays, &out.Version, &out.UpdatedBy, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -99,6 +99,9 @@ func (s *Postgres) PutParameters(ctx context.Context, in SalesParameters, versio
 	if len(in.CreditCheckPoints) == 0 {
 		in.CreditCheckPoints = domain.DefaultParameters().CreditCheckPoints
 	}
+	if in.IntakeDedupWindowDays == 0 {
+		in.IntakeDedupWindowDays = domain.DefaultIntakeDedupWindowDays
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var stored int
 		var err error
@@ -109,18 +112,18 @@ func (s *Postgres) PutParameters(ctx context.Context, in SalesParameters, versio
 		}
 		if version == 0 {
 			err = tx.QueryRow(ctx, `insert into sales_parameter (tenant_id, legal_entity_id, quotation_expiry_days, quotation_probability_default,
-					credit_release_validity_days, credit_hold_sla_business_days, default_order_type, one_time_order_limit, one_time_order_limit_currency, credit_check_points, updated_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11) on conflict do nothing returning version`,
+					credit_release_validity_days, credit_hold_sla_business_days, default_order_type, one_time_order_limit, one_time_order_limit_currency, credit_check_points, intake_dedup_window_days, updated_by)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12) on conflict do nothing returning version`,
 				p.TenantID, in.LegalEntityID, in.QuotationExpiryDays, in.QuotationProbabilityDefault, in.CreditReleaseValidityDays,
-				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, in.CreditCheckPoints, actor).Scan(&stored)
+				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, in.CreditCheckPoints, in.IntakeDedupWindowDays, actor).Scan(&stored)
 		} else {
 			err = tx.QueryRow(ctx, `update sales_parameter set quotation_expiry_days = $3, quotation_probability_default = $4,
 					credit_release_validity_days = $5, credit_hold_sla_business_days = $6, default_order_type = $7,
-					one_time_order_limit = $8::numeric, one_time_order_limit_currency = $9, credit_check_points = $10, updated_by = $11,
+					one_time_order_limit = $8::numeric, one_time_order_limit_currency = $9, credit_check_points = $10, intake_dedup_window_days = $11, updated_by = $12,
 					version = version + 1, updated_at = now()
-				where tenant_id = $1 and legal_entity_id = $2 and version = $12 returning version`,
+				where tenant_id = $1 and legal_entity_id = $2 and version = $13 returning version`,
 				p.TenantID, in.LegalEntityID, in.QuotationExpiryDays, in.QuotationProbabilityDefault, in.CreditReleaseValidityDays,
-				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, in.CreditCheckPoints, actor, version).Scan(&stored)
+				in.CreditHoldSLABusinessDays, in.DefaultOrderType, limit, in.OneTimeOrderLimitCurrency, in.CreditCheckPoints, in.IntakeDedupWindowDays, actor, version).Scan(&stored)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return versionConflict()
@@ -136,7 +139,7 @@ func (s *Postgres) PutParameters(ctx context.Context, in SalesParameters, versio
 			LegalEntityID: in.LegalEntityID, QuotationExpiryDays: out.QuotationExpiryDays, QuotationProbabilityDefault: out.QuotationProbabilityDefault,
 			CreditReleaseValidityDays: out.CreditReleaseValidityDays, CreditHoldSLABusinessDays: out.CreditHoldSLABusinessDays,
 			DefaultOrderType: out.DefaultOrderType, OneTimeOrderLimit: limit, OneTimeOrderLimitCurrency: out.OneTimeOrderLimitCurrency,
-			CreditCheckPoints: out.CreditCheckPoints, Actor: actor, Version: out.Version})
+			CreditCheckPoints: out.CreditCheckPoints, IntakeDedupWindowDays: out.IntakeDedupWindowDays, Actor: actor, Version: out.Version})
 	})
 	return out, err
 }
