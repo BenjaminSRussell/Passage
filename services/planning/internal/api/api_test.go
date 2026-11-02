@@ -32,6 +32,7 @@ type fakeStore struct {
 	pingErr    error
 	lastWindow int
 	orderID    string
+	asOf       string // as-of date of the plan the projection reads; empty is 2026-11-02
 
 	// One planned order for the maintenance tests; version 0 reads as 1.
 	orderVersion int

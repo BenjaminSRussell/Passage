@@ -3,7 +3,9 @@
 Models:
 - ``ets``: the exponential smoothing family selected by AICc (``ets_fit``):
   A,N (simple smoothing), A,A,N (additive trend) and A,A,A (additive trend and
-  additive season of length ``season``, needs two full seasons plus one period).
+  additive season of length ``season``, needs two full seasons plus one period),
+  and the damped-trend forms A,Ad,N and A,Ad,A, which flatten the trend by a
+  factor phi per period so a long horizon does not extrapolate it without end.
   All candidates are scored on the same residuals, so their AICc compare.
 - ``croston``: Croston's method for intermittent demand.
 - ``tsb``: Teunter-Syntetos-Babai, intermittent demand with decaying demand probability.
@@ -26,6 +28,9 @@ MIN_HISTORY = 24
 DEFAULT_SEASON = 12  # monthly buckets
 ALPHA_GRID = tuple(round(0.05 * k, 2) for k in range(1, 21))  # 0.05 .. 1.00
 SMOOTHING_GRID = (0.1, 0.3, 0.6)  # coarse grid for the trend and season models
+PHI_GRID = (0.8, 0.9, 0.98)  # damping factors of the damped-trend candidates
+SEASON_CANDIDATES = (3, 4, 6, 12)  # quarterly, four-monthly, half-yearly and yearly cycles of monthly buckets
+SEASON_MIN_ACF = 0.4  # autocorrelation a cycle length needs to count as seasonal
 
 
 @dataclass(frozen=True)
@@ -116,18 +121,22 @@ def _aicc(sse: float, n: int, k: int) -> float:
 
 @dataclass(frozen=True)
 class _EtsFit:
-    variant: str  # "A,N", "A,A,N" or "A,A,A"
+    variant: str  # "A,N", "A,A,N", "A,Ad,N", "A,A,A" or "A,Ad,A"
     aicc: float
     level: float
     trend: float
     season: tuple[float, ...]  # seasonal states by period index mod m; (0.0,) without season
     m: int
+    phi: float = 1.0  # damping factor of the trend; 1.0 is undamped
 
     def path(self, n: int, horizon: int) -> tuple[float, ...]:
         """Forecast of periods n .. n+horizon-1 after n observations."""
-        return tuple(
-            self.level + h * self.trend + self.season[(n + h - 1) % self.m] for h in range(1, horizon + 1)
-        )
+        out = []
+        for h in range(1, horizon + 1):
+            # The trend of h steps ahead is phi + phi^2 + ... + phi^h times the trend state.
+            steps = float(h) if self.phi == 1.0 else self.phi * (1 - self.phi**h) / (1 - self.phi)
+            out.append(self.level + steps * self.trend + self.season[(n + h - 1) % self.m])
+        return tuple(out)
 
 
 def _ses_candidate(y: Sequence[float], score_from: int) -> _EtsFit:
@@ -148,52 +157,93 @@ def _ses_candidate(y: Sequence[float], score_from: int) -> _EtsFit:
     return best
 
 
-def _holt_run(y: Sequence[float], m: int, alpha: float, beta: float, gamma: float, score_from: int):
-    """Additive trend (m == 1) or trend and season (m > 1). Returns (sse, level, trend, season)."""
+def _holt_run(y: Sequence[float], m: int, alpha: float, beta: float, gamma: float, score_from: int, phi: float = 1.0):
+    """Additive trend (m == 1) or trend and season (m > 1), damped by phi. Returns (sse, level, trend, season)."""
     if m > 1:
         level = sum(y[:m]) / m
         trend = (sum(y[m : 2 * m]) - sum(y[:m])) / (m * m)
         season = [y[i] - level for i in range(m)]
         start = m
     else:
-        level = float(y[0])
+        # State after the first two observations: level at y[1], trend y[1] - y[0];
+        # the recursion then forecasts y[2] as level + phi * trend.
+        level = float(y[1])
         trend = float(y[1] - y[0])
         season = [0.0]
         start = 2
     sse = 0.0
     for t in range(start, len(y)):
         s_prev = season[t % m]
-        err = y[t] - (level + trend + s_prev)
+        err = y[t] - (level + phi * trend + s_prev)
         if t >= score_from:
             sse += err * err
-        new_level = alpha * (y[t] - s_prev) + (1 - alpha) * (level + trend)
-        trend = beta * (new_level - level) + (1 - beta) * trend
+        new_level = alpha * (y[t] - s_prev) + (1 - alpha) * (level + phi * trend)
+        trend = beta * (new_level - level) + (1 - beta) * phi * trend
         if m > 1:
             season[t % m] = gamma * (y[t] - new_level) + (1 - gamma) * s_prev
         level = new_level
     return sse, level, trend, tuple(season)
 
 
-def _holt_candidate(y: Sequence[float], m: int, score_from: int) -> _EtsFit:
-    """A,A,N (m == 1) or A,A,A (m > 1): best smoothing parameters on the grid."""
+def _holt_candidate(y: Sequence[float], m: int, score_from: int, phis: Sequence[float] = (1.0,)) -> _EtsFit:
+    """A,A,N / A,A,A (phis == (1.0,)) or the damped A,Ad,N / A,Ad,A (phis == PHI_GRID):
+    best smoothing parameters on the grid. A damped candidate pays one more
+    parameter (phi) in its AICc."""
+    damped = tuple(phis) != (1.0,)
     gammas = SMOOTHING_GRID if m > 1 else (0.0,)
-    k = 4 if m == 1 else 5 + m  # smoothing parameters plus initial level, trend and season states
+    k = (4 if m == 1 else 5 + m) + (1 if damped else 0)  # smoothing parameters plus initial states (and phi)
+    name = ("A,Ad," if damped else "A,A,") + ("A" if m > 1 else "N")
     best: _EtsFit | None = None
     for alpha in SMOOTHING_GRID:
         for beta in SMOOTHING_GRID:
             for gamma in gammas:
-                sse, level, trend, season = _holt_run(y, m, alpha, beta, gamma, score_from)
-                aicc = _aicc(sse, len(y) - score_from, k)
-                if best is None or aicc < best.aicc:
-                    best = _EtsFit("A,A,A" if m > 1 else "A,A,N", aicc, level, trend, season, m)
+                for phi in phis:
+                    sse, level, trend, season = _holt_run(y, m, alpha, beta, gamma, score_from, phi)
+                    aicc = _aicc(sse, len(y) - score_from, k)
+                    if best is None or aicc < best.aicc:
+                        best = _EtsFit(name, aicc, level, trend, season, m, phi)
     assert best is not None
     return best
 
 
-def ets_fit(y: Sequence[float], season: int = DEFAULT_SEASON) -> _EtsFit:
-    """ETS selection by AICc among A,N, A,A,N and A,A,A (FR-22.9).
+def detect_season(y: Sequence[float], candidates: Sequence[int] = SEASON_CANDIDATES) -> int:
+    """Season length of a history by autocorrelation (FR-22.9), 1 when none.
 
-    A,A,N needs 4 observations and A,A,A ``2 * season + 1``. Every eligible
+    The linear trend is removed first, so a growing series is not read as
+    seasonal. A cycle length m counts when the history holds two full cycles
+    plus one period (the minimum the seasonal ETS needs) and its lag-m
+    autocorrelation reaches ``SEASON_MIN_ACF``; among the lengths within 10%
+    of the strongest the shortest wins, since a cycle of 4 also repeats at 12.
+    """
+    n = len(y)
+    if n < 3:
+        return 1
+    t_mean = (n - 1) / 2
+    y_mean = sum(y) / n
+    denom_t = sum((t - t_mean) ** 2 for t in range(n))
+    slope = sum((t - t_mean) * (v - y_mean) for t, v in enumerate(y)) / denom_t
+    resid = [v - (y_mean + slope * (t - t_mean)) for t, v in enumerate(y)]
+    var = sum(r * r for r in resid)
+    if var <= 1e-12:
+        return 1
+    acf = {}
+    for m in candidates:
+        if m > 1 and n >= 2 * m + 1:
+            acf[m] = sum(resid[t] * resid[t - m] for t in range(m, n)) / var
+    if not acf:
+        return 1
+    top = max(acf.values())
+    if top < SEASON_MIN_ACF:
+        return 1
+    return min(m for m, a in acf.items() if a >= 0.9 * top)
+
+
+def ets_fit(y: Sequence[float], season: int = DEFAULT_SEASON) -> _EtsFit:
+    """ETS selection by AICc among A,N, A,A,N, A,Ad,N, A,A,A and A,Ad,A (FR-22.9).
+
+    A,A,N needs 4 observations and A,A,A ``2 * season + 1``; each has a damped
+    form (A,Ad,N, A,Ad,A) that wins only when its AICc is lower despite the
+    extra parameter, so the undamped form keeps ties. Every eligible
     candidate is scored on the residuals after the longest warm-up among them,
     so the AICc values compare. Ties go to the simpler model, considered first.
     """
@@ -204,8 +254,11 @@ def ets_fit(y: Sequence[float], season: int = DEFAULT_SEASON) -> _EtsFit:
     score_from = season if seasonal else (2 if n >= 4 else 1)
     best = _ses_candidate(y, score_from)
     if n >= 4:
-        for fit_ in (_holt_candidate(y, 1, score_from), _holt_candidate(y, season, score_from) if seasonal else None):
-            if fit_ is not None and fit_.aicc < best.aicc:
+        candidates = [_holt_candidate(y, 1, score_from), _holt_candidate(y, 1, score_from, PHI_GRID)]
+        if seasonal:
+            candidates += [_holt_candidate(y, season, score_from), _holt_candidate(y, season, score_from, PHI_GRID)]
+        for fit_ in candidates:
+            if fit_.aicc < best.aicc:
                 best = fit_
     return best
 

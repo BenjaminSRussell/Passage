@@ -123,6 +123,10 @@ func (f *fakeStore) ReadProjectionSource(_ context.Context, code string, itemIDs
 		return store.ProjectionSource{}, httpx.NewProblem(http.StatusNotFound, store.CodeVersionNotFound, "no current version")
 	}
 	src := store.ProjectionSource{Version: 3, AsOf: "2026-11-02", SiteID: siteID, Rows: map[string][]store.NetRequirement{}}
+	if f.asOf != "" {
+		src.AsOf = f.asOf
+		return src, nil
+	}
 	for _, id := range itemIDs {
 		if id == fgID {
 			src.Rows[id] = []store.NetRequirement{
@@ -211,6 +215,37 @@ func TestPlanProjection_MonthBucketsFollowTheCalendar(t *testing.T) {
 	want := "2026-11-02..2026-11-30 2026-12-01..2026-12-31 2027-01-01..2027-01-24"
 	if strings.Join(got, " ") != want || out.Items[0].Periods[0].Planned != "110" {
 		t.Fatalf("months %v, want %s; body %s", got, want, rec.Body.String())
+	}
+}
+
+// TestPlanProjection_WeekBucketsAreISOWeeks: weeks run Monday to Sunday. From
+// as-of Sunday 27 December 2026 the first bucket is that one day, then ISO week
+// 53 of 2026 (28 December to 3 January 2027) across the year end, then week 1
+// of 2027 cut at the horizon.
+func TestPlanProjection_WeekBucketsAreISOWeeks(t *testing.T) {
+	st := &fakeStore{asOf: "2026-12-27"}
+	rec := do(t, st, http.MethodGet, "/v1/planning/plans/MAIN/projection?bucket=week&horizonDays=12&itemId="+fgID, "", "planning.read", true, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Items []struct {
+			Periods []struct {
+				StartDate string `json:"startDate"`
+				EndDate   string `json:"endDate"`
+			} `json:"periods"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, p := range out.Items[0].Periods {
+		got = append(got, p.StartDate+".."+p.EndDate)
+	}
+	want := "2026-12-27..2026-12-27 2026-12-28..2027-01-03 2027-01-04..2027-01-07"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("weeks %v, want %s", got, want)
 	}
 }
 

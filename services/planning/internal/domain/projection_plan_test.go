@@ -146,3 +146,52 @@ func TestCalendarMonthEnds(t *testing.T) {
 		t.Fatalf("repeated end: %v", err)
 	}
 }
+
+// TestCalendarWeekEnds: week buckets of a dated plan are ISO weeks ending on
+// Sunday; the first runs from the as-of date to the Sunday of its week.
+func TestCalendarWeekEnds(t *testing.T) {
+	cases := []struct {
+		name    string
+		asOf    time.Time
+		horizon int
+		want    []int
+	}{
+		{"monday", time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), 21, []int{6, 13, 20}},
+		{"wednesday", time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC), 21, []int{4, 11, 18, 25}},
+		{"sunday", time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC), 10, []int{0, 7, 14}},
+		{"saturday", time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC), 1, []int{1}},
+		// ISO week 53 of 2026 runs from Monday 28 December to Sunday 3 January 2027.
+		{"week 53 across the year end", time.Date(2026, 12, 30, 0, 0, 0, 0, time.UTC), 12, []int{4, 11}},
+		{"new year's day in week 53", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 3, []int{2}},
+		// A time of day or zone does not move the week.
+		{"late evening in a western zone", time.Date(2026, 11, 8, 23, 30, 0, 0, time.FixedZone("UTC-8", -8*3600)), 2, []int{0, 7}},
+	}
+	for _, c := range cases {
+		got := CalendarWeekEnds(c.asOf, c.horizon)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: ends %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: ends %v, want %v", c.name, got, c.want)
+				break
+			}
+		}
+	}
+	// From Wednesday 4 November: 4 days, then full weeks, the last cut at the horizon.
+	p, err := Project(ProjectionInput{
+		UnitCost: unitCost("0", "XXX"), HorizonDays: 12, Bucket: BucketWeek,
+		PeriodEnds: CalendarWeekEnds(time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC), 12),
+		Demand:     []Flow{{Day: 4, Qty: dec("1")}, {Day: 5, Qty: dec("2")}, {Day: 11, Qty: dec("4")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Periods) != 2 || p.Periods[0].End != 4 || p.Periods[1].Start != 5 || p.Periods[1].End != 11 {
+		t.Fatalf("periods %+v", p.Periods)
+	}
+	if !p.Periods[0].Demand.Equal(dec("1")) || !p.Periods[1].Demand.Equal(dec("6")) {
+		t.Errorf("demand per week %s %s", p.Periods[0].Demand, p.Periods[1].Demand)
+	}
+}

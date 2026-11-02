@@ -128,9 +128,14 @@ func (a *API) planProjection(w http.ResponseWriter, r *http.Request) {
 	date := func(day int) string { return asOf.AddDate(0, 0, day).Format("2006-01-02") }
 	// A month bucket of a dated plan is a calendar month; the first runs from
 	// the as-of date to the end of its month.
-	var monthEnds []int
-	if q.bucket == domain.BucketMonth {
-		monthEnds = domain.CalendarMonthEnds(asOf, q.horizonDays)
+	// A week bucket is an ISO week (Monday to Sunday); the first runs from the
+	// as-of date to the Sunday of its week.
+	var periodEnds []int
+	switch q.bucket {
+	case domain.BucketMonth:
+		periodEnds = domain.CalendarMonthEnds(asOf, q.horizonDays)
+	case domain.BucketWeek:
+		periodEnds = domain.CalendarWeekEnds(asOf, q.horizonDays)
 	}
 
 	items := make([]map[string]any, 0, len(q.itemIDs))
@@ -141,7 +146,7 @@ func (a *API) planProjection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opening, p, perr := domain.ProjectPlanned(days, domain.ProjectionInput{
-			UnitCost: cost, HorizonDays: q.horizonDays, Bucket: q.bucket, PeriodEnds: monthEnds,
+			UnitCost: cost, HorizonDays: q.horizonDays, Bucket: q.bucket, PeriodEnds: periodEnds,
 		})
 		if perr != nil {
 			// The query is validated and stored quantities are not negative,

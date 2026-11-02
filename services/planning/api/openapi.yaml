@@ -151,9 +151,10 @@ paths:
       description: >-
         The supply schedule workbench over a stored plan: for up to 20 items
         at the version's site, the days of the current version are grouped
-        into buckets counted from the version's as-of date: days, weeks of 7
-        days, or calendar months (the first runs from the as-of date to the
-        end of its month); the last bucket ends at the horizon.
+        into buckets counted from the version's as-of date: days, ISO weeks
+        (Monday to Sunday; the first runs from the as-of date to the Sunday
+        of its week), or calendar months (the first runs from the as-of date
+        to the end of its month); the last bucket ends at the horizon.
         Demand is the run's gross requirements (it includes the safety stock
         the run holds back), supply the scheduled receipts, planned the planned
         receipts, and `closingOnHand` the projected available balance at the
@@ -181,7 +182,7 @@ paths:
           schema: {type: array, minItems: 1, maxItems: 20, items: {type: string, format: uuid}}
         - name: bucket
           in: query
-          description: Day, week of 7 days from the as-of date, or calendar month.
+          description: Day, ISO week (Monday to Sunday), or calendar month; the first week or month runs from the as-of date to its end.
           schema: {type: string, enum: [day, week, month], default: week}
         - name: horizonDays
           in: query

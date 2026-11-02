@@ -38,9 +38,9 @@ var (
 	ErrInvalidPeriods = errors.New("planning: period ends must be ascending day offsets")
 )
 
-// BucketDays returns the number of days in one bucket. A month is 30 days,
+// BucketDays returns the number of days in one bucket. A week is 7 days and a month is 30 days,
 // which keeps the grid aligned to day offsets without calendar dates; a
-// projection over a dated plan passes calendar months as PeriodEnds instead.
+// projection over a dated plan passes ISO weeks and calendar months as PeriodEnds instead.
 func BucketDays(bucket string) (int, error) {
 	switch bucket {
 	case BucketDay:
@@ -70,8 +70,9 @@ type ProjectionInput struct {
 	HorizonDays   int
 	Bucket        string
 	// PeriodEnds, when set, replaces the fixed bucket width: the inclusive
-	// last day offset of each bucket, ascending (the calendar months of a
-	// dated plan, CalendarMonthEnds). The last bucket ends at the horizon.
+	// last day offset of each bucket, ascending (the ISO weeks or calendar
+	// months of a dated plan, CalendarWeekEnds and CalendarMonthEnds). The last
+	// bucket ends at the horizon.
 	PeriodEnds []int
 }
 
@@ -199,6 +200,25 @@ func CalendarMonthEnds(asOf time.Time, horizonDays int) []int {
 		if end >= horizonDays-1 {
 			return ends
 		}
+	}
+}
+
+// CalendarWeekEnds returns the day offsets from asOf of the Sunday that closes
+// each ISO week (Monday to Sunday) that starts within the horizon, so week
+// buckets of a dated plan follow the calendar like SAP MD04 and AX (FR-22.21):
+// the first runs from asOf to the Sunday of its week, which is a one-day bucket
+// when asOf is a Sunday. Dates are taken in UTC.
+func CalendarWeekEnds(asOf time.Time, horizonDays int) []int {
+	asOf = time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
+	// Days from asOf to its Sunday: Sunday 0, Monday 6, ..., Saturday 1.
+	end := (7 - int(asOf.Weekday())) % 7
+	var ends []int
+	for {
+		ends = append(ends, end)
+		if end >= horizonDays-1 {
+			return ends
+		}
+		end += 7
 	}
 }
 

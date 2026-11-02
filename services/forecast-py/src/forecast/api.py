@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from forecast import batches, models
 
-app = FastAPI(title="Passage forecast", version="0.3.0")
+app = FastAPI(title="Passage forecast", version="0.4.0")
 
 
 # A history value is a non-negative, finite quantity; anything else is a 422.
@@ -24,6 +24,10 @@ class Series(BaseModel):
     horizonPeriods: int = Field(default=12, ge=1, le=104)
     # Periods per season for the seasonal ETS candidate; 1 turns seasonality off.
     seasonLength: int = Field(default=models.DEFAULT_SEASON, ge=1, le=24)
+    # When true the season length is detected from the history (autocorrelation
+    # of the detrended series over 3, 4, 6 and 12 periods; 1 when none stands
+    # out) and seasonLength is ignored. The result reports the length used.
+    autoSeason: bool = False
     # Tenant parameter "forecast history months" (4.22.13, 12 to 120; the
     # planning service sends its default of 36). Only the last historyMonths
     # values of the monthly history are modelled; omitted, all of it is.
@@ -39,6 +43,9 @@ class SeriesResult(BaseModel):
     siteId: str
     model: str
     shortHistory: bool
+    # Season length offered to the seasonal ETS candidate (detected or sent); that
+    # candidate is eligible only with two seasons plus one period of history.
+    seasonLength: int
     forecast: list[float]
     mape: float | None
     wmape: float | None
@@ -63,14 +70,16 @@ def readyz() -> dict[str, str]:
 def _compute(s: Series) -> SeriesResult:
     """Forecast one validated series."""
     history = s.history if s.historyMonths is None else s.history[-s.historyMonths :]
-    fc = models.select_model(history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
+    season = models.detect_season(history) if s.autoSeason else s.seasonLength
+    fc = models.select_model(history, s.model, horizon=s.horizonPeriods, season=season)
     warnings = ["PLAN-0012"] if fc.short_history else []
-    mape, wmape = models.backtest(history, fc.model, season=s.seasonLength)
+    mape, wmape = models.backtest(history, fc.model, season=season)
     return SeriesResult(
         itemId=s.itemId,
         siteId=s.siteId,
         model=fc.model,
         shortHistory=fc.short_history,
+        seasonLength=season,
         forecast=list(fc.path),
         mape=mape,
         wmape=wmape,

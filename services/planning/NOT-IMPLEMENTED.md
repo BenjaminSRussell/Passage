@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 25)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 26)
 
 Every ticket deliverable and acceptance criterion that slices 1 to 18 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
@@ -192,23 +192,25 @@ vendor existence check (UUID only), and the vendor on a planned order of a run t
 (PLAN-0008 says so). Existing runs behave as before except that a purchase with no vendor now carries the warning.
 
 Slice 25 reads the supply schedule and inventory forecast from the stored plan (FR-22.21, FR-22.22):
-`GET /plans/{planCode}/projection?itemId=...` (duty `planning.read`, up to 20 items, bucket day, week of 7 days from
-the as-of date or calendar month, horizon 1 to 730 days, optional `unitCost` with `currency`) buckets the
+`GET /plans/{planCode}/projection?itemId=...` (duty `planning.read`, up to 20 items, bucket day, ISO week (Monday to Sunday) or calendar month, horizon 1 to 730 days, optional `unitCost` with `currency`) buckets the
 `net_requirement` rows of the plan's current version (one site, returned as `siteId`) from its as-of date through
 `domain.ProjectPlanned`. The opening on-hand is read back from the item's first stored day (always read, even past the
 window, so an item whose first movement is past the horizon keeps its on-hand), so each bucket's closing balance is the
 run's own PAB; demand is the gross requirements (which include the safety stock the run holds back, so a shortage is a
-balance below zero), supply the scheduled receipts, planned the planned receipts. Month buckets follow the calendar
+balance below zero), supply the scheduled receipts, planned the planned receipts. Week buckets are ISO weeks
+(`domain.CalendarWeekEnds`, like SAP MD04 and AX: the first runs from the as-of date to the Sunday of its week) and month
+buckets follow the calendar
 (`domain.CalendarMonthEnds`: the first runs from the as-of date to the end of its month; the calculator, which has no
-dates, keeps 30-day months). Value and days of supply come from the same `Project` as the calculator. A plan outside the
+dates, keeps 7-day weeks and 30-day months). Value and days of supply come from the same `Project` as the calculator. A plan outside the
 caller's legal entities is 404 by row-level security. The web module gets a Supply schedule page
 (`/planning/supply-schedule`). Tests: `TestProjectPlanned_*`, `TestCalendarMonthEnds`, `TestPlanProjection_*`, store
 `TestReadProjectionSource` and the legal-entity case in `TestLegalEntityScope_PlansForecastsAndQuotas`,
 `supplyschedule.test.tsx`. No migration or event. An item the run saw with on-hand but no movement has no stored rows,
 so it reads as not planned with a zero opening (the version does not store on-hand per item).
 
-- **handoff (authz seed)**: add `{"resource": "/v1/planning/plans/*/projection", "methods": ["GET"]}` to the
-  `planning.read` permissions in `policies/authz/data.json` (the route is enforced in the service with `planning.read`).
+Slice 26 changes the week bucket of that projection to ISO weeks (`domain.CalendarWeekEnds`, tested in `TestCalendarWeekEnds`, including ISO week 53 across the year end, and `TestPlanProjection_WeekBucketsAreISOWeeks`) and
+brings the statistical forecast service forward (damped-trend ETS and automatic season-length detection, see
+`services/forecast-py/NOT-IMPLEMENTED.md`). The planning service does not call `forecast-py` yet.
 
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
