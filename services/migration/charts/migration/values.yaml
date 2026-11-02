@@ -7,3 +7,35 @@ resources:
   limits: { cpu: 250m, memory: 2Gi }
 serviceMonitor: { enabled: false }
 connectors: { enabled: false }
+
+# Field encryption (platform fieldcrypt) for connection profile secrets: keysSecret is a Secret whose `keys` entry holds
+# id=base64(32 bytes) lines, mounted as FIELDCRYPT_KEYS_FILE; currentKeyId names the sealing key. Without it the secret
+# and test routes answer 501 MIG-SECRETS-NOT-CONFIGURED.
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""
+
+# Egress guard (MIG_EGRESS_ALLOW): the only way a connection profile can reach a private address (10.0.0.0/8,
+# 172.16.0.0/12, 192.168.0.0/16, fc00::/7). allowCidrs are CIDRs; allowHostPorts are host:port entries (a NetworkPolicy
+# cannot express those: add their peers under networkPolicy.extraEgress). Set per environment by the operator, never
+# by a tenant. Loopback, link-local (169.254.0.0/16 and the metadata address, fe80::/10), multicast and reserved
+# ranges are denied whatever is listed here.
+egress:
+  allowCidrs: []
+  allowHostPorts: []
+
+# Directory file connection profiles read from (MIG_DROP_ROOT): path is where it is mounted; existingClaim is a
+# PersistentVolumeClaim mounted read-only there. Empty path disables file connection tests.
+dropRoot:
+  path: ""
+  existingClaim: ""
+
+# Egress NetworkPolicy. Off by default; turn it on once egressTo lists the in-cluster dependencies (the database and the
+# target contexts' APIs). It admits DNS, the public internet on publicPorts (private, link-local and metadata ranges
+# excluded), the allowCidrs above and anything in extraEgress, and nothing else.
+networkPolicy:
+  enabled: false
+  dnsNamespace: kube-system
+  publicPorts: [443, 1433, 1521, 3306, 5432, 50000]
+  egressTo: []      # NetworkPolicy peers, for example [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: data } } }]
+  extraEgress: []   # complete NetworkPolicy egress rules

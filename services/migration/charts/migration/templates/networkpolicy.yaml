@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+# Egress boundary for connection profiles. The service dials addresses a tenant configures, so the cluster network is
+# the second line behind the in-process egress guard (internal/egress): public addresses on the listed ports, the
+# operator's allowCidrs, DNS and the in-cluster dependencies named in egressTo, and nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: migration
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    {{- with .Values.networkPolicy.egressTo }}
+    - to:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        {{- range .Values.networkPolicy.publicPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+    {{- range .Values.egress.allowCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+    {{- end }}
+    {{- range .Values.networkPolicy.extraEgress }}
+    - {{ toYaml . | nindent 6 | trim }}
+    {{- end }}
+{{- end }}

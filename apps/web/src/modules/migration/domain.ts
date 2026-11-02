@@ -1,12 +1,26 @@
-import type { CreateProjectInput, MigrationProject, ProjectEdit, RunMode, SourceSystem } from "./api/client";
+import type { ConnectionKind, CreateProjectInput, LegacySourceSystem, MigrationProject, ProjectEdit, RunMode, SourceSystem } from "./api/client";
 
-export const SOURCE_LABELS: Record<SourceSystem, string> = {
+export const SOURCE_LABELS: Record<LegacySourceSystem, string> = {
   ax2012: "Dynamics AX 2012",
   d365fo: "Dynamics 365 F&O",
   sap_ecc: "SAP ECC",
   sap_s4: "SAP S/4HANA",
 };
-export const SOURCE_SYSTEMS = Object.keys(SOURCE_LABELS) as SourceSystem[];
+export const SOURCE_SYSTEMS = Object.keys(SOURCE_LABELS) as LegacySourceSystem[];
+
+/** The label of a source system; a custom system (custom_acme) shows as its own name. */
+export function sourceLabel(system: string): string {
+  return (SOURCE_LABELS as Record<string, string>)[system] ?? (system.startsWith("custom_") ? `Custom: ${system.slice("custom_".length)}` : system);
+}
+
+const CUSTOM_SYSTEM = /^custom_[a-z0-9_]{1,40}$/;
+
+/** True for a legacy system or a well-formed custom_<name>; the service decides the same way. */
+export function isSourceSystem(value: string): boolean {
+  return value in SOURCE_LABELS || CUSTOM_SYSTEM.test(value);
+}
+
+export const SOURCE_SYSTEM_HINT = "Lowercase letters, digits and underscores, up to 40 (for example acme or acme_erp).";
 export const MODE_LABELS: Record<RunMode, string> = { rehearsal: "Rehearsal", cutover: "Cutover", delta: "Delta" };
 export const MODES = Object.keys(MODE_LABELS) as RunMode[];
 export const RUN_STATUSES = ["succeeded", "partial", "failed"] as const;
@@ -84,6 +98,8 @@ export interface ProjectForm {
   sourceSystem: string;
   sourceLegalEntityId: string;
   targetLegalEntityId: string;
+  /** The connection profile a migrate project reads from; optional. */
+  connectionProfileId?: string;
   cutoverAt: string;
   scheduleCron: string;
 }
@@ -98,8 +114,16 @@ export function parseProjectForm(form: ProjectForm): { value?: CreateProjectInpu
   else if ([...name].length > 80) errors.name = "At most 80 characters.";
   const input: CreateProjectInput = { name, projectType: form.projectType };
   if (form.projectType === "migrate") {
-    if (form.sourceSystem === "") errors.sourceSystem = "Choose the legacy source system.";
+    if (form.sourceSystem === "") errors.sourceSystem = "Choose the source system.";
+    else if (!isSourceSystem(form.sourceSystem)) errors.sourceSystem = `Name the custom system. ${SOURCE_SYSTEM_HINT}`;
     else input.sourceSystem = form.sourceSystem as SourceSystem;
+    // A migrate project may name the legal entity its data lands in and the connection it reads from.
+    const target = form.targetLegalEntityId.trim();
+    if (target !== "") {
+      if (!UUID_PATTERN.test(target)) errors.targetLegalEntityId = "Enter the target legal entity id (UUID), or leave it empty.";
+      else input.targetLegalEntityId = target;
+    }
+    if (form.connectionProfileId) input.connectionProfileId = form.connectionProfileId;
   }
   if (form.projectType === "copy") {
     const source = form.sourceLegalEntityId.trim();
@@ -169,4 +193,121 @@ export function checkRewriteRules(rules: { field: string; from: string; to: stri
     const earlier = rules.slice(0, i).findIndex((e) => e.field.trim() === field && e.from !== "" && r.from.startsWith(e.from));
     return earlier >= 0 ? `Rule ${earlier + 1} already matches this prefix, so this rule would never apply.` : undefined;
   });
+}
+
+export const CONNECTION_KIND_LABELS: Record<ConnectionKind, string> = { sql: "SQL database", rest: "REST API", file: "File drop directory" };
+export const CONNECTION_KINDS = Object.keys(CONNECTION_KIND_LABELS) as ConnectionKind[];
+
+export interface ConnectionField {
+  key: string;
+  label: string;
+  hint?: string;
+  required?: boolean;
+  number?: boolean;
+  options?: string[];
+}
+
+const COMMON_FIELDS: ConnectionField[] = [
+  { key: "codepage", label: "Character set", hint: "An IANA name such as utf-8, windows-1252 or iso-8859-1." },
+  { key: "timezone", label: "Time zone", hint: "An IANA zone such as Europe/Berlin; dates without a zone are read in it." },
+];
+
+/** The non-secret settings of each kind. The password, token or key is never a field here: it is set on its own. */
+export const CONNECTION_FIELDS: Record<ConnectionKind, ConnectionField[]> = {
+  sql: [
+    { key: "driver", label: "Driver", required: true, options: ["postgres"], hint: "PostgreSQL is the only driver in this build." },
+    { key: "host", label: "Host", required: true, hint: "A host name or IP address. A private address works only when the operator has allowlisted it." },
+    { key: "port", label: "Port", number: true, hint: "Default 5432." },
+    { key: "database", label: "Database", required: true },
+    { key: "user", label: "User", required: true, hint: "The password is set separately, after the connection exists." },
+    { key: "sslmode", label: "TLS mode", options: ["require", "verify-full", "verify-ca", "disable"], hint: "Default require." },
+    ...COMMON_FIELDS,
+  ],
+  rest: [
+    { key: "baseUrl", label: "Base URL", required: true, hint: "https:// with no credentials or query. http:// only for an endpoint without authentication." },
+    { key: "authType", label: "Authentication", options: ["none", "basic", "bearer", "header"], hint: "The password, token or header value is set separately." },
+    { key: "username", label: "User name", hint: "For basic authentication." },
+    { key: "headerName", label: "Header name", hint: "For header authentication, for example X-Api-Key." },
+    { key: "pagingStyle", label: "Paging style", options: ["none", "offset", "page", "cursor", "link"] },
+    { key: "probePath", label: "Test path", hint: "Appended to the base URL for the connection test, for example /health." },
+    ...COMMON_FIELDS,
+  ],
+  file: [
+    { key: "dropDir", label: "Drop directory", required: true, hint: "A relative path under the drop directory the operator mounted, for example acme/ax2012." },
+    { key: "format", label: "File format", required: true, options: ["csv", "tsv", "json", "jsonl"] },
+    { key: "delimiter", label: "Delimiter", hint: "One character, for csv files." },
+    { key: "filePattern", label: "File name pattern", hint: "For example Cust*.csv." },
+    ...COMMON_FIELDS,
+  ],
+};
+
+export interface ConnectionForm {
+  name: string;
+  kind: ConnectionKind;
+  sourceSystem: string;
+  /** Setting key to text value. */
+  config: Record<string, string>;
+}
+
+export const EMPTY_CONNECTION_FORM: ConnectionForm = { name: "", kind: "sql", sourceSystem: "", config: {} };
+
+/** Settings to the text a form shows. */
+export function configToText(config: Record<string, string | number>): Record<string, string> {
+  return Object.fromEntries(Object.entries(config).map(([k, v]) => [k, String(v)]));
+}
+
+/** Form text to the config object the service takes: blanks are dropped and a number field becomes a number. */
+export function parseConnectionConfig(kind: ConnectionKind, text: Record<string, string>): { config?: Record<string, string | number>; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  const config: Record<string, string | number> = {};
+  for (const field of CONNECTION_FIELDS[kind]) {
+    const raw = (text[field.key] ?? "").trim();
+    if (raw === "") {
+      if (field.required) errors[field.key] = `Enter the ${field.label.toLowerCase()}.`;
+      continue;
+    }
+    if (field.number) {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) errors[field.key] = "Enter a whole number from 1 to 65535.";
+      else config[field.key] = n;
+    } else config[field.key] = raw;
+  }
+  return Object.keys(errors).length > 0 ? { errors } : { config, errors };
+}
+
+/** Validates the new connection form the way the service does, so an obvious mistake is caught before the request. */
+export function parseConnectionForm(form: ConnectionForm): { value?: { name: string; kind: ConnectionKind; sourceSystem: SourceSystem; config: Record<string, string | number> }; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  const name = form.name.trim();
+  if (name === "") errors.name = "Enter a connection name.";
+  else if ([...name].length > 80) errors.name = "At most 80 characters.";
+  if (form.sourceSystem === "") errors.sourceSystem = "Choose the source system.";
+  else if (!isSourceSystem(form.sourceSystem)) errors.sourceSystem = `Name the custom system. ${SOURCE_SYSTEM_HINT}`;
+  const parsed = parseConnectionConfig(form.kind, form.config);
+  for (const [k, v] of Object.entries(parsed.errors)) errors[`config.${k}`] = v;
+  if (Object.keys(errors).length > 0 || !parsed.config) return { errors };
+  return { value: { name, kind: form.kind, sourceSystem: form.sourceSystem as SourceSystem, config: parsed.config }, errors };
+}
+
+/** The secret field's check: the service refuses an empty value and one over 4096 bytes. */
+export function checkSecret(secret: string): string | undefined {
+  if (secret === "") return "Enter the secret.";
+  if (new TextEncoder().encode(secret).length > 4096) return "At most 4096 bytes.";
+  return undefined;
+}
+
+/** The secret a kind takes, named for the person setting it. */
+export function secretNoun(kind: ConnectionKind, config: Record<string, string | number>): string | null {
+  if (kind === "sql") return "password";
+  if (kind === "file") return null;
+  switch (config.authType) {
+    case "basic":
+      return "password";
+    case "bearer":
+      return "token";
+    case "header":
+      return "header value";
+    default:
+      return null;
+  }
 }

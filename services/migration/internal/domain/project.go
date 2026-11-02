@@ -28,14 +28,16 @@ type Project struct {
 	SourceSystem        string
 	SourceLegalEntityID string
 	TargetLegalEntityID string
+	// ConnectionProfileID is the connection profile a migrate project reads from (optional).
+	ConnectionProfileID string
 	Status              string
 	CutoverAt           *time.Time
 	ScheduleCron        string
 }
 
 // ValidateProject returns a message per invalid field; an empty map means the project is valid. isID tells whether
-// a legal entity id is a well-formed Passage id, and systems lists the legacy source systems.
-func ValidateProject(p Project, systems []string, isID func(string) bool) map[string]string {
+// a legal entity or connection profile id is a well-formed Passage id.
+func ValidateProject(p Project, isID func(string) bool) map[string]string {
 	bad := map[string]string{}
 	if n := strings.TrimSpace(p.Name); n == "" || utf8.RuneCountInString(n) > maxProjectName || n != p.Name {
 		bad["name"] = "is required, at most 80 characters, without leading or trailing spaces"
@@ -45,8 +47,11 @@ func ValidateProject(p Project, systems []string, isID func(string) bool) map[st
 		if p.SourceSystem == "" {
 			bad["sourceSystem"] = "is required for a migrate project"
 		}
-		if p.SourceLegalEntityID != "" || p.TargetLegalEntityID != "" {
-			bad["sourceLegalEntityId"] = "legal entities belong to copy projects only"
+		if p.SourceLegalEntityID != "" {
+			bad["sourceLegalEntityId"] = "a migrate project has a target legal entity only; the source legal entity belongs to copy projects"
+		}
+		if p.TargetLegalEntityID != "" && !isID(p.TargetLegalEntityID) {
+			bad["targetLegalEntityId"] = "must be a UUID"
 		}
 	case ProjectCopy:
 		switch {
@@ -67,13 +72,15 @@ func ValidateProject(p Project, systems []string, isID func(string) bool) map[st
 	default:
 		bad["projectType"] = "must be one of migrate, copy, config_package"
 	}
-	if p.SourceSystem != "" {
-		known := false
-		for _, s := range systems {
-			known = known || s == p.SourceSystem
-		}
-		if !known {
-			bad["sourceSystem"] = "must be one of " + strings.Join(systems, ", ")
+	if p.SourceSystem != "" && !ValidSourceSystem(p.SourceSystem) {
+		bad["sourceSystem"] = SourceSystemHint
+	}
+	if p.ConnectionProfileID != "" {
+		switch {
+		case p.Type != ProjectMigrate:
+			bad["connectionProfileId"] = "only a migrate project reads from a connection profile"
+		case !isID(p.ConnectionProfileID):
+			bad["connectionProfileId"] = "must be a UUID"
 		}
 	}
 	if p.Status != ProjectActive && p.Status != ProjectArchived {

@@ -8,6 +8,7 @@ import {
   describeProblem,
   getKeyRewriteRules,
   getProject,
+  listConnections,
   listProjects,
   listRunsPage,
   newKey,
@@ -28,12 +29,12 @@ import {
   parseProjectEdit,
   parseProjectForm,
   PROJECT_TYPE_LABELS,
-  SOURCE_LABELS,
-  SOURCE_SYSTEMS,
+  sourceLabel,
   type ProjectEditForm,
   type ProjectForm,
 } from "./domain";
 import { LoadMore } from "./LoadMore";
+import { SourceSystemField } from "./SourceSystemField";
 import { DUTY_RUN } from "./RunPages";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -44,7 +45,7 @@ export const DUTY_PROJECT_WRITE = "migration.project.write";
 const columns: DataTableColumn<MigrationProject>[] = [
   { key: "name", header: "Name" },
   { key: "projectType", header: "Type", render: (row) => PROJECT_TYPE_LABELS[row.projectType] ?? row.projectType },
-  { key: "sourceSystem", header: "Source", render: (row) => (row.sourceSystem ? (SOURCE_LABELS[row.sourceSystem] ?? row.sourceSystem) : "") },
+  { key: "sourceSystem", header: "Source", render: (row) => (row.sourceSystem ? sourceLabel(row.sourceSystem) : "") },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
   { key: "cutoverAt", header: "Cutover", render: (row) => (row.cutoverAt ? formatDateTime(row.cutoverAt) : "") },
   { key: "version", header: "Version", align: "end" },
@@ -173,6 +174,9 @@ export function NewProjectPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  // The connection picker is only needed (and only loaded) for a migrate project.
+  const migrate = form.projectType === "migrate";
+  const connections = useLoad((signal) => (migrate ? listConnections({ status: "active", limit: 200 }, signal) : Promise.resolve({ items: [] })), `project-connections|${migrate}`);
 
   function change<K extends keyof ProjectForm>(field: K, value: ProjectForm[K]) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -220,18 +224,26 @@ export function NewProjectPage() {
             )}
           </FormField>
           {form.projectType === "migrate" ? (
-            <FormField id="project-system" label="Source system" error={errors.sourceSystem}>
-              {(control) => (
-                <Select {...control} value={form.sourceSystem} onChange={(event) => change("sourceSystem", event.target.value)}>
-                  <option value="">Choose a system</option>
-                  {SOURCE_SYSTEMS.map((s) => (
-                    <option key={s} value={s}>
-                      {SOURCE_LABELS[s]}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </FormField>
+            <>
+              <SourceSystemField id="project-system" value={form.sourceSystem} error={errors.sourceSystem} onChange={(value) => change("sourceSystem", value)} />
+              <FormField id="project-connection" label="Connection" optional hint="Where the data is read from. Only connections for this source system are listed; create one under Connections first.">
+                {(control) => (
+                  <Select {...control} value={form.connectionProfileId ?? ""} onChange={(event) => change("connectionProfileId", event.target.value)}>
+                    <option value="">None yet</option>
+                    {(connections.data?.items ?? [])
+                      .filter((c) => c.status === "active" && c.sourceSystem === form.sourceSystem)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </Select>
+                )}
+              </FormField>
+              <FormField id="project-migrate-target-le" label="Target legal entity id" optional error={errors.targetLegalEntityId} hint="The legal entity the migrated data lands in.">
+                {(control) => <Input {...control} value={form.targetLegalEntityId} invalid={Boolean(errors.targetLegalEntityId)} onChange={(event) => change("targetLegalEntityId", event.target.value)} />}
+              </FormField>
+            </>
           ) : null}
           {form.projectType === "copy" ? (
             <>
@@ -469,9 +481,14 @@ function DetailsCard({ project, canEdit, onSaved }: { project: MigrationProject;
   return (
     <Card title="Details" actions={canEdit ? <Button size="sm" onClick={open}>Edit details</Button> : undefined}>
       <dl className={styles.details}>
-        {project.sourceSystem ? <Entry term="Source system">{SOURCE_LABELS[project.sourceSystem] ?? project.sourceSystem}</Entry> : null}
+        {project.sourceSystem ? <Entry term="Source system">{sourceLabel(project.sourceSystem)}</Entry> : null}
         {project.sourceLegalEntityId ? <Entry term="Source legal entity"><span className={styles.mono}>{project.sourceLegalEntityId}</span></Entry> : null}
         {project.targetLegalEntityId ? <Entry term="Target legal entity"><span className={styles.mono}>{project.targetLegalEntityId}</span></Entry> : null}
+        {project.connectionProfileId ? (
+          <Entry term="Connection">
+            <Link to={`/migration/connections/${project.connectionProfileId}`}>View the connection</Link>
+          </Entry>
+        ) : null}
         <Entry term="Cutover">{project.cutoverAt ? formatDateTime(project.cutoverAt) : "Not set"}</Entry>
         <Entry term="Schedule">{project.scheduleCron ? <span className={styles.mono}>{project.scheduleCron}</span> : "Not scheduled"}</Entry>
         <Entry term="Version">{project.version}</Entry>

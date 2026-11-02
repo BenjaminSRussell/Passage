@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { ConnectionDetailPage, ConnectionsPage, NewConnectionPage } from "./ConnectionPages";
 import { NewPackagePage, PackageDetailPage, PackagesPage } from "./PackagePages";
 import { NewProjectPage, ProjectDetailPage, ProjectsPage } from "./ProjectPages";
 import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
@@ -7,14 +8,15 @@ import { NewTemplatePage, TemplateDetailPage, TemplatesPage } from "./TemplatePa
 import { XrefPage } from "./XrefPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
-// migration.run, migration.spec.write, migration.package.apply and migration.project.write are enforced by the service but
-// not seeded in policies/authz/data.json yet (handoff for #313), so the nav items carry no duty and the actions are
-// gated on the routes and buttons. migration.project.write is also left off its route handle: the registry test
+// migration.run is seeded in policies/authz/data.json, so the Connections nav item is gated on it. migration.spec.write,
+// migration.package.apply, migration.project.write and migration.connection.write are enforced by the service but not
+// seeded there yet (handoff for #313): the other nav items carry no duty and these actions are gated on the buttons.
+// migration.project.write and migration.connection.write are also left off their route handles: the registry test
 // rejects a route duty missing from the policy file, which is outside wave 10 ownership.
 const migration: PassageModule = {
   id: "migration",
   title: "Data migration",
-  description: "Map, validate, load and reconcile legacy AX and SAP data: versioned mapping specs, data templates, migration runs with their exception queue and re-run.",
+  description: "Map, validate, load and reconcile legacy AX, SAP and custom ERP data: connections to the source system, versioned mapping specs, data templates, migration runs with their exception queue and re-run.",
   routes: [
     { path: "/migration", element: createElement(RunsPage), handle: { title: "Migration runs" } },
     { path: "/migration/runs/new", element: createElement(NewRunPage), handle: { title: "Start migration run", duty: "migration.run" } },
@@ -31,11 +33,15 @@ const migration: PassageModule = {
     { path: "/migration/projects", element: createElement(ProjectsPage), handle: { title: "Migration projects" } },
     { path: "/migration/projects/new", element: createElement(NewProjectPage), handle: { title: "New migration project" } },
     { path: "/migration/projects/:id", element: createElement(ProjectDetailPage), handle: { title: "Migration project" } },
+    { path: "/migration/connections", element: createElement(ConnectionsPage), handle: { title: "Connections" } },
+    { path: "/migration/connections/new", element: createElement(NewConnectionPage), handle: { title: "New connection" } },
+    { path: "/migration/connections/:id", element: createElement(ConnectionDetailPage), handle: { title: "Connection" } },
     { path: "/migration/xref", element: createElement(XrefPage), handle: { title: "Legacy key cross-reference" } },
   ],
   nav: [
     { label: "Migration runs", to: "/migration" },
     { label: "Migration projects", to: "/migration/projects" },
+    { label: "Connections", to: "/migration/connections", duty: "migration.run" },
     { label: "Mapping specs", to: "/migration/specs" },
     { label: "Data templates", to: "/migration/templates" },
     { label: "Configuration packages", to: "/migration/packages" },

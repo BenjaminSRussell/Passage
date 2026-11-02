@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -31,6 +32,8 @@ type createProjectRequest struct {
 	SourceSystem        string `json:"sourceSystem"`
 	SourceLegalEntityID string `json:"sourceLegalEntityId"`
 	TargetLegalEntityID string `json:"targetLegalEntityId"`
+	// ConnectionProfileID is the connection profile a migrate project reads from (optional).
+	ConnectionProfileID string `json:"connectionProfileId"`
 	CutoverAt           string `json:"cutoverAt"`
 	ScheduleCron        string `json:"scheduleCron"`
 }
@@ -43,6 +46,8 @@ type updateProjectRequest struct {
 	Status       *string `json:"status"`
 	CutoverAt    *string `json:"cutoverAt"`
 	ScheduleCron *string `json:"scheduleCron"`
+	// ConnectionProfileID attaches a connection profile of the project's source system; empty detaches it.
+	ConnectionProfileID *string `json:"connectionProfileId"`
 }
 
 type replaceRulesRequest struct {
@@ -112,9 +117,9 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	cutover, ok := parseCutover(req.CutoverAt)
 	p := domain.Project{
 		Name: req.Name, Type: req.ProjectType, SourceSystem: req.SourceSystem, SourceLegalEntityID: req.SourceLegalEntityID,
-		TargetLegalEntityID: req.TargetLegalEntityID, Status: domain.ProjectActive, CutoverAt: cutover, ScheduleCron: req.ScheduleCron,
+		TargetLegalEntityID: req.TargetLegalEntityID, ConnectionProfileID: req.ConnectionProfileID, Status: domain.ProjectActive, CutoverAt: cutover, ScheduleCron: req.ScheduleCron,
 	}
-	bad := domain.ValidateProject(p, sourceSystems, ids.Valid)
+	bad := domain.ValidateProject(p, ids.Valid)
 	if !ok {
 		bad["cutoverAt"] = "must be an RFC 3339 timestamp"
 	}
@@ -122,9 +127,15 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(bad))
 		return
 	}
+	if p.ConnectionProfileID != "" {
+		if err := a.checkProjectProfile(r, p.ConnectionProfileID, p.SourceSystem); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
 	saved, created, err := a.store.SaveProject(r.Context(), store.Project{
 		Name: p.Name, Type: p.Type, SourceSystem: p.SourceSystem, SourceLegalEntityID: p.SourceLegalEntityID,
-		TargetLegalEntityID: p.TargetLegalEntityID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
+		TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
 	}, r.Header.Get(idempotencyHeader))
 	if err != nil {
 		a.logFailure(r, "create project failed", err)
@@ -226,6 +237,19 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, validation(bad))
 		return
 	}
+	var profile store.ConnectionProfile
+	if req.ConnectionProfileID != nil && *req.ConnectionProfileID != "" {
+		if !ids.Valid(*req.ConnectionProfileID) {
+			fail(w, r, validation(map[string]string{"connectionProfileId": "must be a UUID"}))
+			return
+		}
+		var err error
+		if profile, err = a.store.GetConnectionProfile(r.Context(), *req.ConnectionProfileID); err != nil {
+			a.logFailure(r, "load connection profile for project failed", err)
+			fail(w, r, unknownProfile(err))
+			return
+		}
+	}
 	saved, err := a.store.UpdateProject(r.Context(), chi.URLParam(r, "id"), *req.Version, func(p *store.Project) error {
 		// An archived project is frozen: the only change it takes is reactivation (with or without other edits).
 		reactivating := req.Status != nil && *req.Status == domain.ProjectActive
@@ -244,12 +268,18 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		if req.ScheduleCron != nil {
 			p.ScheduleCron = *req.ScheduleCron
 		}
+		if req.ConnectionProfileID != nil {
+			p.ConnectionProfileID = *req.ConnectionProfileID
+		}
 		fields := domain.ValidateProject(domain.Project{
 			Name: p.Name, Type: p.Type, SourceSystem: p.SourceSystem, SourceLegalEntityID: p.SourceLegalEntityID,
-			TargetLegalEntityID: p.TargetLegalEntityID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
-		}, sourceSystems, ids.Valid)
+			TargetLegalEntityID: p.TargetLegalEntityID, ConnectionProfileID: p.ConnectionProfileID, Status: p.Status, CutoverAt: p.CutoverAt, ScheduleCron: p.ScheduleCron,
+		}, ids.Valid)
 		if len(fields) > 0 {
 			return validation(fields)
+		}
+		if profile.ID != "" {
+			return profileFits(profile, p.SourceSystem)
 		}
 		return nil
 	})
@@ -380,4 +410,33 @@ func (a *API) previewRules(w http.ResponseWriter, r *http.Request) {
 		out[i] = previewRow{Key: req.Keys[i], Rewritten: rec.Key, Changed: rec.Key != req.Keys[i]}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func unknownProfile(err error) error {
+	var p *httpx.Problem
+	if errors.As(err, &p) && p.Status == http.StatusNotFound {
+		return store.ConnectionUnknown()
+	}
+	return err
+}
+
+// profileFits refuses a disabled profile and one of another source system than the project's.
+func profileFits(c store.ConnectionProfile, sourceSystem string) error {
+	switch {
+	case c.Status != domain.ConnActive:
+		return validation(map[string]string{"connectionProfileId": "the connection profile is disabled"})
+	case c.SourceSystem != sourceSystem:
+		return validation(map[string]string{"connectionProfileId": "the connection profile is for " + c.SourceSystem + ", not " + sourceSystem})
+	}
+	return nil
+}
+
+// checkProjectProfile loads the profile a new project names and checks it fits the project.
+func (a *API) checkProjectProfile(r *http.Request, profileID, sourceSystem string) error {
+	c, err := a.store.GetConnectionProfile(r.Context(), profileID)
+	if err != nil {
+		a.logFailure(r, "load connection profile for project failed", err)
+		return unknownProfile(err)
+	}
+	return profileFits(c, sourceSystem)
 }

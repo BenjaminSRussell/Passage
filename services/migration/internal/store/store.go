@@ -130,6 +130,14 @@ type Store interface {
 	// ReplaceRewriteRules swaps a project's whole rule set under its version and bumps the version.
 	ReplaceRewriteRules(ctx context.Context, projectID string, version int, rules []domain.KeyRewrite) (Project, error)
 	RewriteRules(ctx context.Context, projectID string) ([]domain.KeyRewrite, error)
+	// Connection profiles (integration track S1). The store keeps the sealed secret as bytes; sealing and opening
+	// belong to the caller, which holds the fieldcrypt keys. Nothing returned by Get or List carries it.
+	SaveConnectionProfile(ctx context.Context, c ConnectionProfile, idempotencyKey string) (saved ConnectionProfile, created bool, err error)
+	GetConnectionProfile(ctx context.Context, id string) (ConnectionProfile, error)
+	ListConnectionProfiles(ctx context.Context, f ConnectionFilter) ([]ConnectionProfile, error)
+	UpdateConnectionProfile(ctx context.Context, id string, version int, edit func(*ConnectionProfile) error) (ConnectionProfile, error)
+	SetConnectionSecret(ctx context.Context, id string, sealed []byte, keyID string) (ConnectionProfile, error)
+	ConnectionSecret(ctx context.Context, id string) (sealed []byte, keyID string, err error)
 	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
 	XrefSummary(ctx context.Context) ([]XrefCount, error)
@@ -546,6 +554,8 @@ type Mem struct {
 	pkgState *memPackages
 	pjOnce   sync.Once
 	pjState  *memProjects
+	cnOnce   sync.Once
+	cnState  *memConnections
 }
 
 func NewMem() *Mem {

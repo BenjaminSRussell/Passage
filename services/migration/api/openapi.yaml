@@ -105,7 +105,7 @@ paths:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: Mapping DSL document with entity, version, fields (a field may name a source format or the codepage_normalize function), optional rejectWhen conditions (field, op, value or values, reason code) and at least one test. } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: "Mapping DSL document with entity, version, fields (a field may name a source format or the codepage_normalize function), optional rejectWhen conditions (field, op, value or values, reason code) and at least one test." } } } } }
       responses:
         '201':
           description: A new spec version was stored.
@@ -215,7 +215,7 @@ paths:
       description: Answers where a legacy record went. Filter by exact legacy key, key prefix (literal, no wildcards) or Passage id (a target id or the survivor a record was merged into), and page in source system, entity and key order with the opaque nextCursor. Callers scoped to one legal entity are refused.
       x-passage-duty: migration.run
       parameters:
-        - { name: sourceSystem, in: query, schema: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] } }
+        - { name: sourceSystem, in: query, schema: { $ref: '#/components/schemas/SourceSystem' } }
         - { name: entity, in: query, schema: { type: string } }
         - { name: sourceKey, in: query, description: Exact legacy key., schema: { type: string } }
         - { name: keyPrefix, in: query, description: Legacy keys starting with this text., schema: { type: string } }
@@ -257,7 +257,7 @@ paths:
     post:
       operationId: createMigrationProject
       summary: Create a migration project
-      description: Creates a migrate, copy (between two different legal entities of the tenant, FR-10.14) or config_package project. Type, source system and legal entities are fixed once created; name, status, cutover and schedule can be changed with the version. Legal entity ids are not checked against the org service.
+      description: Creates a migrate, copy (between two different legal entities of the tenant, FR-10.14) or config_package project. Type, source system and legal entities are fixed once created; name, status, cutover, schedule and connection profile can be changed with the version. Legal entity ids are not checked against the org service.
       x-passage-duty: migration.project.write
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
@@ -299,7 +299,7 @@ paths:
     patch:
       operationId: updateMigrationProject
       summary: Change a migration project
-      description: Changes name, status, cutover time or schedule under the project's version. An omitted or null field is unchanged; an empty cutoverAt or scheduleCron clears it. A stale version is a conflict. An archived project takes no change except reactivation (status active), which may carry other edits.
+      description: Changes name, status, cutover time, schedule or connection profile under the project's version. An omitted or null field is unchanged; an empty cutoverAt or scheduleCron clears it. A stale version is a conflict. An archived project takes no change except reactivation (status active), which may carry other edits.
       x-passage-duty: migration.project.write
       requestBody:
         required: true
@@ -376,6 +376,127 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: MIG-PROJECT-NOT-COPY, only copy projects have key rewrite rules.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/connection-profiles:
+    get:
+      operationId: listConnectionProfiles
+      summary: List connection profiles
+      description: Connection profiles in name order, optionally filtered by kind and status, paged with the opaque nextCursor. A profile shows whether its secret is set and when it changed, never the secret. Callers must be tenant-wide.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [sql, rest, file] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of connection profiles; nextCursor is absent on the last page.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ConnectionProfile' } }, nextCursor: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createConnectionProfile
+      summary: Create a connection profile
+      description: Stores the non-secret settings for reaching a legacy or custom ERP (a SQL database, a REST API or a file drop directory). The settings are checked against the kind; a key that looks like a secret (password, token, key) is refused, because the one secret is set with PUT .../secret. Kind and source system are fixed once created; the source system may be custom_<name> for a customer's own ERP.
+      x-passage-duty: migration.connection.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateConnectionProfile' } } }
+      responses:
+        '201':
+          description: The profile was created, without a secret.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionProfile' } } }
+        '200':
+          description: The Idempotency-Key was replayed; the stored profile is returned.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionProfile' } } }
+        '409':
+          description: MIG-CONNECTION-NAME-EXISTS, a profile with this name already exists.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse, the key was used for a different profile.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/connection-profiles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getConnectionProfile
+      summary: Get a connection profile
+      description: Returns one connection profile with its current version. The secret is never returned; secretSet and secretUpdatedAt say whether and when it was set.
+      x-passage-duty: migration.run
+      responses:
+        '200':
+          description: The profile.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionProfile' } } }
+        '404':
+          description: AUTH-0404, no connection profile with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateConnectionProfile
+      summary: Change a connection profile
+      description: Changes name, settings (the whole config object is replaced and checked again) or status under the profile's version. An omitted field is unchanged. Kind and source system cannot change. A change to a setting the secret is bound to (sql driver, host, port, database, user or sslmode; rest baseUrl, authType, username or headerName) clears the stored secret, so the answer has secretSet false and the secret must be set again before a test can use it. A stale version is a conflict.
+      x-passage-duty: migration.connection.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateConnectionProfile' } } }
+      responses:
+        '200':
+          description: The updated profile with its new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionProfile' } } }
+        '404':
+          description: AUTH-0404, no connection profile with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: MIG-VERSION-CONFLICT, the version is stale; or MIG-CONNECTION-NAME-EXISTS.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/connection-profiles/{id}/secret:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setConnectionProfileSecret
+      summary: Set a connection profile's secret
+      description: Seals the secret (a database password, API token or key value) with field encryption bound to the tenant and the profile, and stores it. Write-only; nothing returns it, and it is never logged. Replaces any earlier secret and bumps the profile version. Answers 501 MIG-SECRETS-NOT-CONFIGURED when the service has no field-encryption keys.
+      x-passage-duty: migration.connection.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SetConnectionSecret' } } }
+      responses:
+        '200':
+          description: The profile, now with secretSet true and secretUpdatedAt.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionProfile' } } }
+        '404':
+          description: AUTH-0404, no connection profile with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-SECRETS-NOT-CONFIGURED, the service has no FIELDCRYPT_KEYS_FILE.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/connection-profiles/{id}:test:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: testConnectionProfile
+      summary: Test a connection profile
+      description: Connects the way an extractor will and reports what it found. SQL connects through the driver named in config.driver (postgres is the only one in this build), inside a read-only transaction with a 5-second statement timeout, and lists at most 50 schemas, 200 tables and the columns of the first 20 tables (no row data); REST sends one GET to baseUrl plus probePath with the configured authentication and reads at most 64 KiB of the answer, which it does not return; file checks the drop directory under the operator-mounted drop root and counts matching files. Every network connection passes the egress guard, which refuses loopback, link-local and metadata addresses always, refuses private addresses unless the operator lists them in MIG_EGRESS_ALLOW, pins the connection to the checked address and never follows redirects. The call answers 200 whether or not the connection worked; read ok and failure in the body. It needs the write duty because it opens the stored secret.
+      x-passage-duty: migration.connection.write
+      responses:
+        '200':
+          description: The probe result. It never contains the secret, response bodies or row data.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionTestResult' } } }
+        '404':
+          description: AUTH-0404, no connection profile with this id.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-SECRET-UNREADABLE, the stored secret cannot be opened with the current keys; set it again.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-SECRETS-NOT-CONFIGURED, the service has no field-encryption keys and the profile needs a secret (SQL, and REST with authentication), or MIG-PROBE-NOT-CONFIGURED.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/config-packages:
@@ -479,7 +600,7 @@ paths:
 components:
   responses:
     Problem:
-      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 409 MIG-VERSION-CONFLICT, 422 idempotency_key_reuse, MIG-MAP-* or MIG-PKG-*.
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 409 MIG-VERSION-CONFLICT, 422 idempotency_key_reuse, MIG-MAP-*, MIG-PKG-* or MIG-CONNECTION-UNKNOWN, 501 MIG-SECRETS-NOT-CONFIGURED.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   schemas:
     CreateMigrationRun:
@@ -488,13 +609,13 @@ components:
       description: Exactly one of mapping or mappingSpecId is required.
       required: [sourceSystem, mode]
       properties:
-        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
         mode: { type: string, enum: [rehearsal, cutover, delta] }
         dryRun: { type: boolean }
-        mapping: { type: object, description: Mapping DSL document with entity, version and fields. }
+        mapping: { type: object, description: "Mapping DSL document with entity, version and fields." }
         mappingSpecId: { type: string, format: uuid, description: A published mapping spec to run instead of an inline mapping. }
         dataTemplateId: { type: string, format: uuid, description: A published data template whose defaults fill absent source fields before mapping. It must be for the mapping's entity and default only mapping targets filled from a source column. }
-        projectId: { type: string, format: uuid, description: A migrate project to run under. Its source system must equal sourceSystem, it must be active, and only one run per project executes at a time (409 MIG-RUN-ACTIVE). Omit for a run outside any project. }
+        projectId: { type: string, format: uuid, description: "A migrate project to run under. Its source system must equal sourceSystem, it must be active, and only one run per project executes at a time (409 MIG-RUN-ACTIVE). Omit for a run outside any project." }
     MigrationRunAccepted:
       type: object
       required: [jobId, statusUrl, estimatedCompletionSeconds, run]
@@ -516,8 +637,8 @@ components:
         mappingVersion: { type: integer }
         parentRunId: { type: string, format: uuid }
         mappingSpecId: { type: string, format: uuid }
-        dataTemplateId: { type: string, format: uuid, description: The data template the run applied, kept on re-runs. }
-        projectId: { type: string, format: uuid, description: The migrate project the run belongs to, kept on re-runs. }
+        dataTemplateId: { type: string, format: uuid, description: "The data template the run applied, kept on re-runs." }
+        projectId: { type: string, format: uuid, description: "The migrate project the run belongs to, kept on re-runs." }
         counts:
           type: object
           required: [extracted, mapped, created, updated, unchanged, templated, rejected, warned]
@@ -569,7 +690,7 @@ components:
       type: object
       required: [sourceSystem, entity, sourceKey, targetId, updatedAt]
       properties:
-        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
         entity: { type: string }
         sourceKey: { type: string }
         targetId: { type: string, format: uuid }
@@ -580,9 +701,123 @@ components:
       type: object
       required: [sourceSystem, entity, count]
       properties:
-        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
         entity: { type: string }
         count: { type: integer, minimum: 1 }
+    SourceSystem:
+      type: string
+      pattern: '^(ax2012|d365fo|sap_ecc|sap_s4|custom_[a-z0-9_]{1,40})$'
+      description: ax2012, d365fo, sap_ecc, sap_s4, or custom_<name> (lowercase letters, digits and underscores, 1 to 40 after custom_) for a customer's own ERP.
+    ConnectionProfile:
+      type: object
+      required: [id, name, kind, sourceSystem, config, secretSet, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 80 }
+        kind: { type: string, enum: [sql, rest, file] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
+        config: { $ref: '#/components/schemas/ConnectionConfig' }
+        secretSet: { type: boolean, description: Whether a secret is stored. The secret itself is never returned. }
+        secretUpdatedAt: { type: string, format: date-time, description: When the secret was last set. }
+        status: { type: string, enum: [active, disabled] }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ConnectionConfig:
+      type: object
+      additionalProperties: false
+      description: Non-secret settings only. The allowed keys depend on the kind; a key that looks like a secret is refused with 400 and the value is set with PUT .../secret.
+      properties:
+        driver: { type: string, enum: [postgres], description: sql. The only driver in this build. }
+        host: { type: string, maxLength: 253, description: sql. A host name or IP address. }
+        port: { type: integer, minimum: 1, maximum: 65535, description: sql. Default 5432. }
+        database: { type: string, maxLength: 255, description: sql. }
+        user: { type: string, maxLength: 255, description: sql. The password is the secret. }
+        sslmode: { type: string, enum: [disable, require, verify-ca, verify-full], description: sql. Default require. }
+        baseUrl: { type: string, maxLength: 255, description: "rest. https URL (http only without authentication) with no credentials, query or fragment." }
+        authType: { type: string, enum: [none, basic, bearer, header], description: "rest. The secret is the password, token or header value." }
+        username: { type: string, maxLength: 255, description: "rest, authType basic." }
+        headerName: { type: string, maxLength: 64, description: "rest, authType header." }
+        pagingStyle: { type: string, enum: [none, offset, page, cursor, link], description: rest. }
+        probePath: { type: string, maxLength: 255, description: "rest. Path appended to baseUrl for the test request, for example /health." }
+        dropDir: { type: string, maxLength: 255, description: file. A clean relative path under the operator-mounted drop root. }
+        format: { type: string, enum: [csv, tsv, json, jsonl], description: file. }
+        delimiter: { type: string, minLength: 1, maxLength: 1, description: file. }
+        filePattern: { type: string, maxLength: 100, description: "file. Name pattern with * and ?." }
+        codepage: { type: string, maxLength: 255, description: "An IANA character set name such as utf-8, windows-1252 or iso-8859-1." }
+        timezone: { type: string, maxLength: 255, description: An IANA zone name such as Europe/Berlin. }
+    CreateConnectionProfile:
+      type: object
+      additionalProperties: false
+      required: [name, kind, sourceSystem, config]
+      properties:
+        name: { type: string, maxLength: 80 }
+        kind: { type: string, enum: [sql, rest, file] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
+        config: { $ref: '#/components/schemas/ConnectionConfig' }
+    UpdateConnectionProfile:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        name: { type: string, maxLength: 80 }
+        status: { type: string, enum: [active, disabled] }
+        config: { $ref: '#/components/schemas/ConnectionConfig' }
+    SetConnectionSecret:
+      type: object
+      additionalProperties: false
+      required: [secret]
+      properties:
+        secret: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: "The password, token or key value." }
+    ConnectionTestResult:
+      type: object
+      required: [ok, kind, durationMs]
+      properties:
+        ok: { type: boolean }
+        kind: { type: string, enum: [sql, rest, file] }
+        durationMs: { type: integer }
+        failure:
+          type: object
+          required: [code, message]
+          description: Present when ok is false. Codes are MIG-EGRESS-DENIED, MIG-CONNECT-FAILED, MIG-AUTH-FAILED, MIG-PROBE-FAILED, MIG-SECRET-MISSING, MIG-DROP-NOT-CONFIGURED and MIG-DROP-MISSING.
+          properties:
+            code: { type: string }
+            message: { type: string }
+        serverVersion: { type: string, description: sql. }
+        schemas: { type: array, items: { type: string }, description: "sql. Non-system schemas, at most 50." }
+        tables:
+          type: array
+          description: sql. At most 200 tables; columns are listed for the first 20.
+          items:
+            type: object
+            required: [schema, name, type]
+            properties:
+              schema: { type: string }
+              name: { type: string }
+              type: { type: string }
+              columns:
+                type: array
+                items:
+                  type: object
+                  required: [name, type, nullable]
+                  properties:
+                    name: { type: string }
+                    type: { type: string }
+                    nullable: { type: boolean }
+        httpStatus: { type: integer, description: rest. The status the endpoint answered. }
+        fileCount: { type: integer, description: file. Files matching filePattern in the drop directory. }
+        files:
+          type: array
+          description: file. The first 20 matching files.
+          items:
+            type: object
+            required: [name, bytes]
+            properties:
+              name: { type: string }
+              bytes: { type: integer }
+        truncated: { type: boolean, description: True when a list was cut at its limit. }
     MigrationProject:
       type: object
       required: [id, name, projectType, status, version, createdBy, createdAt, updatedAt]
@@ -590,12 +825,13 @@ components:
         id: { type: string, format: uuid }
         name: { type: string, maxLength: 80 }
         projectType: { type: string, enum: [migrate, copy, config_package] }
-        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4], description: Migrate projects only. }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem', description: Migrate projects only. }
         sourceLegalEntityId: { type: string, format: uuid, description: Copy projects only. }
-        targetLegalEntityId: { type: string, format: uuid, description: Copy projects only. }
+        targetLegalEntityId: { type: string, format: uuid, description: "The legal entity a copy project copies into, or the legal entity a migrate project lands its data in." }
+        connectionProfileId: { type: string, format: uuid, description: Migrate projects only. The connection profile the project reads from. }
         status: { type: string, enum: [active, archived] }
         cutoverAt: { type: string, format: date-time }
-        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16); stored, not yet run by a scheduler. }
+        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression (numbers, ranges, lists and steps; no names or macros) for recurring incremental imports, at least 15 minutes between runs (FR-10.16); stored, not yet run by a scheduler." }
         version: { type: integer, minimum: 1 }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
@@ -608,9 +844,10 @@ components:
       properties:
         name: { type: string, maxLength: 80 }
         projectType: { type: string, enum: [migrate, copy, config_package] }
-        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        sourceSystem: { $ref: '#/components/schemas/SourceSystem' }
         sourceLegalEntityId: { type: string, format: uuid }
-        targetLegalEntityId: { type: string, format: uuid }
+        targetLegalEntityId: { type: string, format: uuid, description: "Required for a copy project (different from the source); optional for a migrate project, which has no source legal entity." }
+        connectionProfileId: { type: string, format: uuid, description: Migrate projects only. The connection profile the project reads from; it must be active and have the same source system. }
         cutoverAt: { type: string, format: date-time }
         scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs (FR-10.16). }
     UpdateMigrationProject:
@@ -621,14 +858,15 @@ components:
         version: { type: integer, minimum: 1 }
         name: { type: string, maxLength: 80 }
         status: { type: string, enum: [active, archived] }
-        cutoverAt: { type: string, description: RFC 3339 timestamp, or empty to clear. }
-        scheduleCron: { type: string, maxLength: 100, description: Five-field cron expression with at least 15 minutes between runs, or empty to clear. }
+        cutoverAt: { type: string, description: "RFC 3339 timestamp, or empty to clear." }
+        scheduleCron: { type: string, maxLength: 100, description: "Five-field cron expression with at least 15 minutes between runs, or empty to clear." }
+        connectionProfileId: { type: string, description: "Attaches a connection profile (a UUID, active, with the project's source system) to a migrate project; empty detaches it." }
     KeyRewrite:
       type: object
       additionalProperties: false
       required: [field, from, to]
       properties:
-        field: { type: string, maxLength: 100, description: A field name, or "@key" for the record's own natural key. }
+        field: { type: string, maxLength: 100, description: "A field name, or \"@key\" for the record's own natural key." }
         from: { type: string, minLength: 1, maxLength: 100, description: A value of the field starting with this text has it replaced. }
         to: { type: string, maxLength: 100 }
     KeyRewriteRules:
@@ -703,7 +941,7 @@ components:
                   name: { type: string }
                   entity: { type: string }
                   records: { type: array, items: { type: object, required: [key, body], properties: { key: { type: string }, body: { type: object } } } }
-        signature: { type: string, format: byte, description: Base64 signature over the canonical manifest (version, schemaVersion and file hashes). }
+        signature: { type: string, format: byte, description: "Base64 signature over the canonical manifest (version, schemaVersion and file hashes)." }
     ManifestFile:
       type: object
       required: [name, sha256, dependsOn]

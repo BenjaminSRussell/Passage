@@ -178,10 +178,43 @@ describe("new project", () => {
     expect(screen.queryByLabelText("Source legal entity id")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AX customers" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-    expect(await screen.findByText("Choose the legacy source system.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the source system.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Source system"), { target: { value: "ax2012" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText(/already exists \(MIG-PROJECT-NAME-EXISTS\)/)).toBeInTheDocument();
+  });
+});
+
+describe("new project with a custom source system", () => {
+  it("builds custom_<name>, offers only matching connections and posts them with the target legal entity", async () => {
+    const acme = { id: "0195f0a0-0000-7000-8000-0000000000c1", name: "Acme ERP", kind: "sql", sourceSystem: "custom_acme", config: {}, secretSet: true, status: "active", version: 1, createdBy: "u", createdAt: "2027-01-01T00:00:00Z", updatedAt: "2027-01-01T00:00:00Z" };
+    const other = { ...acme, id: "0195f0a0-0000-7000-8000-0000000000c2", name: "AX box", sourceSystem: "ax2012" };
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, { ...axProject, sourceSystem: "custom_acme", connectionProfileId: acme.id });
+      if (url.pathname.endsWith("/connection-profiles")) return json(200, { items: [acme, other] });
+      return json(200, axProject);
+    };
+    renderAt("/migration/projects/new");
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "migrate" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme migration" } });
+    fireEvent.change(screen.getByLabelText("Source system"), { target: { value: "custom" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText(/Name the custom system/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Custom system name"), { target: { value: "Acme" } });
+    await screen.findByRole("option", { name: "Acme ERP" });
+    expect(screen.queryByRole("option", { name: "AX box" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Connection/), { target: { value: acme.id } });
+    fireEvent.change(screen.getByLabelText(/^Target legal entity id/), { target: { value: LE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      name: "Acme migration",
+      projectType: "migrate",
+      sourceSystem: "custom_acme",
+      targetLegalEntityId: LE_B,
+      connectionProfileId: acme.id,
+    });
   });
 });
 

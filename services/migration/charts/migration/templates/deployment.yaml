@@ -16,8 +16,26 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.fieldCrypt.keysSecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
+      {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim }}
+      volumes:
+{{- if .Values.fieldCrypt.keysSecret }}
+        - name: field-crypt
+          secret:
+            secretName: {{ .Values.fieldCrypt.keysSecret }}
+            defaultMode: 0440
+{{- end }}
+{{- if .Values.dropRoot.existingClaim }}
+        - name: drop-root
+          persistentVolumeClaim:
+            claimName: {{ .Values.dropRoot.existingClaim }}
+            readOnly: true
+{{- end }}
+      {{- end }}
       containers:
         - name: migration
           image: {{ include "migration.image" . | quote }}
@@ -35,6 +53,26 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            # Operator allowlist for private addresses a connection profile may reach (CIDRs or host:port). Loopback,
+            # link-local and metadata addresses stay denied whatever it says; tenants cannot change it.
+            - name: MIG_EGRESS_ALLOW
+              value: {{ concat .Values.egress.allowCidrs .Values.egress.allowHostPorts | join "," | quote }}
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
+            - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }
+{{- end }}
+{{- if .Values.dropRoot.path }}
+            - { name: MIG_DROP_ROOT, value: {{ .Values.dropRoot.path | quote }} }
+{{- end }}
+          {{- if or .Values.fieldCrypt.keysSecret .Values.dropRoot.existingClaim }}
+          volumeMounts:
+{{- if .Values.fieldCrypt.keysSecret }}
+            - { name: field-crypt, mountPath: /var/run/passage/field-crypt, readOnly: true }
+{{- end }}
+{{- if .Values.dropRoot.existingClaim }}
+            - { name: drop-root, mountPath: {{ .Values.dropRoot.path | quote }}, readOnly: true }
+{{- end }}
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

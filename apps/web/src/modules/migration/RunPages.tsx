@@ -4,7 +4,7 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { createRun, describeProblem, getRun, getSpec, listLedgerPage, listProjects, listRunsPage, listSpecsPage, listTemplatesPage, newKey, PICKER_LIMIT, rerunRun, type LedgerRow, type MappingSpec, type MigrationRun, type Problem, type RowIssue } from "./api/client";
-import { formatDateTime, MODE_LABELS, MODES, RUN_STATUSES, SOURCE_LABELS, SOURCE_SYSTEMS } from "./domain";
+import { formatDateTime, MODE_LABELS, MODES, RUN_STATUSES, sourceLabel, SOURCE_SYSTEMS } from "./domain";
 import styles from "./pages.module.css";
 import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
@@ -15,7 +15,7 @@ export const DUTY_RUN = "migration.run";
 const columns: DataTableColumn<MigrationRun>[] = [
   { key: "createdAt", header: "Started", render: (row) => formatDateTime(row.createdAt) },
   { key: "entity", header: "Entity", mono: true },
-  { key: "sourceSystem", header: "Source", render: (row) => SOURCE_LABELS[row.sourceSystem] ?? row.sourceSystem },
+  { key: "sourceSystem", header: "Source", render: (row) => sourceLabel(row.sourceSystem) },
   { key: "mode", header: "Mode", render: (row) => `${MODE_LABELS[row.mode] ?? row.mode}${row.dryRun ? " (dry run)" : ""}` },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
   { key: "extracted", header: "Extracted", align: "end", render: (row) => row.counts.extracted },
@@ -226,9 +226,9 @@ export function NewRunPage() {
             <FormField id="run-source" label="Source system" hint={chosenProject ? "Set by the project." : undefined}>
               {(control) => (
                 <Select {...control} value={effectiveSource} disabled={Boolean(chosenProject)} onChange={(event) => setSourceSystem(event.target.value as MigrationRun["sourceSystem"])}>
-                  {SOURCE_SYSTEMS.map((s) => (
+                  {[...SOURCE_SYSTEMS, ...(SOURCE_SYSTEMS.includes(effectiveSource as never) ? [] : [effectiveSource])].map((s) => (
                     <option key={s} value={s}>
-                      {SOURCE_LABELS[s]}
+                      {sourceLabel(s)}
                     </option>
                   ))}
                 </Select>
@@ -383,7 +383,7 @@ export function RunDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`${run.entity} migration`}
-        description={`${SOURCE_LABELS[run.sourceSystem] ?? run.sourceSystem}, ${MODE_LABELS[run.mode] ?? run.mode}${run.dryRun ? ", dry run" : ""}. Started ${formatDateTime(run.createdAt)}.`}
+        description={`${sourceLabel(run.sourceSystem)}, ${MODE_LABELS[run.mode] ?? run.mode}${run.dryRun ? ", dry run" : ""}. Started ${formatDateTime(run.createdAt)}.`}
         actions={
           <>
             <StatusPill status={run.status} />

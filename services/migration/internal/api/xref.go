@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
 )
 
@@ -64,8 +64,8 @@ func (a *API) listXref(w http.ResponseWriter, r *http.Request) {
 		limit = defaultPage
 	}
 	bad := map[string]string{}
-	if v := q.Get("sourceSystem"); v != "" && !slices.Contains(sourceSystems, v) {
-		bad["sourceSystem"] = "must be one of ax2012, d365fo, sap_ecc, sap_s4"
+	if v := q.Get("sourceSystem"); v != "" && !domain.ValidSourceSystem(v) {
+		bad["sourceSystem"] = domain.SourceSystemHint
 	}
 	if v := q.Get("targetId"); v != "" && !ids.Valid(v) {
 		bad["targetId"] = "must be a Passage id (UUID)"

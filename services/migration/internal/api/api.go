@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -46,7 +47,6 @@ const (
 )
 
 var (
-	sourceSystems    = []string{"ax2012", "d365fo", "sap_ecc", "sap_s4"}
 	modes            = []string{"rehearsal", "cutover", "delta"}
 	ErrNotConfigured = errors.New("migration backend is not configured")
 )
@@ -65,6 +65,8 @@ type API struct {
 	store    store.Store
 	backends BackendFactory
 	packages PackageFactory
+	keys     *fieldcrypt.Keys
+	prober   Prober
 	runs     atomic.Int64
 	failed   atomic.Int64
 	loaded   atomic.Int64
@@ -155,6 +157,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerXref(r)
 	a.registerPackages(r)
 	a.registerProjects(r)
+	a.registerConnections(r)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -644,8 +647,8 @@ func sameRequest(a, b store.Run) bool {
 
 func validateRun(req createRunRequest) map[string]string {
 	fields := map[string]string{}
-	if !slices.Contains(sourceSystems, req.SourceSystem) {
-		fields["sourceSystem"] = "must be one of ax2012, d365fo, sap_ecc, sap_s4"
+	if !domain.ValidSourceSystem(req.SourceSystem) {
+		fields["sourceSystem"] = domain.SourceSystemHint
 	}
 	if !slices.Contains(modes, req.Mode) {
 		fields["mode"] = "must be one of rehearsal, cutover, delta"

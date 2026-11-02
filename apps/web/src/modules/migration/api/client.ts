@@ -24,7 +24,9 @@ export function describeProblem(error: unknown): Problem {
   return { code: "COM-0001", message: error instanceof Error ? error.message : "Request failed" };
 }
 
-export type SourceSystem = "ax2012" | "d365fo" | "sap_ecc" | "sap_s4";
+export type LegacySourceSystem = "ax2012" | "d365fo" | "sap_ecc" | "sap_s4";
+/** A legacy system, or custom_<name> for a customer's own ERP. */
+export type SourceSystem = LegacySourceSystem | `custom_${string}`;
 export type RunMode = "rehearsal" | "cutover" | "delta";
 export type RunStatus = "succeeded" | "partial" | "failed";
 
@@ -291,6 +293,8 @@ export interface MigrationProject {
   sourceSystem?: SourceSystem;
   sourceLegalEntityId?: string;
   targetLegalEntityId?: string;
+  /** The connection profile a migrate project reads from. */
+  connectionProfileId?: string;
   status: ProjectStatus;
   cutoverAt?: string;
   scheduleCron?: string;
@@ -306,6 +310,7 @@ export interface CreateProjectInput {
   sourceSystem?: SourceSystem;
   sourceLegalEntityId?: string;
   targetLegalEntityId?: string;
+  connectionProfileId?: string;
   cutoverAt?: string;
   scheduleCron?: string;
 }
@@ -369,3 +374,69 @@ export async function previewKeyRewrite(id: string, keys: string[], rules: KeyRe
   });
   return body.items;
 }
+
+export type ConnectionKind = "sql" | "rest" | "file";
+export type ConnectionStatus = "active" | "disabled";
+
+export interface ConnectionProfile {
+  id: string;
+  name: string;
+  kind: ConnectionKind;
+  sourceSystem: SourceSystem;
+  /** Non-secret settings only. */
+  config: Record<string, string | number>;
+  /** Whether a secret is stored. The secret itself is never returned. */
+  secretSet: boolean;
+  secretUpdatedAt?: string;
+  status: ConnectionStatus;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateConnectionInput {
+  name: string;
+  kind: ConnectionKind;
+  sourceSystem: SourceSystem;
+  config: Record<string, string | number>;
+}
+
+export interface ConnectionEdit {
+  name?: string;
+  status?: ConnectionStatus;
+  config?: Record<string, string | number>;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  kind: ConnectionKind;
+  durationMs: number;
+  failure?: { code: string; message: string };
+  serverVersion?: string;
+  schemas?: string[];
+  tables?: { schema: string; name: string; type: string; columns?: { name: string; type: string; nullable: boolean }[] }[];
+  httpStatus?: number;
+  fileCount?: number;
+  files?: { name: string; bytes: number }[];
+  truncated?: boolean;
+}
+
+export const listConnections = (filter: { kind?: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) => {
+  const { limit = 50, ...rest } = filter;
+  return page<ConnectionProfile>(`/connection-profiles${query({ ...rest, limit: String(limit) })}`, signal);
+};
+
+export const getConnection = (id: string, signal?: AbortSignal) => send<ConnectionProfile>(`/connection-profiles/${encodeURIComponent(id)}`, {}, signal);
+
+export const createConnection = (input: CreateConnectionInput, key: string = newKey()) =>
+  send<ConnectionProfile>("/connection-profiles", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+
+export const updateConnection = (id: string, version: number, edit: ConnectionEdit) =>
+  send<ConnectionProfile>(`/connection-profiles/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ version, ...edit }) });
+
+/** Sets the profile's one secret. Write-only: the answer is the profile, which says only that a secret is set. */
+export const setConnectionSecret = (id: string, secret: string) =>
+  send<ConnectionProfile>(`/connection-profiles/${encodeURIComponent(id)}/secret`, { method: "PUT", body: JSON.stringify({ secret }) });
+
+export const testConnection = (id: string) => send<ConnectionTestResult>(`/connection-profiles/${encodeURIComponent(id)}:test`, { method: "POST" });

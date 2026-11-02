@@ -41,6 +41,7 @@ type Project struct {
 	SourceSystem        string     `json:"sourceSystem,omitempty"`
 	SourceLegalEntityID string     `json:"sourceLegalEntityId,omitempty"`
 	TargetLegalEntityID string     `json:"targetLegalEntityId,omitempty"`
+	ConnectionProfileID string     `json:"connectionProfileId,omitempty"`
 	Status              string     `json:"status"`
 	CutoverAt           *time.Time `json:"cutoverAt,omitempty"`
 	ScheduleCron        string     `json:"scheduleCron,omitempty"`
@@ -82,7 +83,7 @@ func versionConflict(current int) error {
 
 func sameProject(a, b Project) bool {
 	return a.Name == b.Name && a.Type == b.Type && a.SourceSystem == b.SourceSystem && a.SourceLegalEntityID == b.SourceLegalEntityID &&
-		a.TargetLegalEntityID == b.TargetLegalEntityID && a.ScheduleCron == b.ScheduleCron && sameTime(a.CutoverAt, b.CutoverAt)
+		a.TargetLegalEntityID == b.TargetLegalEntityID && a.ConnectionProfileID == b.ConnectionProfileID && a.ScheduleCron == b.ScheduleCron && sameTime(a.CutoverAt, b.CutoverAt)
 }
 
 func sameTime(a, b *time.Time) bool {
@@ -93,11 +94,11 @@ func sameTime(a, b *time.Time) bool {
 }
 
 const projectColumns = `id, name, project_type, coalesce(source_system, ''), coalesce(source_legal_entity_id::text, ''), coalesce(target_legal_entity_id::text, ''),
-	status, cutover_at, coalesce(schedule_cron, ''), version, created_by, created_at, updated_at`
+	coalesce(connection_profile_id::text, ''), status, cutover_at, coalesce(schedule_cron, ''), version, created_by, created_at, updated_at`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.SourceSystem, &p.SourceLegalEntityID, &p.TargetLegalEntityID, &p.Status, &p.CutoverAt, &p.ScheduleCron,
+	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.SourceSystem, &p.SourceLegalEntityID, &p.TargetLegalEntityID, &p.ConnectionProfileID, &p.Status, &p.CutoverAt, &p.ScheduleCron,
 		&p.Version, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
@@ -107,6 +108,11 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func isForeignKeyViolation(err error, constraint string) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23503" && pg.ConstraintName == constraint
 }
 
 func isUniqueViolation(err error, constraint string) bool {
@@ -138,12 +144,12 @@ func (s *Postgres) SaveProject(ctx context.Context, in Project, idempotencyKey s
 		// A concurrent request with the same key may insert first: the key conflict is skipped and its row replayed.
 		var err error
 		saved, err = scanProject(tx.QueryRow(ctx, `insert into migration.project
-			(tenant_id, id, name, project_type, source_system, source_legal_entity_id, target_legal_entity_id, status, cutover_at, schedule_cron, created_by, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			(tenant_id, id, name, project_type, source_system, source_legal_entity_id, target_legal_entity_id, connection_profile_id, status, cutover_at, schedule_cron, created_by, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+projectColumns,
 			p.TenantID, in.ID, in.Name, in.Type, nullIfEmpty(in.SourceSystem), nullIfEmpty(in.SourceLegalEntityID), nullIfEmpty(in.TargetLegalEntityID),
-			in.Status, in.CutoverAt, nullIfEmpty(in.ScheduleCron), p.UserID, nullIfEmpty(idempotencyKey)))
+			nullIfEmpty(in.ConnectionProfileID), in.Status, in.CutoverAt, nullIfEmpty(in.ScheduleCron), p.UserID, nullIfEmpty(idempotencyKey)))
 		if errors.Is(err, pgx.ErrNoRows) {
 			prior, err := scanProject(tx.QueryRow(ctx, `select `+projectColumns+` from migration.project where tenant_id = $1 and idempotency_key = $2`, p.TenantID, idempotencyKey))
 			if err != nil {
@@ -158,6 +164,9 @@ func (s *Postgres) SaveProject(ctx context.Context, in Project, idempotencyKey s
 		created = err == nil
 		return err
 	})
+	if isForeignKeyViolation(err, "project_connection_profile_fk") {
+		return Project{}, false, ConnectionUnknown()
+	}
 	if isUniqueViolation(err, "project_tenant_id_name_key") {
 		// The name can collide with a concurrent request carrying the same key that committed first: replay it.
 		if idempotencyKey != "" {
@@ -260,10 +269,13 @@ func (s *Postgres) UpdateProject(ctx context.Context, id string, version int, ed
 		if err := edit(&cur); err != nil {
 			return err
 		}
-		out, err = scanProject(tx.QueryRow(ctx, `update migration.project set name = $3, status = $4, cutover_at = $5, schedule_cron = $6, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+projectColumns, p.TenantID, id, cur.Name, cur.Status, cur.CutoverAt, nullIfEmpty(cur.ScheduleCron)))
+		out, err = scanProject(tx.QueryRow(ctx, `update migration.project set name = $3, status = $4, cutover_at = $5, schedule_cron = $6, connection_profile_id = $7, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+projectColumns, p.TenantID, id, cur.Name, cur.Status, cur.CutoverAt, nullIfEmpty(cur.ScheduleCron), nullIfEmpty(cur.ConnectionProfileID)))
 		return err
 	})
+	if isForeignKeyViolation(err, "project_connection_profile_fk") {
+		return Project{}, ConnectionUnknown()
+	}
 	if isUniqueViolation(err, "project_tenant_id_name_key") {
 		return Project{}, projectNameUsed()
 	}

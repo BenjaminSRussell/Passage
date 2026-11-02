@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-var testSystems = []string{"ax2012", "d365fo", "sap_ecc", "sap_s4"}
-
 func isID(s string) bool { return strings.HasPrefix(s, "le-") }
 
 func TestValidateProject(t *testing.T) {
@@ -30,7 +28,23 @@ func TestValidateProject(t *testing.T) {
 		{"copy same entity", func(p *Project) { p.TargetLegalEntityID = p.SourceLegalEntityID }, "targetLegalEntityId"},
 		{"copy with legacy system", func(p *Project) { p.SourceSystem = "ax2012" }, "sourceSystem"},
 		{"migrate without system", func(p *Project) { *p = Project{Name: "AX", Type: ProjectMigrate, Status: ProjectActive} }, "sourceSystem"},
-		{"migrate with legal entity", func(p *Project) {
+		{"valid migrate with target legal entity and profile", func(p *Project) {
+			*p = Project{Name: "AX", Type: ProjectMigrate, SourceSystem: "ax2012", TargetLegalEntityID: "le-2", ConnectionProfileID: "le-9", Status: ProjectActive}
+		}, ""},
+		{"valid custom source system", func(p *Project) {
+			*p = Project{Name: "Acme", Type: ProjectMigrate, SourceSystem: "custom_acme", Status: ProjectActive}
+		}, ""},
+		{"custom system with uppercase", func(p *Project) {
+			*p = Project{Name: "Acme", Type: ProjectMigrate, SourceSystem: "custom_Acme", Status: ProjectActive}
+		}, "sourceSystem"},
+		{"migrate bad target legal entity", func(p *Project) {
+			*p = Project{Name: "AX", Type: ProjectMigrate, SourceSystem: "ax2012", TargetLegalEntityID: "x", Status: ProjectActive}
+		}, "targetLegalEntityId"},
+		{"copy with profile", func(p *Project) { p.ConnectionProfileID = "le-9" }, "connectionProfileId"},
+		{"migrate bad profile id", func(p *Project) {
+			*p = Project{Name: "AX", Type: ProjectMigrate, SourceSystem: "ax2012", ConnectionProfileID: "x", Status: ProjectActive}
+		}, "connectionProfileId"},
+		{"migrate with source legal entity", func(p *Project) {
 			*p = Project{Name: "AX", Type: ProjectMigrate, SourceSystem: "ax2012", SourceLegalEntityID: "le-1", Status: ProjectActive}
 		}, "sourceLegalEntityId"},
 		{"unknown system", func(p *Project) {
@@ -50,7 +64,7 @@ func TestValidateProject(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := copyOK
 			tc.edit(&p)
-			bad := ValidateProject(p, testSystems, isID)
+			bad := ValidateProject(p, isID)
 			if tc.field == "" && len(bad) != 0 {
 				t.Fatalf("unexpected %v", bad)
 			}
