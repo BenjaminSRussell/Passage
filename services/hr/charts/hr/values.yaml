@@ -29,6 +29,13 @@ config:
   actionSweepTenantIds: ""
   actionSweepInterval: "15m"
 
+# CronJob running `hr reseal-pii <tenant-id>...` (#335). Idempotent: a tenant with nothing legacy logs rewritten=0.
+# Tenants are listed because the app role cannot enumerate them. Off by default.
+reseal:
+  enabled: false
+  schedule: "17 3 * * *"
+  tenantIds: []
+
 # Requisitions without a requisitionNumber take the next number of the REQ sequence from numbering (#266).
 numberingUrl: ""
 serviceIdentity:

@@ -78,7 +78,18 @@ channels:
     messages:
       checklistChanged:
         $ref: "#/components/messages/ChecklistChanged"
+  reviewChanged:
+    address: passage.hr.review
+    messages:
+      reviewChanged:
+        $ref: "#/components/messages/ReviewChanged"
 operations:
+  publishReviewChanged:
+    action: send
+    channel:
+      $ref: "#/channels/reviewChanged"
+    messages:
+      - $ref: "#/channels/reviewChanged/messages/reviewChanged"
   publishIncidentChanged:
     action: send
     channel:
@@ -277,7 +288,22 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ChecklistChangedData"
+    ReviewChanged:
+      name: dev.passage.hr.review.changed.v1
+      description: Published in the same transaction as a review is opened (draft), the worker submits the self-assessment (self_submitted) or the manager signs off (signed_off) (FR-42.11). Ids, period and status only; no review text.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ReviewChangedData"
   schemas:
+    ReviewChangedData:
+      type: object
+      required: [id, worker_id, status, period_start, period_end]
+      properties:
+        id: {type: string, format: uuid}
+        worker_id: {type: string, format: uuid}
+        status: {type: string, enum: [draft, self_submitted, signed_off]}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
     IncidentChangedData:
       type: object
       description: worker_id, incident_type and outcome are omitted for a privacy case.

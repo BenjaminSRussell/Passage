@@ -1061,3 +1061,17 @@ test_tax_duties_reach_only_their_routes if {
 	data.service_grants.tax.ledger == ["ledger.balance.read"]
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
 }
+
+test_hr_performance_duties_reach_only_their_routes if {
+	allowed("hr.performance.manage", "POST", "/v1/hr/workers/w-1/goals")
+	allowed("hr.performance.manage", "POST", "/v1/hr/reviews/r-1/sign-off")
+	allowed("hr.performance.admin", "GET", "/v1/hr/reviews/r-1")
+	not allowed("hr.performance.manage", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
+	not allowed("hr.performance.manage", "DELETE", "/v1/hr/reviews/r-1")
+	not allowed("hr.performance.manage", "GET", "/v1/hr/workers/w-1/pii")
+	allowed("hr.performance.self", "POST", "/v1/hr/me/reviews/r-1/self-assessment")
+	allowed("hr.performance.self", "GET", "/v1/hr/me/goals")
+	not allowed("hr.performance.self", "POST", "/v1/hr/reviews/r-1/sign-off")
+	not allowed("hr.performance.self", "GET", "/v1/hr/workers/w-1/reviews")
+	not allowed("hr.performance.self", "POST", "/v1/hr/workers/w-1/goals")
+}

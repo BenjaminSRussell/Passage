@@ -46,13 +46,17 @@ var (
 	// ChecklistChanged is written when a checklist is started or completed
 	// (FR-42.19); notifications and MSS consume it.
 	ChecklistChanged = events.Type(Context, "checklist", "changed", 1)
+	// ReviewChanged is written when a review is opened, self-submitted or
+	// signed off (FR-42.11). It carries ids, the period and the status only:
+	// none of the review text.
+	ReviewChanged = events.Type(Context, "review", "changed", 1)
 )
 
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
 	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
 		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, RequisitionChanged,
-		IncidentChanged, LoanedItemChanged, ChecklistChanged}
+		IncidentChanged, LoanedItemChanged, ChecklistChanged, ReviewChanged}
 }
 
 type IncidentChangedData struct {
@@ -77,6 +81,14 @@ type LoanedItemChangedData struct {
 	IssuedOn string  `json:"issued_on"`
 	DueOn    *string `json:"due_on"`
 	ClosedOn *string `json:"closed_on"`
+}
+
+type ReviewChangedData struct {
+	ID          string `json:"id"`
+	WorkerID    string `json:"worker_id"`
+	Status      string `json:"status"`
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
 }
 
 type ChecklistChangedData struct {

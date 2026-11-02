@@ -232,6 +232,34 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 Domain rules that are not yet exposed by an endpoint, but are implemented and
 tested: hierarchy cycle detection (BR-42.7) and the reveal gate (`CheckReveal`).
 
+## What slice 7 does (job skill gaps, goals, reviews)
+
+Job skill profiles: `job_skill_requirement` holds the minimum rating per skill
+for a job, like a position's profile. `GET /v1/hr/jobs/{id}/skill-gaps?asOf=`
+lists, for every worker whose primary position on the date carries the job's
+code (at most 500, `truncated` says more exist), only the unmet requirements;
+`GET /v1/hr/workers/{id}/skill-gap?jobId=` does the same for one worker. A
+skill the worker is not rated on counts as 0. Positions the caller's
+legal-entity scope hides do not contribute workers.
+
+Goals (FR-42.11): a manager (or `hr.performance.admin`) adds a goal for a worker
+(title, description, due date) and sets its status (OPEN, ACHIEVED, CANCELLED)
+and progress percent; ACHIEVED without a percent sets 100. The worker reads
+their goals at `/v1/hr/me/goals`.
+
+Reviews (FR-42.11): one two-step template, no calibration and no rating
+distribution. A manager opens a review for a worker and period (`draft`; one per
+worker and period). The reviewed worker writes the self-assessment
+(achievements, development) at `/v1/hr/me/reviews/{id}/self-assessment`
+(`self_submitted`); the manager then signs off with comments and an optional
+overall rating 1-5 (`signed_off`). Repeating a step with the same content
+changes nothing; out-of-order steps and changed text are HCM-REV-STATE; nobody
+signs off their own review (HCM-REV-SELF). Every step publishes
+`review.changed` with ids, period and status only. A manager acts on their own
+record and their direct reports; `hr.performance.admin` acts on any worker the
+legal-entity scope allows. Goals and reviews carry the legal entity of the
+worker's employment and follow the caller's scope.
+
 ## Run
 
 Configuration is read from the environment and validated at startup:
@@ -272,6 +300,13 @@ go run ./cmd/hr reseal-pii <tenant-id> [<tenant-id>...]   # in a cluster: the hr
 Use it after a fieldcrypt rotation (keep the old key configured until it reports
 `rewritten=0`) and to retire `HR_PII_KEY`: once every tenant reports
 `rewritten=0` and `hr_pii_legacy_opens_total` stays 0, remove `HR_PII_KEY`.
+
+The chart can run it on a schedule: set `reseal.enabled=true`, `reseal.tenantIds`
+(the app role cannot list tenants) and optionally `reseal.schedule` (default
+`17 3 * * *`). The CronJob (`concurrencyPolicy: Forbid`) runs
+`hr reseal-pii <tenant-id>...` with the same secret and the fieldcrypt key file
+the Deployment mounts. Dropping `HR_PII_KEY` from the secret is a manual step
+after the logs show `rewritten=0` for every tenant (see NOT-IMPLEMENTED.md).
 
 Opens are observable on `/metrics`: `hr_pii_legacy_opens_total` counts values
 that needed `HR_PII_KEY`, `hr_pii_open_failures_total` values that opened under
@@ -374,10 +409,21 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST | `/v1/hr/workers/{id}/certifications` | HcmWorkerMaintain |
 | GET | `/v1/hr/workers/{id}/certifications?asOf=` | HcmWorkerInquire |
 | GET | `/v1/hr/certifications/expiring?withinDays=&asOf=&limit=&cursor=` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}/skill-gap?positionId=` | HcmOrgInquire |
+| GET | `/v1/hr/workers/{id}/skill-gap?positionId=` or `?jobId=` (exactly one) | HcmOrgInquire |
 | GET | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgInquire |
 | POST | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgMaintain |
 | DELETE | `/v1/hr/positions/{id}/skill-requirements/{skillCode}` | HcmOrgMaintain |
+| GET | `/v1/hr/jobs/{id}/skill-requirements` | HcmOrgInquire |
+| POST | `/v1/hr/jobs/{id}/skill-requirements` | HcmOrgMaintain |
+| DELETE | `/v1/hr/jobs/{id}/skill-requirements/{skillCode}` | HcmOrgMaintain |
+| GET | `/v1/hr/jobs/{id}/skill-gaps?asOf=` | HcmOrgInquire |
+| POST / GET | `/v1/hr/workers/{id}/goals` | hr.performance.manage (or .admin) |
+| POST | `/v1/hr/goals/{id}/progress` | hr.performance.manage (or .admin) |
+| POST / GET | `/v1/hr/workers/{id}/reviews` | hr.performance.manage (or .admin) |
+| GET | `/v1/hr/reviews/{id}` | hr.performance.manage (or .admin) |
+| POST | `/v1/hr/reviews/{id}/sign-off` | hr.performance.manage (or .admin) |
+| GET | `/v1/hr/me/goals`, `/v1/hr/me/reviews` | hr.performance.self |
+| POST | `/v1/hr/me/reviews/{id}/self-assessment` | hr.performance.self |
 | POST | `/v1/hr/courses` | HcmLearningAdmin |
 | GET | `/v1/hr/courses?limit=&cursor=` | EssLearning |
 | GET | `/v1/hr/courses/{id}` | EssLearning |
@@ -463,7 +509,10 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-SKL-NOT-FOUND` | 404 | No skill with that code in the catalog |
 | `HCM-SKL-DUPLICATE` | 409 | Skill code already used in this tenant |
 | `HCM-SKL-STALE` | 409 | The worker has a newer assessment of the skill |
-| `HCM-SKL-REQ-NOT-FOUND` | 404 | The position does not require that skill |
+| `HCM-SKL-REQ-NOT-FOUND` | 404 | The position or job does not require that skill |
+| `HCM-GOAL-NOT-FOUND` / `HCM-REV-NOT-FOUND` | 404 | Unknown goal or review, or one outside the caller's team or legal-entity scope |
+| `HCM-REV-STATE` | 409 | Review step out of order (sign-off before the self-assessment, or a changed text after submit) |
+| `HCM-REV-SELF` | 403 | A worker cannot sign off their own review |
 | `HCM-CERT-DUPLICATE` | 409 | The worker already has a certificate with that code and issue date |
 | `HCM-CRS-001` | 422 | The session and its waitlist are full |
 | `HCM-CRS-002` | warning | The course needs manager approval; returned in `warnings` with the REQUESTED registration |
@@ -504,7 +553,7 @@ internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql, 0008_incidents_loans_checklists.sql, 0009_questionnaires.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql, 0008_incidents_loans_checklists.sql, 0009_questionnaires.sql, 0010_jobs_compensation_actions.sql, 0011_recruitment_comp_cycles.sql, 0012_performance.sql (applied in order by dbx.Migrate)
 testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
 events/asyncapi.yaml  AsyncAPI 3 for the eight events published

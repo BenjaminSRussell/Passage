@@ -1072,6 +1072,25 @@
       {"resource": "/v1/hr/questionnaires/schedules", "methods": ["POST"]},
       {"resource": "/v1/hr/questionnaires/schedules/*/results", "methods": ["GET"]}
     ]},
+    "hr.performance.manage": {"permissions": [
+      {"resource": "/v1/hr/workers/*/goals", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/goals/*/progress", "methods": ["POST"]},
+      {"resource": "/v1/hr/workers/*/reviews", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/reviews/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/reviews/*/sign-off", "methods": ["POST"]}
+    ]},
+    "hr.performance.admin": {"permissions": [
+      {"resource": "/v1/hr/workers/*/goals", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/goals/*/progress", "methods": ["POST"]},
+      {"resource": "/v1/hr/workers/*/reviews", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/reviews/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/reviews/*/sign-off", "methods": ["POST"]}
+    ]},
+    "hr.performance.self": {"permissions": [
+      {"resource": "/v1/hr/me/goals", "methods": ["GET"]},
+      {"resource": "/v1/hr/me/reviews", "methods": ["GET"]},
+      {"resource": "/v1/hr/me/reviews/*/self-assessment", "methods": ["POST"]}
+    ]},
     "HcmSetupAdmin": {"permissions": [
       {"resource": "/v1/hr/candidates/purge", "methods": ["POST"]},
       {"resource": "/v1/hr/retention-policies", "methods": ["GET"]},

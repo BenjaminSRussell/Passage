@@ -1270,7 +1270,15 @@ paths:
         - $ref: "#/components/parameters/WorkerId"
         - name: positionId
           in: query
-          required: true
+          required: false
+          description: Compare with a position's profile. Give exactly one of positionId or jobId.
+          schema:
+            type: string
+            format: uuid
+        - name: jobId
+          in: query
+          required: false
+          description: Compare with a job's profile. Give exactly one of positionId or jobId.
           schema:
             type: string
             format: uuid
@@ -1288,7 +1296,7 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
-          description: HCM-WRK-NOT-FOUND or HCM-POS-NOT-FOUND
+          description: HCM-WRK-NOT-FOUND, HCM-POS-NOT-FOUND or HCM-JOB-NOT-FOUND
           content:
             application/problem+json:
               schema:
@@ -1372,6 +1380,357 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           description: HCM-POS-NOT-FOUND or HCM-SKL-REQ-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/jobs/{id}/skill-requirements:
+    get:
+      operationId: listJobSkillRequirements
+      summary: A job's skill profile by skill code
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSkillRequirementList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: setJobSkillRequirement
+      summary: Set or replace the minimum rating a job needs in a skill (FR-42.18)
+      description: Replaces an earlier minimum for the same skill, so a retry is safe without an Idempotency-Key.
+      x-passage-duty: HcmOrgMaintain
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSkillRequirementRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSkillRequirement"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-SKL-RATING (minimum outside the skill's scale)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/jobs/{id}/skill-requirements/{skillCode}:
+    delete:
+      operationId: removeJobSkillRequirement
+      summary: Drop a skill from a job's profile
+      x-passage-duty: HcmOrgMaintain
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - name: skillCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/jobs/{id}/skill-gaps:
+    get:
+      operationId: jobSkillGaps
+      summary: Skill gaps of every worker who holds the job on a date (FR-42.18)
+      description: Workers whose primary position on asOf carries the job's code, at most 500 (truncated says more exist), each with only the unmet requirements.
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/AsOf"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSkillGaps"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/goals:
+    get:
+      operationId: listWorkerGoals
+      summary: A worker's goals, newest first (FR-42.11)
+      description: A manager sees their own and their direct reports' goals; hr.performance.admin sees any worker's.
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createGoal
+      summary: Add a goal for a worker (FR-42.11)
+      description: 201 on create; 200 with the stored goal when the Idempotency-Key was already used.
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/goals/{id}/progress:
+    post:
+      operationId: updateGoalProgress
+      summary: Set a goal's status and progress percent
+      description: Setting the status to ACHIEVED without progressPercent sets 100. Setting the same values again changes nothing.
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/GoalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalProgressRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/reviews:
+    get:
+      operationId: listWorkerReviews
+      summary: A worker's reviews, latest period first (FR-42.11)
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: openReview
+      summary: Open the review of a worker for a period, in draft (FR-42.11)
+      description: 201 on create; 200 with the stored review when one exists for the worker and period or the Idempotency-Key was already used.
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/reviews/{id}:
+    get:
+      operationId: getReview
+      summary: One review
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/reviews/{id}/sign-off:
+    post:
+      operationId: signOffReview
+      summary: Manager sign-off, step two: self_submitted to signed_off (FR-42.11)
+      description: A draft review cannot be signed (HCM-REV-STATE). The reviewed worker cannot sign their own review (403 HCM-REV-SELF). Signing again with the same comments and rating changes nothing.
+      x-passage-duty: hr.performance.manage
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignOffRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-REV-STATE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/me/goals:
+    get:
+      operationId: myGoals
+      summary: The signed-in worker's goals
+      x-passage-duty: hr.performance.self
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/reviews:
+    get:
+      operationId: myReviews
+      summary: The signed-in worker's reviews
+      x-passage-duty: hr.performance.self
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/reviews/{id}/self-assessment:
+    post:
+      operationId: submitSelfAssessment
+      summary: Employee self-assessment, step one: draft to self_submitted (FR-42.11)
+      description: Only the reviewed worker can; any other review is 404. Submitting the same text again changes nothing; the text cannot change once submitted.
+      x-passage-duty: hr.performance.self
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SelfAssessmentRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-REV-STATE
           content:
             application/problem+json:
               schema:
@@ -4281,6 +4640,27 @@ components:
       schema:
         type: string
         format: uuid
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GoalId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReviewId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     AsOf:
       name: asOf
       in: query
@@ -5746,6 +6126,132 @@ components:
           type: integer
           minimum: 1
           maximum: 10
+    JobSkillRequirement:
+      type: object
+      required: [jobId, skillId, skillCode, skillName, scaleMax, minRating]
+      properties:
+        jobId: {type: string, format: uuid}
+        skillId: {type: string, format: uuid}
+        skillCode: {type: string}
+        skillName: {type: string}
+        scaleMax: {type: integer}
+        minRating: {type: integer}
+    JobSkillRequirementList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobSkillRequirement"
+    JobSkillGaps:
+      type: object
+      required: [jobId, jobCode, asOf, items, truncated]
+      properties:
+        jobId: {type: string, format: uuid}
+        jobCode: {type: string}
+        asOf: {type: string, format: date}
+        truncated: {type: boolean}
+        items:
+          type: array
+          items:
+            type: object
+            required: [workerId, personnelNumber, legalName, met, gaps]
+            properties:
+              workerId: {type: string, format: uuid}
+              personnelNumber: {type: string}
+              legalName: {type: string}
+              met: {type: boolean}
+              gaps:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SkillGapRow"
+    GoalRequest:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000}
+        dueOn: {type: string, format: date}
+    GoalProgressRequest:
+      type: object
+      additionalProperties: false
+      description: Give status, progressPercent or both.
+      properties:
+        status: {type: string, enum: [OPEN, ACHIEVED, CANCELLED]}
+        progressPercent: {type: integer, minimum: 0, maximum: 100}
+    Goal:
+      type: object
+      required: [id, workerId, title, status, progressPercent, createdBy, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        workerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: string}
+        dueOn: {type: string, format: date}
+        status: {type: string, enum: [OPEN, ACHIEVED, CANCELLED]}
+        progressPercent: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    GoalList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Goal"
+    ReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [periodStart, periodEnd]
+      properties:
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+    SelfAssessmentRequest:
+      type: object
+      additionalProperties: false
+      required: [achievements]
+      properties:
+        achievements: {type: string, minLength: 1, maxLength: 4000}
+        development: {type: string, maxLength: 4000}
+    SignOffRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        managerComments: {type: string, maxLength: 4000}
+        overallRating: {type: integer, minimum: 1, maximum: 5}
+    Review:
+      type: object
+      required: [id, workerId, periodStart, periodEnd, status, createdBy, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        workerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+        status: {type: string, enum: [draft, self_submitted, signed_off]}
+        selfAchievements: {type: string}
+        selfDevelopment: {type: string}
+        selfSubmittedAt: {type: string, format: date-time}
+        managerComments: {type: string}
+        overallRating: {type: integer}
+        signedOffBy: {type: string}
+        signedOffAt: {type: string, format: date-time}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ReviewList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Review"
     SkillGapRow:
       type: object
       required: [skill, required, actual, delta]
@@ -5762,12 +6268,15 @@ components:
           description: actual - required; negative is a shortfall.
     SkillGap:
       type: object
-      required: [workerId, positionId, met, comparison, gaps]
+      required: [workerId, met, comparison, gaps]
       properties:
         workerId:
           type: string
           format: uuid
         positionId:
+          type: string
+          format: uuid
+        jobId:
           type: string
           format: uuid
         met:
