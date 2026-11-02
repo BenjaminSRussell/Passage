@@ -17,7 +17,7 @@ func (a *API) defaultParameters() domain.Parameters {
 	return domain.Parameters{RAFTolerancePct: a.cfg.RAFTolerancePct, OverConsumptionPct: a.cfg.OverConsumptionPct,
 		AutoStartOnFeedback: a.cfg.AutoStartOnFeedback, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		SplitAllocation: domain.AllocProportional, TriggerPointsEnabled: true, PickingListProposal: domain.ProposeRemaining,
-		RouteCardProposal: domain.ProposeRemaining, StaleOrderDays: domain.DefaultStaleOrderDays}
+		RouteCardProposal: domain.ProposeRemaining, StaleOrderDays: domain.DefaultStaleOrderDays, EndJobs: true}
 }
 
 type parametersList struct {
@@ -93,6 +93,8 @@ type parametersRequest struct {
 	RouteCardProposal   domain.Proposal `json:"routeCardProposal"`
 	StaleOrderDays      *int            `json:"staleOrderDays"`
 	AutoEndEnabled      *bool           `json:"autoEndEnabled"`
+	// EndJobs (slice 22) is optional the same way; a create takes it on (the PRD default).
+	EndJobs *bool `json:"endJobs"`
 }
 
 func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +139,7 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 	if req.AutoEndEnabled != nil {
 		prm.AutoEndEnabled = *req.AutoEndEnabled
 	}
+	prm.EndJobs = req.EndJobs == nil || *req.EndJobs
 	missing := "is required"
 	if req.RAFTolerancePct == nil {
 		fields["rafTolerancePct"] = missing
@@ -172,7 +175,7 @@ func (a *API) saveParameters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keep := store.KeepParameters{PickingListProposal: req.PickingListProposal == "", RouteCardProposal: req.RouteCardProposal == "",
-		StaleOrderDays: req.StaleOrderDays == nil, AutoEndEnabled: req.AutoEndEnabled == nil}
+		StaleOrderDays: req.StaleOrderDays == nil, AutoEndEnabled: req.AutoEndEnabled == nil, EndJobs: req.EndJobs == nil}
 	saved, created, err := a.store.SaveParameters(r.Context(), store.ParametersSave{LegalEntityID: req.LegalEntityID, Parameters: prm, IfMatch: ifMatch,
 		Actor: p.UserID, Keep: keep})
 	if err != nil {

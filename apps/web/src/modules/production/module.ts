@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
 import type { ProductionOrder } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
+import { CostSnapshotsPage } from "./CostSnapshotsPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
 import { HousekeepingPage } from "./HousekeepingPage";
 import { JobsPage } from "./JobsPage";
@@ -103,6 +104,11 @@ function JournalsRoute() {
   return createElement(JournalInquiryPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
+function CostSnapshotsRoute() {
+  const navigate = useNavigate();
+  return createElement(CostSnapshotsPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
 function ChangesRoute() {
   const navigate = useNavigate();
   return createElement(OrderChangesPage, { onOpenChange: (change) => navigate(`${list}/order-changes/${encodeURIComponent(change.id)}`) });
@@ -123,7 +129,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders); order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
+    "Production orders: create, estimate, schedule (dated jobs with infinite capacity), release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview, the scheduled jobs and the production journals across orders; the order KPIs (on-time %, cycle days, scrap %, overdue orders) and the daily order cost snapshots; order changes from engineering changes with preview, change cost, apply and dismiss; order housekeeping (cancel stale orders, end fully reported orders); rework orders, as-built genealogy, production parameters and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -138,6 +144,7 @@ const production: PassageModule = {
     { path: `${list}/jobs`, element: createElement(JobsRoute), handle: { title: "Scheduled jobs" } },
     { path: `${list}/journals`, element: createElement(JournalsRoute), handle: { title: "Production journals" } },
     { path: `${list}/kpi`, element: createElement(KpiPage), handle: { title: "Production KPIs" } },
+    { path: `${list}/cost-snapshots`, element: createElement(CostSnapshotsRoute), handle: { title: "Order cost snapshots" } },
     { path: `${list}/order-changes`, element: createElement(ChangesRoute), handle: { title: "Order changes" } },
     { path: `${list}/order-changes/:changeId`, element: createElement(ChangeDetailRoute), handle: { title: "Order change" } },
     { path: `${list}/ocm-profiles`, element: createElement(OcmProfilesPage), handle: { title: "Order change profiles" } },
@@ -154,6 +161,7 @@ const production: PassageModule = {
     { label: "Scheduled jobs", to: `${list}/jobs`, duty: "production.order.read" },
     { label: "Production journals", to: `${list}/journals`, duty: "production.order.read" },
     { label: "Production KPIs", to: `${list}/kpi`, duty: "production.order.read" },
+    { label: "Order cost snapshots", to: `${list}/cost-snapshots`, duty: "production.cost.read" },
     { label: "Order changes", to: `${list}/order-changes`, duty: "production.order.read" },
     { label: "Order housekeeping", to: `${list}/housekeeping`, duty: "production.order.read" },
     { label: "Order change profiles", to: `${list}/ocm-profiles`, duty: "production.setup.read" },

@@ -1622,6 +1622,8 @@ export interface ProductionParametersInput {
   staleOrderDays: number;
   /** Opts the site in to the auto-end job. */
   autoEndEnabled: boolean;
+  /** The report as finished that completes the order quantity finishes every job of the order. */
+  endJobs: boolean;
 }
 
 export type RouteCardProposal = "remaining" | "proportional";
@@ -1716,4 +1718,57 @@ export async function runHousekeeping(job: HousekeepingJob, dryRun: boolean, ide
     detail: body.detail,
     results: Array.isArray(body.results) ? body.results : [],
   };
+}
+
+// ---- Order cost snapshots (PRD 4.21.16 order-cost-snapshot) ----
+
+/** The planned and actual cost of one open order on one day. */
+export interface CostSnapshot {
+  orderId: string;
+  orderNumber: string;
+  siteId?: string;
+  snapshotDate: string;
+  status: ProductionStatus;
+  currency: string;
+  qtyOrdered: string;
+  qtyReported: string;
+  plannedCost: string;
+  actualCost: string;
+  wipBalance: string;
+  /** Actual minus planned cost to date. */
+  costVariance: string;
+}
+
+export interface CostSnapshotQuery {
+  orderId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface CostSnapshotPage {
+  items: CostSnapshot[];
+  nextCursor?: string;
+}
+
+/** The stored snapshots, newest day first. */
+export async function listCostSnapshots({ limit = 50, ...filter }: CostSnapshotQuery = {}, signal?: AbortSignal): Promise<CostSnapshotPage> {
+  const body = await requestAt<Partial<CostSnapshotPage>>(`${root}/cost-snapshots?${query({ ...filter, limit })}`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor || undefined };
+}
+
+export interface CostSnapshotRunResult {
+  snapshotDate: string;
+  orders: number;
+}
+
+/** Takes the snapshot of the open orders for a day (default today); a second run of the day replaces its rows. */
+export async function runCostSnapshot(date?: string): Promise<CostSnapshotRunResult> {
+  const body = await requestAt<Partial<CostSnapshotRunResult>>(`${root}/cost-snapshots:run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(date ? { date } : {}),
+  });
+  return { snapshotDate: body.snapshotDate ?? date ?? "", orders: body.orders ?? 0 };
 }

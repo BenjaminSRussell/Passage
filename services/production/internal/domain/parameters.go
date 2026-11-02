@@ -47,6 +47,10 @@ type Parameters struct {
 	// AutoEndEnabled opts the site in to the auto-end job, which ends orders that are
 	// fully reported as finished (PRD 4.21.16).
 	AutoEndEnabled bool `json:"autoEndEnabled"`
+	// EndJobs finishes every job (and the operations they close) of an order when its last
+	// report as finished brings the reported quantity up to the order quantity (PRD 4.21.13
+	// "End jobs on last RAF", FR-21.7); a reversal that takes the quantity back reopens them.
+	EndJobs bool `json:"endJobs"`
 }
 
 // DefaultStaleOrderDays is the PRD's age for cancel-stale-created-orders.

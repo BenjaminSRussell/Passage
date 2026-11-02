@@ -87,16 +87,16 @@ func (s *Postgres) ApplyOperationCommand(ctx context.Context, c OperationCommand
 			from = domain.OperOpen
 		}
 		if changed {
-			if _, err := tx.Exec(ctx, `update production_operation set status = $4 where tenant_id = $1 and order_id = $2 and oper_number = $3`,
+			if _, err := tx.Exec(ctx, `update production_operation set status = $4, ended_by_raf = false where tenant_id = $1 and order_id = $2 and oper_number = $3`,
 				p.TenantID, c.OrderID, c.OperNumber, string(next)); err != nil {
 				return err
 			}
 			// The operation's setup and process jobs follow it (FR-21.6): :finish closes them to job
 			// cards, :reopen opens them again, started when a job card reported on them.
-			if _, err := tx.Exec(ctx, `update production_job set status = case when $4 = 'finished' then 'finished'
+			if _, err := tx.Exec(ctx, `update production_job set ended_by_raf = false, status = case when $4 = 'finished' then 'finished'
 					when hours_reported = 0 and qty_good = 0 and qty_error = 0 then 'planned' else 'started' end
 				where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type in ('setup', 'process')
-				  and (($4 = 'finished') <> (status = 'finished'))`,
+				  and ((($4 = 'finished') <> (status = 'finished')) or ended_by_raf)`,
 				p.TenantID, c.OrderID, c.OperNumber, string(next)); err != nil {
 				return err
 			}

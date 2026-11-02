@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -739,6 +740,9 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 			tenantID, h.id, h.qtyRAF.String(), h.qtyError.String()); err != nil {
 			return err
 		}
+		if err := endJobsOnLastRAF(ctx, tx, tenantID, *h, o.actor); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `update production_journal set posted = true, posted_at = now(), posted_by = $3, post_key = $4
 		where tenant_id = $1 and id = $2`, tenantID, j.ID, o.actor, o.key); err != nil {
@@ -780,7 +784,7 @@ func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID str
 				continue
 			}
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
-					qty_good = qty_good + $5, qty_error = qty_error + $6,
+					qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,
 					status = case when $7 then 'finished' else 'started' end
 				where tenant_id = $1 and order_id = $2 and oper_number = $3`,
 				tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished); err != nil {
@@ -939,6 +943,102 @@ func reverseJournals(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHe
 			tenantID, h.id, h.qtyRAF.String(), h.qtyError.String()); err != nil {
 			return err
 		}
+		if h.qtyRAF.LessThan(h.quantity) {
+			return reopenJobsEndedByRAF(ctx, tx, tenantID, *h, actor)
+		}
+	}
+	return nil
+}
+
+// endJobsOnLastRAF closes the order's open jobs when a report as finished brought the reported
+// quantity up to the order quantity and the site's EndJobs parameter is on (FR-21.7, PRD
+// 4.21.13 "End jobs on last RAF"). A job closed here carries ended_by_raf, and so does an
+// operation whose setup and process jobs are all finished by it, so a reversal below the order
+// quantity reopens just those. Jobs a job card or :finish closed earlier stay as they are, and
+// any later job card, route card, :finish, :reopen or feedback reversal on a job or operation
+// clears its flag: from then on it is that command's, not the RAF's. Each operation closed here
+// emits operation.statuschanged (finish) for scheduling and the shop floor.
+func endJobsOnLastRAF(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, actor string) error {
+	if h.qtyRAF.LessThan(h.quantity) {
+		return nil
+	}
+	prm, err := orderParameters(ctx, tx, tenantID, h, domain.Parameters{})
+	if err != nil || !prm.EndJobs {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update production_job set status = 'finished', ended_by_raf = true
+		where tenant_id = $1 and order_id = $2 and job_type in ('setup', 'process') and status <> 'finished'`, tenantID, h.id); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `update production_operation o set status = 'finished', ended_by_raf = true
+		from production_operation b
+		where b.tenant_id = o.tenant_id and b.order_id = o.order_id and b.oper_number = o.oper_number
+		  and o.tenant_id = $1 and o.order_id = $2 and o.status <> 'finished'
+		  and exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
+			and j.oper_number = o.oper_number and j.ended_by_raf)
+		  and not exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
+			and j.oper_number = o.oper_number and j.job_type in ('setup', 'process') and j.status <> 'finished')
+		returning o.oper_number, b.status, o.status`, tenantID, h.id)
+	if err != nil {
+		return err
+	}
+	return enqueueOperationChanges(ctx, tx, tenantID, h, rows, domain.OperFinish, actor)
+}
+
+// reopenJobsEndedByRAF undoes endJobsOnLastRAF once a reversal took the reported quantity back
+// below the order quantity: the jobs and operations it closed (and no command touched since) are
+// planned again, or started when feedback was reported on them; each reopened operation emits
+// operation.statuschanged (reopen).
+func reopenJobsEndedByRAF(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, actor string) error {
+	if _, err := tx.Exec(ctx, `update production_job set ended_by_raf = false, status = case
+			when hours_reported = 0 and qty_good = 0 and qty_error = 0 then 'planned' else 'started' end
+		where tenant_id = $1 and order_id = $2 and ended_by_raf`, tenantID, h.id); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `update production_operation o set ended_by_raf = false, status = case
+			when o.hours_reported = 0 and o.qty_good = 0 and o.qty_error = 0 then 'open' else 'started' end
+		from production_operation b
+		where b.tenant_id = o.tenant_id and b.order_id = o.order_id and b.oper_number = o.oper_number
+		  and o.tenant_id = $1 and o.order_id = $2 and o.ended_by_raf
+		returning o.oper_number, b.status, o.status`, tenantID, h.id)
+	if err != nil {
+		return err
+	}
+	return enqueueOperationChanges(ctx, tx, tenantID, h, rows, domain.OperReopen, actor)
+}
+
+// enqueueOperationChanges emits operation.statuschanged for each (oper_number, from, to) row of an
+// update that the report as finished or its reversal made. The order version is the one after the
+// post, which bumps it once.
+func enqueueOperationChanges(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, rows pgx.Rows, action domain.OperAction, actor string) error {
+	type change struct {
+		oper     int
+		from, to string
+	}
+	var changes []change
+	for rows.Next() {
+		var c change
+		if err := rows.Scan(&c.oper, &c.from, &c.to); err != nil {
+			rows.Close()
+			return err
+		}
+		changes = append(changes, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	sort.Slice(changes, func(i, k int) bool { return changes[i].oper < changes[k].oper })
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, c := range changes {
+		if c.from == "" {
+			c.from = string(domain.OperOpen)
+		}
+		if err := enqueue(ctx, tx, h.id, prodevents.OperationStatusChanged, tenantID, actor, prodevents.OperationStatusChangedData{
+			OrderID: h.id, OperNumber: c.oper, Action: string(action), From: c.from, To: c.to,
+			OrderVersion: h.version + 1, Actor: actor, OccurredAt: at}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1032,13 +1132,13 @@ func checkJobOpen(ctx context.Context, tx pgx.Tx, tenantID, orderID string, oper
 // it is finished (FR-21.6 "unless reopened" still applies through :reopen).
 func applyJobFeedback(ctx context.Context, tx pgx.Tx, tenantID, orderID string, l JournalLine) error {
 	if _, err := tx.Exec(ctx, `update production_job set hours_reported = hours_reported + $5, qty_good = qty_good + $6, qty_error = qty_error + $7,
-			status = case when $8 then 'finished' else 'started' end
+			ended_by_raf = false, status = case when $8 then 'finished' else 'started' end
 		where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type = $4`,
 		tenantID, orderID, *l.OperNumber, *l.JobType, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(), l.Finished); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `update production_operation o set hours_reported = hours_reported + $4,
-			qty_good = qty_good + $5, qty_error = qty_error + $6,
+			qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,
 			status = case when not exists (select 1 from production_job j where j.tenant_id = o.tenant_id and j.order_id = o.order_id
 				and j.oper_number = o.oper_number and j.job_type in ('setup', 'process') and j.status <> 'finished') then 'finished' else 'started' end
 		where o.tenant_id = $1 and o.order_id = $2 and o.oper_number = $3`,
@@ -1075,7 +1175,7 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 				}
 			}
 			if _, err := tx.Exec(ctx, `update production_operation set hours_reported = hours_reported + $4,
-					qty_good = qty_good + $5, qty_error = qty_error + $6,
+					qty_good = qty_good + $5, qty_error = qty_error + $6, ended_by_raf = false,
 					status = case when hours_reported + $4 = 0 and qty_good + $5 = 0 and qty_error + $6 = 0 then 'open' else 'started' end
 				where tenant_id = $1 and order_id = $2 and oper_number = $3`,
 				tenantID, orderID, *l.OperNumber, l.Qty.String(), l.QtyGood.String(), l.QtyError.String()); err != nil {
@@ -1083,7 +1183,7 @@ func applyReversal(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lin
 			}
 			// The reopened operation's setup and process jobs open again (whether a job card or
 			// :finish closed them): a job with nothing left reported is planned, otherwise started.
-			if _, err := tx.Exec(ctx, `update production_job set status = case when hours_reported = 0 and qty_good = 0 and qty_error = 0
+			if _, err := tx.Exec(ctx, `update production_job set ended_by_raf = false, status = case when hours_reported = 0 and qty_good = 0 and qty_error = 0
 					then 'planned' else 'started' end
 				where tenant_id = $1 and order_id = $2 and oper_number = $3 and job_type in ('setup', 'process')`,
 				tenantID, orderID, *l.OperNumber); err != nil {

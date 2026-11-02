@@ -86,12 +86,13 @@ describe("production parameters (PRD 4.21.13)", () => {
     await userEvent.clear(within(form).getByLabelText(/Cancel stale orders after/));
     await userEvent.type(within(form).getByLabelText(/Cancel stale orders after/), "45");
     await userEvent.selectOptions(within(form).getByLabelText("Auto-end fully reported orders"), "yes");
+    await userEvent.selectOptions(within(form).getByLabelText("End jobs on the last report as finished"), "no");
     await userEvent.click(within(form).getByRole("button", { name: "Save parameters" }));
     expect(await screen.findByText("Production parameters for All saved (version 3).")).toBeInTheDocument();
     const [, put] = calls(fetchMock).find(([, init]) => init?.method === "PUT")!;
     expect((put?.headers as Record<string, string>)["If-Match"]).toBe('"2"');
     expect(JSON.parse(String(put?.body))).toMatchObject({ siteId: "All", rafTolerancePct: "4", estimateOnCreate: true, splitAllocation: "keep-on-original", asBuiltRequired: true,
-      pickingListProposal: "none", routeCardProposal: "proportional", staleOrderDays: 45, autoEndEnabled: true });
+      pickingListProposal: "none", routeCardProposal: "proportional", staleOrderDays: 45, autoEndEnabled: true, endJobs: false });
   });
 
   it("starts a new row from the service defaults", async () => {

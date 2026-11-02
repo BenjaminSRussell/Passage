@@ -253,6 +253,8 @@ type Store interface {
 	ApplyOrderChange(ctx context.Context, in ChangeApply) (ChangeApplyResult, error)
 	DismissOrderChange(ctx context.Context, in ChangeDismiss) (OrderChange, error)
 	ListJobs(ctx context.Context, f JobFilter) (JobPage, error)
+	RunCostSnapshot(ctx context.Context, in CostSnapshotRun) (CostSnapshotResult, error)
+	CostSnapshots(ctx context.Context, f CostSnapshotFilter) (CostSnapshotPage, error)
 }
 
 // Postgres is the production store.

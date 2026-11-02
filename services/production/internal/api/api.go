@@ -169,6 +169,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/order-changes:detect", a.detectChanges)
 	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/gl-postings:run", a.postToGL)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/wip-reconciliation", a.wipReconciliation)
+	r.With(authz.RequireDuty(DutyCostRead)).Post("/v1/production/cost-snapshots:run", a.runCostSnapshot)
+	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/cost-snapshots", a.listCostSnapshots)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes", a.listChanges)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes/{id}", a.getChange)
 	r.Post("/v1/production/order-changes/{id}", a.changeCommand)

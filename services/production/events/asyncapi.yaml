@@ -84,6 +84,12 @@ channels:
         $ref: '#/components/messages/orderChangeApplied'
       dismissed:
         $ref: '#/components/messages/orderChangeDismissed'
+  passage.production.costsnapshot:
+    address: passage.production.costsnapshot
+    description: Keyed by legal entity id (the outbox aggregate), so the runs of one legal entity stay ordered.
+    messages:
+      taken:
+        $ref: '#/components/messages/costSnapshotTaken'
   passage.production.parameters:
     address: passage.production.parameters
     description: Keyed by legal entity id (the outbox aggregate), so the changes of one legal entity's parameters stay ordered.
@@ -163,6 +169,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.parameters' }
     messages: [{ $ref: '#/channels/passage.production.parameters/messages/saved' }]
+  onCostSnapshotTaken:
+    action: send
+    channel: { $ref: '#/channels/passage.production.costsnapshot' }
+    messages: [{ $ref: '#/channels/passage.production.costsnapshot/messages/taken' }]
 components:
   messages:
     orderCreated:
@@ -508,7 +518,10 @@ components:
         Emitted in the transaction of `POST /v1/production/orders/{id}/operations/{operNumber}:finish` or
         `:reopen` when the operation's status changes (FR-21.6); a command already in effect and an
         idempotent replay emit nothing. A route card's `finished` flag is reported by journal.posted.
-        Consumers: scheduling (wave 23) and the shop floor (wave 25).
+        Also emitted (action finish) for each operation that the report as finished completing the
+        order quantity closes under the End jobs on last RAF parameter (PRD 4.21.13), and (action
+        reopen) for each of those a reversal below the order quantity opens again; the actor is the
+        poster of the journal or the reset. Consumers: scheduling (wave 23) and the shop floor (wave 25).
       payload:
         type: object
         required: [orderId, operNumber, action, from, to, orderVersion, actor, occurredAt]
@@ -594,7 +607,7 @@ components:
       description: 'Emitted in the transaction of `PUT /v1/production/parameters` when the parameters of a site (or All sites) of a legal entity are created or replaced (PRD 4.21.13). The payload is the row after the save. Consumers: audit, analytics.'
       payload:
         type: object
-        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled, version, actor, occurredAt]
+        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled, endJobs, version, actor, occurredAt]
         properties:
           legalEntityId: { type: string, format: uuid }
           siteId: { type: string, description: A site UUID, or All. }
@@ -609,10 +622,25 @@ components:
           routeCardProposal: { type: string, enum: [remaining, proportional] }
           staleOrderDays: { type: integer, description: 'Age after which an order still Created is cancelled by the cancel-stale job; 0 never.' }
           autoEndEnabled: { type: boolean }
+          endJobs: { type: boolean, description: 'The last report as finished closes every job of the order (PRD 4.21.13 End jobs on last RAF).' }
           version: { type: integer }
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.parameters.saved.v1
+    costSnapshotTaken:
+      name: taken
+      title: Order cost snapshot taken
+      description: 'Emitted in the transaction of `POST /v1/production/cost-snapshots:run` (the daily `order-cost-snapshot` job, PRD 4.21.16): one event per run, with the number of open orders whose planned and actual cost were stored for the day. The rows are read with `GET /v1/production/cost-snapshots`. Consumers: analytics (the order KPI trend, wave 46).'
+      payload:
+        type: object
+        required: [legalEntityId, snapshotDate, orders, actor, occurredAt]
+        properties:
+          legalEntityId: { type: string, format: uuid }
+          snapshotDate: { type: string, format: date, description: The snapshot day (UTC). }
+          orders: { type: integer, description: Open orders written (Estimated to ReportedAsFinished). }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.costsnapshot.taken.v1
   schemas:
     scheduledJob:
       type: object

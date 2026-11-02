@@ -441,6 +441,20 @@ Slice 13 (read-only inquiries of 4.21.14, no migration):
   overdue as of the date, per group and in total; rates are null with nothing to measure
   (`production.order.read`). Read-only; no table or event of its own.
 
+Slice 22:
+
+- End jobs on last RAF (`endJobs` parameter, default on): the report as finished that brings the
+  reported quantity up to the order quantity finishes the open setup and process jobs and the
+  operations they complete; a reversal below the quantity reopens exactly those that no command
+  touched since (migration 0020, `ended_by_raf` on jobs and operations); each such operation emits
+  `operation.statuschanged` (finish / reopen).
+- Order cost snapshots (`order-cost-snapshot`, PRD 4.21.16): `POST /v1/production/cost-snapshots:run`
+  (`production.cost.read`) stores for the day (default today, UTC) the planned cost, the actual cost
+  and the WIP balance as of that day of every open order of the legal entity, overwriting that day's
+  row of each order on a repeat (runs of one day queue on an advisory lock), and emits
+  `costsnapshot.taken`; `GET /v1/production/cost-snapshots` (`production.cost.read`) lists them
+  newest day first by order and date range, keyset-paged.
+
 Slice 15:
 
 - Subcontract purchase request changes (FR-21.10): purchasing hears about every change to an

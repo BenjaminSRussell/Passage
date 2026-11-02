@@ -1111,6 +1111,7 @@ components:
         routeCardProposal: { type: string, enum: [remaining, proportional], description: The hours basis of a route-card journal that names none. }
         staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Age in days after which cancel-stale-created-orders cancels an order still Created; 0 never cancels.' }
         autoEndEnabled: { type: boolean, description: 'Opts the site in to auto-end-fully-reported.' }
+        endJobs: { type: boolean, description: 'The report as finished that brings the reported quantity up to the order quantity finishes every job of the order (End jobs on last RAF); a reversal below the quantity reopens them.' }
     ProductionParametersInput:
       type: object
       required: [rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired]
@@ -1129,6 +1130,7 @@ components:
         routeCardProposal: { type: string, enum: [remaining, proportional], description: 'Optional: omitted, a replace keeps the stored value and a create takes remaining.' }
         staleOrderDays: { type: integer, minimum: 0, maximum: 3650, description: 'Optional: omitted, a replace keeps the stored value and a create takes 90.' }
         autoEndEnabled: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes off.' }
+        endJobs: { type: boolean, description: 'Optional: omitted, a replace keeps the stored value and a create takes on (the PRD default).' }
     ProductionParameters:
       allOf:
         - $ref: '#/components/schemas/ParameterValues'
@@ -2263,6 +2265,93 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '502': { description: PRODUCTION_GL_UNAVAILABLE, the ledger refused the balance read, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '503': { description: PRODUCTION_GL_UNAVAILABLE, the ledger is not configured, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/cost-snapshots:run:
+    post:
+      operationId: runProductionCostSnapshot
+      summary: Snapshot the planned and actual cost of the open orders (order-cost-snapshot)
+      description: |
+        The on-demand form of the daily `order-cost-snapshot` job (PRD 4.21.16). For every order of
+        the legal entity from Estimated to ReportedAsFinished it stores, for the day (default today,
+        UTC; not in the future), the planned cost of the estimate, the actual cost of the posted
+        issue and hours lines (reversals net out) and the WIP balance. A second run for the same day
+        overwrites that day's row of each open order (upsert by order and date), so a repeat or a
+        retry needs no Idempotency-Key; actual cost and WIP count the postings dated up to the day.
+        The run is one transaction and emits one `costsnapshot.taken` event. It needs the cost read
+        duty: it posts nothing and stores only figures the caller may already read.
+      x-passage-duty: production.cost.read
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+                date: { type: string, format: date, description: 'The snapshot day (YYYY-MM-DD); defaults to today.' }
+      responses:
+        '200':
+          description: What the run wrote.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [legalEntityId, snapshotDate, orders]
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  snapshotDate: { type: string, format: date }
+                  orders: { type: integer, description: Open orders written for the day. }
+        '400': { description: 'Malformed or foreign legal entity, malformed or future date (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003: production.cost.read is missing', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/cost-snapshots:
+    get:
+      operationId: listProductionCostSnapshots
+      summary: Order cost snapshots, newest day first
+      description: |
+        The stored daily snapshots of open orders for the order KPI trend: planned cost, actual cost,
+        the variance to date (actual minus planned) and the WIP balance, to the currency's minor unit.
+        Filter by order and by snapshot date (from and to, inclusive); `nextCursor` continues the list.
+      x-passage-duty: production.cost.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of snapshots.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  nextCursor: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [orderId, orderNumber, snapshotDate, status, currency, plannedCost, actualCost, wipBalance, costVariance]
+                      properties:
+                        orderId: { type: string, format: uuid }
+                        orderNumber: { type: string }
+                        legalEntityId: { type: string, format: uuid }
+                        siteId: { type: string, format: uuid }
+                        snapshotDate: { type: string, format: date }
+                        status: { type: string }
+                        currency: { type: string }
+                        qtyOrdered: { type: string }
+                        qtyReported: { type: string }
+                        plannedCost: { type: string }
+                        actualCost: { type: string }
+                        wipBalance: { type: string }
+                        costVariance: { type: string }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/production/variances:
     get:
       operationId: getProductionVariances
@@ -2627,14 +2716,15 @@ paths:
       description: |
         Creating takes no If-Match; replacing needs If-Match with the row version. The settings
         before slice 17 are required, so a missing one is refused rather than switching a flag off;
-        pickingListProposal, routeCardProposal, staleOrderDays and autoEndEnabled are optional: an
+        pickingListProposal, routeCardProposal, staleOrderDays, autoEndEnabled and endJobs are optional: an
         omitted one keeps its stored value on a replace (so an older client cannot reset a site's
         stale-order age or auto-end opt-in) and takes remaining, remaining, 90 and off on a create (they set the journal proposal that a
         create request naming none uses, and the two housekeeping jobs). The tolerances
         apply to report as finished and picking (FR-21.5, FR-21.7), auto-start to route cards
         (FR-21.6), estimate on create to new orders, the split allocation to a split that names
         none (FR-21.15), trigger points enabled to route-card trigger evaluation (FR-21.17) and
-        asBuiltRequired to `:end` (FR-21.19, PRODUCTION_AS_BUILT_REQUIRED).
+        asBuiltRequired to `:end` (FR-21.19, PRODUCTION_AS_BUILT_REQUIRED) and endJobs to the report
+        as finished that completes the order quantity (FR-21.7).
       x-passage-duty: production.setup.write
       parameters:
         - { name: If-Match, in: header, required: false, description: 'The row version, quoted; required to replace.', schema: { type: string } }

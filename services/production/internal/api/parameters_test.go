@@ -139,21 +139,21 @@ func TestParameters_HousekeepingSettingsDefaultAndSave(t *testing.T) {
 		t.Fatalf("create: %d", code)
 	}
 	got := f.params.saved[0].Parameters
-	if got.StaleOrderDays != 90 || got.AutoEndEnabled || got.PickingListProposal != domain.ProposeRemaining || got.RouteCardProposal != domain.ProposeRemaining {
+	if got.StaleOrderDays != 90 || got.AutoEndEnabled || !got.EndJobs || got.PickingListProposal != domain.ProposeRemaining || got.RouteCardProposal != domain.ProposeRemaining {
 		t.Fatalf("defaults: %+v", got)
 	}
-	body := fullParameters[:len(fullParameters)-1] + `,"pickingListProposal":"none","routeCardProposal":"proportional","staleOrderDays":0,"autoEndEnabled":true}`
+	body := fullParameters[:len(fullParameters)-1] + `,"pickingListProposal":"none","routeCardProposal":"proportional","staleOrderDays":0,"autoEndEnabled":true,"endJobs":false}`
 	if code := put(body); code != http.StatusCreated {
 		t.Fatalf("create with settings: %d", code)
 	}
-	if keep := f.params.saved[0].Keep; !keep.PickingListProposal || !keep.RouteCardProposal || !keep.StaleOrderDays || !keep.AutoEndEnabled {
+	if keep := f.params.saved[0].Keep; !keep.PickingListProposal || !keep.RouteCardProposal || !keep.StaleOrderDays || !keep.AutoEndEnabled || !keep.EndJobs {
 		t.Fatalf("omitted settings are kept on a replace: %+v", keep)
 	}
 	got = f.params.saved[1].Parameters
-	if got.StaleOrderDays != 0 || !got.AutoEndEnabled || got.PickingListProposal != domain.ProposeNone || got.RouteCardProposal != domain.ProposeProportional {
+	if got.StaleOrderDays != 0 || !got.AutoEndEnabled || got.EndJobs || got.PickingListProposal != domain.ProposeNone || got.RouteCardProposal != domain.ProposeProportional {
 		t.Fatalf("settings: %+v", got)
 	}
-	if keep := f.params.saved[1].Keep; keep.PickingListProposal || keep.RouteCardProposal || keep.StaleOrderDays || keep.AutoEndEnabled {
+	if keep := f.params.saved[1].Keep; keep.PickingListProposal || keep.RouteCardProposal || keep.StaleOrderDays || keep.AutoEndEnabled || keep.EndJobs {
 		t.Fatalf("named settings are written: %+v", keep)
 	}
 	// the defaults the list reports carry them too
@@ -162,7 +162,7 @@ func TestParameters_HousekeepingSettingsDefaultAndSave(t *testing.T) {
 		Defaults domain.Parameters `json:"defaults"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &list)
-	if list.Defaults.StaleOrderDays != 90 || list.Defaults.PickingListProposal != domain.ProposeRemaining || list.Defaults.AutoEndEnabled {
+	if list.Defaults.StaleOrderDays != 90 || list.Defaults.PickingListProposal != domain.ProposeRemaining || list.Defaults.AutoEndEnabled || !list.Defaults.EndJobs {
 		t.Fatalf("list defaults: %+v", list.Defaults)
 	}
 }

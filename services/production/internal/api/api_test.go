@@ -73,8 +73,11 @@ type fakeStore struct {
 	operErr      error
 	hk           housekeepingFake
 	// scheduling jobs
-	jobFilters []store.JobFilter
-	jobPage    store.JobPage
+	jobFilters  []store.JobFilter
+	jobPage     store.JobPage
+	snapRuns    []store.CostSnapshotRun
+	snapFilters []store.CostSnapshotFilter
+	snapPage    store.CostSnapshotPage
 	// order change management (FR-21.16)
 	ocm    ocmFake
 	params paramsFake

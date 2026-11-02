@@ -38,6 +38,7 @@ export const blankParameters = (): ProductionParametersInput => ({
   routeCardProposal: "remaining",
   staleOrderDays: 90,
   autoEndEnabled: false,
+  endJobs: true,
 });
 
 /** Validates the parameters like the service: the site (UUID or All) and the two percentage ranges. */
@@ -80,10 +81,11 @@ const columns: DataTableColumn<ProductionParameters>[] = [
   { key: "routeCardProposal", header: "Route-card basis", render: (row) => proposalLabel[row.routeCardProposal] ?? row.routeCardProposal },
   { key: "staleOrderDays", header: "Stale after (days)", align: "end", render: (row) => (row.staleOrderDays === 0 ? "Never" : String(row.staleOrderDays)) },
   { key: "autoEndEnabled", header: "Auto-end", render: (row) => yesNo(row.autoEndEnabled) },
+  { key: "endJobs", header: "End jobs on last RAF", render: (row) => yesNo(row.endJobs ?? true) },
   { key: "version", header: "Version", align: "end" },
 ];
 
-type Flag = "autoStartOnFeedback" | "estimateOnCreate" | "triggerPointsEnabled" | "asBuiltRequired" | "autoEndEnabled";
+type Flag = "autoStartOnFeedback" | "estimateOnCreate" | "triggerPointsEnabled" | "asBuiltRequired" | "autoEndEnabled" | "endJobs";
 
 /**
  * Production parameters (PRD 4.21.13): per site, or for All sites, the tolerances on report as finished and picking,
@@ -132,6 +134,7 @@ export function ParametersPage() {
       routeCardProposal: row.routeCardProposal ?? "remaining",
       staleOrderDays: row.staleOrderDays ?? 90,
       autoEndEnabled: row.autoEndEnabled ?? false,
+      endJobs: row.endJobs ?? true,
     });
     setErrors({});
     setFailure(null);
@@ -280,6 +283,7 @@ export function ParametersPage() {
               )}
             </FormField>
             {flag("autoEndEnabled", "Auto-end fully reported orders", "The housekeeping job ends orders that are fully reported as finished at this site.")}
+            {flag("endJobs", "End jobs on the last report as finished", "The report as finished that completes the order quantity finishes every job of the order; reversing it opens them again.")}
           </div>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={saving}>

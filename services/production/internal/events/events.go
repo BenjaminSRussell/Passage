@@ -34,7 +34,8 @@ var (
 	SubcontractPOChanged   = events.Type(Context, "subcontract", "pochanged", 1)
 	SubcontractPOCancelled = events.Type(Context, "subcontract", "pocancelled", 1)
 	// OperationStatusChanged reports an operation finished or reopened by its
-	// `:finish` or `:reopen` command (FR-21.6), for scheduling and the shop floor.
+	// `:finish` or `:reopen` command (FR-21.6), or by the last report as finished (End jobs on
+	// last RAF) and its reversal, for scheduling and the shop floor.
 	OperationStatusChanged = events.Type(Context, "operation", "statuschanged", 1)
 	// OrderChangeDetected reports an open order whose BOM or route snapshot an ECO
 	// superseded (FR-21.16); OrderChangeApplied that the planner applied the change,
@@ -45,12 +46,15 @@ var (
 	// ParametersSaved reports the production parameters of a site created or replaced
 	// (PRD 4.21.13); the aggregate is the legal entity.
 	ParametersSaved = events.Type(Context, "parameters", "saved", 1)
+	// CostSnapshotTaken reports a run of the order cost snapshot (PRD 4.21.16
+	// `order-cost-snapshot`): one event per legal entity and day; the aggregate is the legal entity.
+	CostSnapshotTaken = events.Type(Context, "costsnapshot", "taken", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderScheduled, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed, ParametersSaved}
+		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed, ParametersSaved, CostSnapshotTaken}
 }
 
 // OrderChangeData is the payload of orderchange.detected.v1, .applied.v1 and
@@ -389,6 +393,15 @@ type TriggerPointFiredData struct {
 	Actor              string          `json:"actor"`
 }
 
+// CostSnapshotTakenData is the payload of costsnapshot.taken.v1: what one run wrote.
+type CostSnapshotTakenData struct {
+	LegalEntityID string `json:"legalEntityId"`
+	SnapshotDate  string `json:"snapshotDate"`
+	Orders        int    `json:"orders"`
+	Actor         string `json:"actor"`
+	OccurredAt    string `json:"occurredAt"`
+}
+
 // ParametersSavedData is the payload of parameters.saved.v1: the parameters after the save.
 type ParametersSavedData struct {
 	LegalEntityID        string `json:"legalEntityId"`
@@ -404,6 +417,7 @@ type ParametersSavedData struct {
 	RouteCardProposal    string `json:"routeCardProposal"`
 	StaleOrderDays       int    `json:"staleOrderDays"`
 	AutoEndEnabled       bool   `json:"autoEndEnabled"`
+	EndJobs              bool   `json:"endJobs"`
 	Version              int    `json:"version"`
 	Actor                string `json:"actor"`
 	OccurredAt           string `json:"occurredAt"`
