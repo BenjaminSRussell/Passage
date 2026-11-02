@@ -582,10 +582,10 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-0717" }
-        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target, CST-0724 no posting accounts configured for the legal entity" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version, CST-0723 the activation was already reversed" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target of another version or itself a reversal, CST-0724 no posting accounts configured for the legal entity, CST-0725 no stored standard for a position" }
         "502": { $ref: "#/components/responses/Problem", description: "CST-0721 the ledger did not accept the journal (nothing is activated), CST-0722 the on-hand could not be read" }
-        "503": { $ref: "#/components/responses/Problem", description: "CST-0721 no ledger configured, or the store is unavailable" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-0721 no ledger configured, CST-0722 no inventory service configured, or the store is unavailable" }
   /v1/product-costing/posting-accounts/{legalEntityId}:
     get:
       operationId: getPostingAccounts
@@ -601,8 +601,7 @@ paths:
               schema: { $ref: "#/components/schemas/PostingAccounts" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem", description: "CST-0718 legal entity outside the caller's scope" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0724 none configured" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0724 none configured for the legal entity" }
         "503": { $ref: "#/components/responses/Problem" }
     put:
       operationId: putPostingAccounts
@@ -677,24 +676,22 @@ components:
       properties:
         version: { type: integer, minimum: 1 }
         dryRun: { type: boolean }
-        reversesActivationId: { type: string, format: uuid, description: Reverses this earlier activation of the version; takes its lines from it }
-        ledgerId: { type: string, format: uuid, description: Required unless dryRun }
+        reversesActivationId: { type: string, format: uuid, description: Reverses this earlier activation of the version through the ledger reverse route; takes its lines, ledger, currency and accounts from it (lines, currency and ledgerId must be omitted) }
+        ledgerId: { type: string, format: uuid, description: Required unless dryRun or a reversal }
         postingDate: { type: string, format: date, description: Defaults to today (UTC); before today the on-hand is read as of that date }
-        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: Required unless a reversal }
         newStandardForOpenOrders: { type: boolean }
         lines:
           type: array
           maxItems: 50000
           items:
             type: object
-            required: [itemId, siteId, oldStd, newStd]
+            required: [itemId, siteId]
             additionalProperties: false
+            description: A position to revalue. The old and new standards come from the stored calculations and the quantity from the inventory on-hand; the request cannot carry them
             properties:
-              itemId: { type: string }
-              siteId: { type: string }
-              oldStd: { type: string }
-              newStd: { type: string }
-              qty: { type: string, description: Required only while no inventory service is configured; otherwise read from the on-hand and must be omitted }
+              itemId: { type: string, format: uuid }
+              siteId: { type: string, format: uuid }
     StoredActivationResult:
       type: object
       required: [version, activation]
@@ -713,6 +710,16 @@ components:
             itemCount: { type: integer }
             total: { type: string }
             journalEntryId: { type: string }
+            inventoryAccount: { type: string, description: The account the journal booked, kept for the reversal }
+            costChangeAccount: { type: string }
+            journalLines:
+              type: array
+              items:
+                type: object
+                properties:
+                  account: { type: string }
+                  credit: { type: boolean }
+                  amount: { type: string }
             newStandardForOpenOrders: { type: boolean }
             activatedBy: { type: string }
             createdAt: { type: string, format: date-time }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -13,38 +14,85 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
 	costevents "github.com/BenjaminSRussell/passage/services/productcost/internal/events"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 )
 
-func revaluation(oldStd, newStd string) domain.RevalPreview {
-	return domain.Revalue([]domain.RevalLine{{ItemID: "I1", SiteID: "S1", Qty: decimal.NewFromInt(10),
-		OldStd: decimal.RequireFromString(oldStd), NewStd: decimal.RequireFromString(newStd)}}, "USD")
+const (
+	itemA = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b01"
+	siteA = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6b02"
+)
+
+var positionA = inventory.Position{ItemID: itemA, SiteID: siteA}
+
+type activationFixture struct {
+	s      *Postgres
+	admin  *pgxpool.Pool
+	le     string
+	oldVer Version
+	newVer Version
+	pa     PostingAccounts
+	rls    bool
 }
 
-func activation(versionID, key string, ledger ledgerclient.Ledger, pa PostingAccounts, le string) ActivationInput {
-	preview := revaluation("1.00", "2.50")
-	return ActivationInput{
-		VersionID: versionID, Expected: 1, Key: key, Fingerprint: versionID, LedgerID: ids.Nil, PostingDate: "2026-01-02", Currency: "USD", Preview: preview,
-		Post: func(ctx context.Context, activationID string) (string, error) {
-			e := ledgerclient.Entry{LegalEntityID: le, LedgerID: ids.Nil, DocumentID: activationID, PostingDate: "2026-01-02", Currency: "USD",
-				IdempotencyKey: "productcost.activation:" + versionID + ":1", SourceType: "StandardCostActivation"}
-			for _, jl := range preview.Journal {
-				account := pa.InventoryAccount
-				if jl.Account == domain.AccountCostChangeVar {
-					account = pa.CostChangeAccount
-				}
-				amount, credit := jl.Debit, false
-				if !jl.Credit.IsZero() {
-					amount, credit = jl.Credit, true
-				}
-				e.Lines = append(e.Lines, ledgerclient.Line{Account: account, Credit: credit, Amount: amount})
-			}
-			return ledger.Post(ctx, e)
-		},
+func seedCalculation(t *testing.T, admin *pgxpool.Pool, le, versionID, status, unitCost string) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `insert into cost_calculation
+		(tenant_id, id, legal_entity_id, costing_version_id, item_id, site_id, calc_quantity, explosion_mode, bom_version_id, route_version_id, unit_cost, status)
+		values ($1, $2, $3, $4, $5, $6, 1, 'Multilevel', $7, $7, $8, $9)`,
+		testkit.TenantID(1), ids.New(), le, versionID, itemA, siteA, ids.New(), unitCost, status)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestPostingAccounts_AreStoredPerLegalEntityAndIsolated(t *testing.T) {
-	s, _, rls := setup(t)
+func newActivationFixture(t *testing.T, withAccounts bool) activationFixture {
+	t.Helper()
+	s, admin, rls := setup(t)
+	ctx := as(1, "")
+	f := activationFixture{s: s, admin: admin, le: ids.New(), rls: rls}
+	f.pa = PostingAccounts{LegalEntityID: f.le, InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}
+	if withAccounts {
+		if _, err := s.SetPostingAccounts(ctx, f.pa); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var err error
+	if f.oldVer, _, err = s.CreateVersion(ctx, spec(f.le, "STD-OLD"), "k-old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admin.Exec(context.Background(), `update costing_version set status = 'Active', activated_at = now() - interval '1 day' where id = $1`, f.oldVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, admin, f.le, f.oldVer.ID, "Active", "1.00")
+	if f.newVer, _, err = s.CreateVersion(ctx, spec(f.le, "STD-NEW"), "k-new"); err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, admin, f.le, f.newVer.ID, "Pending", "2.50")
+	return f
+}
+
+func (f activationFixture) activate(ledger ledgerclient.Ledger, key string) ActivationInput {
+	return ActivationInput{
+		VersionID: f.newVer.ID, Expected: 1, Key: key, Fingerprint: f.newVer.ID, LedgerID: ids.Nil, PostingDate: "2026-01-02", Currency: "USD",
+		Positions: []inventory.Position{positionA}, OnHand: map[inventory.Position]decimal.Decimal{positionA: decimal.NewFromInt(10)}, Ledger: ledger,
+	}
+}
+
+func reversal(versionID, activationID string, expected int, key string, ledger ledgerclient.Ledger) ActivationInput {
+	return ActivationInput{VersionID: versionID, Expected: expected, Key: key, Fingerprint: key, ReversesID: activationID, PostingDate: "2026-01-03", Ledger: ledger}
+}
+
+func activationRows(t *testing.T, admin *pgxpool.Pool, versionID string) int {
+	t.Helper()
+	var n int
+	if err := admin.QueryRow(context.Background(), `select count(*) from standard_cost_activation where costing_version_id = $1`, versionID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestPostingAccounts_AreStoredPerLegalEntityIsolatedAndAnnounced(t *testing.T) {
+	s, admin, rls := setup(t)
 	t1 := as(1, "")
 	leA, leB := ids.New(), ids.New()
 	if _, err := s.GetPostingAccounts(t1, leA); codeOf(err) != domain.CodePostingAccounts {
@@ -59,6 +107,9 @@ func TestPostingAccounts_AreStoredPerLegalEntityAndIsolated(t *testing.T) {
 	}
 	if pa, err := s.GetPostingAccounts(t1, leA); err != nil || pa.InventoryAccount != "1410" || pa.CostChangeAccount != "5910" {
 		t.Fatalf("read back %+v %v", pa, err)
+	}
+	if types := outboxTypes(t, admin, leA); len(types) != 2 || types[0] != costevents.PostingAccountsChanged || types[1] != costevents.PostingAccountsChanged {
+		t.Fatalf("each change is announced, got %v", types)
 	}
 	if _, err := s.GetPostingAccounts(t1, leB); codeOf(err) != domain.CodePostingAccounts {
 		t.Fatalf("another legal entity inherits accounts: %v", err)
@@ -77,47 +128,51 @@ func TestPostingAccounts_AreStoredPerLegalEntityAndIsolated(t *testing.T) {
 	}
 }
 
-func TestActivation_PostsOnceAndReplaysByIdempotencyKey(t *testing.T) {
-	s, admin, _ := setup(t)
+func TestActivation_PostsTheStoredStandardMathOnceAndReplaysByIdempotencyKey(t *testing.T) {
+	f := newActivationFixture(t, true)
 	ctx := as(1, "")
-	le := ids.New()
-	pa := PostingAccounts{LegalEntityID: le, InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}
-	if _, err := s.SetPostingAccounts(ctx, pa); err != nil {
-		t.Fatal(err)
-	}
-	v, _, err := s.CreateVersion(ctx, spec(le, "STD-ACT"), "k-v")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ledger := ledgerclient.NewFake()
-	first, replayed, err := s.ActivateVersion(ctx, activation(v.ID, "k-act", ledger, pa, le))
+	first, replayed, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
 	if err != nil || replayed {
 		t.Fatalf("activate: replayed=%v err=%v", replayed, err)
 	}
-	if first.Version.Status != domain.VersionActive || first.Version.Version != 2 || first.Activation.JournalEntryID == "" || first.Activation.Total.String() != "15" {
+	act := first.Activation
+	if first.Version.Status != domain.VersionActive || first.Version.Version != 2 || act.JournalEntryID == "" || act.Total.String() != "15" {
 		t.Fatalf("result %+v", first)
 	}
-	again, replayed, err := s.ActivateVersion(ctx, activation(v.ID, "k-act", ledger, pa, le))
-	if err != nil || !replayed || again.Activation.ID != first.Activation.ID {
+	if len(act.Lines) != 1 || act.Lines[0].OldStd.String() != "1" || act.Lines[0].NewStd.String() != "2.5" || act.Lines[0].Qty.String() != "10" {
+		t.Fatalf("lines %+v, want 10 x (2.50 - 1.00) from the stored standards", act.Lines)
+	}
+	again, replayed, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
+	if err != nil || !replayed || again.Activation.ID != act.ID {
 		t.Fatalf("replay %+v replayed=%v err=%v", again, replayed, err)
 	}
 	entries := ledger.Entries()
-	if len(entries) != 1 || entries[0].ID != first.Activation.JournalEntryID {
+	if len(entries) != 1 || entries[0].ID != act.JournalEntryID || entries[0].DocumentID != act.ID {
 		t.Fatalf("ledger entries %+v", entries)
 	}
+	booked := map[string]string{}
 	for _, l := range entries[0].Lines {
-		if l.Account != "1400-INV" && l.Account != "5900-PPV" {
-			t.Errorf("journal line on %q, not a configured account", l.Account)
+		side := "D"
+		if l.Credit {
+			side = "C"
 		}
+		booked[l.Account] = side + l.Amount.String()
 	}
-	var n int
-	if err := admin.QueryRow(context.Background(), `select count(*) from standard_cost_activation where costing_version_id = $1`, v.ID).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("activation rows %d err=%v", n, err)
+	if len(booked) != 2 || booked["1400-INV"] != "D15" || booked["5900-PPV"] != "C15" {
+		t.Fatalf("journal %v, want Dr 1400-INV 15 / Cr 5900-PPV 15", booked)
 	}
-	if got := outboxTypes(t, admin, first.Activation.ID); len(got) != 1 || got[0] != costevents.StandardCostActivated {
+	stored, err := f.s.GetActivation(ctx, act.ID)
+	if err != nil || stored.InventoryAccount != "1400-INV" || stored.CostChangeAccount != "5900-PPV" || len(stored.JournalLines) != 2 {
+		t.Fatalf("stored activation %+v err=%v", stored, err)
+	}
+	if n := activationRows(t, f.admin, f.newVer.ID); n != 1 {
+		t.Fatalf("activation rows %d", n)
+	}
+	if got := outboxTypes(t, f.admin, act.ID); len(got) != 1 || got[0] != costevents.StandardCostActivated {
 		t.Fatalf("outbox %v", got)
 	}
-	if _, _, err := s.ActivateVersion(ctx, activation(v.ID, "k-other", ledger, pa, le)); codeOf(err) != domain.CodeVersionConflict {
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-other")); codeOf(err) != domain.CodeVersionConflict {
 		t.Fatalf("second activation under a new key with a stale counter: %v", err)
 	}
 	if len(ledger.Entries()) != 1 {
@@ -125,51 +180,250 @@ func TestActivation_PostsOnceAndReplaysByIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestActivation_RefusedJournalLeavesTheVersionUntouchedAndRetryable(t *testing.T) {
-	s, admin, _ := setup(t)
-	ctx := as(1, "")
-	le := ids.New()
-	pa := PostingAccounts{LegalEntityID: le, InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}
-	v, _, err := s.CreateVersion(ctx, spec(le, "STD-REFUSED"), "k-v")
-	if err != nil {
-		t.Fatal(err)
+func TestActivation_PreviewReadsTheStoredStandardsAndWritesNothing(t *testing.T) {
+	f := newActivationFixture(t, false)
+	preview, err := f.s.PreviewActivation(as(1, ""), f.activate(nil, ""))
+	if err != nil || preview.Total.String() != "15" || len(preview.Journal) != 2 {
+		t.Fatalf("preview %+v err=%v", preview, err)
 	}
+	if n := activationRows(t, f.admin, f.newVer.ID); n != 0 {
+		t.Fatalf("a preview stored %d activations", n)
+	}
+}
+
+func TestActivation_FailsClosedWithoutStoredStandardsOrAccounts(t *testing.T) {
+	t.Run("no new standard", func(t *testing.T) {
+		f := newActivationFixture(t, true)
+		if _, err := f.admin.Exec(context.Background(), `delete from cost_calculation where costing_version_id = $1`, f.newVer.ID); err != nil {
+			t.Fatal(err)
+		}
+		ledger := ledgerclient.NewFake()
+		if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-1")); codeOf(err) != domain.CodeNoStoredStandard {
+			t.Fatalf("%v", err)
+		}
+		if len(ledger.Entries()) != 0 {
+			t.Fatal("posted without a stored standard")
+		}
+	})
+	t.Run("no earlier standard", func(t *testing.T) {
+		f := newActivationFixture(t, true)
+		if _, err := f.admin.Exec(context.Background(), `update costing_version set status = 'Closed' where id = $1`, f.oldVer.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledgerclient.NewFake(), "k-1")); codeOf(err) != domain.CodeNoStoredStandard {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("no posting accounts", func(t *testing.T) {
+		f := newActivationFixture(t, false)
+		ledger := ledgerclient.NewFake()
+		if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-1")); codeOf(err) != domain.CodePostingAccounts {
+			t.Fatalf("%v", err)
+		}
+		got, err := f.s.GetVersion(as(1, ""), f.newVer.ID)
+		if err != nil || got.Status != domain.VersionOpen || len(ledger.Entries()) != 0 || activationRows(t, f.admin, f.newVer.ID) != 0 {
+			t.Fatalf("state after a refusal: %+v %v entries=%d", got, err, len(ledger.Entries()))
+		}
+	})
+}
+
+func TestActivation_RefusedJournalLeavesTheVersionUntouchedAndRetryable(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
 	ledger := ledgerclient.NewFake()
 	refusal := &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}
 	ledger.FailPosts(refusal)
-	if _, _, err := s.ActivateVersion(ctx, activation(v.ID, "k-act", ledger, pa, le)); !errors.Is(err, refusal) {
+	_, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
+	var refused *LedgerRefusal
+	if !errors.As(err, &refused) || !errors.Is(err, refusal) {
 		t.Fatalf("refused journal: %v", err)
 	}
-	got, err := s.GetVersion(ctx, v.ID)
+	got, err := f.s.GetVersion(ctx, f.newVer.ID)
 	if err != nil || got.Status != domain.VersionOpen || got.Version != 1 || got.ActivatedAt != nil {
 		t.Fatalf("version after a refused journal: %+v %v", got, err)
 	}
-	var n int
-	if err := admin.QueryRow(context.Background(), `select count(*) from standard_cost_activation where costing_version_id = $1`, v.ID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("activation rows %d err=%v", n, err)
+	if n := activationRows(t, f.admin, f.newVer.ID); n != 0 {
+		t.Fatalf("activation rows %d", n)
 	}
 	ledger.FailPosts(nil)
-	res, replayed, err := s.ActivateVersion(ctx, activation(v.ID, "k-act", ledger, pa, le))
+	res, replayed, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
 	if err != nil || replayed || res.Version.Status != domain.VersionActive || len(ledger.Entries()) != 1 {
 		t.Fatalf("retry with the same key: %+v replayed=%v err=%v entries=%d", res, replayed, err, len(ledger.Entries()))
 	}
 }
 
-func TestActivation_LegalEntityScopeAppliesToTheVersion(t *testing.T) {
-	s, _, rls := setup(t)
-	if !rls {
-		t.Skipf("%s is needed to run as the application role", testkit.EnvAppURL)
+type postThenCancel struct {
+	ledgerclient.Ledger
+	cancel context.CancelFunc
+}
+
+func (p postThenCancel) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	id, err := p.Ledger.Post(ctx, e)
+	p.cancel()
+	return id, err
+}
+
+func TestActivation_RetryAfterTheLedgerAcceptedButTheCommitFailedReplaysTheSameEntry(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	ctx, cancel := context.WithCancel(as(1, ""))
+	defer cancel()
+	if _, _, err := f.s.ActivateVersion(ctx, f.activate(postThenCancel{Ledger: ledger, cancel: cancel}, "k-act")); err == nil {
+		t.Fatal("the commit should have failed")
 	}
-	t1 := as(1, "")
-	leA, leB := ids.New(), ids.New()
-	pa := PostingAccounts{LegalEntityID: leA, InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}
-	v, _, err := s.CreateVersion(t1, spec(leA, "STD-A"), "k-a")
+	got, err := f.s.GetVersion(as(1, ""), f.newVer.ID)
+	if err != nil || got.Status != domain.VersionOpen || activationRows(t, f.admin, f.newVer.ID) != 0 {
+		t.Fatalf("a failed commit left state behind: %+v %v", got, err)
+	}
+	if len(ledger.Entries()) != 1 {
+		t.Fatalf("the ledger should hold the accepted entry, has %d", len(ledger.Entries()))
+	}
+	res, replayed, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act"))
+	if err != nil || replayed || res.Activation.JournalEntryID != ledger.Entries()[0].ID || len(ledger.Entries()) != 1 {
+		t.Fatalf("retry: %+v replayed=%v err=%v entries=%d", res, replayed, err, len(ledger.Entries()))
+	}
+}
+
+func TestActivation_ReversalReversesTheOriginalEntryWhateverTheAccountsAreNow(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	ledger := ledgerclient.NewFake()
+	act, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.s.SetPostingAccounts(ctx, PostingAccounts{LegalEntityID: f.le, InventoryAccount: "1500-NEW", CostChangeAccount: "5950-NEW"}); err != nil {
+		t.Fatal(err)
+	}
+	rev, replayed, err := f.s.ActivateVersion(ctx, reversal(f.newVer.ID, act.Activation.ID, act.Version.Version, "k-rev", ledger))
+	if err != nil || replayed {
+		t.Fatalf("reversal: replayed=%v err=%v", replayed, err)
+	}
+	r := rev.Activation
+	if r.ReversesActivationID == nil || *r.ReversesActivationID != act.Activation.ID || r.Total.String() != "-15" || r.JournalEntryID == "" ||
+		r.InventoryAccount != "1400-INV" || r.CostChangeAccount != "5900-PPV" || r.LedgerID != act.Activation.LedgerID || r.Currency != "USD" {
+		t.Fatalf("reversal row %+v", r)
+	}
+	if rev.Version.Status != domain.VersionActive || rev.Version.Version != 3 {
+		t.Fatalf("version after the reversal %+v", rev.Version)
+	}
+	entries := ledger.Entries()
+	if len(entries) != 2 || entries[1].ReversalOf != act.Activation.JournalEntryID || entries[1].ID != r.JournalEntryID {
+		t.Fatalf("ledger entries %+v", entries)
+	}
+	for i, l := range entries[1].Lines {
+		orig := entries[0].Lines[i]
+		if l.Account != orig.Account || l.Credit == orig.Credit || !l.Amount.Equal(orig.Amount) {
+			t.Errorf("reversed line %+v vs original %+v: want the same account and amount on the other side", l, orig)
+		}
+		if l.Account == "1500-NEW" || l.Account == "5950-NEW" {
+			t.Errorf("the reversal used today's account %s", l.Account)
+		}
+	}
+	if len(r.JournalLines) != 2 || r.JournalLines[0].Credit == act.Activation.JournalLines[0].Credit {
+		t.Fatalf("stored reversal lines %+v", r.JournalLines)
+	}
+	if got := outboxTypes(t, f.admin, r.ID); len(got) != 1 || got[0] != costevents.StandardCostActivated {
+		t.Fatalf("outbox %v", got)
+	}
+}
+
+func TestActivation_ASecondReversalIs409AndPostsNothing(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
 	ledger := ledgerclient.NewFake()
-	if _, _, err := s.ActivateVersion(as(1, leB), activation(v.ID, "k-sneak", ledger, pa, leA)); codeOf(err) != domain.CodeVersionNotFound {
-		t.Fatalf("scope B activates a version of A: %v", err)
+	act, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, _, err := f.s.ActivateVersion(ctx, reversal(f.newVer.ID, act.Activation.ID, act.Version.Version, "k-rev-1", ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = f.s.ActivateVersion(ctx, reversal(f.newVer.ID, act.Activation.ID, rev.Version.Version, "k-rev-2", ledger))
+	if codeOf(err) != domain.CodeReversalTarget || statusOf(err) != http.StatusConflict {
+		t.Fatalf("duplicate reversal: %v", err)
+	}
+	if len(ledger.Entries()) != 2 {
+		t.Fatalf("the duplicate reversal left %d ledger entries, want 2", len(ledger.Entries()))
+	}
+	if n := activationRows(t, f.admin, f.newVer.ID); n != 2 {
+		t.Fatalf("activation rows %d", n)
+	}
+	if _, _, err := f.s.ActivateVersion(ctx, reversal(f.newVer.ID, rev.Activation.ID, rev.Version.Version, "k-rev-3", ledger)); codeOf(err) != domain.CodeReversalTarget {
+		t.Fatalf("reversing a reversal: %v", err)
+	}
+	if len(ledger.Entries()) != 2 {
+		t.Fatal("reversing a reversal posted")
+	}
+}
+
+func TestActivation_ReversalTargetMustBeAnActivationOfThisVersion(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	ledger := ledgerclient.NewFake()
+	act, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-act"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-OTHER"), "k-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, other.ID, "Pending", "4.00")
+	in := f.activate(ledger, "k-act-other")
+	in.VersionID, in.Fingerprint = other.ID, other.ID
+	otherAct, _, err := f.s.ActivateVersion(ctx, in)
+	if err != nil || otherAct.Activation.Total.String() != "15" {
+		t.Fatalf("second version: %+v %v", otherAct.Activation, err)
+	}
+	_, _, err = f.s.ActivateVersion(ctx, reversal(other.ID, act.Activation.ID, otherAct.Version.Version, "k-wrong", ledger))
+	if codeOf(err) != domain.CodeReversalTarget || statusOf(err) == http.StatusConflict {
+		t.Fatalf("an activation of another version: %v", err)
+	}
+	_, _, err = f.s.ActivateVersion(ctx, reversal(other.ID, ids.New(), otherAct.Version.Version, "k-missing", ledger))
+	if codeOf(err) != domain.CodeReversalTarget || statusOf(err) != http.StatusNotFound {
+		t.Fatalf("a missing activation: %v", err)
+	}
+	if len(ledger.Entries()) != 2 {
+		t.Fatalf("refused reversals posted: %d entries", len(ledger.Entries()))
+	}
+}
+
+func TestActivation_IsRefusedWhileARollHoldsTheVersionLock(t *testing.T) {
+	f := newActivationFixture(t, true)
+	roll, err := f.admin.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = roll.Rollback(context.Background()) }()
+	if _, err := roll.Exec(context.Background(), `select pg_advisory_xact_lock(hashtextextended($1, 0))`, domain.RollLockKey(testkit.TenantID(1), f.newVer.ID)); err != nil {
+		t.Fatal(err)
+	}
+	ledger := ledgerclient.NewFake()
+	_, _, err = f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act"))
+	if codeOf(err) != domain.CodeVersionRolling || statusOf(err) != http.StatusConflict {
+		t.Fatalf("activation during a roll: %v", err)
+	}
+	if len(ledger.Entries()) != 0 {
+		t.Fatal("posted during a roll")
+	}
+	if err := roll.Rollback(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err != nil {
+		t.Fatalf("after the roll ended: %v", err)
+	}
+}
+
+func TestActivation_LegalEntityScopeAppliesToTheVersion(t *testing.T) {
+	f := newActivationFixture(t, true)
+	if !f.rls {
+		t.Skipf("%s is needed to run as the application role", testkit.EnvAppURL)
+	}
+	ledger := ledgerclient.NewFake()
+	if _, _, err := f.s.ActivateVersion(as(1, ids.New()), f.activate(ledger, "k-sneak")); codeOf(err) != domain.CodeVersionNotFound {
+		t.Fatalf("another scope activates a version: %v", err)
 	}
 	if len(ledger.Entries()) != 0 {
 		t.Fatal("a journal was posted for a version outside the caller's scope")

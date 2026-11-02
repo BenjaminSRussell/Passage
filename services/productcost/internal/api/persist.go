@@ -40,7 +40,7 @@ type Store interface {
 	GetVersion(ctx context.Context, id string) (store.Version, error)
 	CreateVersion(ctx context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error)
 	TransitionVersion(ctx context.Context, id string, expected int, action string) (store.Version, error)
-	GetActivation(ctx context.Context, id string) (store.Activation, error)
+	PreviewActivation(ctx context.Context, in store.ActivationInput) (domain.RevalPreview, error)
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
 	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
 	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)

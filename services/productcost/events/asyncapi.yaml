@@ -41,7 +41,15 @@ channels:
     messages:
       standardCostActivated:
         $ref: "#/components/messages/StandardCostActivated"
+  postingAccountsChanged:
+    address: passage.costing.postingaccounts
+    messages:
+      postingAccountsChanged:
+        $ref: "#/components/messages/PostingAccountsChanged"
 operations:
+  publishPostingAccountsChanged:
+    action: send
+    channel: { $ref: "#/channels/postingAccountsChanged" }
   publishStandardCostActivated:
     action: send
     channel: { $ref: "#/channels/standardCostActivated" }
@@ -79,7 +87,19 @@ components:
       name: dev.passage.costing.standardcost.activated.v1
       contentType: application/cloudevents+json
       payload: { $ref: "#/components/schemas/StandardCostActivatedData" }
+    PostingAccountsChanged:
+      name: dev.passage.costing.postingaccounts.changed.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/PostingAccountsChangedData" }
   schemas:
+    PostingAccountsChangedData:
+      type: object
+      required: [legalEntityId, inventoryAccount, costChangeAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        inventoryAccount: { type: string }
+        costChangeAccount: { type: string }
+        actor: { type: string }
     StandardCostActivatedData:
       type: object
       required: [activationId, costingVersionId, legalEntityId, itemCount, revaluationJournalId, totalRevaluation, currency, postingDate, newStandardForOpenOrders]

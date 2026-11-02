@@ -31,9 +31,10 @@ type fakeStore struct {
 	replayed        bool
 	err             error
 	accountsErr     error
+	activateErr     error
 	accounts        store.PostingAccounts
 	activation      *store.ActivationInput
-	runPost         bool
+	preview         *store.ActivationInput
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -81,20 +82,16 @@ func (f *fakeStore) TransitionVersion(_ context.Context, id string, expected int
 	return store.Version{ID: id, Status: domain.VersionBlocked, Version: expected + 1, SiteIDs: []string{}}, f.err
 }
 
-func (f *fakeStore) GetActivation(context.Context, string) (store.Activation, error) {
+func (f *fakeStore) PreviewActivation(_ context.Context, in store.ActivationInput) (domain.RevalPreview, error) {
 	f.calls++
-	return store.Activation{}, f.err
+	f.preview = &in
+	return domain.Revalue(nil, in.Currency), f.activateErr
 }
 
-func (f *fakeStore) ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error) {
+func (f *fakeStore) ActivateVersion(_ context.Context, in store.ActivationInput) (store.ActivationResult, bool, error) {
 	f.calls++
 	f.activation = &in
-	if f.err == nil && f.runPost {
-		if _, err := in.Post(ctx, someID); err != nil {
-			return store.ActivationResult{}, false, err
-		}
-	}
-	return store.ActivationResult{}, false, f.err
+	return store.ActivationResult{}, f.replayed, f.activateErr
 }
 
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {

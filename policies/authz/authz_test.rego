@@ -628,7 +628,7 @@ test_service_grants_allow_only_their_declared_routes if {
 	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
 	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
 	data.service_grants.hr.numbering == ["numbering.sequence.allocate"]
-	data.service_grants.productcost.ledger == ["ledger.entry.post"]
+	data.service_grants.productcost.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
 	data.service_grants.productcost.inventory == ["inventory.read"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
 		every duty in grant {
@@ -1198,4 +1198,12 @@ test_payroll_posting_profile_write_is_its_own_duty if {
 test_payroll_service_grant_reaches_only_ledger_post_balance_and_lookup if {
 	data.service_grants.payroll.ledger == ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
 	count(data.service_grants.payroll) == 1
+}
+
+test_posting_accounts_are_maintained_by_costing_maintain_and_read_by_costing_view if {
+	allowed("CostingMaintain", "PUT", "/v1/product-costing/posting-accounts/le-1")
+	not allowed("CostingView", "PUT", "/v1/product-costing/posting-accounts/le-1")
+	not allowed("CostingActivate", "PUT", "/v1/product-costing/posting-accounts/le-1")
+	allowed("CostingView", "GET", "/v1/product-costing/posting-accounts/le-1")
+	not allowed("CostingMaintain", "GET", "/v1/product-costing/posting-accounts/le-1")
 }

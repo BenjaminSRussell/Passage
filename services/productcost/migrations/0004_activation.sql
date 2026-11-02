@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS standard_cost_activation (
   item_count integer NOT NULL CHECK (item_count > 0),
   total numeric(19,4) NOT NULL,
   journal_entry_id text,
+  inventory_account text NOT NULL DEFAULT '',
+  cost_change_account text NOT NULL DEFAULT '',
+  journal_lines jsonb NOT NULL DEFAULT '[]',
   new_standard_for_open_orders boolean NOT NULL DEFAULT false,
   lines jsonb NOT NULL,
   activated_by text NOT NULL DEFAULT '',
@@ -36,6 +39,8 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT ON standard_cost_activation TO passage_app';
+    EXECUTE 'GRANT UPDATE (journal_entry_id) ON standard_cost_activation TO passage_app';
+    EXECUTE 'GRANT SELECT ON cost_calculation TO passage_app';
   END IF;
 END
 $$;

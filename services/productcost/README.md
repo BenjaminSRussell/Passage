@@ -247,19 +247,37 @@ same transaction (see `events/asyncapi.yaml`).
   a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
   (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. Event
   `dev.passage.costing.version.transitioned.v1` with the action and both statuses.
-- **Activation with revaluation** (FR-39.6, D6): a body with `lines`, `dryRun` or
-  `reversesActivationId` (plus `currency`, `postingDate`, `ledgerId`, and the `Idempotency-Key`
-  header unless `dryRun`) revalues the on-hand of the lines, and without `dryRun` posts the
-  journal to the ledger and activates the version in one transaction. A journal the ledger
-  refuses fails the call (`CST-0721`, 502) and leaves the version, the activation and the
-  key untouched, so the same key can be retried. A reversal is a new activation back to the
-  earlier standard (`CST-0723`). The ledger accounts are stored configuration per legal entity,
-  `PUT /v1/product-costing/posting-accounts/{legalEntityId}` with `{inventoryAccount,
-  costChangeAccount}` (CostingMaintain, legal-entity scope; the two must differ). The request
-  cannot carry accounts: `inventoryAccount` and `costChangeAccount` are unknown fields (400).
-  Productcost holds `ledger.entry.post`, so letting a caller choose the account would let
-  CostingActivate post to any account. An activation with a non-zero revaluation and no
-  configured accounts is `CST-0724` (422). Event `dev.passage.costing.standardcost.activated.v1`.
+- **Activation with revaluation** (FR-39.6, D6): a body with `lines` (`itemId` and `siteId` only),
+  `dryRun` or `reversesActivationId` (plus `currency`, `postingDate`, `ledgerId`, and the
+  `Idempotency-Key` header unless `dryRun`) revalues the on-hand of the lines, and without
+  `dryRun` posts the journal to the ledger and activates the version in one transaction. The
+  amounts are never the caller's: the new standard is the version's `cost_calculation` row
+  (Legal view, status Pending or Active) and the old one the same position in the most
+  recently activated other Active version of the legal entity, both read inside the
+  transaction; the quantity is the inventory on-hand (`INVENTORY_URL`) at the posting date.
+  `oldStd`, `newStd`, `qty` and account fields are unknown fields (400). A position without
+  both standards is `CST-0725` (422), no inventory service is `CST-0722` (503), and nothing
+  is posted in either case. A journal the ledger refuses fails the call (`CST-0721`, 502) and
+  leaves the version, the activation and the key untouched, so the same key can be retried.
+  Every check, the activation row and the version event are written first; the post is the
+  last step before the commit. The activation id and the ledger document id derive from the
+  tenant, version and counter, so a retry after a failure that followed the post sends the
+  identical entry and the ledger replays it (the retry must see the same on-hand).
+  A reversal (`version`, `reversesActivationId`, `postingDate`; no lines, currency or
+  ledger) is a new activation that reverses the original ledger entry through the ledger's
+  reverse route, using the lines, accounts and quantities stored with the original, never
+  today's accounts or on-hand. A second reversal of the same activation, a reversal of
+  another version's activation or of a reversal is `CST-0723`. The ledger accounts are
+  stored configuration per legal entity, `PUT /v1/product-costing/posting-accounts/{legalEntityId}`
+  with `{inventoryAccount, costChangeAccount}` (CostingMaintain, legal-entity scope; the two
+  must differ; each change publishes `dev.passage.costing.postingaccounts.changed.v1`) and
+  `GET` (`CST-0724`, 404 when none). Productcost holds `ledger.entry.post` and
+  `ledger.journal.reverse`, so a caller choosing an account would let CostingActivate post
+  to any account. An activation with a non-zero revaluation and no configured accounts is
+  `CST-0724` (422). Event `dev.passage.costing.standardcost.activated.v1`.
+  Deployment: the ledger and inventory services must list productcost's public key in
+  `PASSAGE_SERVICE_PUBLIC_KEYS`, and productcost needs `INVENTORY_URL`, `LEDGER_URL` and its
+  service signing key.
 - The slice-3 stateless routes (`/versions:transition`, `/versions:activate`) still serve
   callers that carry a version themselves.
 - Without a store (no database) the stored routes answer `CST-0799` (503).
@@ -334,9 +352,10 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0716 | 422 | `SpecifiedVersion` fallback without a fallback version, or pointing to itself (new code) |
 | CST-0720 | 422 | variance identity failed for the order (residual above the rounding bound) |
 | CST-0721 | 502 / 503 | the ledger did not accept the revaluation journal (nothing activated), or no ledger is configured |
-| CST-0722 | 502 | the inventory on-hand could not be read |
-| CST-0723 | 404 / 422 | reversal target missing, of another version, or already reversed |
+| CST-0722 | 502 / 503 | the inventory on-hand could not be read, or no inventory service is configured |
+| CST-0723 | 404 / 409 / 422 | reversal target missing (404), already reversed (409), of another version or itself a reversal (422) |
 | CST-0724 | 422 / 404 | no posting accounts configured for the legal entity |
+| CST-0725 | 422 | no stored standard for a position: the version has no calculation for it, or no earlier Active version does |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
 | CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |
 | CST-0733 | diagnostic | open in-transit transfers (error with `InTransit`; new code) |

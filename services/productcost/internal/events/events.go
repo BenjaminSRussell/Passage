@@ -16,12 +16,22 @@ const Context = "costing"
 // 20), production (wave 21) and budgeting read to know which version and split
 // apply.
 var (
-	CostComponentCreated  = events.Type(Context, "costcomponent", "created", 1)
-	CostGroupCreated      = events.Type(Context, "costgroup", "created", 1)
-	VersionCreated        = events.Type(Context, "version", "created", 1)
-	VersionTransitioned   = events.Type(Context, "version", "transitioned", 1)
-	StandardCostActivated = events.Type(Context, "standardcost", "activated", 1)
+	CostComponentCreated   = events.Type(Context, "costcomponent", "created", 1)
+	CostGroupCreated       = events.Type(Context, "costgroup", "created", 1)
+	VersionCreated         = events.Type(Context, "version", "created", 1)
+	VersionTransitioned    = events.Type(Context, "version", "transitioned", 1)
+	StandardCostActivated  = events.Type(Context, "standardcost", "activated", 1)
+	PostingAccountsChanged = events.Type(Context, "postingaccounts", "changed", 1)
 )
+
+// PostingAccountsChangedData is the payload of PostingAccountsChanged: the
+// ledger accounts activations of the legal entity post to from now on.
+type PostingAccountsChangedData struct {
+	LegalEntityID     string `json:"legalEntityId"`
+	InventoryAccount  string `json:"inventoryAccount"`
+	CostChangeAccount string `json:"costChangeAccount"`
+	Actor             string `json:"actor,omitempty"`
+}
 
 // StandardCostActivatedData is the payload of StandardCostActivated (PRD 7.39.5:
 // costingVersionId, itemCount, revaluationJournalId, totalRevaluation). A

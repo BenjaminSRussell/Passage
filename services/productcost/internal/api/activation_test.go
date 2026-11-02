@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -12,17 +17,44 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
-func activationRouter(f *fakeStore, l ledgerclient.Ledger) http.Handler {
+const (
+	itemOne = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6a01"
+	siteOne = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6a02"
+)
+
+type fakeOnHand struct {
+	positions map[inventory.Position]decimal.Decimal
+	err       error
+	calls     int
+	legal     string
+	asOf      string
+}
+
+func (f *fakeOnHand) OnHand(_ context.Context, legalEntityID, asOf string) (map[inventory.Position]decimal.Decimal, error) {
+	f.calls++
+	f.legal, f.asOf = legalEntityID, asOf
+	return f.positions, f.err
+}
+
+func onHandOf(qty string) *fakeOnHand {
+	return &fakeOnHand{positions: map[inventory.Position]decimal.Decimal{{ItemID: itemOne, SiteID: siteOne}: decimal.RequireFromString(qty)}}
+}
+
+func activationRouter(f *fakeStore, l ledgerclient.Ledger, oh inventory.Reader) (http.Handler, *API) {
 	r := httpx.NewRouter()
 	a := New(nil, Config{}).WithStore(f)
 	if l != nil {
 		a.WithLedger(l)
 	}
+	if oh != nil {
+		a.WithInventory(oh)
+	}
 	a.Register(r)
-	return r
+	return r, a
 }
 
 func activateAs(h http.Handler, body, key string) *httptest.ResponseRecorder {
@@ -41,86 +73,171 @@ func activateAs(h http.Handler, body, key string) *httptest.ResponseRecorder {
 
 func activationBody(extra string) string {
 	return `{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `"` + extra +
-		`,"lines":[{"itemId":"I1","siteId":"S1","oldStd":"1.00","newStd":"2.50","qty":"10"}]}`
+		`,"lines":[{"itemId":"` + strings.ToUpper(itemOne) + `","siteId":"` + siteOne + `"}]}`
 }
 
-var configured = store.PostingAccounts{InventoryAccount: "1400-INV", CostChangeAccount: "5900-PPV"}
-
-func TestActivation_RequestCannotChooseTheLedgerAccounts(t *testing.T) {
-	f := &fakeStore{accounts: configured, runPost: true}
+func TestActivation_RequestCannotSupplyAccountsStandardsOrQuantities(t *testing.T) {
+	f := &fakeStore{}
 	ledger := ledgerclient.NewFake()
-	h := activationRouter(f, ledger)
-	for _, extra := range []string{
-		`,"inventoryAccount":"9999-ATTACKER"`,
-		`,"costChangeAccount":"9999-ATTACKER"`,
-		`,"inventoryAccount":"9999-ATTACKER","costChangeAccount":"9998-ATTACKER"`,
-	} {
-		if rec := activateAs(h, activationBody(extra), "k-1"); rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: %d %s, want 400", extra, rec.Code, rec.Body.String())
+	h, _ := activationRouter(f, ledger, onHandOf("10"))
+	bodies := []string{
+		activationBody(`,"inventoryAccount":"9999-ATTACKER"`),
+		activationBody(`,"costChangeAccount":"9999-ATTACKER"`),
+		`{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `","oldStd":"1.00","newStd":"900"}]}`,
+		`{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `","qty":"1000000"}]}`,
+	}
+	for _, body := range bodies {
+		if rec := activateAs(h, body, "k-1"); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s, want 400", body, rec.Code, rec.Body.String())
 		}
 	}
-	if f.activation != nil || len(ledger.Entries()) != 0 {
-		t.Fatalf("a request that chose accounts reached the store or ledger: %v, %d entries", f.activation, len(ledger.Entries()))
+	if f.activation != nil || f.preview != nil || len(ledger.Entries()) != 0 {
+		t.Fatalf("a request that chose its own numbers reached the store or ledger: %v %v", f.activation, f.preview)
 	}
 }
 
-func TestActivation_PostsToTheConfiguredAccounts(t *testing.T) {
-	f := &fakeStore{accounts: configured, runPost: true}
+func TestActivation_PassesPositionsAndInventoryOnHandToTheStore(t *testing.T) {
+	f := &fakeStore{}
 	ledger := ledgerclient.NewFake()
-	h := activationRouter(f, ledger)
+	oh := onHandOf("10")
+	h, a := activationRouter(f, ledger, oh)
+	a.now = func() time.Time { return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC) }
 	if rec := activateAs(h, activationBody(""), "k-act"); rec.Code != http.StatusOK {
 		t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())
 	}
-	entries := ledger.Entries()
-	if len(entries) != 1 || len(entries[0].Lines) != 2 {
-		t.Fatalf("entries %+v", entries)
+	in := f.activation
+	if in == nil || in.Key != "k-act" || in.Ledger != ledger || in.Expected != 1 {
+		t.Fatalf("store input %+v", in)
 	}
-	got := map[string]bool{}
-	for _, l := range entries[0].Lines {
-		got[l.Account] = l.Credit
+	want := inventory.Position{ItemID: itemOne, SiteID: siteOne}
+	if len(in.Positions) != 1 || in.Positions[0] != want || !in.OnHand[want].Equal(decimal.NewFromInt(10)) {
+		t.Fatalf("positions %v on-hand %v, want the canonical position with the inventory quantity", in.Positions, in.OnHand)
 	}
-	if debit, ok := got["1400-INV"]; !ok || debit {
-		t.Errorf("inventory must be debited on a cost increase: %v", got)
-	}
-	if credit, ok := got["5900-PPV"]; !ok || !credit {
-		t.Errorf("cost change variance must be credited: %v", got)
-	}
-	if f.activation.Key != "k-act" || f.activation.Preview.Total.String() != "15" {
-		t.Fatalf("store got %+v", f.activation)
+	if oh.asOf != "2026-01-02" {
+		t.Errorf("a past posting date reads the on-hand as of that date, got %q", oh.asOf)
 	}
 }
 
-func TestActivation_RefusesWithoutConfiguredAccounts(t *testing.T) {
-	f := &fakeStore{accountsErr: &domain.CodedError{Code: domain.CodePostingAccounts, Detail: "none"}, runPost: true}
-	ledger := ledgerclient.NewFake()
-	rec := activateAs(activationRouter(f, ledger), activationBody(""), "k-none")
-	if code, _ := problemCode(t, rec); rec.Code != http.StatusUnprocessableEntity || code != domain.CodePostingAccounts {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if f.activation != nil || len(ledger.Entries()) != 0 {
-		t.Fatal("an activation without accounts was attempted")
+func TestActivation_TodayReadsTheLiveOnHand(t *testing.T) {
+	f := &fakeStore{}
+	oh := onHandOf("3")
+	h, a := activationRouter(f, ledgerclient.NewFake(), oh)
+	a.now = func() time.Time { return time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC) }
+	if rec := activateAs(h, activationBody(""), "k-live"); rec.Code != http.StatusOK || oh.asOf != "" {
+		t.Fatalf("%d %s asOf=%q", rec.Code, rec.Body.String(), oh.asOf)
 	}
 }
 
-func TestActivation_LedgerRefusalFailsTheActivation(t *testing.T) {
-	f := &fakeStore{accounts: configured, runPost: true}
-	ledger := ledgerclient.NewFake()
-	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
-	h := activationRouter(f, ledger)
-	rec := activateAs(h, activationBody(""), "k-closed")
-	if code, _ := problemCode(t, rec); rec.Code != http.StatusBadGateway || code != domain.CodeActivationLedger {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+func TestActivation_RefusesWithoutInventoryOrWhenItFails(t *testing.T) {
+	f := &fakeStore{}
+	h, _ := activationRouter(f, ledgerclient.NewFake(), nil)
+	rec := activateAs(h, activationBody(""), "k-no-inv")
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != domain.CodeOnHandUnavailable {
+		t.Fatalf("no inventory: %d %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "did not accept") || strings.Contains(rec.Body.String(), ledgerclient.CodePeriodClosed) {
-		t.Errorf("body %s", rec.Body.String())
+	h, _ = activationRouter(f, ledgerclient.NewFake(), &fakeOnHand{err: errors.New("down")})
+	rec = activateAs(h, activationBody(""), "k-inv-down")
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusBadGateway || code != domain.CodeOnHandUnavailable {
+		t.Fatalf("inventory down: %d %s", rec.Code, rec.Body.String())
+	}
+	if f.activation != nil {
+		t.Fatal("an activation without quantities reached the store")
+	}
+}
+
+func TestActivation_StoreRefusalsMapToTheirCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{&domain.CodedError{Code: domain.CodePostingAccounts, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodePostingAccounts},
+		{&domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodeNoStoredStandard},
+		{&store.LedgerRefusal{Err: &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}}, http.StatusBadGateway, domain.CodeActivationLedger},
+	} {
+		f := &fakeStore{activateErr: tc.err}
+		h, a := activationRouter(f, ledgerclient.NewFake(), onHandOf("10"))
+		rec := activateAs(h, activationBody(""), "k-refused")
+		if code, _ := problemCode(t, rec); rec.Code != tc.status || code != tc.code {
+			t.Fatalf("%v: %d %s", tc.err, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), ledgerclient.CodePeriodClosed) {
+			t.Errorf("the ledger's own code leaked: %s", rec.Body.String())
+		}
+		var refused *store.LedgerRefusal
+		if errors.As(tc.err, &refused) && a.activationPostFailures.Load() != 1 {
+			t.Errorf("post failures %d, want 1", a.activationPostFailures.Load())
+		}
 	}
 }
 
 func TestActivation_WithoutALedgerIs503(t *testing.T) {
-	f := &fakeStore{accounts: configured}
-	rec := activateAs(activationRouter(f, nil), activationBody(""), "k-noledger")
+	f := &fakeStore{}
+	h, _ := activationRouter(f, nil, onHandOf("10"))
+	rec := activateAs(h, activationBody(""), "k-noledger")
 	if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != domain.CodeActivationLedger {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestActivation_DryRunPreviewsWithoutALedgerOrKey(t *testing.T) {
+	f := &fakeStore{}
+	h, _ := activationRouter(f, nil, onHandOf("10"))
+	body := `{"version":1,"dryRun":true,"currency":"USD","postingDate":"2026-01-02","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"}]}`
+	rec := activateAs(h, body, "")
+	if rec.Code != http.StatusOK || f.preview == nil || f.activation != nil || !strings.Contains(rec.Body.String(), `"dryRun":true`) {
+		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestActivation_ReversalReadsNothingFromTheRequestOrInventory(t *testing.T) {
+	f := &fakeStore{}
+	oh := onHandOf("10")
+	h, _ := activationRouter(f, ledgerclient.NewFake(), oh)
+	target := ids.New()
+	body := `{"version":2,"reversesActivationId":"` + target + `","postingDate":"2026-01-03"}`
+	if rec := activateAs(h, body, "k-rev"); rec.Code != http.StatusOK {
+		t.Fatalf("reversal: %d %s", rec.Code, rec.Body.String())
+	}
+	in := f.activation
+	if in == nil || in.ReversesID != target || len(in.Positions) != 0 || in.OnHand != nil || oh.calls != 0 || in.Ledger == nil {
+		t.Fatalf("store input %+v, inventory calls %d", in, oh.calls)
+	}
+	f.activation = nil
+	for _, extra := range []string{`,"currency":"USD"`, `,"ledgerId":"` + ids.New() + `"`, `,"lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"}]`} {
+		if rec := activateAs(h, strings.TrimSuffix(body, "}")+extra+"}", "k-rev-2"); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", extra, rec.Code)
+		}
+	}
+	if rec := activateAs(h, `{"version":2,"reversesActivationId":"nope"}`, "k-rev-3"); rec.Code != http.StatusBadRequest || f.activation != nil {
+		t.Errorf("malformed target: %d", rec.Code)
+	}
+}
+
+func TestActivation_ReversalErrorsAreTheStoresAnswers(t *testing.T) {
+	body := `{"version":2,"reversesActivationId":"` + ids.New() + `"}`
+	f := &fakeStore{activateErr: httpx.NewProblem(http.StatusConflict, domain.CodeReversalTarget, "already reversed")}
+	h, _ := activationRouter(f, ledgerclient.NewFake(), nil)
+	if rec := activateAs(h, body, "k-dup"); rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate: %d %s", rec.Code, rec.Body.String())
+	}
+	f = &fakeStore{activateErr: &domain.CodedError{Code: domain.CodeReversalTarget, Detail: "not an activation of this version"}}
+	h, _ = activationRouter(f, ledgerclient.NewFake(), nil)
+	if rec := activateAs(h, body, "k-wrong"); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("wrong version: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestActivation_PositionMustBeInTheVersionSitesAndUnique(t *testing.T) {
+	f := &fakeStore{}
+	h, _ := activationRouter(f, ledgerclient.NewFake(), onHandOf("10"))
+	dup := `{"version":1,"currency":"USD","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"},{"itemId":"` + strings.ToUpper(itemOne) + `","siteId":"` + siteOne + `"}]}`
+	if rec := activateAs(h, dup, "k-dup"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unique") {
+		t.Fatalf("duplicate position: %d %s", rec.Code, rec.Body.String())
+	}
+	notUUID := `{"version":1,"currency":"USD","ledgerId":"` + ids.New() + `","lines":[{"itemId":"I1","siteId":"` + siteOne + `"}]}`
+	if rec := activateAs(h, notUUID, "k-bad"); rec.Code != http.StatusBadRequest || f.activation != nil {
+		t.Fatalf("non-UUID item: %d", rec.Code)
 	}
 }
 
@@ -159,5 +276,14 @@ func TestPostingAccounts_AreMaintainedPerLegalEntityInScope(t *testing.T) {
 	}
 	if rec = (call{http.MethodGet, "/v1/product-costing/posting-accounts/nope", "", view, "", le}).do(h); rec.Code != http.StatusNotFound {
 		t.Errorf("malformed id: %d", rec.Code)
+	}
+}
+
+func TestPostingAccounts_NothingConfiguredIs404(t *testing.T) {
+	f := &fakeStore{accountsErr: &domain.CodedError{Code: domain.CodePostingAccounts, Detail: "none"}}
+	le := ids.New()
+	rec := call{http.MethodGet, "/v1/product-costing/posting-accounts/" + le, "", view, "", le}.do(storedRouter(f))
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusNotFound || code != domain.CodePostingAccounts {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }

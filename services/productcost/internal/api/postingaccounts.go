@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -42,6 +43,11 @@ func (a *API) getPostingAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pa, err := a.store.GetPostingAccounts(r.Context(), le)
+	var coded *domain.CodedError
+	if errors.As(err, &coded) && coded.Code == domain.CodePostingAccounts {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, coded.Code, coded.Detail))
+		return
+	}
 	if err != nil {
 		storeFailure(w, r, err)
 		return
