@@ -536,8 +536,9 @@ components:
         retryRejected: { type: boolean, description: "Offer the lines of ledger-rejected postings again; by default they are skipped." }
     JournalPostings:
       type: object
-      required: [items, rejected, otherLedger]
+      required: [through, items, rejected, otherLedger]
       properties:
+        through: { type: string, format: date, description: "The last recognition date posted: the requested date clamped to the last completed month end." }
         otherLedger:
           type: array
           description: Pending postings on a ledger other than the configured one; reported, never re-targeted.

@@ -27,7 +27,7 @@ const (
 
 type PostingStore interface {
 	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time, retryRejected bool) ([]store.Posting, []store.Posting, error)
-	CompletePosting(ctx context.Context, postingID, entryID string) (bool, error)
+	CompletePosting(ctx context.Context, postingID, entryID string) (store.Completion, error)
 	RejectPosting(ctx context.Context, postingID, code string) error
 }
 
@@ -182,19 +182,22 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, ledgerProblem(r.Context(), "post", err))
 			return
 		}
-		reattached, err := a.postings.CompletePosting(r.Context(), p.ID, entryID)
+		done, err := a.postings.CompletePosting(r.Context(), p.ID, entryID)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}
-		if reattached {
-			slog.ErrorContext(r.Context(), "ledger accepted a revenue posting that a concurrent call had marked rejected", "postingId", p.ID, "entryId", entryID, "correlationId", middleware.GetReqID(r.Context()))
+		if done.Reattached {
+			slog.ErrorContext(r.Context(), "ledger accepted a revenue posting that a concurrent call had marked rejected", "postingId", p.ID, "entryId", entryID, "supersededPostings", done.Superseded, "correlationId", middleware.GetReqID(r.Context()))
+		}
+		if len(done.DoublePosted) > 0 {
+			slog.ErrorContext(r.Context(), "revenue lines were posted to the ledger twice; reverse one entry by hand", "postingId", p.ID, "entryId", entryID, "doublePostedPostings", done.DoublePosted, "correlationId", middleware.GetReqID(r.Context()))
 		}
 		a.journalPostings.Add(1)
 		out = append(out, postingOut{ID: p.ID, Currency: p.Currency, PostingDate: p.PostingDate.Format(dateLayout),
 			Amount: fixed(p.Amount, p.Currency), LineCount: p.LineCount, JournalEntryID: entryID})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "rejected": rejected, "otherLedger": elsewhere})
+	httpx.JSON(w, http.StatusOK, map[string]any{"through": through.Format(dateLayout), "items": out, "rejected": rejected, "otherLedger": elsewhere})
 }
 
 type glReconciliationOut struct {

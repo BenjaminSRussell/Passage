@@ -92,8 +92,21 @@ func (s Subscription) CheckCancel(on time.Time) error {
 	if s.CancelEffective != nil {
 		return &Error{Code: CodeSubscriptionClosed, Detail: "the subscription is already cancelled"}
 	}
-	if dateOnly(on).Before(dateOnly(s.Terms[len(s.Terms)-1].From)) {
-		return &Error{Code: "COM-0001", Detail: "the last service day must not be before the current plan began"}
+	if dateOnly(on).Before(dateOnly(s.Start)) {
+		return &Error{Code: "COM-0001", Detail: "the last service day must not be before the subscription started"}
 	}
 	return nil
+}
+
+func (s Subscription) EffectiveTerms() []PlanTerm {
+	if s.CancelEffective == nil {
+		return s.Terms
+	}
+	var out []PlanTerm
+	for _, t := range s.Terms {
+		if !dateOnly(t.From).After(dateOnly(*s.CancelEffective)) {
+			out = append(out, t)
+		}
+	}
+	return out
 }

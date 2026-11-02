@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,12 +56,12 @@ func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID st
 				key.month.AddDate(0, 1, -1).Format(dateLayout), g.amount.String(), len(g.lineIDs)); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid, rejected_posting_id = null where id = any($2::uuid[])`, id, g.lineIDs); err != nil {
+			if _, err := tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid where id = any($2::uuid[])`, id, g.lineIDs); err != nil {
 				return err
 			}
 		}
 		rows, err := tx.Query(ctx, `select id::text, ledger_id::text, currency::text, posting_date, amount::text, line_count from journal_posting
-			where legal_entity_id = $1::uuid and entry_id is null and rejected_code is null order by posting_date, id`, legalEntityID)
+			where legal_entity_id = $1::uuid and entry_id is null and rejected_code is null order by posting_date, id for update skip locked`, legalEntityID)
 		if err != nil {
 			return err
 		}
@@ -121,23 +122,73 @@ func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through ti
 	return groups, order, rows.Err()
 }
 
-func (s *Postgres) CompletePosting(ctx context.Context, postingID, entryID string) (bool, error) {
-	reattached := false
+type Completion struct {
+	Reattached   bool
+	Superseded   []string
+	DoublePosted []string
+}
+
+const SupersededCode = "SUPERSEDED"
+
+func (s *Postgres) CompletePosting(ctx context.Context, postingID, entryID string) (Completion, error) {
+	var done Completion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `update journal_posting set entry_id = $2 where id = $1::uuid and entry_id is null and rejected_code is null`, postingID, entryID)
 		if err != nil || tag.RowsAffected() > 0 {
 			return err
 		}
-		tag, err = tx.Exec(ctx, `update journal_posting set entry_id = $2, rejected_code = null where id = $1::uuid and entry_id is null`, postingID, entryID)
-		if err != nil || tag.RowsAffected() == 0 {
+		var rejectedCode string
+		err = tx.QueryRow(ctx, `select rejected_code from journal_posting where id = $1::uuid and entry_id is null and rejected_code is not null for update`, postingID).Scan(&rejectedCode)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		reattached = true
+		done.Reattached = true
+		if rejectedCode == SupersededCode {
+			done.DoublePosted = append(done.DoublePosted, postingID)
+		}
+		rows, err := tx.Query(ctx, `select j.id::text, j.entry_id is not null from journal_posting j
+			where j.id in (select s.journal_posting_id from revenue_schedule s where s.rejected_posting_id = $1::uuid and s.journal_posting_id <> $1::uuid)
+			for update of j`, postingID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			var posted bool
+			if err := rows.Scan(&id, &posted); err != nil {
+				rows.Close()
+				return err
+			}
+			if posted {
+				done.DoublePosted = append(done.DoublePosted, id)
+			} else {
+				done.Superseded = append(done.Superseded, id)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(done.Superseded) > 0 {
+			if _, err := tx.Exec(ctx, `update revenue_schedule set journal_posting_id = null, rejected_posting_id = journal_posting_id
+				where journal_posting_id = any($1::uuid[]) and rejected_posting_id is distinct from $2::uuid`, done.Superseded, postingID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `update journal_posting set rejected_code = $2 where id = any($1::uuid[])`, done.Superseded, SupersededCode); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `update journal_posting set entry_id = $2, rejected_code = null where id = $1::uuid`, postingID, entryID); err != nil {
+			return err
+		}
 		_, err = tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid, rejected_posting_id = null
-			where rejected_posting_id = $1::uuid and journal_posting_id is null`, postingID)
+			where rejected_posting_id = $1::uuid and (journal_posting_id is null or journal_posting_id = any($2::uuid[]))`, postingID, done.Superseded)
 		return err
 	})
-	return reattached, err
+	return done, err
 }
 
 func (s *Postgres) RejectPosting(ctx context.Context, postingID, code string) error {

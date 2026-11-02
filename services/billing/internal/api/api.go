@@ -35,17 +35,20 @@ import (
 )
 
 const (
-	idempotencyKey   = "Idempotency-Key"
-	validationDetail = "request failed validation"
-	dateLayout       = "2006-01-02"
-	maxLinesCeiling  = 10000
-	readyTimeout     = 500 * time.Millisecond
-	defaultListLimit = 100
-	maxListLimit     = 200
-	maxAccountLength = 20
-	maxReasonLength  = 200
-	maxInstallments  = 24
-	maxOffsetDays    = 365
+	idempotencyKey = "Idempotency-Key"
+
+	subscriptionKeyPrefix = "subscription-"
+	idempotencyKeyDetail  = `Idempotency-Key header is required (1 to 255 characters, not starting with "subscription-")`
+	validationDetail      = "request failed validation"
+	dateLayout            = "2006-01-02"
+	maxLinesCeiling       = 10000
+	readyTimeout          = 500 * time.Millisecond
+	defaultListLimit      = 100
+	maxListLimit          = 200
+	maxAccountLength      = 20
+	maxReasonLength       = 200
+	maxInstallments       = 24
+	maxOffsetDays         = 365
 	// Duties (§5.29.17): InvoiceView, InvoiceMaintain, InvoicePost, CreditNotePost.
 	dutyView       = "billing.invoice.view"
 	dutyMaintain   = "billing.invoice.maintain"
@@ -297,10 +300,14 @@ func toDTO(inv store.Invoice) invoiceDTO {
 
 func fixed(v decimal.Decimal, exp int32) string { return v.StringFixed(exp) }
 
+func invalidIdempotencyKey(key string) bool {
+	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix)
+}
+
 func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	key := r.Header.Get(idempotencyKey)
-	if key == "" || len(key) > 255 {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "Idempotency-Key header is required (1 to 255 characters)"))
+	if invalidIdempotencyKey(key) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", idempotencyKeyDetail))
 		return
 	}
 	var req proposalRequest

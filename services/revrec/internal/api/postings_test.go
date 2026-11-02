@@ -178,6 +178,7 @@ func TestJournalPostings_Guards(t *testing.T) {
 }
 
 type postResult struct {
+	Through     string           `json:"through"`
 	Items       []postingOut     `json:"items"`
 	Rejected    []rejectedOut    `json:"rejected"`
 	OtherLedger []otherLedgerOut `json:"otherLedger"`
@@ -232,6 +233,68 @@ func TestJournalPostings_ThroughIsClampedToTheLastCompletedMonth(t *testing.T) {
 	if len(got.Items) != 2 {
 		t.Errorf("posted %+v, want March and April", got.Items)
 	}
+	if got.Through != "2027-04-30" {
+		t.Errorf("through echoed %q, want the effective 2027-04-30", got.Through)
+	}
+}
+
+func TestCompletePosting_AcceptedAfterRejectAndRetryMovesTheLinesBackAndSupersedesTheRetry(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityID, Duties: testkit.ScopeDuties(entityID)})
+	march := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	postings := g.api.postings
+
+	first, _, err := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, false)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("claim %v %v, want one posting", first, err)
+	}
+	if err := postings.RejectPosting(ctx, first[0].ID, ledgerclient.CodePeriodClosed); err != nil {
+		t.Fatal(err)
+	}
+	retry, _, err := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true)
+	if err != nil || len(retry) != 1 || retry[0].ID == first[0].ID {
+		t.Fatalf("retry claim %v %v, want a new posting for the released lines", retry, err)
+	}
+
+	done, err := postings.CompletePosting(ctx, first[0].ID, "entry-1")
+	if err != nil || !done.Reattached || len(done.Superseded) != 1 || done.Superseded[0] != retry[0].ID || len(done.DoublePosted) != 0 {
+		t.Fatalf("late complete %+v %v, want the retry superseded", done, err)
+	}
+	if next, other, err := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true); err != nil || len(next) != 0 || len(other) != 0 {
+		t.Fatalf("claim after supersede %v %v %v, want nothing left to post a second time", next, other, err)
+	}
+
+	late, err := postings.CompletePosting(ctx, retry[0].ID, "entry-2")
+	if err != nil || len(late.DoublePosted) != 1 || late.DoublePosted[0] != retry[0].ID {
+		t.Errorf("a superseded retry that the ledger accepted: %+v %v, want it flagged as double posted", late, err)
+	}
+}
+
+func TestCompletePosting_FlagsLinesAlreadyAcceptedUnderTheRetry(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityID, Duties: testkit.ScopeDuties(entityID)})
+	march := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+	postings := g.api.postings
+
+	first, _, _ := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, false)
+	if err := postings.RejectPosting(ctx, first[0].ID, ledgerclient.CodePeriodClosed); err != nil {
+		t.Fatal(err)
+	}
+	retry, _, _ := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true)
+	if _, err := postings.CompletePosting(ctx, retry[0].ID, "entry-retry"); err != nil {
+		t.Fatal(err)
+	}
+	done, err := postings.CompletePosting(ctx, first[0].ID, "entry-first")
+	if err != nil || len(done.DoublePosted) != 1 || done.DoublePosted[0] != retry[0].ID || len(done.Superseded) != 0 {
+		t.Fatalf("late complete %+v %v, want the already accepted retry flagged and no further posting", done, err)
+	}
+	if next, _, err := postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true); err != nil || len(next) != 0 {
+		t.Errorf("claim afterwards %v %v, want nothing to post", next, err)
+	}
 }
 
 func TestCompletePosting_AfterAConcurrentRejectKeepsTheLedgerEntryAndTheLines(t *testing.T) {
@@ -248,16 +311,16 @@ func TestCompletePosting_AfterAConcurrentRejectKeepsTheLedgerEntryAndTheLines(t 
 	if err := g.api.postings.RejectPosting(ctx, claimed[0].ID, ledgerclient.CodePeriodClosed); err != nil {
 		t.Fatal(err)
 	}
-	reattached, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1")
-	if err != nil || !reattached {
-		t.Fatalf("complete after reject %v %v, want reattached", reattached, err)
+	done, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1")
+	if err != nil || !done.Reattached {
+		t.Fatalf("complete after reject %v %v, want reattached", done, err)
 	}
 	again, other, err := g.api.postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true)
 	if err != nil || len(again) != 0 || len(other) != 0 {
 		t.Fatalf("claim after reattach %v %v %v, want nothing to post twice", again, other, err)
 	}
-	if reattached, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1"); err != nil || reattached {
-		t.Errorf("second complete %v %v, want a quiet no-op", reattached, err)
+	if again, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1"); err != nil || again.Reattached {
+		t.Errorf("second complete %v %v, want a quiet no-op", again, err)
 	}
 }
 

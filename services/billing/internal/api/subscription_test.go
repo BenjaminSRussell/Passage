@@ -24,6 +24,12 @@ import (
 
 func subscriptionHandler(t *testing.T, tax TaxEngine) http.Handler {
 	t.Helper()
+	h, _ := subscriptionStack(t, tax)
+	return h
+}
+
+func subscriptionStack(t *testing.T, tax TaxEngine) (http.Handler, *store.Postgres) {
+	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -32,7 +38,65 @@ func subscriptionHandler(t *testing.T, tax TaxEngine) http.Handler {
 	a := New(st, tax, 2000).WithSubscriptions(st)
 	r := httpx.NewRouter()
 	a.Register(r)
-	return r
+	return r, st
+}
+
+func TestSubscription_ClientKeysCannotUseTheReservedPrefix(t *testing.T) {
+	h := subscriptionHandler(t, exemptTax(t))
+	sub := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	reserved := "subscription-" + sub.ID + "-2027-01-01"
+	for _, path := range []string{"/v1/billing/free-text-invoices", "/v1/billing/proposals", "/v1/billing/credit-notes"} {
+		rec := do(h, http.MethodPost, path, reserved, `{}`)
+		if p := decodeProblemOf(t, rec); rec.Code != http.StatusBadRequest || p.Code != "COM-0001" {
+			t.Errorf("POST %s with a reserved key: %d %s, want 400 COM-0001", path, rec.Code, p.Code)
+		}
+	}
+}
+
+func TestSubscription_PreexistingInvoiceUnderTheOldDerivedKeyCannotBlockBilling(t *testing.T) {
+	h, st := subscriptionStack(t, exemptTax(t))
+	sub := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	otherLE := ids.New()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: otherLE, UserID: "squatter", Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
+	squat := store.Invoice{ID: ids.New(), LegalEntityID: otherLE, CustomerID: custID, InvoiceAccountID: acctID, Type: domain.TypeFreeText,
+		Currency: "USD", InvoiceDate: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC),
+		PaymentTermDays: 30, IdempotencyKey: "subscription-" + sub.ID + "-2027-01-01", RequestHash: "x"}
+	if _, err := st.CreateProposal(ctx, squat); err != nil {
+		t.Fatalf("squat: %v", err)
+	}
+	first := billPeriod(h, sub.ID, "2027-01-01")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("bill after a squat: %d %s, want 201", first.Code, first.Body)
+	}
+	var a, b invoiceDTO
+	decode(t, first, &a)
+	again := billPeriod(h, sub.ID, "2027-01-01")
+	decode(t, again, &b)
+	if again.Code != http.StatusOK || again.Header().Get("Idempotent-Replayed") != "true" || a.ID != b.ID || a.ID == squat.ID {
+		t.Errorf("replay %d id %s, want the subscription invoice %s and not the squatting invoice", again.Code, b.ID, a.ID)
+	}
+}
+
+func TestSubscription_CancelBeforeAFutureDatedPlanChangeIgnoresThatChange(t *testing.T) {
+	h := subscriptionHandler(t, exemptTax(t))
+	sub := newSubscription(t, h, subscriptionBody("USD", "310.00", 1, "2027-03-01"))
+	if rec := do(h, http.MethodPost, "/v1/billing/subscriptions/"+sub.ID+":change-plan", "", `{"planCode":"PREMIUM","price":"600.00","effectiveFrom":"2027-03-20"}`); rec.Code != http.StatusOK {
+		t.Fatalf("change plan: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodPost, "/v1/billing/subscriptions/"+sub.ID+":cancel", "", `{"lastServiceDay":"2027-03-10"}`); rec.Code != http.StatusOK {
+		t.Fatalf("cancel before the future change: %d %s, want 200", rec.Code, rec.Body)
+	}
+	var read subscriptionDTO
+	decode(t, do(h, http.MethodGet, "/v1/billing/subscriptions/"+sub.ID, "", ""), &read)
+	if len(read.Terms) != 1 || read.Terms[0].PlanCode != "STANDARD" {
+		t.Errorf("terms %+v, want only the plan that was in force until the last service day", read.Terms)
+	}
+	var inv invoiceDTO
+	rec := billPeriod(h, sub.ID, "2027-03-01")
+	decode(t, rec, &inv)
+	if rec.Code != http.StatusCreated || len(inv.Lines) != 1 || inv.Lines[0].Net != "100.00" {
+		t.Errorf("bill %d %+v, want 10 of 31 days of 310.00 on the first plan only", rec.Code, inv)
+	}
 }
 
 func exemptTax(t *testing.T) TaxEngine {

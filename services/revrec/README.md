@@ -126,7 +126,19 @@ ledger refuses for good is marked rejected and its lines are released with
 `rejected_posting_id`, then skipped until a request sets `retryRejected`. `REVREC_LEDGER_IDS`
 (`<legalEntityId>=<ledgerId>,...`, chart value `ledgerIds`) names the ledger of each entity and
 is required when `LEDGER_URL` is set. A pending posting on another ledger than the configured
-one is logged and listed under `otherLedger`, never re-targeted.
+one is logged and listed under `otherLedger`, never re-targeted. Operator procedure for
+those: if the mapping changed by mistake, restore it and call the endpoint to drain them.
+If the move to the new ledger is intended, first confirm in the old ledger that no entry
+with idempotency key `revrec-posting-<id>` exists, then, as the schema owner in one
+transaction, run `update journal_posting set rejected_code = 'OPERATOR_RELEASED' where id = '<id>' and entry_id is null`
+and `update revenue_schedule set journal_posting_id = null, rejected_posting_id = '<id>' where journal_posting_id = '<id>'`,
+and post again with `retryRejected` so the lines are claimed for the configured ledger.
+When a ledger acceptance arrives after its posting was rejected and its lines were
+already retried into a new pending posting, completing it supersedes that new posting
+(`rejected_code = 'SUPERSEDED'`, its other lines released for retry) and gives the
+lines back to the accepted one; if the new posting was already accepted by the ledger the
+lines are in the ledger twice, which is logged at error level with both posting ids
+for a manual reversal. The response echoes the effective `through` date.
 The reconciliation compares the cumulative recognized revenue of the roll-forward
 with the ledger's 2400 debits: the credit side of 2400 is the invoice's posting
 (billing), not revrec's.

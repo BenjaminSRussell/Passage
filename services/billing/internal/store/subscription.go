@@ -192,10 +192,40 @@ func (s *Postgres) CancelSubscription(ctx context.Context, id string, lastServic
 	return out, err
 }
 
-func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv Invoice) (Invoice, error) {
+func loadPeriodInvoice(ctx context.Context, tx pgx.Tx, subscriptionID string, periodFrom time.Time) (Invoice, bool, error) {
+	var invoiceID string
+	err := tx.QueryRow(ctx, `select invoice_id::text from subscription_period where subscription_id = $1::uuid and period_from = $2::date`,
+		subscriptionID, periodFrom.Format(dateLayout)).Scan(&invoiceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invoice{}, false, nil
+	}
+	if err != nil {
+		return Invoice{}, false, err
+	}
+	inv, err := loadInvoice(ctx, tx, `where id = $1::uuid`, invoiceID)
+	return inv, err == nil, err
+}
+
+func (s *Postgres) FindPeriodInvoice(ctx context.Context, subscriptionID string, periodFrom time.Time) (Invoice, bool, error) {
+	var inv Invoice
+	var found bool
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		inv, found, err = loadPeriodInvoice(ctx, tx, subscriptionID, periodFrom)
+		return err
+	})
+	return inv, found, err
+}
+
+func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv Invoice) (Invoice, bool, error) {
 	p, _ := tenant.FromContext(ctx)
+	var replay Invoice
+	var replayed bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := lockSubscription(ctx, tx, id, expectedVersion); err != nil {
+			return err
+		}
+		var err error
+		if replay, replayed, err = loadPeriodInvoice(ctx, tx, id, periodFrom); err != nil || replayed {
 			return err
 		}
 		var overlaps bool
@@ -218,13 +248,16 @@ func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVers
 		if err := writeProposal(ctx, tx, inv); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `insert into subscription_period (tenant_id, subscription_id, period_from, period_to, invoice_id)
+		_, err = tx.Exec(ctx, `insert into subscription_period (tenant_id, subscription_id, period_from, period_to, invoice_id)
 			values ($1, $2, $3::date, $4::date, $5)`, p.TenantID, id, periodFrom.Format(dateLayout), periodTo.Format(dateLayout), inv.ID)
 		return err
 	})
 	if err != nil {
-		return Invoice{}, writeProblem(err)
+		return Invoice{}, false, writeProblem(err)
+	}
+	if replayed {
+		return replay, true, nil
 	}
 	inv.Version, inv.Status = 1, domain.StatusProposal
-	return inv, nil
+	return inv, false, nil
 }
