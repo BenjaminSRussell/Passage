@@ -35,6 +35,7 @@ type runServer struct {
 	t      *testing.T
 	h      http.Handler
 	ledger *ledgerclient.Fake
+	api    *API
 }
 
 var payrollRoles = []string{domain.AccountSalaryExpense, domain.AccountEmployerTaxExpense, domain.AccountNetPayClearing, domain.AccountFederalWHPayable,
@@ -91,7 +92,9 @@ func buildRunServer(t *testing.T, ledgerFor func(*ledgerclient.Fake) ledgerclien
 		t.Fatal(err)
 	}
 	s := &runServer{t: t, ledger: ledgerclient.NewFake()}
+	s.ledger.AddLedger(ledgerID, legalEntity)
 	a := New(nil)
+	s.api = a
 	if ledgerFor != nil {
 		a.WithRuns(store.New(app), ledgerFor(s.ledger))
 	} else {
@@ -560,5 +563,116 @@ func TestReconciliation_UsesTheJournalStoredOnThePostedRun(t *testing.T) {
 	}
 	if !listed[glAccount(domain.AccountSalaryExpense)] || listed["MOVED"] {
 		t.Fatalf("accounts %+v", v.Accounts)
+	}
+}
+
+const otherLedgerID = "00000000-0000-0000-0000-0000000000b9"
+
+func (s *runServer) post(runID, ledger string) *httptest.ResponseRecorder {
+	s.t.Helper()
+	return s.do(http.MethodPost, "/v1/payroll/runs/"+runID+"/post", `{"ledgerId":"`+ledger+`"}`, "carol", "payroll.run.post", "")
+}
+
+func TestRunPosting_DefiniteRefusalClearsThePinSoTheCorrectedProfilePosts(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "LEDGER_ACCOUNT_NOT_FOUND"})
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+		t.Fatalf("refused post: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != "" {
+		t.Fatalf("pin kept after a definite refusal: %+v", got)
+	}
+	fixed := `{"accounts":{"` + domain.AccountSalaryExpense + `":"FIXED"}}`
+	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, fixed, "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusOK {
+		t.Fatalf("profile fix %d", rec.Code)
+	}
+	s.ledger.FailPosts(nil)
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusOK {
+		t.Fatalf("retry %d: %s", rec.Code, rec.Body.String())
+	}
+	entries := s.ledger.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("entries %+v", entries)
+	}
+	accounts := map[string]bool{}
+	for _, l := range entries[0].Lines {
+		accounts[l.Account] = true
+	}
+	if !accounts["FIXED"] || accounts[glAccount(domain.AccountSalaryExpense)] {
+		t.Fatalf("the corrected journal was not posted: %+v", entries[0].Lines)
+	}
+}
+
+func TestRunPosting_AmbiguousFailuresKeepThePin(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	for _, failure := range []error{
+		&ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable},
+		&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodeIdempotencyConflict},
+		errors.New("connection reset"),
+	} {
+		s.ledger.FailPosts(failure)
+		if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusBadGateway {
+			t.Fatalf("%v: %d", failure, rec.Code)
+		}
+		if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != ledgerID {
+			t.Fatalf("pin lost after %v: %+v", failure, got)
+		}
+	}
+}
+
+func TestRunPosting_LedgerMustExistAndBelongToTheRunsLegalEntity(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	if rec := s.post(run.ID, otherLedgerID); rec.Code != http.StatusUnprocessableEntity || problemCode(rec) != store.CodeLedgerForeign {
+		t.Fatalf("unknown ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	s.ledger.AddLedger(otherLedgerID, "00000000-0000-0000-0000-0000000000e2")
+	if rec := s.post(run.ID, otherLedgerID); rec.Code != http.StatusUnprocessableEntity || problemCode(rec) != store.CodeLedgerForeign {
+		t.Fatalf("another entity's ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeRun(t, s.do(http.MethodGet, "/v1/payroll/runs/"+run.ID, "", "carol", "payroll.run.read", "")); got.LedgerID != "" || len(s.ledger.Entries()) != 0 {
+		t.Fatalf("a foreign ledger pinned or posted: %+v", got)
+	}
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusOK {
+		t.Fatalf("correct ledger %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRunPosting_PostedRunOnAnotherLedgerIsConflictAndCountsOnce(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	s.ledger.AddLedger(otherLedgerID, legalEntity)
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusOK {
+		t.Fatalf("post %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.post(run.ID, ledgerID); rec.Code != http.StatusOK {
+		t.Fatalf("replay %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.post(run.ID, otherLedgerID); rec.Code != http.StatusConflict || problemCode(rec) != store.CodeLedgerPinned {
+		t.Fatalf("posted run, other ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := s.api.runsPosted.Load(); n != 1 {
+		t.Fatalf("runsPosted %d, want 1", n)
+	}
+}
+
+func TestReconciliation_CountsOnlyRunsPostedToTheReconciledLedger(t *testing.T) {
+	s := newRunServer(t, true)
+	s.ledger.AddLedger(otherLedgerID, legalEntity)
+	first, second := s.finalizedRun(workerA), s.finalizedRun(workerB)
+	if rec := s.post(first.ID, ledgerID); rec.Code != http.StatusOK {
+		t.Fatalf("post A %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.post(second.ID, otherLedgerID); rec.Code != http.StatusOK {
+		t.Fatalf("post B %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, ledger := range []string{ledgerID, otherLedgerID} {
+		rec := s.do(http.MethodGet, "/v1/payroll/gl-reconciliation?legalEntityId="+legalEntity+"&ledgerId="+ledger, "", "carol", "payroll.run.read", "")
+		var v reconView
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &v) != nil || !v.Reconciled || v.PostedRuns != 1 {
+			t.Fatalf("ledger %s: %d %s", ledger, rec.Code, rec.Body.String())
+		}
 	}
 }

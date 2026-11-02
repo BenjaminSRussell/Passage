@@ -21,16 +21,17 @@ import (
 )
 
 const (
-	Currency         = "USD"
-	CodeRunNotFound  = "PAY-RUN-007"
-	CodeKeyConflict  = "PAY-RUN-008"
-	CodeGLRefused    = "PAY-GL-001"
-	CodeLedgerPinned = "PAY-GL-004"
-	sourceType       = "payroll-run"
-	runColumns       = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, ''), posting_lines`
-	statementsOfRun  = `select worker_id::text, rule_set, hash, gross::text, net::text, employer_cost::text, lines from pay_statement where tenant_id = $1 and run_id = $2 order by worker_id`
-	postedJournals   = `select posting_lines from pay_run where tenant_id = $1 and legal_entity_id = $2 and status = 'POSTED'`
-	lockRun          = `select status, calculated_by from pay_run where tenant_id = $1 and id = $2 for update`
+	Currency          = "USD"
+	CodeRunNotFound   = "PAY-RUN-007"
+	CodeKeyConflict   = "PAY-RUN-008"
+	CodeGLRefused     = "PAY-GL-001"
+	CodeLedgerPinned  = "PAY-GL-004"
+	CodeLedgerForeign = "PAY-GL-005"
+	sourceType        = "payroll-run"
+	runColumns        = `id::text, legal_entity_id::text, pay_date::text, period_start::text, period_end::text, status, calculated_by, coalesce(finalized_by, ''), coalesce(ledger_id::text, ''), coalesce(journal_entry_id::text, ''), posting_lines`
+	statementsOfRun   = `select worker_id::text, rule_set, hash, gross::text, net::text, employer_cost::text, lines from pay_statement where tenant_id = $1 and run_id = $2 order by worker_id`
+	postedJournals    = `select posting_lines from pay_run where tenant_id = $1 and legal_entity_id = $2 and ledger_id = $3 and status = 'POSTED'`
+	lockRun           = `select status, calculated_by from pay_run where tenant_id = $1 and id = $2 for update`
 )
 
 type Postgres struct{ pool *pgxpool.Pool }
@@ -244,50 +245,93 @@ func journalEntry(run Run, ledgerID string, journal []domain.JournalLine) ledger
 }
 
 // PostRun sends the balanced run journal (gross, employer cost, tax and deduction liabilities, net pay clearing) to the ledger under the key
-// payroll-run:<id> and records the journal entry on the run. The journal and ledger are fixed on the run before the first ledger call, so a retry
-// after a lost answer resends the identical entry whatever the posting profile or the requested ledger became since. A POSTED run is returned unchanged.
-func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (Run, error) {
+// payroll-run:<id> and records the journal entry on the run. The ledger must belong to the run's legal entity. The journal and ledger are fixed on the run
+// before the first ledger call, so a retry after an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict) resends the identical entry
+// whatever the posting profile or the requested ledger became since. A definite refusal (a 4xx other than a conflict) clears them, so the corrected profile or
+// ledger is used by the next attempt. The bool reports a FINALIZED to POSTED transition made by this call; a POSTED run on the same ledger is returned unchanged.
+func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (Run, bool, error) {
 	p := principal(ctx)
 	run, err := s.GetRun(ctx, id)
 	if err != nil {
-		return Run{}, err
+		return Run{}, false, err
 	}
 	if run.Status == domain.RunPosted {
-		return run, nil
+		if run.LedgerID != ledgerID {
+			return Run{}, false, httpx.NewProblem(http.StatusConflict, CodeLedgerPinned, "this run is already posted to ledger "+run.LedgerID)
+		}
+		return run, false, nil
 	}
 	if err := domain.CheckTransition(run.Status, domain.RunPosted); err != nil {
-		return Run{}, err
+		return Run{}, false, err
 	}
 	if run.PostingLines == nil {
+		if err := checkLedgerOwner(ctx, ledger, run.LegalEntityID, ledgerID); err != nil {
+			return Run{}, false, err
+		}
 		journal, err := s.postingJournal(ctx, run.LegalEntityID, run.statements())
 		if err != nil {
-			return Run{}, err
+			return Run{}, false, err
 		}
 		if run, err = s.fixJournal(ctx, id, journal, ledgerID); err != nil {
-			return Run{}, err
+			return Run{}, false, err
 		}
 	}
 	if run.LedgerID != ledgerID {
-		return Run{}, httpx.NewProblem(http.StatusConflict, CodeLedgerPinned, "this run's journal is already fixed against ledger "+run.LedgerID)
+		return Run{}, false, httpx.NewProblem(http.StatusConflict, CodeLedgerPinned, "this run's journal is already fixed against ledger "+run.LedgerID)
 	}
 	entryID, err := ledger.Post(ctx, journalEntry(run, run.LedgerID, run.PostingLines))
 	if err != nil {
 		code := ledgerclient.CodeOf(err)
 		slog.ErrorContext(ctx, "payroll run posting refused by the ledger", "run", id, "code", code, "err", err, "correlationId", middleware.GetReqID(ctx))
-		return Run{}, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not accept the payroll journal ("+code+")")
+		if definiteRefusal(err) {
+			if clearErr := s.clearJournal(ctx, id); clearErr != nil {
+				slog.ErrorContext(ctx, "payroll run journal not cleared after a ledger refusal", "run", id, "err", clearErr, "correlationId", middleware.GetReqID(ctx))
+			}
+		}
+		return Run{}, false, httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not accept the payroll journal ("+code+")")
 	}
+	transitioned := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `update pay_run set status = 'POSTED', journal_entry_id = $3 where tenant_id = $1 and id = $2 and status = 'FINALIZED'`,
-			p.TenantID, id, entryID); err != nil {
+		tag, err := tx.Exec(ctx, `update pay_run set status = 'POSTED', journal_entry_id = $3 where tenant_id = $1 and id = $2 and status = 'FINALIZED'`,
+			p.TenantID, id, entryID)
+		if err != nil {
 			return err
 		}
+		transitioned = tag.RowsAffected() == 1
 		run, err = loadRun(ctx, tx, p.TenantID, id)
 		return err
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "payroll run posted to the ledger but not recorded", "run", id, "entryId", entryID, "err", err, "correlationId", middleware.GetReqID(ctx))
 	}
-	return run, err
+	return run, transitioned && err == nil, err
+}
+
+func definiteRefusal(err error) bool {
+	return ledgerclient.Rejected(err) || errors.Is(err, ledgerclient.ErrEmptyEntry) || errors.Is(err, ledgerclient.ErrUnbalanced)
+}
+
+func checkLedgerOwner(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, ledgerID string) error {
+	owner, err := ledger.LegalEntity(ctx, legalEntityID, ledgerID)
+	if err != nil {
+		slog.ErrorContext(ctx, "payroll cannot read the ledger", "ledger", ledgerID, "err", err, "correlationId", middleware.GetReqID(ctx))
+		if ledgerclient.Rejected(err) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerForeign, "the ledger is unknown or not readable for this legal entity ("+ledgerclient.CodeOf(err)+")")
+		}
+		return httpx.NewProblem(http.StatusBadGateway, CodeGLRefused, "the general ledger did not answer the ledger lookup")
+	}
+	if owner != legalEntityID {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerForeign, "the ledger belongs to another legal entity")
+	}
+	return nil
+}
+
+func (s *Postgres) clearJournal(ctx context.Context, id string) error {
+	p := principal(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update pay_run set posting_lines = null, ledger_id = null where tenant_id = $1 and id = $2 and status = 'FINALIZED'`, p.TenantID, id)
+		return err
+	})
 }
 
 func (s *Postgres) fixJournal(ctx context.Context, id string, journal []domain.JournalLine, ledgerID string) (Run, error) {
@@ -329,7 +373,7 @@ func (s *Postgres) Reconcile(ctx context.Context, ledger ledgerclient.Ledger, le
 	var order []string
 	register := map[string]decimal.Decimal{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, postedJournals, p.TenantID, legalEntityID)
+		rows, err := tx.Query(ctx, postedJournals, p.TenantID, legalEntityID, ledgerID)
 		if err != nil {
 			return err
 		}

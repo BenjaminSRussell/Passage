@@ -1164,7 +1164,7 @@ test_payroll_posting_profile_write_is_its_own_duty if {
 	not allowed("payroll.run.read", "PUT", "/v1/payroll/posting-profiles/le-1")
 }
 
-test_payroll_service_grant_reaches_only_ledger_post_and_balance if {
-	data.service_grants.payroll.ledger == ["ledger.entry.post", "ledger.balance.read"]
+test_payroll_service_grant_reaches_only_ledger_post_balance_and_lookup if {
+	data.service_grants.payroll.ledger == ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
 	count(data.service_grants.payroll) == 1
 }

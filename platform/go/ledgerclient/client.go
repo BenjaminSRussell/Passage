@@ -26,8 +26,10 @@ const (
 	DutyPost        = "ledger.entry.post"
 	DutyReverse     = "ledger.journal.reverse"
 	DutyBalanceRead = "ledger.balance.read"
+	DutyLedgerRead  = "ledger.ledger.lookup"
 
 	audience        = "ledger"
+	ledgersPath     = "/v1/ledger/ledgers/"
 	entriesPath     = "/v1/ledger/journal-entries"
 	balancesPath    = "/v1/ledger/balances"
 	maxResponseSize = 1 << 20
@@ -88,6 +90,7 @@ type Ledger interface {
 	Post(ctx context.Context, e Entry) (string, error)
 	Reverse(ctx context.Context, r Reversal) (string, error)
 	Balance(ctx context.Context, q BalanceQuery) (Balance, error)
+	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
 // Error is a non-success answer of the ledger; Code is the problem code it sent, passed through unchanged.
@@ -352,6 +355,22 @@ func (c *Client) Balance(ctx context.Context, q BalanceQuery) (Balance, error) {
 		out.Debit, out.Credit = out.Debit.Add(d), out.Credit.Add(cr)
 	}
 	return out, nil
+}
+
+// LegalEntity returns the legal entity that owns ledgerID; an unknown ledger is an *Error with status 404.
+func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
+	raw, err := c.do(ctx, "ledger", ledgerID, http.MethodGet, ledgersPath+url.PathEscape(ledgerID), nil, nil, "", legalEntityID, DutyLedgerRead)
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		LegalEntityID string `json:"legalEntityId"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || body.LegalEntityID == "" {
+		slog.ErrorContext(ctx, "ledger lookup response unusable", "ledger", ledgerID, "err", err, "correlationId", middleware.GetReqID(ctx))
+		return "", errors.New("ledger lookup: response has no legalEntityId")
+	}
+	return body.LegalEntityID, nil
 }
 
 // FromEnv builds the client from LEDGER_URL, LEDGER_TIMEOUT and the service signing key variables; it returns nil, nil when LEDGER_URL is unset

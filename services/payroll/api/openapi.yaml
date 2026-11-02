@@ -9,7 +9,7 @@ info:
     Social Security with the wage base cap, Medicare with the employee-only additional tax,
     FUTA, Colorado flat state tax), supplemental withholding for off-cycle bonuses, deduction
     arrears (BR-43.10) and employer costs and persists nothing. Money is a decimal string with two places, never a float.
-    Error codes: COM-0001, AUTH-0001, AUTH-0003, PAY-RULE-001, PAY-RUN-004 to PAY-RUN-009, PAY-GL-001 to PAY-GL-004, COM-0500.
+    Error codes: COM-0001, AUTH-0001, AUTH-0003, PAY-RULE-001, PAY-RUN-004 to PAY-RUN-009, PAY-GL-001 to PAY-GL-005, COM-0500.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -106,8 +106,12 @@ paths:
       description: >-
         Posts the balanced run journal to the general ledger under the key payroll-run:{id}. GL accounts come from the
         legal entity's stored posting profile, never from the request. 422 PAY-GL-003 when the profile lacks an account for a role,
-        422 PAY-RUN-005 unless the run is FINALIZED, 502 PAY-GL-001 when the ledger refuses (the run stays FINALIZED and can be retried),
-        503 PAY-GL-002 when no ledger is configured, 409 PAY-GL-004 when the run is already fixed against another ledger. The journal is stored on the run before the ledger call and reused by retries. A POSTED run is returned unchanged.
+        422 PAY-RUN-005 unless the run is FINALIZED, 422 PAY-GL-005 when the ledger is unknown or belongs to another legal entity,
+        502 PAY-GL-001 when the ledger refuses or does not answer (the run stays FINALIZED and can be retried),
+        503 PAY-GL-002 when no ledger is configured, 409 PAY-GL-004 when the run is already fixed or posted against another ledger.
+        The journal and ledger are stored on the run before the ledger call. After an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict) retries reuse them;
+        after a definite refusal (a 4xx other than a conflict) they are cleared, so the retry uses the corrected posting profile or ledger.
+        A POSTED run on the same ledger is returned unchanged.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:

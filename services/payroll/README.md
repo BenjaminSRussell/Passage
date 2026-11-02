@@ -47,10 +47,16 @@ Slice 1 is the pure gross-to-net engine behind a stateless HTTP preview:
   exact-fraction reference (`python3 -I gen_payroll_fixtures.py`): `payroll-us-200.csv`
   (200 Pub 15-T gross-to-net scenarios) and `payroll-retro-25.json` (25 retro cases).
 
-Post fixes the journal lines and the ledger on the run before the first ledger call, so a
-retry resends the identical entry (a different ledgerId is 409 PAY-GL-004) and
-reconciliation sums the stored journals of POSTED runs: a later posting-profile edit
-changes only runs not yet posted. See `NOT-IMPLEMENTED.md`.
+Post first checks that the ledger exists and belongs to the run's legal entity (422
+PAY-GL-005), then fixes the journal lines and the ledger on the run before the ledger
+call. After an ambiguous outcome (transport error, timeout, 5xx, idempotency conflict)
+the pin stays, so a retry resends the identical entry (a different ledgerId is 409
+PAY-GL-004). After a definite refusal (a 4xx other than a conflict, e.g. an unknown,
+unpostable or suspended account) the pin is cleared, so the retry uses the corrected
+posting profile or ledger. A POSTED run posted again to another ledger is 409
+PAY-GL-004. Reconciliation sums the stored journals of the POSTED runs on the
+reconciled ledger: a later posting-profile edit changes only runs not yet posted. See
+`NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -119,7 +125,8 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | PAY-GL-001   | 502  | The general ledger refused or did not answer                          |
 | PAY-GL-002   | 503  | No general ledger configured                                          |
 | PAY-GL-003   | 422  | The posting profile has no GL account for a payroll role              |
-| PAY-GL-004   | 409  | The run is already fixed against another ledger                       |
+| PAY-GL-004   | 409  | The run is already fixed or posted against another ledger             |
+| PAY-GL-005   | 422  | The ledger is unknown or belongs to another legal entity              |
 | COM-0500     | 500  | Unexpected failure                                                    |
 
 ## Dependencies

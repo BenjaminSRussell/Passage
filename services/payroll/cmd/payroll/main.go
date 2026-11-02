@@ -62,11 +62,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("ledger client: %w", err)
 	}
 	runs := store.New(pool)
-	a := api.New(pool).WithRuns(runs, nil)
-	// WithRuns takes the ledger interface; passing a nil *Client directly would make a non-nil interface that posts through nothing.
+	var l ledgerclient.Ledger
 	if ledger != nil {
-		a.WithRuns(runs, ledger)
+		l = ledger
 	}
+	a := api.New(pool).WithRuns(runs, l)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

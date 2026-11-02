@@ -44,7 +44,7 @@ type Runs interface {
 	CreateRun(ctx context.Context, in store.NewRun) (store.Run, error)
 	GetRun(ctx context.Context, id string) (store.Run, error)
 	Advance(ctx context.Context, id string, to domain.RunStatus) (store.Run, error)
-	PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (store.Run, error)
+	PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (store.Run, bool, error)
 	Reconcile(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, ledgerID string) (store.Reconciliation, error)
 	GetPostingProfile(ctx context.Context, legalEntityID string) (map[string]string, error)
 	SetPostingProfile(ctx context.Context, legalEntityID string, accounts map[string]string) (map[string]string, error)
@@ -334,12 +334,14 @@ func (a *API) postRun(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, fields)
 		return
 	}
-	run, err := a.runs.PostRun(r.Context(), a.ledger, id, req.LedgerID)
+	run, transitioned, err := a.runs.PostRun(r.Context(), a.ledger, id, req.LedgerID)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	a.runsPosted.Add(1)
+	if transitioned {
+		a.runsPosted.Add(1)
+	}
 	httpx.JSON(w, http.StatusOK, toRunView(run))
 }
 
