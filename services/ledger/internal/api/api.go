@@ -86,6 +86,7 @@ var (
 type API struct {
 	store    store.Store
 	periods  store.PeriodGate
+	rates    store.RateSource
 	now      func() time.Time
 	posted   atomic.Int64
 	replayed atomic.Int64
@@ -101,10 +102,18 @@ func (a *API) WithPeriodGate(g store.PeriodGate) *API {
 	return a
 }
 
+func (a *API) WithRateSource(src store.RateSource) *API {
+	a.rates = src
+	return a
+}
+
 func (a *API) periodGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.periods != nil {
 			r = r.WithContext(store.WithPeriodGate(r.Context(), a.periods))
+		}
+		if a.rates != nil {
+			r = r.WithContext(store.WithRateSource(r.Context(), a.rates))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -116,6 +125,7 @@ func (a *API) Register(r chi.Router) {
 		r.Use(a.periodGate)
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
 		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
+		r.With(authz.RequireDuty(dutyLedgerWrite)).Patch("/ledgers/{id}", a.patchLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
 		r.With(authz.RequireDuty(dutyRead)).Get("/charts/{chart}/accounts", a.listAccounts)
 		r.With(authz.RequireAnyDuty(dutyPost, dutyEntryPost)).Post("/journal-entries", a.postEntry)
@@ -276,6 +286,61 @@ type createLedgerRequest struct {
 	// ReversalReasonRequired defaults to true (FR-11.15); NegativePostingEnabled to false (BR-11.16).
 	ReversalReasonRequired *bool `json:"reversalReasonRequired"`
 	NegativePostingEnabled *bool `json:"negativePostingEnabled"`
+}
+
+var (
+	calendarCodeRe      = regexp.MustCompile(`^[A-Z0-9_-]{1,20}$`)
+	accountingPrinciple = map[string]bool{"IFRS": true, "US_GAAP": true, "LOCAL_GAAP": true, "TAX": true, "MANAGEMENT": true}
+)
+
+type patchLedgerRequest struct {
+	CalendarCode        *string `json:"calendarCode"`
+	AccountingPrinciple *string `json:"accountingPrinciple"`
+	ReportingCurrency   *string `json:"reportingCurrency"`
+}
+
+func (a *API) patchLedger(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found"))
+		return
+	}
+	var req patchLedgerRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.CalendarCode == nil && req.AccountingPrinciple == nil && req.ReportingCurrency == nil {
+		fields["body"] = "send at least one of calendarCode, accountingPrinciple, reportingCurrency (an empty string clears it)"
+	}
+	if v := req.CalendarCode; v != nil && *v != "" && !calendarCodeRe.MatchString(*v) {
+		fields["calendarCode"] = "must be 1 to 20 characters of A-Z, 0-9, '_' or '-'"
+	}
+	if v := req.AccountingPrinciple; v != nil && *v != "" && !accountingPrinciple[*v] {
+		fields["accountingPrinciple"] = "must be one of IFRS, US_GAAP, LOCAL_GAAP, TAX, MANAGEMENT"
+	}
+	if v := req.ReportingCurrency; v != nil && *v != "" && !currencyRe.MatchString(*v) {
+		fields["reportingCurrency"] = "must be an ISO 4217 alpha-3 code"
+	}
+	version, versionOK := parseIfMatch(r.Header.Get("If-Match"))
+	if !versionOK {
+		fields["If-Match"] = `must be the ledger version as an entity tag, for example "3"`
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	ledger, err := a.store.UpdateLedgerSettings(r.Context(), id, version, store.LedgerSettings(req))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, ledger.Version))
+	httpx.JSON(w, http.StatusOK, ledger)
 }
 
 func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
@@ -499,6 +564,11 @@ type postEntryRequest struct {
 	Lines        []lineDTO `json:"lines"`
 }
 
+type singleEntryRequest struct {
+	postEntryRequest
+	LedgerLines []ledgerLinesDTO `json:"ledgerLines,omitempty"`
+}
+
 // toPostInput checks the request's syntax and builds the store input. Rule
 // checks happen in the domain and are reported as violations, not here.
 func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInput, map[string]string) {
@@ -573,17 +643,22 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req postEntryRequest
+	var req singleEntryRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in, fields := a.toPostInput(req, r)
+	in, fields := a.toPostInput(req.postEntryRequest, r)
+	if len(req.LedgerLines) > 0 && len(req.Lines) == 0 {
+		delete(fields, "lines")
+	}
+	in.LedgerLines = ledgerLinesInput(req.LedgerLines, fields)
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
+	req.LedgerLines = canonicalGroups(req.LedgerLines)
 	hash, err := domain.HashPayload(req)
 	if err != nil {
 		httpx.Fail(w, r, err)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -75,6 +76,9 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err := requireLedgerSpecific(ctx, tx, tenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 		return out, err
 	}
+	if in, err = withOwnLedgerLines(ledger, in); err != nil {
+		return out, err
+	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
@@ -85,6 +89,17 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	}
 	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
 	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+}
+
+func withOwnLedgerLines(ledger Ledger, in PostInput) (PostInput, error) {
+	for raw, lines := range in.LedgerLines {
+		if id, ok := ids.Canonical(raw); !ok || id != ledger.ID {
+			return in, setViolation(CodeLedgerLinesOwnLedgerOnly, "ledgerLines",
+				"a single-ledger post accepts ledger lines only for its own ledger "+ledger.Code+"; use the ledger set to post other ledgers")
+		}
+		in.Lines = append(slices.Clone(in.Lines), lines...)
+	}
+	return in, nil
 }
 
 func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID string, allowed bool) error {
@@ -389,11 +404,11 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	for i, wl := range ne.lines {
 		batch.Queue(`insert into journal_line (tenant_id, id, legal_entity_id, entry_id, line_number, main_account_id, dimension_combination_id,
-				debit_credit, currency_txn, amount_txn, amount_acct, negative_posting, line_text, source_line_ref, reversal_of_line_id, derived_by_step_ids)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, $14, nullif($11, ''), nullif($12, ''), $13, $15::text[]::uuid[])`,
+				debit_credit, currency_txn, amount_txn, amount_acct, negative_posting, line_text, source_line_ref, reversal_of_line_id, derived_by_step_ids, rounding_adjustment)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, $14, nullif($11, ''), nullif($12, ''), $13, $15::text[]::uuid[], $16)`,
 			tenantID, wl.id, l.LegalEntityID, entryID, i+1, wl.valid.Account.ID, wl.valid.CombinationID,
 			wl.valid.Side, l.Currency, wl.valid.Amount.String(), wl.valid.Text, wl.valid.SourceLineRef, wl.reversalOfLineID,
-			wl.valid.Negative, derivedBy(wl.valid.DerivedBy))
+			wl.valid.Negative, derivedBy(wl.valid.DerivedBy), wl.valid.RoundingAdjustment)
 	}
 	valid := make([]domain.ValidLine, 0, len(ne.lines))
 	for _, wl := range ne.lines {
@@ -469,7 +484,7 @@ func lineView(wl writeLine, number int, currency string) Line {
 		ID: wl.id, LineNumber: number, Account: v.Account.Number, DimensionCombinationID: hex.EncodeToString(v.CombinationID),
 		DisplayName: v.DisplayName, Dimensions: v.Dimensions, DebitCredit: v.Side,
 		Amount: v.Amount.StringFixed(money.MinorUnits(currency)), Text: v.Text, SourceLineRef: v.SourceLineRef,
-		ReversalOfLineID: wl.reversalOfLineID, NegativePosting: v.Negative, DerivedByStepIDs: v.DerivedBy,
+		ReversalOfLineID: wl.reversalOfLineID, NegativePosting: v.Negative, DerivedByStepIDs: v.DerivedBy, RoundingAdjustment: v.RoundingAdjustment,
 	}
 }
 
@@ -541,7 +556,7 @@ func loadEntryTx(ctx context.Context, tx pgx.Tx, tenantID, id string) (Entry, er
 func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency string) ([]Line, error) {
 	rows, err := tx.Query(ctx, `select l.id, l.line_number, a.account_number, l.dimension_combination_id, c.display_name, c.dimensions,
 			l.debit_credit, l.amount_acct::text, coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), l.reversal_of_line_id::text,
-			l.negative_posting, l.derived_by_step_ids::text[]
+			l.negative_posting, l.derived_by_step_ids::text[], l.rounding_adjustment
 		from journal_line l
 		join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
 		join dimension_combination c on c.tenant_id = l.tenant_id and c.id = l.dimension_combination_id
@@ -556,7 +571,7 @@ func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency strin
 		var combo []byte
 		var amountText string
 		if err := rows.Scan(&ln.ID, &ln.LineNumber, &ln.Account, &combo, &ln.DisplayName, &ln.Dimensions, &ln.DebitCredit,
-			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID, &ln.NegativePosting, &ln.DerivedByStepIDs); err != nil {
+			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID, &ln.NegativePosting, &ln.DerivedByStepIDs, &ln.RoundingAdjustment); err != nil {
 			return nil, err
 		}
 		amount, err := decimal.NewFromString(amountText)

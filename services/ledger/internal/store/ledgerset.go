@@ -26,8 +26,9 @@ const (
 	CodeSetEntityMismatch   = "LEDGER_SET_LEGAL_ENTITY_MISMATCH"
 	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
 	CodeMappingOnLeading    = "LEDGER_MAPPING_ON_LEADING_LEDGER"
-	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
 	CodeLedgerLinesNotInSet = "LEDGER_LINES_LEDGER_NOT_IN_SET"
+
+	CodeLedgerLinesOwnLedgerOnly = "LEDGER_LINES_OWN_LEDGER_ONLY"
 )
 
 type LedgerSet struct {
@@ -97,9 +98,6 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		for _, l := range loaded {
 			if l.LegalEntityID != loaded[0].LegalEntityID {
 				return setViolation(CodeSetEntityMismatch, "parallelLedgerIds", "every ledger of a set belongs to one legal entity")
-			}
-			if l.Currency != loaded[0].Currency {
-				return setViolation(CodeSetCurrencyMismatch, "parallelLedgerIds", "every ledger of a set has the same accounting currency")
 			}
 		}
 		if err := lockLegalEntity(ctx, tx, p.TenantID, loaded[0].LegalEntityID); err != nil {
@@ -340,6 +338,7 @@ func (s *Postgres) PostSetEntry(ctx context.Context, setID string, in PostInput)
 	}
 	var out EntryResult
 	s.warmPeriods(ctx, warmSetQuery, setID, in.PostingDate.Format(time.DateOnly), in.Source.System)
+	ctx = s.resolveRates(ctx, setID, in.PostingDate)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = postSetTx(ctx, tx, p.TenantID, setID, in)
 		return err
@@ -361,6 +360,12 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 		}
 		ledgers = append(ledgers, l)
 	}
+	documentCurrency := ""
+	for _, l := range ledgers {
+		if l.ID == set.LeadingLedgerID {
+			documentCurrency = l.Currency
+		}
+	}
 	ledgerLines, err := checkLedgerLines(set, in)
 	if err != nil {
 		return out, err
@@ -379,6 +384,9 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 				return EntryResult{}, err
 			}
 			li.Lines = domain.ApplyMappings(in.Lines, mappings, in.PostingDate)
+		}
+		if li.Lines, err = translateLines(ctx, ledger, documentCurrency, in.PostingDate, li.Lines); err != nil {
+			return EntryResult{}, err
 		}
 		li.Lines = append(slices.Clone(li.Lines), ledgerLines[ledger.ID]...)
 		li.Key = setEntryKey(in.Key, ledger.ID)

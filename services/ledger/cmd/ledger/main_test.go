@@ -76,3 +76,17 @@ func TestPeriodGate_CloseUrlNeedsASigningKey(t *testing.T) {
 		t.Fatalf("configured: %v %v", g, err)
 	}
 }
+
+func TestRateSource_FxUrlNeedsASigningKeyAndIsOptional(t *testing.T) {
+	if src, err := rateSource(envOf(nil)); err != nil || src != nil {
+		t.Fatalf("unset must leave no rate source: %v %v", src, err)
+	}
+	if _, err := rateSource(envOf(map[string]string{"FX_URL": "http://fx"})); err == nil || !strings.Contains(err.Error(), "signing key") {
+		t.Fatalf("want a signing key error, got %v", err)
+	}
+	src, err := rateSource(envOf(map[string]string{"FX_URL": "http://fx", "PASSAGE_SERVICE_NAME": "ledger",
+		"PASSAGE_SERVICE_SIGNING_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}))
+	if err != nil || src == nil {
+		t.Fatalf("configured: %v %v", src, err)
+	}
+}

@@ -35,6 +35,7 @@ type Store interface {
 	ListAccounts(ctx context.Context, chartCode, afterNumber string, limit int) ([]Account, error)
 	CreateLedger(ctx context.Context, in Ledger) (Ledger, error)
 	GetLedger(ctx context.Context, id string) (Ledger, error)
+	UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error)
 	PostEntry(ctx context.Context, in PostInput) (EntryResult, error)
 	ReverseEntry(ctx context.Context, in ReverseInput) (EntryResult, error)
 	GetEntry(ctx context.Context, id string) (Entry, error)
@@ -160,6 +161,10 @@ type Ledger struct {
 	FuturePostingDays      int       `json:"futurePostingDays"`
 	ReversalReasonRequired bool      `json:"reversalReasonRequired"`
 	NegativePostingEnabled bool      `json:"negativePostingEnabled"`
+	CalendarCode           *string   `json:"calendarCode,omitempty"`
+	AccountingPrinciple    *string   `json:"accountingPrinciple,omitempty"`
+	ReportingCurrency      *string   `json:"reportingCurrency,omitempty"`
+	Version                int       `json:"version"`
 	NextSequence           int64     `json:"-"`
 	CreatedAt              time.Time `json:"createdAt"`
 }
@@ -300,6 +305,8 @@ type Line struct {
 	NegativePosting        bool              `json:"negativePosting,omitempty"`
 	// DerivedByStepIDs names the derivation steps that filled dimensions on the line (FR-11.22).
 	DerivedByStepIDs []string `json:"derivedByStepIds,omitempty"`
+	// RoundingAdjustment marks the line that absorbed a currency translation rounding difference (BR-12.4).
+	RoundingAdjustment bool `json:"roundingAdjustment,omitempty"`
 }
 
 // BalanceFilter selects balances for a trial balance.
@@ -495,14 +502,15 @@ func accountNumbers(lines []domain.LineInput) []string {
 	return out
 }
 
-const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled`
+const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled, calendar_code, accounting_principle, reporting_currency, settings_version`
 
 const ledgerColumns = `select ` + ledgerFields
 
 func scanLedger(row pgx.Row) (Ledger, error) {
 	var l Ledger
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.Code, &l.Name, &l.ChartCode, &l.Currency, &l.DimensionAttributes,
-		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt, &l.ReversalReasonRequired, &l.NegativePostingEnabled)
+		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt, &l.ReversalReasonRequired, &l.NegativePostingEnabled,
+		&l.CalendarCode, &l.AccountingPrinciple, &l.ReportingCurrency, &l.Version)
 	if l.DimensionAttributes == nil {
 		l.DimensionAttributes = []string{}
 	}

@@ -101,6 +101,8 @@ type LineInput struct {
 	SourceLineRef string
 	// DerivedBy lists the derivation step ids that filled dimensions (FR-11.22).
 	DerivedBy []string
+	// RoundingAdjustment marks the line that absorbed a currency translation rounding difference (BR-12.4).
+	RoundingAdjustment bool
 }
 
 // ValidLine is a line that passed every line-level rule.
@@ -117,7 +119,8 @@ type ValidLine struct {
 	// StructureID is the account structure version that validated the line.
 	StructureID string
 	// DerivedBy lists the derivation step ids that filled dimensions (FR-11.22).
-	DerivedBy []string
+	DerivedBy          []string
+	RoundingAdjustment bool
 	// Negative marks a negative posting (storno, BR-11.16): the projection
 	// reduces the original side instead of adding to the opposite side.
 	Negative bool
@@ -277,7 +280,7 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 		id, display := CombinationIDFor(structureID, r.DimensionAttributes, r.ChartCode, acct.Number, dims)
 		res.Lines = append(res.Lines, ValidLine{Index: idx, Account: acct, Dimensions: dims, Side: in.Side,
 			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, CombinationID: id, DisplayName: display,
-			StructureID: structureID, DerivedBy: in.DerivedBy})
+			StructureID: structureID, DerivedBy: in.DerivedBy, RoundingAdjustment: in.RoundingAdjustment})
 	}
 	if !res.Debit.Equal(res.Credit) {
 		res.Violations = append(res.Violations, Violation{Code: "LEDGER_UNBALANCED", Field: "lines",

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 )
@@ -272,5 +273,79 @@ func TestListLedgerSetsAndAccountMappings(t *testing.T) {
 	}
 	if rec := call(h, http.MethodGet, "/v1/ledger/ledgers/nope/account-mappings", "", dutyRead, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("malformed ledger id: status %d", rec.Code)
+	}
+}
+
+func TestPostEntry_LedgerLinesReachTheStoreAndValidateRefusesThem(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	body := `{"ledgerId":"` + testLedger + `","documentId":"` + testDoc + `","postingDate":"2026-03-31",
+	  "source":{"system":"ap","type":"vendor_invoice","id":"7F3A"},
+	  "lines":[{"account":"6010","debitCredit":"D","amount":{"currency":"USD","value":"10.00"}}],
+	  "ledgerLines":[{"ledgerId":"` + testLedger + `","lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]}]}`
+	rec := call(h, http.MethodPost, "/v1/ledger/journal-entries", body, dutyPost, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusCreated || len(fs.posted) != 1 || len(fs.posted[0].LedgerLines[testLedger]) != 1 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(h, http.MethodPost, "/v1/ledger/validate", body, dutyPost, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("validate has no ledger lines: status %d", rec.Code)
+	}
+}
+
+func TestPatchLedger_ValidatesAndPassesSettingsWithTheVersion(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	path := "/v1/ledger/ledgers/" + testLedger
+	for name, body := range map[string]string{
+		"empty":         `{}`,
+		"bad calendar":  `{"calendarCode":"fiscal year"}`,
+		"bad principle": `{"accountingPrinciple":"ifrs"}`,
+		"bad currency":  `{"reportingCurrency":"euro"}`,
+	} {
+		if rec := call(h, http.MethodPatch, path, body, dutyLedgerWrite, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d", name, rec.Code)
+		}
+	}
+	if rec := call(h, http.MethodPatch, path, `{"calendarCode":"X"}`, dutyLedgerWrite, map[string]string{"If-Match": `"zero"`}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad If-Match: status %d", rec.Code)
+	}
+	if rec := call(h, http.MethodPatch, path, `{"calendarCode":"X"}`, dutyRead, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("without the ledger write duty: status %d", rec.Code)
+	}
+	if len(fs.settings) != 0 {
+		t.Fatalf("invalid requests must not reach the store: %d", len(fs.settings))
+	}
+	rec := call(h, http.MethodPatch, path, `{"calendarCode":"FISCAL_EU","accountingPrinciple":"IFRS","reportingCurrency":""}`, dutyLedgerWrite, map[string]string{"If-Match": `"2"`})
+	if rec.Code != http.StatusOK || len(fs.settings) != 1 || fs.settings[0].version != 2 || *fs.settings[0].in.AccountingPrinciple != "IFRS" || *fs.settings[0].in.ReportingCurrency != "" {
+		t.Fatalf("status %d: %s %+v", rec.Code, rec.Body.String(), fs.settings)
+	}
+	if rec.Header().Get("ETag") != `"3"` {
+		t.Errorf("etag %q", rec.Header().Get("ETag"))
+	}
+}
+
+func TestSetAndSinglePosts_RelayRateAndLedgerLineProblemsUnchanged(t *testing.T) {
+	setPath := "/v1/ledger/ledger-sets/" + testSet + "/journal-entries"
+	headers := map[string]string{"Idempotency-Key": "k"}
+	for name, tc := range map[string]struct {
+		err  error
+		code int
+		want string
+	}{
+		"rate missing": {httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRateMissing, "no rate"), http.StatusUnprocessableEntity, store.CodeRateMissing},
+		"future rate":  {httpx.NewProblem(http.StatusUnprocessableEntity, "FX_RATE_DATE_FUTURE", "future"), http.StatusUnprocessableEntity, "FX_RATE_DATE_FUTURE"},
+		"fx down":      {httpx.NewProblem(http.StatusServiceUnavailable, store.CodeFXUnavailable, "down"), http.StatusServiceUnavailable, store.CodeFXUnavailable},
+		"fx refused":   {httpx.NewProblem(http.StatusBadGateway, store.CodeFXMisconfigure, "refused"), http.StatusBadGateway, store.CodeFXMisconfigure},
+	} {
+		rec := call(server(&fakeStore{err: tc.err}), http.MethodPost, setPath, setEntryBody, dutyPost, headers)
+		if rec.Code != tc.code || decode(t, rec)["code"] != tc.want {
+			t.Errorf("%s: status %d: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	own := &domain.RejectedError{Violations: []domain.Violation{{Code: store.CodeLedgerLinesOwnLedgerOnly, Field: "ledgerLines", Message: "own ledger only"}}}
+	rec := call(server(&fakeStore{err: own}), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, headers)
+	m := decode(t, rec)
+	if rec.Code != http.StatusUnprocessableEntity || m["code"] != store.CodeLedgerLinesOwnLedgerOnly || m["violations"].([]any)[0].(map[string]any)["field"] != "ledgerLines" {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 }

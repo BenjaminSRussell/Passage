@@ -72,6 +72,18 @@ type fakeStore struct {
 	listNext    string
 	mappings    []store.AccountMapping
 	setPosts    []setPost
+	settings    []settingsCall
+}
+
+type settingsCall struct {
+	id      string
+	version int
+	in      store.LedgerSettings
+}
+
+func (f *fakeStore) UpdateLedgerSettings(_ context.Context, id string, version int, in store.LedgerSettings) (store.Ledger, error) {
+	f.settings = append(f.settings, settingsCall{id, version, in})
+	return store.Ledger{ID: id, Version: version + 1}, f.err
 }
 
 type setPost struct {

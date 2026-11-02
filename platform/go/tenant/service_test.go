@@ -163,6 +163,24 @@ func TestUmbrellaDutiesAreNotServiceGranted(t *testing.T) {
 	}
 }
 
+func TestLedgerMayMintOnlyTheFxRateLookupForFx(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := tenant.NewServiceSigner("ledger", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "clerk"}
+	if _, err := signer.MintDuties("fx", p, "", []string{"fx.rate.lookup"}); err != nil {
+		t.Fatalf("ledger to fx rate lookup: %v", err)
+	}
+	if _, err := signer.MintDuties("fx", p, "", []string{"Maintain exchange rates"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("ledger must not publish rates: %v", err)
+	}
+}
+
 func mustMint(t *testing.T, s *tenant.ServiceSigner, aud string, p tenant.Principal) string {
 	t.Helper()
 	token, err := s.Mint(aud, p, "")

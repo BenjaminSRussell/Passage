@@ -75,7 +75,10 @@
     "product.released.read": {"permissions": [{"resource": "/v1/product/released-products", "methods": ["GET"]}]},
     "product.variants.explode": {"permissions": [{"resource": "/v1/product/products/*/variants:explode", "methods": ["POST"]}]},
     "product.jobs.write": {"permissions": [{"resource": "/v1/product/jobs/group-change", "methods": ["POST"]}]},
-    "ledger.ledger.write": {"permissions": [{"resource": "/v1/ledger/ledgers", "methods": ["POST"]}]},
+    "ledger.ledger.write": {"permissions": [
+      {"resource": "/v1/ledger/ledgers", "methods": ["POST"]},
+      {"resource": "/v1/ledger/ledgers/*", "methods": ["PATCH"]}
+    ]},
     "ledger.account.write": {"permissions": [
       {"resource": "/v1/ledger/charts/*/accounts/*", "methods": ["PUT"]},
       {"resource": "/v1/ledger/ledgers/*/open-item-accounts/*", "methods": ["PUT"]}
@@ -2722,7 +2725,8 @@
       "production": ["production.order.create-from-sales"]
     },
     "ledger": {
-      "close": ["period.check"]
+      "close": ["period.check"],
+      "fx": ["fx.rate.lookup"]
     },
     "analytics": {
       "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
