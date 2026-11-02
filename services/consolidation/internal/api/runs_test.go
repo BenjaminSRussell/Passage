@@ -89,8 +89,8 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
 	}
 	started := created[runOut](t, rec)
-	if started.Version != 1 || started.Status != "completed" || started.CreatedBy != "user-7" || started.CTAAmount != "38000.00" ||
-		started.UnitCount != 1 || started.EliminationCount != 16 || rec.Header().Get("Location") != runsPath+"/"+started.ID {
+	if started.Version != 1 || started.Status != "completed" || started.CreatedBy != "user-7" || started.CTAAmount != "39523.81" ||
+		started.UnitCount != 1 || started.EliminationCount != 17 || rec.Header().Get("Location") != runsPath+"/"+started.ID {
 		t.Fatalf("started = %+v", started)
 	}
 
@@ -117,7 +117,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 		Balances     []struct{ Unit, Account, Amount string }
 		Eliminations []struct{ Unit, Rule, Account, Debit, Credit string }
 	}](t, call(a, http.MethodGet, runsPath+"/"+started.ID, tenantID, api.DutyView, "", ""))
-	if got.ID != started.ID || len(got.Balances) != 6 || len(got.Eliminations) != 16 || got.Balances[2].Account != "CTA" || got.Balances[2].Amount != "38000.00" {
+	if got.ID != started.ID || len(got.Balances) != 6 || len(got.Eliminations) != 17 || got.Balances[2].Account != "CTA" || got.Balances[2].Amount != "38000.00" {
 		t.Fatalf("detail = %+v", got)
 	}
 
@@ -129,7 +129,7 @@ func TestRuns_StartListGetStatements(t *testing.T) {
 	for _, l := range st.Statements {
 		amounts[l.Statement+"/"+l.Line] = l.Amount
 	}
-	if st.Version != 1 || amounts["income/CONSOLIDATED_NET_INCOME"] != "149040.00" || amounts["income/NCI_PROFIT"] != "29808.00" || amounts["net_assets/CTA"] != "38000.00" {
+	if st.Version != 1 || amounts["income/CONSOLIDATED_NET_INCOME"] != "147540.00" || amounts["income/IC_FX_GAIN_LOSS"] != "-1500.00" || amounts["net_assets/CTA_ELIMINATIONS"] != "1523.81" || amounts["income/NCI_PROFIT"] != "29808.00" || amounts["net_assets/CTA"] != "38000.00" {
 		t.Fatalf("statements = %+v", amounts)
 	}
 }

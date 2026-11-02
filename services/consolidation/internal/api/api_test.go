@@ -66,13 +66,13 @@ func TestPreviewEliminations_PSExample(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Balanced || len(got.Entries) != 16 {
+	if !got.Balanced || len(got.Entries) != 17 {
 		t.Fatalf("response = %+v", got)
 	}
-	if got.Totals["debit"] != "1032952.00" || got.Totals["credit"] != "1032952.00" {
+	if got.Totals["debit"] != "1034475.81" || got.Totals["credit"] != "1034475.81" {
 		t.Fatalf("totals = %v", got.Totals)
 	}
-	ruleDebits := map[string]string{"E1": "108000.00", "E2": "110000.00", "E3": "15552.00", "E4": "767000.00", "E5": "32400.00"}
+	ruleDebits := map[string]string{"E1": "108000.00", "E2": "110000.00", "E3": "15552.00", "E4": "768523.81", "E5": "32400.00"}
 	for rule, want := range ruleDebits {
 		if got.Rules[rule]["debit"] != want || got.Rules[rule]["credit"] != want {
 			t.Fatalf("rule %s totals = %v; want %s each side", rule, got.Rules[rule], want)
@@ -80,6 +80,32 @@ func TestPreviewEliminations_PSExample(t *testing.T) {
 	}
 	if got.Entries[2].Rule != "E2" || got.Entries[2].Account != "IC_PAYABLE" || got.Entries[2].Debit != "108500.00" {
 		t.Fatalf("E2 first leg = %+v", got.Entries[2])
+	}
+}
+
+func TestPreviewEliminations_ICFXTreatment(t *testing.T) {
+	cases := []struct{ name, extra, account string }{
+		{"default account", ``, "FX_GAIN_LOSS"},
+		{"configured account", `,"fxGainLossAccount":"FX_REALIZED"`, "FX_REALIZED"},
+		{"net investment", `,"icNetInvestment":true`, "CTA"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true`+c.extra, 1)
+			rec := do(api.New(nil), eliminationsPath, tenantID, api.DutyRun, body)
+			var got struct {
+				Entries []struct{ Rule, Account, Debit string } `json:"entries"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+			}
+			for _, e := range got.Entries {
+				if e.Rule == "E2" && e.Account == c.account && e.Debit == "1500.00" {
+					return
+				}
+			}
+			t.Fatalf("no E2 Dr 1500.00 on %s: %+v", c.account, got.Entries)
+		})
 	}
 }
 
@@ -110,6 +136,8 @@ func TestPreviewEliminations_Errors(t *testing.T) {
 		{"exponent decimal", strings.Replace(psBody, `"icSales":"100000"`, `"icSales":"1e5"`, 1), http.StatusBadRequest, "COM-0001", "icSales"},
 		{"bad currency", strings.Replace(psBody, `"USD"`, `"usd"`, 1), http.StatusBadRequest, "COM-0001", "currency"},
 		{"ownership above 100", strings.Replace(psBody, `"ownershipPct":"80"`, `"ownershipPct":"120"`, 1), http.StatusBadRequest, "COM-0001", ""},
+		{"reserved FX account", strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true,"fxGainLossAccount":"CTA"`, 1), http.StatusBadRequest, "COM-0001", ""},
+		{"malformed FX account", strings.Replace(psBody, `"sellerIsSubsidiary":true`, `"sellerIsSubsidiary":true,"fxGainLossAccount":"a b"`, 1), http.StatusBadRequest, "COM-0001", "fxGainLossAccount"},
 		{"bargain purchase", strings.Replace(psBody, `"investmentCost":"620000"`, `"investmentCost":"1"`, 1), http.StatusUnprocessableEntity, "CNS-0920", ""},
 	}
 	for _, c := range cases {

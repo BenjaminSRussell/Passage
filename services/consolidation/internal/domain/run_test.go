@@ -42,10 +42,10 @@ func TestComputeRun_TranslationEliminationsAndStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.CTA.Equal(dec("38000")) {
-		t.Errorf("CTA = %s, want 38000 (AC-40.6)", res.CTA)
+	if !res.CTA.Equal(dec("39523.81")) {
+		t.Errorf("CTA = %s, want 39523.81 (translation 38000 + E4 goodwill 1523.81)", res.CTA)
 	}
-	if len(res.Balances) != 6 || len(res.Entries) != 16 {
+	if len(res.Balances) != 6 || len(res.Entries) != 17 {
 		t.Fatalf("balances=%d entries=%d", len(res.Balances), len(res.Entries))
 	}
 	entries := make([]Entry, 0, len(res.Entries))
@@ -56,9 +56,9 @@ func TestComputeRun_TranslationEliminationsAndStatements(t *testing.T) {
 		t.Errorf("entries: %v", err)
 	}
 	for statement, want := range map[string]map[string]string{
-		StatementNetAssets: {LineOpeningNetAssets: "735000", LineUnitNetIncome: "162000", LineCTA: "38000", LineClosingNetAssets: "935000"},
-		StatementIncome: {LineUnitNetIncome: "162000", LineUnrealizedProfitE3: "-12960", LineConsolidatedIncome: "149040",
-			LineNCIProfit: "29808", LineOwnersProfit: "119232"},
+		StatementNetAssets: {LineOpeningNetAssets: "735000", LineUnitNetIncome: "162000", LineCTA: "38000", LineEliminationCTA: "1523.81", LineClosingNetAssets: "935000"},
+		StatementIncome: {LineUnitNetIncome: "162000", LineUnrealizedProfitE3: "-12960", LineICFXGainLoss: "-1500", LineConsolidatedIncome: "147540",
+			LineNCIProfit: "29808", LineOwnersProfit: "117732"},
 	} {
 		for code, amount := range want {
 			if got := lineOf(res, statement, code); !got.Equal(dec(amount)) {
@@ -73,7 +73,7 @@ func TestComputeRun_SumsUnits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.CTA.Equal(dec("76000")) || !lineOf(res, StatementIncome, LineConsolidatedIncome).Equal(dec("298080")) {
+	if !res.CTA.Equal(dec("79047.62")) || !lineOf(res, StatementIncome, LineConsolidatedIncome).Equal(dec("295080")) {
 		t.Errorf("two units: cta=%s income=%s", res.CTA, lineOf(res, StatementIncome, LineConsolidatedIncome))
 	}
 }
@@ -129,5 +129,53 @@ func TestRunInput_CanonicalIgnoresOrderAndDecimalSpelling(t *testing.T) {
 	third, _ := psRun(changed, b).Canonical()
 	if string(first) == string(third) || !strings.Contains(string(first), RulesVersion) {
 		t.Fatalf("a changed amount must change the form, and the rules version must be in it: %s", third)
+	}
+}
+
+func TestComputeRun_NetInvestmentFlagMovesICDifferenceToCTA(t *testing.T) {
+	u := psUnit("S1")
+	u.Pair.ICNetInvestment = true
+	res, err := ComputeRun(psRun(u))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lineOf(res, StatementIncome, LineICFXGainLoss); !got.IsZero() {
+		t.Errorf("IC FX line = %s, want 0 for a net investment", got)
+	}
+	if got := lineOf(res, StatementNetAssets, LineEliminationCTA); !got.Equal(dec("23.81")) {
+		t.Errorf("elimination CTA = %s, want 23.81 (1523.81 goodwill - 1500 IC)", got)
+	}
+	if got := lineOf(res, StatementIncome, LineConsolidatedIncome); !got.Equal(dec("149040")) {
+		t.Errorf("consolidated income = %s, want 149040", got)
+	}
+}
+
+func TestRunInput_CanonicalCoversFXTreatment(t *testing.T) {
+	base, _ := psRun(psUnit("S1")).Canonical()
+	flagged := psUnit("S1")
+	flagged.Pair.ICNetInvestment = true
+	withFlag, _ := psRun(flagged).Canonical()
+	if string(base) == string(withFlag) {
+		t.Fatal("toggling icNetInvestment must change the canonical form")
+	}
+	if !strings.Contains(string(base), `"fxGainLossAccount":"FX_GAIN_LOSS"`) {
+		t.Fatalf("omitted account must resolve to FX_GAIN_LOSS: %s", base)
+	}
+	custom := psUnit("S1")
+	custom.Pair.FXGainLossAccount = "FX_REALIZED"
+	withAcct, _ := psRun(custom).Canonical()
+	if string(base) == string(withAcct) {
+		t.Fatal("a configured account must change the canonical form")
+	}
+}
+
+func TestEliminate_RejectsReservedFXAccount(t *testing.T) {
+	for _, acct := range []string{AcctCTA, AcctGoodwill, "bad account"} {
+		p := psExample()
+		p.FXGainLossAccount = acct
+		var de *Error
+		if _, err := Eliminate(p); !errors.As(err, &de) || de.Code != CodeInvalid {
+			t.Errorf("%q: err = %v, want COM-0001", acct, err)
+		}
 	}
 }

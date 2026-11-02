@@ -30,6 +30,7 @@ func TestClassify_Table(t *testing.T) {
 		{"B side booked in the next period is timing", ReconInput{AmountA: d("250"), AmountB: d("0"), NextPeriodB: d("250")}, ReconTiming, false, "250"},
 		{"A side booked in the next period is timing", ReconInput{AmountA: d("0"), AmountB: d("80"), NextPeriodA: d("80")}, ReconTiming, false, "-80"},
 		{"next-period counterpart with the wrong amount is a mismatch", ReconInput{AmountA: d("250"), AmountB: d("0"), NextPeriodB: d("200")}, ReconMismatch, false, "250"},
+		{"wrong period: A booked again next period, no mirror in B", ReconInput{AmountA: d("250"), AmountB: d("0"), NextPeriodA: d("250")}, ReconMismatch, false, "250"},
 		{"fx timing item uses the tolerance", ReconInput{AmountA: d("1000"), AmountB: d("0"), NextPeriodB: d("996"), FXApplies: true, FXTolerancePct: half}, ReconTiming, true, "1000"},
 		{"negative balances (credit due-from) compare by value", ReconInput{AmountA: d("-40"), AmountB: d("-40")}, ReconMatched, false, "0"},
 	}
@@ -56,8 +57,11 @@ func TestClassify_PlantedMismatches(t *testing.T) {
 			planted = append(planted, ReconInput{AmountA: base})
 		case 1: // wrong amount: B booked 5.00 more
 			planted = append(planted, ReconInput{AmountA: base, AmountB: base.Add(d("5.00"))})
-		default: // wrong period: B booked two periods later, which is neither this nor the next period
-			planted = append(planted, ReconInput{AmountA: base, NextPeriodA: d("0"), NextPeriodB: d("0")})
+		default: // wrong period: A booked the same amount again next period and B never booked
+			planted = append(planted, ReconInput{AmountA: base, NextPeriodA: base})
+			if got := Classify(ReconInput{AmountA: base, NextPeriodB: base}); got.Status != ReconTiming {
+				t.Fatalf("the same item with B's mirror in the next period classified %s; want Timing", got.Status)
+			}
 		}
 	}
 	for i, in := range planted {

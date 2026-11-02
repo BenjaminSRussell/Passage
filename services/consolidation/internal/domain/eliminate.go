@@ -24,6 +24,7 @@ const (
 	AcctICPayable    = "IC_PAYABLE"
 	AcctICReceivable = "IC_RECEIVABLE"
 	AcctCTA          = "CTA"
+	AcctFXGainLoss   = "FX_GAIN_LOSS"
 	AcctCOGS         = "COGS"
 	AcctInventory    = "INVENTORY"
 	AcctNCIEquity    = "NCI_EQUITY"
@@ -33,6 +34,12 @@ const (
 	AcctGoodwill     = "GOODWILL"
 	AcctInvestment   = "INVESTMENT"
 )
+
+var reservedAccounts = map[string]bool{
+	AcctICRevenue: true, AcctICCOGS: true, AcctICPayable: true, AcctICReceivable: true, AcctCTA: true, AcctCOGS: true,
+	AcctInventory: true, AcctNCIEquity: true, AcctNCIProfit: true, AcctShareCapital: true, AcctPreAcqRE: true,
+	AcctGoodwill: true, AcctInvestment: true, AcctICDifference: true,
+}
 
 // Entry is one consolidation line. Debit and Credit are never both non-zero.
 type Entry struct {
@@ -60,6 +67,8 @@ type Pair struct {
 	InvestmentCost     decimal.Decimal // group currency
 	NetIncome          decimal.Decimal
 	SellerIsSubsidiary bool
+	ICNetInvestment    bool   // IC balance is part of the net investment in the foreign operation (IAS 21.32)
+	FXGainLossAccount  string // profit or loss account for IC exchange differences (IAS 21.45); AcctFXGainLoss when empty
 }
 
 // Eliminate builds the entries for E1–E5 and checks that every rule balances.
@@ -77,12 +86,13 @@ func Eliminate(p Pair) ([]Entry, error) {
 	out = leg(out, RuleE1, AcctICRevenue, rev)
 	out = leg(out, RuleE1, AcctICCOGS, rev.Neg())
 
-	// E2: intercompany balances at the closing rate; the difference goes to CTA.
+	// E2: intercompany balances at the closing rate. The difference is profit or
+	// loss (IAS 21.45) unless the balance is part of a net investment (IAS 21.32).
 	ap := round(p.PayableGroup, cur)
 	ar := round(p.ICReceivable.Mul(p.Rates.Closing), cur)
 	out = leg(out, RuleE2, AcctICPayable, ap)
 	out = leg(out, RuleE2, AcctICReceivable, ar.Neg())
-	out = leg(out, RuleE2, AcctCTA, ar.Sub(ap))
+	out = leg(out, RuleE2, p.icDifferenceAccount(), ar.Sub(ap))
 
 	// E3: unrealized profit in closing inventory at the average rate. Upstream
 	// profit is shared with the NCI; downstream profit belongs to the parent.
@@ -98,7 +108,8 @@ func Eliminate(p Pair) ([]Entry, error) {
 		}
 	}
 
-	// E4: investment against subsidiary equity at acquisition, goodwill as the plug.
+	// E4: investment against subsidiary equity at acquisition, goodwill as the plug
+	// and retranslated at the closing rate (IAS 21.47) with the difference to CTA.
 	sc := round(p.ShareCapital.Mul(p.Rates.Historical), cur)
 	re := round(p.PreAcqRE.Mul(p.Rates.Historical), cur)
 	inv := round(p.InvestmentCost, cur)
@@ -109,7 +120,9 @@ func Eliminate(p Pair) ([]Entry, error) {
 	}
 	out = leg(out, RuleE4, AcctShareCapital, sc)
 	out = leg(out, RuleE4, AcctPreAcqRE, re)
-	out = leg(out, RuleE4, AcctGoodwill, goodwill)
+	closingGoodwill := round(goodwill.Mul(p.Rates.Closing).Div(p.Rates.Historical), cur)
+	out = leg(out, RuleE4, AcctGoodwill, closingGoodwill)
+	out = leg(out, RuleE4, AcctCTA, goodwill.Sub(closingGoodwill))
 	out = leg(out, RuleE4, AcctInvestment, inv.Neg())
 	out = leg(out, RuleE4, AcctNCIEquity, nci.Neg())
 
@@ -122,6 +135,16 @@ func Eliminate(p Pair) ([]Entry, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (p Pair) icDifferenceAccount() string {
+	switch {
+	case p.ICNetInvestment:
+		return AcctCTA
+	case p.FXGainLossAccount != "":
+		return p.FXGainLossAccount
+	}
+	return AcctFXGainLoss
 }
 
 // leg appends a line with a signed debit: positive debits go to Debit, negative
@@ -176,6 +199,8 @@ func (p Pair) validate() error {
 		return invalid("closing, average and historical rates must be positive")
 	case p.UnsoldShare.IsNegative() || p.UnsoldShare.GreaterThan(decimal.NewFromInt(1)):
 		return invalid("unsold share must be between 0 and 1")
+	case p.FXGainLossAccount != "" && (!codePattern.MatchString(p.FXGainLossAccount) || reservedAccounts[p.FXGainLossAccount]):
+		return invalid("FX gain or loss account must be 1 to 64 letters, digits or . _ : - and not an elimination or CTA account")
 	case p.InvestmentCost.IsNegative():
 		return invalid("investment cost must not be negative")
 	case p.ICSales.IsNegative() || p.ICCost.IsNegative() || p.ICReceivable.IsNegative() || p.PayableGroup.IsNegative() || p.ShareCapital.IsNegative():

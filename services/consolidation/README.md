@@ -14,7 +14,7 @@ Nothing is persisted, no run is versioned and no event is published yet.
 
 | Area | Code | Status |
 |---|---|---|
-| Elimination entries E1–E5 with NCI, FR-40.9 worked example (1,032,952.00 per side) | `internal/domain/eliminate.go` | built, exact-amount test (AC-40.7) |
+| Elimination entries E1–E5 with NCI, FR-40.9 worked example (1,034,475.81 per side) | `internal/domain/eliminate.go` | built, exact-amount test (AC-40.7) |
 | Balance check per rule, CNS-0903 | `internal/domain/eliminate.go` | built, tests |
 | Ownership validation (never above 100.00 % on any date), CNS-0904 | `internal/domain/ownership.go` | built, tests |
 | IAS 21 translation and CTA with NCI share, FR-40.8 / BR-40.6, AC-40.6 (38,000.00) | `internal/domain/translate.go` | built, unit tests |
@@ -73,9 +73,13 @@ web page. Still nothing is stored, posted or published.
 
 A run computes the IAS 21 translation and the E1–E5 eliminations of each
 subsidiary unit of a group with the rules above, derives the group statements
-from them and stores everything. Rules and rates are not changed by storing:
-the IAS 21 treatment of the eliminations is an open accountant question
-(issue 349) and the run keeps what the engine produces.
+from them and stores everything. Rules and rates are not changed by storing.
+
+IAS 21 in the eliminations (issue 349): the E2 exchange difference on IC
+balances goes to profit or loss (`FX_GAIN_LOSS`, or the request's
+`fxGainLossAccount`, IAS 21.45); with `icNetInvestment: true` it goes to CTA
+(IAS 21.32). E4 goodwill is retranslated at the closing rate and the
+difference goes to CTA (IAS 21.47). Rules version `consol-rules-2`.
 
 | Area | Code | Status |
 |---|---|---|

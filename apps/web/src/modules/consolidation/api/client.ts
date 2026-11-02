@@ -27,6 +27,8 @@ export interface EliminationRequest {
   investmentCost?: string;
   netIncome?: string;
   sellerIsSubsidiary?: boolean;
+  icNetInvestment?: boolean;
+  fxGainLossAccount?: string;
 }
 
 export type RuleCode = "E1" | "E2" | "E3" | "E4" | "E5";

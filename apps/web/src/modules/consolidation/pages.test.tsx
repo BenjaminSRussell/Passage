@@ -89,17 +89,18 @@ const psPreview = {
     { rule: "E1", account: "IC_COGS", debit: "0.00", credit: "108000.00" },
     { rule: "E2", account: "IC_PAYABLE", debit: "108500.00", credit: "0.00" },
     { rule: "E2", account: "IC_RECEIVABLE", debit: "0.00", credit: "110000.00" },
-    { rule: "E2", account: "CTA", debit: "1500.00", credit: "0.00" },
-    { rule: "E4", account: "GOODWILL", debit: "32000.00", credit: "0.00" },
+    { rule: "E2", account: "FX_GAIN_LOSS", debit: "1500.00", credit: "0.00" },
+    { rule: "E4", account: "GOODWILL", debit: "33523.81", credit: "0.00" },
+    { rule: "E4", account: "CTA", debit: "0.00", credit: "1523.81" },
   ],
   rules: {
     E2: { debit: "110000.00", credit: "110000.00" },
     E1: { debit: "108000.00", credit: "108000.00" },
     E3: { debit: "15552.00", credit: "15552.00" },
-    E4: { debit: "767000.00", credit: "767000.00" },
+    E4: { debit: "768523.81", credit: "768523.81" },
     E5: { debit: "32400.00", credit: "32400.00" },
   },
-  totals: { debit: "1032952.00", credit: "1032952.00" },
+  totals: { debit: "1034475.81", credit: "1034475.81" },
   balanced: true,
 };
 
@@ -127,15 +128,15 @@ describe("elimination entries page", () => {
       netIncome: "150000",
       sellerIsSubsidiary: true,
     });
-    expect(screen.getByText("Every rule balances").parentElement).toHaveTextContent("Total debits 1032952.00 and credits 1032952.00 USD");
+    expect(screen.getByText("Every rule balances").parentElement).toHaveTextContent("Total debits 1034475.81 and credits 1034475.81 USD");
     const rules = screen.getByRole("table", { name: "Totals by rule" });
     const ruleCodes = within(rules)
       .getAllByRole("row")
       .slice(1)
       .map((r) => within(r).getAllByRole("cell")[0].textContent);
     expect(ruleCodes).toEqual(["E1", "E2", "E3", "E4", "E5"]);
-    const cta = within(entries).getByRole("row", { name: /Translation difference/ });
-    expect(within(cta).getAllByRole("cell").map((c) => c.textContent)).toEqual(["E2", "Translation difference (CTA)", "CTA", "1500.00", "—"]);
+    const fx = within(entries).getByRole("row", { name: /Exchange gain or loss/ });
+    expect(within(fx).getAllByRole("cell").map((c) => c.textContent)).toEqual(["E2", "Exchange gain or loss", "FX_GAIN_LOSS", "1500.00", "—"]);
     expect(pageViolations(container)).toEqual([]);
   });
 

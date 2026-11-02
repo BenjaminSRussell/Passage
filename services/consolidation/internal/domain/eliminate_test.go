@@ -44,14 +44,15 @@ func TestEliminate_PSWorkedExample(t *testing.T) {
 		{RuleE1, AcctICCOGS, "0.00", "108000.00"},
 		{RuleE2, AcctICPayable, "108500.00", "0.00"},
 		{RuleE2, AcctICReceivable, "0.00", "110000.00"},
-		{RuleE2, AcctCTA, "1500.00", "0.00"},
+		{RuleE2, AcctFXGainLoss, "1500.00", "0.00"},
 		{RuleE3, AcctCOGS, "12960.00", "0.00"},
 		{RuleE3, AcctInventory, "0.00", "12960.00"},
 		{RuleE3, AcctNCIEquity, "2592.00", "0.00"},
 		{RuleE3, AcctNCIProfit, "0.00", "2592.00"},
 		{RuleE4, AcctShareCapital, "525000.00", "0.00"},
 		{RuleE4, AcctPreAcqRE, "210000.00", "0.00"},
-		{RuleE4, AcctGoodwill, "32000.00", "0.00"},
+		{RuleE4, AcctGoodwill, "33523.81", "0.00"},
+		{RuleE4, AcctCTA, "0.00", "1523.81"},
 		{RuleE4, AcctInvestment, "0.00", "620000.00"},
 		{RuleE4, AcctNCIEquity, "0.00", "147000.00"},
 		{RuleE5, AcctNCIProfit, "32400.00", "0.00"},
@@ -68,8 +69,8 @@ func TestEliminate_PSWorkedExample(t *testing.T) {
 		}
 	}
 	dr, cr := Totals(entries)
-	if dr.StringFixed(2) != "1032952.00" || cr.StringFixed(2) != "1032952.00" {
-		t.Fatalf("totals Dr %s Cr %s; want 1032952.00 both", dr.StringFixed(2), cr.StringFixed(2))
+	if dr.StringFixed(2) != "1034475.81" || cr.StringFixed(2) != "1034475.81" {
+		t.Fatalf("totals Dr %s Cr %s; want 1034475.81 both", dr.StringFixed(2), cr.StringFixed(2))
 	}
 }
 
@@ -104,6 +105,50 @@ func TestEliminate_LossInInventoryReversesSides(t *testing.T) {
 	}
 	if err := CheckBalanced(entries); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEliminate_E2NetInvestmentGoesToCTA(t *testing.T) {
+	p := psExample()
+	p.ICNetInvestment = true
+	entries, err := Eliminate(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.RuleCode == RuleE2 && e.Account == AcctCTA && e.Debit.StringFixed(2) == "1500.00" {
+			return
+		}
+	}
+	t.Fatalf("net-investment IC difference not posted to CTA: %+v", entries)
+}
+
+func TestEliminate_E2ConfiguredFXAccount(t *testing.T) {
+	p := psExample()
+	p.FXGainLossAccount = "FX_REALIZED"
+	entries, err := Eliminate(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.RuleCode == RuleE2 && e.Account == "FX_REALIZED" && e.Debit.StringFixed(2) == "1500.00" {
+			return
+		}
+	}
+	t.Fatalf("IC difference not posted to the configured account: %+v", entries)
+}
+
+func TestEliminate_GoodwillAtHistoricalRateHasNoCTA(t *testing.T) {
+	p := psExample()
+	p.Rates.Closing = p.Rates.Historical
+	entries, err := Eliminate(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.RuleCode == RuleE4 && e.Account == AcctCTA {
+			t.Fatalf("closing = historical rate should leave no goodwill CTA: %+v", e)
+		}
 	}
 }
 
@@ -149,8 +194,8 @@ func TestEliminate_WhollyOwnedHasNoNCI(t *testing.T) {
 		if e.Account == AcctNCIEquity || e.Account == AcctNCIProfit {
 			t.Fatalf("wholly owned unit produced an NCI line: %+v", e)
 		}
-		if e.RuleCode == RuleE4 && e.Account == AcctGoodwill && e.Debit.StringFixed(2) != "65000.00" {
-			t.Fatalf("goodwill = %s; want 65000.00 (800,000 - 735,000)", e.Debit.StringFixed(2))
+		if e.RuleCode == RuleE4 && e.Account == AcctGoodwill && e.Debit.StringFixed(2) != "68095.24" {
+			t.Fatalf("goodwill = %s; want 68095.24 (65,000 at 1.05 retranslated at 1.10)", e.Debit.StringFixed(2))
 		}
 	}
 }
