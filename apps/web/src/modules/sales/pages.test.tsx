@@ -315,6 +315,20 @@ describe("Credit profiles", () => {
     expect(put?.body).toMatchObject({ limit: "12000", mandatoryCheck: true, exposure: { openAr: "8500" } });
   });
 
+  it("shows open orders computed by the service read-only and names those it cannot count", async () => {
+    handler = () => ({
+      status: 200,
+      body: { ...profile, limitType: "BALANCE_ALL", exposure: { ...profile.exposure, openOrders: "6000", openOrdersOtherCurrencies: [{ currency: "EUR", amount: "4000" }] } },
+      etag: '"4"',
+    });
+    renderAt(`/sales/credit-profiles/${LE}/${CUSTOMER}`);
+    const open = await screen.findByLabelText("Confirmed open orders");
+    expect(open).toHaveValue("6000");
+    expect(open).toHaveAttribute("readonly");
+    expect(screen.getByText("Open orders not counted")).toBeInTheDocument();
+    expect(screen.getByText(/4000 EUR/)).toBeInTheDocument();
+  });
+
   it("creates a profile with If-Match 0", async () => {
     handler = (_url, init) => (init.method === "PUT" ? { status: 200, body: { ...profile, version: 1 }, etag: '"1"' } : { status: 200, body: { ...profile, version: 1 }, etag: '"1"' });
     renderAt("/sales/credit-profiles/new");

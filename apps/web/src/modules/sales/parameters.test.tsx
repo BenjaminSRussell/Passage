@@ -67,9 +67,14 @@ const params = {
 };
 
 describe("validateParameters", () => {
-  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const };
+  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const, creditCheckPoints: ["confirm" as const, "release" as const] };
   it("accepts the defaults and returns numbers", () => {
-    expect(validateParameters(ok).input).toEqual({ quotationExpiryDays: 30, quotationProbabilityDefault: 50, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER" });
+    expect(validateParameters(ok).input).toEqual({ quotationExpiryDays: 30, quotationProbabilityDefault: 50, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["confirm", "release"] });
+  });
+  it("needs the confirm check point and sends the points in service order", () => {
+    expect(Object.keys(validateParameters({ ...ok, creditCheckPoints: [] }).errors)).toEqual(["creditCheckPoints"]);
+    expect(Object.keys(validateParameters({ ...ok, creditCheckPoints: ["entry", "release"] }).errors)).toEqual(["creditCheckPoints"]);
+    expect(validateParameters({ ...ok, creditCheckPoints: ["release", "confirm", "entry"] }).input?.creditCheckPoints).toEqual(["entry", "confirm", "release"]);
   });
   it("accepts the PRD bounds", () => {
     expect(validateParameters({ ...ok, quotationExpiryDays: "365", quotationProbabilityDefault: "0", creditReleaseValidityDays: "30", creditHoldSlaBusinessDays: "10" }).input).toBeDefined();
@@ -103,11 +108,14 @@ describe("Sales parameters page", () => {
     expect(screen.queryByRole("option", { name: "Returned" })).not.toBeInTheDocument();
     fill(/Quotation expiry/, "45");
     fill(/Default win probability/, "35");
+    expect(screen.getByLabelText("Confirm")).toBeChecked();
+    expect(screen.getByLabelText("Entry")).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText("Entry"));
     fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
     expect(await screen.findByText("Sales parameters saved.")).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.headers.get("If-Match")).toBe('"0"');
-    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER" });
+    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["entry", "confirm", "release"] });
   });
 
   it("shows the values without a save action to a caller lacking the maintain duty", async () => {
@@ -131,6 +139,30 @@ describe("Sales parameters page", () => {
     fill(/Credit hold SLA/, "11");
     fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
     expect(await screen.findByText(/business days from 1 to 10/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+  });
+
+  it("shows packing slip and invoice as not active yet", async () => {
+    handler = () => ({ status: 200, body: { ...params, creditCheckPoints: ["confirm", "release"], version: 1 }, etag: '"1"' });
+    renderAt("/sales/parameters");
+    fill("Legal entity", LE);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("form", { name: "Sales parameters" });
+    for (const name of ["Packing slip (not active yet)", "Invoice (not active yet)"]) {
+      expect(screen.getByLabelText(name)).toBeDisabled();
+      expect(screen.getByLabelText(name)).not.toBeChecked();
+    }
+  });
+
+  it("refuses to save without the confirm check point", async () => {
+    handler = () => ({ status: 200, body: { ...params, creditCheckPoints: ["confirm"], version: 1 }, etag: '"1"' });
+    renderAt("/sales/parameters");
+    fill("Legal entity", LE);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("form", { name: "Sales parameters" });
+    fireEvent.click(screen.getByLabelText("Confirm"));
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText(/Keep confirm: it is the only check point that places a credit hold/)).toBeInTheDocument();
     expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
   });
 

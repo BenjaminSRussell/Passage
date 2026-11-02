@@ -332,6 +332,10 @@ func (s *Postgres) ConvertQuotation(ctx context.Context, id string, in ConvertRe
 		if err != nil {
 			return err
 		}
+		// A converted or released order is entered like any other (FR-27.7).
+		if err := checkAtEntryTx(ctx, tx, p.TenantID, &order); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update sales_quotation_line set line_status = 'CONVERTED', converted_order_id = $3
 			where tenant_id = $1 and quotation_id = $2 and line_no = any($4::int[])`, p.TenantID, id, order.ID, selected); err != nil {
 			return err

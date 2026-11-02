@@ -107,9 +107,10 @@ func TestPostgres_CreditHoldAndRelease(t *testing.T) {
 		t.Fatalf("a confirmed order cannot be confirmed again: %v", err)
 	}
 
-	// Every state change wrote exactly one event in its transaction.
+	// Every state change wrote exactly one event in its transaction; the
+	// default release point adds the check recorded at the release.
 	types := outboxTypes(t, pool, order.ID)
-	want := []string{salesevents.CreditCheckEvaluated, salesevents.OrderConfirmed, salesevents.OrderHoldApplied, salesevents.OrderHoldReleased}
+	want := []string{salesevents.CreditCheckEvaluated, salesevents.CreditCheckEvaluated, salesevents.OrderConfirmed, salesevents.OrderHoldApplied, salesevents.OrderHoldReleased}
 	sort.Strings(types)
 	sort.Strings(want)
 	if strings.Join(types, ",") != strings.Join(want, ",") {

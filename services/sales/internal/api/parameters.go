@@ -20,6 +20,8 @@ type parametersRequest struct {
 	CreditReleaseValidityDays   *int   `json:"creditReleaseValidityDays"`
 	CreditHoldSLABusinessDays   *int   `json:"creditHoldSlaBusinessDays"`
 	DefaultOrderType            string `json:"defaultOrderType"`
+	// CreditCheckPoints is optional; absent, the default (confirm, release) applies.
+	CreditCheckPoints []string `json:"creditCheckPoints"`
 	// OneTimeOrderLimit and OneTimeOrderLimitCurrency are optional and go
 	// together; absent, the defaults apply (5,000 USD, 4,500 EUR).
 	OneTimeOrderLimit         *string `json:"oneTimeOrderLimit"`
@@ -41,7 +43,10 @@ func (r parametersRequest) parameters() (domain.Parameters, map[string]string) {
 		QuotationProbabilityDefault: val(r.QuotationProbabilityDefault, "quotationProbabilityDefault"),
 		CreditReleaseValidityDays:   val(r.CreditReleaseValidityDays, "creditReleaseValidityDays"),
 		CreditHoldSLABusinessDays:   val(r.CreditHoldSLABusinessDays, "creditHoldSlaBusinessDays"),
-		DefaultOrderType:            r.DefaultOrderType}
+		DefaultOrderType:            r.DefaultOrderType, CreditCheckPoints: r.CreditCheckPoints}
+	if out.CreditCheckPoints == nil {
+		out.CreditCheckPoints = domain.DefaultParameters().CreditCheckPoints
+	}
 	if r.OneTimeOrderLimit != nil {
 		limit, err := decimal.NewFromString(*r.OneTimeOrderLimit)
 		if err != nil {

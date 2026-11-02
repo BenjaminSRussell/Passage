@@ -109,3 +109,27 @@ func TestParameters_RequiresLegalEntityInScope(t *testing.T) {
 		t.Fatalf("reading outside the scope: %d", rec.Code)
 	}
 }
+
+func TestParameters_CreditCheckPoints(t *testing.T) {
+	path := parameters + "?legalEntityId=" + testLE
+	withPoints := func(points string) string {
+		return validParameters[:len(validParameters)-1] + `,"creditCheckPoints":` + points + "}"
+	}
+	s := &parametersStore{}
+	for name, body := range map[string]string{"unknown": withPoints(`["ship"]`), "empty": withPoints(`[]`), "repeated": withPoints(`["entry","entry"]`),
+		"no blocking point": withPoints(`["entry","release"]`), "packing slip not active": withPoints(`["confirm","packing_slip"]`)} {
+		rec := serveBody(t, s, http.MethodPut, path, body, principal(dutyParameter), map[string]string{"If-Match": `"0"`})
+		if rec.Code != http.StatusBadRequest || s.puts != 0 || !strings.Contains(rec.Body.String(), "creditCheckPoints") {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	rec := serveBody(t, s, http.MethodPut, path, withPoints(`["entry","confirm"]`), principal(dutyParameter), map[string]string{"If-Match": `"0"`})
+	if rec.Code != http.StatusOK || len(s.saved.CreditCheckPoints) != 2 || s.saved.CreditCheckPoints[0] != "entry" {
+		t.Fatalf("put: %d %s %+v", rec.Code, rec.Body.String(), s.saved)
+	}
+	// Absent, the default applies.
+	if rec := serveBody(t, s, http.MethodPut, path, validParameters, principal(dutyParameter), map[string]string{"If-Match": `"0"`}); rec.Code != http.StatusOK ||
+		len(s.saved.CreditCheckPoints) != 2 || s.saved.CreditCheckPoints[0] != "confirm" {
+		t.Fatalf("default: %d %+v", rec.Code, s.saved)
+	}
+}

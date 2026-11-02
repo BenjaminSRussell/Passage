@@ -25,6 +25,12 @@ func TestParametersValidate(t *testing.T) {
 		{"probability over 100", func(p *Parameters) { p.QuotationProbabilityDefault = 101 }, "quotationProbabilityDefault"},
 		{"probability negative", func(p *Parameters) { p.QuotationProbabilityDefault = -1 }, "quotationProbabilityDefault"},
 		{"unknown order type", func(p *Parameters) { p.DefaultOrderType = "QUOTE" }, "defaultOrderType"},
+		{"no check point", func(p *Parameters) { p.CreditCheckPoints = nil }, "creditCheckPoints"},
+		{"unknown check point", func(p *Parameters) { p.CreditCheckPoints = []string{"confirm", "ship"} }, "creditCheckPoints"},
+		{"repeated check point", func(p *Parameters) { p.CreditCheckPoints = []string{"confirm", "confirm"} }, "creditCheckPoints"},
+		{"no blocking check point", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointEntry, CheckPointRelease} }, "creditCheckPoints"},
+		{"packing slip not active", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointConfirm, CheckPointPackingSlip} }, "creditCheckPoints"},
+		{"invoice not active", func(p *Parameters) { p.CreditCheckPoints = []string{CheckPointConfirm, CheckPointInvoice} }, "creditCheckPoints"},
 		{"returned is not an allowed default", func(p *Parameters) { p.DefaultOrderType = "RETURNED" }, "defaultOrderType"},
 	}
 	for _, tc := range tests {
@@ -40,12 +46,13 @@ func TestParametersValidate(t *testing.T) {
 
 func TestParametersValidate_AcceptsBounds(t *testing.T) {
 	p := Parameters{QuotationExpiryDays: 365, QuotationProbabilityDefault: 0, CreditReleaseValidityDays: 30,
-		CreditHoldSLABusinessDays: 10, DefaultOrderType: OrderTypeJournal}
+		CreditHoldSLABusinessDays: 10, DefaultOrderType: OrderTypeJournal,
+		CreditCheckPoints: []string{CheckPointEntry, CheckPointConfirm, CheckPointRelease}}
 	if f := p.Validate(); len(f) != 0 {
 		t.Fatalf("upper bounds must validate: %v", f)
 	}
 	p = Parameters{QuotationExpiryDays: 1, QuotationProbabilityDefault: 100, CreditReleaseValidityDays: 1,
-		CreditHoldSLABusinessDays: 1, DefaultOrderType: "SUBSCRIPTION"}
+		CreditHoldSLABusinessDays: 1, DefaultOrderType: "SUBSCRIPTION", CreditCheckPoints: []string{CheckPointConfirm}}
 	if f := p.Validate(); len(f) != 0 {
 		t.Fatalf("lower bounds must validate: %v", f)
 	}
@@ -63,5 +70,12 @@ func TestAddBusinessDays_SkipsWeekends(t *testing.T) {
 	saturday := time.Date(2027, 3, 6, 9, 0, 0, 0, time.UTC)
 	if got, want := AddBusinessDays(saturday, 1), time.Date(2027, 3, 8, 9, 0, 0, 0, time.UTC); !got.Equal(want) {
 		t.Fatalf("saturday + 1 = %s, want %s", got, want)
+	}
+}
+
+func TestParametersChecksAt(t *testing.T) {
+	p := DefaultParameters()
+	if !p.ChecksAt(CheckPointConfirm) || !p.ChecksAt(CheckPointRelease) || p.ChecksAt(CheckPointEntry) {
+		t.Fatalf("default points are confirm and release: %v", p.CreditCheckPoints)
 	}
 }

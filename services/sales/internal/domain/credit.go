@@ -52,9 +52,19 @@ type Exposure struct {
 	Unapplied            decimal.Decimal `json:"unapplied"`
 	DeliveredNotInvoiced decimal.Decimal `json:"deliveredNotInvoiced"`
 	OpenOrders           decimal.Decimal `json:"openOrders"`
-	OverdueAR            decimal.Decimal `json:"overdueAr"`
-	OldestItemDays       int             `json:"oldestItemDays"`
-	DunningLevel         int             `json:"dunningLevel"`
+	// OpenOrdersOtherCurrencies are the customer's open orders in currencies
+	// other than the profile's, which OpenOrders leaves out for want of an FX
+	// rate (w12). Computed by sales like OpenOrders, never stored.
+	OpenOrdersOtherCurrencies []CurrencyAmount `json:"openOrdersOtherCurrencies,omitempty"`
+	OverdueAR                 decimal.Decimal  `json:"overdueAr"`
+	OldestItemDays            int              `json:"oldestItemDays"`
+	DunningLevel              int              `json:"dunningLevel"`
+}
+
+// CurrencyAmount is an amount in a named currency.
+type CurrencyAmount struct {
+	Currency string          `json:"currency"`
+	Amount   decimal.Decimal `json:"amount"`
 }
 
 // CreditInput is everything one credit check needs. Profile is nil when the
@@ -143,7 +153,19 @@ func EvaluateCredit(in CreditInput) CreditEvaluation {
 		case exposure.GreaterThan(p.Limit):
 			result = RuleWarn
 		}
-		add("CR-1", result, exposure, threshold)
+		r := RuleResult{ID: "CR-1", Result: result, Value: exposure.String(), Threshold: threshold.String()}
+		if p.LimitType == LimitBalanceAll && len(e.OpenOrdersOtherCurrencies) > 0 {
+			// The exposure is understated by orders that cannot be converted;
+			// a pass is shown as a warning so the gap is not silent.
+			if result == RulePass {
+				r.Result = RuleWarn
+			}
+			r.Note = "open orders not counted for want of an FX rate:"
+			for _, o := range e.OpenOrdersOtherCurrencies {
+				r.Note += " " + o.Amount.String() + " " + o.Currency
+			}
+		}
+		rules = append(rules, r)
 	}
 	if e.OldestItemDays > p.OldestItemDaysMax {
 		add("CR-2", RuleFail, decimal.NewFromInt(int64(e.OldestItemDays)), decimal.NewFromInt(int64(p.OldestItemDaysMax)))

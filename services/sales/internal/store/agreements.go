@@ -330,6 +330,10 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 		if err != nil {
 			return err
 		}
+		// A converted or released order is entered like any other (FR-27.7).
+		if err := checkAtEntryTx(ctx, tx, p.TenantID, &order); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update sales_agreement set released_qty = $3::numeric, status = $4, version = version + 1, updated_at = $5
 			where tenant_id = $1 and id = $2`, p.TenantID, id, next.String(), status, now); err != nil {
 			return err

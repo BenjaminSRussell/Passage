@@ -3,11 +3,14 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import {
+  CREDIT_CHECK_POINTS,
   DEFAULT_ORDER_TYPES,
   describeProblem,
   etagOf,
   getSalesParameters,
+  INACTIVE_CREDIT_CHECK_POINTS,
   putSalesParameters,
+  type CreditCheckPoint,
   type DefaultOrderType,
   type Problem,
   type SalesParametersInput,
@@ -27,6 +30,7 @@ export interface ParameterValues {
   creditReleaseValidityDays: string;
   creditHoldSlaBusinessDays: string;
   defaultOrderType: DefaultOrderType;
+  creditCheckPoints: CreditCheckPoint[];
   /** Optional: empty means the defaults (5,000 USD, 4,500 EUR). */
   oneTimeOrderLimit?: string;
   oneTimeOrderLimitCurrency?: string;
@@ -39,6 +43,7 @@ export function parameterValues(p: SalesParametersInput): ParameterValues {
     creditReleaseValidityDays: String(p.creditReleaseValidityDays),
     creditHoldSlaBusinessDays: String(p.creditHoldSlaBusinessDays),
     defaultOrderType: p.defaultOrderType,
+    creditCheckPoints: p.creditCheckPoints ?? ["confirm", "release"],
     oneTimeOrderLimit: p.oneTimeOrderLimit ?? "",
     oneTimeOrderLimitCurrency: p.oneTimeOrderLimitCurrency ?? "",
   };
@@ -57,6 +62,8 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
   if (!inRange(v.quotationProbabilityDefault, 0, 100)) errors.quotationProbabilityDefault = "Enter a whole percentage from 0 to 100.";
   if (!inRange(v.creditReleaseValidityDays, 1, 30)) errors.creditReleaseValidityDays = "Enter a whole number of days from 1 to 30.";
   if (!inRange(v.creditHoldSlaBusinessDays, 1, 10)) errors.creditHoldSlaBusinessDays = "Enter a whole number of business days from 1 to 10.";
+  if (!v.creditCheckPoints.includes("confirm"))
+    errors.creditCheckPoints = "Keep confirm: it is the only check point that places a credit hold. To stop credit control for a customer, set its credit limit type to None.";
   const limit = (v.oneTimeOrderLimit ?? "").trim();
   const limitCurrency = (v.oneTimeOrderLimitCurrency ?? "").trim();
   if ((limit === "") !== (limitCurrency === "")) errors.oneTimeOrderLimit = "Enter the limit and its currency together, or leave both empty.";
@@ -74,6 +81,7 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
       creditReleaseValidityDays: Number(v.creditReleaseValidityDays),
       creditHoldSlaBusinessDays: Number(v.creditHoldSlaBusinessDays),
       defaultOrderType: v.defaultOrderType,
+      creditCheckPoints: CREDIT_CHECK_POINTS.filter((c) => v.creditCheckPoints.includes(c)),
     },
   };
 }
@@ -121,7 +129,7 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
     }
   }
 
-  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType" | "oneTimeOrderLimit" | "oneTimeOrderLimitCurrency">, label: string, hint: string) => (
+  const whole = (name: Exclude<keyof ParameterValues, "defaultOrderType" | "creditCheckPoints" | "oneTimeOrderLimit" | "oneTimeOrderLimitCurrency">, label: string, hint: string) => (
     <FormField id={`param-${name}`} label={label} hint={hint} error={errors[name]}>
       {(control) => (
         <Input {...control} inputMode="numeric" value={values[name]} readOnly={!canSave} onChange={(e) => setValues({ ...values, [name]: e.target.value })} invalid={Boolean(errors[name])} />
@@ -159,6 +167,33 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
               </Select>
             )}
           </FormField>
+          <fieldset className={styles.stack} aria-describedby="param-creditCheckPoints-hint">
+            <legend>Credit check points</legend>
+            <p id="param-creditCheckPoints-hint" className={styles.note}>
+              Where the credit rules run. Entry records the result on a new order without a hold, confirm places the CREDIT hold and is required, release records the position when a hold is released. Packing slip and invoice are not active yet: they come with fulfillment and billing.
+            </p>
+            {CREDIT_CHECK_POINTS.map((point) => (
+              <span key={point} className={styles.check}>
+                <Input
+                  id={`param-point-${point}`}
+                  type="checkbox"
+                  checked={values.creditCheckPoints.includes(point)}
+                  disabled={!canSave}
+                  onChange={(e) =>
+                    setValues({ ...values, creditCheckPoints: e.target.checked ? [...values.creditCheckPoints, point] : values.creditCheckPoints.filter((c) => c !== point) })
+                  }
+                />
+                <label htmlFor={`param-point-${point}`}>{sentence(point)}</label>
+              </span>
+            ))}
+            {INACTIVE_CREDIT_CHECK_POINTS.map((point) => (
+              <span key={point} className={styles.check}>
+                <Input id={`param-point-${point}`} type="checkbox" checked={false} disabled readOnly />
+                <label htmlFor={`param-point-${point}`}>{sentence(point)} (not active yet)</label>
+              </span>
+            ))}
+            {errors.creditCheckPoints ? <span role="alert">{errors.creditCheckPoints}</span> : null}
+          </fieldset>
         </div>
       </Card>
       <Alert tone="success" live="status">

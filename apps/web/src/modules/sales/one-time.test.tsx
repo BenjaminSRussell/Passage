@@ -162,7 +162,7 @@ describe("One-time customer order", () => {
 });
 
 describe("One-time order limit parameter", () => {
-  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const };
+  const ok = { quotationExpiryDays: "30", quotationProbabilityDefault: "50", creditReleaseValidityDays: "7", creditHoldSlaBusinessDays: "2", defaultOrderType: "ORDER" as const, creditCheckPoints: ["confirm" as const] };
   it("accepts both or neither and keeps the amount a string", () => {
     expect(validateParameters({ ...ok, oneTimeOrderLimit: "2500.50", oneTimeOrderLimitCurrency: "GBP" }).input).toMatchObject({ oneTimeOrderLimit: "2500.50", oneTimeOrderLimitCurrency: "GBP" });
     expect(validateParameters({ ...ok, oneTimeOrderLimit: "", oneTimeOrderLimitCurrency: "" }).input).not.toHaveProperty("oneTimeOrderLimit");

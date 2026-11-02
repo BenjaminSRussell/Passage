@@ -363,7 +363,10 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		}
 		out, err = createOrderTx(ctx, tx, p.TenantID, in)
 		created = err == nil
-		return err
+		if err != nil {
+			return err
+		}
+		return checkAtEntryTx(ctx, tx, p.TenantID, &out)
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -373,6 +376,27 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		return Order{}, false, err
 	}
 	return out, created, nil
+}
+
+// checkAtEntryTx runs the credit rules on a new order when the legal entity's
+// credit_check_points include entry (FR-27.7). The check is advisory: the
+// evaluation is stored on the order and written as creditcheck.evaluated, but
+// no hold is placed before confirmation. JOURNAL orders reserve and invoice
+// nothing against the customer (BR-27.7), so they are not checked.
+func checkAtEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, o *Order) error {
+	if o.OrderType == domain.OrderTypeJournal {
+		return nil
+	}
+	checked, err := checksAtTx(ctx, tx, tenantID, o.LegalEntityID, domain.CheckPointEntry)
+	if err != nil || !checked {
+		return err
+	}
+	if _, err := evaluateCreditTx(ctx, tx, tenantID, *o, domain.CheckPointEntry, time.Now().UTC()); err != nil {
+		return err
+	}
+	*o, err = loadOrder(ctx, tx, tenantID, o.ID, false)
+	o.Warnings = supplementaryWarnings(*o)
+	return err
 }
 
 // createOrderTx checks the product listings (BR-27.13) and inserts a DRAFT
@@ -637,9 +661,15 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 				return err
 			}
 		}
-		eval, err := evaluateCreditTx(ctx, tx, p.TenantID, o, now)
+		checked, err := checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm)
 		if err != nil {
 			return err
+		}
+		eval := domain.CreditEvaluation{Outcome: domain.RulePass}
+		if checked {
+			if eval, err = evaluateCreditTx(ctx, tx, p.TenantID, o, domain.CheckPointConfirm, now); err != nil {
+				return err
+			}
 		}
 		if eval.Outcome == domain.RuleFail && !coveredByRelease(o, now) {
 			if err := applyCreditHoldTx(ctx, tx, p.TenantID, o, eval, actor, o.Version+1); err != nil {
@@ -662,22 +692,92 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 	return res, err
 }
 
+// checksAtTx reports whether the legal entity's credit_check_points include
+// point (FR-27.7).
+func checksAtTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, point string) (bool, error) {
+	params, err := loadParameters(ctx, tx, tenantID, legalEntityID)
+	if err != nil {
+		return false, err
+	}
+	return params.ChecksAt(point), nil
+}
+
+// openOrdersTx is the customer's exposure from orders in this service: the net
+// total of the customer's other CONFIRMED and PARTIALLY_SHIPPED ORDER and
+// SUBSCRIPTION orders in the credit profile currency (BR-27.3 open orders).
+// Orders in another currency cannot be converted without an FX rate (w12):
+// they are returned per currency so the evaluation and the profile flag them
+// instead of understating the exposure silently. The sum reads the partial
+// index sales_order_open_exposure (migration 0022).
+func openOrdersTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID, currency, exceptOrderID string) (decimal.Decimal, []domain.CurrencyAmount, error) {
+	rows, err := tx.Query(ctx, `select currency::text, sum(net_total)::text from sales_order
+		where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3
+		  and status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and order_type in ('ORDER', 'SUBSCRIPTION')
+		  and ($4::uuid is null or id <> $4::uuid)
+		group by currency order by currency`,
+		tenantID, legalEntityID, customerID, nullIfEmpty(exceptOrderID))
+	if err != nil {
+		return decimal.Zero, nil, err
+	}
+	defer rows.Close()
+	total := decimal.Zero
+	var other []domain.CurrencyAmount
+	for rows.Next() {
+		var cur, sum string
+		if err := rows.Scan(&cur, &sum); err != nil {
+			return decimal.Zero, nil, err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return decimal.Zero, nil, err
+		}
+		if cur == currency {
+			total = amount
+		} else {
+			other = append(other, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	return total, other, rows.Err()
+}
+
+// withOpenOrders replaces the stored open-orders figures of c with the ones
+// computed from the orders (a value sent with the profile is never used).
+func withOpenOrders(ctx context.Context, tx pgx.Tx, tenantID string, c *CreditProfile, exceptOrderID string) error {
+	var err error
+	c.Exposure.OpenOrders, c.Exposure.OpenOrdersOtherCurrencies, err = openOrdersTx(ctx, tx, tenantID, c.LegalEntityID, c.CustomerID, c.Currency, exceptOrderID)
+	return err
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // evaluateCreditTx runs the BR-27.3 rules for o at its current net total,
-// stores the evaluation on the order and writes creditcheck.evaluated in the
-// caller's transaction.
-func evaluateCreditTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, now time.Time) (domain.CreditEvaluation, error) {
-	profile, found, err := loadProfile(ctx, tx, tenantID, o.LegalEntityID, o.CustomerID)
+// stores the evaluation on the order and writes creditcheck.evaluated, tagged
+// with the check point, in the caller's transaction.
+func evaluateCreditTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, point string, now time.Time) (domain.CreditEvaluation, error) {
+	// The profile row is locked for the rest of the transaction, so two orders
+	// of one customer are checked one after the other: the second sees the
+	// first's confirmation in its open orders instead of both passing on an
+	// exposure that misses the other.
+	profile, found, err := loadProfileForUpdate(ctx, tx, tenantID, o.LegalEntityID, o.CustomerID)
 	if err != nil {
 		return domain.CreditEvaluation{}, err
 	}
 	input := domain.CreditInput{Order: o.NetTotal, OrderCurrency: o.Currency, AsOf: now}
 	if found {
 		input.Profile = &profile.CreditProfile
+		if err := withOpenOrders(ctx, tx, tenantID, &profile, o.ID); err != nil {
+			return domain.CreditEvaluation{}, err
+		}
 		input.Exposure = profile.Exposure
 	}
 	eval := domain.EvaluateCredit(input)
 	if err := enqueue(ctx, tx, "order", o.ID, salesevents.CreditCheckEvaluated, tenantID, salesevents.CreditCheckData{
-		CustomerID: o.CustomerID, OrderID: o.ID, Rules: eval.Rules, Outcome: eval.Outcome}); err != nil {
+		CustomerID: o.CustomerID, OrderID: o.ID, Rules: eval.Rules, Outcome: eval.Outcome, Point: point}); err != nil {
 		return domain.CreditEvaluation{}, err
 	}
 	evalJSON, err := json.Marshal(eval)
@@ -796,6 +896,13 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 			OrderID: o.ID, HoldID: holdID, HoldType: hold.HoldType, ReasonCode: hold.ReasonCode, Actor: actor, Version: o.Version + 1}); err != nil {
 			return err
 		}
+		if hold.HoldType == domain.HoldCredit && params.ChecksAt(domain.CheckPointRelease) {
+			// The release stands whatever the rules say now: the check records
+			// the position at the moment of release for the credit manager.
+			if _, err := evaluateCreditTx(ctx, tx, p.TenantID, o, domain.CheckPointRelease, now); err != nil {
+				return err
+			}
+		}
 		released, err := loadOrder(ctx, tx, p.TenantID, o.ID, false)
 		if err != nil {
 			return err
@@ -894,8 +1001,18 @@ func scanProfile(row pgx.Row) (CreditProfile, error) {
 }
 
 func loadProfile(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID string) (CreditProfile, bool, error) {
+	return queryProfile(ctx, tx, "", tenantID, legalEntityID, customerID)
+}
+
+// loadProfileForUpdate is loadProfile with the row locked until the
+// transaction ends.
+func loadProfileForUpdate(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, customerID string) (CreditProfile, bool, error) {
+	return queryProfile(ctx, tx, " for update", tenantID, legalEntityID, customerID)
+}
+
+func queryProfile(ctx context.Context, tx pgx.Tx, lock, tenantID, legalEntityID, customerID string) (CreditProfile, bool, error) {
 	c, err := scanProfile(tx.QueryRow(ctx, `select `+profileColumns+`
-		from credit_profile where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3`, tenantID, legalEntityID, customerID))
+		from credit_profile where tenant_id = $1 and legal_entity_id = $2 and customer_id = $3`+lock, tenantID, legalEntityID, customerID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CreditProfile{}, false, nil
 	}
@@ -919,7 +1036,7 @@ func (s *Postgres) GetCreditProfile(ctx context.Context, legalEntityID, customer
 		if !found {
 			return problem(http.StatusNotFound, CodeProfileNotFound, "credit profile not found")
 		}
-		return nil
+		return withOpenOrders(ctx, tx, p.TenantID, &c, "")
 	})
 	return c, err
 }
@@ -928,6 +1045,9 @@ func (s *Postgres) GetCreditProfile(ctx context.Context, legalEntityID, customer
 // it when version matches the stored version (optimistic concurrency).
 func (s *Postgres) PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error) {
 	p, _ := tenant.FromContext(ctx)
+	// Open orders are computed from the orders on every read; a figure sent
+	// with the profile is not stored.
+	in.Exposure.OpenOrders, in.Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
 	exposure, err := json.Marshal(in.Exposure)
 	if err != nil {
 		return CreditProfile{}, err
@@ -1030,7 +1150,51 @@ func (s *Postgres) ListCreditProfiles(ctx context.Context, legalEntityID string,
 			}
 			out = append(out, c)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		return listOpenOrdersTx(ctx, tx, p.TenantID, out)
 	})
 	return out, err
+}
+
+// listOpenOrdersTx fills the computed open-orders figures of a page of
+// profiles with one grouped query rather than one per profile.
+func listOpenOrdersTx(ctx context.Context, tx pgx.Tx, tenantID string, profiles []CreditProfile) error {
+	if len(profiles) == 0 {
+		return nil
+	}
+	les, customers := make([]string, len(profiles)), make([]string, len(profiles))
+	at := map[[2]string]int{}
+	for i, c := range profiles {
+		les[i], customers[i] = c.LegalEntityID, c.CustomerID
+		at[[2]string{c.LegalEntityID, c.CustomerID}] = i
+		profiles[i].Exposure.OpenOrders, profiles[i].Exposure.OpenOrdersOtherCurrencies = decimal.Zero, nil
+	}
+	rows, err := tx.Query(ctx, `select o.legal_entity_id::text, o.customer_id::text, o.currency::text, sum(o.net_total)::text
+		from sales_order o join unnest($2::uuid[], $3::uuid[]) as k(le, customer) on o.legal_entity_id = k.le and o.customer_id = k.customer
+		where o.tenant_id = $1 and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED') and o.order_type in ('ORDER', 'SUBSCRIPTION')
+		group by o.legal_entity_id, o.customer_id, o.currency order by o.currency`, tenantID, les, customers)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var le, customer, cur, sum string
+		if err := rows.Scan(&le, &customer, &cur, &sum); err != nil {
+			return err
+		}
+		amount, err := decimal.NewFromString(sum)
+		if err != nil {
+			return err
+		}
+		c := &profiles[at[[2]string{le, customer}]]
+		if cur == c.Currency {
+			c.Exposure.OpenOrders = amount
+		} else {
+			c.Exposure.OpenOrdersOtherCurrencies = append(c.Exposure.OpenOrdersOtherCurrencies, domain.CurrencyAmount{Currency: cur, Amount: amount})
+		}
+	}
+	return rows.Err()
 }

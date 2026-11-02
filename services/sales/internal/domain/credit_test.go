@@ -216,3 +216,30 @@ func TestEvaluateCredit_Credit40Fixtures(t *testing.T) {
 		})
 	}
 }
+
+// Open orders in another currency cannot be converted yet (w12); BALANCE_ALL
+// must not pass silently on an exposure that leaves them out.
+func TestEvaluateCredit_FlagsOpenOrdersInOtherCurrencies(t *testing.T) {
+	p := usdProfile()
+	p.LimitType = LimitBalanceAll
+	other := []CurrencyAmount{{Currency: "EUR", Amount: decimal.NewFromInt(4000)}}
+	ev := EvaluateCredit(CreditInput{Profile: p, Exposure: Exposure{OpenAR: decimal.NewFromInt(1000), OpenOrdersOtherCurrencies: other},
+		Order: decimal.NewFromInt(1000), AsOf: asOf})
+	r := ruleResult(t, ev, "CR-1")
+	if r.Result != RuleWarn || r.Value != "2000" || r.Note != "open orders not counted for want of an FX rate: 4000 EUR" || ev.Outcome != RuleWarn {
+		t.Fatalf("a pass leaving out EUR open orders must warn with a note: %+v outcome %s", r, ev.Outcome)
+	}
+	// A failing exposure stays a failure, with the note.
+	ev = EvaluateCredit(CreditInput{Profile: p, Exposure: Exposure{OpenAR: decimal.NewFromInt(12000), OpenOrdersOtherCurrencies: other},
+		Order: decimal.NewFromInt(1000), AsOf: asOf})
+	if r := ruleResult(t, ev, "CR-1"); r.Result != RuleFail || r.Note == "" {
+		t.Fatalf("fail keeps fail: %+v", r)
+	}
+	// BALANCE does not count open orders, so nothing is missing.
+	p.LimitType = LimitBalance
+	ev = EvaluateCredit(CreditInput{Profile: p, Exposure: Exposure{OpenAR: decimal.NewFromInt(1000), OpenOrdersOtherCurrencies: other},
+		Order: decimal.NewFromInt(1000), AsOf: asOf})
+	if r := ruleResult(t, ev, "CR-1"); r.Result != RulePass || r.Note != "" {
+		t.Fatalf("BALANCE ignores open orders: %+v", r)
+	}
+}

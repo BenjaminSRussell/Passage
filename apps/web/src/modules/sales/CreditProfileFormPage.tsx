@@ -41,6 +41,8 @@ export interface ProfileValues {
   overdueAr: string;
   oldestItemDays: string;
   dunningLevel: string;
+  /** Read-only: open orders in other currencies the check cannot count, as "4000 EUR, 120 GBP". */
+  uncountedOpenOrders?: string;
 }
 
 /** PRD §5.27.13 defaults: BALANCE limit type, 5% / 1,000.00 tolerance. */
@@ -88,6 +90,7 @@ export function profileValues(p: CreditProfile): ProfileValues {
     overdueAr: e.overdueAr ?? "0",
     oldestItemDays: String(e.oldestItemDays ?? 0),
     dunningLevel: String(e.dunningLevel ?? 0),
+    uncountedOpenOrders: (e.openOrdersOtherCurrencies ?? []).map((o) => `${o.amount} ${o.currency}`).join(", "),
   };
 }
 
@@ -243,11 +246,17 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
           {text("openAr", "Open AR", { decimal: true })}
           {text("unapplied", "Unapplied cash", { decimal: true })}
           {text("deliveredNotInvoiced", "Delivered, not invoiced", { decimal: true })}
-          {text("openOrders", "Confirmed open orders", { decimal: true })}
+          {text("openOrders", "Confirmed open orders", { decimal: true, readOnly: true, hint: "Computed from this customer's confirmed orders in the profile currency; counted by limit type Balance all." })}
           {text("overdueAr", "Overdue AR", { decimal: true })}
           {text("oldestItemDays", "Oldest item, days overdue", { decimal: true })}
           {text("dunningLevel", "Dunning level", { decimal: true })}
         </div>
+        {values.uncountedOpenOrders ? (
+          <Alert tone="warning" title="Open orders not counted">
+            Orders in other currencies are left out of confirmed open orders until exchange rates are available: {values.uncountedOpenOrders}. A Balance-all credit check warns
+            while they are open.
+          </Alert>
+        ) : null}
         {errors.exposure ? (
           <p role="alert" className={styles.fieldError}>
             {errors.exposure}

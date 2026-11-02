@@ -10,6 +10,12 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 export const DEFAULT_ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION"] as const;
 export type DefaultOrderType = (typeof DEFAULT_ORDER_TYPES)[number];
 
+/** Where the credit rules run (FR-27.7). confirm is required: it is the only point that places a CREDIT hold. */
+export const CREDIT_CHECK_POINTS = ["entry", "confirm", "release"] as const;
+export type CreditCheckPoint = (typeof CREDIT_CHECK_POINTS)[number];
+/** PRD check points the service refuses until fulfillment (packing slip) and billing (invoice) run them. */
+export const INACTIVE_CREDIT_CHECK_POINTS = ["packing_slip", "invoice"] as const;
+
 export const ORDER_STATUSES = ["DRAFT", "OPEN", "CONFIRMED", "PARTIALLY_SHIPPED", "SHIPPED", "INVOICED", "CLOSED", "CANCELLED"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -277,7 +283,10 @@ export interface Exposure {
   openAr?: Decimal;
   unapplied?: Decimal;
   deliveredNotInvoiced?: Decimal;
+  /** Computed by the service from the confirmed orders in the profile currency; a value sent is ignored. */
   openOrders?: Decimal;
+  /** Read-only: open orders in other currencies, not counted for want of an FX rate. */
+  openOrdersOtherCurrencies?: { currency: string; amount: Decimal }[];
   overdueAr?: Decimal;
   oldestItemDays?: number;
   dunningLevel?: number;
@@ -578,6 +587,8 @@ export interface SalesParametersInput {
   /** The most a one-time order may be worth, in oneTimeOrderLimitCurrency; both absent: 5,000 USD and 4,500 EUR. */
   oneTimeOrderLimit?: Decimal;
   oneTimeOrderLimitCurrency?: string;
+  /** Where the credit rules run; the service defaults to confirm and release when absent. */
+  creditCheckPoints?: CreditCheckPoint[];
 }
 
 /** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */

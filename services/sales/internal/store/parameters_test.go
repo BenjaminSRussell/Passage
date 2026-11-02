@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestPostgres_ParametersVersioning(t *testing.T) {
 	s, pool, ctx := migrated(t)
 	le := ids.New()
 	got, err := s.GetParameters(ctx, le)
-	if err != nil || got.Version != 0 || got.Parameters != domain.DefaultParameters() || got.UpdatedAt != nil {
+	if err != nil || got.Version != 0 || !reflect.DeepEqual(got.Parameters, domain.DefaultParameters()) || got.UpdatedAt != nil {
 		t.Fatalf("defaults: %+v %v", got, err)
 	}
 	in := SalesParameters{LegalEntityID: le, Parameters: domain.Parameters{QuotationExpiryDays: 45, QuotationProbabilityDefault: 40, CreditReleaseValidityDays: 10,
@@ -130,7 +131,7 @@ func TestPostgres_ParametersScope(t *testing.T) {
 		"other legal entity": tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: ids.New(), UserID: "x", Duties: testkit.ScopeDuties("x")}),
 		"other tenant":       tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: testkit.ScopeDuties("")}),
 	} {
-		if got, err := s.GetParameters(c, le); err != nil || got.Version != 0 || got.Parameters != domain.DefaultParameters() {
+		if got, err := s.GetParameters(c, le); err != nil || got.Version != 0 || !reflect.DeepEqual(got.Parameters, domain.DefaultParameters()) {
 			t.Fatalf("%s: get %+v %v", name, got, err)
 		}
 		if _, err := s.PutParameters(c, saved, saved.Version, "x"); problemCode(t, err) != CodeVersionConflict {

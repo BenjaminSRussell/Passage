@@ -2696,6 +2696,12 @@ components:
         defaultOrderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION], description: order type of an order created without one (default_order_type)}
         oneTimeOrderLimit: {allOf: [{$ref: "#/components/schemas/Money"}], description: "the most a one-time customer order may be worth, in oneTimeOrderLimitCurrency, 0 or more with 2 decimal places (one_time_order_limit, FR-27.22); optional, sent together with the currency; absent: 5,000 USD and 4,500 EUR, and no other currency may place one-time orders"}
         oneTimeOrderLimitCurrency: {type: string, pattern: "^[A-Z]{3}$"}
+        creditCheckPoints:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [entry, confirm, release]}
+          description: "where the credit rules run (credit_check_points, FR-27.7); optional, default confirm and release. entry checks a new order (also a converted quotation or an agreement release) and records the result without a hold, confirm places the CREDIT hold, release records the position when a CREDIT hold is released. confirm is required, as the only point that holds an order; a set without it is refused with 400 (switch credit control off for a customer with limitType NONE). The PRD values packing_slip and invoice are refused with 400 as not active yet: their checks come with the fulfillment and billing waves"
     SalesParameters:
       allOf:
         - $ref: "#/components/schemas/SalesParametersRequest"
@@ -2726,18 +2732,34 @@ components:
       description: >-
         The customer's open position in the profile currency, supplied with the profile
         until the receivables projection exists (waves 29/30). Amounts are non-negative;
-        unapplied cash lowers the balance.
+        unapplied cash lowers the balance. openOrders and openOrdersOtherCurrencies are
+        computed by sales, not stored: the net total of the customer's CONFIRMED and
+        PARTIALLY_SHIPPED ORDER and SUBSCRIPTION orders (other than the order being
+        checked), in the profile currency and, for orders in other currencies that
+        cannot be converted without an FX rate, per currency; values sent in a PUT are
+        ignored. A BALANCE_ALL check with uncounted orders in other currencies is at
+        least a CR-1 WARN naming them.
       properties:
         openAr: {$ref: "#/components/schemas/Money"}
         unapplied: {$ref: "#/components/schemas/Money"}
         deliveredNotInvoiced: {$ref: "#/components/schemas/Money"}
-        openOrders: {$ref: "#/components/schemas/Money"}
+        openOrders: {allOf: [{$ref: "#/components/schemas/Money"}], readOnly: true, description: open orders in the profile currency, computed}
+        openOrdersOtherCurrencies:
+          type: array
+          readOnly: true
+          description: open orders in other currencies, left out of openOrders for want of an FX rate; absent when there are none
+          items:
+            type: object
+            required: [currency, amount]
+            properties:
+              currency: {type: string, pattern: "^[A-Z]{3}$"}
+              amount: {$ref: "#/components/schemas/Money"}
         overdueAr: {$ref: "#/components/schemas/Money"}
         oldestItemDays: {type: integer, minimum: 0}
         dunningLevel: {type: integer, minimum: 0}
     CreditEvaluation:
       type: object
-      description: Every BR-27.3 rule evaluated at the last confirm, with value and threshold.
+      description: Every BR-27.3 rule evaluated at the last credit check (entry, confirm or release), with value and threshold.
       properties:
         outcome: {type: string, enum: [PASS, WARN, FAIL]}
         rules:

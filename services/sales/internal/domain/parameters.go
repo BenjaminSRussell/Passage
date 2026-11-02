@@ -17,6 +17,12 @@ type Parameters struct {
 	CreditHoldSLABusinessDays   int    `json:"creditHoldSlaBusinessDays"`
 	DefaultOrderType            string `json:"defaultOrderType"`
 
+	// CreditCheckPoints is credit_check_points (FR-27.7): where the credit
+	// rules run. Sales runs entry, confirm and release; confirm is required
+	// (the only point that holds an order today) and packing_slip and invoice
+	// are refused until the fulfillment and billing waves run them.
+	CreditCheckPoints []string `json:"creditCheckPoints"`
+
 	// OneTimeOrderLimit and its currency are one_time_order_limit (FR-27.22);
 	// both are set or both are absent, and absent means the currency defaults.
 	OneTimeOrderLimit         *decimal.Decimal `json:"oneTimeOrderLimit,omitempty"`
@@ -37,7 +43,42 @@ const (
 func DefaultParameters() Parameters {
 	return Parameters{QuotationExpiryDays: QuotationExpiryDays, QuotationProbabilityDefault: DefaultProbabilityPct,
 		CreditReleaseValidityDays: CreditReleaseDays, CreditHoldSLABusinessDays: DefaultCreditHoldSLABusinessDays,
-		DefaultOrderType: "ORDER"}
+		DefaultOrderType: "ORDER", CreditCheckPoints: []string{CheckPointConfirm, CheckPointRelease}}
+}
+
+// The credit_check_points values.
+const (
+	CheckPointEntry       = "entry"
+	CheckPointConfirm     = "confirm"
+	CheckPointRelease     = "release"
+	CheckPointPackingSlip = "packing_slip"
+	CheckPointInvoice     = "invoice"
+)
+
+// activeCheckPoints are the values a legal entity may set today. packing_slip
+// and invoice are PRD values (5.27.13) whose checks belong to the fulfillment
+// (w28) and billing (w29) waves; until those run them, a set naming them is
+// refused rather than stored as a setting that does nothing.
+var activeCheckPoints = map[string]bool{CheckPointEntry: true, CheckPointConfirm: true, CheckPointRelease: true}
+
+// notActiveCheckPoints are the PRD values whose checks are not built yet.
+var notActiveCheckPoints = map[string]bool{CheckPointPackingSlip: true, CheckPointInvoice: true}
+
+// blockingCheckPoints place a CREDIT hold on a failed check. entry is advisory
+// and release only records the position, so a set without a blocking point
+// would switch credit control off; turning credit control off for a customer
+// is limit type NONE on the profile, not the check points. packing_slip and
+// invoice join this set when their waves wire them.
+var blockingCheckPoints = map[string]bool{CheckPointConfirm: true}
+
+// ChecksAt reports whether the credit rules run at point.
+func (p Parameters) ChecksAt(point string) bool {
+	for _, c := range p.CreditCheckPoints {
+		if c == point {
+			return true
+		}
+	}
+	return false
 }
 
 // parameterOrderTypes are the allowed default_order_type values. RETURNED is
@@ -61,6 +102,9 @@ func (p Parameters) Validate() map[string]string {
 	}
 	if !parameterOrderTypes[p.DefaultOrderType] {
 		f["defaultOrderType"] = "must be JOURNAL, ORDER or SUBSCRIPTION"
+	}
+	if msg := validateCheckPoints(p.CreditCheckPoints); msg != "" {
+		f["creditCheckPoints"] = msg
 	}
 	if (p.OneTimeOrderLimit == nil) != (p.OneTimeOrderLimitCurrency == nil) {
 		f["oneTimeOrderLimit"] = "oneTimeOrderLimit and oneTimeOrderLimitCurrency are set together"
@@ -86,4 +130,27 @@ func AddBusinessDays(t time.Time, n int) time.Time {
 		}
 	}
 	return t
+}
+
+// validateCheckPoints returns why points is not an allowed credit_check_points
+// set, or "" when it is.
+func validateCheckPoints(points []string) string {
+	seen := map[string]bool{}
+	blocking := false
+	for _, c := range points {
+		switch {
+		case notActiveCheckPoints[c]:
+			return c + " is not active yet: the packing slip and invoice credit checks are built with fulfillment and billing"
+		case !activeCheckPoints[c]:
+			return "must be entry, confirm or release"
+		case seen[c]:
+			return "must not repeat a check point"
+		}
+		seen[c] = true
+		blocking = blocking || blockingCheckPoints[c]
+	}
+	if !blocking {
+		return "must include confirm, the check point that places a credit hold; entry and release do not hold an order"
+	}
+	return ""
 }

@@ -272,6 +272,9 @@ type CreditCheckData struct {
 	OrderID    string              `json:"order_id"`
 	Rules      []domain.RuleResult `json:"rules"`
 	Outcome    string              `json:"outcome"`
+	// Point is the credit_check_points value the check ran at: entry,
+	// confirm or release.
+	Point string `json:"point"`
 }
 
 // ScheduleReleaseLine is one open schedule line of a scheduling-agreement release.
@@ -345,10 +348,11 @@ type ParametersChangedData struct {
 	CreditHoldSLABusinessDays   int    `json:"credit_hold_sla_business_days"`
 	DefaultOrderType            string `json:"default_order_type"`
 	// OneTimeOrderLimit and its currency are absent when the defaults apply.
-	OneTimeOrderLimit         *string `json:"one_time_order_limit,omitempty"`
-	OneTimeOrderLimitCurrency *string `json:"one_time_order_limit_currency,omitempty"`
-	Actor                     string  `json:"actor"`
-	Version                   int     `json:"version"`
+	OneTimeOrderLimit         *string  `json:"one_time_order_limit,omitempty"`
+	OneTimeOrderLimitCurrency *string  `json:"one_time_order_limit_currency,omitempty"`
+	CreditCheckPoints         []string `json:"credit_check_points"`
+	Actor                     string   `json:"actor"`
+	Version                   int      `json:"version"`
 }
 
 // OrderChangeRequestedData is the data member of orderchange.requested.v1: a

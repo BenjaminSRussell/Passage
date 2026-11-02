@@ -346,8 +346,14 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		}); err != nil {
 			return err
 		}
+		checked := false
 		if o.Status == domain.OrderConfirmed && o.NetTotal.GreaterThan(oldTotal) {
-			eval, err := evaluateCreditTx(ctx, tx, p.TenantID, o, now)
+			if checked, err = checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm); err != nil {
+				return err
+			}
+		}
+		if checked {
+			eval, err := evaluateCreditTx(ctx, tx, p.TenantID, o, domain.CheckPointConfirm, now)
 			if err != nil {
 				return err
 			}
