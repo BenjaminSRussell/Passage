@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Process Manufacturing
-  version: 0.6.0
+  version: 0.7.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11 to 14): formulas, batch orders
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9, 11 to 15): formulas, batch orders
     scaled from a formula snapshot, the potency, catch-weight and co-product
     allocation calculators (slice 1), the batch derivation, merge, consolidation,
     customer requirement and EBR approval previews (slice 2), and the batch
     attribute check, the picking proposal and the rework plan (slice 3), and the
-    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11), the merge of stored batches with its genealogy (slice 13), and the customer batch requirements with the requirement check over stored batches (slice 14). Routes
+    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11), the merge of stored batches with its genealogy (slice 13), and the customer batch requirements with the requirement check over stored batches (slice 14), and the electronic batch record: profiles, compilation, review by exception, approval and the sealed content hash (slice 15). Routes
     match the handlers in internal/api (checked by internal/api/openapi_test.go).
     Errors are RFC 9457 problem details (application/problem+json) with a stable
     `code`; see README.md. The gateway routes /api/v1/production/* paths listed
@@ -717,7 +717,7 @@ paths:
           description: PMF-0109 when the item already has a batch with that number.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: idempotency_key_reuse.
+          description: PMF-0015 when the batch is registered as available while its item has a batch record profile that requires an approved record; idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -807,7 +807,7 @@ paths:
           description: PMF-0104 when the version is stale; PMF-0111 when the batch already has that disposition.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: idempotency_key_reuse.
+          description: PMF-0015 when the batch is moved to available while its item has a profile that requires an approved record and the batch (or, for a merged batch, any batch it was merged from) has no approved or sealed record; idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/production/batches:merge:
@@ -835,7 +835,7 @@ paths:
           description: PMF-0104 when a source version is stale; PMF-0109 when the target batch number already exists for the item.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: PMF-0006 when the sources differ in item, legal entity, warehouse, catch-weight unit, disposition, the kind of an attribute, or a text attribute that is not merge-override; idempotency_key_reuse.
+          description: PMF-0006 when the sources differ in item, legal entity, warehouse, catch-weight unit, disposition, the kind of an attribute, or a text attribute that is not merge-override; PMF-0015 when the target would be available and a source (or a batch an earlier merge made it from) lacks the approved record its profile requires; idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/production/batches/{id}/genealogy:
@@ -853,6 +853,294 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404':
           description: PMF-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-record-profiles:
+    post:
+      operationId: defineBatchRecordProfile
+      summary: Define the electronic batch record profile of an item (FR-24.21)
+      description: >-
+        Says that the batches of the item get an electronic batch record and whether releasing a batch needs the
+        record approved (default yes). One active profile per item and legal entity; the code is unique among the
+        active ones. While the profile requires approval, a batch cannot be registered or moved to available without
+        an approved or sealed record (PMF-0015). Writes dev.passage.production.batchrecordprofile.defined.v1.
+      x-passage-duty: production.batch-record.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RecordProfileRequest' } } }
+      responses:
+        '201':
+          description: 'Created at version 1. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecordProfile' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PMF-0116 when the item already has an active profile or the code is taken.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBatchRecordProfiles
+      summary: Batch record profiles by item and code
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: active, in: query, description: 'true keeps the profiles that are not retired.', schema: { type: boolean } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RecordProfile' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-record-profiles/{id}:
+    get:
+      operationId: getBatchRecordProfile
+      summary: One batch record profile
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The profile with its version and whether it is retired.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecordProfile' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0115
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-record-profiles/{id}:retire:
+    post:
+      operationId: retireBatchRecordProfile
+      summary: Retire a batch record profile
+      description: Records already compiled keep their profile; new batches of the item are no longer held for a record. Writes dev.passage.production.batchrecordprofile.retired.v1.
+      x-passage-duty: production.batch-record.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The retired profile at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecordProfile' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0115
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0117 when the profile is already retired.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records:
+    post:
+      operationId: compileBatchRecord
+      summary: Compile the electronic batch record of a batch, or refresh it while in review (FR-24.21)
+      description: >-
+        Builds the record from the batch order and the batch (order header, scaled lines, cost split, attributes,
+        dispositions) and raises one exception for each recorded value outside its limits that has none yet (BR-24.15).
+        Compiling again while the record is in review reads the content again and adds the exceptions of values
+        recorded since. The batch needs a batch order and an active profile of its item. An approved or sealed record
+        does not change (PMF-0120). Writes dev.passage.production.batchrecord.compiled.v1 and one
+        dev.passage.production.batchrecord.exceptionraised.v1 for each new exception.
+      x-passage-duty: production.batch-record.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CompileRecordRequest' } } }
+      responses:
+        '200':
+          description: 'The record in review with its exceptions. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0108 when the batch is not found.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0119 when the item has no active profile; PMF-0120 when the record is approved or sealed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0123 when the batch has no batch order; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBatchRecords
+      summary: Electronic batch records, newest first (exceptions and content omitted)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/RecordStatus' } }
+        - { name: batchId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Records with their exception counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ElectronicBatchRecord' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}:
+    get:
+      operationId: getBatchRecord
+      summary: One batch record with its content, exceptions and, once sealed, the sealed document and hash
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The record.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}/exceptions:
+    post:
+      operationId: raiseBatchRecordException
+      summary: Raise an exception on a record in review (BR-24.15)
+      description: For something the reviewer found that no recorded value shows. Writes dev.passage.production.batchrecord.exceptionraised.v1.
+      x-passage-duty: production.batch-record.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RaiseExceptionRequest' } } }
+      responses:
+        '200':
+          description: 'The record at version + 1 with the new exception. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is no longer in review.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}/exceptions/{exceptionId}:disposition:
+    post:
+      operationId: dispositionBatchRecordException
+      summary: Decide an exception of a record in review with the signature behind it (BR-24.15)
+      description: >-
+        Accept it, raise a deviation or reject; this is the review step (PRD duty *Review batch records*). WARNING, NOT
+        21 CFR PART 11 COMPLIANT YET: the signature service (FR-24.22) is not built, so signatureId is stored exactly as
+        given and is NOT verified. Any well-formed UUID is accepted; there is no re-authentication, no binding of the
+        signature to the record hash and no check that the signature exists or belongs to the caller. The decision is
+        attributed to the authenticated caller (dispositionedBy), and the sealed document records signaturesVerified
+        false. A decision is final (409 PMF-0125). Writes
+        dev.passage.production.batchrecord.exceptiondispositioned.v1.
+      x-passage-duty: production.batch-record.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: exceptionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DispositionExceptionRequest' } } }
+      responses:
+        '200':
+          description: 'The record at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118 when the record is not found; PMF-0122 when it has no such exception.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is no longer in review; PMF-0125 when the exception is already decided.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}:approve:
+    post:
+      operationId: approveBatchRecord
+      summary: Approve a batch record by exception (BR-24.15, AC-24.16)
+      description: >-
+        Refused with 422 PMF-0014 while any exception lacks a disposition or its signature, with 409 PMF-0121 when a
+        value outside its limits was recorded after the last compile (compile again first), and with 422 PMF-0124 when
+        the caller raised or decided an exception of this record or created its batch order (segregation of duties,
+        PRD 4.24.17). The signature ids behind the decisions are not verified (see the disposition operation). Once
+        approved, the content is frozen and the batch can be released. Writes
+        dev.passage.production.batchrecord.approved.v1.
+      x-passage-duty: production.batch-record.approve
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The approved record at version + 1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is not in review; PMF-0121 when the record is out of date.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0014 while any exception lacks a disposition or a signature; PMF-0124 when the caller reviewed the record or created its batch order; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records/{id}:seal:
+    post:
+      operationId: sealBatchRecord
+      summary: Seal an approved batch record with a content hash (FR-24.21)
+      description: >-
+        Stores the canonical JSON document of the record, the content as it was approved (not compiled again) and its
+        exceptions with their decisions, and its SHA-256: contentHash is the hex SHA-256 of the UTF-8 bytes of
+        sealedDocument. Canonical means compact, object keys sorted at every level, no HTML escaping, numbers as first
+        written (quantities and money are decimal strings) and times in UTC, so any sorted-keys JSON encoder
+        reproduces it. The document carries signaturesVerified false while the signature service is not built. A
+        sealed record never changes again; the database refuses any update or delete. No PDF/A rendition or document
+        archive yet. Writes dev.passage.production.batchrecord.sealed.v1.
+      x-passage-duty: production.batch-record.approve
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The sealed record with its document and hash. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicBatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0118
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0120 when the record is not approved.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
 components:
@@ -1651,6 +1939,95 @@ components:
         qualityOrderRequired: { type: boolean }
         varianceType: { type: string, enum: [rework, capitalized] }
         parents: { type: array, items: { type: string } }
+    RecordStatus:
+      type: string
+      enum: [in-review, approved, sealed]
+    RecordProfileRequest:
+      type: object
+      required: [code, itemId]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_.-]{0,39}$' }
+        itemId: { type: string, format: uuid }
+        approvalRequiredForRelease: { type: boolean, default: true, description: When true a batch of the item is released (disposition available) only with an approved or sealed record (PMF-0015). }
+    RecordProfile:
+      type: object
+      required: [id, legalEntityId, code, itemId, approvalRequiredForRelease, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        itemId: { type: string, format: uuid }
+        approvalRequiredForRelease: { type: boolean }
+        retiredAt: { type: string, format: date-time }
+        retiredBy: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CompileRecordRequest:
+      type: object
+      required: [batchId]
+      properties:
+        batchId: { type: string, format: uuid, description: A registered batch that is linked to a batch order. }
+    RaiseExceptionRequest:
+      type: object
+      required: [version, description]
+      properties:
+        version: { type: integer, minimum: 1, description: The record version the caller read. }
+        description: { type: string, minLength: 1, maxLength: 500 }
+        severity: { type: string, enum: [minor, major, critical], default: major }
+    DispositionExceptionRequest:
+      type: object
+      required: [version, disposition, signatureId]
+      properties:
+        version: { type: integer, minimum: 1, description: The record version the caller read. }
+        disposition: { type: string, enum: [accepted, deviation-raised, rejected] }
+        comment: { type: string, maxLength: 500 }
+        signatureId: { type: string, format: uuid, description: 'The electronic signature (FR-24.22) meant to back the decision. NOT VERIFIED: stored as given until the signature service exists.' }
+    RecordException:
+      type: object
+      required: [id, sourceType, sourceId, description, severity, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sourceType: { type: string, enum: [attribute, manual], description: attribute for a recorded value outside its limits, manual for one a reviewer raised. }
+        sourceId: { type: string, description: The attribute history row, or the exception's own id. }
+        description: { type: string }
+        severity: { type: string, enum: [minor, major, critical] }
+        disposition: { type: string, enum: [accepted, deviation-raised, rejected], description: Absent while the exception is open. }
+        dispositionComment: { type: string }
+        signatureId: { type: string, format: uuid }
+        dispositionedBy: { type: string }
+        dispositionedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    ElectronicBatchRecord:
+      type: object
+      required: [id, legalEntityId, batchOrderId, batchId, batchNumber, itemId, profileId, status, compiledAt, version, exceptionCount, openExceptions, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        batchOrderId: { type: string, format: uuid }
+        batchId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        itemId: { type: string, format: uuid }
+        profileId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/RecordStatus' }
+        compiledAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        sealedBy: { type: string }
+        sealedAt: { type: string, format: date-time }
+        contentHash: { type: string, description: Hex SHA-256 of sealedDocument; set when sealed. }
+        version: { type: integer, minimum: 1 }
+        exceptionCount: { type: integer }
+        openExceptions: { type: integer, description: Exceptions without a disposition and signature. }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        content: { type: object, additionalProperties: true, description: 'The compiled sections, batchOrder and batch. Only on the detail.' }
+        sealedDocument: { type: string, description: 'The canonical JSON document that was hashed (recordId, batch and profile ids, compiledAt, approvedBy, approvedAt, sealedBy, sealedAt, signaturesVerified, content, exceptions). Only on a sealed record''s detail.' }
+        exceptions: { type: array, items: { $ref: '#/components/schemas/RecordException' }, description: Only on the detail and the commands. }
     Problem:
       type: object
       description: RFC 9457 problem details.

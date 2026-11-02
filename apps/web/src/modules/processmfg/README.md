@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 to 3, 9, 11 and 12)
+# processmfg web module (PSG-24 slices 1 to 3, 9 and 11 to 15)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -32,6 +32,10 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/customer-requirements/new` | Define a requirement for a customer, a customer group or the item default: sellable days, attribute range, same-batch flag, validity; client-side checks before the call | `POST /customer-batch-requirements` | `production.batch-requirement.write` (enforced on the page and in the service) |
 | `/processmfg/customer-requirements/:id` | One requirement with its version; retire it under the version read, with a reload on PMF-0104 | `GET /customer-batch-requirements/{id}`, `POST ...:retire` | `production.batch-order.read` (retire: `production.batch-requirement.write`) |
 | `/processmfg/requirement-check-stored` | Check stored batches against a customer's stored requirements: item id lists its batches, an on-hand quantity per batch, ship date and line quantity; the resolved requirement, qualifying and excluded batches with reasons (PMF-0009), the same-batch pick or 409 PMF-0008 (FR-24.19, AC-24.14) | `GET /batches?itemId=`, `POST /batch-requirements:check-stored` | `production.batch-order.read` |
+| `/processmfg/batch-records` | Electronic batch records with a status filter (loading, empty, error with retry); a form to compile the record of a batch for a holder of the write duty (FR-24.21) | `GET /batch-records`, `POST /batch-records` | `production.batch-order.read` (compile: `production.batch-record.write`) |
+| `/processmfg/batch-records/:id` | One record: status, counts, exceptions with their decision, signature (marked unverified) and who decided; for a holder of the review (write) duty: decide an open exception once (decision, signature id, comment, with a warning that signature ids are not verified), raise an exception by hand and compile again; for a holder of the approve duty: approve or seal; once sealed the SHA-256, the sealed document and the unverified-signature note. Every step sends the record version read; PMF-0104 offers a reload, PMF-0014 and PMF-0124 (approver reviewed the record or created its order) are shown as refused (BR-24.15, AC-24.16) | `GET /batch-records/{id}`, `POST .../exceptions`, `.../exceptions/{id}:disposition`, `:approve`, `:seal`, `POST /batch-records` | `production.batch-order.read`; raise, decide, compile `production.batch-record.write`; approve, seal `production.batch-record.approve` |
+| `/processmfg/batch-record-profiles` | Profiles by item with active or retired status and a retire action (loading, empty, error with retry) | `GET /batch-record-profiles`, `POST ...:retire` | `production.batch-order.read` (retire: `production.batch-record.write`) |
+| `/processmfg/batch-record-profiles/new` | Define the profile of an item: code, item id and whether release needs the approved record | `POST /batch-record-profiles` | `production.batch-record.write` (enforced on the page and in the service) |
 | `/processmfg/rework` | Rework batch order plan: batch, quantity to rework, expected output and the FR-24.18 parameters; output batch, disposition, quality order, cost treatment and genealogy (AC-24.18) | `POST /api/v1/production/rework-orders:preview` | `production.batch-order.write` |
 
 Every command sends an `Idempotency-Key`, kept for the life of the form so a retried submit
@@ -46,7 +50,7 @@ npx vitest --run src/modules/processmfg
 npx tsc --noEmit
 ```
 
-`customerrequirements.test.tsx` covers the slice-14 screens (list filters, empty and error states, define with one key and client-side validation, retire at the version read with its stale-version path, the duty gates, and the stored check of AC-24.14 with its same-batch shortfall). `batchrecords.test.tsx` covers the slice-11 screens (list filter, empty and error states, register,
+`batchrecordebr.test.tsx` covers the slice-15 screens (record list and compile, the review steps with the version read, signature and key, final decisions, PMF-0014, PMF-0104 and PMF-0124 refusals, the review/approve duty split, seal with hash and the unverified-signature note, the duty gates, and the profile list, define and retire). `customerrequirements.test.tsx` covers the slice-14 screens (list filters, empty and error states, define with one key and client-side validation, retire at the version read with its stale-version path, the duty gates, and the stored check of AC-24.14 with its same-batch shortfall). `batchrecords.test.tsx` covers the slice-11 screens (list filter, empty and error states, register,
 recording with the version and the outside-limits report, client-side validation, the disposition
 duty and reason, histories, definitions). `pages.test.tsx` stubs `fetch` and renders the module's routes in a MemoryRouter, so it needs no
 service. It covers the list, empty, error and detail states, the formula designer's percent
@@ -63,6 +67,7 @@ rule, refusal), plus the in-repo WCAG checks.
 
 - Item, site and legal-entity pickers: forms take item ids as UUIDs until a shared item lookup
   exists in the shell.
-- The derivation monitor, EBR review and signature prompts wait for their endpoints (see
+- The derivation monitor and the signature prompts (step-up re-authentication that would produce a
+  verified signature id for an EBR decision) wait for their endpoints (see
   `services/processmfg/NOT-IMPLEMENTED.md`). The slice-2 and slice-3 pages take batches as typed
   input until a wave-16 batch lookup exists.

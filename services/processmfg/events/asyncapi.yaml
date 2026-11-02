@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Process Manufacturing events
-  version: 0.6.0
+  version: 0.7.0
   description: >
     CloudEvents 1.0 published through the transactional outbox (Debezium
     outbox router), each in the same transaction as the change it reports.
@@ -54,6 +54,26 @@ channels:
         $ref: '#/components/messages/BatchRequirementDefined'
       batchRequirementRetired:
         $ref: '#/components/messages/BatchRequirementRetired'
+  batchRecordProfile:
+    address: passage.production.batchrecordprofile
+    messages:
+      batchRecordProfileDefined:
+        $ref: '#/components/messages/BatchRecordProfileDefined'
+      batchRecordProfileRetired:
+        $ref: '#/components/messages/BatchRecordProfileRetired'
+  batchRecord:
+    address: passage.production.batchrecord
+    messages:
+      batchRecordCompiled:
+        $ref: '#/components/messages/BatchRecordCompiled'
+      batchRecordExceptionRaised:
+        $ref: '#/components/messages/BatchRecordExceptionRaised'
+      batchRecordExceptionDispositioned:
+        $ref: '#/components/messages/BatchRecordExceptionDispositioned'
+      batchRecordApproved:
+        $ref: '#/components/messages/BatchRecordApproved'
+      batchRecordSealed:
+        $ref: '#/components/messages/BatchRecordSealed'
 operations:
   publishFormulaCreated:
     action: send
@@ -115,6 +135,41 @@ operations:
     channel: { $ref: '#/channels/batchRequirement' }
     messages: [{ $ref: '#/channels/batchRequirement/messages/batchRequirementRetired' }]
     summary: A customer batch requirement was retired and no longer applies
+  publishBatchRecordProfileDefined:
+    action: send
+    channel: { $ref: '#/channels/batchRecordProfile' }
+    messages: [{ $ref: '#/channels/batchRecordProfile/messages/batchRecordProfileDefined' }]
+    summary: An item got an electronic batch record profile; it says whether releasing a batch needs an approved record
+  publishBatchRecordProfileRetired:
+    action: send
+    channel: { $ref: '#/channels/batchRecordProfile' }
+    messages: [{ $ref: '#/channels/batchRecordProfile/messages/batchRecordProfileRetired' }]
+    summary: A batch record profile was retired and its item's batches are no longer held for a record
+  publishBatchRecordCompiled:
+    action: send
+    channel: { $ref: '#/channels/batchRecord' }
+    messages: [{ $ref: '#/channels/batchRecord/messages/batchRecordCompiled' }]
+    summary: The electronic batch record of a batch was compiled or refreshed; quality and release review read it
+  publishBatchRecordExceptionRaised:
+    action: send
+    channel: { $ref: '#/channels/batchRecord' }
+    messages: [{ $ref: '#/channels/batchRecord/messages/batchRecordExceptionRaised' }]
+    summary: A batch record got an exception, from a value outside its limits or raised by a reviewer; quality follows it up
+  publishBatchRecordExceptionDispositioned:
+    action: send
+    channel: { $ref: '#/channels/batchRecord' }
+    messages: [{ $ref: '#/channels/batchRecord/messages/batchRecordExceptionDispositioned' }]
+    summary: An exception of a batch record was decided with the signature behind it (accepted, deviation raised or rejected)
+  publishBatchRecordApproved:
+    action: send
+    channel: { $ref: '#/channels/batchRecord' }
+    messages: [{ $ref: '#/channels/batchRecord/messages/batchRecordApproved' }]
+    summary: A batch record was approved by exception; the batch can be released
+  publishBatchRecordSealed:
+    action: send
+    channel: { $ref: '#/channels/batchRecord' }
+    messages: [{ $ref: '#/channels/batchRecord/messages/batchRecordSealed' }]
+    summary: A batch record was sealed with the SHA-256 of its document; archiving reads it
 components:
   messages:
     FormulaCreated:
@@ -177,6 +232,41 @@ components:
       summary: A customer batch requirement was retired
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/BatchRequirementData' }
+    BatchRecordProfileDefined:
+      name: dev.passage.production.batchrecordprofile.defined.v1
+      summary: A batch record profile was defined
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordProfileData' }
+    BatchRecordProfileRetired:
+      name: dev.passage.production.batchrecordprofile.retired.v1
+      summary: A batch record profile was retired
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordProfileData' }
+    BatchRecordCompiled:
+      name: dev.passage.production.batchrecord.compiled.v1
+      summary: A batch record was compiled or refreshed
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordData' }
+    BatchRecordExceptionRaised:
+      name: dev.passage.production.batchrecord.exceptionraised.v1
+      summary: An exception was raised on a batch record
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordExceptionData' }
+    BatchRecordExceptionDispositioned:
+      name: dev.passage.production.batchrecord.exceptiondispositioned.v1
+      summary: An exception of a batch record was decided
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordExceptionData' }
+    BatchRecordApproved:
+      name: dev.passage.production.batchrecord.approved.v1
+      summary: A batch record was approved
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordData' }
+    BatchRecordSealed:
+      name: dev.passage.production.batchrecord.sealed.v1
+      summary: A batch record was sealed
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRecordData' }
   schemas:
     FormulaCreatedData:
       type: object
@@ -363,3 +453,41 @@ components:
         validFrom: { type: string, format: date }
         validTo: { type: string, format: date }
         version: { type: integer, description: The rule version after the change (1 when defined, 2 when retired). }
+
+    BatchRecordProfileData:
+      type: object
+      required: [profileId, legalEntityId, code, itemId, approvalRequiredForRelease, version]
+      properties:
+        profileId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        itemId: { type: string, format: uuid }
+        approvalRequiredForRelease: { type: boolean }
+        version: { type: integer, description: The profile version after the change (1 when defined, 2 when retired). }
+    BatchRecordData:
+      type: object
+      required: [recordId, legalEntityId, batchOrderId, batchId, batchNumber, itemId, status, version, exceptions, openExceptions]
+      properties:
+        recordId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        batchOrderId: { type: string, format: uuid }
+        batchId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        itemId: { type: string, format: uuid }
+        status: { type: string, enum: [in-review, approved, sealed] }
+        version: { type: integer }
+        exceptions: { type: integer, description: Exceptions on the record. }
+        openExceptions: { type: integer, description: Exceptions without a disposition and signature. }
+        contentHash: { type: string, description: Hex SHA-256 of the sealed document; set on sealed. }
+    BatchRecordExceptionData:
+      type: object
+      required: [recordId, exceptionId, legalEntityId, batchId, sourceType, severity]
+      properties:
+        recordId: { type: string, format: uuid }
+        exceptionId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        batchId: { type: string, format: uuid }
+        sourceType: { type: string, enum: [attribute, manual] }
+        severity: { type: string, enum: [minor, major, critical] }
+        disposition: { type: string, enum: [accepted, deviation-raised, rejected], description: Set on exceptiondispositioned. }
+        signatureId: { type: string, format: uuid, description: 'Set on exceptiondispositioned. Stored as the caller gave it and NOT verified: the signature service (FR-24.22) is not built yet.' }

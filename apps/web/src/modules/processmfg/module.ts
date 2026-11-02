@@ -5,6 +5,7 @@ import { BatchOrderDetailPage, BatchOrdersPage, NewBatchOrderPage } from "./Batc
 import { BatchAttributesPage, PickingPage, ReworkPage } from "./BatchQualityPages";
 import { ApprovalCheckPage, ConsolidationPage, DerivationPage, MergePage, RequirementCheckPage } from "./BatchRulePages";
 import { CustomerRequirementDetailPage, CustomerRequirementsPage, NewCustomerRequirementPage, StoredRequirementCheckPage } from "./CustomerRequirementPages";
+import { BatchRecordDetailPage, BatchRecordsPage, NewRecordProfilePage, RecordProfilesPage } from "./EbrPages";
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
 import { FormulaDetailPage, FormulasPage, NewFormulaPage } from "./FormulaPages";
 import { ProcessHome } from "./pages";
@@ -15,7 +16,7 @@ const processmfg: PassageModule = {
   id: "processmfg",
   title: "Process manufacturing",
   description:
-    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking (from typed or stored batches), merging stored batches with their genealogy, stored customer batch requirements with the check over stored batches, rework, and the batch quality record with its disposition history.",
+    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking (from typed or stored batches), merging stored batches with their genealogy, stored customer batch requirements with the check over stored batches, rework, and the batch quality record with its disposition history, and the electronic batch record with its profiles, review by exception, approval and seal.",
   routes: [
     { path: "/processmfg", element: createElement(ProcessHome), handle: { title: "Process manufacturing" } },
     { path: "/processmfg/formulas", element: createElement(FormulasPage), handle: { title: "Formulas" } },
@@ -39,6 +40,10 @@ const processmfg: PassageModule = {
     { path: "/processmfg/customer-requirements/:id", element: createElement(CustomerRequirementDetailPage), handle: { title: "Customer batch requirement" } },
     { path: "/processmfg/requirement-check-stored", element: createElement(StoredRequirementCheckPage), handle: { title: "Check stored batches" } },
     { path: "/processmfg/consolidation", element: createElement(ConsolidationPage), handle: { title: "Bulk consolidation" } },
+    { path: "/processmfg/batch-records", element: createElement(BatchRecordsPage), handle: { title: "Batch records" } },
+    { path: "/processmfg/batch-records/:id", element: createElement(BatchRecordDetailPage), handle: { title: "Batch record" } },
+    { path: "/processmfg/batch-record-profiles", element: createElement(RecordProfilesPage), handle: { title: "Batch record profiles" } },
+    { path: "/processmfg/batch-record-profiles/new", element: createElement(NewRecordProfilePage), handle: { title: "Define profile" } },
     { path: "/processmfg/batch-record-check", element: createElement(ApprovalCheckPage), handle: { title: "Batch record approval check" } },
     { path: "/processmfg/batch-attributes", element: createElement(BatchAttributesPage), handle: { title: "Batch attributes" } },
     { path: "/processmfg/picking", element: createElement(PickingPage), handle: { title: "Batch picking" } },
@@ -60,6 +65,8 @@ const processmfg: PassageModule = {
     { label: "Requirement rules", to: "/processmfg/customer-requirements", duty: "production.batch-order.read" },
     { label: "Check stored batches", to: "/processmfg/requirement-check-stored", duty: "production.batch-order.read" },
     { label: "Bulk consolidation", to: "/processmfg/consolidation", duty: "production.batch-order.write" },
+    { label: "Batch records", to: "/processmfg/batch-records", duty: "production.batch-order.read" },
+    { label: "Record profiles", to: "/processmfg/batch-record-profiles", duty: "production.batch-order.read" },
     { label: "Batch record approval", to: "/processmfg/batch-record-check", duty: "production.batch-record.approve" },
     { label: "Batch attributes", to: "/processmfg/batch-attributes", duty: "production.batch-attribute.write" },
     { label: "Batch picking", to: "/processmfg/picking", duty: "production.batch-order.read" },

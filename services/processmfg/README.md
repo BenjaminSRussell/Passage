@@ -126,6 +126,15 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/customer-batch-requirements` | `production.batch-requirement.write` | Define a customer batch requirement for an item at a customer, customer group or item scope: sellable days, attribute range, same-batch flag, validity; writes `batchrequirement.defined` (FR-24.19, BR-24.13) |
 | GET | `/v1/production/customer-batch-requirements`, `/{id}` | `production.batch-order.read` | The rules, filtered by legal entity, item, customer, group and the day they are active |
 | POST | `/v1/production/customer-batch-requirements/{id}:retire` | `production.batch-requirement.write` | Retire a rule under the version read; writes `batchrequirement.retired` |
+| POST | `/v1/production/batch-record-profiles` | `production.batch-record.write` | Define the electronic batch record profile of an item: whether releasing a batch needs the approved record (default yes); one active profile per item and legal entity; writes `batchrecordprofile.defined` (FR-24.21) |
+| GET | `/v1/production/batch-record-profiles`, `/{id}` | `production.batch-order.read` | The profiles, filtered by item and `active=true` |
+| POST | `/v1/production/batch-record-profiles/{id}:retire` | `production.batch-record.write` | Retire a profile under the version read; writes `batchrecordprofile.retired` |
+| POST | `/v1/production/batch-records` | `production.batch-record.write` | Compile the electronic batch record of a batch from its batch order and quality record, or refresh it while in review; one exception per recorded value outside its limits (BR-24.15); writes `batchrecord.compiled` and `batchrecord.exceptionraised` |
+| GET | `/v1/production/batch-records`, `/{id}` | `production.batch-order.read` | Records by status, batch and item; the detail carries the content, the exceptions and, once sealed, the sealed document and its hash |
+| POST | `/v1/production/batch-records/{id}/exceptions` | `production.batch-record.write` | Raise an exception by hand on a record in review |
+| POST | `/v1/production/batch-records/{id}/exceptions/{exceptionId}:disposition` | `production.batch-record.write` | The review step: accept, raise a deviation or reject an open exception with the signature id behind the decision; a decision is final (409 PMF-0125). **The signature id is not verified** (no signature service yet; see NOT-IMPLEMENTED.md); writes `batchrecord.exceptiondispositioned` |
+| POST | `/v1/production/batch-records/{id}:approve` | `production.batch-record.approve` | Approve by exception: every exception decided and signed (422 PMF-0014), no value recorded since the last compile (409 PMF-0121), and the approver neither raised nor decided an exception of the record nor created its batch order (422 PMF-0124); writes `batchrecord.approved` (BR-24.15, AC-24.16) |
+| POST | `/v1/production/batch-records/{id}:seal` | `production.batch-record.approve` | Seal an approved record: the canonical JSON document of the approved content (sorted keys, compact, UTC times, `signaturesVerified: false`) is stored with its SHA-256 and the database refuses any later change; writes `batchrecord.sealed` (FR-24.21) |
 | POST | `/v1/production/batch-requirements:check-stored` | `production.batch-order.read` | Check registered batches against the stored rules of the legal entity (default the caller's) for the item, customer and group in force on the ship date; on-hand quantity per batch from the caller (FR-24.19, AC-24.14). Precedence per field: customer over group over item default; within a scope the rule that started last, then the one defined last. Customer and group ids are party/sales references checked for form only; ship date and expiry are calendar days compared without time-zone conversion |
 | POST | `/v1/production/rework-orders:preview` | `production.batch-order.write` | Rework batch order plan: output batch, disposition, quality order, variance type, genealogy (FR-24.18) |
 | POST | `/v1/production/batch-attribute-definitions` | `production.batch-attribute.write` | Define a batch attribute of an item, role generic or potency (one per item) (FR-24.5); Idempotency-Key |
@@ -152,6 +161,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `dev.passage.production.batchorder.rescaled.v1` | a batch order's size changes |
 | `dev.passage.production.batchorder.statechanged.v1` | a batch order is released, started, reported as finished or ended |
 | `dev.passage.production.coproduct.allocated.v1` | an order ends and its batch cost is split (same transaction as the end) |
+| `dev.passage.production.batchrecordprofile.defined.v1`, `.retired.v1` | a batch record profile is defined or retired (FR-24.21) |
+| `dev.passage.production.batchrecord.compiled.v1`, `.exceptionraised.v1`, `.exceptiondispositioned.v1`, `.approved.v1`, `.sealed.v1` | the electronic batch record is compiled, an exception is raised or decided, the record is approved or sealed (the sealed event carries the content hash) |
 
 ## Error codes
 
@@ -168,6 +179,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0008` | 409 | No single qualifying batch holds a same-batch line; PRD alias `SAME_BATCH_UNAVAILABLE` (FR-24.19) |
 | `PMF-0009` | 200 (warning) | `warningCode` of a batch excluded by the customer's requirements (FR-24.19) |
 | `PMF-0014` | 422 | Batch record cannot be approved: exceptions without disposition and signature (BR-24.15) |
+| `PMF-0015` | 422 | Release refused: the item's profile needs an approved batch record (a batch is registered, moved to available or made available by a merge only with one; a merged batch stands on the records of the batches it was merged from; FR-24.21) |
 | `PMF-0016` | 200 (exclusion) | Batch disposition is not available (FR-24.5, AC-24.10; not in the PRD catalog) |
 | `PMF-0021` | 422 | Allocation weights sum to zero, or by-product burden exceeds batch cost (not in the PRD catalog) |
 | `PMF-0101` | 404 | Formula not found |
@@ -184,6 +196,17 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0112` | 409 | The caller-supplied picking proposal lists a batch of the batch register; propose it with `batch-picking:propose-stored` (not in the PRD catalog) |
 | `PMF-0113` | 404 | Customer batch requirement not found |
 | `PMF-0114` | 409 | The customer batch requirement is already retired |
+| `PMF-0115` | 404 | Batch record profile not found |
+| `PMF-0116` | 409 | The item already has an active batch record profile, or the code is taken |
+| `PMF-0117` | 409 | The batch record profile is already retired |
+| `PMF-0118` | 404 | Batch record not found |
+| `PMF-0119` | 409 | The batch's item has no active batch record profile |
+| `PMF-0120` | 409 | The batch record's status does not allow the step (only a record in review changes, only an approved one is sealed) |
+| `PMF-0121` | 409 | A value outside its limits was recorded after the record was compiled; compile it again |
+| `PMF-0122` | 404 | The batch record has no such exception |
+| `PMF-0123` | 422 | The batch has no batch order to compile a record from |
+| `PMF-0124` | 422 | Segregation of duties: the approver raised or decided an exception of the record, or created its batch order (PRD 4.24.17) |
+| `PMF-0125` | 409 | The exception is already decided; a decision is final |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

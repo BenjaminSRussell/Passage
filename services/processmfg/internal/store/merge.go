@@ -147,6 +147,14 @@ func (s *Postgres) MergeBatches(ctx context.Context, in MergeInput, idem Idem) (
 		for i, b := range loaded {
 			sourceIDs[i] = b.ID
 		}
+		if res.Disposition == domain.DispositionAvailable {
+			// The target is born available, so the release gate applies to what it
+			// is made of (PMF-0015): a source that should have had an approved
+			// batch record cannot be merged into a releasable batch.
+			if err := releaseGate(ctx, tx, first.LegalEntityID, first.ItemID, sourceIDs, in.TargetNumber); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `update batch_record set version = version + 1, updated_at = now() where id = any($1::uuid[])`, sourceIDs); err != nil {
 			return err
 		}

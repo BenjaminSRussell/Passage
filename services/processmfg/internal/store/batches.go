@@ -247,6 +247,13 @@ func (s *Postgres) RegisterBatch(ctx context.Context, in NewBatch, idem Idem) (B
 				return err
 			}
 		}
+		if in.Disposition == domain.DispositionAvailable {
+			// A new batch has no record yet, so an item whose profile asks for an
+			// approved record starts held until the record is approved.
+			if err := releaseGate(ctx, tx, in.LegalEntityID, in.ItemID, nil, in.BatchNumber); err != nil {
+				return err
+			}
+		}
 		p := principal(ctx)
 		id := ids.New()
 		err := tx.QueryRow(ctx, `insert into batch_record (tenant_id, id, legal_entity_id, item_id, batch_number, batch_order_id, disposition, created_by)
@@ -493,6 +500,11 @@ func (s *Postgres) ChangeDisposition(ctx context.Context, id, to, reason string,
 		if b.Disposition == to {
 			return httpx.NewProblem(http.StatusConflict, CodeDispositionUnchanged,
 				fmt.Sprintf("batch %s is already %s", b.BatchNumber, to))
+		}
+		if to == domain.DispositionAvailable {
+			if err := releaseGate(ctx, tx, b.LegalEntityID, b.ItemID, []string{b.ID}, b.BatchNumber); err != nil {
+				return err
+			}
 		}
 		p := principal(ctx)
 		var conflict bool

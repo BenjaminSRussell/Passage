@@ -96,24 +96,39 @@ func CheckDistinctSigner(author, signer string) error {
 // means compact with object keys sorted and numbers kept digit for digit, so
 // equal records hash equally no matter how their maps or structs were built.
 func RecordHash(v any) ([]byte, error) {
+	canon, err := CanonicalJSON(v)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(canon)
+	return sum[:], nil
+}
+
+// CanonicalJSON encodes v as compact UTF-8 JSON: object keys sorted by their
+// bytes at every level, no insignificant whitespace, no HTML escaping of <, >
+// and & (so the output matches a plain sorted-keys encoder in another language),
+// and numbers kept digit for digit as they were first encoded: they are decoded
+// as json.Number, because a float round trip would change large or long decimal
+// values and so the hash. Money and quantities are encoded as decimal strings by
+// their types, so no float formatting enters the document.
+func CanonicalJSON(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, errorf(CodeInvalid, "record is not encodable: %v", err)
 	}
-	// Decode numbers as json.Number so re-encoding keeps every digit; a float
-	// round trip would change large or long decimal values and so the hash.
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var generic any
 	if err := dec.Decode(&generic); err != nil {
 		return nil, errorf(CodeInvalid, "record is not encodable: %v", err)
 	}
-	canon, err := json.Marshal(generic)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(generic); err != nil {
 		return nil, errorf(CodeInvalid, "record is not encodable: %v", err)
 	}
-	sum := sha256.Sum256(canon)
-	return sum[:], nil
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // CheckSignatureValid returns PMF-0013 when the signed hash no longer matches the

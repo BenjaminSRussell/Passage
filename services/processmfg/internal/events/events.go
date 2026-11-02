@@ -31,13 +31,23 @@ const (
 	// batch requirements (FR-24.19): sales and picking read the rules from them.
 	BatchRequirementDefined = "dev.passage.production.batchrequirement.defined.v1"
 	BatchRequirementRetired = "dev.passage.production.batchrequirement.retired.v1"
+	// The electronic batch record (FR-24.21): its profile, compilation, review
+	// by exception, approval and seal.
+	BatchRecordProfileDefined    = "dev.passage.production.batchrecordprofile.defined.v1"
+	BatchRecordProfileRetired    = "dev.passage.production.batchrecordprofile.retired.v1"
+	BatchRecordCompiled          = "dev.passage.production.batchrecord.compiled.v1"
+	BatchRecordExceptionRaised   = "dev.passage.production.batchrecord.exceptionraised.v1"
+	BatchRecordExceptionDisposed = "dev.passage.production.batchrecord.exceptiondispositioned.v1"
+	BatchRecordApproved          = "dev.passage.production.batchrecord.approved.v1"
+	BatchRecordSealed            = "dev.passage.production.batchrecord.sealed.v1"
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{FormulaCreated, BatchOrderCreated, BatchOrderRescaled, BatchOrderStateChanged, CoProductAllocated,
 		BatchAttributeDefined, BatchRegistered, BatchAttributesRecorded, BatchDispositionChanged, BatchMerged,
-		BatchRequirementDefined, BatchRequirementRetired}
+		BatchRequirementDefined, BatchRequirementRetired, BatchRecordProfileDefined, BatchRecordProfileRetired,
+		BatchRecordCompiled, BatchRecordExceptionRaised, BatchRecordExceptionDisposed, BatchRecordApproved, BatchRecordSealed}
 }
 
 // FormulaCreatedData is the payload of FormulaCreated.
@@ -236,4 +246,46 @@ type BatchRequirementData struct {
 	ValidFrom       string `json:"validFrom,omitempty"`
 	ValidTo         string `json:"validTo,omitempty"`
 	Version         int    `json:"version"`
+}
+
+// BatchRecordProfileData is the payload of BatchRecordProfileDefined and
+// BatchRecordProfileRetired.
+type BatchRecordProfileData struct {
+	ProfileID                  string `json:"profileId"`
+	LegalEntityID              string `json:"legalEntityId"`
+	Code                       string `json:"code"`
+	ItemID                     string `json:"itemId"`
+	ApprovalRequiredForRelease bool   `json:"approvalRequiredForRelease"`
+	Version                    int    `json:"version"`
+}
+
+// BatchRecordData is the payload of the record events (compiled, approved,
+// sealed). ContentHash is the hex SHA-256 of the sealed document and is set on
+// BatchRecordSealed.
+type BatchRecordData struct {
+	RecordID       string `json:"recordId"`
+	LegalEntityID  string `json:"legalEntityId"`
+	BatchOrderID   string `json:"batchOrderId"`
+	BatchID        string `json:"batchId"`
+	BatchNumber    string `json:"batchNumber"`
+	ItemID         string `json:"itemId"`
+	Status         string `json:"status"`
+	Version        int    `json:"version"`
+	Exceptions     int    `json:"exceptions"`
+	OpenExceptions int    `json:"openExceptions"`
+	ContentHash    string `json:"contentHash,omitempty"`
+}
+
+// BatchRecordExceptionData is the payload of BatchRecordExceptionRaised and
+// BatchRecordExceptionDisposed. Disposition and SignatureID are set on the
+// latter.
+type BatchRecordExceptionData struct {
+	RecordID      string `json:"recordId"`
+	ExceptionID   string `json:"exceptionId"`
+	LegalEntityID string `json:"legalEntityId"`
+	BatchID       string `json:"batchId"`
+	SourceType    string `json:"sourceType"`
+	Severity      string `json:"severity"`
+	Disposition   string `json:"disposition,omitempty"`
+	SignatureID   string `json:"signatureId,omitempty"`
 }

@@ -762,3 +762,121 @@ export interface StoredRequirementCheck {
 export function checkStoredRequirements(input: StoredRequirementCheckRequest): Promise<StoredRequirementCheck> {
   return post<StoredRequirementCheck>("/batch-requirements:check-stored", input);
 }
+
+/** FR-24.21: says that an item's batches get an electronic batch record and whether releasing a batch needs it approved. */
+export interface RecordProfile {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  itemId: string;
+  approvalRequiredForRelease: boolean;
+  retiredAt?: string;
+  retiredBy?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewRecordProfile {
+  code: string;
+  itemId: string;
+  approvalRequiredForRelease: boolean;
+}
+
+export type RecordStatus = "in-review" | "approved" | "sealed";
+export type RecordDisposition = "accepted" | "deviation-raised" | "rejected";
+export type ExceptionSeverity = "minor" | "major" | "critical";
+
+/** One exception of a batch record: a value outside its limits (attribute) or one a reviewer raised (manual). */
+export interface RecordException {
+  id: string;
+  sourceType: "attribute" | "manual";
+  sourceId: string;
+  description: string;
+  severity: ExceptionSeverity;
+  disposition?: RecordDisposition;
+  dispositionComment?: string;
+  signatureId?: string;
+  dispositionedBy?: string;
+  dispositionedAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** The electronic batch record; the list leaves out content and exceptions. */
+export interface BatchRecord {
+  id: string;
+  legalEntityId: string;
+  batchOrderId: string;
+  batchId: string;
+  batchNumber: string;
+  itemId: string;
+  profileId: string;
+  status: RecordStatus;
+  compiledAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  sealedBy?: string;
+  sealedAt?: string;
+  contentHash?: string;
+  version: number;
+  exceptionCount: number;
+  openExceptions: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  content?: unknown;
+  sealedDocument?: string;
+  exceptions?: RecordException[];
+}
+
+export function listRecordProfiles(filter: { itemId?: string; active?: boolean } = {}, signal?: AbortSignal): Promise<RecordProfile[]> {
+  return items<RecordProfile>(`/batch-record-profiles${query({ itemId: filter.itemId, active: filter.active ? "true" : undefined, limit: 200 })}`, signal);
+}
+
+export function defineRecordProfile(input: NewRecordProfile, key: string = newKey()): Promise<RecordProfile> {
+  return post<RecordProfile>("/batch-record-profiles", input, key);
+}
+
+export function retireRecordProfile(id: string, version: number, key: string = newKey()): Promise<RecordProfile> {
+  return post<RecordProfile>(`/batch-record-profiles/${encodeURIComponent(id)}:retire`, { version }, key);
+}
+
+export function listBatchRecords(filter: { status?: string; itemId?: string } = {}, signal?: AbortSignal): Promise<BatchRecord[]> {
+  return items<BatchRecord>(`/batch-records${query({ ...filter, limit: 200 })}`, signal);
+}
+
+export function getBatchRecord(id: string, signal?: AbortSignal): Promise<BatchRecord> {
+  return send<BatchRecord>(`/batch-records/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Compiles the record of a batch, or refreshes it while it is in review. */
+export function compileBatchRecord(batchId: string, key: string = newKey()): Promise<BatchRecord> {
+  return post<BatchRecord>("/batch-records", { batchId }, key);
+}
+
+export function raiseRecordException(
+  id: string,
+  input: { version: number; description: string; severity: ExceptionSeverity },
+  key: string = newKey(),
+): Promise<BatchRecord> {
+  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}/exceptions`, input, key);
+}
+
+export function dispositionRecordException(
+  id: string,
+  exceptionId: string,
+  input: { version: number; disposition: RecordDisposition; comment?: string; signatureId: string },
+  key: string = newKey(),
+): Promise<BatchRecord> {
+  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}/exceptions/${encodeURIComponent(exceptionId)}:disposition`, input, key);
+}
+
+export function approveBatchRecord(id: string, version: number, key: string = newKey()): Promise<BatchRecord> {
+  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}:approve`, { version }, key);
+}
+
+export function sealBatchRecord(id: string, version: number, key: string = newKey()): Promise<BatchRecord> {
+  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}:seal`, { version }, key);
+}

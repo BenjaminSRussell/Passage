@@ -64,6 +64,7 @@ type fakeStore struct {
 	gotReqWho    store.ReqScope
 	gotReqDate   string
 	gotReqEntity string
+	ebr          ebrCalls
 }
 
 func (f *fakeStore) CreateFormula(_ context.Context, in store.Formula, idem store.Idem) (store.Formula, bool, error) {
