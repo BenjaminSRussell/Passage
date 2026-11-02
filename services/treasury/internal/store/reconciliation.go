@@ -31,6 +31,8 @@ const (
 	CodeMatchNotFound     = "TRS-0484"
 	CodeMatchState        = "TRS-0485"
 	CodeMatchLine         = "TRS-0486"
+	CodeRuleState         = "TRS-0487"
+	CodeLegalEntity       = "TRS-0488"
 	MaxRunLines           = 2000
 	MaxRunItems           = 2000
 	MaxMatchesListed      = 500
@@ -109,6 +111,7 @@ type Match struct {
 	Difference    string      `json:"difference"`
 	Reason        string      `json:"reason,omitempty"`
 	UnmatchReason *string     `json:"unmatchReason,omitempty"`
+	UnmatchedBy   *string     `json:"unmatchedBy,omitempty"`
 	CreatedBy     string      `json:"createdBy"`
 	Version       int         `json:"version"`
 	Lines         []MatchLine `json:"lines"`
@@ -119,10 +122,11 @@ type Match struct {
 
 // NewMatch is a validated manual match request.
 type NewMatch struct {
-	StatementID string
-	LineNos     []int
-	Items       []MatchItem
-	Reason      string
+	StatementID   string
+	LegalEntityID string
+	LineNos       []int
+	Items         []MatchItem
+	Reason        string
 }
 
 // RunItem is an open item offered to a reconciliation run.
@@ -139,8 +143,10 @@ type RunItem struct {
 
 // RunInput is a validated reconciliation run request.
 type RunInput struct {
-	StatementID string
-	Items       []RunItem
+	StatementID   string
+	LegalEntityID string
+	AfterLineNo   int
+	Items         []RunItem
 }
 
 // RunSuggestion is the best candidate of a line that did not auto-match.
@@ -157,6 +163,10 @@ type RunResult struct {
 	Suggestions     []RunSuggestion `json:"suggestions"`
 	LinesConsidered int             `json:"linesConsidered"`
 	ItemsConsidered int             `json:"itemsConsidered"`
+	// RemainingLines counts open lines after this page; run again with
+	// afterLineNo = NextAfterLineNo to evaluate them.
+	RemainingLines  int `json:"remainingLines"`
+	NextAfterLineNo int `json:"nextAfterLineNo"`
 }
 
 func itemKey(kind, id string) string { return kind + ":" + id }
@@ -247,6 +257,9 @@ func (s *Postgres) DeactivateReconRule(ctx context.Context, id string, version i
 		if cur.Version != version {
 			return versionMismatch()
 		}
+		if !cur.Active {
+			return httpx.NewProblem(http.StatusConflict, CodeRuleState, "the rule is already inactive")
+		}
 		out, err = scanRule(tx.QueryRow(ctx, `update reconciliation_rule set active = false, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 returning `+ruleColumns, p.TenantID, id))
 		return err
@@ -300,6 +313,9 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 	if err != nil {
 		return RunResult{}, err
 	}
+	if in.LegalEntityID != st.legalEntityID {
+		return RunResult{}, unprocessable(CodeLegalEntity, "the items belong to a different legal entity than the statement")
+	}
 	if _, err := tx.Exec(ctx, `select 1 from bank_account where tenant_id = $1 and id = $2 for update`, p.TenantID, st.bankAccountID); err != nil {
 		return RunResult{}, err
 	}
@@ -307,7 +323,7 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 	if err != nil {
 		return RunResult{}, err
 	}
-	lines, amounts, err := openLines(ctx, tx, p.TenantID, in.StatementID)
+	lines, amounts, remaining, err := openLines(ctx, tx, p.TenantID, in.StatementID, in.AfterLineNo)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -317,13 +333,11 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 	}
 	outcome := domain.ReconcileStatement(lines, items, rules, domain.DefaultThresholds)
 	matches := make([]Match, 0, len(outcome.Matches))
-	matchedLines := map[int32]bool{}
 	for _, am := range outcome.Matches {
 		m := Match{ID: ids.New(), LegalEntityID: st.legalEntityID, BankAccountID: st.bankAccountID, StatementID: in.StatementID,
 			Kind: "auto", Status: "matched", RuleName: am.Rule, Score: &am.Score, Difference: am.Difference.String(), CreatedBy: createdBy(p), Version: 1}
 		for _, no := range am.LineNos {
 			m.Lines = append(m.Lines, MatchLine{LineNo: no, Amount: amounts[no]})
-			matchedLines[int32(no)] = true
 		}
 		for _, id := range am.ItemIDs {
 			m.Items = append(m.Items, byKey[id])
@@ -333,14 +347,21 @@ func runReconciliation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ru
 	if matches, err = writeMatches(ctx, tx, p.TenantID, in.StatementID, matches); err != nil {
 		return RunResult{}, err
 	}
-	result := RunResult{Matches: matches, Suggestions: []RunSuggestion{}, LinesConsidered: len(lines), ItemsConsidered: len(items)}
+	result := RunResult{Matches: matches, Suggestions: []RunSuggestion{}, LinesConsidered: len(lines), ItemsConsidered: len(items), RemainingLines: remaining}
+	considered := make([]int32, len(lines))
+	for i, l := range lines {
+		considered[i] = int32(l.No)
+	}
+	if len(lines) > 0 && remaining > 0 {
+		result.NextAfterLineNo = lines[len(lines)-1].No
+	}
 	suggested := []int32{}
 	for _, sg := range outcome.Suggestions {
 		it := byKey[sg.ItemID]
 		result.Suggestions = append(result.Suggestions, RunSuggestion{LineNo: sg.LineNo, ItemType: it.Type, ItemID: it.ID, Score: sg.Score})
 		suggested = append(suggested, int32(sg.LineNo))
 	}
-	if err := markSuggested(ctx, tx, p.TenantID, in.StatementID, suggested, matchedLines); err != nil {
+	if err := markSuggested(ctx, tx, p.TenantID, in.StatementID, suggested, considered); err != nil {
 		return RunResult{}, err
 	}
 	return result, nil
@@ -374,12 +395,12 @@ func activeRules(ctx context.Context, tx pgx.Tx, tenantID string, st statementSc
 	return rules, nil
 }
 
-func openLines(ctx context.Context, tx pgx.Tx, tenantID, statementID string) ([]domain.RecLine, map[int]string, error) {
-	rows, err := tx.Query(ctx, `select line_no, value_date::text, amount::text, coalesce(nullif(end_to_end_ref, ''), reference), counterparty_name
-		from bank_statement_line where tenant_id = $1 and statement_id = $2 and status in ('unmatched', 'suggested')
-		order by line_no limit $3`, tenantID, statementID, MaxRunLines)
+func openLines(ctx context.Context, tx pgx.Tx, tenantID, statementID string, after int) ([]domain.RecLine, map[int]string, int, error) {
+	rows, err := tx.Query(ctx, `select line_no, value_date::text, amount::text, end_to_end_ref, reference, counterparty_name
+		from bank_statement_line where tenant_id = $1 and statement_id = $2 and line_no > $3 and status in ('unmatched', 'suggested')
+		order by line_no limit $4`, tenantID, statementID, after, MaxRunLines)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer rows.Close()
 	var lines []domain.RecLine
@@ -387,16 +408,23 @@ func openLines(ctx context.Context, tx pgx.Tx, tenantID, statementID string) ([]
 	for rows.Next() {
 		var l domain.RecLine
 		var amount string
-		if err := rows.Scan(&l.No, &l.ValueDate, &amount, &l.Reference, &l.Counterparty); err != nil {
-			return nil, nil, err
+		if err := rows.Scan(&l.No, &l.ValueDate, &amount, &l.Reference, &l.AltReference, &l.Counterparty); err != nil {
+			return nil, nil, 0, err
 		}
 		if l.Amount, err = decimal.NewFromString(amount); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		amounts[l.No] = amount
 		lines = append(lines, l)
 	}
-	return lines, amounts, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil || len(lines) == 0 {
+		return lines, amounts, 0, err
+	}
+	var remaining int
+	err = tx.QueryRow(ctx, `select count(*) from bank_statement_line where tenant_id = $1 and statement_id = $2 and line_no > $3
+		and status in ('unmatched', 'suggested')`, tenantID, statementID, lines[len(lines)-1].No).Scan(&remaining)
+	return lines, amounts, remaining, err
 }
 
 func openItems(ctx context.Context, tx pgx.Tx, tenantID string, st statementScope, offered []RunItem) ([]domain.Item, map[string]MatchItem, error) {
@@ -440,20 +468,17 @@ func openItems(ctx context.Context, tx pgx.Tx, tenantID string, st statementScop
 	return items, byKey, nil
 }
 
-// markSuggested sets suggested lines to suggested and puts lines that were
-// suggested by an earlier run but found no candidate this time back to unmatched.
-func markSuggested(ctx context.Context, tx pgx.Tx, tenantID, statementID string, suggested []int32, matched map[int32]bool) error {
+// markSuggested sets suggested lines to suggested and puts lines of this page
+// that were suggested by an earlier run but found no candidate now back to
+// unmatched. Lines outside the page keep their status.
+func markSuggested(ctx context.Context, tx pgx.Tx, tenantID, statementID string, suggested, considered []int32) error {
 	if _, err := tx.Exec(ctx, `update bank_statement_line set status = 'suggested', version = version + 1
 		where tenant_id = $1 and statement_id = $2 and line_no = any($3) and status = 'unmatched'`, tenantID, statementID, suggested); err != nil {
 		return err
 	}
-	keep := make([]int32, 0, len(suggested)+len(matched))
-	keep = append(keep, suggested...)
-	for no := range matched {
-		keep = append(keep, no)
-	}
 	_, err := tx.Exec(ctx, `update bank_statement_line set status = 'unmatched', version = version + 1
-		where tenant_id = $1 and statement_id = $2 and status = 'suggested' and not (line_no = any($3))`, tenantID, statementID, keep)
+		where tenant_id = $1 and statement_id = $2 and status = 'suggested' and line_no = any($3) and not (line_no = any($4))`,
+		tenantID, statementID, considered, suggested)
 	return err
 }
 
@@ -562,6 +587,9 @@ func manualMatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NewMatch
 	if err != nil {
 		return Match{}, err
 	}
+	if in.LegalEntityID != st.legalEntityID {
+		return Match{}, unprocessable(CodeLegalEntity, "the items belong to a different legal entity than the statement")
+	}
 	nos := make([]int32, len(in.LineNos))
 	for i, n := range in.LineNos {
 		nos[i] = int32(n)
@@ -617,11 +645,12 @@ func manualMatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, in NewMatch
 }
 
 const matchColumns = `id, legal_entity_id, bank_account_id, statement_id, kind, status, rule_name, score, difference::text, reason,
-	unmatch_reason, created_by, version, created_at, updated_at`
+	unmatch_reason, unmatched_by, created_by, version, created_at, updated_at`
 
-func loadMatches(ctx context.Context, tx pgx.Tx, tenantID, where string, args ...any) ([]Match, error) {
+func loadMatches(ctx context.Context, tx pgx.Tx, tenantID, where string, limit, offset int, args ...any) ([]Match, error) {
+	n := strconv.Itoa(2 + len(args))
 	rows, err := tx.Query(ctx, `select `+matchColumns+` from reconciliation_match where tenant_id = $1 and `+where+` order by created_at, id limit $`+
-		strconv.Itoa(2+len(args)), append(append([]any{tenantID}, args...), MaxMatchesListed)...)
+		n+` offset $`+strconv.Itoa(3+len(args)), append(append([]any{tenantID}, args...), limit, offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +660,7 @@ func loadMatches(ctx context.Context, tx pgx.Tx, tenantID, where string, args ..
 	for rows.Next() {
 		var m Match
 		if err := rows.Scan(&m.ID, &m.LegalEntityID, &m.BankAccountID, &m.StatementID, &m.Kind, &m.Status, &m.RuleName, &m.Score, &m.Difference,
-			&m.Reason, &m.UnmatchReason, &m.CreatedBy, &m.Version, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			&m.Reason, &m.UnmatchReason, &m.UnmatchedBy, &m.CreatedBy, &m.Version, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -677,13 +706,16 @@ func loadMatches(ctx context.Context, tx pgx.Tx, tenantID, where string, args ..
 	return matches, its.Err()
 }
 
-// ListMatches returns the matches of a statement, oldest first, unmatched ones included.
-func (s *Postgres) ListMatches(ctx context.Context, statementID string) ([]Match, error) {
+// ListMatches returns a page of the matches of a statement, oldest first, unmatched ones included.
+func (s *Postgres) ListMatches(ctx context.Context, statementID string, limit, offset int) ([]Match, error) {
 	p, _ := tenant.FromContext(ctx)
+	if limit <= 0 || limit > MaxMatchesListed {
+		limit = MaxMatchesListed
+	}
 	var out []Match
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = loadMatches(ctx, tx, p.TenantID, `statement_id = $2`, statementID)
+		out, err = loadMatches(ctx, tx, p.TenantID, `statement_id = $2`, limit, offset, statementID)
 		return err
 	})
 	return out, err
@@ -694,7 +726,7 @@ func (s *Postgres) GetMatch(ctx context.Context, id string) (Match, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out Match
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		found, err := loadMatches(ctx, tx, p.TenantID, `id = $2`, id)
+		found, err := loadMatches(ctx, tx, p.TenantID, `id = $2`, 1, 0, id)
 		if err != nil {
 			return err
 		}
@@ -730,8 +762,8 @@ func (s *Postgres) Unmatch(ctx context.Context, id string, version int, reason s
 		if status != "matched" {
 			return unprocessable(CodeMatchState, "the match is already unmatched")
 		}
-		if _, err := tx.Exec(ctx, `update reconciliation_match set status = 'unmatched', unmatch_reason = $3, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2`, p.TenantID, id, reason); err != nil {
+		if _, err := tx.Exec(ctx, `update reconciliation_match set status = 'unmatched', unmatch_reason = $3, unmatched_by = $4, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2`, p.TenantID, id, reason, createdBy(p)); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update bank_statement_line l set status = 'unmatched', version = l.version + 1
@@ -746,7 +778,7 @@ func (s *Postgres) Unmatch(ctx context.Context, id string, version int, reason s
 			return err
 		}
 		evt, err := events.New(tevents.ReconciliationUnmatched, eventSource, id, p.TenantID, tevents.ReconciliationUnmatchedData{
-			MatchID: id, StatementID: statementID, BankAccountID: accountID, LegalEntityID: legalEntityID, Reason: reason,
+			MatchID: id, StatementID: statementID, BankAccountID: accountID, LegalEntityID: legalEntityID, Reason: reason, UnmatchedBy: createdBy(p),
 		})
 		if err != nil {
 			return err
@@ -754,7 +786,7 @@ func (s *Postgres) Unmatch(ctx context.Context, id string, version int, reason s
 		if err := outbox.Enqueue(ctx, tx, reconciliationAggType, id, evt); err != nil {
 			return err
 		}
-		found, err := loadMatches(ctx, tx, p.TenantID, `id = $2`, id)
+		found, err := loadMatches(ctx, tx, p.TenantID, `id = $2`, 1, 0, id)
 		if err != nil {
 			return err
 		}

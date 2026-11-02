@@ -13,7 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 )
 
-const maxMatchParts = 200
+const maxMatchParts = 50
 
 var itemTypes = map[string]bool{"ledger": true, "ar": true, "ap": true}
 
@@ -29,15 +29,18 @@ type createRuleRequest struct {
 }
 
 type runRequest struct {
-	StatementID string          `json:"statementId"`
-	Items       []store.RunItem `json:"items"`
+	StatementID   string          `json:"statementId"`
+	LegalEntityID string          `json:"legalEntityId"`
+	AfterLineNo   int             `json:"afterLineNo"`
+	Items         []store.RunItem `json:"items"`
 }
 
 type manualMatchRequest struct {
-	StatementID string            `json:"statementId"`
-	LineNos     []int             `json:"lineNos"`
-	Items       []store.MatchItem `json:"items"`
-	Reason      string            `json:"reason"`
+	StatementID   string            `json:"statementId"`
+	LegalEntityID string            `json:"legalEntityId"`
+	LineNos       []int             `json:"lineNos"`
+	Items         []store.MatchItem `json:"items"`
+	Reason        string            `json:"reason"`
 }
 
 type unmatchRequest struct {
@@ -70,8 +73,8 @@ func (a *API) createReconRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule := domain.Rule{Name: strings.TrimSpace(req.Name), Priority: req.Priority, Weights: req.Weights, Strict: req.Strict,
 		Tolerance: domain.Tolerance{Amount: tolerance, DateWindowDays: req.DateWindowDays}}
-	if err := rule.Validate(); err != nil {
-		fields["rule"] = err.Error()
+	for k, v := range rule.Problems() {
+		fields[k] = v
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -181,6 +184,12 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.StatementID) {
 		fields["statementId"] = "must be a UUID"
 	}
+	if !ids.Valid(req.LegalEntityID) {
+		fields["legalEntityId"] = "must be the UUID of the legal entity the items belong to"
+	}
+	if req.AfterLineNo < 0 {
+		fields["afterLineNo"] = "must not be negative"
+	}
 	if n := len(req.Items); n < 1 || n > store.MaxRunItems {
 		fields["items"] = "1 to " + strconv.Itoa(store.MaxRunItems) + " items"
 	}
@@ -211,7 +220,11 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	res, err := a.store.RunReconciliation(r.Context(), store.RunInput{StatementID: req.StatementID, Items: req.Items}, key)
+	if outsideScope(w, r, req.LegalEntityID) {
+		return
+	}
+	res, err := a.store.RunReconciliation(r.Context(), store.RunInput{
+		StatementID: req.StatementID, LegalEntityID: req.LegalEntityID, AfterLineNo: req.AfterLineNo, Items: req.Items}, key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
@@ -239,6 +252,9 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.StatementID) {
 		fields["statementId"] = "must be a UUID"
 	}
+	if !ids.Valid(req.LegalEntityID) {
+		fields["legalEntityId"] = "must be the UUID of the legal entity the items belong to"
+	}
 	if n := len(req.LineNos); n < 1 || n > maxMatchParts {
 		fields["lineNos"] = "1 to " + strconv.Itoa(maxMatchParts) + " line numbers"
 	}
@@ -261,8 +277,8 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 			fields[at] = "type must be ledger, ar or ap and id 1 to 100 characters"
 		case itemSeen[it.Type+":"+it.ID]:
 			fields[at] = "duplicate item"
-		case err != nil || !amount.Abs().LessThan(maxAmount) || !amount.Equal(amount.Round(6)):
-			fields[at] = "amount must be a decimal string"
+		case err != nil || amount.IsZero() || !amount.Abs().LessThan(maxAmount) || !amount.Equal(amount.Round(6)):
+			fields[at] = "amount must be a non-zero decimal string"
 		case !domain.ValidCurrency(it.Currency):
 			fields[at] = "currency must be an ISO 4217 code"
 		}
@@ -279,8 +295,11 @@ func (a *API) createManualMatch(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	if outsideScope(w, r, req.LegalEntityID) {
+		return
+	}
 	m, err := a.store.CreateManualMatch(r.Context(), store.NewMatch{
-		StatementID: req.StatementID, LineNos: req.LineNos, Items: req.Items, Reason: reason}, key)
+		StatementID: req.StatementID, LegalEntityID: req.LegalEntityID, LineNos: req.LineNos, Items: req.Items, Reason: reason}, key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
@@ -299,12 +318,28 @@ func (a *API) listMatches(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"statementId": "required UUID query parameter"})
 		return
 	}
-	items, err := a.store.ListMatches(r.Context(), statement)
+	limit, ok := intQuery(w, r, "limit", store.MaxMatchesListed)
+	if !ok {
+		return
+	}
+	offset, ok := intQuery(w, r, "offset", 0)
+	if !ok {
+		return
+	}
+	if limit < 1 || limit > store.MaxMatchesListed {
+		validationFailed(w, r, map[string]string{"limit": "1 to " + strconv.Itoa(store.MaxMatchesListed)})
+		return
+	}
+	items, err := a.store.ListMatches(r.Context(), statement, limit, offset)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	page := map[string]any{"items": items}
+	if len(items) == limit {
+		page["nextOffset"] = offset + limit
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) getMatch(w http.ResponseWriter, r *http.Request) {

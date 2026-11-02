@@ -91,8 +91,9 @@ func TestSFTP_UploadsSignatureThenDataAndPublishesByRename(t *testing.T) {
 
 func TestSFTP_FailureBeforeTheRenameLeavesNothingVisibleAndIsFailedNotUnknown(t *testing.T) {
 	for name, srv := range map[string]*memorySFTP{
-		"signature upload fails": {files: map[string][]byte{}, failPut: map[int]error{1: ErrSFTPUnreachable}},
+		"signature upload fails": {files: map[string][]byte{}, failPut: map[int]error{1: errors.New("unreachable")}},
 		"data upload fails":      {files: map[string][]byte{}, failPut: map[int]error{2: errors.New("disk full")}},
+		"signature rename fails": {files: map[string][]byte{}, failRename: map[int]error{1: errors.New("denied")}},
 	} {
 		audit := &memoryAudit{}
 		_, err := Sender{Signer: &fixedSigner{}, Transport: SFTP{Dir: "in", Client: srv}, Audit: audit}.Send(context.Background(), pain001)
@@ -110,7 +111,7 @@ func TestSFTP_FailureBeforeTheRenameLeavesNothingVisibleAndIsFailedNotUnknown(t 
 
 func TestSFTP_FailedRenameIsAmbiguousAndAuditedUnknown(t *testing.T) {
 	srv := newMemorySFTP()
-	srv.failRename = map[int]error{1: errors.New("connection reset")}
+	srv.failRename = map[int]error{2: errors.New("connection reset")}
 	audit := &memoryAudit{}
 	_, err := Sender{Signer: &fixedSigner{}, Transport: SFTP{Dir: "in", Client: srv}, Audit: audit}.Send(context.Background(), pain001)
 	if !errors.Is(err, ErrAmbiguous) {

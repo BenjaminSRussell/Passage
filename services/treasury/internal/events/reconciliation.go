@@ -25,4 +25,5 @@ type ReconciliationUnmatchedData struct {
 	BankAccountID string `json:"bankAccountId"`
 	LegalEntityID string `json:"legalEntityId"`
 	Reason        string `json:"reason"`
+	UnmatchedBy   string `json:"unmatchedBy"`
 }

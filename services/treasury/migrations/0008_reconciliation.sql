@@ -41,6 +41,7 @@ create table reconciliation_match (
   difference numeric(20,6) not null default 0,
   reason text not null default '',
   unmatch_reason text,
+  unmatched_by text,
   created_by text not null,
   version int not null default 1,
   created_at timestamptz not null default now(),

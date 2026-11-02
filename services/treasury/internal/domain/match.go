@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,9 +54,12 @@ func (t Thresholds) Valid() error {
 
 // Facts are the comparable features of a statement line or a Passage bank transaction.
 type Facts struct {
-	Amount       decimal.Decimal
-	ValueDate    string // YYYY-MM-DD
-	Reference    string // end-to-end id, check number or invoice number
+	Amount    decimal.Decimal
+	ValueDate string // YYYY-MM-DD
+	Reference string // end-to-end id, check number or invoice number
+	// AltReference is a second reference of a statement line, such as the
+	// remittance text beside the end-to-end id; the better of the two scores.
+	AltReference string
 	Counterparty string
 }
 
@@ -230,23 +234,39 @@ type Rule struct {
 	Strict    bool
 }
 
-// Validate enforces the stored-rule ranges: weights sum to 100 and the amount
-// carries at least 20 of them, a non-negative tolerance and a window of 0 to 30 days.
-func (r Rule) Validate() error {
-	w := r.Weights
+// Problems returns the field-keyed violations of the stored-rule ranges: weights
+// sum to 100, the amount carries at least 20 of them, a non-strict rule cannot
+// reach the auto threshold on amount and date alone, the tolerance is not
+// negative and the window is 0 to 30 days.
+func (r Rule) Problems() map[string]string {
+	w, out := r.Weights, map[string]string{}
 	switch {
 	case w.Amount < 20 || w.Date < 0 || w.Reference < 0 || w.Counterparty < 0:
-		return errors.New("amount weight must be at least 20 and no weight may be negative")
+		out["weights"] = "amount weight must be at least 20 and no weight may be negative"
 	case w.Amount+w.Date+w.Reference+w.Counterparty != 100:
-		return errors.New("weights must sum to 100")
-	case r.Tolerance.Amount.IsNegative():
-		return errors.New("amountTolerance must not be negative")
-	case r.Tolerance.DateWindowDays < 0 || r.Tolerance.DateWindowDays > 30:
-		return errors.New("dateWindowDays must be 0 to 30")
-	case r.Priority < 1 || r.Priority > 1000:
-		return errors.New("priority must be 1 to 1000")
-	case strings.TrimSpace(r.Name) == "" || len(r.Name) > 80:
-		return errors.New("name must be 1 to 80 characters")
+		out["weights"] = "weights must sum to 100"
+	case !r.Strict && w.Amount+w.Date >= DefaultThresholds.Auto:
+		out["weights"] = "amount and date alone could auto-match; give reference or counterparty weight, or make the rule strict"
+	}
+	if r.Tolerance.Amount.IsNegative() {
+		out["amountTolerance"] = "must not be negative"
+	}
+	if r.Tolerance.DateWindowDays < 0 || r.Tolerance.DateWindowDays > 30 {
+		out["dateWindowDays"] = "must be 0 to 30"
+	}
+	if r.Priority < 1 || r.Priority > 1000 {
+		out["priority"] = "must be 1 to 1000"
+	}
+	if strings.TrimSpace(r.Name) == "" || len(r.Name) > 80 {
+		out["name"] = "1 to 80 characters"
+	}
+	return out
+}
+
+// Validate is Problems as one error.
+func (r Rule) Validate() error {
+	for _, msg := range r.Problems() {
+		return errors.New(msg)
 	}
 	return nil
 }
@@ -270,25 +290,27 @@ func withinWindow(a, b string, window int) bool {
 // the earlier rule on equal scores. Candidates are keyed by ID.
 func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) Decision {
 	best := Decision{Status: StatusUnmatched}
+	refs := lineReferences(line)
 	for _, r := range rules {
 		scored := make([]Candidate, 0, len(cands))
-		sameReference := 0
-		lineRef := normalizedReference(line.Reference)
-		for _, c := range cands {
-			if r.Strict && lineRef != "" && normalizedReference(c.Reference) == lineRef {
-				sameReference++
+		sharing := map[string]int{}
+		if r.Strict {
+			for _, c := range cands {
+				if n := normalizedReference(c.Reference); slices.Contains(refs, n) {
+					sharing[n]++
+				}
 			}
 		}
 		for id, c := range cands {
 			score := ScoreWith(line, c, r.Tolerance, r.Weights)
-			if r.Strict && !strictEligible(line, c, lineRef, r.Tolerance) {
+			if r.Strict && !strictEligible(line, c, refs, r.Tolerance) {
 				score = 0
 			}
 			scored = append(scored, Candidate{ID: id, Score: score})
 		}
 		d := Decide(scored, t)
 		d.Rule = r.Name
-		if d.Status == StatusMatched && r.Strict && sameReference > 1 {
+		if d.Status == StatusMatched && r.Strict && sharing[normalizedReference(cands[d.Best.ID].Reference)] > 1 {
 			d.Status = StatusSuggested
 		}
 		if d.Status == StatusMatched {
@@ -301,7 +323,18 @@ func MatchLine(line Facts, cands map[string]Facts, rules []Rule, t Thresholds) D
 	return best
 }
 
-func strictEligible(line, cand Facts, lineRef string, tol Tolerance) bool {
-	return len(lineRef) >= MinStrictReferenceLen && !placeholderReference(lineRef) &&
-		normalizedReference(cand.Reference) == lineRef && withinWindow(line.ValueDate, cand.ValueDate, tol.DateWindowDays)
+func lineReferences(f Facts) []string {
+	var out []string
+	for _, ref := range []string{f.Reference, f.AltReference} {
+		if n := normalizedReference(ref); n != "" && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func strictEligible(line, cand Facts, refs []string, tol Tolerance) bool {
+	n := normalizedReference(cand.Reference)
+	return len(n) >= MinStrictReferenceLen && !placeholderReference(n) && slices.Contains(refs, n) &&
+		withinWindow(line.ValueDate, cand.ValueDate, tol.DateWindowDays)
 }

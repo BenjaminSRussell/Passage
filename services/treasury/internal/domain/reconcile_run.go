@@ -110,9 +110,14 @@ func matchBatches(lines []RecLine, items []Item, window int) []AutoMatch {
 	var found []AutoMatch
 	claims := map[string]int{}
 	for _, l := range lines {
-		key := normalizedReference(l.Reference)
-		group := groups[key]
-		if len(group) < 2 || len(key) < MinStrictReferenceLen || placeholderReference(key) {
+		key, group := "", []Item(nil)
+		for _, ref := range lineReferences(l.Facts) {
+			if len(ref) >= MinStrictReferenceLen && !placeholderReference(ref) && len(groups[ref]) >= 2 {
+				key, group = ref, groups[ref]
+				break
+			}
+		}
+		if key == "" {
 			continue
 		}
 		sum, inWindow := decimal.Zero, true

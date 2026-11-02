@@ -177,7 +177,7 @@ type Store interface {
 	DeactivateReconRule(ctx context.Context, id string, version int) (ReconRule, error)
 	RunReconciliation(ctx context.Context, in RunInput, idempotencyKey string) (RunResult, error)
 	CreateManualMatch(ctx context.Context, in NewMatch, idempotencyKey string) (Match, error)
-	ListMatches(ctx context.Context, statementID string) ([]Match, error)
+	ListMatches(ctx context.Context, statementID string, limit, offset int) ([]Match, error)
 	GetMatch(ctx context.Context, id string) (Match, error)
 	Unmatch(ctx context.Context, id string, version int, reason string) (Match, error)
 	Ping(ctx context.Context) error
