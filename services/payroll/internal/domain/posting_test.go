@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -152,5 +153,19 @@ func TestRunPosting_UnknownLineFailsClosed(t *testing.T) {
 	unbalanced := Statement{Net: dec("9"), Lines: []Line{{Code: "REGULAR", Kind: KindEarning, Amount: dec("10")}}}
 	if _, err := RunPosting([]Statement{unbalanced}); !errors.Is(err, ErrUnbalancedPosting) {
 		t.Fatalf("want ErrUnbalancedPosting, got %v", err)
+	}
+}
+
+func TestMapToAccounts_ReplacesRolesSumsSharedAccountsAndFailsClosed(t *testing.T) {
+	journal := []JournalLine{{Account: AccountSalaryExpense, Amount: decimal.RequireFromString("100")}, {Account: AccountEmployerTaxExpense, Amount: decimal.RequireFromString("8")},
+		{Account: AccountNetPayClearing, Amount: decimal.RequireFromString("-108")}}
+	got, err := MapToAccounts(journal, map[string]string{AccountSalaryExpense: "6000", AccountEmployerTaxExpense: "6000", AccountNetPayClearing: "2100"})
+	if err != nil || len(got) != 2 || got[0].Account != "6000" || !got[0].Amount.Equal(decimal.RequireFromString("108")) || got[1].Account != "2100" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	_, err = MapToAccounts(journal, map[string]string{AccountSalaryExpense: "6000"})
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeNoPostingAccount || !strings.Contains(de.Detail, AccountNetPayClearing) || !strings.Contains(de.Detail, AccountEmployerTaxExpense) {
+		t.Fatalf("missing roles: %v", err)
 	}
 }

@@ -27,6 +27,12 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 		testkit.IdempotencyCase(),
 		{Table: "pay_run", Insert: payRunInsert, Args: payRunArgs, LegalEntity: true},
 		{
+			Table:       "pay_posting_account",
+			Insert:      `insert into pay_posting_account (tenant_id, legal_entity_id, role, account, updated_by) values ($1, $3, $2::text || $4::text, 'a', 'u')`,
+			Args:        payRunArgs,
+			LegalEntity: true,
+		},
+		{
 			Table:       "pay_statement",
 			Before:      payRunInsert,
 			Insert:      `insert into pay_statement (tenant_id, run_id, worker_id, legal_entity_id, rule_set, hash, gross, net, employer_cost, lines) values ($1, $2, $4::uuid, $3, 'r', 'h', 1, 1, 0, '[]')`,

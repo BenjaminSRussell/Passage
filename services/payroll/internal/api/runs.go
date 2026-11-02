@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ const (
 	dutyFinalize     = "payroll.run.finalize"
 	dutyPost         = "payroll.run.post"
 	dutyRead         = "payroll.run.read"
+	dutyProfile      = "payroll.posting-profile.maintain"
+	maxProfileRoles  = 200
 	maxRunStatements = 500
 	maxRunBody       = 8 << 20
 	dateLayout       = "2006-01-02"
@@ -43,7 +46,14 @@ type Runs interface {
 	Advance(ctx context.Context, id string, to domain.RunStatus) (store.Run, error)
 	PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, ledgerID string) (store.Run, error)
 	Reconcile(ctx context.Context, ledger ledgerclient.Ledger, legalEntityID, ledgerID string) (store.Reconciliation, error)
+	GetPostingProfile(ctx context.Context, legalEntityID string) (map[string]string, error)
+	SetPostingProfile(ctx context.Context, legalEntityID string, accounts map[string]string) (map[string]string, error)
 }
+
+var (
+	roleName    = regexp.MustCompile(`^PAYROLL_[A-Z0-9_]{1,80}$`)
+	accountName = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+)
 
 // WithRuns enables stored pay runs; ledger is the general ledger the runs post to and reconcile with (nil keeps posting off).
 func (a *API) WithRuns(runs Runs, ledger ledgerclient.Ledger) *API {
@@ -58,6 +68,8 @@ func (a *API) registerRuns(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/payroll/runs/{id}/post", a.postRun)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/payroll/runs/{id}", a.getRun)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/payroll/gl-reconciliation", a.reconcile)
+	r.With(authz.RequireDuty(dutyProfile)).Put("/v1/payroll/posting-profiles/{legalEntityId}", a.setProfile)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/payroll/posting-profiles/{legalEntityId}", a.getProfile)
 }
 
 type runRequest struct {
@@ -365,4 +377,72 @@ func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 		v.Accounts = append(v.Accounts, reconAccountView{Account: x.Account, Register: cents(x.Register), GL: cents(x.GL), Difference: cents(x.Difference)})
 	}
 	httpx.JSON(w, http.StatusOK, v)
+}
+
+type profileRequest struct {
+	Accounts map[string]string `json:"accounts"`
+}
+
+type profileView struct {
+	LegalEntityID string            `json:"legalEntityId"`
+	Accounts      map[string]string `json:"accounts"`
+}
+
+func (a *API) setProfile(w http.ResponseWriter, r *http.Request) {
+	if !a.runsReady(w, r) {
+		return
+	}
+	le := chi.URLParam(r, "legalEntityId")
+	var req profileRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(le) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if n := len(req.Accounts); n == 0 || n > maxProfileRoles {
+		fields["accounts"] = fmt.Sprintf("between 1 and %d role to account mappings are required", maxProfileRoles)
+	}
+	for role, account := range req.Accounts {
+		if !roleName.MatchString(role) {
+			fields["accounts."+role] = "the role must look like PAYROLL_<NAME>"
+		} else if !accountName.MatchString(account) {
+			fields["accounts."+role] = "the account must be 1 to 64 letters, digits or . _ : -"
+		}
+	}
+	if len(fields) > 0 {
+		writeValidation(w, r, fields)
+		return
+	}
+	if !inScope(w, r, le) {
+		return
+	}
+	profile, err := a.runs.SetPostingProfile(r.Context(), le, req.Accounts)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, profileView{LegalEntityID: le, Accounts: profile})
+}
+
+func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
+	if !a.runsReady(w, r) {
+		return
+	}
+	le := chi.URLParam(r, "legalEntityId")
+	if !ids.Valid(le) {
+		writeValidation(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+		return
+	}
+	if !inScope(w, r, le) {
+		return
+	}
+	profile, err := a.runs.GetPostingProfile(r.Context(), le)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, profileView{LegalEntityID: le, Accounts: profile})
 }

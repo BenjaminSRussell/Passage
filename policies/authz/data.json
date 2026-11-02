@@ -2042,9 +2042,11 @@
       {"resource": "/v1/payroll/runs/*/review", "methods": ["POST"]}
     ]},
     "payroll.run.finalize": {"permissions": [{"resource": "/v1/payroll/runs/*/finalize", "methods": ["POST"]}]},
+    "payroll.posting-profile.maintain": {"permissions": [{"resource": "/v1/payroll/posting-profiles/*", "methods": ["PUT"]}]},
     "payroll.run.post": {"permissions": [{"resource": "/v1/payroll/runs/*/post", "methods": ["POST"]}]},
     "payroll.run.read": {"permissions": [
       {"resource": "/v1/payroll/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/payroll/posting-profiles/*", "methods": ["GET"]},
       {"resource": "/v1/payroll/gl-reconciliation", "methods": ["GET"]}
     ]},
     "planning.forecast.approve": {"permissions": [

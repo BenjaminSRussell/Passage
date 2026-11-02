@@ -1154,6 +1154,16 @@ test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	not allowed("payroll.run.read", "POST", "/v1/payroll/runs")
 }
 
+test_payroll_posting_profile_write_is_its_own_duty if {
+	allowed("payroll.posting-profile.maintain", "PUT", "/v1/payroll/posting-profiles/le-1")
+	not allowed("payroll.posting-profile.maintain", "GET", "/v1/payroll/posting-profiles/le-1")
+	not allowed("payroll.posting-profile.maintain", "POST", "/v1/payroll/runs/r-1/post")
+	not allowed("payroll.run.maintain", "PUT", "/v1/payroll/posting-profiles/le-1")
+	not allowed("payroll.run.post", "PUT", "/v1/payroll/posting-profiles/le-1")
+	allowed("payroll.run.read", "GET", "/v1/payroll/posting-profiles/le-1")
+	not allowed("payroll.run.read", "PUT", "/v1/payroll/posting-profiles/le-1")
+}
+
 test_payroll_service_grant_reaches_only_ledger_post_and_balance if {
 	data.service_grants.payroll.ledger == ["ledger.entry.post", "ledger.balance.read"]
 	count(data.service_grants.payroll) == 1

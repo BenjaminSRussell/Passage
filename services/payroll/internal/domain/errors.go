@@ -7,11 +7,12 @@ import "fmt"
 
 // Stable error codes returned by the domain (see README error table).
 const (
-	CodeNoRule        = "PAY-RULE-001"
-	CodeRuleSoD       = "PAY-RULE-002"
-	CodeRunSoD        = "PAY-RUN-004"
-	CodeRunTransition = "PAY-RUN-005"
-	CodeInvalidInput  = "PAY-RUN-006"
+	CodeNoRule           = "PAY-RULE-001"
+	CodeRuleSoD          = "PAY-RULE-002"
+	CodeRunSoD           = "PAY-RUN-004"
+	CodeRunTransition    = "PAY-RUN-005"
+	CodeInvalidInput     = "PAY-RUN-006"
+	CodeNoPostingAccount = "PAY-GL-003"
 )
 
 // Error is a domain rule violation with a stable code.

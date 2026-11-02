@@ -35,7 +35,29 @@ type runServer struct {
 	ledger *ledgerclient.Fake
 }
 
+var payrollRoles = []string{domain.AccountSalaryExpense, domain.AccountEmployerTaxExpense, domain.AccountNetPayClearing, domain.AccountFederalWHPayable,
+	domain.AccountFICAPayable, domain.AccountFUTAPayable, domain.AccountPayable("401K"), domain.AccountMatchExpense("401K"), domain.AccountPayable("STATE_CO_WH")}
+
+func glAccount(role string) string { return "GL" + strings.TrimPrefix(role, "PAYROLL") }
+
+func profileBody(roles ...string) string {
+	pairs := make([]string, len(roles))
+	for i, r := range roles {
+		pairs[i] = `"` + r + `":"` + glAccount(r) + `"`
+	}
+	return `{"accounts":{` + strings.Join(pairs, ",") + `}}`
+}
+
 func newRunServer(t *testing.T, withLedger bool) *runServer {
+	t.Helper()
+	s := newBareRunServer(t, withLedger)
+	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, profileBody(payrollRoles...), "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusOK {
+		t.Fatalf("profile %d: %s", rec.Code, rec.Body.String())
+	}
+	return s
+}
+
+func newBareRunServer(t *testing.T, withLedger bool) *runServer {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
@@ -56,10 +78,15 @@ func newRunServer(t *testing.T, withLedger bool) *runServer {
 
 func (s *runServer) do(method, path, body, user, duties, key string) *httptest.ResponseRecorder {
 	s.t.Helper()
+	return s.doAt(legalEntity, method, path, body, user, duties, key)
+}
+
+func (s *runServer) doAt(scope, method, path, body, user, duties, key string) *httptest.ResponseRecorder {
+	s.t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(tenant.HeaderTenant, testTenant)
-	req.Header.Set(tenant.HeaderLegalEntity, legalEntity)
+	req.Header.Set(tenant.HeaderLegalEntity, scope)
 	req.Header.Set(tenant.HeaderUser, user)
 	req.Header.Set(tenant.HeaderDuties, duties)
 	if key != "" {
@@ -194,7 +221,10 @@ func TestRunPosting_ReconcilesToGLPayrollAccounts(t *testing.T) {
 		} else {
 			debit = debit.Add(l.Amount)
 		}
-		if l.Account == domain.AccountNetPayClearing {
+		if !strings.HasPrefix(l.Account, "GL_") {
+			t.Errorf("ledger account %q was not taken from the posting profile", l.Account)
+		}
+		if l.Account == glAccount(domain.AccountNetPayClearing) {
 			netClearing = l.Amount
 		}
 	}
@@ -228,7 +258,7 @@ func TestRunPosting_ReconcilesToGLPayrollAccounts(t *testing.T) {
 
 	if _, err := s.ledger.Post(tenantCtx(), ledgerclient.Entry{LegalEntityID: legalEntity, LedgerID: ledgerID, DocumentID: "stray", PostingDate: "2025-03-15", Currency: "USD",
 		IdempotencyKey: "stray", Lines: []ledgerclient.Line{
-			{Account: domain.AccountSalaryExpense, Amount: decimal.RequireFromString("12.34")},
+			{Account: glAccount(domain.AccountSalaryExpense), Amount: decimal.RequireFromString("12.34")},
 			{Account: "OTHER", Credit: true, Amount: decimal.RequireFromString("12.34")}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +267,7 @@ func TestRunPosting_ReconcilesToGLPayrollAccounts(t *testing.T) {
 		t.Fatalf("a stray ledger line must break reconciliation: %+v", drift)
 	}
 	for _, a := range drift.Accounts {
-		if a.Account == domain.AccountSalaryExpense && a.Difference != "12.34" {
+		if a.Account == glAccount(domain.AccountSalaryExpense) && a.Difference != "12.34" {
 			t.Errorf("salary expense difference %s, want 12.34", a.Difference)
 		}
 	}
@@ -293,4 +323,104 @@ func TestRunGet_UnknownRunIsNotFound(t *testing.T) {
 
 func tenantCtx() context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testTenant, LegalEntityID: legalEntity, UserID: "carol", Duties: map[string]struct{}{}})
+}
+
+const otherEntity = "00000000-0000-0000-0000-0000000000e2"
+
+func TestRunCreate_IdempotencyKeyIsScopedToCallerAndLegalEntity(t *testing.T) {
+	s := newRunServer(t, true)
+	body := runBody(workerA)
+	alice := decodeRun(t, s.do(http.MethodPost, "/v1/payroll/runs", body, "alice", "payroll.run.maintain", "shared-key"))
+	bob := s.do(http.MethodPost, "/v1/payroll/runs", body, "bob", "payroll.run.maintain", "shared-key")
+	if bob.Code != http.StatusCreated || decodeRun(t, bob).ID == alice.ID || decodeRun(t, bob).CalculatedBy != "bob" {
+		t.Fatalf("another user must get its own run, not alice's: %d %s", bob.Code, bob.Body.String())
+	}
+	probe := s.do(http.MethodPost, "/v1/payroll/runs", runBody(workerA, workerB), "bob", "payroll.run.maintain", "shared-key")
+	if probe.Code != http.StatusConflict || problemCode(probe) != store.CodeKeyConflict || strings.Contains(probe.Body.String(), alice.ID) {
+		t.Fatalf("bob's own key with another body: %d %s", probe.Code, probe.Body.String())
+	}
+	elsewhere := strings.Replace(body, legalEntity, otherEntity, 1)
+	same := s.doAt(otherEntity, http.MethodPost, "/v1/payroll/runs", elsewhere, "alice", "payroll.run.maintain", "shared-key")
+	if same.Code != http.StatusCreated || decodeRun(t, same).ID == alice.ID || decodeRun(t, same).LegalEntityID != otherEntity {
+		t.Fatalf("another legal entity must get its own run: %d %s", same.Code, same.Body.String())
+	}
+	replay := s.do(http.MethodPost, "/v1/payroll/runs", body, "alice", "payroll.run.maintain", "shared-key")
+	if replay.Code != http.StatusCreated || decodeRun(t, replay).ID != alice.ID {
+		t.Fatalf("alice's own replay: %d %s", replay.Code, replay.Body.String())
+	}
+}
+
+func TestPostingProfile_GLAccountsComeFromStoredConfigNeverTheRequest(t *testing.T) {
+	s := newRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	smuggled := `{"ledgerId":"` + ledgerID + `","accounts":{"PAYROLL_SALARY_EXPENSE":"EVIL"}}`
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", smuggled, "carol", "payroll.run.post", ""); rec.Code != http.StatusBadRequest || len(s.ledger.Entries()) != 0 {
+		t.Fatalf("request-supplied accounts on post: %d %s", rec.Code, rec.Body.String())
+	}
+	withAccounts := strings.Replace(runBody(workerB), `"statements"`, `"accounts":{"PAYROLL_SALARY_EXPENSE":"EVIL"},"statements"`, 1)
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs", withAccounts, "alice", "payroll.run.maintain", "k-accounts"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("request-supplied accounts on create: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", `{"ledgerId":"`+ledgerID+`"}`, "carol", "payroll.run.post", ""); rec.Code != http.StatusOK {
+		t.Fatalf("post %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, l := range s.ledger.Entries()[0].Lines {
+		if l.Account == "EVIL" || strings.HasPrefix(l.Account, "PAYROLL_") {
+			t.Errorf("ledger line account %q", l.Account)
+		}
+	}
+}
+
+func TestPostingProfile_MissingRoleRefusesPostingAndMergesRoles(t *testing.T) {
+	s := newBareRunServer(t, true)
+	run := s.finalizedRun(workerA)
+	rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", `{"ledgerId":"`+ledgerID+`"}`, "carol", "payroll.run.post", "")
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(rec) != domain.CodeNoPostingAccount || len(s.ledger.Entries()) != 0 {
+		t.Fatalf("post without profile: %d %s", rec.Code, rec.Body.String())
+	}
+	put := func(body string) *httptest.ResponseRecorder {
+		return s.do(http.MethodPut, "/v1/payroll/posting-profiles/"+legalEntity, body, "dave", "payroll.posting-profile.maintain", "")
+	}
+	put(profileBody(payrollRoles[:3]...))
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", `{"ledgerId":"`+ledgerID+`"}`, "carol", "payroll.run.post", ""); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("post with partial profile: %d", rec.Code)
+	}
+	put(profileBody(payrollRoles[3:]...))
+	var got profileView
+	read := s.do(http.MethodGet, "/v1/payroll/posting-profiles/"+legalEntity, "", "carol", "payroll.run.read", "")
+	if err := json.Unmarshal(read.Body.Bytes(), &got); err != nil || len(got.Accounts) != len(payrollRoles) || got.Accounts[domain.AccountSalaryExpense] != glAccount(domain.AccountSalaryExpense) {
+		t.Fatalf("merged profile %d: %s", read.Code, read.Body.String())
+	}
+	if rec := s.do(http.MethodPost, "/v1/payroll/runs/"+run.ID+"/post", `{"ledgerId":"`+ledgerID+`"}`, "carol", "payroll.run.post", ""); rec.Code != http.StatusOK {
+		t.Fatalf("post with full profile: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostingProfile_AccessAndValidation(t *testing.T) {
+	s := newBareRunServer(t, true)
+	path := "/v1/payroll/posting-profiles/" + legalEntity
+	if rec := s.do(http.MethodPut, path, profileBody(domain.AccountSalaryExpense), "carol", "payroll.run.post", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("write without its duty: %d", rec.Code)
+	}
+	if rec := s.do(http.MethodGet, path, "", "carol", "payroll.run.maintain", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("read without its duty: %d", rec.Code)
+	}
+	if rec := s.doAt(legalEntity, http.MethodPut, "/v1/payroll/posting-profiles/"+otherEntity, profileBody(domain.AccountSalaryExpense), "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("legal entity outside scope: %d", rec.Code)
+	}
+	bad := map[string]string{
+		"empty":        `{"accounts":{}}`,
+		"bad role":     `{"accounts":{"salary":"GL1"}}`,
+		"bad account":  `{"accounts":{"PAYROLL_SALARY_EXPENSE":"a b"}}`,
+		"empty acct":   `{"accounts":{"PAYROLL_SALARY_EXPENSE":""}}`,
+		"unknown prop": `{"accounts":{"PAYROLL_SALARY_EXPENSE":"GL1"},"extra":1}`,
+	}
+	for name, body := range bad {
+		if rec := s.do(http.MethodPut, path, body, "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusBadRequest || problemCode(rec) != "COM-0001" {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := s.do(http.MethodPut, "/v1/payroll/posting-profiles/not-a-uuid", profileBody(domain.AccountSalaryExpense), "dave", "payroll.posting-profile.maintain", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad legal entity id: %d", rec.Code)
+	}
 }

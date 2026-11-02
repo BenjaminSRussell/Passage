@@ -139,14 +139,15 @@ func (s *Postgres) GetRun(ctx context.Context, id string) (Run, error) {
 	return run, err
 }
 
-// CreateRun stores a CALCULATED run with its statements. A repeated Key with the same RequestHash returns the stored run; the same Key with another hash is refused.
+// CreateRun stores a CALCULATED run with its statements. Keys are scoped to the caller and legal entity: a repeated Key with the same RequestHash returns the
+// caller's stored run, the same Key with another hash is refused, and another caller's run is never read.
 func (s *Postgres) CreateRun(ctx context.Context, in NewRun) (Run, error) {
 	p := principal(ctx)
 	var run Run
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		id := ids.New()
 		tag, err := tx.Exec(ctx, `insert into pay_run (tenant_id, id, legal_entity_id, pay_date, period_start, period_end, status, calculated_by, idempotency_key, request_hash)
-			values ($1, $2, $3, $4::date, $5::date, $6::date, $7, $8, $9, $10) on conflict (tenant_id, idempotency_key) do nothing`,
+			values ($1, $2, $3, $4::date, $5::date, $6::date, $7, $8, $9, $10) on conflict (tenant_id, legal_entity_id, calculated_by, idempotency_key) do nothing`,
 			p.TenantID, id, in.LegalEntityID, in.PayDate, in.PeriodStart, in.PeriodEnd, string(domain.RunCalculated), p.UserID, in.Key, in.RequestHash)
 		if err != nil {
 			return err
@@ -211,6 +212,18 @@ func (s *Postgres) Advance(ctx context.Context, id string, to domain.RunStatus) 
 	return run, err
 }
 
+func (s *Postgres) postingJournal(ctx context.Context, legalEntityID string, statements []domain.Statement) ([]domain.JournalLine, error) {
+	roles, err := domain.RunPosting(statements)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.GetPostingProfile(ctx, legalEntityID)
+	if err != nil {
+		return nil, err
+	}
+	return domain.MapToAccounts(roles, profile)
+}
+
 func journalEntry(run Run, ledgerID string, journal []domain.JournalLine) ledgerclient.Entry {
 	e := ledgerclient.Entry{LegalEntityID: run.LegalEntityID, LedgerID: ledgerID, DocumentID: run.ID, PostingDate: run.PayDate, Currency: Currency,
 		IdempotencyKey: sourceType + ":" + run.ID, SourceType: sourceType}
@@ -236,7 +249,7 @@ func (s *Postgres) PostRun(ctx context.Context, ledger ledgerclient.Ledger, id, 
 	if err := domain.CheckTransition(run.Status, domain.RunPosted); err != nil {
 		return Run{}, err
 	}
-	journal, err := domain.RunPosting(run.statements())
+	journal, err := s.postingJournal(ctx, run.LegalEntityID, run.statements())
 	if err != nil {
 		return Run{}, err
 	}
@@ -305,7 +318,7 @@ func (s *Postgres) Reconcile(ctx context.Context, ledger ledgerclient.Ledger, le
 	if err != nil {
 		return Reconciliation{}, err
 	}
-	journal, err := domain.RunPosting(statements)
+	journal, err := s.postingJournal(ctx, legalEntityID, statements)
 	if err != nil {
 		return Reconciliation{}, err
 	}
@@ -321,4 +334,44 @@ func (s *Postgres) Reconcile(ctx context.Context, ledger ledgerclient.Ledger, le
 		out.Accounts = append(out.Accounts, a)
 	}
 	return out, nil
+}
+
+// GetPostingProfile returns the stored GL account for each payroll account role of a legal entity.
+func (s *Postgres) GetPostingProfile(ctx context.Context, legalEntityID string) (map[string]string, error) {
+	profile := map[string]string{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select role, account from pay_posting_account where tenant_id = $1 and legal_entity_id = $2`, principal(ctx).TenantID, legalEntityID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var role, account string
+			if err := rows.Scan(&role, &account); err != nil {
+				return err
+			}
+			profile[role] = account
+		}
+		return rows.Err()
+	})
+	return profile, err
+}
+
+// SetPostingProfile stores the given role to GL account mappings for a legal entity and returns the whole profile.
+func (s *Postgres) SetPostingProfile(ctx context.Context, legalEntityID string, accounts map[string]string) (map[string]string, error) {
+	p := principal(ctx)
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		for role, account := range accounts {
+			if _, err := tx.Exec(ctx, `insert into pay_posting_account (tenant_id, legal_entity_id, role, account, updated_by) values ($1, $2, $3, $4, $5)
+				on conflict (tenant_id, legal_entity_id, role) do update set account = excluded.account, updated_by = excluded.updated_by, updated_at = now()`,
+				p.TenantID, legalEntityID, role, account, p.UserID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetPostingProfile(ctx, legalEntityID)
 }
