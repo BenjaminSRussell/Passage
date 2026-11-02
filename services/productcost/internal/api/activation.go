@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -32,28 +31,17 @@ func (a *API) WithLedger(l ledgerclient.Ledger) *API {
 	return a
 }
 
-type activationLine struct {
-	ItemID string `json:"itemId"`
-	SiteID string `json:"siteId"`
-}
-
 type activationDryResponse struct {
 	DryRun  bool                `json:"dryRun"`
 	Version store.Version       `json:"version"`
 	Preview domain.RevalPreview `json:"preview"`
 }
 
-func (r storedActivateRequest) revalues() bool {
-	return r.DryRun || r.ReversesActivationID != "" || len(r.Lines) > 0
-}
+// maxActivationItems bounds the distinct items of one activation: the
+// inventory is read once per item.
+const maxActivationItems = 1000
 
-func canonicalPosition(ln activationLine) (inventory.Position, bool) {
-	item, okItem := ids.Canonical(ln.ItemID)
-	site, okSite := ids.Canonical(ln.SiteID)
-	return inventory.Position{ItemID: item, SiteID: site}, okItem && okSite
-}
-
-func (a *API) validateActivation(r *http.Request, req storedActivateRequest, v store.Version) map[string]string {
+func (a *API) validateActivation(r *http.Request, req storedActivateRequest) map[string]string {
 	fields := map[string]string{}
 	if req.Version == nil || *req.Version < 1 {
 		fields["version"] = "is required and must be at least 1"
@@ -61,11 +49,14 @@ func (a *API) validateActivation(r *http.Request, req storedActivateRequest, v s
 	if _, err := time.Parse(time.DateOnly, req.PostingDate); err != nil {
 		fields["postingDate"] = "must be a date YYYY-MM-DD"
 	}
+	if len(req.Lines) > 0 {
+		fields["lines"] = "the positions are the version's stored calculations; the request cannot list them"
+	}
 	if req.ReversesActivationID != "" {
 		if !ids.Valid(req.ReversesActivationID) {
 			fields["reversesActivationId"] = "must be a UUID"
 		}
-		for key, set := range map[string]bool{"lines": len(req.Lines) > 0, "currency": req.Currency != "", "ledgerId": req.LedgerID != ""} {
+		for key, set := range map[string]bool{"currency": req.Currency != "", "ledgerId": req.LedgerID != ""} {
 			if set {
 				fields[key] = "a reversal takes this from the activation it reverses"
 			}
@@ -77,28 +68,9 @@ func (a *API) validateActivation(r *http.Request, req storedActivateRequest, v s
 		if !req.DryRun && !ids.Valid(req.LedgerID) {
 			fields["ledgerId"] = "must be a UUID"
 		}
-		if n := len(req.Lines); n == 0 || n > MaxRevalLines {
-			fields["lines"] = fmt.Sprintf("must contain from 1 to %d lines", MaxRevalLines)
-		}
 	}
 	if !req.DryRun {
 		idempotencyKey(r, fields)
-	}
-	seen := map[inventory.Position]bool{}
-	for i, ln := range req.Lines {
-		at := func(key string) string { return fmt.Sprintf("lines[%d].%s", i, key) }
-		pos, ok := canonicalPosition(ln)
-		switch {
-		case !ids.Valid(ln.ItemID):
-			fields[at("itemId")] = "must be a UUID"
-		case !ids.Valid(ln.SiteID):
-			fields[at("siteId")] = "must be a UUID"
-		case len(v.SiteIDs) > 0 && !slices.Contains(v.SiteIDs, pos.SiteID):
-			fields[at("siteId")] = "is not a site of this version"
-		case ok && seen[pos]:
-			fields[at("itemId")] = "item and site must be unique"
-		}
-		seen[pos] = true
 	}
 	return fields
 }
@@ -107,12 +79,12 @@ func activationProblem(status int, code, detail string) error {
 	return httpx.NewProblem(status, code, detail)
 }
 
-func (a *API) quantities(ctx context.Context, legalEntityID, postingDate string) (map[inventory.Position]decimal.Decimal, error) {
+func (a *API) quantities(ctx context.Context, legalEntityID, postingDate string, positions []inventory.Position) (map[inventory.Position]decimal.Decimal, error) {
 	asOf := ""
 	if postingDate < a.now().UTC().Format(time.DateOnly) {
 		asOf = postingDate
 	}
-	pos, err := a.onHand.OnHand(ctx, legalEntityID, asOf)
+	pos, err := a.onHand.OnHand(ctx, legalEntityID, asOf, positions)
 	if err != nil {
 		slog.ErrorContext(ctx, "activation on-hand read failed", "legalEntityId", legalEntityID, "asOf", asOf, "err", err, "correlationId", middleware.GetReqID(ctx))
 		return nil, activationProblem(http.StatusBadGateway, domain.CodeOnHandUnavailable, "the inventory on-hand could not be read")
@@ -131,7 +103,7 @@ func (a *API) activationFailure(w http.ResponseWriter, r *http.Request, versionI
 	storeFailure(w, r, err)
 }
 
-func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id string, req storedActivateRequest) {
+func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id string, req storedActivateRequest, positions []inventory.Position) {
 	p, _ := tenant.FromContext(r.Context())
 	v, err := a.store.GetVersion(r.Context(), id)
 	if err != nil {
@@ -145,7 +117,7 @@ func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id
 	if req.PostingDate == "" {
 		req.PostingDate = a.now().UTC().Format(time.DateOnly)
 	}
-	if !validation(w, r, a.validateActivation(r, req, v)) {
+	if !validation(w, r, a.validateActivation(r, req)) {
 		return
 	}
 	if !req.DryRun && p.UserID == "" {
@@ -166,13 +138,20 @@ func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id
 			httpx.Fail(w, r, activationProblem(http.StatusServiceUnavailable, domain.CodeOnHandUnavailable, "the inventory service is not configured; the on-hand to revalue cannot be read"))
 			return
 		}
-		for _, ln := range req.Lines {
-			pos, _ := canonicalPosition(ln)
-			in.Positions = append(in.Positions, pos)
+		items := map[string]bool{}
+		for _, pos := range positions {
+			items[pos.ItemID] = true
 		}
-		if in.OnHand, err = a.quantities(r.Context(), v.LegalEntityID, req.PostingDate); err != nil {
-			storeFailure(w, r, err)
+		if len(items) > maxActivationItems || len(positions) > MaxRevalLines {
+			httpx.Fail(w, r, activationProblem(http.StatusUnprocessableEntity, domain.CodeActivationTooBig,
+				fmt.Sprintf("the version has %d items at %d positions; an activation revalues at most %d items and %d positions", len(items), len(positions), maxActivationItems, MaxRevalLines)))
 			return
+		}
+		if len(positions) > 0 {
+			if in.OnHand, err = a.quantities(r.Context(), v.LegalEntityID, req.PostingDate, positions); err != nil {
+				storeFailure(w, r, err)
+				return
+			}
 		}
 	}
 	if req.DryRun {

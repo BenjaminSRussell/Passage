@@ -32,11 +32,12 @@ type fakeOnHand struct {
 	calls     int
 	legal     string
 	asOf      string
+	asked     []inventory.Position
 }
 
-func (f *fakeOnHand) OnHand(_ context.Context, legalEntityID, asOf string) (map[inventory.Position]decimal.Decimal, error) {
+func (f *fakeOnHand) OnHand(_ context.Context, legalEntityID, asOf string, positions []inventory.Position) (map[inventory.Position]decimal.Decimal, error) {
 	f.calls++
-	f.legal, f.asOf = legalEntityID, asOf
+	f.legal, f.asOf, f.asked = legalEntityID, asOf, positions
 	return f.positions, f.err
 }
 
@@ -46,6 +47,9 @@ func onHandOf(qty string) *fakeOnHand {
 
 func activationRouter(f *fakeStore, l ledgerclient.Ledger, oh inventory.Reader) (http.Handler, *API) {
 	r := httpx.NewRouter()
+	if f.positions == nil {
+		f.positions = []inventory.Position{{ItemID: itemOne, SiteID: siteOne}}
+	}
 	a := New(nil, Config{}).WithStore(f)
 	if l != nil {
 		a.WithLedger(l)
@@ -72,27 +76,62 @@ func activateAs(h http.Handler, body, key string) *httptest.ResponseRecorder {
 }
 
 func activationBody(extra string) string {
-	return `{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `"` + extra +
-		`,"lines":[{"itemId":"` + strings.ToUpper(itemOne) + `","siteId":"` + siteOne + `"}]}`
+	return `{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `"` + extra + `}`
 }
 
-func TestActivation_RequestCannotSupplyAccountsStandardsOrQuantities(t *testing.T) {
+func TestActivation_RequestCannotSupplyAccountsStandardsQuantitiesOrPositions(t *testing.T) {
 	f := &fakeStore{}
 	ledger := ledgerclient.NewFake()
 	h, _ := activationRouter(f, ledger, onHandOf("10"))
 	bodies := []string{
 		activationBody(`,"inventoryAccount":"9999-ATTACKER"`),
 		activationBody(`,"costChangeAccount":"9999-ATTACKER"`),
-		`{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `","oldStd":"1.00","newStd":"900"}]}`,
-		`{"version":1,"currency":"USD","postingDate":"2026-01-02","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `","qty":"1000000"}]}`,
+		activationBody(`,"lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"}]`),
+		activationBody(`,"lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `","oldStd":"1.00","newStd":"900"}]`),
+		activationBody(`,"lines":[]`),
 	}
 	for _, body := range bodies {
 		if rec := activateAs(h, body, "k-1"); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s, want 400", body, rec.Code, rec.Body.String())
 		}
 	}
-	if f.activation != nil || f.preview != nil || len(ledger.Entries()) != 0 {
+	bare := `{"version":1,"lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"}]}`
+	f.positions = []inventory.Position{}
+	if rec := activateAs(h, bare, ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("lines on a bare activation: %d", rec.Code)
+	}
+	if f.activation != nil || f.preview != nil || f.action != "" || len(ledger.Entries()) != 0 {
 		t.Fatalf("a request that chose its own numbers reached the store or ledger: %v %v", f.activation, f.preview)
+	}
+}
+
+func TestActivation_BareRequestRevaluesEveryStoredPositionAndNeedsItsFields(t *testing.T) {
+	f := &fakeStore{}
+	oh := onHandOf("10")
+	h, _ := activationRouter(f, ledgerclient.NewFake(), oh)
+	if rec := activateAs(h, `{"version":1}`, ""); rec.Code != http.StatusBadRequest || f.activation != nil || f.action != "" {
+		t.Fatalf("a bare request for a version with stored positions must not skip the revaluation: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := activateAs(h, activationBody(""), "k-bare"); rec.Code != http.StatusOK || f.activation == nil || len(oh.asked) != 1 || f.action != "" {
+		t.Fatalf("%d %s asked %v", rec.Code, rec.Body.String(), oh.asked)
+	}
+	f = &fakeStore{positions: []inventory.Position{}}
+	h, _ = activationRouter(f, ledgerclient.NewFake(), nil)
+	if rec := activateAs(h, `{"version":1}`, ""); rec.Code != http.StatusOK || f.action != domain.ActionActivate || f.activation != nil {
+		t.Fatalf("a version with no stored positions only moves the status: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestActivation_RefusesAVersionWithTooManyItems(t *testing.T) {
+	f := &fakeStore{}
+	for i := 0; i <= maxActivationItems; i++ {
+		f.positions = append(f.positions, inventory.Position{ItemID: ids.New(), SiteID: siteOne})
+	}
+	oh := onHandOf("1")
+	h, _ := activationRouter(f, ledgerclient.NewFake(), oh)
+	rec := activateAs(h, activationBody(""), "k-big")
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusUnprocessableEntity || code != domain.CodeActivationTooBig || oh.calls != 0 {
+		t.Fatalf("%d %s calls %d", rec.Code, rec.Body.String(), oh.calls)
 	}
 }
 
@@ -110,8 +149,8 @@ func TestActivation_PassesPositionsAndInventoryOnHandToTheStore(t *testing.T) {
 		t.Fatalf("store input %+v", in)
 	}
 	want := inventory.Position{ItemID: itemOne, SiteID: siteOne}
-	if len(in.Positions) != 1 || in.Positions[0] != want || !in.OnHand[want].Equal(decimal.NewFromInt(10)) {
-		t.Fatalf("positions %v on-hand %v, want the canonical position with the inventory quantity", in.Positions, in.OnHand)
+	if len(oh.asked) != 1 || oh.asked[0] != want || !in.OnHand[want].Equal(decimal.NewFromInt(10)) {
+		t.Fatalf("asked %v on-hand %v, want the stored position with the inventory quantity", oh.asked, in.OnHand)
 	}
 	if oh.asOf != "2026-01-02" {
 		t.Errorf("a past posting date reads the on-hand as of that date, got %q", oh.asOf)
@@ -153,6 +192,8 @@ func TestActivation_StoreRefusalsMapToTheirCodes(t *testing.T) {
 	}{
 		{&domain.CodedError{Code: domain.CodePostingAccounts, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodePostingAccounts},
 		{&domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodeNoStoredStandard},
+		{&domain.CodedError{Code: domain.CodeNoOnHand, Detail: "none"}, http.StatusUnprocessableEntity, domain.CodeNoOnHand},
+		{&domain.CodedError{Code: domain.CodeNotStandard, Detail: "planned"}, http.StatusUnprocessableEntity, domain.CodeNotStandard},
 		{&store.LedgerRefusal{Err: &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed}}, http.StatusBadGateway, domain.CodeActivationLedger},
 	} {
 		f := &fakeStore{activateErr: tc.err}
@@ -183,7 +224,7 @@ func TestActivation_WithoutALedgerIs503(t *testing.T) {
 func TestActivation_DryRunPreviewsWithoutALedgerOrKey(t *testing.T) {
 	f := &fakeStore{}
 	h, _ := activationRouter(f, nil, onHandOf("10"))
-	body := `{"version":1,"dryRun":true,"currency":"USD","postingDate":"2026-01-02","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"}]}`
+	body := `{"version":1,"dryRun":true,"currency":"USD","postingDate":"2026-01-02"}`
 	rec := activateAs(h, body, "")
 	if rec.Code != http.StatusOK || f.preview == nil || f.activation != nil || !strings.Contains(rec.Body.String(), `"dryRun":true`) {
 		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
@@ -200,7 +241,7 @@ func TestActivation_ReversalReadsNothingFromTheRequestOrInventory(t *testing.T) 
 		t.Fatalf("reversal: %d %s", rec.Code, rec.Body.String())
 	}
 	in := f.activation
-	if in == nil || in.ReversesID != target || len(in.Positions) != 0 || in.OnHand != nil || oh.calls != 0 || in.Ledger == nil {
+	if in == nil || in.ReversesID != target || in.OnHand != nil || oh.calls != 0 || in.Ledger == nil {
 		t.Fatalf("store input %+v, inventory calls %d", in, oh.calls)
 	}
 	f.activation = nil
@@ -225,19 +266,6 @@ func TestActivation_ReversalErrorsAreTheStoresAnswers(t *testing.T) {
 	h, _ = activationRouter(f, ledgerclient.NewFake(), nil)
 	if rec := activateAs(h, body, "k-wrong"); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("wrong version: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestActivation_PositionMustBeInTheVersionSitesAndUnique(t *testing.T) {
-	f := &fakeStore{}
-	h, _ := activationRouter(f, ledgerclient.NewFake(), onHandOf("10"))
-	dup := `{"version":1,"currency":"USD","ledgerId":"` + ids.New() + `","lines":[{"itemId":"` + itemOne + `","siteId":"` + siteOne + `"},{"itemId":"` + strings.ToUpper(itemOne) + `","siteId":"` + siteOne + `"}]}`
-	if rec := activateAs(h, dup, "k-dup"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unique") {
-		t.Fatalf("duplicate position: %d %s", rec.Code, rec.Body.String())
-	}
-	notUUID := `{"version":1,"currency":"USD","ledgerId":"` + ids.New() + `","lines":[{"itemId":"I1","siteId":"` + siteOne + `"}]}`
-	if rec := activateAs(h, notUUID, "k-bad"); rec.Code != http.StatusBadRequest || f.activation != nil {
-		t.Fatalf("non-UUID item: %d", rec.Code)
 	}
 }
 

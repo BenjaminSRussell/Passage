@@ -9,6 +9,9 @@ const (
 	CodeReversalTarget    = "CST-0723"
 	CodePostingAccounts   = "CST-0724"
 	CodeNoStoredStandard  = "CST-0725"
+	CodeNoOnHand          = "CST-0726"
+	CodeNotStandard       = "CST-0727"
+	CodeActivationTooBig  = "CST-0728"
 )
 
 // RollLockKey names the advisory lock a running roll of a version holds and an

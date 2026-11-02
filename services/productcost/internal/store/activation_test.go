@@ -74,7 +74,7 @@ func newActivationFixture(t *testing.T, withAccounts bool) activationFixture {
 func (f activationFixture) activate(ledger ledgerclient.Ledger, key string) ActivationInput {
 	return ActivationInput{
 		VersionID: f.newVer.ID, Expected: 1, Key: key, Fingerprint: f.newVer.ID, LedgerID: ids.Nil, PostingDate: "2026-01-02", Currency: "USD",
-		Positions: []inventory.Position{positionA}, OnHand: map[inventory.Position]decimal.Decimal{positionA: decimal.NewFromInt(10)}, Ledger: ledger,
+		OnHand: map[inventory.Position]decimal.Decimal{positionA: decimal.NewFromInt(10)}, Ledger: ledger,
 	}
 }
 
@@ -252,35 +252,211 @@ func TestActivation_RefusedJournalLeavesTheVersionUntouchedAndRetryable(t *testi
 	}
 }
 
-type postThenCancel struct {
+type postThenBreakCommit struct {
 	ledgerclient.Ledger
-	cancel context.CancelFunc
+	admin *pgxpool.Pool
+	t     *testing.T
 }
 
-func (p postThenCancel) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+func (p postThenBreakCommit) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
 	id, err := p.Ledger.Post(ctx, e)
-	p.cancel()
+	if _, execErr := p.admin.Exec(context.Background(), `alter table standard_cost_activation add constraint break_commit check (false) not valid`); execErr != nil {
+		p.t.Fatal(execErr)
+	}
 	return id, err
 }
 
-func TestActivation_RetryAfterTheLedgerAcceptedButTheCommitFailedReplaysTheSameEntry(t *testing.T) {
+func pendingAttempts(t *testing.T, admin *pgxpool.Pool) (n int, ambiguous bool) {
+	t.Helper()
+	err := admin.QueryRow(context.Background(), `select count(*), coalesce(bool_or(attempted_ambiguous), false) from standard_cost_activation_attempt`).Scan(&n, &ambiguous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n, ambiguous
+}
+
+func TestActivation_RetryAfterTheLedgerAcceptedButTheCommitFailedReplaysTheSameEntryWhateverTheDefaultsBecame(t *testing.T) {
 	f := newActivationFixture(t, true)
 	ledger := ledgerclient.NewFake()
-	ctx, cancel := context.WithCancel(as(1, ""))
-	defer cancel()
-	if _, _, err := f.s.ActivateVersion(ctx, f.activate(postThenCancel{Ledger: ledger, cancel: cancel}, "k-act")); err == nil {
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(postThenBreakCommit{Ledger: ledger, admin: f.admin, t: t}, "k-act")); err == nil {
 		t.Fatal("the commit should have failed")
 	}
 	got, err := f.s.GetVersion(as(1, ""), f.newVer.ID)
 	if err != nil || got.Status != domain.VersionOpen || activationRows(t, f.admin, f.newVer.ID) != 0 {
 		t.Fatalf("a failed commit left state behind: %+v %v", got, err)
 	}
-	if len(ledger.Entries()) != 1 {
-		t.Fatalf("the ledger should hold the accepted entry, has %d", len(ledger.Entries()))
+	if n, _ := pendingAttempts(t, f.admin); n != 1 || len(ledger.Entries()) != 1 {
+		t.Fatalf("pending attempts %d, ledger entries %d; want the attempt kept and the entry accepted", n, len(ledger.Entries()))
 	}
-	res, replayed, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act"))
-	if err != nil || replayed || res.Activation.JournalEntryID != ledger.Entries()[0].ID || len(ledger.Entries()) != 1 {
+	if _, err := f.admin.Exec(context.Background(), `alter table standard_cost_activation drop constraint break_commit`); err != nil {
+		t.Fatal(err)
+	}
+	retry := f.activate(ledger, "k-act")
+	retry.PostingDate, retry.Currency, retry.LedgerID = "2026-01-03", "EUR", ids.New()
+	retry.OnHand = map[inventory.Position]decimal.Decimal{positionA: decimal.NewFromInt(99)}
+	res, replayed, err := f.s.ActivateVersion(as(1, ""), retry)
+	if err != nil || replayed || len(ledger.Entries()) != 1 || res.Activation.JournalEntryID != ledger.Entries()[0].ID {
 		t.Fatalf("retry: %+v replayed=%v err=%v entries=%d", res, replayed, err, len(ledger.Entries()))
+	}
+	if a := res.Activation; a.PostingDate != "2026-01-02" || a.Currency != "USD" || a.Total.String() != "15" {
+		t.Fatalf("the retry must use the pending attempt verbatim, got %+v", a)
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 || res.Version.Status != domain.VersionActive {
+		t.Fatalf("pending attempts %d after the retry", n)
+	}
+}
+
+func TestActivation_ADefiniteRefusalClearsTheAttemptAndACorrectedRetryPostsAfresh(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the refusal should fail the call")
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 0 {
+		t.Fatalf("a definite refusal left %d attempts", n)
+	}
+	ledger.FailPosts(nil)
+	retry := f.activate(ledger, "k-act")
+	retry.PostingDate = "2026-02-01"
+	res, _, err := f.s.ActivateVersion(as(1, ""), retry)
+	if err != nil || res.Activation.PostingDate != "2026-02-01" || len(ledger.Entries()) != 1 {
+		t.Fatalf("corrected retry: %+v %v entries=%d", res.Activation, err, len(ledger.Entries()))
+	}
+}
+
+func TestActivation_AnAmbiguousFailureKeepsTheAttemptAndALaterRefusalDoesNotClearIt(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusBadGateway} {
+		ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: status})
+		if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+			t.Fatalf("status %d should fail the call", status)
+		}
+		if n, amb := pendingAttempts(t, f.admin); n != 1 || !amb {
+			t.Fatalf("status %d: attempts %d ambiguous %v, want the attempt kept and flagged", status, n, amb)
+		}
+	}
+	ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err == nil {
+		t.Fatal("the refusal should fail the call")
+	}
+	if n, _ := pendingAttempts(t, f.admin); n != 1 {
+		t.Fatalf("a refusal after an ambiguous attempt cleared it: %d", n)
+	}
+	ledger.FailPosts(nil)
+	if res, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act")); err != nil || res.Version.Status != domain.VersionActive || len(ledger.Entries()) != 1 {
+		t.Fatalf("recovery: %+v %v", res, err)
+	}
+}
+
+func TestActivation_ReversalCommitFailureAlsoReplaysTheSameLedgerEntry(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	act, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-act"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := reversal(f.newVer.ID, act.Activation.ID, act.Version.Version, "k-rev", reverseThenBreak{Ledger: ledger, admin: f.admin, t: t})
+	if _, _, err := f.s.ActivateVersion(as(1, ""), broken); err == nil {
+		t.Fatal("the commit should have failed")
+	}
+	if _, err := f.admin.Exec(context.Background(), `alter table standard_cost_activation drop constraint break_commit`); err != nil {
+		t.Fatal(err)
+	}
+	retry := reversal(f.newVer.ID, act.Activation.ID, act.Version.Version, "k-rev", ledger)
+	retry.PostingDate = "2026-02-02"
+	res, _, err := f.s.ActivateVersion(as(1, ""), retry)
+	if err != nil || res.Activation.PostingDate != "2026-01-03" || len(ledger.Entries()) != 2 {
+		t.Fatalf("reversal retry: %+v %v entries=%d", res.Activation, err, len(ledger.Entries()))
+	}
+}
+
+type reverseThenBreak struct {
+	ledgerclient.Ledger
+	admin *pgxpool.Pool
+	t     *testing.T
+}
+
+func (p reverseThenBreak) Reverse(ctx context.Context, r ledgerclient.Reversal) (string, error) {
+	id, err := p.Ledger.Reverse(ctx, r)
+	if _, execErr := p.admin.Exec(context.Background(), `alter table standard_cost_activation add constraint break_commit check (false) not valid`); execErr != nil {
+		p.t.Fatal(execErr)
+	}
+	return id, err
+}
+
+func TestActivation_ARevertedStandardIsNotTheOldStandardOfTheNextActivation(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ctx := as(1, "")
+	ledger := ledgerclient.NewFake()
+	v2, _, err := f.s.ActivateVersion(ctx, f.activate(ledger, "k-v2"))
+	if err != nil || v2.Activation.Total.String() != "15" {
+		t.Fatalf("v2: %+v %v", v2.Activation, err)
+	}
+	if _, _, err := f.s.ActivateVersion(ctx, reversal(f.newVer.ID, v2.Activation.ID, v2.Version.Version, "k-rev", ledger)); err != nil {
+		t.Fatal(err)
+	}
+	v3, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-V3"), "k-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, v3.ID, "Pending", "4.00")
+	in := f.activate(ledger, "k-act-v3")
+	in.VersionID, in.Fingerprint = v3.ID, v3.ID
+	res, _, err := f.s.ActivateVersion(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := res.Activation.Lines[0]; res.Activation.Total.String() != "30" || l.OldStd.String() != "1" || l.NewStd.String() != "4" {
+		t.Fatalf("v3 posted %s with line %+v, want 10 x (4.00 - 1.00): the stock is back at 1.00 after the reversal", res.Activation.Total, l)
+	}
+	v4, _, err := f.s.CreateVersion(ctx, spec(f.le, "STD-V4"), "k-v4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalculation(t, f.admin, f.le, v4.ID, "Pending", "5.00")
+	in = f.activate(ledger, "k-act-v4")
+	in.VersionID, in.Fingerprint = v4.ID, v4.ID
+	next, _, err := f.s.ActivateVersion(ctx, in)
+	if err != nil || next.Activation.Lines[0].OldStd.String() != "4" || next.Activation.Total.String() != "10" {
+		t.Fatalf("v4 must start from the standard v3 booked: %+v %v", next.Activation, err)
+	}
+}
+
+func TestActivation_RefusesAPlannedVersionAndAPositionInventoryDoesNotReport(t *testing.T) {
+	f := newActivationFixture(t, true)
+	ledger := ledgerclient.NewFake()
+	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Planned' where id = $1`, f.newVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.ActivateVersion(as(1, ""), f.activate(ledger, "k-planned")); codeOf(err) != domain.CodeNotStandard {
+		t.Fatalf("planned version: %v", err)
+	}
+	if _, err := f.s.PreviewActivation(as(1, ""), f.activate(nil, "")); err != nil {
+		t.Fatalf("a preview of a planned version stays available: %v", err)
+	}
+	if _, err := f.admin.Exec(context.Background(), `update costing_version set type = 'Standard' where id = $1`, f.newVer.ID); err != nil {
+		t.Fatal(err)
+	}
+	missing := f.activate(ledger, "k-missing")
+	missing.OnHand = map[inventory.Position]decimal.Decimal{}
+	if _, _, err := f.s.ActivateVersion(as(1, ""), missing); codeOf(err) != domain.CodeNoOnHand {
+		t.Fatalf("position missing from the inventory answer: %v", err)
+	}
+	if len(ledger.Entries()) != 0 {
+		t.Fatal("posted for a refused activation")
+	}
+}
+
+func TestActivation_PositionsComeFromTheStoredCalculations(t *testing.T) {
+	f := newActivationFixture(t, true)
+	got, err := f.s.ActivationPositions(as(1, ""), f.newVer.ID)
+	if err != nil || len(got) != 1 || got[0] != positionA {
+		t.Fatalf("%v %v", got, err)
+	}
+	if empty, err := f.s.ActivationPositions(as(1, ""), ids.New()); err != nil || len(empty) != 0 {
+		t.Fatalf("%v %v", empty, err)
 	}
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
@@ -42,6 +44,7 @@ type Store interface {
 	TransitionVersion(ctx context.Context, id string, expected int, action string) (store.Version, error)
 	PreviewActivation(ctx context.Context, in store.ActivationInput) (domain.RevalPreview, error)
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
+	ActivationPositions(ctx context.Context, versionID string) ([]inventory.Position, error)
 	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
 	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)
 }
@@ -331,20 +334,21 @@ func (a *API) transitionStoredVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 type storedActivateRequest struct {
-	Version                  *int             `json:"version"`
-	DryRun                   bool             `json:"dryRun"`
-	ReversesActivationID     string           `json:"reversesActivationId"`
-	LedgerID                 string           `json:"ledgerId"`
-	PostingDate              string           `json:"postingDate"`
-	Currency                 string           `json:"currency"`
-	NewStandardForOpenOrders bool             `json:"newStandardForOpenOrders"`
-	Lines                    []activationLine `json:"lines"`
+	Version                  *int            `json:"version"`
+	DryRun                   bool            `json:"dryRun"`
+	ReversesActivationID     string          `json:"reversesActivationId"`
+	LedgerID                 string          `json:"ledgerId"`
+	PostingDate              string          `json:"postingDate"`
+	Currency                 string          `json:"currency"`
+	NewStandardForOpenOrders bool            `json:"newStandardForOpenOrders"`
+	Lines                    json.RawMessage `json:"lines"`
 }
 
 // activateStoredVersion moves a stored Open or Blocked version to Active
-// (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711). With
-// lines, a reversal or dryRun it revalues the on-hand and posts the journal
-// (activation.go); a bare request only moves the status.
+// (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711). A
+// version with stored calculations revalues every one of its positions against
+// the inventory on-hand and posts the journal (activation.go); a version with
+// none only moves the status.
 func (a *API) activateStoredVersion(w http.ResponseWriter, r *http.Request) {
 	if !a.storeReady(w, r) {
 		return
@@ -353,13 +357,21 @@ func (a *API) activateStoredVersion(w http.ResponseWriter, r *http.Request) {
 	if !decodeLimit(w, r, &req, maxActivationBody) {
 		return
 	}
-	if !req.revalues() {
-		a.storedMove(w, r, domain.ActionActivate, map[string]string{}, req.Version)
-		return
-	}
 	id, ok := versionID(w, r)
 	if !ok {
 		return
 	}
-	a.activateWithRevaluation(w, r, id, req)
+	var positions []inventory.Position
+	if req.ReversesActivationID == "" {
+		var err error
+		if positions, err = a.store.ActivationPositions(r.Context(), id); err != nil {
+			storeFailure(w, r, err)
+			return
+		}
+		if len(positions) == 0 && !req.DryRun && len(req.Lines) == 0 {
+			a.storedMove(w, r, domain.ActionActivate, map[string]string{}, req.Version)
+			return
+		}
+	}
+	a.activateWithRevaluation(w, r, id, req, positions)
 }

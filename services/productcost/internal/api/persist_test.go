@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
@@ -35,6 +36,7 @@ type fakeStore struct {
 	accounts        store.PostingAccounts
 	activation      *store.ActivationInput
 	preview         *store.ActivationInput
+	positions       []inventory.Position
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -92,6 +94,11 @@ func (f *fakeStore) ActivateVersion(_ context.Context, in store.ActivationInput)
 	f.calls++
 	f.activation = &in
 	return store.ActivationResult{}, f.replayed, f.activateErr
+}
+
+func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Position, error) {
+	f.calls++
+	return f.positions, f.err
 }
 
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {

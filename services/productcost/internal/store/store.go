@@ -121,12 +121,10 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 // as the change. A key reused with a different request (or on another command,
 // through scope) is 422. replayed reports a stored response.
 func idempotent[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope string, request any, run func() (T, error)) (out T, replayed bool, err error) {
-	raw, err := json.Marshal(request)
+	hash, err := requestHash(scope, request)
 	if err != nil {
 		return out, false, err
 	}
-	sum := sha256.Sum256(append([]byte(scope+"\n"), raw...))
-	hash := hex.EncodeToString(sum[:])
 	tag, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status) values ($1, $2, $3, 0)
 		on conflict (tenant_id, key) do nothing`, tenantID, key, hash)
 	if err != nil {
@@ -156,6 +154,40 @@ func idempotent[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope stri
 	_, err = tx.Exec(ctx, `update idempotency_keys set response_status = $3, response_body = $4 where tenant_id = $1 and key = $2`,
 		tenantID, key, http.StatusCreated, body)
 	return out, false, err
+}
+
+func requestHash(scope string, request any) (string, error) {
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte(scope+"\n"), raw...))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// storedReplay reads the response an earlier request stored under key, without
+// claiming the key: found is false when the key is unused.
+func storedReplay[T any](ctx context.Context, tx pgx.Tx, tenantID, key, scope string, request any) (out T, found bool, err error) {
+	hash, err := requestHash(scope, request)
+	if err != nil {
+		return out, false, err
+	}
+	var stored string
+	var body []byte
+	err = tx.QueryRow(ctx, `select request_hash, response_body from idempotency_keys where tenant_id = $1 and key = $2`, tenantID, key).Scan(&stored, &body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, err
+	}
+	if stored != hash {
+		return out, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request")
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return out, false, fmt.Errorf("replay %s: %w", key, err)
+	}
+	return out, true, nil
 }
 
 // tenantTx runs fn in a tenant transaction and maps a row-level security

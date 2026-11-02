@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -73,7 +74,6 @@ type ActivationInput struct {
 	PostingDate              string
 	Currency                 string
 	NewStandardForOpenOrders bool
-	Positions                []inventory.Position
 	OnHand                   map[inventory.Position]decimal.Decimal
 	Ledger                   ledgerclient.Ledger
 }
@@ -111,6 +111,34 @@ func (s *Postgres) GetActivation(ctx context.Context, id string) (Activation, er
 	return out, err
 }
 
+func (s *Postgres) ActivationPositions(ctx context.Context, versionID string) ([]inventory.Position, error) {
+	var out []inventory.Position
+	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
+		var err error
+		out, err = versionPositions(ctx, tx, p.TenantID, versionID)
+		return err
+	})
+	return out, err
+}
+
+func versionPositions(ctx context.Context, tx pgx.Tx, tenantID, versionID string) ([]inventory.Position, error) {
+	rows, err := tx.Query(ctx, `select distinct item_id::text, site_id::text from cost_calculation
+		where tenant_id = $1 and costing_version_id = $2 and valuation_view = 'Legal' and status in ('Pending', 'Active') order by 1, 2`, tenantID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []inventory.Position
+	for rows.Next() {
+		var pos inventory.Position
+		if err := rows.Scan(&pos.ItemID, &pos.SiteID); err != nil {
+			return nil, err
+		}
+		out = append(out, pos)
+	}
+	return out, rows.Err()
+}
+
 type activationPlan struct {
 	preview  domain.RevalPreview
 	accounts PostingAccounts
@@ -134,48 +162,148 @@ func (s *Postgres) PreviewActivation(ctx context.Context, in ActivationInput) (d
 	return out, err
 }
 
+const activateScope = "version.activate"
+
+type pendingActivation struct {
+	Activation      Activation `json:"activation"`
+	ReversesEntryID string     `json:"reversesEntryId,omitempty"`
+}
+
+type preparedActivation struct {
+	cur       Version
+	pending   pendingActivation
+	post      bool
+	ambiguous bool
+}
+
+func attemptKey(versionID string, in ActivationInput) string {
+	if in.ReversesID != "" {
+		return "reverse:" + in.ReversesID
+	}
+	return "activate:" + versionID
+}
+
+// ActivateVersion settles in three steps. The first transaction checks
+// everything and commits the pending attempt (the exact journal to post); the
+// ledger is then posted with that attempt's own ids and values; the second
+// transaction records the activation. A crash or failed commit after the post
+// leaves the attempt, and the next call posts it verbatim so the ledger replays
+// the entry instead of booking a second one.
 func (s *Postgres) ActivateVersion(ctx context.Context, in ActivationInput) (ActivationResult, bool, error) {
-	var out ActivationResult
-	var replayed bool
+	var replay ActivationResult
+	var found bool
+	var prepared preparedActivation
 	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
 		var err error
-		out, replayed, err = idempotent(ctx, tx, p.TenantID, in.Key, "version.activate", in.Fingerprint, func() (ActivationResult, error) {
-			return activateInTx(ctx, tx, p, in)
+		if replay, found, err = storedReplay[ActivationResult](ctx, tx, p.TenantID, in.Key, activateScope, in.Fingerprint); err != nil || found {
+			return err
+		}
+		prepared, err = prepareActivation(ctx, tx, p, in)
+		return err
+	})
+	if err != nil {
+		return ActivationResult{}, false, err
+	}
+	if found {
+		return replay, true, nil
+	}
+	settle := context.WithoutCancel(ctx)
+	if prepared.post {
+		entryID, err := postPending(settle, in.Ledger, prepared)
+		if err != nil {
+			s.recordFailedAttempt(settle, in, prepared, err)
+			return ActivationResult{}, false, &LedgerRefusal{Err: err}
+		}
+		prepared.pending.Activation.JournalEntryID = entryID
+	}
+	var out ActivationResult
+	var replayed bool
+	err = s.tenantTx(settle, func(tx pgx.Tx, p tenant.Principal) error {
+		var err error
+		out, replayed, err = idempotent(settle, tx, p.TenantID, in.Key, activateScope, in.Fingerprint, func() (ActivationResult, error) {
+			return finalizeActivation(settle, tx, p, in, prepared)
 		})
 		return err
 	})
 	return out, replayed, err
 }
 
-func activateInTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput) (ActivationResult, error) {
-	var res ActivationResult
-	cur, err := scanVersion(tx.QueryRow(ctx, `select `+versionColumns+` from costing_version where tenant_id = $1 and id = $2 for update`, p.TenantID, in.VersionID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return res, versionNotFound(in.VersionID)
-	}
+func prepareActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput) (preparedActivation, error) {
+	var out preparedActivation
+	cur, err := lockVersion(ctx, tx, p.TenantID, in)
 	if err != nil {
-		return res, err
-	}
-	if cur.Version != in.Expected {
-		return res, httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, "current version is "+strconv.Itoa(cur.Version))
+		return out, err
 	}
 	var free bool
 	if err := tx.QueryRow(ctx, `select pg_try_advisory_xact_lock(hashtextextended($1, 0))`, domain.RollLockKey(p.TenantID, in.VersionID)).Scan(&free); err != nil {
-		return res, err
+		return out, err
 	}
 	if !free {
-		return res, httpx.NewProblem(http.StatusConflict, domain.CodeVersionRolling, "version "+cur.Code+" is being rolled; activation blocked")
+		return out, httpx.NewProblem(http.StatusConflict, domain.CodeVersionRolling, "version "+cur.Code+" is being rolled; activation blocked")
 	}
-	reversing := in.ReversesID != ""
-	if !reversing {
+	if in.ReversesID == "" {
 		if _, err := domain.Transition(cur.Lifecycle(), domain.ActionActivate); err != nil {
-			return res, err
+			return out, err
 		}
+		if cur.Type != domain.VersionStandard {
+			return out, &domain.CodedError{Code: domain.CodeNotStandard, Detail: "only a Standard version revalues the inventory; version " + cur.Code + " is " + cur.Type}
+		}
+	}
+	out.cur = cur
+	key := attemptKey(cur.ID, in)
+	var raw []byte
+	err = tx.QueryRow(ctx, `select payload, attempted_ambiguous from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`, p.TenantID, key).Scan(&raw, &out.ambiguous)
+	if err == nil {
+		out.post = true
+		return out, json.Unmarshal(raw, &out.pending)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
 	}
 	plan, err := planActivation(ctx, tx, p.TenantID, cur, in, true)
 	if err != nil {
+		return out, err
+	}
+	out.pending.Activation = newActivation(p, cur, in, plan)
+	out.post = !plan.preview.Total.IsZero()
+	if plan.reverses != nil {
+		out.pending.ReversesEntryID = plan.reverses.JournalEntryID
+	}
+	if !out.post {
+		return out, nil
+	}
+	payload, err := json.Marshal(out.pending)
+	if err != nil {
+		return out, err
+	}
+	_, err = tx.Exec(ctx, `insert into standard_cost_activation_attempt (tenant_id, attempt_key, legal_entity_id, costing_version_id, payload) values ($1, $2, $3, $4, $5)`,
+		p.TenantID, key, cur.LegalEntityID, cur.ID, payload)
+	return out, err
+}
+
+func lockVersion(ctx context.Context, tx pgx.Tx, tenantID string, in ActivationInput) (Version, error) {
+	cur, err := scanVersion(tx.QueryRow(ctx, `select `+versionColumns+` from costing_version where tenant_id = $1 and id = $2 for update`, tenantID, in.VersionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return cur, versionNotFound(in.VersionID)
+	}
+	if err != nil {
+		return cur, err
+	}
+	if cur.Version != in.Expected {
+		return cur, httpx.NewProblem(http.StatusConflict, domain.CodeVersionConflict, "current version is "+strconv.Itoa(cur.Version))
+	}
+	return cur, nil
+}
+
+func finalizeActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ActivationInput, prepared preparedActivation) (ActivationResult, error) {
+	var res ActivationResult
+	if _, err := lockVersion(ctx, tx, p.TenantID, in); err != nil {
 		return res, err
 	}
+	if _, err := tx.Exec(ctx, `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`, p.TenantID, attemptKey(in.VersionID, in)); err != nil {
+		return res, err
+	}
+	reversing := in.ReversesID != ""
 	next, err := scanVersion(tx.QueryRow(ctx, `update costing_version
 		set status = case when $3 then status else 'Active' end, version = version + 1,
 		    activated_at = case when $3 then activated_at else now() end
@@ -183,23 +311,15 @@ func activateInTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Activat
 	if err != nil {
 		return res, err
 	}
-	a, err := insertActivation(ctx, tx, p, cur, in, plan)
+	a, err := insertActivation(ctx, tx, p, prepared.pending.Activation)
 	if err != nil {
 		return res, err
 	}
 	if !reversing {
 		if err := enqueue(ctx, tx, "costingversion", next.ID, costevents.VersionTransitioned, p, costevents.VersionTransitionedData{
 			ID: next.ID, LegalEntityID: next.LegalEntityID, Code: next.Code, Type: next.Type, Action: domain.ActionActivate,
-			FromStatus: cur.Status, ToStatus: next.Status, Version: next.Version, ActivatedAt: next.ActivatedAt, Actor: p.UserID,
+			FromStatus: prepared.cur.Status, ToStatus: next.Status, Version: next.Version, ActivatedAt: next.ActivatedAt, Actor: p.UserID,
 		}); err != nil {
-			return res, err
-		}
-	}
-	if !plan.preview.Total.IsZero() {
-		if a.JournalEntryID, err = postJournal(ctx, in, cur, a, plan); err != nil {
-			return res, &LedgerRefusal{Err: err}
-		}
-		if _, err := tx.Exec(ctx, `update standard_cost_activation set journal_entry_id = $3 where tenant_id = $1 and id = $2`, p.TenantID, a.ID, a.JournalEntryID); err != nil {
 			return res, err
 		}
 	}
@@ -211,6 +331,43 @@ func activateInTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Activat
 	return ActivationResult{Version: next, Activation: a}, err
 }
 
+// recordFailedAttempt keeps the pending attempt after a failed post so the next
+// call resends it verbatim. A definite refusal (ledger 400, 404, 422 or a
+// locally invalid entry) on an attempt never sent ambiguously drops it, so a
+// corrected request can post afresh; any other failure may have reached the
+// ledger (a 401, 403 or 429 is decided before its idempotency replay), so the
+// attempt is flagged ambiguous and no later refusal drops it.
+func (s *Postgres) recordFailedAttempt(ctx context.Context, in ActivationInput, prepared preparedActivation, cause error) {
+	definite := definiteRefusal(cause)
+	if definite && prepared.ambiguous {
+		return
+	}
+	statement := `update standard_cost_activation_attempt set attempted_ambiguous = true where tenant_id = $1 and attempt_key = $2`
+	if definite {
+		statement = `delete from standard_cost_activation_attempt where tenant_id = $1 and attempt_key = $2`
+	} else if prepared.ambiguous {
+		return
+	}
+	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
+		_, err := tx.Exec(ctx, statement, p.TenantID, attemptKey(prepared.cur.ID, in))
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "pending activation attempt not updated after a ledger failure", "versionId", prepared.cur.ID, "err", err)
+	}
+}
+
+func definiteRefusal(err error) bool {
+	if errors.Is(err, ledgerclient.ErrUnbalanced) || errors.Is(err, ledgerclient.ErrEmptyEntry) {
+		return true
+	}
+	var le *ledgerclient.Error
+	if !errors.As(err, &le) {
+		return false
+	}
+	return le.Status == http.StatusBadRequest || le.Status == http.StatusNotFound || le.Status == http.StatusUnprocessableEntity
+}
+
 func activationID(tenantID string, cur Version, in ActivationInput) string {
 	name := tenantID + "|activate|" + cur.ID + "|" + strconv.Itoa(in.Expected)
 	if in.ReversesID != "" {
@@ -219,7 +376,7 @@ func activationID(tenantID string, cur Version, in ActivationInput) string {
 	return uuid.NewSHA1(activationNamespace, []byte(name)).String()
 }
 
-func insertActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, cur Version, in ActivationInput, plan activationPlan) (Activation, error) {
+func newActivation(p tenant.Principal, cur Version, in ActivationInput, plan activationPlan) Activation {
 	a := Activation{ID: activationID(p.TenantID, cur, in), VersionID: cur.ID, LegalEntityID: cur.LegalEntityID, ReversesActivationID: nullable(in.ReversesID),
 		LedgerID: in.LedgerID, PostingDate: in.PostingDate, Currency: in.Currency, ItemCount: len(plan.preview.Lines), Total: plan.preview.Total,
 		InventoryAccount: plan.accounts.InventoryAccount, CostChangeAccount: plan.accounts.CostChangeAccount, JournalLines: plan.journalLines(),
@@ -227,6 +384,10 @@ func insertActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, cur Ve
 	if plan.reverses != nil {
 		a.LedgerID, a.Currency = plan.reverses.LedgerID, plan.reverses.Currency
 	}
+	return a
+}
+
+func insertActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Activation) (Activation, error) {
 	lines, err := json.Marshal(a.Lines)
 	if err != nil {
 		return a, err
@@ -236,28 +397,29 @@ func insertActivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, cur Ve
 		return a, err
 	}
 	err = tx.QueryRow(ctx, `insert into standard_cost_activation
-		(tenant_id, id, legal_entity_id, costing_version_id, reverses_activation_id, ledger_id, posting_date, currency, item_count, total,
+		(tenant_id, id, legal_entity_id, costing_version_id, reverses_activation_id, ledger_id, posting_date, currency, item_count, total, journal_entry_id,
 		 inventory_account, cost_change_account, journal_lines, new_standard_for_open_orders, lines, activated_by)
-		values ($1, $2, $3, $4, $5::uuid, $6, $7::date, $8, $9, $10, $11, $12, $13, $14, $15, $16) returning created_at`,
-		p.TenantID, a.ID, a.LegalEntityID, a.VersionID, a.ReversesActivationID, a.LedgerID, a.PostingDate, a.Currency, a.ItemCount, a.Total,
+		values ($1, $2, $3, $4, $5::uuid, $6, $7::date, $8, $9, $10, nullif($11, ''), $12, $13, $14, $15, $16, $17) returning created_at`,
+		p.TenantID, a.ID, a.LegalEntityID, a.VersionID, a.ReversesActivationID, a.LedgerID, a.PostingDate, a.Currency, a.ItemCount, a.Total, a.JournalEntryID,
 		a.InventoryAccount, a.CostChangeAccount, journal, a.NewStandardForOpenOrders, lines, a.ActivatedBy).Scan(&a.CreatedAt)
 	if pgCode(err) == uniqueViolation {
-		return a, httpx.NewProblem(http.StatusConflict, domain.CodeReversalTarget, "activation "+in.ReversesID+" was already reversed")
+		return a, httpx.NewProblem(http.StatusConflict, domain.CodeReversalTarget, "activation "+a.ID+" was already recorded or its target already reversed")
 	}
 	return a, err
 }
 
-func postJournal(ctx context.Context, in ActivationInput, cur Version, a Activation, plan activationPlan) (string, error) {
-	if plan.reverses != nil {
-		return in.Ledger.Reverse(ctx, ledgerclient.Reversal{LegalEntityID: cur.LegalEntityID, EntryID: plan.reverses.JournalEntryID, PostingDate: in.PostingDate,
-			Description: "Reversal of standard cost activation " + plan.reverses.ID, IdempotencyKey: "productcost.activation.reversal:" + plan.reverses.ID})
+func postPending(ctx context.Context, ledger ledgerclient.Ledger, prepared preparedActivation) (string, error) {
+	a := prepared.pending.Activation
+	if a.ReversesActivationID != nil {
+		return ledger.Reverse(ctx, ledgerclient.Reversal{LegalEntityID: a.LegalEntityID, EntryID: prepared.pending.ReversesEntryID, PostingDate: a.PostingDate,
+			Description: "Reversal of standard cost activation " + *a.ReversesActivationID, IdempotencyKey: "productcost.activation.reversal:" + *a.ReversesActivationID})
 	}
-	e := ledgerclient.Entry{LegalEntityID: cur.LegalEntityID, LedgerID: in.LedgerID, DocumentID: a.ID, PostingDate: in.PostingDate, Currency: in.Currency,
-		IdempotencyKey: "productcost.activation:" + cur.ID + ":" + strconv.Itoa(in.Expected), SourceType: activationSourceType}
+	e := ledgerclient.Entry{LegalEntityID: a.LegalEntityID, LedgerID: a.LedgerID, DocumentID: a.ID, PostingDate: a.PostingDate, Currency: a.Currency,
+		IdempotencyKey: "productcost.activation:" + a.ID, SourceType: activationSourceType}
 	for _, l := range a.JournalLines {
-		e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: "Standard cost revaluation " + cur.Code})
+		e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: "Standard cost revaluation " + prepared.cur.Code})
 	}
-	return in.Ledger.Post(ctx, e)
+	return ledger.Post(ctx, e)
 }
 
 func (p activationPlan) journalLines() []PostedLine {
@@ -292,14 +454,26 @@ func planActivation(ctx context.Context, tx pgx.Tx, tenantID string, cur Version
 		plan.accounts = PostingAccounts{LegalEntityID: orig.LegalEntityID, InventoryAccount: orig.InventoryAccount, CostChangeAccount: orig.CostChangeAccount}
 		return plan, nil
 	}
-	std, err := storedStandards(ctx, tx, tenantID, cur, in.Positions)
+	positions, err := versionPositions(ctx, tx, tenantID, cur.ID)
 	if err != nil {
 		return plan, err
 	}
-	lines := make([]domain.RevalLine, len(in.Positions))
-	for i, pos := range in.Positions {
+	if len(positions) == 0 {
+		return plan, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "version " + cur.Code + " has no stored calculations to revalue"}
+	}
+	std, err := storedStandards(ctx, tx, tenantID, cur, positions)
+	if err != nil {
+		return plan, err
+	}
+	lines := make([]domain.RevalLine, len(positions))
+	for i, pos := range positions {
+		qty, ok := in.OnHand[pos]
+		if !ok {
+			return plan, &domain.CodedError{Code: domain.CodeNoOnHand, Detail: "the inventory reports no on-hand for item " + pos.ItemID + " at site " + pos.SiteID +
+				"; inventory must carry the site's id in its site dimension"}
+		}
 		s := std[pos]
-		lines[i] = domain.RevalLine{ItemID: pos.ItemID, SiteID: pos.SiteID, Qty: in.OnHand[pos], OldStd: s.old, NewStd: s.new}
+		lines[i] = domain.RevalLine{ItemID: pos.ItemID, SiteID: pos.SiteID, Qty: qty, OldStd: s.old, NewStd: s.new}
 	}
 	plan.preview = domain.Revalue(lines, in.Currency)
 	if withAccounts && !plan.preview.Total.IsZero() {
@@ -337,6 +511,11 @@ func loadReversible(ctx context.Context, tx pgx.Tx, tenantID string, cur Version
 
 type standard struct{ old, new decimal.Decimal }
 
+// storedStandards pairs each position's new standard (this version's Legal
+// calculation) with the standard the stock is carried at now: the new standard
+// of the latest activation that booked the position and was not reversed, else
+// the calculation of the latest activated Standard version whose activation was
+// not reversed. A position without both is refused.
 func storedStandards(ctx context.Context, tx pgx.Tx, tenantID string, cur Version, positions []inventory.Position) (map[inventory.Position]standard, error) {
 	items, sites := make([]string, len(positions)), make([]string, len(positions))
 	for i, pos := range positions {
@@ -351,15 +530,28 @@ func storedStandards(ctx context.Context, tx pgx.Tx, tenantID string, cur Versio
 	if err != nil {
 		return nil, err
 	}
-	older, err := standardRows(ctx, tx, fmt.Sprintf(pick, `v.legal_entity_id::text = $5 and v.id <> $2 and v.status = 'Active' and v.type = 'Standard'`, `v.activated_at desc,`),
-		tenantID, cur.ID, items, sites, cur.LegalEntityID)
+	const notReversed = `not exists (select 1 from standard_cost_activation r where r.tenant_id = a.tenant_id and r.reverses_activation_id = a.id)`
+	booked, err := standardRows(ctx, tx, `select distinct on (l->>'itemId', l->>'siteId') l->>'itemId', l->>'siteId', (l->>'newStd')::numeric
+		from standard_cost_activation a cross join lateral jsonb_array_elements(a.lines) l
+		where a.tenant_id = $1 and a.legal_entity_id::text = $2 and a.reverses_activation_id is null and `+notReversed+`
+		  and (l->>'itemId', l->>'siteId') in (select * from unnest($3::text[], $4::text[]))
+		order by l->>'itemId', l->>'siteId', a.created_at desc, a.id desc`, tenantID, cur.LegalEntityID, items, sites)
+	if err != nil {
+		return nil, err
+	}
+	older, err := standardRows(ctx, tx, fmt.Sprintf(pick, `v.legal_entity_id::text = $5 and v.id <> $2 and v.status = 'Active' and v.type = 'Standard'
+		and not exists (select 1 from standard_cost_activation a where a.tenant_id = v.tenant_id and a.costing_version_id = v.id and not `+notReversed+`)`,
+		`v.activated_at desc,`), tenantID, cur.ID, items, sites, cur.LegalEntityID)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[inventory.Position]standard, len(positions))
 	for _, pos := range positions {
 		n, hasNew := newer[pos]
-		o, hasOld := older[pos]
+		o, hasOld := booked[pos]
+		if !hasOld {
+			o, hasOld = older[pos]
+		}
 		if !hasNew || !hasOld {
 			return nil, &domain.CodedError{Code: domain.CodeNoStoredStandard, Detail: "item " + pos.ItemID + " at site " + pos.SiteID +
 				" has no stored standard in this version or no earlier standard in an Active version; nothing is revalued without both"}

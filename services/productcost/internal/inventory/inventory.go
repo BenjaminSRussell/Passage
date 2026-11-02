@@ -13,12 +13,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -27,7 +29,7 @@ const (
 	audience        = "inventory"
 	dutyRead        = "inventory.read"
 	onHandPath      = "/v1/inventory/onhand"
-	maxResponseSize = 64 << 20
+	maxResponseSize = 16 << 20
 )
 
 // Position is one item at one site.
@@ -36,10 +38,13 @@ type Position struct {
 	SiteID string
 }
 
-// Reader returns the physical quantity per item and site of one legal entity.
+// Reader returns the physical quantity of the requested positions of one legal
+// entity; a position inventory has no row for is absent from the answer. The
+// inventory site dimension must carry the productcost site id (a UUID, any
+// case); rows with another site value cannot be matched and are ignored.
 // asOf is a date (YYYY-MM-DD) or empty for the live projection.
 type Reader interface {
-	OnHand(ctx context.Context, legalEntityID, asOf string) (map[Position]decimal.Decimal, error)
+	OnHand(ctx context.Context, legalEntityID, asOf string, positions []Position) (map[Position]decimal.Decimal, error)
 }
 
 type Client struct {
@@ -86,56 +91,84 @@ type onHandBody struct {
 	Truncated bool `json:"truncated"`
 }
 
-func (c *Client) OnHand(ctx context.Context, legalEntityID, asOf string) (map[Position]decimal.Decimal, error) {
+// OnHand reads one product at a time because the inquiry filters on a single
+// product and answers at most 10000 groups; a whole-entity read would fail
+// closed on a large catalog.
+// ponytail: one request per distinct item, sequential; upgrade to a multi-product filter on the inquiry.
+func (c *Client) OnHand(ctx context.Context, legalEntityID, asOf string, positions []Position) (map[Position]decimal.Decimal, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("inventory on-hand: no principal in context")
 	}
-	query := url.Values{"groupBy": {"product,site,legal_entity"}}
+	wanted := map[Position]bool{}
+	var items []string
+	for _, pos := range positions {
+		item, okItem := ids.Canonical(pos.ItemID)
+		site, okSite := ids.Canonical(pos.SiteID)
+		if !okItem || !okSite {
+			return nil, fmt.Errorf("inventory on-hand: position %s/%s is not a pair of UUIDs", pos.ItemID, pos.SiteID)
+		}
+		if !slices.Contains(items, item) {
+			items = append(items, item)
+		}
+		wanted[Position{ItemID: item, SiteID: site}] = true
+	}
+	out := map[Position]decimal.Decimal{}
+	for _, item := range items {
+		body, err := c.read(ctx, principal, legalEntityID, asOf, item)
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range body.Items {
+			site, okSite := ids.Canonical(it.Group["site"])
+			pos := Position{ItemID: item, SiteID: site}
+			if it.Group["legal_entity"] != legalEntityID || it.Group["product"] != item || !okSite || !wanted[pos] {
+				continue
+			}
+			qty, err := decimal.NewFromString(it.PhysicalInvent)
+			if err != nil {
+				return nil, fmt.Errorf("inventory on-hand: quantity %q: %w", it.PhysicalInvent, err)
+			}
+			out[pos] = out[pos].Add(qty)
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) read(ctx context.Context, principal tenant.Principal, legalEntityID, asOf, item string) (onHandBody, error) {
+	var body onHandBody
+	query := url.Values{"groupBy": {"product,site,legal_entity"}, "product": {item}}
 	if asOf != "" {
 		query.Set("asOf", asOf)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+onHandPath+"?"+query.Encode(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("inventory on-hand: %w", err)
+		return body, fmt.Errorf("inventory on-hand: %w", err)
 	}
 	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyRead}); err != nil {
-		return nil, fmt.Errorf("inventory on-hand: %w", err)
+		return body, fmt.Errorf("inventory on-hand: %w", err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "inventory on-hand request failed", "err", err, "correlationId", middleware.GetReqID(ctx))
-		return nil, fmt.Errorf("inventory on-hand: %w", err)
+		return body, fmt.Errorf("inventory on-hand: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		slog.ErrorContext(ctx, "inventory on-hand response unreadable", "err", err, "correlationId", middleware.GetReqID(ctx))
-		return nil, fmt.Errorf("inventory on-hand: %w", err)
+		return body, fmt.Errorf("inventory on-hand: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		slog.ErrorContext(ctx, "inventory refused the on-hand read", "status", resp.StatusCode, "correlationId", middleware.GetReqID(ctx))
-		return nil, fmt.Errorf("inventory on-hand: status %d", resp.StatusCode)
+		return body, fmt.Errorf("inventory on-hand: status %d", resp.StatusCode)
 	}
-	var body onHandBody
 	if err := json.Unmarshal(raw, &body); err != nil {
 		slog.ErrorContext(ctx, "inventory on-hand response unusable", "err", err, "correlationId", middleware.GetReqID(ctx))
-		return nil, fmt.Errorf("inventory on-hand: %w", err)
+		return body, fmt.Errorf("inventory on-hand: %w", err)
 	}
 	if body.Truncated {
-		return nil, errors.New("inventory on-hand: the answer was truncated; the quantities would be incomplete")
+		return body, errors.New("inventory on-hand: the answer was truncated; the quantities would be incomplete")
 	}
-	out := map[Position]decimal.Decimal{}
-	for _, it := range body.Items {
-		if it.Group["legal_entity"] != legalEntityID {
-			continue
-		}
-		qty, err := decimal.NewFromString(it.PhysicalInvent)
-		if err != nil {
-			return nil, fmt.Errorf("inventory on-hand: quantity %q: %w", it.PhysicalInvent, err)
-		}
-		pos := Position{ItemID: it.Group["product"], SiteID: it.Group["site"]}
-		out[pos] = out[pos].Add(qty)
-	}
-	return out, nil
+	return body, nil
 }
