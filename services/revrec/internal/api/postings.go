@@ -26,8 +26,8 @@ const (
 )
 
 type PostingStore interface {
-	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time) ([]store.Posting, error)
-	CompletePosting(ctx context.Context, postingID, entryID string) error
+	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time, retryRejected bool) ([]store.Posting, []store.Posting, error)
+	CompletePosting(ctx context.Context, postingID, entryID string) (bool, error)
 	RejectPosting(ctx context.Context, postingID, code string) error
 }
 
@@ -43,8 +43,10 @@ func ParseLedgerIDs(raw string) (map[string]string, error) {
 		if pair == "" {
 			continue
 		}
-		le, ledger, ok := strings.Cut(pair, "=")
-		if !ok || !ids.Valid(le) || !ids.Valid(ledger) {
+		rawLE, rawLedger, ok := strings.Cut(pair, "=")
+		le, leOK := ids.Canonical(rawLE)
+		ledger, ledgerOK := ids.Canonical(rawLedger)
+		if !ok || !leOK || !ledgerOK {
 			return nil, fmt.Errorf("REVREC_LEDGER_IDS entry %q must be <legalEntityId>=<ledgerId> with two UUIDs", pair)
 		}
 		out[le] = ledger
@@ -55,6 +57,7 @@ func ParseLedgerIDs(raw string) (map[string]string, error) {
 type postingRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
 	Through       string `json:"through,omitempty"`
+	RetryRejected bool   `json:"retryRejected,omitempty"`
 }
 
 type rejectedOut struct {
@@ -63,6 +66,14 @@ type rejectedOut struct {
 	Currency    string `json:"currency"`
 	Amount      string `json:"amount"`
 	LedgerCode  string `json:"ledgerCode"`
+}
+
+type otherLedgerOut struct {
+	ID          string `json:"id"`
+	LedgerID    string `json:"ledgerId"`
+	PostingDate string `json:"postingDate"`
+	Currency    string `json:"currency"`
+	Amount      string `json:"amount"`
 }
 
 type postingOut struct {
@@ -110,17 +121,21 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if !ids.Valid(req.LegalEntityID) {
+	legalEntityID, valid := ids.Canonical(req.LegalEntityID)
+	if !valid {
 		fields["legalEntityId"] = "must be a UUID"
 	}
+	req.LegalEntityID = legalEntityID
 	now := a.now().UTC()
-	through := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+	lastMonthEnd := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+	through := lastMonthEnd
 	if req.Through != "" {
 		t, err := time.Parse(dateLayout, req.Through)
 		if err != nil || t.After(now.Truncate(24*time.Hour)) {
 			fields["through"] = "must be a date as YYYY-MM-DD that is not in the future"
+		} else if t.Before(lastMonthEnd) {
+			through = t
 		}
-		through = t
 	}
 	if len(fields) > 0 {
 		writeFields(w, r, fields)
@@ -134,12 +149,16 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	pending, err := a.postings.ClaimPostings(r.Context(), req.LegalEntityID, ledgerID, through)
+	pending, otherLedger, err := a.postings.ClaimPostings(r.Context(), req.LegalEntityID, ledgerID, through, req.RetryRejected)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	out, rejected := make([]postingOut, 0, len(pending)), []rejectedOut{}
+	out, rejected, elsewhere := make([]postingOut, 0, len(pending)), []rejectedOut{}, make([]otherLedgerOut, 0, len(otherLedger))
+	for _, p := range otherLedger {
+		slog.ErrorContext(r.Context(), "pending revenue posting belongs to another ledger than the configured one", "postingId", p.ID, "postingLedgerId", p.LedgerID, "configuredLedgerId", ledgerID, "correlationId", middleware.GetReqID(r.Context()))
+		elsewhere = append(elsewhere, otherLedgerOut{ID: p.ID, LedgerID: p.LedgerID, PostingDate: p.PostingDate.Format(dateLayout), Currency: p.Currency, Amount: fixed(p.Amount, p.Currency)})
+	}
 	for _, p := range pending {
 		entryID, err := a.ledger.Post(r.Context(), ledgerclient.Entry{
 			LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: p.ID, PostingDate: p.PostingDate.Format(dateLayout),
@@ -163,15 +182,19 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, ledgerProblem(r.Context(), "post", err))
 			return
 		}
-		if err := a.postings.CompletePosting(r.Context(), p.ID, entryID); err != nil {
+		reattached, err := a.postings.CompletePosting(r.Context(), p.ID, entryID)
+		if err != nil {
 			httpx.Fail(w, r, err)
 			return
+		}
+		if reattached {
+			slog.ErrorContext(r.Context(), "ledger accepted a revenue posting that a concurrent call had marked rejected", "postingId", p.ID, "entryId", entryID, "correlationId", middleware.GetReqID(r.Context()))
 		}
 		a.journalPostings.Add(1)
 		out = append(out, postingOut{ID: p.ID, Currency: p.Currency, PostingDate: p.PostingDate.Format(dateLayout),
 			Amount: fixed(p.Amount, p.Currency), LineCount: p.LineCount, JournalEntryID: entryID})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "rejected": rejected})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "rejected": rejected, "otherLedger": elsewhere})
 }
 
 type glReconciliationOut struct {
@@ -191,9 +214,10 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	le, cur, period := q.Get("legalEntityId"), q.Get("currency"), q.Get("period")
+	cur, period := q.Get("currency"), q.Get("period")
+	le, valid := ids.Canonical(q.Get("legalEntityId"))
 	fields := map[string]string{}
-	if !ids.Valid(le) {
+	if !valid {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !currencyCode.MatchString(cur) {

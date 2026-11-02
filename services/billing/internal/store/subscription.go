@@ -208,12 +208,12 @@ func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVers
 		}
 		var gap bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from subscription_period where subscription_id = $1::uuid)
-			and not exists (select 1 from subscription_period where subscription_id = $1::uuid and period_to = $2::date)`,
-			id, periodFrom.AddDate(0, 0, -1).Format(dateLayout)).Scan(&gap); err != nil {
+			and not exists (select 1 from subscription_period where subscription_id = $1::uuid and (period_to = $2::date or period_from = $3::date))`,
+			id, periodFrom.AddDate(0, 0, -1).Format(dateLayout), periodTo.AddDate(0, 0, 1).Format(dateLayout)).Scan(&gap); err != nil {
 			return err
 		}
 		if gap {
-			return httpx.NewProblem(http.StatusBadRequest, "COM-0001", "a billing period must start the day after the last invoiced period ends; invoice periods in order")
+			return httpx.NewProblem(http.StatusBadRequest, "COM-0001", "a billing period must start the day after the latest invoiced period ends or end the day before the earliest one starts; leave no gap")
 		}
 		if err := writeProposal(ctx, tx, inv); err != nil {
 			return err

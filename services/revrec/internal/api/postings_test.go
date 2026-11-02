@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/store"
 	"github.com/BenjaminSRussell/passage/services/revrec/migrations"
@@ -175,28 +177,116 @@ func TestJournalPostings_Guards(t *testing.T) {
 	}
 }
 
-func TestJournalPostings_PermanentRefusalDoesNotBlockTheEntity(t *testing.T) {
+type postResult struct {
+	Items       []postingOut     `json:"items"`
+	Rejected    []rejectedOut    `json:"rejected"`
+	OtherLedger []otherLedgerOut `json:"otherLedger"`
+}
+
+func (g *ledgerRig) postBody(t *testing.T, body string) postResult {
+	t.Helper()
+	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", body, nil)
+	var out postResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("journal-postings %d %s, want 200", rec.Code, rec.Body)
+	}
+	return out
+}
+
+func TestJournalPostings_PermanentRefusalIsNotReofferedUnlessRetried(t *testing.T) {
 	g := newLedgerRig(t)
 	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
 	g.run(t, "2027-03-31")
 	g.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	body := `{"legalEntityId":"` + entityID + `"}`
 
-	for attempt := 1; attempt <= 2; attempt++ {
-		rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
-		var out struct {
-			Items    []postingOut  `json:"items"`
-			Rejected []rejectedOut `json:"rejected"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || len(out.Items) != 0 || len(out.Rejected) != 1 ||
-			out.Rejected[0].LedgerCode != ledgerclient.CodePeriodClosed || out.Rejected[0].PostingDate != "2027-03-31" {
-			t.Fatalf("attempt %d: %d %s, want 200 with one rejected March posting", attempt, rec.Code, rec.Body)
-		}
+	first := g.postBody(t, body)
+	if len(first.Items) != 0 || len(first.Rejected) != 1 || first.Rejected[0].LedgerCode != ledgerclient.CodePeriodClosed || first.Rejected[0].PostingDate != "2027-03-31" {
+		t.Fatalf("first call %+v, want one rejected March posting", first)
+	}
+	g.ledger.FailPosts(nil)
+	if second := g.postBody(t, body); len(second.Items) != 0 || len(second.Rejected) != 0 || len(g.ledger.Entries()) != 0 {
+		t.Fatalf("second call %+v with %d entries, want the rejected lines skipped", second, len(g.ledger.Entries()))
 	}
 
+	retried := g.postBody(t, `{"legalEntityId":"`+entityID+`","retryRejected":true}`)
+	if len(retried.Items) != 1 || retried.Items[0].PostingDate != "2027-03-31" || len(g.ledger.Entries()) != 1 {
+		t.Fatalf("retry %+v with %d entries, want the released March lines posted once", retried, len(g.ledger.Entries()))
+	}
+}
+
+func TestJournalPostings_ThroughIsClampedToTheLastCompletedMonth(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	*g.clock = time.Date(2027, 5, 2, 9, 0, 0, 0, time.UTC)
+	g.run(t, "2027-04-30")
+	g.run(t, "2027-05-01")
+
+	got := g.postBody(t, `{"legalEntityId":"`+entityID+`","through":"2027-05-02"}`)
+	for _, p := range got.Items {
+		if p.PostingDate > "2027-04-30" {
+			t.Errorf("posted %s with through in the open month, want nothing after 2027-04-30", p.PostingDate)
+		}
+	}
+	if len(got.Items) != 2 {
+		t.Errorf("posted %+v, want March and April", got.Items)
+	}
+}
+
+func TestCompletePosting_AfterAConcurrentRejectKeepsTheLedgerEntryAndTheLines(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityID, Duties: testkit.ScopeDuties(entityID)})
+	march := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
+
+	claimed, _, err := g.api.postings.ClaimPostings(ctx, entityID, g.ledgerID, march, false)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim %v %v, want one posting", claimed, err)
+	}
+	if err := g.api.postings.RejectPosting(ctx, claimed[0].ID, ledgerclient.CodePeriodClosed); err != nil {
+		t.Fatal(err)
+	}
+	reattached, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1")
+	if err != nil || !reattached {
+		t.Fatalf("complete after reject %v %v, want reattached", reattached, err)
+	}
+	again, other, err := g.api.postings.ClaimPostings(ctx, entityID, g.ledgerID, march, true)
+	if err != nil || len(again) != 0 || len(other) != 0 {
+		t.Fatalf("claim after reattach %v %v %v, want nothing to post twice", again, other, err)
+	}
+	if reattached, err := g.api.postings.CompletePosting(ctx, claimed[0].ID, "entry-1"); err != nil || reattached {
+		t.Errorf("second complete %v %v, want a quiet no-op", reattached, err)
+	}
+}
+
+func TestJournalPostings_UppercaseLegalEntityMapsToTheLedger(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	if got := g.postBody(t, `{"legalEntityId":"`+strings.ToUpper(entityID)+`"}`); len(got.Items) != 1 {
+		t.Fatalf("uppercase entity posted %+v, want one posting", got)
+	}
+	rec := call(t, g.handler, http.MethodGet, "/v1/revrec/gl-reconciliation?legalEntityId="+strings.ToUpper(entityID)+"&currency=USD&period=2027-03", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("uppercase reconciliation %d %s, want 200", rec.Code, rec.Body)
+	}
+}
+
+func TestJournalPostings_PendingOnAnotherLedgerIsReportedNotRetargeted(t *testing.T) {
+	g := newLedgerRig(t)
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	g.run(t, "2027-03-31")
+	g.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable})
+	call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
 	g.ledger.FailPosts(nil)
-	items := g.post(t, http.StatusOK)
-	if len(items) != 1 || items[0].PostingDate != "2027-03-31" || len(g.ledger.Entries()) != 1 {
-		t.Fatalf("after the ledger recovered %+v with %d entries, want the released March lines posted once", items, len(g.ledger.Entries()))
+
+	other := ids.New()
+	g.api.ledgerIDs = map[string]string{entityID: other}
+	got := g.postBody(t, `{"legalEntityId":"`+entityID+`"}`)
+	if len(got.Items) != 0 || len(got.OtherLedger) != 1 || got.OtherLedger[0].LedgerID != g.ledgerID || len(g.ledger.Entries()) != 0 {
+		t.Fatalf("got %+v with %d entries, want the pending posting listed under otherLedger and nothing posted", got, len(g.ledger.Entries()))
 	}
 }
 
@@ -226,6 +316,10 @@ func TestParseLedgerIDs(t *testing.T) {
 	got, err := ParseLedgerIDs(le + "=" + ledger + " ,")
 	if err != nil || got[le] != ledger || len(got) != 1 {
 		t.Errorf("parsed %v %v, want the one pair", got, err)
+	}
+	upper, err := ParseLedgerIDs(strings.ToUpper(le) + "=" + strings.ToUpper(ledger))
+	if err != nil || upper[le] != ledger {
+		t.Errorf("uppercase pair parsed %v %v, want lowercase keys and values", upper, err)
 	}
 	for _, bad := range []string{"x=y", le, le + "=" + ledger + "," + ledger} {
 		if _, err := ParseLedgerIDs(bad); err == nil {

@@ -274,7 +274,8 @@ paths:
         same ledger idempotency key, so no amount posts twice. A posting the
         ledger refuses for good (a 4xx such as a closed period) is marked
         rejected, its lines are released and it is listed under `rejected`; it
-        does not block the entity's other postings. The ledger comes from the
+        does not block the entity's other postings, and its lines are offered
+        again only when the request sets `retryRejected`. The ledger comes from the
         service configuration (REVREC_LEDGER_IDS), never from the request. 503
         REV-0200 when LEDGER_URL is not set; 422 REV-0202 when the legal entity
         has no configured ledger; 502 REV-0201 when the ledger does not answer.
@@ -531,11 +532,24 @@ components:
       additionalProperties: false
       properties:
         legalEntityId: { type: string, format: uuid }
-        through: { type: string, format: date, description: "Last recognition date to post; default the last completed month end, not in the future." }
+        through: { type: string, format: date, description: "Last recognition date to post; default and upper bound the last completed month end." }
+        retryRejected: { type: boolean, description: "Offer the lines of ledger-rejected postings again; by default they are skipped." }
     JournalPostings:
       type: object
-      required: [items, rejected]
+      required: [items, rejected, otherLedger]
       properties:
+        otherLedger:
+          type: array
+          description: Pending postings on a ledger other than the configured one; reported, never re-targeted.
+          items:
+            type: object
+            required: [id, ledgerId, currency, postingDate, amount]
+            properties:
+              id: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              currency: { type: string }
+              postingDate: { type: string, format: date }
+              amount: { type: string }
         rejected:
           type: array
           items:

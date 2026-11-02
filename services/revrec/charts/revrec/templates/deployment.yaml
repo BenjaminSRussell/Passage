@@ -58,6 +58,8 @@ spec:
             {{- if .Values.ledgerUrl }}
             - name: LEDGER_URL
               value: {{ .Values.ledgerUrl | quote }}
+            - name: REVREC_LEDGER_IDS
+              value: {{ include "revrec.ledgerIds" . | quote }}
             {{- end }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE

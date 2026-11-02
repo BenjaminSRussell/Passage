@@ -196,6 +196,59 @@ func TestSubscription_BillingIsIdempotentPerPeriodAndRefusesOverlap(t *testing.T
 	}
 }
 
+func TestSubscription_PeriodsMayBeBilledBackwardsButNotAcrossAGap(t *testing.T) {
+	h := subscriptionHandler(t, exemptTax(t))
+	sub := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	for _, from := range []string{"2027-03-01", "2027-02-01", "2027-01-01"} {
+		if rec := billPeriod(h, sub.ID, from); rec.Code != http.StatusCreated {
+			t.Fatalf("bill %s: %d %s, want 201 at either end of the billed range", from, rec.Code, rec.Body)
+		}
+	}
+	var read subscriptionDTO
+	decode(t, do(h, http.MethodGet, "/v1/billing/subscriptions/"+sub.ID, "", ""), &read)
+	if read.BilledThrough != "2027-03-31" {
+		t.Errorf("billed through %q, want 2027-03-31", read.BilledThrough)
+	}
+
+	gapped := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	if rec := billPeriod(h, gapped.ID, "2027-01-01"); rec.Code != http.StatusCreated {
+		t.Fatalf("bill January: %d %s", rec.Code, rec.Body)
+	}
+	if rec := billPeriod(h, gapped.ID, "2027-03-01"); rec.Code != http.StatusBadRequest {
+		t.Errorf("bill March after January: %d, want 400 for the February gap", rec.Code)
+	}
+	backwards := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	if rec := billPeriod(h, backwards.ID, "2027-03-01"); rec.Code != http.StatusCreated {
+		t.Fatalf("bill March: %d %s", rec.Code, rec.Body)
+	}
+	rec := billPeriod(h, backwards.ID, "2027-01-01")
+	if p := decodeProblemOf(t, rec); rec.Code != http.StatusBadRequest || p.Code != "COM-0001" {
+		t.Errorf("bill January after March: %d %s, want 400 COM-0001 for the February gap", rec.Code, p.Code)
+	}
+}
+
+func TestSubscription_OtherLegalEntityScopeCannotReadOrChange(t *testing.T) {
+	h := subscriptionHandler(t, exemptTax(t))
+	sub := newSubscription(t, h, subscriptionBody("USD", "100.00", 1, "2027-01-01"))
+	other := map[string]string{tenant.HeaderLegalEntity: ids.New()}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "", ""},
+		{http.MethodPost, ":bill", `{"periodFrom":"2027-01-01"}`},
+		{http.MethodPost, ":change-plan", `{"planCode":"X","price":"1.00","effectiveFrom":"2027-02-01"}`},
+		{http.MethodPost, ":cancel", `{"lastServiceDay":"2027-01-31"}`},
+	} {
+		rec := doAs(h, c.method, "/v1/billing/subscriptions/"+sub.ID+c.path, "", c.body, allDuties, other)
+		if rec.Code != http.StatusForbidden && rec.Code != http.StatusNotFound {
+			t.Errorf("%s%s from another legal entity: %d, want 403 or 404", c.method, c.path, rec.Code)
+		}
+	}
+	var read subscriptionDTO
+	decode(t, do(h, http.MethodGet, "/v1/billing/subscriptions/"+sub.ID, "", ""), &read)
+	if read.Status != domain.SubscriptionActive || read.BilledThrough != "" || read.Version != 1 {
+		t.Errorf("subscription %+v after refused calls, want it untouched", read)
+	}
+}
+
 func TestSubscription_InvoicedPeriodsAreProtectedFromChangeAndCancel(t *testing.T) {
 	h := subscriptionHandler(t, exemptTax(t))
 	sub := newSubscription(t, h, subscriptionBody("USD", "310.00", 1, "2027-03-01"))

@@ -70,6 +70,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err != nil {
 			return err
 		}
+		if len(ledgerIDs) == 0 {
+			return errors.New("REVREC_LEDGER_IDS is required when LEDGER_URL is set")
+		}
 		a.WithLedger(ledger, st, ledgerIDs)
 	}
 	router := httpx.NewRouter()

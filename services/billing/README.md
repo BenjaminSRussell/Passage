@@ -54,7 +54,7 @@ charts/billing/         Helm chart (deployment, service with admin port, Service
 | GET | `/v1/billing/subscriptions/{id}` | `billing.invoice.view` | plan terms, status, `billedThrough` (end of the last invoiced period); `ETag` = version |
 | POST | `/v1/billing/subscriptions/{id}:change-plan` | `billing.invoice.maintain` | new price from `effectiveFrom`, after the current plan began and after the last invoiced period (`BIL-0107`); optional `If-Match` |
 | POST | `/v1/billing/subscriptions/{id}:cancel` | `billing.invoice.maintain` | `lastServiceDay`, not inside an invoiced period (`BIL-0107`); once (`BIL-0108`) |
-| POST | `/v1/billing/subscriptions/{id}:bill` | `billing.invoice.maintain` | `{periodFrom}` (first of a month); one line per plan term served in the period, prorated by calendar days; tax quoted; idempotent per period (the hash covers the invoice date only); overlap `BIL-0106`; a later period must start the day after the last invoiced one ends (400 `COM-0001`); nothing to bill `BIL-0105` |
+| POST | `/v1/billing/subscriptions/{id}:bill` | `billing.invoice.maintain` | `{periodFrom}` (first of a month); one line per plan term served in the period, prorated by calendar days; tax quoted; idempotent per period (the hash covers the invoice date only); overlap `BIL-0106`; a later period must start the day after the latest invoiced one ends or end the day before the earliest one starts (400 `COM-0001`); nothing to bill `BIL-0105` |
 | POST | `/v1/billing/credit-notes/{id}:post` | `billing.creditnote.post` (CreditNotePost) | re-checks `BIL-0005` under the original's lock; `CN-` number; idempotent by state; optional `If-Match` |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`

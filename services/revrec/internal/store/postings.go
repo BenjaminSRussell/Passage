@@ -37,14 +37,14 @@ type postingGroup struct {
 	amount  decimal.Decimal
 }
 
-func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time) ([]Posting, error) {
+func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time, retryRejected bool) ([]Posting, []Posting, error) {
 	p, err := principal(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []Posting
+	var out, otherLedger []Posting
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		groups, order, err := claimLines(ctx, tx, legalEntityID, through)
+		groups, order, err := claimLines(ctx, tx, legalEntityID, through, retryRejected)
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID st
 				key.month.AddDate(0, 1, -1).Format(dateLayout), g.amount.String(), len(g.lineIDs)); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid where id = any($2::uuid[])`, id, g.lineIDs); err != nil {
+			if _, err := tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid, rejected_posting_id = null where id = any($2::uuid[])`, id, g.lineIDs); err != nil {
 				return err
 			}
 		}
@@ -73,22 +73,26 @@ func (s *Postgres) ClaimPostings(ctx context.Context, legalEntityID, ledgerID st
 			if posting.Amount, err = decimal.NewFromString(amount); err != nil {
 				return err
 			}
-			out = append(out, posting)
+			if posting.LedgerID == ledgerID {
+				out = append(out, posting)
+			} else {
+				otherLedger = append(otherLedger, posting)
+			}
 		}
 		return rows.Err()
 	})
-	return out, err
+	return out, otherLedger, err
 }
 
-func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through time.Time) (map[postingKey]*postingGroup, []postingKey, error) {
+func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through time.Time, retryRejected bool) (map[postingKey]*postingGroup, []postingKey, error) {
 	rows, err := tx.Query(ctx, `select s.id::text, c.currency::text, date_trunc('month', s.recognized_on)::date, s.amount::text
 		from revenue_schedule s
 		join performance_obligation o on o.tenant_id = s.tenant_id and o.id = s.obligation_id
 		join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
 		where c.legal_entity_id = $1::uuid and o.method = any($2::text[]) and s.status = $3 and s.journal_posting_id is null
-		  and s.amount > 0 and s.recognized_on <= $4::date
+		  and (s.rejected_posting_id is null or $5::boolean) and s.amount > 0 and s.recognized_on <= $4::date
 		order by s.recognized_on, s.id for update of s`,
-		legalEntityID, domain.DeferredMethods(), domain.ScheduleRecognized, through.Format(dateLayout))
+		legalEntityID, domain.DeferredMethods(), domain.ScheduleRecognized, through.Format(dateLayout), retryRejected)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -117,11 +121,23 @@ func claimLines(ctx context.Context, tx pgx.Tx, legalEntityID string, through ti
 	return groups, order, rows.Err()
 }
 
-func (s *Postgres) CompletePosting(ctx context.Context, postingID, entryID string) error {
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update journal_posting set entry_id = $2 where id = $1::uuid and entry_id is null`, postingID, entryID)
+func (s *Postgres) CompletePosting(ctx context.Context, postingID, entryID string) (bool, error) {
+	reattached := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update journal_posting set entry_id = $2 where id = $1::uuid and entry_id is null and rejected_code is null`, postingID, entryID)
+		if err != nil || tag.RowsAffected() > 0 {
+			return err
+		}
+		tag, err = tx.Exec(ctx, `update journal_posting set entry_id = $2, rejected_code = null where id = $1::uuid and entry_id is null`, postingID, entryID)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		reattached = true
+		_, err = tx.Exec(ctx, `update revenue_schedule set journal_posting_id = $1::uuid, rejected_posting_id = null
+			where rejected_posting_id = $1::uuid and journal_posting_id is null`, postingID)
 		return err
 	})
+	return reattached, err
 }
 
 func (s *Postgres) RejectPosting(ctx context.Context, postingID, code string) error {
@@ -130,7 +146,7 @@ func (s *Postgres) RejectPosting(ctx context.Context, postingID, code string) er
 		if err != nil || tag.RowsAffected() == 0 {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update revenue_schedule set journal_posting_id = null where journal_posting_id = $1::uuid`, postingID)
+		_, err = tx.Exec(ctx, `update revenue_schedule set journal_posting_id = null, rejected_posting_id = $1::uuid where journal_posting_id = $1::uuid`, postingID)
 		return err
 	})
 }

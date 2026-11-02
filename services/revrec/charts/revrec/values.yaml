@@ -10,6 +10,8 @@ databaseSecret: revrec-db
 migrateOnStart: false
 # Unset, the ledger postings and the GL 2400 reconciliation answer 503 REV-0200.
 ledgerUrl: ""
+# Legal entity id -> ledger id; required when ledgerUrl is set (rendered as REVREC_LEDGER_IDS).
+ledgerIds: {}
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

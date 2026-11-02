@@ -4,7 +4,10 @@
 -- created pending (entry_id null) in the transaction that claims its lines and is
 -- completed once the ledger has answered, so a failed post is retried with the
 -- same ledger idempotency key. A posting the ledger refuses for good is marked
--- rejected (rejected_code) and its lines are released, so it never blocks the entity.
+-- rejected (rejected_code) and its lines are released with rejected_posting_id set, so it never
+-- blocks the entity and the lines are offered again only when the caller asks to retry rejected postings.
+
+ALTER TABLE revenue_schedule ADD COLUMN IF NOT EXISTS rejected_posting_id uuid;
 
 CREATE TABLE IF NOT EXISTS journal_posting (
   tenant_id uuid NOT NULL,
