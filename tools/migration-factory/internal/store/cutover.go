@@ -106,6 +106,9 @@ func getPlan(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (domain.
 	if err := loadSteps(ctx, tx, []*domain.Plan{&p}); err != nil {
 		return domain.Plan{}, err
 	}
+	if err := loadLatestDecisions(ctx, tx, []*domain.Plan{&p}); err != nil {
+		return domain.Plan{}, err
+	}
 	return p, nil
 }
 
@@ -165,7 +168,10 @@ func (s *Postgres) ListPlans(ctx context.Context, f PlanFilter) ([]domain.Plan, 
 		for i := range out {
 			ptrs[i] = &out[i]
 		}
-		return loadSteps(ctx, tx, ptrs)
+		if err := loadSteps(ctx, tx, ptrs); err != nil {
+			return err
+		}
+		return loadLatestDecisions(ctx, tx, ptrs)
 	})
 	return out, err
 }

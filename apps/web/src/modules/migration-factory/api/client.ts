@@ -372,12 +372,87 @@ export interface CutoverPlan {
   openGoNoGo: string[];
   abortDue: boolean;
   abortWarning?: string;
+  /** The latest go/no-go decision; absent until one is recorded. */
+  decision?: DecisionSummary;
   /** Present once the plan is rolled back: the lines exported for re-keying (FR-49.9). */
   rekeying?: Rekeying;
   /** Present on get and commands; the list leaves it out. */
   steps?: RunbookStep[];
   /** The generated rollback plan, sent with the steps. */
   rollbackSteps?: RollbackStep[];
+}
+
+export type GoNoGoValue = "GO" | "NO_GO";
+export type ChecklistStatus = "MET" | "OPEN" | "UNCONFIRMED";
+
+export interface DecisionSummary {
+  seq: number;
+  decision: GoNoGoValue;
+  /** Authenticated users who approved: two for a GO, the recording user for a NO_GO. */
+  approvers: string[];
+  reason?: string;
+  decidedBy?: string;
+  decidedAt: string;
+}
+
+/** One go/no-go checklist item (PRD 9.49.1); system items are evaluated by the factory, attested ones by the approvers. */
+export interface ChecklistItem {
+  code: string;
+  title: string;
+  source: "system" | "attested";
+  status: ChecklistStatus;
+  detail?: string;
+  /** Run ids (pack runs or parallel runs) the item rests on. */
+  references: string[];
+}
+
+export interface GoNoGoDecision extends DecisionSummary {
+  planVersion: number;
+  /** The checklist as it was when the decision was taken. */
+  checklist: ChecklistItem[];
+}
+
+export interface Readiness {
+  planId: string;
+  version: number;
+  rolledBack: boolean;
+  /** Both items the factory evaluates are met and the plan is not rolled back. */
+  systemReady: boolean;
+  items: ChecklistItem[];
+  openItems: string[];
+  decisions: GoNoGoDecision[];
+  /** A CutoverManager's approval of a GO waiting for a second, different one; the checklist shows its attestations. */
+  pendingGo?: GoApproval;
+}
+
+export interface Attestation {
+  code: string;
+  confirmed: boolean;
+  reference?: string;
+}
+
+/** The first approval of a GO (CUT-1605). Round is the seq the decision takes; a NO_GO in between voids it. */
+export interface GoApproval {
+  round: number;
+  approver: string;
+  attestations: Attestation[];
+  planVersion: number;
+  approvedAt: string;
+}
+
+/** The approver is the signed-in user; approvers are never named in the request. */
+export interface DecisionRequest {
+  decision: GoNoGoValue;
+  reason?: string;
+  attestations?: Attestation[];
+  version?: number;
+}
+
+/** A recorded decision (201), or the caller's approval of a GO waiting for a second approver (202). */
+export interface DecisionResponse {
+  decision?: GoNoGoDecision;
+  pendingGo?: GoApproval;
+  plan: CutoverPlan;
 }
 
 export interface Rekeying {
@@ -571,6 +646,20 @@ export function completeStep(planId: string, seq: number, actualDurationMin: num
  */
 export function rollbackPlan(planId: string, approvers: string[], postings: RekeyPosting[], version: number, key: string = newKey()): Promise<CutoverPlan> {
   return post(`/cutover/plans/${encodeURIComponent(planId)}/rollback`, { approvers, postings, version }, key);
+}
+
+/** GET /cutover/plans/{id}/go-no-go: the checklist evaluated now and the decisions so far. */
+export function getReadiness(planId: string, signal?: AbortSignal): Promise<Readiness> {
+  return send(`/cutover/plans/${encodeURIComponent(planId)}/go-no-go`, {}, signal);
+}
+
+/**
+ * POST /cutover/plans/{id}/go-no-go as the signed-in user. A NO_GO (with a reason) is recorded at once. A GO needs
+ * every checklist item met (CUT-1607) and two different CutoverManagers (CUT-1605): the first call stores the caller's
+ * approval, a second caller's GO records it. The service re-evaluates the checklist when it stores the request.
+ */
+export function recordDecision(planId: string, input: DecisionRequest, key: string = newKey()): Promise<DecisionResponse> {
+  return post(`/cutover/plans/${encodeURIComponent(planId)}/go-no-go`, input, key);
 }
 
 /** GET /cutover/plans/{id}/rekeying/{file}: the CSV download of a rolled-back plan's re-keying file. */

@@ -293,6 +293,12 @@ export function CutoverPlanDetailPage() {
             <StatTile label="Abort deadline" value={formatOffset(plan.abortOffsetMin)} />
           </StatGroup>
           <Card title="Go/no-go checklist">
+            <p className={styles.note}>
+              {plan.decision
+                ? `Latest decision: ${plan.decision.decision === "GO" ? "Go" : "No-go"} by ${plan.decision.approvers.join(" and ")}, ${formatDateTime(plan.decision.decidedAt)}.`
+                : "No go/no-go decision is recorded yet."}{" "}
+              <Link to={`/migration-factory/cutover/${plan.planId}/go-no-go`}>Open the go/no-go decision</Link>
+            </p>
             {plan.openGoNoGo.length === 0 ? (
               <p className={styles.note}>All go/no-go items are complete.</p>
             ) : (

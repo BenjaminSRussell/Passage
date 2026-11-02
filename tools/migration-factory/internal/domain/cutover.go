@@ -57,9 +57,12 @@ type Plan struct {
 	RolledBack     bool
 	Approvers      []string
 	// Rekey counts the re-keying lines the rollback exported (FR-49.9); zero until rolled back.
-	Rekey     RekeySummary
-	Version   int
-	CreatedAt time.Time
+	Rekey   RekeySummary
+	Version int
+	// LatestDecision is the most recent go/no-go decision (nil until one is recorded); the full
+	// history is read with the readiness view.
+	LatestDecision *Decision
+	CreatedAt      time.Time
 }
 
 // DurationOverrides maps a step name to the duration measured in the last rehearsal (minutes).

@@ -79,6 +79,8 @@ type planDTO struct {
 	// has passed with go/no-go items open, or it is less than an hour away (CUT-1604).
 	AbortDue     bool   `json:"abortDue"`
 	AbortWarning string `json:"abortWarning,omitempty"`
+	// Decision is the latest go/no-go decision, nil until one is recorded.
+	Decision *decisionSummaryDTO `json:"decision,omitempty"`
 	// Rekeying is set once the plan is rolled back: the lines exported for re-keying (FR-49.9).
 	Rekeying *rekeyingDTO `json:"rekeying,omitempty"`
 	Steps    []stepDTO    `json:"steps,omitempty"`
@@ -88,7 +90,8 @@ type planDTO struct {
 
 func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 	out := planDTO{PlanID: p.PlanID, T0: p.T0, Entities: p.Entities, AbortOffsetMin: p.AbortOffsetMin, RolledBack: p.RolledBack,
-		Approvers: p.Approvers, Version: p.Version, CreatedAt: p.CreatedAt, Packs: []string{}, OpenGoNoGo: p.OpenGoNoGo()}
+		Approvers: p.Approvers, Version: p.Version, CreatedAt: p.CreatedAt, Packs: []string{}, OpenGoNoGo: p.OpenGoNoGo(),
+		Decision: toDecisionSummary(p.LatestDecision)}
 	if out.Approvers == nil {
 		out.Approvers = []string{}
 	}

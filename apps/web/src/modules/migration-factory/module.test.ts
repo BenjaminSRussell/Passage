@@ -39,6 +39,7 @@ describe("migration-factory module", () => {
       "/migration-factory/cutover",
       "/migration-factory/cutover/new",
       "/migration-factory/cutover/:id",
+      "/migration-factory/cutover/:id/go-no-go",
     ]);
   });
 

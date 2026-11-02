@@ -18,11 +18,13 @@ var (
 	CutoverStepCompleted = events.Type("cutover", "step", "completed", 1)
 	// CutoverPlanRolledBack is written when a cutover plan's rollback is executed (FR-49.9).
 	CutoverPlanRolledBack = events.Type("cutover", "plan", "rolledback", 1)
+	// CutoverDecisionRecorded is written when a go/no-go decision is recorded on a plan (FR-49.6).
+	CutoverDecisionRecorded = events.Type("cutover", "decision", "recorded", 1)
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack}
+	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack, CutoverDecisionRecorded}
 }
 
 // PackReconciledData is the payload of dev.passage.migration.pack.reconciled.v1.
@@ -88,4 +90,16 @@ type CutoverPlanRolledBackData struct {
 	ExecutedBy         string   `json:"executed_by"`
 	RekeyJournalLines  int      `json:"rekey_journal_lines"`
 	RekeyDocumentLines int      `json:"rekey_document_lines"`
+}
+
+// CutoverDecisionRecordedData is the payload of dev.passage.cutover.decision.recorded.v1.
+// OpenItems lists the checklist items not met when the decision was taken (empty for a GO).
+type CutoverDecisionRecordedData struct {
+	PlanID    string   `json:"plan_id"`
+	Decision  string   `json:"decision"`
+	Approvers []string `json:"approvers"`
+	Reason    string   `json:"reason"`
+	OpenItems []string `json:"open_items"`
+	DecidedBy string   `json:"decided_by"`
+	Timestamp string   `json:"timestamp"`
 }

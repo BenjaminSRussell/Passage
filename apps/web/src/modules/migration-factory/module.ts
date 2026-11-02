@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { CutoverDecisionPage } from "./CutoverDecisionPage";
 import { CutoverPlanDetailPage } from "./CutoverPlanDetailPage";
 import { CutoverPlansPage } from "./CutoverPlansPage";
 import { NewCutoverPlanPage } from "./NewCutoverPlanPage";
@@ -35,6 +36,7 @@ const migrationFactory: PassageModule = {
     { path: "/migration-factory/cutover", element: createElement(CutoverPlansPage), handle: { title: "Cutover runbooks" } },
     { path: "/migration-factory/cutover/new", element: createElement(NewCutoverPlanPage), handle: { title: "Generate cutover plan" } },
     { path: "/migration-factory/cutover/:id", element: createElement(CutoverPlanDetailPage), handle: { title: "Cutover runbook" } },
+    { path: "/migration-factory/cutover/:id/go-no-go", element: createElement(CutoverDecisionPage), handle: { title: "Go/no-go decision" } },
   ],
   nav: [
     { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },

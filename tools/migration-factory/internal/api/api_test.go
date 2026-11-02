@@ -56,6 +56,14 @@ func (u unreachableStore) ListPlans(context.Context, store.PlanFilter) ([]domain
 	u.fail()
 	return nil, nil
 }
+func (u unreachableStore) GetReadiness(context.Context, string) (domain.ReadinessFacts, error) {
+	u.fail()
+	return domain.ReadinessFacts{}, nil
+}
+func (u unreachableStore) RecordDecision(context.Context, store.Idem, store.DecisionRequest) (store.DecisionResult, bool, error) {
+	u.fail()
+	return store.DecisionResult{}, false, nil
+}
 func (u unreachableStore) StartStep(context.Context, store.Idem, store.StepStart) (domain.Plan, bool, error) {
 	u.fail()
 	return domain.Plan{}, false, nil

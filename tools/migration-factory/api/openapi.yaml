@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Migration Factory API
-  version: 0.5.0
+  version: 0.6.0
   description: |
-    Slices 1 to 6 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
+    Slices 1 to 7 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
     with control totals, quarantine release and the legacy cross-reference lookup, the
     parallel-run review, project opening balances, and the cutover runbook with timed steps, the
     generated rollback plan and the rollback re-keying export, and (slice 6) the load of an open_items
-    run into the receivables service with its reconciliation. Source of truth for the handlers in
+    run into the receivables service with its reconciliation, and (slice 7) the go/no-go decision of a cutover plan with its
+    checklist. Source of truth for the handlers in
     internal/api. State is stored in Postgres under row-level security per tenant.
 
     Commands accept an optional `Idempotency-Key` header (at most 200 characters). A repeated
@@ -825,6 +826,141 @@ paths:
               schema:
                 $ref: "#/components/schemas/Plan"
         "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/go-no-go:
+    get:
+      operationId: getGoNoGoReadiness
+      summary: The go/no-go checklist of a cutover plan evaluated now, with the decisions recorded so far
+      description: |
+        Evaluates the 14 phase-exit checklist items (PRD 9.49.1). `packs_reconciled` is met when,
+        for every pack and every entity of the plan (entities are legacy company codes, matched to
+        the run's source company), the latest pack run of that company is RECONCILED and was started
+        at or after the legacy transaction freeze (T-0 minus 6 hours); earlier runs are dry runs or
+        rehearsals and do not count. `parallel_run_signed_off` is met when the month before T-0 (UTC)
+        has a parallel run and every parallel run of that month (one per legacy system) is
+        SIGNED_OFF. The other twelve items are attested by the approvers: they show as the pending GO
+        approval confirmed them (`pendingGo`), or UNCONFIRMED when there is none. `systemReady` is
+        true when both items the factory evaluates are met and the plan is not rolled back. Reads only.
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The checklist, the items not met, and the decisions in the order recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: recordGoNoGoDecision
+      summary: Record a go/no-go decision, or approve a GO, on a cutover plan as the calling user
+      description: |
+        Approvers are the authenticated callers, never names in the request (CUT-1605). A NO_GO is
+        recorded at once with the caller as its approver; it needs a reason. A GO needs two
+        different CutoverManagers: the first caller's GO is stored as their approval (202, with
+        `pendingGo`), and a second, different caller's GO approves the same attestations (send none,
+        or the same ones) and records the decision with both as approvers (201). The first approver
+        cannot approve again (MIG-0004, CUT-1605); a NO_GO recorded in between voids a pending
+        approval. Service principals cannot decide.
+
+        The checklist is evaluated in the transaction that stores the request, so a GO rests on the
+        pack runs and the parallel runs as they are at that moment. `attestations` confirm the
+        attested items, each with a reference to its evidence (CUT-1606 when missing). A GO, and a
+        GO approval, are refused with CUT-1607 while any item is not met; a GO is recorded once per
+        plan (a later decision is MIG-0004). Nothing can be decided on a rolled-back plan (MIG-0004).
+        A decision is stored with its checklist and writes dev.passage.cutover.decision.recorded.v1;
+        a decision or an approval moves the plan's version. `version` works as on step completion.
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              additionalProperties: false
+              properties:
+                decision:
+                  type: string
+                  enum: [GO, NO_GO]
+                reason:
+                  type: string
+                  maxLength: 2000
+                  description: Required for NO_GO.
+                attestations:
+                  type: array
+                  description: Confirmations of the attested checklist items. The second approver of a GO sends none or the first approver's.
+                  maxItems: 14
+                  items:
+                    type: object
+                    required: [code, confirmed]
+                    additionalProperties: false
+                    properties:
+                      code:
+                        type: string
+                        description: An attested checklist item code, for example opening_tb_signed.
+                      confirmed:
+                        type: boolean
+                      reference:
+                        type: string
+                        maxLength: 500
+                        description: Where the evidence is kept (a document link or ticket); required when confirmed.
+                version:
+                  type: integer
+                  minimum: 1
+      responses:
+        "201":
+          description: A decision was recorded (a NO_GO, or a GO by its second approver), with its checklist, and the plan after it.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [decision, plan]
+                properties:
+                  decision:
+                    $ref: "#/components/schemas/Decision"
+                  plan:
+                    $ref: "#/components/schemas/Plan"
+        "202":
+          description: The caller's approval of a GO was stored; the GO is recorded when a second, different CutoverManager approves it.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pendingGo, plan]
+                properties:
+                  pendingGo:
+                    $ref: "#/components/schemas/GoApproval"
+                  plan:
+                    $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
@@ -1877,6 +2013,127 @@ components:
         available:
           type: boolean
           description: A run can be started for this pack in this release.
+    ChecklistItem:
+      type: object
+      required: [code, title, source, status, references]
+      properties:
+        code:
+          type: string
+        title:
+          type: string
+        source:
+          type: string
+          enum: [system, attested]
+          description: system items are evaluated from the factory's own data; attested items are confirmed by the approvers.
+        status:
+          type: string
+          enum: [MET, OPEN, UNCONFIRMED]
+        detail:
+          type: string
+        references:
+          type: array
+          description: Run ids (pack runs or parallel runs) the item rests on.
+          items:
+            type: string
+    GoApproval:
+      type: object
+      description: A CutoverManager's approval of a GO, waiting for a second, different approver (CUT-1605).
+      required: [round, approver, attestations, planVersion, approvedAt]
+      properties:
+        round:
+          type: integer
+          minimum: 1
+          description: The seq the decision takes when it is recorded; a decision recorded in between voids the approval.
+        approver:
+          type: string
+          description: The authenticated user who approved.
+        attestations:
+          type: array
+          description: The confirmed attested items with their evidence references; the second approver approves these.
+          items:
+            type: object
+            required: [code, confirmed]
+            properties:
+              code:
+                type: string
+              confirmed:
+                type: boolean
+              reference:
+                type: string
+        planVersion:
+          type: integer
+          minimum: 2
+        approvedAt:
+          type: string
+          format: date-time
+    DecisionSummary:
+      type: object
+      required: [seq, decision, approvers, decidedAt]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        decision:
+          type: string
+          enum: [GO, NO_GO]
+        approvers:
+          type: array
+          description: Authenticated users who approved, in order; two for a GO, the recording user for a NO_GO.
+          items:
+            type: string
+        reason:
+          type: string
+        decidedBy:
+          type: string
+          description: The user who recorded the decision (the last approver).
+        decidedAt:
+          type: string
+          format: date-time
+    Decision:
+      allOf:
+        - $ref: "#/components/schemas/DecisionSummary"
+        - type: object
+          required: [planVersion, checklist]
+          properties:
+            planVersion:
+              type: integer
+              minimum: 2
+              description: The plan's version after the decision.
+            checklist:
+              type: array
+              description: The checklist as evaluated when the decision was taken.
+              items:
+                $ref: "#/components/schemas/ChecklistItem"
+    Readiness:
+      type: object
+      required: [planId, version, rolledBack, systemReady, items, openItems, decisions]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        rolledBack:
+          type: boolean
+        systemReady:
+          type: boolean
+          description: Both items the factory evaluates are met and the plan is not rolled back.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChecklistItem"
+        openItems:
+          type: array
+          description: Codes of the items not MET.
+          items:
+            type: string
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Decision"
+        pendingGo:
+          $ref: "#/components/schemas/GoApproval"
     Plan:
       type: object
       required: [planId, t0, packs, entities, abortOffsetMin, rolledBack, approvers, version, createdAt, stepsDone, stepsTotal, openGoNoGo, abortDue]
@@ -1925,6 +2182,9 @@ components:
         abortWarning:
           type: string
           description: CUT-1604 text in the hour before the deadline.
+        decision:
+          description: The latest go/no-go decision; absent until one is recorded.
+          $ref: "#/components/schemas/DecisionSummary"
         rekeying:
           type: object
           description: Present once the plan is rolled back. The lines exported for re-keying (FR-49.9).
