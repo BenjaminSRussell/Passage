@@ -36,6 +36,33 @@ describe("engineering module", () => {
     expect(engineering.nav.find((n) => n.label === "Change orders")).toMatchObject({ to: "/engineering/ecos", duty: "engineering.read" });
   });
 
+  it("declares the ECR routes and nav entry, with New gated on the BOM write duty", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(expect.arrayContaining(["/engineering/ecrs", "/engineering/ecrs/new", "/engineering/ecrs/:id"]));
+    expect(engineering.routes.find((r) => r.path === "/engineering/ecrs/new")?.handle).toMatchObject({ duty: "engineering.bom.write" });
+    expect(engineering.nav.find((n) => n.label === "Change requests")).toMatchObject({ to: "/engineering/ecrs", duty: "engineering.read" });
+  });
+
+  it("shows the ECR decisions only with engineering.ecr.review", async () => {
+    const ecr = { id: "a", number: "ECR-1", title: "Swap", priority: "high", state: "under_review", products: ["BIKE"], requestedBy: "rita" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ecr }));
+    const detail = engineering.routes.find((r) => r.path === "/engineering/ecrs/:id")!.element;
+    const reader = render(
+      <PrincipalProvider duties={["engineering.read", "engineering.bom.write"]}>
+        <MemoryRouter>{detail}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    reader.unmount();
+    render(
+      <PrincipalProvider duties={["engineering.read", "engineering.ecr.review"]}>
+        <MemoryRouter>{detail}</MemoryRouter>
+      </PrincipalProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+  });
+
   it("declares the routing routes and nav entries", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(
       expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id", "/engineering/routes/:id/edit"]),

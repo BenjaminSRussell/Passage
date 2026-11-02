@@ -13,6 +13,10 @@ import {
   listResourceGroups,
   listResources,
   listRouteVersions,
+  listEcrs,
+  getEcr,
+  createEcr,
+  actOnEcr,
 } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -150,5 +154,22 @@ describe("engineering client", () => {
       expect(error).toBeInstanceOf(ApiError);
       expect(error).toMatchObject({ code: "ENG-INVALID-QUERY", message: "Invalid query", status: 422 });
     }
+  });
+
+  it("calls the ECR endpoints with filters, an idempotency key and the action routes", async () => {
+    const fetchMock = stub({ ok: true, status: 200, json: async () => ({ items: [] }) });
+    await listEcrs({ state: "approved", productId: "BIKE" }, "c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?state=approved&productId=BIKE&cursor=c1");
+    await getEcr("a/1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs/a%2F1");
+    await createEcr({ number: "E", title: "t", priority: "low", products: ["A"] }, "key-1");
+    const [, create] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    expect(new Headers(create?.headers).get("Idempotency-Key")).toBe("key-1");
+    await actOnEcr("a", "reject", "no");
+    const [url, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    expect(url).toBe("/api/v1/engineering/ecrs/a:reject");
+    expect(init?.body).toBe('{"reason":"no"}');
+    await actOnEcr("a", "submit");
+    expect(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1]?.body).toBe("{}");
   });
 });

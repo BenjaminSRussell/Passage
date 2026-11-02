@@ -6,6 +6,10 @@ const (
 	EcoSubmitted        = "dev.passage.engineering.eco.submitted.v1"
 	EcoApproved         = "dev.passage.engineering.eco.approved.v1"
 	EcoReleased         = "dev.passage.engineering.eco.released.v1"
+	EcrSubmitted        = "dev.passage.engineering.ecr.submitted.v1"
+	EcrApproved         = "dev.passage.engineering.ecr.approved.v1"
+	EcrRejected         = "dev.passage.engineering.ecr.rejected.v1"
+	EcrCancelled        = "dev.passage.engineering.ecr.cancelled.v1"
 )
 
 type BomVersionActivatedData struct {
@@ -34,6 +38,7 @@ type EcoData struct {
 	AffectedVersions []string `json:"affectedVersions"`
 	ReleaseDate      string   `json:"releaseDate,omitempty"`
 	ApproverID       string   `json:"approverId,omitempty"`
+	EcrID            string   `json:"ecrId,omitempty"`
 }
 
 const (
@@ -63,4 +68,14 @@ type RouteVersionActivatedData struct {
 	ProductID      string `json:"productId"`
 	SiteID         string `json:"siteId"`
 	EffectiveFrom  string `json:"effectiveFrom"`
+}
+
+type EcrData struct {
+	EcrID       string   `json:"ecrId"`
+	EcrNumber   string   `json:"ecrNumber"`
+	Title       string   `json:"title"`
+	Priority    string   `json:"priority"`
+	Products    []string `json:"products"`
+	RequestedBy string   `json:"requestedBy"`
+	DecidedBy   string   `json:"decidedBy,omitempty"`
 }

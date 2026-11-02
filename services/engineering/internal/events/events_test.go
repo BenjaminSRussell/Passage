@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventTypes_Valid(t *testing.T) {
-	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated, events.RouteVersionActivated} {
+	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated, events.RouteVersionActivated, events.EcrSubmitted, events.EcrApproved, events.EcrRejected, events.EcrCancelled} {
 		if !platformevents.ValidType(typ) {
 			t.Errorf("%s is not a valid event type", typ)
 		}
@@ -31,6 +31,8 @@ func TestPayloads_MatchAsyncAPI(t *testing.T) {
 	}{
 		{"resourceChanged", events.ResourceChanged, events.ResourceChangedData{ChangedFields: []string{"x"}, SiteID: "s", CalendarID: "c"}},
 		{"calendarGenerated", events.CalendarGenerated, events.CalendarGeneratedData{}},
+		{"ecrSubmitted", events.EcrSubmitted, events.EcrData{DecidedBy: "d"}},
+		{"ecoSubmitted", events.EcoSubmitted, events.EcoData{ApproverID: "a", EcrID: "e", ReleaseDate: "2026-01-01"}},
 	}
 	for _, tc := range cases {
 		start := strings.Index(spec, "    "+tc.message+":\n")

@@ -14,6 +14,13 @@ channels:
       submitted: { $ref: '#/components/messages/ecoSubmitted' }
       approved: { $ref: '#/components/messages/ecoApproved' }
       released: { $ref: '#/components/messages/ecoReleased' }
+  passage.engineering.ecr:
+    address: passage.engineering.ecr
+    messages:
+      submitted: { $ref: '#/components/messages/ecrSubmitted' }
+      approved: { $ref: '#/components/messages/ecrApproved' }
+      rejected: { $ref: '#/components/messages/ecrRejected' }
+      cancelled: { $ref: '#/components/messages/ecrCancelled' }
   passage.engineering.routeversion:
     address: passage.engineering.routeversion
     messages:
@@ -47,6 +54,22 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.engineering.eco' }
     messages: [{ $ref: '#/channels/passage.engineering.eco/messages/released' }]
+  onEcrSubmitted:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.ecr' }
+    messages: [{ $ref: '#/channels/passage.engineering.ecr/messages/submitted' }]
+  onEcrApproved:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.ecr' }
+    messages: [{ $ref: '#/channels/passage.engineering.ecr/messages/approved' }]
+  onEcrRejected:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.ecr' }
+    messages: [{ $ref: '#/channels/passage.engineering.ecr/messages/rejected' }]
+  onEcrCancelled:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.ecr' }
+    messages: [{ $ref: '#/channels/passage.engineering.ecr/messages/cancelled' }]
   onRouteVersionActivated:
     action: send
     channel: { $ref: '#/channels/passage.engineering.routeversion' }
@@ -101,6 +124,7 @@ components:
           affectedVersions: { type: array, items: { type: string } }
           releaseDate: { type: string, format: date }
           approverId: { type: string }
+          ecrId: { type: string, description: The approved change request this ECO carries out; absent for an ECO raised directly. }
       x-passage-type: dev.passage.engineering.eco.submitted.v1
     ecoApproved:
       name: ecoApproved
@@ -112,6 +136,37 @@ components:
       title: ECO released to production
       payload: *ecoPayload
       x-passage-type: dev.passage.engineering.eco.released.v1
+    ecrSubmitted:
+      name: ecrSubmitted
+      title: Engineering change request submitted
+      payload: &ecrPayload
+        type: object
+        required: [ecrId, ecrNumber, title, priority, products, requestedBy]
+        properties:
+          ecrId: { type: string }
+          ecrNumber: { type: string }
+          title: { type: string }
+          priority: { type: string, enum: [low, medium, high, critical] }
+          products: { type: array, items: { type: string } }
+          requestedBy: { type: string }
+          decidedBy: { type: string, description: Set on the approved and rejected events (the reviewer) and on the cancelled event (the requester who withdrew it). }
+      x-passage-type: dev.passage.engineering.ecr.submitted.v1
+    ecrApproved:
+      name: ecrApproved
+      title: Engineering change request approved
+      payload: *ecrPayload
+      x-passage-type: dev.passage.engineering.ecr.approved.v1
+    ecrRejected:
+      name: ecrRejected
+      title: Engineering change request rejected
+      payload: *ecrPayload
+      x-passage-type: dev.passage.engineering.ecr.rejected.v1
+    ecrCancelled:
+      name: ecrCancelled
+      title: Engineering change request withdrawn
+      summary: The requester withdrew a submitted or under-review request. A draft withdrawn before submission raises no event.
+      payload: *ecrPayload
+      x-passage-type: dev.passage.engineering.ecr.cancelled.v1
     routeVersionActivated:
       name: routeVersionActivated
       title: Route version became active

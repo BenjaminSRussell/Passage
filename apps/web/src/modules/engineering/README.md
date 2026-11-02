@@ -18,3 +18,4 @@ Engineering workspace for wave 9. Discovered by the shell via `module.ts`.
 `api/client.ts` routes every call through one `request` helper that turns a problem document into an `ApiError` carrying `code`, the problem `detail` as its message (falling back to `title`, which is only the HTTP status text), and the per-field `errors`.
 
 Needs: none beyond the shell lockfile.
+- Change requests at `/engineering/ecrs` (list with state and product filters), `/engineering/ecrs/new` and `/engineering/ecrs/:id` (workflow actions: submit, withdraw, start review, approve, reject; decisions gated on `engineering.ecr.review` in the UI, enforced by the service). The New ECO form takes an optional change request id and the ECR detail links to and from the ECO.

@@ -34,6 +34,7 @@ const (
 	dutyBomWrite      = "engineering.bom.write"
 	dutyEcoApprove    = "engineering.eco.approve"
 	dutyEcoWorkflow   = "engineering.eco.workflow"
+	dutyEcrReview     = "engineering.ecr.review"
 	dutyResourceWrite = "engineering.resource.write"
 	dutyRouteWrite    = "engineering.route.write"
 	dateLayout        = "2006-01-02"
@@ -65,6 +66,9 @@ type API struct {
 	bomConflicts atomic.Int64
 	ecosReleased atomic.Int64
 	ecosFailed   atomic.Int64
+	ecrsCreated  atomic.Int64
+	ecrsDecided  atomic.Int64
+	ecrsFailed   atomic.Int64
 	explosions   atomic.Int64
 	stats        routeStats
 
@@ -110,6 +114,15 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecrs", a.createEcr)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecrs", a.listEcrs)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecrs/{id}", a.getEcr)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecrs/{id}:submit", a.moveEcr("submit"))
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecrs/{id}:cancel", a.moveEcr("cancel"))
+		ecrDecider := r.With(authz.RequireDuty(dutyEcrReview))
+		ecrDecider.Post("/v1/engineering/ecrs/{id}:review", a.moveEcr("review"))
+		ecrDecider.Post("/v1/engineering/ecrs/{id}:approve", a.moveEcr("approve"))
+		ecrDecider.Post("/v1/engineering/ecrs/{id}:reject", a.moveEcr("reject"))
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos", a.listEcos)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}", a.getEco)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}/impact", a.ecoImpact)
@@ -695,11 +708,12 @@ type ecoBody struct {
 	DecidedBy      string            `json:"decidedBy,omitempty"`
 	CreatedBy      string            `json:"createdBy,omitempty"`
 	DecisionReason string            `json:"decisionReason,omitempty"`
+	EcrID          string            `json:"ecrId,omitempty"`
 	Replaces       []replacementBody `json:"replaces"`
 }
 
 func bodyFromEco(e domain.Eco) ecoBody {
-	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, CreatedBy: e.CreatedBy, DecisionReason: e.DecisionReason, Replaces: make([]replacementBody, len(e.Replaces))}
+	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, CreatedBy: e.CreatedBy, DecisionReason: e.DecisionReason, EcrID: e.EcrID, Replaces: make([]replacementBody, len(e.Replaces))}
 	for i, r := range e.Replaces {
 		body.Replaces[i] = replacementBody{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID}
 	}
@@ -713,6 +727,10 @@ func (b ecoBody) toDomain() (domain.Eco, map[string]string) {
 		fields["number"] = fmt.Sprintf("must be 1 to %d characters", maxNumberLength)
 	}
 	eco := domain.Eco{ID: ids.New(), Number: number, State: domain.EcoSubmitted}
+	if b.EcrID != "" {
+		checkUUID("ecrId", b.EcrID, fields)
+		eco.EcrID = b.EcrID
+	}
 	eco.ReleaseDate = optionalDate("releaseDate", b.ReleaseDate, fields)
 	if len(b.Replaces) == 0 || len(b.Replaces) > maxLines {
 		fields["replaces"] = fmt.Sprintf("must contain 1 to %d replacements", maxLines)
@@ -891,11 +909,11 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict, domain.CodeResInUse, domain.CodeResConflict:
+	case domain.CodeEcoState, domain.CodeEcrState, domain.CodeEcrConverted, domain.CodeEcrNotApproved, domain.CodeRouteState, domain.CodeRouteOverlap, domain.CodeBomState, domain.CodeBomInEco, domain.CodeBomVersionConflict, domain.CodeRouteConflict, domain.CodeResInUse, domain.CodeResConflict:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable
-	case domain.CodeEcoSelfApproval, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty:
+	case domain.CodeEcoSelfApproval, domain.CodeEcrSelfApproval, domain.CodeEcrNotRequester, domain.CodeEcoCreatorUnknown, domain.CodeEcoBackdateDuty:
 		status = http.StatusForbidden
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

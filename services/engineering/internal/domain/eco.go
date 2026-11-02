@@ -43,6 +43,8 @@ type Eco struct {
 	DecidedBy      string
 	CreatedBy      string
 	DecisionReason string
+	// EcrID is the approved change request this ECO carries out, empty for an ECO raised directly.
+	EcrID string
 }
 
 type Decision struct {
@@ -250,7 +252,7 @@ func (p ReleasePlan) ExpiredEvents(ecoID string) []events.BomVersionExpiredData 
 }
 
 func (e Eco) EventData() events.EcoData {
-	data := events.EcoData{EcoID: e.ID, EcoNumber: e.Number, ApproverID: e.DecidedBy, AffectedVersions: make([]string, len(e.Replaces))}
+	data := events.EcoData{EcoID: e.ID, EcoNumber: e.Number, ApproverID: e.DecidedBy, EcrID: e.EcrID, AffectedVersions: make([]string, len(e.Replaces))}
 	for i, r := range e.Replaces {
 		data.AffectedVersions[i] = r.NewVersionID
 	}

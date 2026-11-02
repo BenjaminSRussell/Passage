@@ -94,6 +94,10 @@ type Store interface {
 	UpdateBomDraft(ctx context.Context, v domain.BomVersion, expectedVersion int, idem Idem, check func(Snapshot) error) (domain.BomVersion, error)
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
+	CreateEcr(ctx context.Context, e domain.Ecr, idem Idem) (domain.Ecr, error)
+	GetEcr(ctx context.Context, id string) (domain.Ecr, error)
+	ListEcrs(ctx context.Context, f EcrFilter, afterID string, limit int) (Page[domain.Ecr], error)
+	SaveEcr(ctx context.Context, e domain.Ecr, prev domain.EcrState) error
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
 	ListEcos(ctx context.Context, state string, afterID string, limit int) (Page[domain.Eco], error)
 	ReleaseEco(ctx context.Context, e domain.Eco, prev domain.EcoState, plan domain.ReleasePlan) error
@@ -508,8 +512,8 @@ func (s *Postgres) GetBomVersion(ctx context.Context, id string) (v domain.BomVe
 func getEco(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.Eco, error) {
 	var e domain.Eco
 	var releaseDate *time.Time
-	err := tx.QueryRow(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason from eco where tenant_id = $1 and id = $2::uuid`, tenantID, id).
-		Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason)
+	err := tx.QueryRow(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason, coalesce(ecr_id::text, '') from eco where tenant_id = $1 and id = $2::uuid`, tenantID, id).
+		Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason, &e.EcrID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return e, httpx.NewProblem(http.StatusNotFound, CodeEcoNotFound, "ECO not found")
 	}
@@ -576,8 +580,13 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 		if err := lockProducts(ctx, tx, p.TenantID, products...); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into eco (tenant_id, id, number, state, release_date, created_by) values ($1, $2, $3, $4, $5, $6)`,
-			p.TenantID, e.ID, e.Number, string(e.State), zeroToNil(e.ReleaseDate), e.CreatedBy); err != nil {
+		if e.EcrID != "" {
+			if err := checkEcrSource(ctx, tx, p.TenantID, e.EcrID, products); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `insert into eco (tenant_id, id, number, state, release_date, created_by, ecr_id) values ($1, $2, $3, $4, $5, $6, nullif($7, '')::uuid)`,
+			p.TenantID, e.ID, e.Number, string(e.State), zeroToNil(e.ReleaseDate), e.CreatedBy, e.EcrID); err != nil {
 			return err
 		}
 		for _, r := range e.Replaces {
@@ -620,7 +629,7 @@ func (s *Postgres) ListEcos(ctx context.Context, state, afterID string, limit in
 	}
 	var items []domain.Eco
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason from eco
+		rows, err := tx.Query(ctx, `select id::text, number, state, release_date, decided_by, created_by, decision_reason, coalesce(ecr_id::text, '') from eco
 			where tenant_id = $1 and id > $2::uuid and ($3 = '' or state = $3) order by id limit $4`, p.TenantID, afterID, state, limit+1)
 		if err != nil {
 			return err
@@ -631,7 +640,7 @@ func (s *Postgres) ListEcos(ctx context.Context, state, afterID string, limit in
 		for rows.Next() {
 			var e domain.Eco
 			var releaseDate *time.Time
-			if err := rows.Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason); err != nil {
+			if err := rows.Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy, &e.CreatedBy, &e.DecisionReason, &e.EcrID); err != nil {
 				return err
 			}
 			e.ReleaseDate = valueOrZero(releaseDate)

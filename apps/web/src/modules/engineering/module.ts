@@ -10,12 +10,17 @@ import { BomVersionCreatePage, BomVersionPage, BomVersionsPage } from "./bom";
 import { BomVersionEditPage } from "./bomEdit";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
 import { EcoCreatePage, EcoPage, EcosPage } from "./eco";
+import { EcrCreatePage, EcrPage, EcrsPage } from "./ecr";
 import { RouteVersionCreatePage } from "./routeCreate";
 import { RouteVersionEditPage } from "./routeEdit";
 import { CalendarCreatePage, CapabilityCreatePage, ResourceCreatePage, ResourceGroupCreatePage } from "./setup";
 
 /** Every resource, group, capability and calendar write, including Generate days, is under this seeded duty. */
 const dutyResourceWrite = "engineering.resource.write";
+
+/** Raising, submitting and withdrawing an ECR use the BOM write duty; the decisions use the ECR review duty. */
+const dutyBomWrite = "engineering.bom.write";
+const dutyEcrReview = "engineering.ecr.review";
 
 /** UX only: hides the New buttons from principals without the write duty; the service still enforces it. */
 function useCreateAction(to: string): (() => void) | undefined {
@@ -86,12 +91,45 @@ function EcoRoute() {
     id,
     onBack: () => navigate("/engineering/ecos"),
     onOpenBom: (versionId: string) => navigate(`/engineering/boms/${encodeURIComponent(versionId)}`),
+    onOpenEcr: (ecrId: string) => navigate(`/engineering/ecrs/${encodeURIComponent(ecrId)}`),
+  });
+}
+
+function EcrsRoute() {
+  const navigate = useNavigate();
+  const onCreate = holdsDuty(usePrincipalDuties(), dutyBomWrite) ? () => navigate("/engineering/ecrs/new") : undefined;
+  return createElement(EcrsPage, { onOpen: (id: string) => navigate(`/engineering/ecrs/${encodeURIComponent(id)}`), onCreate });
+}
+
+function EcrRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const duties = usePrincipalDuties();
+  return createElement(EcrPage, {
+    id,
+    onBack: () => navigate("/engineering/ecrs"),
+    onOpenEco: (ecoId: string) => navigate(`/engineering/ecos/${encodeURIComponent(ecoId)}`),
+    onCreateEco: (ecrId: string) => navigate(`/engineering/ecos/new?ecrId=${encodeURIComponent(ecrId)}`),
+    canWrite: holdsDuty(duties, dutyBomWrite),
+    canReview: holdsDuty(duties, dutyEcrReview),
+  });
+}
+
+function EcrCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(EcrCreatePage, {
+    onCreated: (id: string) => navigate(`/engineering/ecrs/${encodeURIComponent(id)}`),
+    onCancel: () => navigate("/engineering/ecrs"),
   });
 }
 
 function EcoCreateRoute() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const ecrId = params.get("ecrId") ?? "";
   return createElement(EcoCreatePage, {
+    key: ecrId,
+    initialEcrId: ecrId,
     onCreated: (id: string) => navigate(`/engineering/ecos/${encodeURIComponent(id)}`),
     onCancel: () => navigate("/engineering/ecos"),
   });
@@ -222,6 +260,9 @@ const engineering: PassageModule = {
     { path: "/engineering/ecos", element: createElement(EcosRoute), handle: { title: "Change orders" } },
     { path: "/engineering/ecos/new", element: createElement(EcoCreateRoute), handle: { title: "New change order" } },
     { path: "/engineering/ecos/:id", element: createElement(EcoRoute), handle: { title: "Change order" } },
+    { path: "/engineering/ecrs", element: createElement(EcrsRoute), handle: { title: "Change requests" } },
+    { path: "/engineering/ecrs/new", element: createElement(EcrCreateRoute), handle: { title: "New change request", duty: dutyBomWrite } },
+    { path: "/engineering/ecrs/:id", element: createElement(EcrRoute), handle: { title: "Change request" } },
     { path: "/engineering/routes", element: createElement(RouteVersionsRoute) },
     { path: "/engineering/routes/new", element: createElement(RouteVersionCreateRoute), handle: { title: "New route version" } },
     { path: "/engineering/routes/:id/edit", element: createElement(RouteVersionEditRoute), handle: { title: "Edit route draft" } },
@@ -243,6 +284,7 @@ const engineering: PassageModule = {
   nav: [
     { label: "Overview", to: "/engineering", duty: "engineering.read" },
     { label: "Bills of material", to: "/engineering/boms", duty: "engineering.read" },
+    { label: "Change requests", to: "/engineering/ecrs", duty: "engineering.read" },
     { label: "Change orders", to: "/engineering/ecos", duty: "engineering.read" },
     { label: "Routings", to: "/engineering/routes", duty: "engineering.read" },
     { label: "Resources", to: "/engineering/resources", duty: "engineering.read" },

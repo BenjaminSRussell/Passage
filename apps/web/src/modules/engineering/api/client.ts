@@ -511,12 +511,15 @@ export interface Eco {
   state: string;
   releaseDate?: string;
   decidedBy?: string;
+  /** The approved change request this ECO carries out, if any. */
+  ecrId?: string;
   replaces: EcoReplacement[];
 }
 
 export interface EcoInput {
   number: string;
   releaseDate?: string;
+  ecrId?: string;
   replaces: EcoReplacement[];
 }
 
@@ -567,4 +570,45 @@ export function createEco(body: EcoInput, idempotencyKey: string): Promise<Eco> 
 
 export function releaseEco(id: string, idempotencyKey: string): Promise<Eco> {
   return request(`/ecos/${encodeURIComponent(id)}:release`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+export interface Ecr {
+  id: string;
+  number: string;
+  title: string;
+  reason?: string;
+  priority: string;
+  state: string;
+  products: string[];
+  requestedBy?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+  /** The live ECO that carries this request out. */
+  ecoId?: string;
+}
+
+export interface EcrInput {
+  number: string;
+  title: string;
+  reason?: string;
+  priority: string;
+  products: string[];
+}
+
+export type EcrAction = "submit" | "review" | "approve" | "reject" | "cancel";
+
+export function listEcrs(filters: { state?: string; productId?: string }, cursor?: string): Promise<Page<Ecr>> {
+  return request(`/ecrs${query({ ...filters, cursor })}`);
+}
+
+export function getEcr(id: string): Promise<Ecr> {
+  return request(`/ecrs/${encodeURIComponent(id)}`);
+}
+
+export function createEcr(body: EcrInput, idempotencyKey: string): Promise<Ecr> {
+  return post("/ecrs", body, idempotencyKey);
+}
+
+export function actOnEcr(id: string, action: EcrAction, reason?: string): Promise<Ecr> {
+  return post(`/ecrs/${encodeURIComponent(id)}:${action}`, reason ? { reason } : {});
 }

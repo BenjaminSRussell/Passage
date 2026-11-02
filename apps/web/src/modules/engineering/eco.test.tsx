@@ -57,6 +57,16 @@ describe("EcosPage", () => {
   });
 });
 
+describe("EcoPage change request link", () => {
+  it("links an ECO to the ECR it carries out", async () => {
+    stub(() => ok(eco("a", { ecrId: "ecr-1" })));
+    const opened: string[] = [];
+    render(<EcoPage id="a" onOpenEcr={(id) => opened.push(id)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open change request ecr-1" }));
+    expect(opened).toEqual(["ecr-1"]);
+  });
+});
+
 describe("EcoPage", () => {
   it("shows the facts, links to versions and releases with an idempotency key", async () => {
     const fetchMock = stub((url) => (url.endsWith(":release") ? ok(eco("a", { state: "released", decidedBy: "alice" })) : ok(eco("a"))));
@@ -173,6 +183,16 @@ describe("EcoCreatePage", () => {
     expect(screen.getByLabelText(/Release date/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText(/Release date/)).toHaveAccessibleDescription(/requires the Backdate duty/));
     expect(screen.queryByText("You do not have permission to create ECOs")).toBeNull();
+  });
+
+  it("carries the change request id from the ECR into the body", async () => {
+    const fetchMock = stub(() => ok(eco("new"), 201));
+    render(<EcoCreatePage initialEcrId="ecr-1" onCreated={() => undefined} />);
+    expect(screen.getByLabelText(/Change request ID/)).toHaveValue("ecr-1");
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: "Create ECO" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({ number: "ECO-9", ecrId: "ecr-1" });
   });
 
   it("removes a replacement row and cancels", () => {

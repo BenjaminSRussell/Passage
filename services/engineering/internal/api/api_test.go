@@ -59,6 +59,7 @@ type fakeStore struct {
 	created    []domain.BomVersion
 	released   []releaseCall
 	res        *resourceState
+	ecrs       *ecrState
 	routes     []domain.RouteVersion
 
 	activateErr error

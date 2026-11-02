@@ -63,6 +63,13 @@ const (
 	CodeEcoActorRequired       = "ENG-ECO-ACTOR-REQUIRED"
 	CodeEcoCreatorUnknown      = "ENG-ECO-CREATOR-UNKNOWN"
 	CodeAltConflict            = "ENG-ALT-CONFLICT"
+	CodeEcrState               = "ENG-ECR-STATE"
+	CodeEcrSelfApproval        = "ENG-ECR-SELF-APPROVAL"
+	CodeEcrActorRequired       = "ENG-ECR-ACTOR-REQUIRED"
+	CodeEcrNotApproved         = "ENG-ECR-NOT-APPROVED"
+	CodeEcrConverted           = "ENG-ECR-CONVERTED"
+	CodeEcrProduct             = "ENG-ECR-PRODUCT"
+	CodeEcrNotRequester        = "ENG-ECR-NOT-REQUESTER"
 )
 
 const (

@@ -367,8 +367,14 @@ paths:
         '403':
           description: AUTH-0003 without engineering.bom.write, or ENG-ECO-BACKDATE-DUTY when the release date is before today's UTC date (BR-9.10; the backdate duty is not built, so every past date is refused).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: ENG-BOM-VERSION-NOTFOUND, a replaced or replacing BOM version does not exist, or ENG-ECR-NOTFOUND, the named ecrId does not exist in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: ENG-ECR-NOT-APPROVED, the named ECR is not approved; ENG-ECR-CONVERTED, it already has a live ECO; or ENG-DUPLICATE, the ECO number or Idempotency-Key is taken.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: ENG-ECO-HORIZON, the release date is more than 365 days after today's UTC date (BR-9.10).
+          description: ENG-ECO-HORIZON, the release date is more than 365 days after today's UTC date (BR-9.10), or ENG-ECR-PRODUCT, a replaced product is not listed on the named ECR.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -482,6 +488,151 @@ paths:
           description: ENG-ECO-NOTFOUND, no ECO with this id in the tenant.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs:
+    post:
+      operationId: createEcr
+      summary: Raise an engineering change request
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+      responses:
+        '201':
+          description: ECR created in the draft state with the acting user as requester, or the original ECR on an Idempotency-Key replay. A draft raises no event.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '400':
+          description: COM-0001, a field failed validation (number, title, reason, priority, products).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: ENG-DUPLICATE, the ECR number already exists.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEcrs
+      summary: List engineering change requests
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [draft, submitted, under_review, approved, rejected, cancelled] } }
+        - { name: productId, in: query, description: Only requests that list this affected product., schema: { type: string, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of ECRs ordered by id. Pass nextCursor as cursor for the next page. A bad state, limit or cursor is 400 COM-0001.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Ecr' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:
+    get:
+      operationId: getEcr
+      summary: Get an engineering change request
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECR with its state, affected products, decision and the live ECO that carries it out, if any.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:submit:
+    post:
+      operationId: submitEcr
+      summary: Submit a draft engineering change request
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECR moves draft to submitted and ecr.submitted is enqueued. Repeating it on a submitted ECR returns it unchanged. Any other state is 409 ENG-ECR-STATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '404':
+          description: ENG-ECR-NOTFOUND, no ECR with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:review:
+    post:
+      operationId: reviewEcr
+      summary: Start the review of a submitted engineering change request
+      x-passage-duty: engineering.ecr.review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECR moves submitted to under_review. The requester cannot review it (403 ENG-ECR-SELF-APPROVAL). Repeating it returns the ECR unchanged. Any other state is 409 ENG-ECR-STATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '404':
+          description: ENG-ECR-NOTFOUND, no ECR with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '403':
+          description: ENG-ECR-SELF-APPROVAL, the user who requested the ECR cannot review or decide it, or AUTH-0003 without engineering.ecr.review.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:approve:
+    post:
+      operationId: approveEcr
+      summary: Approve an engineering change request under review
+      x-passage-duty: engineering.ecr.review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECR moves under_review to approved, decidedBy is the acting user (never the requester) and ecr.approved is enqueued. An ECO may then name it. Repeating it on an approved ECR returns it unchanged. Any other state is 409 ENG-ECR-STATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '404':
+          description: ENG-ECR-NOTFOUND, no ECR with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '403':
+          description: ENG-ECR-SELF-APPROVAL, the user who requested the ECR cannot review or decide it, or AUTH-0003 without engineering.ecr.review.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:reject:
+    post:
+      operationId: rejectEcr
+      summary: Reject an engineering change request under review
+      x-passage-duty: engineering.ecr.review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECR moves under_review to rejected and is final. An optional JSON body {reason} (200 characters at most) is kept as decisionReason; the requester cannot reject it. ecr.rejected is enqueued. Repeating it returns the ECR unchanged. Any other state is 409 ENG-ECR-STATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '404':
+          description: ENG-ECR-NOTFOUND, no ECR with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '403':
+          description: ENG-ECR-SELF-APPROVAL, the user who requested the ECR cannot review or decide it, or AUTH-0003 without engineering.ecr.review.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecrs/{id}:cancel:
+    post:
+      operationId: cancelEcr
+      summary: Withdraw an engineering change request
+      x-passage-duty: engineering.bom.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The requester withdraws the ECR from draft, submitted or under_review to cancelled. An optional JSON body {reason} is kept as decisionReason and decidedBy is the requester. ecr.cancelled is enqueued unless the ECR was still a draft. Repeating it returns the ECR unchanged. An approved or rejected ECR is 409 ENG-ECR-STATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Ecr' } } }
+        '403':
+          description: ENG-ECR-NOT-REQUESTER, only the user who requested the ECR can withdraw it (a reviewer rejects it instead), or AUTH-0003 without engineering.bom.write.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: ENG-ECR-NOTFOUND, no ECR with this id in the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: ENG-ECR-ACTOR-REQUIRED, the request has no acting user.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/calendars:
     get:
@@ -956,7 +1107,24 @@ components:
         decidedBy: { type: string }
         createdBy: { type: string, readOnly: true, description: The user who created the ECO; they cannot decide it. }
         decisionReason: { type: string, readOnly: true, maxLength: 200 }
+        ecrId: { type: string, format: uuid, description: 'Optional. The approved ECR this ECO carries out. Every replaced product must be listed on the ECR (422 ENG-ECR-PRODUCT), the ECR must be approved (409 ENG-ECR-NOT-APPROVED) and have no other live ECO (409 ENG-ECR-CONVERTED).' }
         replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
+    Ecr:
+      type: object
+      additionalProperties: false
+      required: [number, title, priority, products]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, maxLength: 40 }
+        title: { type: string, maxLength: 200 }
+        reason: { type: string, maxLength: 2000 }
+        priority: { type: string, enum: [low, medium, high, critical] }
+        state: { type: string, readOnly: true, enum: [draft, submitted, under_review, approved, rejected, cancelled] }
+        products: { type: array, minItems: 1, maxItems: 100, items: { type: string, maxLength: 64 }, description: Affected product ids, each listed once. }
+        requestedBy: { type: string, readOnly: true }
+        decidedBy: { type: string, readOnly: true }
+        decisionReason: { type: string, readOnly: true, maxLength: 200 }
+        ecoId: { type: string, format: uuid, readOnly: true, description: The live (not rejected or cancelled) ECO that names this ECR. }
     EcoImpact:
       type: object
       required: [asOf, replacements, products, siteIds, openProductionOrders, openPlannedOrders]

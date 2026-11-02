@@ -139,7 +139,7 @@ export function EcosPage({ onOpen, onCreate }: { onOpen?: (id: string) => void; 
   );
 }
 
-export function EcoPage({ id, onBack, onOpenBom }: { id: string; onBack?: () => void; onOpenBom?: (versionId: string) => void }) {
+export function EcoPage({ id, onBack, onOpenBom, onOpenEcr }: { id: string; onBack?: () => void; onOpenBom?: (versionId: string) => void; onOpenEcr?: (ecrId: string) => void }) {
   const [eco, setEco] = useState<Eco | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -197,6 +197,7 @@ export function EcoPage({ id, onBack, onOpenBom }: { id: string; onBack?: () => 
         ["State", <StatusPill status={eco.state} />],
         ["Release date", eco.releaseDate ?? "On release"],
         ["Decided by", eco.decidedBy || "Pending"],
+        ...(eco.ecrId ? [["Change request", onOpenEcr ? <Button size="sm" onClick={() => onOpenEcr(eco.ecrId!)}>Open change request {eco.ecrId}</Button> : eco.ecrId] as [string, React.ReactNode]] : []),
       ]
     : [];
   const columns: DataTableColumn<EcoReplacement>[] = [
@@ -277,8 +278,9 @@ interface PairDraft {
 // BR-9.10 refusals of the release date (past without the backdate duty, or beyond the horizon).
 const releaseDateCodes = new Set(["ENG-ECO-HORIZON", "ENG-ECO-BACKDATE-DUTY"]);
 
-export function EcoCreatePage({ onCreated, onCancel }: { onCreated?: (id: string) => void; onCancel?: () => void }) {
+export function EcoCreatePage({ onCreated, onCancel, initialEcrId = "" }: { onCreated?: (id: string) => void; onCancel?: () => void; initialEcrId?: string }) {
   const [number, setNumber] = useState("");
+  const [ecrId, setEcrId] = useState(initialEcrId);
   const [releaseDate, setReleaseDate] = useState("");
   const [pairs, setPairs] = useState<PairDraft[]>([{ key: 0, oldVersionId: "", newVersionId: "" }]);
   const nextKey = useRef(1);
@@ -299,6 +301,7 @@ export function EcoCreatePage({ onCreated, onCancel }: { onCreated?: (id: string
     const input = {
       number: number.trim(),
       ...(releaseDate ? { releaseDate } : {}),
+      ...(ecrId.trim() ? { ecrId: ecrId.trim() } : {}),
       replaces: pairs.map((p) => ({ oldVersionId: p.oldVersionId.trim(), newVersionId: p.newVersionId.trim() })),
     };
     const body = JSON.stringify(input);
@@ -333,6 +336,11 @@ export function EcoCreatePage({ onCreated, onCancel }: { onCreated?: (id: string
           <div className={styles.field}>
             <FormField id="new-eco-date" label="Release date" optional error={fields.releaseDate}>
               {(control) => <Input {...control} type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} />}
+            </FormField>
+          </div>
+          <div className={styles.field}>
+            <FormField id="new-eco-ecr" label="Change request ID" optional hint="An approved ECR that lists every product this ECO replaces." error={fields.ecrId}>
+              {(control) => <Input {...control} value={ecrId} onChange={(e) => setEcrId(e.target.value)} />}
             </FormField>
           </div>
           {pairs.map((pair, index) => (
