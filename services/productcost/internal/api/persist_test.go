@@ -77,6 +77,16 @@ func (f *fakeStore) TransitionVersion(_ context.Context, id string, expected int
 	return store.Version{ID: id, Status: domain.VersionBlocked, Version: expected + 1, SiteIDs: []string{}}, f.err
 }
 
+func (f *fakeStore) GetActivation(context.Context, string) (store.Activation, error) {
+	f.calls++
+	return store.Activation{}, f.err
+}
+
+func (f *fakeStore) ActivateVersion(context.Context, store.ActivationInput) (store.ActivationResult, bool, error) {
+	f.calls++
+	return store.ActivationResult{}, false, f.err
+}
+
 func storedRouter(f *fakeStore) http.Handler {
 	r := httpx.NewRouter()
 	a := New(nil, Config{})

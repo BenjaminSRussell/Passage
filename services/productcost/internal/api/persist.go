@@ -40,6 +40,8 @@ type Store interface {
 	GetVersion(ctx context.Context, id string) (store.Version, error)
 	CreateVersion(ctx context.Context, spec domain.VersionSpec, key string) (store.Version, bool, error)
 	TransitionVersion(ctx context.Context, id string, expected int, action string) (store.Version, error)
+	GetActivation(ctx context.Context, id string) (store.Activation, error)
+	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
 }
 
 // WithStore attaches the repository. Without one the stored routes answer 503.
@@ -327,18 +329,37 @@ func (a *API) transitionStoredVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 type storedActivateRequest struct {
-	Version *int `json:"version"`
+	Version                  *int             `json:"version"`
+	DryRun                   bool             `json:"dryRun"`
+	ReversesActivationID     string           `json:"reversesActivationId"`
+	LedgerID                 string           `json:"ledgerId"`
+	PostingDate              string           `json:"postingDate"`
+	Currency                 string           `json:"currency"`
+	InventoryAccount         string           `json:"inventoryAccount"`
+	CostChangeAccount        string           `json:"costChangeAccount"`
+	NewStandardForOpenOrders bool             `json:"newStandardForOpenOrders"`
+	Lines                    []activationLine `json:"lines"`
 }
 
 // activateStoredVersion moves a stored Open or Blocked version to Active
-// (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711).
+// (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711). With
+// lines, a reversal or dryRun it revalues the on-hand and posts the journal
+// (activation.go); a bare request only moves the status.
 func (a *API) activateStoredVersion(w http.ResponseWriter, r *http.Request) {
 	if !a.storeReady(w, r) {
 		return
 	}
 	var req storedActivateRequest
-	if !decode(w, r, &req) {
+	if !decodeLimit(w, r, &req, maxActivationBody) {
 		return
 	}
-	a.storedMove(w, r, domain.ActionActivate, map[string]string{}, req.Version)
+	if !req.revalues() {
+		a.storedMove(w, r, domain.ActionActivate, map[string]string{}, req.Version)
+		return
+	}
+	id, ok := versionID(w, r)
+	if !ok {
+		return
+	}
+	a.activateWithRevaluation(w, r, id, req)
 }

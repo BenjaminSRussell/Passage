@@ -16,11 +16,29 @@ const Context = "costing"
 // 20), production (wave 21) and budgeting read to know which version and split
 // apply.
 var (
-	CostComponentCreated = events.Type(Context, "costcomponent", "created", 1)
-	CostGroupCreated     = events.Type(Context, "costgroup", "created", 1)
-	VersionCreated       = events.Type(Context, "version", "created", 1)
-	VersionTransitioned  = events.Type(Context, "version", "transitioned", 1)
+	CostComponentCreated  = events.Type(Context, "costcomponent", "created", 1)
+	CostGroupCreated      = events.Type(Context, "costgroup", "created", 1)
+	VersionCreated        = events.Type(Context, "version", "created", 1)
+	VersionTransitioned   = events.Type(Context, "version", "transitioned", 1)
+	StandardCostActivated = events.Type(Context, "standardcost", "activated", 1)
 )
+
+// StandardCostActivatedData is the payload of StandardCostActivated (PRD 7.39.5:
+// costingVersionId, itemCount, revaluationJournalId, totalRevaluation). A
+// reversal is a new activation that names the one it reverses.
+type StandardCostActivatedData struct {
+	ActivationID             string `json:"activationId"`
+	CostingVersionID         string `json:"costingVersionId"`
+	LegalEntityID            string `json:"legalEntityId"`
+	ReversesActivationID     string `json:"reversesActivationId,omitempty"`
+	ItemCount                int    `json:"itemCount"`
+	RevaluationJournalID     string `json:"revaluationJournalId"`
+	TotalRevaluation         string `json:"totalRevaluation"`
+	Currency                 string `json:"currency"`
+	PostingDate              string `json:"postingDate"`
+	NewStandardForOpenOrders bool   `json:"newStandardForOpenOrders"`
+	Actor                    string `json:"actor,omitempty"`
+}
 
 // CostComponentCreatedData is the payload of CostComponentCreated.
 type CostComponentCreatedData struct {

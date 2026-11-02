@@ -9,6 +9,11 @@ replicaCount: 2
 costing:
   maxLevels: 20
   rollWorkers: 4
+ledgerUrl: ""
+inventoryUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 1000m, memory: 2Gi }

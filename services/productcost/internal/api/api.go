@@ -22,8 +22,10 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 )
 
 const (
@@ -39,6 +41,11 @@ const (
 	MaxItems = 50000
 	// MaxRevalLines bounds one activation preview.
 	MaxRevalLines = 50000
+	// maxRollBody lets a 50,000-item selection fit in one mass roll request
+	// (AC-39.3): about 1.3 KB per item, against the platform default of 4 MiB.
+	maxRollBody = 64 << 20
+	// maxActivationBody fits MaxRevalLines lines of an activation.
+	maxActivationBody = 32 << 20
 )
 
 var decimalHundred = decimal.NewFromInt(100)
@@ -59,6 +66,12 @@ type API struct {
 	pinger Pinger
 	cfg    Config
 	store  Store
+	onHand inventory.Reader
+	ledger ledgerclient.Ledger
+	now    func() time.Time
+
+	activations            atomic.Int64
+	activationPostFailures atomic.Int64
 
 	calculations     atomic.Int64
 	massRolls        atomic.Int64
@@ -82,7 +95,7 @@ func New(pinger Pinger, cfg Config) *API {
 	if cfg.Workers == 0 {
 		cfg.Workers = domain.DefaultWorkers
 	}
-	return &API{pinger: pinger, cfg: cfg}
+	return &API{pinger: pinger, cfg: cfg, now: time.Now}
 }
 
 // route is one duty-guarded endpoint; api/openapi.yaml lists the same table.
@@ -150,6 +163,8 @@ func (a *API) Metrics() http.Handler {
 		counter("productcost_adhoc_estimates_total", "Ad-hoc estimates computed from costing models.", a.estimates.Load())
 		counter("productcost_cost_structure_created_total", "Cost components and cost groups created (replays not counted).", a.structureChanges.Load())
 		counter("productcost_version_transitions_total", "Stored costing version lifecycle actions applied.", a.versionTransitions.Load())
+		counter("productcost_standard_cost_activations_total", "Standard cost activations and reversals committed with their revaluation (replays not counted).", a.activations.Load())
+		counter("productcost_activation_post_failures_total", "Activations rolled back because the ledger did not accept the revaluation journal.", a.activationPostFailures.Load())
 		counter("productcost_reconciliation_differences_total", "Sites whose standard value differs from the GL balance.", a.reconciliationDifferences.Load())
 	})
 }
@@ -200,6 +215,14 @@ func guard(w http.ResponseWriter, r *http.Request) bool {
 // decode reads a JSON body and turns decode failures into 400 problems.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := httpx.Decode(r, v); err != nil {
+		httpx.Fail(w, r, err)
+		return false
+	}
+	return true
+}
+
+func decodeLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	if err := httpx.DecodeLimit(r, v, limit); err != nil {
 		httpx.Fail(w, r, err)
 		return false
 	}
@@ -457,7 +480,7 @@ func (a *API) massRoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req rollRequest
-	if !decode(w, r, &req) {
+	if !decodeLimit(w, r, &req, maxRollBody) {
 		return
 	}
 	fields := map[string]string{}
