@@ -6,7 +6,7 @@ import { describeProblem, type Problem } from "./api/client";
 import { DUTY_HUB_WRITE, listDeadLetters, replayDelivery, type Delivery } from "./api/hubClient";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
-import { DEAD_LETTER_REASONS } from "./syncFormat";
+import { DEAD_LETTER_REASONS, NOT_REPLAYABLE_CODES } from "./syncFormat";
 import { useLoad } from "./useLoad";
 
 /** Dead letters: events the ERP (or the mapping) refused for good, with the answer kept, and a replay once the cause is fixed. */
@@ -42,11 +42,15 @@ export function SyncDeadLettersPage() {
     {
       key: "actions",
       header: "Actions",
-      render: (row) => (
-        <Button size="sm" disabled={!canWrite || replaying !== null} loading={replaying === row.id} onClick={() => void replay(row)} aria-label={`Replay ${row.eventType} ${row.aggregateId}`}>
-          Replay
-        </Button>
-      ),
+      render: (row) =>
+        row.deadLetterCode !== null && NOT_REPLAYABLE_CODES.has(row.deadLetterCode) ? (
+          // The ERP already accepted this record (its key is in the answer); a replay would push a duplicate.
+          <span>Reconcile in the ERP (legacy key {row.legacyKey ?? dash})</span>
+        ) : (
+          <Button size="sm" disabled={!canWrite || replaying !== null} loading={replaying === row.id} onClick={() => void replay(row)} aria-label={`Replay ${row.eventType} ${row.aggregateId}`}>
+            Replay
+          </Button>
+        ),
     },
   ];
 

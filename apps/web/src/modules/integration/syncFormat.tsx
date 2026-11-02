@@ -12,11 +12,15 @@ export function DeliveryPill({ status }: { status: DeliveryStatus }) {
   return <Badge tone={tone}>{label}</Badge>;
 }
 
-/** The dead-letter reason: HUB-0115 retries spent, HUB-0117 refused for good. */
+/** The dead-letter reason: HUB-0115 retries spent, HUB-0117 refused for good, HUB-0118 pushed with a conflicting legacy key. */
 export const DEAD_LETTER_REASONS: Record<string, string> = {
   "HUB-0115": "Retries exhausted",
   "HUB-0117": "Refused (4xx or unresolved reference)",
+  "HUB-0118": "Pushed, but the event already has another legacy key",
 };
+
+/** Dead letters the hub refuses to replay: the ERP already holds the record, so a replay could only add a duplicate. */
+export const NOT_REPLAYABLE_CODES: ReadonlySet<string> = new Set(["HUB-0118"]);
 
 /** Unix seconds as "2026-10-26 08:00 UTC". */
 export function formatUnix(seconds: number | null): string {

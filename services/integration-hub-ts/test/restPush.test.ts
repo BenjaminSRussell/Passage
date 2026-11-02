@@ -91,10 +91,18 @@ class FakeMigration implements MigrationClient {
       },
     };
   }
+  /** (mapping, eventId) -> legacy key, idempotent like migration.outbound_xref_event: another key is 409 MIG-XREF-EVENT-CONFLICT. */
+  recorded = new Map<string, string>();
   async recordXref(input: XrefInput): Promise<XrefOutcome> {
     if (this.xrefStatus !== null) {
-      return { ok: false, status: this.xrefStatus, detail: "xref store down" };
+      return { ok: false, status: this.xrefStatus, code: null, detail: "xref store down", retryable: true };
     }
+    const k = `${input.mappingId}/${input.eventId}`;
+    const before = this.recorded.get(k);
+    if (before !== undefined && before !== input.legacyKey) {
+      return { ok: false, status: 409, code: "MIG-XREF-EVENT-CONFLICT", detail: `event ${input.eventId} already recorded a different legacy key or record for this mapping`, retryable: false };
+    }
+    this.recorded.set(k, input.legacyKey);
     this.xrefs.push(input);
     return { ok: true };
   }
@@ -162,6 +170,7 @@ describe.skipIf(ownerUrl === undefined)("rest-push on Postgres", () => {
     migration.renderStatus = null;
     migration.xrefStatus = null;
     migration.unresolved.clear();
+    migration.recorded.clear();
     vi.restoreAllMocks();
   });
 
@@ -206,6 +215,9 @@ describe.skipIf(ownerUrl === undefined)("rest-push on Postgres", () => {
     // The render saw the CloudEvent and the event's legal entity.
     const rendered = migration.renders.at(-1) as RenderInput;
     expect(rendered).toMatchObject({ tenantId: tenant, mappingId: MAPPING, legalEntityId: "22222222-3333-4444-8555-666666666666" });
+    // A background push never forwards the producing actor (the event's actor is a user id here, service:sales elsewhere).
+    expect(rendered.actor).toBeUndefined();
+    expect(migration.xrefs.at(-1)?.actor).toBeUndefined();
     expect(rendered.event).toMatchObject({ id: e["id"], type: "dev.passage.sales.order.confirmed.v1" });
 
     const x = migration.xrefs.at(-1) as XrefInput;
@@ -350,6 +362,44 @@ describe.skipIf(ownerUrl === undefined)("rest-push on Postgres", () => {
     expect(d).toMatchObject({ status: "dead_letter", deadLetterCode: "HUB-0117", lastStatus: 201 });
     expect(d.responseExcerpt).toContain("no legacy key");
     expect(migration.xrefs).toHaveLength(before);
+  });
+
+  test("a push whose legacy key conflicts with the one recorded for the event (MIG-XREF-EVENT-CONFLICT) is HUB-0118: never resent, never replayed", async () => {
+    const tenant = randomUUID();
+    erp.hits.length = 0;
+    const sub = await subscribe(tenant);
+    const e = confirmed(tenant);
+    migration.recorded.set(`${MAPPING}/${e["id"]}`, "SO-EARLIER");
+    await consume(message(e));
+    await poller().pollOnce();
+    expect(erp.hits).toHaveLength(1);
+    const [dead] = (await hub.call("GET", "/v1/hub/dead-letters", { tenant })).body.items as any[];
+    expect(dead).toMatchObject({ status: "dead_letter", deadLetterCode: "HUB-0118", attempts: 1, lastStatus: 409, legacyKey: expect.stringMatching(/^SO-\d/) });
+    expect(dead.responseExcerpt).toMatch(/^pushed \(receiver 201\); not resent\. xref:record 409 MIG-XREF-EVENT-CONFLICT/);
+    expect(dead.responseExcerpt).not.toContain(PASSWORD);
+
+    // Neither replay touches it: the ERP already has the record, a resend could only add a duplicate.
+    const one = await hub.call("POST", `/v1/hub/deliveries/${dead.id}:replay`, { tenant });
+    expect(one.status).toBe(409);
+    expect(one.body).toMatchObject({ code: "HUB-0409", detail: expect.stringContaining("HUB-0118") });
+    const all = await hub.call("POST", `/v1/hub/subscriptions/${sub.id}:replay`, { tenant }, { from: new Date(T0 * 1000).toISOString() });
+    expect(all.body).toMatchObject({ enqueued: 0, truncated: false });
+    await poller().pollOnce();
+    expect(erp.hits).toHaveLength(1);
+    expect((await hub.call("GET", "/v1/hub/dead-letters", { tenant })).body.items).toMatchObject([{ id: dead.id, deadLetterCode: "HUB-0118" }]);
+  });
+
+  test("an event with the nil legal entity is dead-lettered before the render (the verifier would answer 401, which retries)", async () => {
+    const tenant = randomUUID();
+    erp.hits.length = 0;
+    await subscribe(tenant);
+    const renders = migration.renders.length;
+    await consume(message(confirmed(tenant, { legalentityid: "00000000-0000-0000-0000-000000000000" })));
+    await poller().pollOnce();
+    expect(migration.renders).toHaveLength(renders);
+    const [dead] = (await hub.call("GET", "/v1/hub/dead-letters", { tenant })).body.items as any[];
+    expect(dead).toMatchObject({ deadLetterCode: "HUB-0117", lastStatus: null, attempts: 1 });
+    expect(dead.responseExcerpt).toContain("no legalentityid");
   });
 
   test("an event without a legal entity is dead-lettered with the reason, never pushed unmapped", async () => {

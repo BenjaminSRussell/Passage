@@ -4,7 +4,7 @@ import { test } from "vitest";
 import { restStep } from "../src/dispatch.ts";
 import type { HubEvent } from "../src/dispatcher.ts";
 import type { MigrationClient, RenderInput } from "../src/migrationClient.ts";
-import { createServiceTokenSigner } from "../src/serviceToken.ts";
+import { actorFor, createServiceTokenSigner } from "../src/serviceToken.ts";
 import {
   classifyStatus,
   excerptOf,
@@ -204,7 +204,7 @@ test("a render outage retries, a render refusal dead-letters with the problem co
 
 // ---- the HTTP migration client ---------------------------------------------------------------------------------
 
-import { httpMigrationClient, RENDER_ROUTE_MISSING } from "../src/migrationClient.ts";
+import { httpMigrationClient, migrationRetryable, RENDER_ROUTE_MISSING } from "../src/migrationClient.ts";
 
 test("the HTTP migration client calls the S5 contract with a service token and maps refusals", async () => {
   const seen: { url: string; headers: Record<string, string>; body: unknown }[] = [];
@@ -240,11 +240,147 @@ test("the HTTP migration client calls the S5 contract with a service token and m
   assert.deepEqual(await client.recordXref({ tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, refs: [1], legacyKey: "SO-1", eventId: "e1" }), { ok: true });
   assert.equal(seen[4]?.url, "http://migration.svc:8080/v1/integration/xref:record");
   assert.deepEqual(seen[4]?.body, { outboundMappingId: MAPPING, refs: [1], legacyKey: "SO-1", eventId: "e1" });
-  assert.deepEqual(await client.recordXref({ tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, refs: [1], legacyKey: "SO-1", eventId: "e1" }), { ok: false, status: 409, detail: "conflict" });
+  assert.deepEqual(await client.recordXref({ tenantId: TENANT, legalEntityId: "33333333-4444-4555-8666-777777777777", mappingId: MAPPING, refs: [1], legacyKey: "SO-1", eventId: "e1" }), { ok: false, status: 409, code: null, detail: "conflict", retryable: false });
   // A mapping the service does not know is its refusal; a 404 without a problem code means the S5 route is not there.
   assert.deepEqual(await client.render(input), { ok: false, status: 404, code: "MIG-0404", detail: "no such mapping", retryable: false });
   assert.deepEqual(await client.render({ ...input, actor: "11111111-1111-4111-8111-111111111111" }), { ok: false, status: 404, code: null, detail: RENDER_ROUTE_MISSING, retryable: false });
   const last = JSON.parse(Buffer.from((seen.at(-1)?.headers["x-passage-service-token"] as string).split(".")[0] as string, "base64url").toString());
   assert.equal(last.act, "11111111-1111-4111-8111-111111111111");
   assert.equal(last.le, "33333333-4444-4555-8666-777777777777");
+});
+
+// ---- the actor contract with platform/go/tenant VerifyContext --------------------------------------------------
+
+const claimsOf = (token: string) => JSON.parse(Buffer.from(token.split(".")[0] as string, "base64url").toString("utf8"));
+
+test("background pushes sign as service:integration-hub whatever actor produced the event; a human operator keeps their id", () => {
+  const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 3).toString("base64") });
+  const le = "33333333-4444-4555-8666-777777777777";
+  // The verifier refuses a service: actor that is not registered, so a producing service's actor is never forwarded.
+  for (const produced of [undefined, "", "service:sales", "SERVICE:billing", "service:migration-loader", "service:integration-hub"]) {
+    assert.equal(claimsOf(signer.mintForMigration({ tenantId: TENANT, legalEntityId: le, ...(produced === undefined ? {} : { actor: produced }) })).act, "service:integration-hub", String(produced));
+  }
+  assert.equal(claimsOf(signer.mintForMigration({ tenantId: TENANT, legalEntityId: le, actor: "11111111-1111-4111-8111-111111111111" })).act, "11111111-1111-4111-8111-111111111111");
+  assert.equal(actorFor(" user-1 "), "user-1");
+});
+
+test("RestPusher.attempt passes no actor to the migration client for an event another service produced; a test send passes the operator", async () => {
+  const actors: (string | undefined)[] = [];
+  const spy: MigrationClient = {
+    async render(i) {
+      actors.push(i.actor);
+      return migration.render(i);
+    },
+    async recordXref(i) {
+      actors.push(i.actor);
+      return { ok: true };
+    },
+  };
+  const exchange: Exchange = async () => ({ status: 201, headers: {}, body: '{"id":"SO-1"}' });
+  const pusher = new RestPusher({ migration: spy, exchange });
+  const t = { ...target({ type: "bearer" }, { token: "tok" }), config: { ...target({ type: "bearer" }, { token: "tok" }).config, responseKeyPath: "$.id" } };
+  assert.equal((await pusher.attempt(t, { ...pending, event: { ...event, actor: "service:sales" } })).kind, "delivered");
+  assert.deepEqual(actors, [undefined, undefined]);
+  actors.length = 0;
+  await pusher.preview(t, { ...event, actor: "11111111-1111-4111-8111-111111111111" }, true);
+  assert.deepEqual(actors, ["11111111-1111-4111-8111-111111111111"]);
+});
+
+// ---- client contract: literal JSON from services/migration/internal/api/outbound_test.go ------------------------
+
+function clientFor(status: number, json: unknown) {
+  const fakeFetch = (async () => new Response(status === 204 || json === undefined ? null : JSON.stringify(json), { status, headers: { "content-type": status >= 400 ? "application/problem+json" : "application/json" } })) as unknown as typeof fetch;
+  return httpMigrationClient({ baseUrl: "http://migration:8080", signer: createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") }), fetch: fakeFetch });
+}
+const LE = "33333333-4444-4555-8666-777777777777";
+const renderIn = { tenantId: TENANT, legalEntityId: LE, mappingId: MAPPING, event: { id: "evt-1" } };
+const xrefIn = { tenantId: TENANT, legalEntityId: LE, mappingId: MAPPING, refs: [{ entity: "salesOrder", id: "o1" }], legacyKey: "SO-77", eventId: "evt-1" };
+
+test("render decodes the Go answer: body, idempotencyKey and refs [] or [{entity,id}] pass through", async () => {
+  // renderView in outbound.go; TestOutbound_RenderHappyPathAndContract decodes {body, idempotencyKey, refs[{entity,id}]}.
+  const ok = await clientFor(200, { body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-9" } }, idempotencyKey: "abc123", refs: [{ entity: "salesOrder", id: "o1" }] }).render(renderIn);
+  assert.deepEqual(ok, { ok: true, rendered: { body: { CustAccount: "C-1001", Header: { CustomerRef: "SO-9" } }, idempotencyKey: "abc123", refs: [{ entity: "salesOrder", id: "o1" }] } });
+  // TestOutbound_RecordWithoutSubject: `"refs":[]`.
+  const none = await clientFor(200, { body: { Journal: 1 }, idempotencyKey: "k", refs: [] }).render(renderIn);
+  assert.deepEqual(none.ok && none.rendered.refs, []);
+});
+
+test("render 422 MIG-XREF-UNRESOLVED keeps the code and is not retried", async () => {
+  // failRender in outbound.go: problem body with code, detail, errors and unresolved[].
+  const out = await clientFor(422, { type: "https://passage.dev/problems/MIG-XREF-UNRESOLVED", title: "Unprocessable Entity", status: 422, detail: "customer c1 has no legacy key", code: "MIG-XREF-UNRESOLVED", errors: { customer: "no legacy key" }, unresolved: [{ name: "customer", entity: "customer", id: "c1", reason: "no legacy key" }] }).render(renderIn);
+  assert.deepEqual(out, { ok: false, status: 422, code: "MIG-XREF-UNRESOLVED", detail: "customer c1 has no legacy key", retryable: false });
+});
+
+// Every row is a status the migration service answers (TestOutbound_RenderRefusals, TestOutbound_RecordXrefValidationConflictAndIsolation).
+const CLASSES: { name: string; status: number | null; code: string | null; retryable: boolean }[] = [
+  { name: "no answer", status: null, code: null, retryable: true },
+  { name: "server error", status: 500, code: null, retryable: true },
+  { name: "unavailable", status: 503, code: null, retryable: true },
+  { name: "rate limited", status: 429, code: null, retryable: true },
+  { name: "request timeout", status: 408, code: null, retryable: true },
+  { name: "token refused (key or clock)", status: 401, code: null, retryable: true },
+  { name: "other legal entity", status: 403, code: "MIG-OUTBOUND-LEGAL-ENTITY", retryable: false },
+  { name: "unknown mapping", status: 404, code: "MIG-OUTBOUND-NOT-FOUND", retryable: false },
+  { name: "unknown version", status: 404, code: "MIG-OUTBOUND-VERSION-NOT-FOUND", retryable: false },
+  { name: "archived mapping", status: 409, code: "MIG-OUTBOUND-ARCHIVED", retryable: false },
+  { name: "event already recorded with another key", status: 409, code: "MIG-XREF-EVENT-CONFLICT", retryable: false },
+  { name: "key belongs to another record", status: 409, code: "MIG-XREF-CONFLICT", retryable: false },
+  { name: "unresolved reference", status: 422, code: "MIG-XREF-UNRESOLVED", retryable: false },
+  { name: "mapping rejected the event", status: 422, code: "MIG-OUTBOUND-REJECTED", retryable: false },
+  { name: "ref is not the subject entity", status: 422, code: "MIG-XREF-REF-MISMATCH", retryable: false },
+  { name: "bad request", status: 400, code: "COM-0001", retryable: false },
+];
+
+for (const c of CLASSES) {
+  test(`status classification: ${c.name} (${c.status ?? "none"} ${c.code ?? ""}) is ${c.retryable ? "retried" : "dead-lettered"}`, async () => {
+    const answer = c.status === null ? undefined : { detail: "d", ...(c.code === null ? {} : { code: c.code }) };
+    const failing = c.status === null
+      ? httpMigrationClient({ baseUrl: "http://m", signer: createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") }), fetch: (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch })
+      : clientFor(c.status, answer);
+    const r = await failing.render(renderIn);
+    assert.ok(!r.ok);
+    assert.equal(r.retryable, c.retryable);
+    const x = await failing.recordXref(xrefIn);
+    assert.ok(!x.ok);
+    assert.equal(x.retryable, c.retryable);
+    assert.equal(x.code, c.code);
+  });
+}
+
+test("xref:record sends the Go request shape and accepts 204 (also with refs [])", async () => {
+  let sent: unknown;
+  const f = (async (_u: string, init: RequestInit) => ((sent = JSON.parse(init.body as string)), new Response(null, { status: 204 }))) as unknown as typeof fetch;
+  const client = httpMigrationClient({ baseUrl: "http://m", signer: createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 1).toString("base64") }), fetch: f });
+  assert.deepEqual(await client.recordXref({ ...xrefIn, refs: [] }), { ok: true });
+  assert.deepEqual(sent, { outboundMappingId: MAPPING, refs: [], legacyKey: "SO-77", eventId: "evt-1" });
+});
+
+test("a 409 MIG-XREF-EVENT-CONFLICT after a successful push dead-letters without a second request to the legacy ERP; other xref refusals follow the table", async () => {
+  let pushes = 0;
+  const exchange: Exchange = async () => (pushes++, { status: 201, headers: {}, body: '{"id":"SO-2"}' });
+  const t = { ...target({ type: "bearer" }, { token: "tok" }), config: { ...target({ type: "bearer" }, { token: "tok" }).config, responseKeyPath: "$.id" } };
+  const withXref = (status: number, code: string | null): RestPusher =>
+    new RestPusher({ migration: { ...migration, recordXref: async () => ({ ok: false, status, code, detail: "conflict", retryable: migrationRetryable(status) }) }, exchange });
+  const conflict = await withXref(409, "MIG-XREF-EVENT-CONFLICT").attempt(t, pending);
+  assert.equal(conflict.kind, "dead");
+  assert.equal(conflict.kind === "dead" && conflict.code, "HUB-0118");
+  assert.deepEqual(restStep(0, conflict, 100), { kind: "dead_letter", attempts: 1, code: "HUB-0118" });
+  assert.equal(conflict.legacyKey, "SO-2");
+  assert.ok(conflict.excerpt?.includes("not resent") && conflict.excerpt.includes("MIG-XREF-EVENT-CONFLICT"));
+  assert.equal(pushes, 1);
+  const other = await withXref(409, "MIG-XREF-CONFLICT").attempt(t, pending);
+  assert.equal(other.kind, "dead");
+  assert.equal(other.kind === "dead" && other.code, undefined);
+  assert.deepEqual(restStep(0, other, 100), { kind: "dead_letter", attempts: 1, code: "HUB-0117" });
+  assert.equal((await withXref(422, "MIG-XREF-REF-MISMATCH").attempt(t, pending)).kind, "dead");
+  assert.equal((await withXref(503, null).attempt(t, pending)).kind, "retry");
+});
+
+test("an event with the nil legal entity is never rendered: the verifier would refuse the token with a 401, which retries", async () => {
+  let renders = 0;
+  const pusher = new RestPusher({ migration: { ...migration, render: async (i) => (renders++, migration.render(i)) }, exchange: async () => ({ status: 201, headers: {}, body: "{}" }) });
+  const out = await pusher.attempt(target({ type: "bearer" }, { token: "tok" }), { ...pending, event: { ...event, legalEntityId: "00000000-0000-0000-0000-000000000000" } });
+  assert.equal(out.kind, "dead");
+  assert.ok(out.excerpt?.includes("no legalentityid"));
+  assert.equal(renders, 0);
 });

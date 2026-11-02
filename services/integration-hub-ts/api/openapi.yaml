@@ -210,7 +210,8 @@ paths:
         per-aggregate sequence order marked with `ce-passagereplay: true`. `cap`
         limits the number of events (1 to 1,000,000, the default); `truncated` says
         more matching events remain, which a later replay from a later `from` picks up.
-        Events the subscription never recorded cannot be replayed.
+        Events the subscription never recorded cannot be replayed, and HUB-0118 dead letters
+        are skipped (see replayDelivery).
       x-passage-duty: hub.subscription.write
       requestBody:
         required: true
@@ -241,7 +242,9 @@ paths:
         Puts the dead-lettered delivery back in the pending set, due now, with a fresh retry
         schedule and its stored response cleared; use it after fixing the cause (a missing
         cross-reference, a wrong key path, the receiver's data). A delivery that is not dead-lettered
-        answers 409; another tenant's delivery is reported as not found.
+        answers 409, and so does a HUB-0118 dead letter (the receiver already holds the record and the
+        migration service keeps another legacy key for the event, so a replay could only push a duplicate);
+        another tenant's delivery is reported as not found.
       x-passage-duty: hub.subscription.write
       responses:
         "202":
@@ -286,11 +289,14 @@ paths:
   /v1/hub/dead-letters:
     get:
       operationId: listDeadLetters
-      summary: List dead-lettered deliveries (HUB-0115, HUB-0117)
+      summary: List dead-lettered deliveries (HUB-0115, HUB-0117, HUB-0118)
       description: |
         HUB-0115: still failing after the 8th retry (9 attempts). HUB-0117: a rest-push receiver or the
         render refused the request for good (a 4xx), after one attempt; `responseExcerpt` keeps the answer.
-        Replay a delivery (rest-push) or a subscription to send them again.
+        Replay a delivery (rest-push) or a subscription to send them again. HUB-0118: the receiver accepted
+        the push, but the migration service already recorded another legacy key for the event
+        (MIG-XREF-EVENT-CONFLICT); `legacyKey` is the key this push returned, and the delivery is never
+        resent or replayed: reconcile the record in the legacy ERP.
       x-passage-duty: hub.delivery.read
       parameters:
         - {$ref: "#/components/parameters/Limit"}
@@ -496,7 +502,7 @@ components:
         lastStatus: {type: [integer, "null"], description: "HTTP status of the last attempt; null when there was no response."}
         nextRetryAt: {type: [number, "null"], description: "Unix seconds; only for pending deliveries."}
         replay: {type: boolean}
-        deadLetterCode: {type: [string, "null"], description: "HUB-0115 retries exhausted, HUB-0117 refused for good (rest-push 4xx or render refusal)."}
+        deadLetterCode: {type: [string, "null"], description: "HUB-0115 retries exhausted, HUB-0117 refused for good (rest-push 4xx or render refusal), HUB-0118 pushed but its legacy key conflicts with the one recorded for the event (not replayable)."}
         responseExcerpt: {type: [string, "null"], description: "rest-push: the receiver's last answer, truncated to 2000 characters, credentials removed."}
         legacyKey: {type: [string, "null"], description: "rest-push: the legacy key the receiver answered with."}
         createdAt: {type: string, format: date-time}

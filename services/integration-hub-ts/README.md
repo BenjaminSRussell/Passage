@@ -168,9 +168,16 @@ cannot receive a CloudEvents webhook:
    is missing, and is dead-lettered, never pushed unmapped). The call carries a service token minted by
    `src/serviceToken.ts` (same format as `services/workflow-ts`, signer `integration-hub`,
    audience `migration`, duties `migration.outbound.render` and `migration.xref.record`, the
-   event's legal entity). An event without a `legalentityid` extension is dead-lettered
+   event's legal entity). The token's `act` is `service:integration-hub` for background
+   pushes: the producing actor is never forwarded, because `tenant.ServiceVerifier` refuses a
+   `service:` actor it does not know and the hub must not speak as another service. A test send
+   carries the operator's user id instead (the Go convention: `act` is the end user the call is
+   made for); either way the migration service grants exactly the two duties above, never the
+   operator's own. `testdata/service-token-vectors.json` holds hub-minted tokens that
+   `testdata/goverify` checks with the real Go verifier (`cd testdata/goverify && go test ./...`).
+   An event without a `legalentityid` extension (or with the nil UUID) is dead-lettered
    (HUB-0117) before the render, because the platform verifier refuses a token without
-   exactly one legal entity; Passage events do not carry the extension yet (handoff).
+   exactly one legal entity; producers set it from the payload's `legalEntityId`.
 3. `src/restPush.ts` fills the URL template's `{placeholders}` from the rendered body
    (JSONPath-lite: `$.a.b[0].c`; every value is escaped as one path segment or query value,
    `.` and `..` refused, placeholders never allowed in the scheme, host or port) and sends
@@ -179,12 +186,22 @@ cannot receive a CloudEvents webhook:
 4. On 2xx the legacy key found at `responseKeyPath` is recorded with
    `POST /v1/integration/xref:record` and the delivery is `delivered`. A 2xx without a key at
    the path is dead-lettered (the record exists; an operator fixes the path and replays,
-   the Idempotency-Key makes the resend safe).
+   the Idempotency-Key makes the resend safe). When `xref:record` answers 409
+   MIG-XREF-EVENT-CONFLICT (this event already recorded another legacy key, which the migration
+   service never changes) the delivery is dead-lettered HUB-0118 with the key the receiver
+   returned: it is never resent, and both replays refuse it (409 for one, skipped by the
+   subscription replay), since a resend could only add a duplicate in the legacy ERP. The
+   operator reconciles the record there.
 5. Failures: a 4xx other than 410 and 429 dead-letters at once (HUB-0117) with the receiver's
    answer kept in `responseExcerpt` (2000 characters, control characters stripped, every
    credential value removed), unless the subscription says `onClientError: "retry"`; 5xx,
    3xx, silence, a render outage and an xref outage follow the existing 8-step schedule
    (HUB-0115 when spent); 429 (and a 503) honours `Retry-After` (at most 24 h); 410 pauses.
+   From the migration service, no answer, 5xx, 429, 408 and 401 are retried (a 401 is the hub's
+   signing key missing from `PASSAGE_SERVICE_PUBLIC_KEYS`, a rotation or deploy-order gap, or
+   clock skew: a configuration fault fixed while the schedule runs, and the render comes before
+   any push, so nothing reaches the legacy ERP meanwhile); 400, 403, 404, 409 and 422 are
+   answers about the data or the mapping and dead-letter at once (HUB-0117).
    `POST /v1/hub/deliveries/{id}:replay` sends one dead letter again after the cause is fixed.
 
 Auth: `basic`, `bearer`, `api-key` (header name; not one the hub sets itself) and
@@ -243,5 +260,6 @@ NOBYPASSRLS) in `PASSAGE_TEST_APP_DATABASE_URL`; each test file works in its own
 | HUB-0114 | Subscription paused after a 410 Gone response |
 | HUB-0115 | Event dead-lettered after the retry schedule is exhausted |
 | HUB-0117 | rest-push delivery dead-lettered at once: the receiver (4xx) or the render refused it for good |
+| HUB-0118 | rest-push delivery accepted by the receiver, but the migration service already holds another legacy key for the event (MIG-XREF-EVENT-CONFLICT); never resent or replayed |
 | HUB-0400 / 0401 / 0403 / 0404 / 0405 / 0409 / 0413 / 0422 / 0500 / 0501 / 0502 | API: malformed request / no identity / missing duty / not found / method not allowed / stale version / body too large / unsafe webhook URL / unexpected error / field encryption keys missing / rest-push not configured |
 | EDI-0139 | PLM ECO effectivity earlier than today, moved to today (`decideEcoImport` in `src/plm.ts`) |

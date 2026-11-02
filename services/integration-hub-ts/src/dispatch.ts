@@ -15,7 +15,7 @@ export type Step =
   | { kind: "delivered"; attempts: number }
   | { kind: "paused"; attempts: number }
   | { kind: "retry"; attempts: number; nextRetryAt: number }
-  | { kind: "dead_letter"; attempts: number; code?: "HUB-0115" | "HUB-0117" };
+  | { kind: "dead_letter"; attempts: number; code?: "HUB-0115" | "HUB-0117" | "HUB-0118" };
 
 /**
  * Decides the next step after an attempt. `retriesDone` counts retries already
@@ -139,12 +139,12 @@ const MAX_RETRY_AFTER_SECONDS = 86_400;
 
 /**
  * The next step after a rest-push attempt. `dead` dead-letters at once (HUB-0117: a 4xx the receiver will
- * answer the same way every time), `pause` is a 410, `retry` follows the 8-step schedule, or the receiver's
- * Retry-After when it sent one (429 and 503), and dead-letters (HUB-0115) when the schedule is spent.
+ * answer the same way every time, or the outcome's own code: HUB-0118 for a push whose legacy key conflicts),
+ * `pause` is a 410, `retry` follows the 8-step schedule, or the receiver's Retry-After when it sent one (429 and 503), and dead-letters (HUB-0115) when the schedule is spent.
  */
 export function restStep(
   retriesDone: number,
-  outcome: { kind: "delivered" | "retry" | "dead" | "pause"; retryAfterSeconds?: number },
+  outcome: { kind: "delivered" | "retry" | "dead" | "pause"; retryAfterSeconds?: number; code?: "HUB-0117" | "HUB-0118" },
   nowSeconds: number,
 ): Step {
   const attempts = retriesDone + 1;
@@ -154,7 +154,7 @@ export function restStep(
     case "pause":
       return { kind: "paused", attempts };
     case "dead":
-      return { kind: "dead_letter", attempts, code: "HUB-0117" };
+      return { kind: "dead_letter", attempts, code: outcome.code ?? "HUB-0117" };
     case "retry": {
       const scheduled = retryDelaySeconds(retriesDone + 1);
       if (scheduled === null) {

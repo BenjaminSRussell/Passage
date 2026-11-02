@@ -17,10 +17,21 @@ export const MIGRATION_GRANT = ["migration.outbound.render", "migration.xref.rec
 /** The actor recorded on tokens the hub mints for its own background work. */
 export const HUB_ACTOR = "service:integration-hub";
 
+/**
+ * The verifier (platform/go/tenant VerifyContext) refuses any `service:` actor that is not registered in
+ * servicePrincipals, and only `service:integration-hub` is registered for this signer. So a service actor (an
+ * event produced by service:sales, say) is never forwarded: the token says the hub acted. Human user ids pass.
+ */
+export function actorFor(actor: string | undefined): string {
+  const a = (actor ?? "").trim();
+  return a === "" || a.toLowerCase().startsWith("service:") ? HUB_ACTOR : a;
+}
+
 export interface TokenSubject {
   tenantId: string;
   /** The event's legal entity. Required: the platform verifier refuses a token without one (or with the nil UUID). */
   legalEntityId?: string | null;
+  /** A human operator's user id (test sends). Background work omits it and signs as HUB_ACTOR. */
   actor?: string;
 }
 
@@ -52,7 +63,7 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
         aud: MIGRATION_AUDIENCE,
         tid: tenantId,
         le: legalEntityId,
-        act: actor || HUB_ACTOR,
+        act: actorFor(actor),
         duties: [...MIGRATION_GRANT],
         iat,
         exp: iat + TOKEN_TTL_SECONDS,

@@ -32,6 +32,8 @@ const LOAD_PER_AGGREGATE = 100;
 const LOAD_TOTAL = 5_000;
 /** Rows read per page while a replay scans the subscription's recorded deliveries. */
 const REPLAY_PAGE = 1_000;
+/** The dead-letter code a replay never touches (a pushed record whose legacy key conflicts; see replayDelivery). A constant, never input. */
+const NOT_REPLAYABLE = "HUB-0118";
 
 export type DeliveryStatus = "pending" | "delivered" | "dead_letter";
 export const DELIVERY_STATUSES: readonly DeliveryStatus[] = ["pending", "delivered", "dead_letter"];
@@ -560,22 +562,26 @@ export class HubStore {
 
   /**
    * Puts one dead-lettered delivery back in the pending set as a replay, due now, with a fresh retry schedule.
-   * "missing" when no such delivery, "not_dead" when it is not dead-lettered (pending or delivered).
+   * "missing" when no such delivery, "not_dead" when it is not dead-lettered (pending or delivered),
+   * "not_replayable" for HUB-0118: the receiver already holds the record and the event's legacy key is fixed in the
+   * migration service, so a replay could only push one more copy and dead-letter again.
    */
-  async replayDelivery(tenantId: string, deliveryId: string, now: number): Promise<"replayed" | "missing" | "not_dead"> {
+  async replayDelivery(tenantId: string, deliveryId: string, now: number): Promise<"replayed" | "missing" | "not_dead" | "not_replayable"> {
     return this.withTenant(tenantId, async (c) => {
       const res = await c.query(
         `update hub_delivery
             set status = 'pending', replay = true, retries_done = 0, next_retry_at = $2, attempts = 0,
                 dead_letter_code = null, response_excerpt = null, updated_at = now()
-          where id = $1 and status = 'dead_letter'`,
+          where id = $1 and status = 'dead_letter' and dead_letter_code is distinct from '${NOT_REPLAYABLE}'`,
         [deliveryId, now],
       );
       if ((res.rowCount ?? 0) > 0) {
         return "replayed";
       }
-      const exists = await c.query("select 1 from hub_delivery where id = $1", [deliveryId]);
-      return exists.rowCount ? "not_dead" : "missing";
+      const exists = await c.query<{ status: string; dead_letter_code: string | null }>("select status, dead_letter_code from hub_delivery where id = $1", [deliveryId]);
+      const row = exists.rows[0];
+      if (row === undefined) return "missing";
+      return row.status === "dead_letter" && row.dead_letter_code === NOT_REPLAYABLE ? "not_replayable" : "not_dead";
     });
   }
 
@@ -599,8 +605,8 @@ export class HubStore {
    * with ce-passagereplay: true), oldest first; the dispatcher's per-aggregate
    * order applies when they are sent. Everything runs in the subscription's
    * tenant, so another tenant's events cannot be reached. `truncated` is true
-   * when more matching events remain after the cap. Null when the subscription
-   * does not exist.
+   * when more matching events remain after the cap. HUB-0118 dead letters are
+   * skipped (see replayDelivery). Null when the subscription does not exist.
    */
   async replay(
     tenantId: string,
@@ -621,7 +627,7 @@ export class HubStore {
       for (;;) {
         const page: pg.QueryResult<{ id: string; event_type: string; occurred_at: number }> = await c.query(
           `select id, event_type, occurred_at from hub_delivery
-            where subscription_id = $1 and status <> 'pending' and occurred_at >= $2
+            where subscription_id = $1 and status <> 'pending' and dead_letter_code is distinct from '${NOT_REPLAYABLE}' and occurred_at >= $2
               and ($3::double precision is null or (occurred_at, id) > ($3, $4::uuid))
             order by occurred_at, id limit $5`,
           [subscriptionId, fromSeconds, after?.at ?? null, after?.id ?? null, REPLAY_PAGE],
@@ -633,7 +639,7 @@ export class HubStore {
             `update hub_delivery
                 set status = 'pending', replay = true, retries_done = 0, next_retry_at = $2, attempts = 0,
                     dead_letter_code = null, response_excerpt = null, updated_at = now()
-              where id = any($1::uuid[]) and status <> 'pending'`,
+              where id = any($1::uuid[]) and status <> 'pending' and dead_letter_code is distinct from '${NOT_REPLAYABLE}'`,
             [take, now],
           );
           enqueued += take.length;

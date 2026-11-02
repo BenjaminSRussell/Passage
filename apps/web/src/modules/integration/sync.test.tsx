@@ -354,6 +354,23 @@ describe("dead letters", () => {
     expect(await findAlert()).toHaveTextContent("only a dead-lettered delivery can be replayed (HUB-0409)");
   });
 
+  it("offers no Replay for a pushed record whose legacy key conflicts (HUB-0118)", async () => {
+    const pushed = delivery({ id: "0195f0a0-0000-7000-8000-0000000000d2", eventId: "evt-2", aggregateId: "order-2", status: "dead_letter", lastStatus: 409, legacyKey: "SO-2", deadLetterCode: "HUB-0118", responseExcerpt: "pushed (receiver 201); not resent. xref:record 409 MIG-XREF-EVENT-CONFLICT: event already recorded" });
+    let posted = false;
+    handler = (url, init) => {
+      if (init.method === "POST") posted = true;
+      return url.pathname === "/api/v1/hub/dead-letters" ? json(200, { items: [pushed, dead], nextCursor: null }) : undefined;
+    };
+    const { container } = renderAt("/integration/sync/dead-letters");
+    const table = await findTable({ name: "Sync dead letters" });
+    await waitFor(() => expect(within(table).getByText("Pushed, but the event already has another legacy key (HUB-0118)")).toBeInTheDocument());
+    expect(within(table).getByText("Reconcile in the ERP (legacy key SO-2)")).toBeInTheDocument();
+    // Only the HUB-0117 row can be replayed.
+    expect(within(table).getAllByRole("button", { name: /^Replay / })).toHaveLength(1);
+    expect(pageViolations(container)).toEqual([]);
+    expect(posted).toBe(false);
+  });
+
   it("shows the empty state", async () => {
     handler = () => json(200, { items: [], nextCursor: null });
     renderAt("/integration/sync/dead-letters");

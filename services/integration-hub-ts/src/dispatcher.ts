@@ -39,13 +39,19 @@ export interface PendingDelivery {
   replay: boolean;
 }
 
-/** HUB-0115: the retry schedule is exhausted. */
+export type DeadLetterCode = "HUB-0115" | "HUB-0117" | "HUB-0118";
+
+/** A dead-lettered event: the retry schedule is exhausted, or the receiver refused it for good. */
 export interface DeadLetter {
   event: HubEvent;
   attempts: number;
   lastStatus: number | null;
-  /** HUB-0115 retries exhausted; HUB-0117 a rest-push receiver or render refused the request for good (4xx). */
-  code: "HUB-0115" | "HUB-0117";
+  /**
+   * HUB-0115 retries exhausted; HUB-0117 a rest-push receiver or render refused the request for good (4xx);
+   * HUB-0118 a rest-push the receiver accepted whose legacy key conflicts with the one already recorded for the
+   * event (MIG-XREF-EVENT-CONFLICT): kept for the record, never resent or replayed.
+   */
+  code: DeadLetterCode;
 }
 
 /**
@@ -55,7 +61,7 @@ export interface DeadLetter {
 export type RestOutcome = (
   | { kind: "delivered"; status: number }
   | { kind: "retry"; status: number | null; retryAfterSeconds?: number }
-  | { kind: "dead"; status: number | null }
+  | { kind: "dead"; status: number | null; code?: "HUB-0117" | "HUB-0118" }
   | { kind: "pause"; status: number }
 ) & {
   /** The receiver's (or the render service's) answer, truncated and with credentials removed; kept on the delivery. */

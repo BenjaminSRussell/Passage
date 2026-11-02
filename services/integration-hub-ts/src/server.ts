@@ -452,6 +452,13 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
       if (out === "not_dead") {
         throw new ApiError(409, "HUB-0409", "only a dead-lettered delivery can be replayed");
       }
+      if (out === "not_replayable") {
+        throw new ApiError(
+          409,
+          "HUB-0409",
+          "HUB-0118: the legacy ERP already accepted this record and the migration service holds another legacy key for the event; a replay would push a duplicate. Reconcile the record in the legacy ERP instead",
+        );
+      }
       return { name: "replayDelivery", status: 202, body: { status: "pending" } };
     }
 

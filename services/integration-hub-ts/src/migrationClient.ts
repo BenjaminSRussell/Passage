@@ -18,7 +18,8 @@ export interface RenderInput {
   mappingId: string;
   /** The CloudEvent exactly as the hub received it. */
   event: Record<string, unknown>;
-  /** Who the call is made for: the user of a test send; absent for background deliveries (service:integration-hub). */
+  /** Who the call is made for: the user of a test send. Absent for background deliveries, which sign as service:integration-hub
+   *  (the producing service's actor is never forwarded: the verifier refuses an unregistered service: actor). */
   actor?: string;
 }
 
@@ -43,7 +44,20 @@ export interface XrefInput {
   actor?: string;
 }
 
-export type XrefOutcome = { ok: true } | { ok: false; status: number | null; detail: string };
+/** `code` is the problem code (MIG-XREF-EVENT-CONFLICT, MIG-XREF-CONFLICT, MIG-XREF-REF-MISMATCH, ...) when the service sent one. */
+export type XrefOutcome = { ok: true } | { ok: false; status: number | null; code: string | null; detail: string; retryable: boolean };
+
+/** The migration service's own codes the hub reacts to. */
+export const CODE_XREF_EVENT_CONFLICT = "MIG-XREF-EVENT-CONFLICT";
+
+/**
+ * Whether a refusal from the migration service is worth another attempt: no answer, a 5xx, 429 and 408 are
+ * transient; 401 is a signing-key or clock problem an operator fixes while the 8-step schedule is still running.
+ * Every other 4xx (403 MIG-OUTBOUND-LEGAL-ENTITY, 404, 409, 422) is a data or configuration answer that repeating does not change.
+ */
+export function migrationRetryable(status: number | null): boolean {
+  return status === null || status >= 500 || status === 429 || status === 408 || status === 401;
+}
 
 export interface MigrationClient {
   render(input: RenderInput): Promise<RenderOutcome>;
@@ -131,14 +145,16 @@ export function httpMigrationClient(options: {
         // No problem code: the route itself is missing (the outbound mapping API of wave 10 slice S5 is not deployed).
         return { ok: false, status: 404, code: null, detail: RENDER_ROUTE_MISSING, retryable: false };
       }
-      return { ok: false, status: out.status, ...p, retryable: out.status >= 500 || out.status === 429 };
+      return { ok: false, status: out.status, ...p, retryable: migrationRetryable(out.status) };
     },
     async recordXref({ tenantId, legalEntityId, mappingId, refs, legacyKey, eventId, actor }) {
       const out = await post("/v1/integration/xref:record", tenantId, legalEntityId, actor, { outboundMappingId: mappingId, refs, legacyKey, eventId });
       if (out === null) {
-        return { ok: false, status: null, detail: "the migration service did not answer" };
+        return { ok: false, status: null, code: null, detail: "the migration service did not answer", retryable: true };
       }
-      return out.status >= 200 && out.status < 300 ? { ok: true } : { ok: false, status: out.status, detail: problem(out.json).detail };
+      if (out.status >= 200 && out.status < 300) return { ok: true };
+      const p = problem(out.json);
+      return { ok: false, status: out.status, code: p.code, detail: p.detail, retryable: migrationRetryable(out.status) };
     },
   };
 }

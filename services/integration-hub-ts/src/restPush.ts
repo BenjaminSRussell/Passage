@@ -16,7 +16,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 import type { HubEvent, PendingDelivery, RestOutcome } from "./dispatcher.ts";
-import { cloudEventOf, type MigrationClient } from "./migrationClient.ts";
+import { CODE_XREF_EVENT_CONFLICT, cloudEventOf, type MigrationClient } from "./migrationClient.ts";
 import { validateWebhookUrl, type GuardOptions, type PinnedTarget } from "./ssrf.ts";
 
 export const METHODS = ["POST", "PUT", "PATCH"] as const;
@@ -364,9 +364,11 @@ export function parseRetryAfter(value: string | undefined, nowMs: number): numbe
 
 export const EXCERPT_CHARS = 2000;
 
+const NIL_LEGAL_ENTITY = "00000000-0000-0000-0000-000000000000";
+
 /** Why an event without a legal entity is dead-lettered before the render (see NOT-IMPLEMENTED.md). */
 export const NO_LEGAL_ENTITY =
-  "render not attempted: the event carries no legalentityid extension, and a service token to the migration service names exactly one legal entity";
+  "render not attempted: the event carries no legalentityid extension (or the nil UUID), and a service token to the migration service names exactly one legal entity";
 
 /** Truncates, strips control characters and removes every secret value. */
 export function excerptOf(text: string, secrets: readonly string[]): string {
@@ -434,12 +436,13 @@ export class RestPusher {
   }
 
   /** Renders the event and builds the request, or the outcome that stops the attempt. */
-  async prepare(target: RestTarget, event: HubEvent, forceFreshToken = false): Promise<Preparation> {
+  async prepare(target: RestTarget, event: HubEvent, forceFreshToken = false, actor?: string): Promise<Preparation> {
     const { config } = target;
     const secrets = this.#secrets(target.credentials);
-    if (event.legalEntityId === undefined) {
+    if (event.legalEntityId === undefined || event.legalEntityId === NIL_LEGAL_ENTITY) {
       // Service tokens name exactly one legal entity (platform/go/tenant VerifyContext refuses the nil one), so
       // without the event's legalentityid the migration service cannot be asked; nothing is pushed unmapped.
+      // The nil UUID is caught here: the verifier would answer 401, which is retried as a key or clock fault.
       return { ok: false, outcome: { kind: "dead", status: null, excerpt: NO_LEGAL_ENTITY } };
     }
     const rendered = await this.#d.migration.render({
@@ -447,7 +450,7 @@ export class RestPusher {
       legalEntityId: event.legalEntityId,
       mappingId: config.outboundMappingId,
       event: cloudEventOf(event),
-      ...(event.actor === undefined ? {} : { actor: event.actor }),
+      ...(actor === undefined ? {} : { actor }),
     });
     if (!rendered.ok) {
       const excerpt = excerptOf(`render ${rendered.status ?? "no answer"}${rendered.code ? ` ${rendered.code}` : ""}: ${rendered.detail}`, secrets);
@@ -519,11 +522,11 @@ export class RestPusher {
     }
   }
 
-  async #send(target: RestTarget, event: HubEvent, p: Prepared): Promise<ExchangeResponse | null> {
+  async #send(target: RestTarget, event: HubEvent, p: Prepared, actor?: string): Promise<ExchangeResponse | null> {
     let res = await this.#d.exchange({ url: p.url, method: target.config.method, headers: p.headers, body: p.body });
     if (res !== null && res.status === 401 && p.oauthKey !== null) {
       // The cached token may have been revoked: one inline retry with a fresh one.
-      const again = await this.prepare(target, event, true);
+      const again = await this.prepare(target, event, true, actor);
       if (again.ok) {
         res = await this.#d.exchange({ url: again.prepared.url, method: target.config.method, headers: again.prepared.headers, body: again.prepared.body });
         p.secrets.push(...again.prepared.secrets);
@@ -562,16 +565,21 @@ export class RestPusher {
       const xref = await this.#d.migration.recordXref({
         tenantId: target.tenantId,
         legalEntityId: event.legalEntityId ?? null,
-        ...(event.actor === undefined ? {} : { actor: event.actor }),
         mappingId: target.config.outboundMappingId,
         refs: p.refs,
         legacyKey,
         eventId: event.eventId,
       });
       if (!xref.ok) {
-        const retryable = xref.status === null || xref.status >= 500 || xref.status === 429;
-        const ex = excerptOf(`xref:record ${xref.status ?? "no answer"}: ${xref.detail}`, p.secrets);
-        return retryable ? { kind: "retry", status: xref.status, excerpt: ex, legacyKey } : { kind: "dead", status: xref.status, excerpt: ex, legacyKey };
+        const ex = excerptOf(`xref:record ${xref.status ?? "no answer"}${xref.code ? ` ${xref.code}` : ""}: ${xref.detail}`, p.secrets);
+        if (xref.code === CODE_XREF_EVENT_CONFLICT) {
+          // The receiver accepted the record, but this event already has another legacy key recorded for this
+          // mapping, and the migration service never changes that. Resending cannot fix it and would create one more
+          // record in the legacy ERP unless it honours Idempotency-Key: HUB-0118 keeps the key it returned for the
+          // operator to reconcile there, and the store refuses to replay it.
+          return { kind: "dead", code: "HUB-0118", status: xref.status, excerpt: excerptOf(`pushed (receiver ${res.status}); not resent. ${ex}`, p.secrets), legacyKey };
+        }
+        return xref.retryable ? { kind: "retry", status: xref.status, excerpt: ex, legacyKey } : { kind: "dead", status: xref.status, excerpt: ex, legacyKey };
       }
     }
     return { kind: "delivered", status: res.status, excerpt, ...(legacyKey === undefined ? {} : { legacyKey }) };
@@ -583,7 +591,8 @@ export class RestPusher {
     event: HubEvent,
     send: boolean,
   ): Promise<{ stage: "render" | "url" | "token" | "built" | "sent"; url?: string; method: string; body?: unknown; status?: number | null; excerpt?: string; legacyKey?: string }> {
-    const prep = await this.prepare(target, event);
+    // A test send is made for the operator who asked: their user id is the token's actor.
+    const prep = await this.prepare(target, event, false, event.actor);
     if (!prep.ok) {
       const o = prep.outcome;
       return { stage: o.excerpt?.startsWith("url template") ? "url" : o.excerpt?.startsWith("oauth2") ? "token" : "render", method: target.config.method, status: o.status, ...(o.excerpt === undefined ? {} : { excerpt: o.excerpt }) };
@@ -591,7 +600,7 @@ export class RestPusher {
     const p = prep.prepared;
     const base = { url: p.url, method: target.config.method, body: JSON.parse(p.body) as unknown };
     if (!send) return { stage: "built", ...base };
-    const res = await this.#send(target, event, p);
+    const res = await this.#send(target, event, p, event.actor);
     if (res === null) return { stage: "sent", ...base, status: null, excerpt: "no response from the receiver" };
     let legacyKey: string | undefined;
     if (target.config.responseKeyPath !== "") {

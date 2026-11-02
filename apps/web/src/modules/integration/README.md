@@ -25,7 +25,7 @@ Screens for the edi service (`services/edi/api/openapi.yaml`), wired through `ap
 | `/integration/sync/new` | New REST push: event types, outbound mapping id, method, endpoint template with `{placeholders}`, legacy key path, 4xx policy, auth (basic, bearer, API key, OAuth2 client credentials; secrets are password fields, sent once, never shown again; one `Idempotency-Key` per attempt) | `POST /subscriptions` |
 | `/integration/sync/:id` | Subscription settings (credentials shown only as "stored"), Resume after a 410 pause, Test send: render a sample sales.order.confirmed event or also send it once | `GET /subscriptions/{id}`, `POST /subscriptions/{id}:resume`, `POST /subscriptions/{id}:test` |
 | `/integration/sync/deliveries` | Delivery monitor: status filter, `?subscriptionId=`, Load more by cursor; attempts, last HTTP status, the ERP's key, next retry | `GET /deliveries` |
-| `/integration/sync/dead-letters` | Dead letters with reason (HUB-0115, HUB-0117) and the ERP's truncated answer; Replay one (needs `hub.subscription.write`) | `GET /dead-letters`, `POST /deliveries/{id}:replay` |
+| `/integration/sync/dead-letters` | Dead letters with reason (HUB-0115, HUB-0117, HUB-0118) and the ERP's truncated answer; Replay one (needs `hub.subscription.write`), except HUB-0118 (the ERP already holds the record: reconcile it there) | `GET /dead-letters`, `POST /deliveries/{id}:replay` |
 
 The sync pages call the hub through `api/hubClient.ts` (`/api/v1/hub/...`, mapped by the gateway to `/v1/hub/...`) and are gated on `hub.delivery.read` (nav) and `hub.subscription.write` (create, test, resume, replay). Editing and deleting a subscription and creating a webhook subscription are not in the UI yet. Tests: `sync.test.tsx`.
 

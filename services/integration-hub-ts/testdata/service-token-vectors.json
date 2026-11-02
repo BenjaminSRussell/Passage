@@ -1,0 +1,40 @@
+{
+  "note": "Service tokens minted by src/serviceToken.ts (signer integration-hub, audience migration). test/serviceTokenVectors.test.ts re-mints them byte for byte; testdata/goverify verifies them with platform/go/tenant ServiceVerifier.VerifyContext at nowUnixSeconds. Regenerate both sides together if the token format changes. The seed is a test key (32 bytes of 0x07), never deployed.",
+  "seedBase64": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  "nowUnixSeconds": 1793520000,
+  "tenantId": "0195f0a0-0000-7000-8000-000000000001",
+  "legalEntityId": "33333333-4444-4555-8666-777777777777",
+  "duties": [
+    "migration.outbound.render",
+    "migration.xref.record"
+  ],
+  "vectors": [
+    {
+      "name": "background push",
+      "jti": "00000000000000000000000000000001",
+      "token": "eyJpc3MiOiJpbnRlZ3JhdGlvbi1odWIiLCJhdWQiOiJtaWdyYXRpb24iLCJ0aWQiOiIwMTk1ZjBhMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJsZSI6IjMzMzMzMzMzLTQ0NDQtNDU1NS04NjY2LTc3Nzc3Nzc3Nzc3NyIsImFjdCI6InNlcnZpY2U6aW50ZWdyYXRpb24taHViIiwiZHV0aWVzIjpbIm1pZ3JhdGlvbi5vdXRib3VuZC5yZW5kZXIiLCJtaWdyYXRpb24ueHJlZi5yZWNvcmQiXSwiaWF0IjoxNzkzNTIwMDAwLCJleHAiOjE3OTM1MjAwNjAsImp0aSI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxIn0.U5JcD0Hm14BNlhcEvLfNyVLpi66aIrLi079619mclENpSrPIO8jtzimIl8-lQcJt5tpmWGtL0tIyzQIyzJ02CA",
+      "act": "service:integration-hub"
+    },
+    {
+      "name": "background push of an event another service produced",
+      "actor": "service:sales",
+      "jti": "00000000000000000000000000000002",
+      "token": "eyJpc3MiOiJpbnRlZ3JhdGlvbi1odWIiLCJhdWQiOiJtaWdyYXRpb24iLCJ0aWQiOiIwMTk1ZjBhMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJsZSI6IjMzMzMzMzMzLTQ0NDQtNDU1NS04NjY2LTc3Nzc3Nzc3Nzc3NyIsImFjdCI6InNlcnZpY2U6aW50ZWdyYXRpb24taHViIiwiZHV0aWVzIjpbIm1pZ3JhdGlvbi5vdXRib3VuZC5yZW5kZXIiLCJtaWdyYXRpb24ueHJlZi5yZWNvcmQiXSwiaWF0IjoxNzkzNTIwMDAwLCJleHAiOjE3OTM1MjAwNjAsImp0aSI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAyIn0.zCwlf1C24-N0NZYfg6OsWX4RtwlQZV5kU-vfuuBdR77x-WplKkd31WPMFNzduEwh2YWqZKNEgYvXqRP4QIH-BQ",
+      "act": "service:integration-hub"
+    },
+    {
+      "name": "background push of a loader event is still the hub",
+      "actor": "service:migration-loader",
+      "jti": "00000000000000000000000000000003",
+      "token": "eyJpc3MiOiJpbnRlZ3JhdGlvbi1odWIiLCJhdWQiOiJtaWdyYXRpb24iLCJ0aWQiOiIwMTk1ZjBhMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJsZSI6IjMzMzMzMzMzLTQ0NDQtNDU1NS04NjY2LTc3Nzc3Nzc3Nzc3NyIsImFjdCI6InNlcnZpY2U6aW50ZWdyYXRpb24taHViIiwiZHV0aWVzIjpbIm1pZ3JhdGlvbi5vdXRib3VuZC5yZW5kZXIiLCJtaWdyYXRpb24ueHJlZi5yZWNvcmQiXSwiaWF0IjoxNzkzNTIwMDAwLCJleHAiOjE3OTM1MjAwNjAsImp0aSI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAzIn0.Ox6TNv-GSZ7kank-67GMxkkQWEXGm0FBs1ZaTe44TpW4bfN-Vfl_9wN1YXxXnbdzm8FDAAPhmiqpQtk7LYIXCg",
+      "act": "service:integration-hub"
+    },
+    {
+      "name": "operator test send",
+      "actor": "11111111-1111-4111-8111-111111111111",
+      "jti": "00000000000000000000000000000004",
+      "token": "eyJpc3MiOiJpbnRlZ3JhdGlvbi1odWIiLCJhdWQiOiJtaWdyYXRpb24iLCJ0aWQiOiIwMTk1ZjBhMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJsZSI6IjMzMzMzMzMzLTQ0NDQtNDU1NS04NjY2LTc3Nzc3Nzc3Nzc3NyIsImFjdCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImR1dGllcyI6WyJtaWdyYXRpb24ub3V0Ym91bmQucmVuZGVyIiwibWlncmF0aW9uLnhyZWYucmVjb3JkIl0sImlhdCI6MTc5MzUyMDAwMCwiZXhwIjoxNzkzNTIwMDYwLCJqdGkiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwNCJ9.X3mJ_rN1Z8AsT9NIhSoQD6ghosVl3mG9xFsTxh9AN0JAKrhimr57qgUjbslGXVLVUdaT0wKAXvTt00H-cX5RCg",
+      "act": "11111111-1111-4111-8111-111111111111"
+    }
+  ]
+}
