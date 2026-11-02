@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: identity
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: identity
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        {{- if .Values.bundle.enabled }}
+        fsGroup: 65532
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if .Values.bundle.enabled }}
+      volumes:
+        - name: bundle
+          secret:
+            secretName: {{ .Values.bundle.secret }}
+            defaultMode: 0440
+      {{- end }}
+      containers:
+        - name: identity
+          image: {{ include "identity.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            {{- include "identity.env" . | nindent 12 }}
+          {{- if .Values.bundle.enabled }}
+          volumeMounts:
+            - { name: bundle, mountPath: /var/run/passage/bundle, readOnly: true }
+          {{- end }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            {{- if .Values.bundle.enabled }}
+            - { name: bundle, containerPort: {{ .Values.bundle.port }} }
+            {{- end }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
