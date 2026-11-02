@@ -18,6 +18,7 @@ import {
 import { describeProblem, getRun, newKey, releaseQuarantined, type Problem, type QuarantinedRecord } from "./api/client";
 import { canReconcile, dash, formatDateTime, formatKey, money, projectsOf, projectStatus, SOURCE_LABELS, splitList, type ControlTotal } from "./domain";
 import styles from "./pages.module.css";
+import { TargetLoadPanel } from "./TargetLoadPanel";
 import { useLoad } from "./useLoad";
 
 const totalColumns: DataTableColumn<ControlTotal>[] = [
@@ -222,6 +223,7 @@ export function PackRunDetailPage() {
           empty={{ title: "No totals yet", description: "Totals appear once the run has loaded." }}
         />
       ) : null}
+      {run?.targetLoad ? <TargetLoadPanel initial={run.targetLoad} onChanged={state.reload} /> : null}
       {projects.length > 0 && run ? (
         <Card title="Projects">
           <p className={styles.note}>Opening lines never post to the GL. A project that does not reconcile can't be invoiced or estimated (BR-49.12).</p>

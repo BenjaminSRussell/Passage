@@ -24,6 +24,8 @@ type OpenItemsRun struct {
 	Records   []domain.Record
 	Accepted  []domain.Record
 	StartedBy string
+	// Target, when set, stages the accepted records for loading into the target service (integration track S8).
+	Target *TargetStage
 }
 
 // RunOpenItems loads the accepted records that legacy_xref does not hold yet, reconciles the
@@ -118,6 +120,11 @@ func runOpenItems(ctx context.Context, tx pgx.Tx, in OpenItemsRun) (domain.PackR
 		q := &run.Quarantined[i]
 		q.Seq, q.Status = i+1, domain.QuarantineOpen
 		if err := insertQuarantine(ctx, tx, run.RunID, q.Seq, q.Record.LegacyID, q.Rule, q.Reason, recordJSON(q.Record)); err != nil {
+			return domain.PackRun{}, err
+		}
+	}
+	if in.Target != nil {
+		if err := stageTarget(ctx, tx, run.RunID, in.Target); err != nil {
 			return domain.PackRun{}, err
 		}
 	}

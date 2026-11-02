@@ -116,7 +116,7 @@ func (u unreachableStore) GetProjectOpening(context.Context, store.OpeningFilter
 }
 
 type request struct {
-	method, path, tenant, duties, body, key, user string
+	method, path, tenant, duties, body, key, user, le string
 }
 
 func do(t *testing.T, h http.Handler, rq request) *httptest.ResponseRecorder {
@@ -134,6 +134,9 @@ func do(t *testing.T, h http.Handler, rq request) *httptest.ResponseRecorder {
 	}
 	if rq.user != "" {
 		req.Header.Set("X-Passage-User", rq.user)
+	}
+	if rq.le != "" {
+		req.Header.Set("X-Passage-Legal-Entity", rq.le)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -334,4 +337,25 @@ func TestPlanDTO_ReportsAbortWarningAndDeadline(t *testing.T) {
 	if d := at(37); d.AbortDue {
 		t.Fatal("a rolled-back plan has no abort deadline left")
 	}
+}
+
+func (u unreachableStore) GetTargetLoad(context.Context, string) (domain.TargetLoad, error) {
+	u.fail()
+	return domain.TargetLoad{}, nil
+}
+func (u unreachableStore) ListTargetRows(context.Context, string, store.TargetRowFilter) ([]domain.TargetRowView, error) {
+	u.fail()
+	return nil, nil
+}
+func (u unreachableStore) ClaimTargetLoad(context.Context, string, string, time.Duration) (domain.TargetLoad, []store.PendingRow, error) {
+	u.fail()
+	return domain.TargetLoad{}, nil, nil
+}
+func (u unreachableStore) RecordTargetChunk(context.Context, string, time.Duration, []store.RowOutcome) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) FinishTargetLoad(context.Context, string, store.TargetFinish) (domain.TargetLoad, []domain.ControlTotal, error) {
+	u.fail()
+	return domain.TargetLoad{}, nil, nil
 }

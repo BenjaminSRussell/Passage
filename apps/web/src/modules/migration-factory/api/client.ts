@@ -68,6 +68,57 @@ export interface PackRunDetail extends PackRun {
   quarantined: QuarantinedRecord[];
   /** MIG-1506 text for every control account whose open items differ from the GL balance. */
   mismatchMessages?: string[];
+  /** Set when the run was started with a load object: where its rows went and how they came out. */
+  targetLoad?: TargetLoad;
+}
+
+/** Status of a run's load into receivables; see the TargetLoad schema in api/openapi.yaml. */
+export type TargetLoadStatus = "STAGED" | "LOADING" | "PARTIAL" | "UNRECONCILED" | "MISMATCH" | "RECONCILED" | "FAILED";
+export type TargetRowStatus = "PENDING" | "LOADED" | "UNCHANGED" | "SKIPPED" | "REJECTED" | "NOT_AVAILABLE";
+
+export interface TargetLoad {
+  runId: string;
+  target: "receivables";
+  legalEntityId: string;
+  importSource: string;
+  status: TargetLoadStatus;
+  /** Reconciled with no row pending, rejected or unavailable. */
+  clean: boolean;
+  staged: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  rejected: number;
+  notAvailable: number;
+  pending: number;
+  attempts: number;
+  lastError?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  version: number;
+}
+
+export interface TargetRow {
+  seq: number;
+  legacyId: string;
+  ledger: "AR" | "AP";
+  status: TargetRowStatus;
+  outcome?: string;
+  openItemId?: string;
+  /** The target's own code (AR-OPENING-*) or the factory's MIG-* code. */
+  code?: string;
+  detail?: string;
+  side?: "DEBIT" | "CREDIT";
+  amount?: string;
+  currency?: string;
+  customerId?: string;
+}
+
+export interface TargetLoadDetail extends TargetLoad {
+  /** The run's target.receivables.* control totals: what the factory sent against what receivables reports. */
+  reconciliation: ControlTotal[];
+  rejects: TargetRow[];
 }
 
 export interface OpenItemRecord {
@@ -77,6 +128,23 @@ export interface OpenItemRecord {
   currency: string;
   /** Decimal string; never a float. */
   amount: string;
+  /** Receivables fields, used when the run has a load object. */
+  ledger?: "AR" | "AP";
+  documentNumber?: string;
+  customerId?: string;
+  kind?: "INVOICE" | "CREDIT_NOTE" | "PAYMENT" | "ADJUSTMENT";
+  documentDate?: string;
+  dueDate?: string;
+  originalAmount?: string;
+}
+
+/** Asks for the accepted records to be staged for loading into receivables. */
+export interface LoadRequest {
+  target: "receivables";
+  legalEntityId: string;
+  importSource?: string;
+  /** Legacy party id to Passage customer id. */
+  customerIds?: Record<string, string>;
 }
 
 export interface PackRunRequest {
@@ -87,6 +155,7 @@ export interface PackRunRequest {
   quarantineMaxPct?: string;
   parties: string[];
   records: OpenItemRecord[];
+  load?: LoadRequest;
 }
 
 /** One legacy GL balance at (account, dimension combination, currency). Balance is signed: debit positive, credit negative. */
@@ -183,6 +252,8 @@ export interface Xref {
   passageId: string;
   runId: string;
   createdAt: string;
+  /** True once passageId is the id the target service assigned (the factory's own before that). */
+  targetConfirmed?: boolean;
 }
 
 export type ParallelState = "REPLAYING" | "DIFFING" | "REVIEW" | "SIGNED_OFF";
@@ -399,6 +470,21 @@ export function getRun(runId: string, signal?: AbortSignal): Promise<PackRunDeta
 /** POST /migration/packs/{pack}/runs. */
 export function startPackRun(pack: Pack, body: PackRunRequest, key: string = newKey()): Promise<PackRunDetail> {
   return post(`/migration/packs/${encodeURIComponent(pack)}/runs`, body, key);
+}
+
+/** POST /migration/runs/{id}/load: send the run's pending rows to receivables and reconcile its totals. */
+export function loadRunTarget(runId: string): Promise<TargetLoad> {
+  return send(`/migration/runs/${encodeURIComponent(runId)}/load`, { method: "POST" });
+}
+
+/** GET /migration/runs/{id}/target-load: status, reconciliation lines and the first rejects. */
+export function getTargetLoad(runId: string, signal?: AbortSignal): Promise<TargetLoadDetail> {
+  return send(`/migration/runs/${encodeURIComponent(runId)}/target-load`, {}, signal);
+}
+
+/** GET /migration/runs/{id}/target-rows. */
+export function listTargetRows(runId: string, filter: { status?: TargetRowStatus; after?: number; limit?: number } = {}, signal?: AbortSignal): Promise<TargetRow[]> {
+  return items(`/migration/runs/${encodeURIComponent(runId)}/target-rows${query(filter)}`, signal);
 }
 
 /** POST /migration/packs/gl_balances/runs: GL opening balances (FR-49.1, BR-49.2). */

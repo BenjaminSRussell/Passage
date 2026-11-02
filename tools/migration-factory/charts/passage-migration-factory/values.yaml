@@ -19,6 +19,16 @@ database:
   secretName: passage-migration-factory-db
   secretKey: DATABASE_URL
 
+# Where the open_items pack is loaded (integration track S8). Leave both empty and the service starts, and the
+# load step answers 503 MIG-1520. receivables.url is the receivables service base address; signing.secretName names
+# a Secret holding the base64 32-byte Ed25519 seed the factory signs its service tokens with (the receivables
+# service must hold the matching public key for the service "migration-factory").
+receivables:
+  url: ""
+signing:
+  secretName: ""
+  secretKey: PASSAGE_SERVICE_SIGNING_KEY
+
 # Apply migrations at start. Turn off where a migration job runs them as the owner role.
 migrateOnStart: false
 

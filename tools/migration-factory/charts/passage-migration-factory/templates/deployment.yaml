@@ -44,6 +44,19 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+            {{- if .Values.receivables.url }}
+            - name: RECEIVABLES_URL
+              value: {{ .Values.receivables.url | quote }}
+            {{- end }}
+            {{- if .Values.signing.secretName }}
+            - name: PASSAGE_SERVICE_NAME
+              value: migration-factory
+            - name: PASSAGE_SERVICE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.signing.secretName }}
+                  key: {{ .Values.signing.secretKey }}
+            {{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
           livenessProbe:

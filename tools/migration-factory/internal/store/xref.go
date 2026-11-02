@@ -26,7 +26,7 @@ func (s *Postgres) LookupXref(ctx context.Context, q XrefQuery) ([]domain.Xref, 
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var rows pgx.Rows
 		var err error
-		const cols = `xref_id::text, source_system, source_company, source_table, source_id, passage_entity, passage_id::text, run_id::text, created_at`
+		const cols = `xref_id::text, source_system, source_company, source_table, source_id, passage_entity, passage_id::text, run_id::text, created_at, target_confirmed`
 		if q.PassageID != "" {
 			rows, err = tx.Query(ctx, `select `+cols+` from legacy_xref
 				where tenant_id = current_setting('passage.tenant_id', true)::uuid and passage_entity = $1 and passage_id = $2::uuid
@@ -44,7 +44,7 @@ func (s *Postgres) LookupXref(ctx context.Context, q XrefQuery) ([]domain.Xref, 
 		for rows.Next() {
 			var x domain.Xref
 			var sys string
-			if err := rows.Scan(&x.XrefID, &sys, &x.SourceCompany, &x.SourceTable, &x.SourceID, &x.PassageEntity, &x.PassageID, &x.RunID, &x.CreatedAt); err != nil {
+			if err := rows.Scan(&x.XrefID, &sys, &x.SourceCompany, &x.SourceTable, &x.SourceID, &x.PassageEntity, &x.PassageID, &x.RunID, &x.CreatedAt, &x.TargetConfirmed); err != nil {
 				return err
 			}
 			x.SourceSystem = domain.SourceSystem(sys)

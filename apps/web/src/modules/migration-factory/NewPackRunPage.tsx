@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeProblem, newKey, startPackRun, type PackRunRequest, type Problem } from "./api/client";
-import { localToUtc, parseRecords, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, type SourceSystem } from "./domain";
+import { localToUtc, parseCustomerMap, parseRecords, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, TARGET_COLUMNS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
 
 export interface PackRunValues {
@@ -13,12 +13,20 @@ export interface PackRunValues {
   quarantineMaxPct: string;
   parties: string;
   records: string;
+  /** Stage the accepted records for loading into receivables. */
+  loadIntoReceivables: boolean;
+  legalEntityId: string;
+  importSource: string;
+  /** "legacyParty=customer UUID" entries. */
+  customers: string;
 }
 
-type Field = keyof PackRunValues;
+type Field = Exclude<keyof PackRunValues, "loadIntoReceivables">;
 type Errors = Partial<Record<Field, string>>;
 
 const PCT = /^\d{1,2}(\.\d{1,4})?$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IMPORT_SOURCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 
 /** The checks the service makes before it loads, and the request the form sends. */
 export function validatePackRun(values: PackRunValues): { errors: Errors; input?: PackRunRequest } {
@@ -34,9 +42,17 @@ export function validatePackRun(values: PackRunValues): { errors: Errors; input?
   if (pct !== "" && (!PCT.test(pct) || Number(pct) > 10)) errors.quarantineMaxPct = "Enter a percentage from 0 to 10.";
   const parties = splitList(values.parties);
   if (parties.length === 0) errors.parties = "List the vendor and customer ids in master data.";
-  const parsed = parseRecords(values.records);
+  const parsed = parseRecords(values.records, { forTarget: values.loadIntoReceivables });
   if (parsed.errors.length > 0) errors.records = parsed.errors.slice(0, 3).join(" ");
   else if (parsed.records.length === 0) errors.records = "Paste at least one open item.";
+  const legalEntityId = values.legalEntityId.trim();
+  const importSource = values.importSource.trim();
+  const customers = parseCustomerMap(values.customers);
+  if (values.loadIntoReceivables) {
+    if (!UUID.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID) the open items belong to.";
+    if (importSource !== "" && !IMPORT_SOURCE.test(importSource)) errors.importSource = "Use up to 40 letters, digits, dots, dashes or underscores.";
+    if (customers.errors.length > 0) errors.customers = customers.errors.slice(0, 2).join(" ");
+  }
   if (Object.keys(errors).length > 0 || !cutoffTs || !freezeTs) return { errors };
   return {
     errors,
@@ -48,6 +64,16 @@ export function validatePackRun(values: PackRunValues): { errors: Errors; input?
       ...(pct !== "" ? { quarantineMaxPct: pct } : {}),
       parties,
       records: parsed.records,
+      ...(values.loadIntoReceivables
+        ? {
+            load: {
+              target: "receivables" as const,
+              legalEntityId: legalEntityId.toLowerCase(),
+              ...(importSource !== "" ? { importSource } : {}),
+              ...(Object.keys(customers.map).length > 0 ? { customerIds: customers.map } : {}),
+            },
+          }
+        : {}),
     },
   };
 }
@@ -63,6 +89,10 @@ export function NewPackRunPage() {
     quarantineMaxPct: "",
     parties: "",
     records: "",
+    loadIntoReceivables: false,
+    legalEntityId: "",
+    importSource: "",
+    customers: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -93,6 +123,7 @@ export function NewPackRunPage() {
     }
   }
 
+  const target = values.loadIntoReceivables;
   const text = (id: Field, label: string, hint?: string, extra?: Record<string, unknown>, optional?: boolean) => (
     <FormField id={`run-${id}`} label={label} hint={hint} optional={optional} error={errors[id]}>
       {(control) => (
@@ -132,12 +163,36 @@ export function NewPackRunPage() {
             </FormField>
           </div>
           <div className={styles.wide}>
-            <FormField id="run-records" label="Open items" hint="One per line: legacyId, party, account, currency, amount." error={errors.records}>
+            <FormField
+              id="run-records"
+              label="Open items"
+              hint={target ? `One per line: ${TARGET_COLUMNS}. A negative amount is a credit.` : "One per line: legacyId, party, account, currency, amount."}
+              error={errors.records}
+            >
               {(control) => (
                 <Textarea {...control} mono rows={10} value={values.records} invalid={Boolean(errors.records)} onChange={(event) => update({ records: event.target.value })} />
               )}
             </FormField>
           </div>
+          <div className={styles.wide}>
+            <div className={styles.check}>
+              <Input id="run-load" type="checkbox" checked={target} onChange={(event) => update({ loadIntoReceivables: event.target.checked })} />
+              <label htmlFor="run-load">Load the accepted open items into receivables (open AR). Nothing is sent until you press Load on the run.</label>
+            </div>
+          </div>
+          {target ? (
+            <>
+              {text("legalEntityId", "Legal entity id", "The Passage legal entity the open items belong to. You must be scoped to it.", { maxLength: 36 })}
+              {text("importSource", "Import source", "How receivables keys the items with the legacy id. Default: the system and company, such as ax2012.usmf.", { maxLength: 40 }, true)}
+              <div className={styles.wide}>
+                <FormField id="run-customers" label="Customers" hint="One per line: legacyParty=Passage customer id. A party that is already a UUID needs no line." error={errors.customers} optional>
+                  {(control) => (
+                    <Textarea {...control} mono rows={3} value={values.customers} invalid={Boolean(errors.customers)} onChange={(event) => update({ customers: event.target.value })} />
+                  )}
+                </FormField>
+              </div>
+            </>
+          ) : null}
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not run the pack" live="alert">

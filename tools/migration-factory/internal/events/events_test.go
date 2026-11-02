@@ -34,7 +34,7 @@ func TestPayloadFieldsAreDocumented(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := string(raw)
-	for _, payload := range []any{PackReconciledData{}, ParallelRunDiffedData{}, CutoverStepCompletedData{}, CutoverPlanRolledBackData{}} {
+	for _, payload := range []any{PackReconciledData{}, PackLoadedData{}, ParallelRunDiffedData{}, CutoverStepCompletedData{}, CutoverPlanRolledBackData{}} {
 		typ := reflect.TypeOf(payload)
 		for i := 0; i < typ.NumField(); i++ {
 			name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]

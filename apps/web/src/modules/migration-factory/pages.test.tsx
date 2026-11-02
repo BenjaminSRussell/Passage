@@ -184,6 +184,10 @@ describe("Start pack run", () => {
     quarantineMaxPct: "",
     parties: "V001, V002",
     records: "BSIK-1,V001,160000,EUR,100.00",
+    loadIntoReceivables: false,
+    legalEntityId: "",
+    importSource: "",
+    customers: "",
   };
 
   it("validates what the service checks before it loads", () => {

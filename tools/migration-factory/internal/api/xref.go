@@ -22,6 +22,8 @@ type xrefDTO struct {
 	PassageID     string    `json:"passageId"`
 	RunID         string    `json:"runId"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// TargetConfirmed is true once passageId is the id the target service assigned (the factory's own before that).
+	TargetConfirmed bool `json:"targetConfirmed"`
 }
 
 // lookupXref resolves a legacy id to the Passage record it became, or a Passage record to its
@@ -66,7 +68,7 @@ func (s *Server) lookupXref(w http.ResponseWriter, r *http.Request) {
 	items := make([]xrefDTO, 0, len(rows))
 	for _, x := range rows {
 		items = append(items, xrefDTO{XrefID: x.XrefID, System: string(x.SourceSystem), Company: x.SourceCompany, Table: x.SourceTable,
-			LegacyID: x.SourceID, PassageEntity: x.PassageEntity, PassageID: x.PassageID, RunID: x.RunID, CreatedAt: x.CreatedAt})
+			LegacyID: x.SourceID, PassageEntity: x.PassageEntity, PassageID: x.PassageID, RunID: x.RunID, CreatedAt: x.CreatedAt, TargetConfirmed: x.TargetConfirmed})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }

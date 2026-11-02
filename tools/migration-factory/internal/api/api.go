@@ -74,12 +74,18 @@ type Store interface {
 	RunProjectWIP(ctx context.Context, idem store.Idem, in store.ProjectWIPRun) (domain.PackRun, bool, error)
 	RunGLBalances(ctx context.Context, idem store.Idem, in store.GLBalancesRun) (domain.PackRun, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
+	GetTargetLoad(ctx context.Context, runID string) (domain.TargetLoad, error)
+	ListTargetRows(ctx context.Context, runID string, f store.TargetRowFilter) ([]domain.TargetRowView, error)
+	ClaimTargetLoad(ctx context.Context, runID, startedBy string, lease time.Duration) (domain.TargetLoad, []store.PendingRow, error)
+	RecordTargetChunk(ctx context.Context, runID string, lease time.Duration, outs []store.RowOutcome) error
+	FinishTargetLoad(ctx context.Context, runID string, fin store.TargetFinish) (domain.TargetLoad, []domain.ControlTotal, error)
 }
 
 // Server serves the API over a Store.
 type Server struct {
-	store Store
-	now   func() time.Time
+	store  Store
+	now    func() time.Time
+	target Target
 }
 
 // New returns a server over st.
@@ -104,6 +110,9 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}", s.getRun)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/control-totals", s.controlTotals)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/quarantine/{rec}/release", s.releaseQuarantined)
+		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load", s.runTargetLoad)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/target-load", s.getTargetLoad)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/target-rows", s.listTargetRows)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/projects/{project}/opening", s.projectOpening)
 		// Any authenticated caller may resolve a legacy id (9.49.5); the tenant middleware has
 		// already refused requests without a principal.
@@ -154,6 +163,8 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, CodeNotFound, notFoundDetail(err)))
 	case errors.Is(err, store.ErrVersion):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeVersion, err.Error()))
+	case errors.Is(err, store.ErrImportSourceTaken):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeImportSourceTaken, err.Error()))
 	case errors.Is(err, store.ErrIdempotencyReuse):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request"))
 	default:

@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage Migration Factory API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Slices 1 to 4 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
+    Slices 1 to 6 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
     with control totals, quarantine release and the legacy cross-reference lookup, the
     parallel-run review, project opening balances, and the cutover runbook with timed steps, the
-    generated rollback plan and the rollback re-keying export. Source of truth for the handlers in
+    generated rollback plan and the rollback re-keying export, and (slice 6) the load of an open_items
+    run into the receivables service with its reconciliation. Source of truth for the handlers in
     internal/api. State is stored in Postgres under row-level security per tenant.
 
     Commands accept an optional `Idempotency-Key` header (at most 200 characters). A repeated
@@ -68,7 +69,9 @@ paths:
         that legacy_xref already holds by (system, company, table, id) are not loaded again
         (FR-49.10). Every run is stored, with its input hash, and writes
         dev.passage.migration.pack.reconciled.v1. Status is RECONCILED only when no control
-        total is MISMATCH. The body is limited to 16 MiB.
+        total is MISMATCH. The body is limited to 16 MiB. An open_items run with a `load` object
+        stages its accepted records for POST /migration/runs/{id}/load; its import source may not
+        be one another legacy (system, company) already loads under (409 MIG-1526).
       x-passage-duty: MigrationRun
       parameters:
         - name: pack
@@ -102,6 +105,8 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "403":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "413":
           $ref: "#/components/responses/Problem"
@@ -191,6 +196,132 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/load:
+    post:
+      operationId: loadPackRunTarget
+      summary: Load the open items of a run into receivables and reconcile the target's totals
+      description: |
+        Sends the run's pending rows (those the run staged because it was started with a `load`
+        object) to receivables, POST /v1/receivables/open-items:batch, at most 1000 per request and
+        non-atomic, as the service `migration-factory` acting as the `migration-loader` principal.
+        Each request carries an Idempotency-Key derived from the run and its rows, so the same rows
+        are the same request on every try; a 5xx, a 429 or a timeout is retried with backoff and,
+        when the attempts are used up, the remaining rows stay pending and the load is PARTIAL
+        (call again to resume). An answer that does not describe the batch also leaves its rows
+        pending; a refusal of the whole request (a 4xx that is not a row result) stops the load as
+        FAILED with 502 MIG-1524 and the rows stay pending. Receivables answers per row: CREATED, UPDATED and UNCHANGED rows
+        are stored with the open-item id the target assigned, which also replaces the factory's
+        provisional id in legacy_xref (once); a REJECTED row is recorded with the target's own
+        code (AR-OPENING-INVALID, -DUPLICATE-KEY, -IDENTITY, -DOCUMENT-EXISTS, -SETTLED,
+        -IN-COLLECTION). Rows equal to what the target already accepted under the same import
+        source are not sent again, so a rerun of an unchanged snapshot sends nothing; a row the
+        target stored whose answer was lost is sent again and answered UNCHANGED. Open AP rows
+        (`ledger` AP) are NOT_AVAILABLE: payables has no opening-item API yet. When no row is
+        pending, the target's totals (GET /v1/receivables/open-item-imports) are compared with
+        what the factory sent, per currency: item count, debit, credit and net open. Both sides
+        cover the whole import source in the legal entity, over every run that loaded into it
+        (receivables totals the open amounts it holds now, so reconcile at the freeze). A
+        difference is MISMATCH, never passed silently; totals that cannot be read, or not
+        completely (receivables lists 500 or more import groups), are UNRECONCILED. The lines are
+        control totals of the run named `target.receivables.*`. One load runs at a time per import
+        source and legal entity (409 MIG-1522), and a run older than one already loaded under them
+        is refused (409 MIG-1525). Without RECEIVABLES_URL and a service signing key the answer is
+        503 MIG-1520; a refused service token is 502 MIG-1521.
+        Writes dev.passage.migration.pack.loaded.v1.
+      x-passage-duty: MigrationRun
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The pass ended; `status` says whether the target's totals match, rows are still pending, or the totals could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetLoad"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/target-load:
+    get:
+      operationId: getTargetLoad
+      summary: Load status, reconciliation lines and first rejects of a run's target load
+      description: |
+        `reconciliation` holds the run's `target.receivables.*` control totals (factory side as
+        source, receivables as target). `rejects` lists up to 50 REJECTED rows and 50 NOT_AVAILABLE
+        rows; page all rows with GET /migration/runs/{id}/target-rows. 409 MIG-1523 when the run
+        was started without a load object.
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The load.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetLoadDetail"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/target-rows:
+    get:
+      operationId: listTargetRows
+      summary: Staged rows of a run's target load, by sequence
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TargetRowStatus"
+        - name: after
+          in: query
+          description: Sequence number of the last row of the previous page.
+          schema:
+            type: integer
+            minimum: 0
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TargetRow"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
@@ -885,6 +1016,81 @@ components:
         amount:
           type: string
           description: Decimal string in transaction currency. Never a float.
+    ExtractRecord:
+      type: object
+      required: [legacyId, party, account, currency, amount]
+      additionalProperties: false
+      description: |
+        A Record plus, for a run with a `load` object, the fields of the receivables row. `amount` is the open
+        amount with its sign (a credit is negative); the side follows the sign and the row sends magnitudes.
+      properties:
+        legacyId:
+          type: string
+        party:
+          type: string
+        account:
+          type: string
+          description: Control account; blank is a DOMAIN failure.
+        currency:
+          type: string
+          description: ISO 4217 code; an unknown code is a DOMAIN failure.
+        amount:
+          type: string
+          description: Decimal string in transaction currency. Never a float.
+        ledger:
+          type: string
+          enum: [AR, AP]
+          description: Default AR. An AP record is NOT_AVAILABLE at the target (payables has no opening-item API yet).
+        documentNumber:
+          type: string
+          description: Defaults to the legacy id.
+        customerId:
+          type: string
+          format: uuid
+          description: Passage customer id. Defaults to load.customerIds[party], then to the party when that is a UUID; a record with none is rejected MIG-REF-UNRESOLVED.
+        kind:
+          type: string
+          enum: [INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT]
+          description: Defaults to INVOICE for a debit and CREDIT_NOTE for a credit.
+        documentDate:
+          type: string
+          format: date
+          description: Required with a load object (MIG-LOAD-FIELD-REQUIRED).
+        dueDate:
+          type: string
+          format: date
+          description: Required with a load object.
+        originalAmount:
+          type: string
+          description: Magnitude; defaults to the open amount. A part-paid legacy invoice sends the larger original.
+        cashDiscountDate:
+          type: string
+          format: date
+        cashDiscountAmount:
+          type: string
+    LoadRequest:
+      type: object
+      required: [target, legalEntityId]
+      additionalProperties: false
+      description: Stages the accepted records for loading into the target service. Nothing is sent until POST /migration/runs/{id}/load.
+      properties:
+        target:
+          type: string
+          enum: [receivables]
+        legalEntityId:
+          type: string
+          format: uuid
+          description: Legal entity the open items belong to; must be inside the caller's scope.
+        importSource:
+          type: string
+          maxLength: 40
+          description: The legacy-system label receivables keys the items under with the legacy id. Defaults to the lower-cased source system and company, for example ax2012.usmf.
+        customerIds:
+          type: object
+          description: Legacy party id to Passage customer id.
+          additionalProperties:
+            type: string
+            format: uuid
     PackRunRequest:
       type: object
       required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, parties, records]
@@ -916,7 +1122,9 @@ components:
           type: array
           minItems: 1
           items:
-            $ref: "#/components/schemas/Record"
+            $ref: "#/components/schemas/ExtractRecord"
+        load:
+          $ref: "#/components/schemas/LoadRequest"
     GLBalance:
       type: object
       required: [legacyId, account, currency, balance]
@@ -980,7 +1188,8 @@ components:
         name:
           type: string
           enum: [open_items.amount, open_items.amount_by_account, open_items.count, gl_balances.balance, gl_balances.nonzero_count,
-            gl_balances.trial_balance, gl_balances.control_account, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales]
+            gl_balances.trial_balance, gl_balances.control_account, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales,
+            target.receivables.item_count, target.receivables.debit_open, target.receivables.credit_open, target.receivables.net_open]
         key:
           type: object
           additionalProperties:
@@ -1101,6 +1310,118 @@ components:
               description: MIG-1506 text for every gl_balances.control_account total that is MISMATCH.
               items:
                 type: string
+            targetLoad:
+              $ref: "#/components/schemas/TargetLoad"
+    TargetRowStatus:
+      type: string
+      enum: [PENDING, LOADED, UNCHANGED, SKIPPED, REJECTED, NOT_AVAILABLE]
+      description: |
+        PENDING is still to send; LOADED the target created or updated it; UNCHANGED the target held it already;
+        SKIPPED equals what the target accepted before, so it was not sent; REJECTED carries the code (the target's
+        AR-OPENING-* or the factory's MIG-LOAD-FIELD-REQUIRED / MIG-REF-UNRESOLVED / MIG-TARGET-REFUSED);
+        NOT_AVAILABLE is open AP (MIG-TARGET-NOT-AVAILABLE).
+    TargetLoad:
+      type: object
+      required: [runId, target, legalEntityId, importSource, status, clean, staged, created, updated, unchanged, skipped, rejected, notAvailable, pending, attempts, version]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        target:
+          type: string
+          enum: [receivables]
+        legalEntityId:
+          type: string
+          format: uuid
+        importSource:
+          type: string
+        status:
+          type: string
+          enum: [STAGED, LOADING, PARTIAL, UNRECONCILED, MISMATCH, RECONCILED, FAILED]
+          description: |
+            STAGED nothing sent yet; LOADING a pass is running; PARTIAL rows are still pending because the target
+            did not answer; UNRECONCILED every row was sent but the target's totals could not be read; MISMATCH the
+            target's totals differ from what the factory sent; RECONCILED they match; FAILED the target refused the
+            factory's service token.
+        clean:
+          type: boolean
+          description: RECONCILED with no row pending, rejected or unavailable.
+        staged:
+          type: integer
+        created:
+          type: integer
+        updated:
+          type: integer
+        unchanged:
+          type: integer
+        skipped:
+          type: integer
+        rejected:
+          type: integer
+        notAvailable:
+          type: integer
+        pending:
+          type: integer
+        attempts:
+          type: integer
+        lastError:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    TargetRow:
+      type: object
+      required: [seq, legacyId, ledger, status]
+      properties:
+        seq:
+          type: integer
+        legacyId:
+          type: string
+        ledger:
+          type: string
+          enum: [AR, AP]
+        status:
+          $ref: "#/components/schemas/TargetRowStatus"
+        outcome:
+          type: string
+          description: The target's outcome for the row (CREATED, UPDATED, UNCHANGED, REJECTED).
+        openItemId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        detail:
+          type: string
+        side:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: string
+          description: Open amount (magnitude).
+        currency:
+          type: string
+        customerId:
+          type: string
+          format: uuid
+    TargetLoadDetail:
+      allOf:
+        - $ref: "#/components/schemas/TargetLoad"
+        - type: object
+          required: [reconciliation, rejects]
+          properties:
+            reconciliation:
+              type: array
+              items:
+                $ref: "#/components/schemas/ControlTotal"
+            rejects:
+              type: array
+              items:
+                $ref: "#/components/schemas/TargetRow"
     ReleaseRequest:
       type: object
       additionalProperties: false
@@ -1275,7 +1596,7 @@ components:
                 const: true
     Xref:
       type: object
-      required: [xrefId, system, company, table, legacyId, passageEntity, passageId, runId, createdAt]
+      required: [xrefId, system, company, table, legacyId, passageEntity, passageId, runId, createdAt, targetConfirmed]
       properties:
         xrefId:
           type: string
@@ -1301,6 +1622,9 @@ components:
         createdAt:
           type: string
           format: date-time
+        targetConfirmed:
+          type: boolean
+          description: True once passageId is the id the target service assigned; until then it is the factory's own.
     ParallelState:
       type: string
       enum: [REPLAYING, DIFFING, REVIEW, SIGNED_OFF]

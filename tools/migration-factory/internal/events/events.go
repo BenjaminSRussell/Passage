@@ -10,6 +10,8 @@ const Source = "passage/migration-factory"
 var (
 	// PackReconciled is written when a pack run's reconciliation step has computed its totals.
 	PackReconciled = events.Type("migration", "pack", "reconciled", 1)
+	// PackLoaded is written when the load of a pack run into its target service has finished a pass.
+	PackLoaded = events.Type("migration", "pack", "loaded", 1)
 	// ParallelRunDiffed is written when a parallel run's diff has classified its variances.
 	ParallelRunDiffed = events.Type("migration", "parallelrun", "diffed", 1)
 	// CutoverStepCompleted is written when a runbook step is marked done.
@@ -20,7 +22,7 @@ var (
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{PackReconciled, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack}
+	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack}
 }
 
 // PackReconciledData is the payload of dev.passage.migration.pack.reconciled.v1.
@@ -34,6 +36,26 @@ type PackReconciledData struct {
 	TotalsMismatch int    `json:"totals_mismatch"`
 	Quarantined    int    `json:"quarantined"`
 	RecordsLoaded  int    `json:"records_loaded"`
+}
+
+// PackLoadedData is the payload of dev.passage.migration.pack.loaded.v1: how the rows of a run came out at the
+// target and whether the target's totals equal what the factory sent.
+type PackLoadedData struct {
+	RunID          string `json:"run_id"`
+	Pack           string `json:"pack"`
+	Target         string `json:"target"`
+	ImportSource   string `json:"import_source"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	Status         string `json:"status"`
+	Created        int    `json:"created"`
+	Updated        int    `json:"updated"`
+	Unchanged      int    `json:"unchanged"`
+	Skipped        int    `json:"skipped"`
+	Rejected       int    `json:"rejected"`
+	NotAvailable   int    `json:"not_available"`
+	Pending        int    `json:"pending"`
+	TotalsMatch    int    `json:"totals_match"`
+	TotalsMismatch int    `json:"totals_mismatch"`
 }
 
 // ParallelRunDiffedData is the payload of dev.passage.migration.parallelrun.diffed.v1. Amounts

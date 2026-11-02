@@ -125,6 +125,7 @@ export function money(value: string): string {
 }
 
 const DECIMAL = /^-?\d{1,22}(\.\d{1,6})?$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export const CURRENCY = /^[A-Z]{3}$/;
 const HEADER = ["legacyid", "party", "account", "currency", "amount"];
 
@@ -133,12 +134,19 @@ export interface ParsedRecords {
   errors: string[];
 }
 
+const KINDS = ["INVOICE", "CREDIT_NOTE", "PAYMENT", "ADJUSTMENT"] as const;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Columns of a pasted extract that loads into receivables, after the five control columns. */
+export const TARGET_COLUMNS = "legacyId, party, account, currency, amount, documentDate, dueDate, then optionally ledger, kind, documentNumber, customerId, originalAmount";
+
 /**
  * Parses pasted open items, one per line: legacyId,party,account,currency,amount. A first line
  * that names the columns is skipped. Amounts stay decimal strings. Problems are reported per line
  * so the user can fix the paste; the service applies the referential and domain rules itself.
  */
-export function parseRecords(text: string): ParsedRecords {
+export function parseRecords(text: string, options: { forTarget?: boolean } = {}): ParsedRecords {
+  if (options.forTarget) return parseTargetRecords(text);
   const records: OpenItemRecord[] = [];
   const errors: string[] = [];
   const lines = text.split(/\r?\n/);
@@ -166,6 +174,71 @@ export function parseRecords(text: string): ParsedRecords {
   return { records, errors };
 }
 
+/**
+ * Parses pasted open items for a run that loads into receivables: the five control columns, the document and due
+ * dates (YYYY-MM-DD), and optionally ledger (AR or AP), kind, document number, Passage customer id and original
+ * amount. Blank optional cells keep the service's defaults. A negative amount is a credit.
+ */
+function parseTargetRecords(text: string): ParsedRecords {
+  const records: OpenItemRecord[] = [];
+  const errors: string[] = [];
+  text.split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim();
+    if (line === "") return;
+    const cells = line.split(/[,;\t]/).map((c) => c.trim());
+    if (index === 0 && cells[0].toLowerCase() === HEADER[0] && cells[1]?.toLowerCase() === HEADER[1]) return;
+    const n = index + 1;
+    if (cells.length < 7 || cells.length > 12) {
+      errors.push(`Line ${n}: expected 7 to 12 values (${TARGET_COLUMNS}), found ${cells.length}.`);
+      return;
+    }
+    const [legacyId, party, account, currency, amount, documentDate, dueDate, ledger = "", kind = "", documentNumber = "", customerId = "", originalAmount = ""] = cells;
+    const bad = (message: string) => errors.push(`Line ${n}: ${message}`);
+    if (!legacyId) return bad("the legacy id is blank.");
+    if (!DECIMAL.test(amount)) return bad(`amount "${amount}" is not a decimal such as 1250.00.`);
+    if (!DATE.test(documentDate)) return bad(`documentDate "${documentDate}" is not a YYYY-MM-DD date.`);
+    if (!DATE.test(dueDate)) return bad(`dueDate "${dueDate}" is not a YYYY-MM-DD date.`);
+    if (ledger !== "" && ledger.toUpperCase() !== "AR" && ledger.toUpperCase() !== "AP") return bad(`ledger "${ledger}" must be AR or AP.`);
+    if (kind !== "" && !(KINDS as readonly string[]).includes(kind.toUpperCase())) return bad(`kind "${kind}" must be ${KINDS.join(", ")}.`);
+    if (customerId !== "" && !UUID.test(customerId)) return bad(`customerId "${customerId}" is not a UUID.`);
+    if (originalAmount !== "" && !/^\d{1,22}(\.\d{1,6})?$/.test(originalAmount)) return bad(`originalAmount "${originalAmount}" is not a positive decimal.`);
+    records.push({
+      legacyId,
+      party,
+      account,
+      currency: currency.toUpperCase(),
+      amount,
+      documentDate,
+      dueDate,
+      ...(ledger !== "" ? { ledger: ledger.toUpperCase() as "AR" | "AP" } : {}),
+      ...(kind !== "" ? { kind: kind.toUpperCase() as (typeof KINDS)[number] } : {}),
+      ...(documentNumber !== "" ? { documentNumber } : {}),
+      ...(customerId !== "" ? { customerId: customerId.toLowerCase() } : {}),
+      ...(originalAmount !== "" ? { originalAmount } : {}),
+    });
+  });
+  return { records, errors };
+}
+
+/** Parses "legacyParty=customer UUID" lines (or comma separated) into the load object's customer map. */
+export function parseCustomerMap(text: string): { map: Record<string, string>; errors: string[] } {
+  const map: Record<string, string> = {};
+  const errors: string[] = [];
+  text.split(/[\r\n,;]+/).forEach((raw) => {
+    const entry = raw.trim();
+    if (entry === "") return;
+    const [party, id, ...rest] = entry.split("=").map((c) => c.trim());
+    if (!party || !id || rest.length > 0 || !UUID.test(id)) errors.push(`"${entry}" is not legacyParty=customer UUID.`);
+    else map[party] = id.toLowerCase();
+  });
+  return { map, errors };
+}
+
+/** True for a status that needs attention before the pack is done: the target's totals differ, rows are pending, or it failed. */
+export function loadNeedsAttention(status: string): boolean {
+  return status === "MISMATCH" || status === "PARTIAL" || status === "UNRECONCILED" || status === "FAILED";
+}
+
 /** Splits a comma, space or newline separated list and drops blanks and repeats. */
 export function splitList(text: string): string[] {
   return [...new Set(text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean))];
@@ -187,7 +260,6 @@ export const CATEGORIES: readonly Category[] = ["HOUR", "EXPENSE", "ITEM", "FEE"
 const BILLING: readonly BillingStatus[] = ["CHARGEABLE_UNBILLED", "BILLED", "NON_CHARGEABLE"];
 export const PARALLEL_STATES: readonly ParallelState[] = ["REPLAYING", "DIFFING", "REVIEW", "SIGNED_OFF"];
 export const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function rows(text: string, header: string[], each: (cells: string[], n: number) => string | undefined): string[] {
   const errors: string[] = [];

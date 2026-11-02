@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Migration Factory events
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Events the migration factory writes to its transactional outbox (PRD 9.49.5), in the same
     transaction as the state change. Debezium relays them to Kafka topic
@@ -15,6 +15,8 @@ channels:
     messages:
       packReconciled:
         $ref: "#/components/messages/PackReconciled"
+      packLoaded:
+        $ref: "#/components/messages/PackLoaded"
   migrationParallelRun:
     address: passage.migration.parallelrun
     messages:
@@ -37,6 +39,12 @@ operations:
       $ref: "#/channels/migrationPack"
     messages:
       - $ref: "#/channels/migrationPack/messages/packReconciled"
+  publishPackLoaded:
+    action: send
+    channel:
+      $ref: "#/channels/migrationPack"
+    messages:
+      - $ref: "#/channels/migrationPack/messages/packLoaded"
   publishParallelRunDiffed:
     action: send
     channel:
@@ -63,6 +71,12 @@ components:
       summary: A pack run computed its control totals. Written for every run, whether or not it reached RECONCILED, and again when releasing a quarantined record brings a LOADED run to RECONCILED.
       payload:
         $ref: "#/components/schemas/PackReconciledEnvelope"
+    PackLoaded:
+      name: dev.passage.migration.pack.loaded.v1
+      title: Pack run loaded into its target
+      summary: A pass of the load of a pack run into the target service (receivables for open_items) finished. Written after the rows were sent and the target's totals were compared, and again by every later pass; status says whether the target's totals equal what the factory sent.
+      payload:
+        $ref: "#/components/schemas/PackLoadedEnvelope"
     ParallelRunDiffed:
       name: dev.passage.migration.parallelrun.diffed.v1
       title: Parallel run diffed
@@ -138,6 +152,54 @@ components:
                 quarantined:
                   type: integer
                 records_loaded:
+                  type: integer
+    PackLoadedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.migration.pack.loaded.v1
+            data:
+              type: object
+              required: [run_id, pack, target, import_source, legal_entity_id, status, created, updated, unchanged, skipped, rejected, not_available, pending, totals_match, totals_mismatch]
+              properties:
+                run_id:
+                  type: string
+                  format: uuid
+                pack:
+                  type: string
+                target:
+                  type: string
+                  enum: [receivables]
+                import_source:
+                  type: string
+                  description: The importSource the rows are keyed under at the target.
+                legal_entity_id:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [PARTIAL, UNRECONCILED, MISMATCH, RECONCILED, FAILED]
+                created:
+                  type: integer
+                updated:
+                  type: integer
+                unchanged:
+                  type: integer
+                skipped:
+                  type: integer
+                  description: Rows equal to what the target already accepted, not sent again.
+                rejected:
+                  type: integer
+                not_available:
+                  type: integer
+                  description: Open AP rows, which payables cannot take yet.
+                pending:
+                  type: integer
+                totals_match:
+                  type: integer
+                totals_mismatch:
                   type: integer
     ParallelRunDiffedEnvelope:
       allOf:

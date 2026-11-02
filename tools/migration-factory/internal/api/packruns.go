@@ -26,14 +26,38 @@ type recordDTO struct {
 	Amount   string `json:"amount"`
 }
 
+// extractRecordDTO is a record as an extract sends it: the control fields and, for a run that loads into its
+// target, the fields of the receivables row. amount is signed (a credit is negative); the side follows its sign.
+type extractRecordDTO struct {
+	recordDTO
+	Ledger             string  `json:"ledger,omitempty"`
+	DocumentNumber     string  `json:"documentNumber,omitempty"`
+	CustomerID         string  `json:"customerId,omitempty"`
+	Kind               string  `json:"kind,omitempty"`
+	DocumentDate       string  `json:"documentDate,omitempty"`
+	DueDate            string  `json:"dueDate,omitempty"`
+	OriginalAmount     string  `json:"originalAmount,omitempty"`
+	CashDiscountDate   *string `json:"cashDiscountDate,omitempty"`
+	CashDiscountAmount string  `json:"cashDiscountAmount,omitempty"`
+}
+
+// loadRequestDTO asks a run to be staged for loading into a target service.
+type loadRequestDTO struct {
+	Target        string            `json:"target"`
+	LegalEntityID string            `json:"legalEntityId"`
+	ImportSource  string            `json:"importSource,omitempty"`
+	CustomerIDs   map[string]string `json:"customerIds,omitempty"`
+}
+
 type packRunRequest struct {
-	SourceSystem     string      `json:"sourceSystem"`
-	SourceCompany    string      `json:"sourceCompany"`
-	CutoffTS         time.Time   `json:"cutoffTs"`
-	FreezeTS         time.Time   `json:"freezeTs"`
-	QuarantineMaxPct string      `json:"quarantineMaxPct,omitempty"`
-	Parties          []string    `json:"parties"`
-	Records          []recordDTO `json:"records"`
+	SourceSystem     string             `json:"sourceSystem"`
+	SourceCompany    string             `json:"sourceCompany"`
+	CutoffTS         time.Time          `json:"cutoffTs"`
+	FreezeTS         time.Time          `json:"freezeTs"`
+	QuarantineMaxPct string             `json:"quarantineMaxPct,omitempty"`
+	Parties          []string           `json:"parties"`
+	Records          []extractRecordDTO `json:"records"`
+	Load             *loadRequestDTO    `json:"load,omitempty"`
 }
 
 type totalDTO struct {
@@ -88,6 +112,8 @@ type runDetailDTO struct {
 	ControlTotals    []totalDTO      `json:"controlTotals"`
 	Quarantined      []quarantineDTO `json:"quarantined"`
 	MismatchMessages []string        `json:"mismatchMessages,omitempty"`
+	// TargetLoad is set when the run was started with a load object (open_items into receivables).
+	TargetLoad *targetLoadDTO `json:"targetLoad,omitempty"`
 }
 
 func toTotalDTO(t domain.ControlTotal) totalDTO {
@@ -154,7 +180,7 @@ func parseMoney(raw string) (decimal.Decimal, error) {
 }
 
 // toRecords parses wire records. Amounts are decimal strings; a bad amount is a rule violation.
-func toRecords(in []recordDTO) ([]domain.Record, error) {
+func toRecords(in []extractRecordDTO) ([]domain.Record, error) {
 	out := make([]domain.Record, 0, len(in))
 	for _, r := range in {
 		amt, err := parseMoney(r.Amount)
@@ -237,6 +263,11 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	loadCfg, extras, err := parseLoad(req.Load, req.Records, sys, company, p)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	partyIDs := splitIDs(req.Parties)
 	parties := make(map[string]struct{}, len(partyIDs))
 	for _, id := range partyIDs {
@@ -256,12 +287,23 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	out, replayed, err := s.store.RunOpenItems(r.Context(), idem, store.OpenItemsRun{Run: run, Records: records, Accepted: accepted, StartedBy: p.UserID})
+	in := store.OpenItemsRun{Run: run, Records: records, Accepted: accepted, StartedBy: p.UserID}
+	if loadCfg != nil {
+		in.Target = &store.TargetStage{LegalEntityID: loadCfg.LegalEntityID, ImportSource: loadCfg.ImportSource, Rows: domain.StageRows(accepted, extras, *loadCfg)}
+	}
+	out, replayed, err := s.store.RunOpenItems(r.Context(), idem, in)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	respond(w, http.StatusCreated, replayed, toRunDTO(out))
+	dto := toRunDTO(out)
+	if in.Target != nil {
+		if l, err := s.store.GetTargetLoad(r.Context(), out.RunID); err == nil {
+			ld := toTargetLoadDTO(l)
+			dto.TargetLoad = &ld
+		}
+	}
+	respond(w, http.StatusCreated, replayed, dto)
 }
 
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +359,15 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toRunDTO(run))
+	out := toRunDTO(run)
+	if l, err := s.store.GetTargetLoad(r.Context(), id); err == nil {
+		dto := toTargetLoadDTO(l)
+		out.TargetLoad = &dto
+	} else if !errors.Is(err, store.ErrNoTarget) {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (s *Server) controlTotals(w http.ResponseWriter, r *http.Request) {

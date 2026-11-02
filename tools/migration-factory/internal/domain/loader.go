@@ -47,4 +47,6 @@ type Xref struct {
 	PassageID     string
 	RunID         string
 	CreatedAt     time.Time
+	// TargetConfirmed is true once PassageID is the id the target service assigned; until then it is the factory's own.
+	TargetConfirmed bool
 }
