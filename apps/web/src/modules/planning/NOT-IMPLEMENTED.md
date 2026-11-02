@@ -148,7 +148,8 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Mark auto-firmed planned orders apart from those a planner firmed | later slice of PSG-22 | Both show as firmed with the order they became; the service does not return the firming batch on a planned order. |
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
 | Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |
-| Supply schedule workbench over the stored plan (item selection, inline planned-order creation, quantity edits, firming, printable report) | later slice of PSG-22 | The service projects only the figures sent to it; requirements of a plan version are not readable per period yet. |
+| Supply schedule over the stored plan (item selection, bucket, horizon, value) | built | `/planning/supply-schedule` (`SupplySchedulePage.tsx`, `supplyschedule.test.tsx`) reads `GET /plans/{planCode}/projection`; the selection lives in the URL. |
+| Supply schedule workbench actions (inline planned-order creation, quantity edits, firming in a cell, printable report) | later slice of PSG-22 | The page is read-only; orders are changed and firmed on the planned-orders screens. |
 | Buffer profiles: list, create, edit; DDMRP buffer status by site, zone and priority; recalculate one buffer | built | `BufferPages.tsx` (slice 10). |
 | Quota arrangements: list, create, edit with sources and ratings | built | `QuotaPages.tsx` (slice 10). |
 | Scenarios: list, create, edit, run a simulation, read its planned orders, mark simulations in the run history | built | `ScenarioPages.tsx` (slice 13). |

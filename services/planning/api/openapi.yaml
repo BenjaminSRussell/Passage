@@ -144,6 +144,66 @@ paths:
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plans/{planCode}/projection:
+    get:
+      operationId: getPlanProjection
+      summary: Supply schedule and inventory projection of items in the current plan version (FR-22.21, FR-22.22)
+      description: >-
+        The supply schedule workbench over a stored plan: for up to 20 items
+        at the version's site, the days of the current version are grouped
+        into buckets counted from the version's as-of date: days, weeks of 7
+        days, or calendar months (the first runs from the as-of date to the
+        end of its month); the last bucket ends at the horizon.
+        Demand is the run's gross requirements (it includes the safety stock
+        the run holds back), supply the scheduled receipts, planned the planned
+        receipts, and `closingOnHand` the projected available balance at the
+        bucket's end (opening on-hand + supply + planned - demand), so it
+        matches the net requirements view. A bucket is a shortage when its
+        balance is below zero. `daysOfSupply` is the balance over the average
+        daily demand of the following 30 days (null without demand). Given
+        `unitCost` and `currency`, each bucket carries the value of its balance;
+        otherwise `value` and `currency` are null. An item the plan did not plan
+        has `planned` false and zero rows. Edits to planned orders after the run
+        are not reflected until the next run. A plan outside the caller's legal
+        entities reads as not found.
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - name: itemId
+          in: query
+          required: true
+          description: Item to project; repeat the parameter for up to 20 items.
+          style: form
+          explode: true
+          schema: {type: array, minItems: 1, maxItems: 20, items: {type: string, format: uuid}}
+        - name: bucket
+          in: query
+          description: Day, week of 7 days from the as-of date, or calendar month.
+          schema: {type: string, enum: [day, week, month], default: week}
+        - name: horizonDays
+          in: query
+          description: Days from the as-of date to project, 1 to 730.
+          schema: {type: integer, minimum: 1, maximum: 730, default: 84}
+        - name: unitCost
+          in: query
+          description: Current cost per inventory unit; give it with `currency` to value each bucket's balance (the cost comes from inventory costing, PSG-20, and is entered until that is read).
+          schema: {type: string, example: '2.50'}
+        - name: currency
+          in: query
+          schema: {type: string, pattern: '^[A-Z]{3}$', example: EUR}
+      responses:
+        '200':
+          description: One schedule per requested item, in the order asked
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanProjection'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/planning/planned-orders:
     get:
       operationId: listPlannedOrders
@@ -2357,6 +2417,53 @@ components:
         plannedReceipts: {type: string, description: Planned orders delivered that day}
         projectedAvailableBalance: {type: string, description: 'PAB(t) = PAB(t-1) + SR + PR - GR, opening at on-hand'}
         netRequirement: {type: string, description: 'The day''s own shortfall before planned receipts: max(0, GR - max(PAB(t-1), 0) - SR)'}
+    PlanProjection:
+      type: object
+      required: [planCode, version, asOf, siteId, bucket, horizonDays, currency, items]
+      properties:
+        planCode: {type: string}
+        version: {type: integer, description: Number of the current version the schedule was read from}
+        asOf: {type: string, format: date}
+        siteId: {type: string, format: uuid, description: Site the version was planned for}
+        bucket: {type: string, enum: [day, week, month]}
+        horizonDays: {type: integer}
+        currency: {type: string, nullable: true, description: Currency of the values; null when no unit cost was given}
+        items:
+          type: array
+          items:
+            type: object
+            required: [itemId, planned, openingOnHand, shortagePeriods, periods, totals]
+            properties:
+              itemId: {type: string, format: uuid}
+              planned: {type: boolean, description: False when the current version holds no net requirements for the item}
+              openingOnHand: {type: string, description: Decimal string; on-hand at the as-of date, read back from the first stored day}
+              shortagePeriods: {type: integer, description: Buckets whose balance is below zero}
+              periods:
+                type: array
+                items: {$ref: '#/components/schemas/ProjectionPeriod'}
+              totals:
+                type: object
+                required: [demand, supply, planned, closingOnHand]
+                properties:
+                  demand: {type: string}
+                  supply: {type: string}
+                  planned: {type: string}
+                  closingOnHand: {type: string}
+    ProjectionPeriod:
+      type: object
+      required: [startDay, endDay, startDate, endDate, demand, supply, planned, closingOnHand, shortage, value, daysOfSupply]
+      properties:
+        startDay: {type: integer, description: Day offset from the as-of date, inclusive}
+        endDay: {type: integer, description: Day offset from the as-of date, inclusive}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date}
+        demand: {type: string, description: Decimal string; gross requirements in the bucket}
+        supply: {type: string, description: Decimal string; scheduled receipts in the bucket}
+        planned: {type: string, description: Decimal string; planned receipts in the bucket}
+        closingOnHand: {type: string, description: Decimal string; projected available balance at the bucket's end}
+        shortage: {type: boolean, description: True when the balance is below zero}
+        value: {type: string, nullable: true, description: Balance at the unit cost, rounded to the currency's minor unit; null without a unit cost}
+        daysOfSupply: {type: string, nullable: true, description: Balance over the average daily demand of the next 30 days; null without demand}
     Message:
       type: object
       properties:

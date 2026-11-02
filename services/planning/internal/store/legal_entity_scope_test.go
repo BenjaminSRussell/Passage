@@ -162,6 +162,13 @@ func TestLegalEntityScope_PlansForecastsAndQuotas(t *testing.T) {
 		if _, err := st.GetVersion(ctxA, "MAIN", version.Number); err != nil {
 			t.Errorf("entity A cannot read its own version: %v", err)
 		}
+		// The supply schedule reads only plans of the caller's entities.
+		if _, err := st.ReadProjectionSource(ctxA, "B-PLAN", []string{item}, 30); problemCode(err) != store.CodeVersionNotFound {
+			t.Errorf("entity A projection of entity B's plan: %v", err)
+		}
+		if _, err := st.ReadProjectionSource(all, "B-PLAN", []string{item}, 30); err != nil {
+			t.Errorf("all-entity caller cannot project entity B's plan: %v", err)
+		}
 	})
 }
 

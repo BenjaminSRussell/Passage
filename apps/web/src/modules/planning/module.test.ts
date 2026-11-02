@@ -39,6 +39,7 @@ describe("planning module", () => {
       "/planning/planned-orders/:id",
       "/planning/messages",
       "/planning/net-requirements",
+      "/planning/supply-schedule",
       "/planning/runs",
       "/planning/runs/compare",
       "/planning/runs/new",
@@ -77,6 +78,7 @@ describe("planning module", () => {
     expect(duties["/planning/forecast"]).toBe("planning.read");
     expect(duties["/planning/calculators"]).toBe("planning.read");
     expect(duties["/planning/net-requirements"]).toBe("planning.read");
+    expect(duties["/planning/supply-schedule"]).toBe("planning.read");
     expect(duties["/planning/coverage-groups"]).toBe("planning.read");
     expect(duties["/planning/buffer-profiles"]).toBe("planning.read");
     expect(duties["/planning/ddmrp-buffers"]).toBe("planning.read");

@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 24)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 25)
 
 Every ticket deliverable and acceptance criterion that slices 1 to 18 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
@@ -191,6 +191,25 @@ additive v1 change flagged `x-passage-added-in`; the event carries no catalog co
 vendor existence check (UUID only), and the vendor on a planned order of a run that sends no item coverage and no `vendorId`
 (PLAN-0008 says so). Existing runs behave as before except that a purchase with no vendor now carries the warning.
 
+Slice 25 reads the supply schedule and inventory forecast from the stored plan (FR-22.21, FR-22.22):
+`GET /plans/{planCode}/projection?itemId=...` (duty `planning.read`, up to 20 items, bucket day, week of 7 days from
+the as-of date or calendar month, horizon 1 to 730 days, optional `unitCost` with `currency`) buckets the
+`net_requirement` rows of the plan's current version (one site, returned as `siteId`) from its as-of date through
+`domain.ProjectPlanned`. The opening on-hand is read back from the item's first stored day (always read, even past the
+window, so an item whose first movement is past the horizon keeps its on-hand), so each bucket's closing balance is the
+run's own PAB; demand is the gross requirements (which include the safety stock the run holds back, so a shortage is a
+balance below zero), supply the scheduled receipts, planned the planned receipts. Month buckets follow the calendar
+(`domain.CalendarMonthEnds`: the first runs from the as-of date to the end of its month; the calculator, which has no
+dates, keeps 30-day months). Value and days of supply come from the same `Project` as the calculator. A plan outside the
+caller's legal entities is 404 by row-level security. The web module gets a Supply schedule page
+(`/planning/supply-schedule`). Tests: `TestProjectPlanned_*`, `TestCalendarMonthEnds`, `TestPlanProjection_*`, store
+`TestReadProjectionSource` and the legal-entity case in `TestLegalEntityScope_PlansForecastsAndQuotas`,
+`supplyschedule.test.tsx`. No migration or event. An item the run saw with on-hand but no movement has no stored rows,
+so it reads as not planned with a zero opening (the version does not store on-hand per item).
+
+- **handoff (authz seed)**: add `{"resource": "/v1/planning/plans/*/projection", "methods": ["GET"]}` to the
+  `planning.read` permissions in `policies/authz/data.json` (the route is enforced in the service with `planning.read`).
+
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -240,8 +259,8 @@ not edit that code).
 | 8 | MRP areas: warehouse and subcontractor planning scopes (FR-22.18) | partly built | Planning scope (`site`, `warehouse` with its warehouse, `subcontractor` with its vendor and provision transfers) is stored on item coverage (slice 9). Not built: netting a warehouse in its own scope apart from the site and replenishing it by planned transfers (AC-22.16), and the subcontractor provision orders inside the run. Subcontractor scope needs w21 vendor operations and w16 vendor locations (handoff). |
 | 8 | Planning strategies MTS net/gross, MTO, ATO, PWFA, subassembly (FR-22.19, BR-22.13) | partly built | `POST /strategies:consume-forecast` (`domain/strategy.go`) applies the BR-22.13 consumption windows (backward, forward, backward-then-forward). The strategy code is stored on item coverage (slice 9). Slice 23: `mts-gross` is netted gross (not against on-hand), a scenario's added sales consume the ATO forecast, the PLAN-0015 `sales-on-top` message (migration `0021`) and a `strategy` on the run's coverage block (see the slice 23 note). Slice 22: the `planning_strategy` setup table (migration `0020`) with list, get, create and update (see the slice 22 note), and the plan run applies `mts-net`, `mts-gross`, `mto` and `assemble-to-order-final` to the forecast model (`domain.PlanForecast`, `TestPlanForecast_*`, `TestRun_AssembleToOrderConsumesForecast`, `TestRun_MakeToOrderDropsAndGrossKeepsForecast`, store `TestStrategySetup`, `TestRunStrategies`). Not built: `plan-without-final-assembly` and `subassembly` in the run (both plan the reduced forecast as `mts-net` does: the former needs finished-item supply held back until sales demand and the forecast placed on the components, the latter consumption by dependent demand); `mto` supply created per sales line and marked 1:1 (`usesMarking` is stored and shown but the run does not mark pegging, so a later run can re-peg); order-specific stock segregation (`segregatedStock`, needs w16, handoff); consumption by sales orders outside the run's snapshot (the run consumes against the sales lines it is sent, handoff PSG-27 for loading them); consumption of a forecast against the sales lines of a different forecast period of the model's reduction (the model's own `transactions` reduction is not applied under ATO, the consumption replaces it); the item-group default strategy of the parameter table (an item coverage always names its strategy, `mts-net` by default); the T461P migration mapping. |
 | 9 | Shelf-life aware pegging (FR-22.20, BR-22.15) | partly built | `POST /shelf-life:allocate` (`domain/shelflife.go`): FEFO over batches with expiry − demand day ≥ required shelf life, the shortfall, and batches expiring unpegged by a horizon day; AC-22.15 tested. Required shelf-life days are stored on item coverage (slice 9). Not built: shelf-life pegging inside the plan run, planned supply for the shortfall with expiry = delivery + shelf life, and the `PLAN-0011` message. Batch expiry (w16/w24) and sellable shelf-life days (FR-24.19) are handoffs. |
-| 9 | Supply schedule workbench (FR-22.21) | partly built | `POST /supply-schedule:project` (`domain/projection.go`) buckets demand, receipts and planned supply by day, week or 30-day month with projected on-hand and a below-safety-stock flag; a PAB-identity property test; the calculator card in the web module. Not built: the grid over a stored plan version for a selection of items, inline planned-order creation, quantity edits and firming in a cell, calendar-month buckets, and the printable report. |
-| 9 | Inventory forecast projection with value and days of supply (FR-22.22) | partly built | The same projection returns value (closing on-hand × unit cost as platform `money`, rounded to the currency's minor unit) and days of supply (on-hand over the next 30 days' average daily demand). Not built: the projection read from the current plan version or a scenario (the version's PAB per day is now stored in `net_requirement`, but the projection endpoint does not read it yet) and current cost from inventory costing (w20 handoff; the cost is entered). |
+| 9 | Supply schedule workbench (FR-22.21) | partly built | `POST /supply-schedule:project` (`domain/projection.go`) buckets demand, receipts and planned supply by day, week or 30-day month with projected on-hand and a below-safety-stock flag; a PAB-identity property test; the calculator card in the web module. Slice 25: `GET /plans/{planCode}/projection` is the grid over the current plan version for up to 20 items, with a Supply schedule page. Not built: a scenario or past version as the source, inline planned-order creation, quantity edits and firming in a cell, a separate safety-stock line per period (the stored gross requirements include it), calendar-month buckets in the calculator (the stored-plan grid has them), and the printable report. |
+| 9 | Inventory forecast projection with value and days of supply (FR-22.22) | partly built | The same projection returns value (closing on-hand × unit cost as platform `money`, rounded to the currency's minor unit) and days of supply (on-hand over the next 30 days' average daily demand). Slice 25 reads the projection from the current plan version (`GET /plans/{planCode}/projection`, value from an entered unit cost). Not built: a scenario as the source, a safety-stock line apart from the run's own netting (the stored demand already includes it) and current cost from inventory costing (w20 handoff; the cost is entered). |
 
 ## Plan execution and operations (PRD 4.22.1, 4.22.10, 4.22.16)
 

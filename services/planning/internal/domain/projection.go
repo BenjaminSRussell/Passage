@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -33,10 +34,13 @@ var (
 	ErrNegativeInput = errors.New("planning: quantities and cost must not be negative")
 	// ErrInvalidCurrency is returned when the unit cost carries no ISO 4217 currency code.
 	ErrInvalidCurrency = errors.New("planning: unit cost needs a three-letter currency")
+	// ErrInvalidPeriods is returned when period ends are negative or not ascending.
+	ErrInvalidPeriods = errors.New("planning: period ends must be ascending day offsets")
 )
 
 // BucketDays returns the number of days in one bucket. A month is 30 days,
-// which keeps the grid aligned to day offsets without calendar dates.
+// which keeps the grid aligned to day offsets without calendar dates; a
+// projection over a dated plan passes calendar months as PeriodEnds instead.
 func BucketDays(bucket string) (int, error) {
 	switch bucket {
 	case BucketDay:
@@ -65,6 +69,10 @@ type ProjectionInput struct {
 	Planned       []Flow // planned supply from the plan run
 	HorizonDays   int
 	Bucket        string
+	// PeriodEnds, when set, replaces the fixed bucket width: the inclusive
+	// last day offset of each bucket, ascending (the calendar months of a
+	// dated plan, CalendarMonthEnds). The last bucket ends at the horizon.
+	PeriodEnds []int
 }
 
 // PeriodRow is one bucket of the schedule. Start and End are inclusive day offsets.
@@ -121,13 +129,15 @@ func Project(in ProjectionInput) (Projection, error) {
 	supply := dailyTotals(in.Supply, in.HorizonDays)
 	planned := dailyTotals(in.Planned, in.HorizonDays)
 
+	ends, err := periodEnds(in.PeriodEnds, width, in.HorizonDays)
+	if err != nil {
+		return Projection{}, err
+	}
+
 	onHand := in.OpeningOnHand
 	out := Projection{}
-	for start := 0; start < in.HorizonDays; start += width {
-		end := start + width - 1
-		if end > in.HorizonDays-1 {
-			end = in.HorizonDays - 1
-		}
+	start := 0
+	for _, end := range ends {
 		row := PeriodRow{Start: start, End: end, SafetyStock: in.SafetyStock}
 		for d := start; d <= end; d++ {
 			row.Demand = row.Demand.Add(demand[d])
@@ -143,9 +153,53 @@ func Project(in ProjectionInput) (Projection, error) {
 		out.TotalDemand = out.TotalDemand.Add(row.Demand)
 		out.TotalSupply = out.TotalSupply.Add(row.Supply)
 		out.TotalPlanned = out.TotalPlanned.Add(row.Planned)
+		start = end + 1
 	}
 	out.ClosingOnHand = onHand
 	return out, nil
+}
+
+// periodEnds is the inclusive last day of every bucket up to the horizon:
+// the given ends cut at the horizon, or fixed widths when none are given.
+func periodEnds(given []int, width, horizon int) ([]int, error) {
+	last := horizon - 1
+	var ends []int
+	if len(given) == 0 {
+		for end := width - 1; end < last; end += width {
+			ends = append(ends, end)
+		}
+		return append(ends, last), nil
+	}
+	prev := -1
+	for _, end := range given {
+		if end <= prev {
+			return nil, ErrInvalidPeriods
+		}
+		prev = end
+		if end >= last {
+			break
+		}
+		ends = append(ends, end)
+	}
+	return append(ends, last), nil
+}
+
+// CalendarMonthEnds returns the day offsets from asOf of the last day of each
+// calendar month that starts within the horizon, so month buckets of a dated
+// plan follow the calendar (FR-22.21): the first runs from asOf to the end of
+// its month. Dates are taken in UTC.
+func CalendarMonthEnds(asOf time.Time, horizonDays int) []int {
+	asOf = time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
+	month := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
+	var ends []int
+	for {
+		month = month.AddDate(0, 1, 0)
+		end := int(month.Sub(asOf).Hours()/24) - 1
+		ends = append(ends, end)
+		if end >= horizonDays-1 {
+			return ends
+		}
+	}
 }
 
 // dailyTotals sums flows per day offset inside the horizon; past-due flows fold into day 0.

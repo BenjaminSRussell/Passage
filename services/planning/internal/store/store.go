@@ -69,6 +69,7 @@ type Store interface {
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
+	ReadProjectionSource(ctx context.Context, planCode string, itemIDs []string, windowDays int) (ProjectionSource, error)
 	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
 	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
 	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)

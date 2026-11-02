@@ -275,6 +275,67 @@ export async function listNetRequirements(planCode: string, itemId: string, init
   return body.items;
 }
 
+/** One bucket of the supply schedule of an item in a stored plan (FR-22.21, FR-22.22). Quantities are decimal strings. */
+export const ProjectionPeriod = z.object({
+  startDay: z.number().int(),
+  endDay: z.number().int(),
+  startDate: z.string(),
+  endDate: z.string(),
+  demand: z.string(),
+  supply: z.string(),
+  planned: z.string(),
+  /** Projected available balance at the bucket's end. */
+  closingOnHand: z.string(),
+  /** True when the balance is below zero. */
+  shortage: z.boolean(),
+  /** Balance at the unit cost; null when no unit cost was given. */
+  value: z.string().nullable(),
+  daysOfSupply: z.string().nullable(),
+});
+export type ProjectionPeriod = z.infer<typeof ProjectionPeriod>;
+
+export const PlanProjection = z.object({
+  planCode: z.string(),
+  version: z.number().int(),
+  asOf: z.string(),
+  /** Site the version was planned for. */
+  siteId: z.string(),
+  bucket: z.enum(["day", "week", "month"]),
+  horizonDays: z.number().int(),
+  currency: z.string().nullable(),
+  items: z.array(
+    z.object({
+      itemId: z.string(),
+      /** False when the current version holds no net requirements for the item. */
+      planned: z.boolean(),
+      openingOnHand: z.string(),
+      shortagePeriods: z.number().int(),
+      periods: z.array(ProjectionPeriod),
+      totals: z.object({ demand: z.string(), supply: z.string(), planned: z.string(), closingOnHand: z.string() }),
+    }),
+  ),
+});
+export type PlanProjection = z.infer<typeof PlanProjection>;
+
+export interface ProjectionQuery {
+  itemIds: string[];
+  bucket?: "day" | "week" | "month";
+  horizonDays?: number;
+  unitCost?: string;
+  currency?: string;
+}
+
+/** Supply schedule and inventory projection of up to 20 items in the current version of a plan. */
+export async function getPlanProjection(planCode: string, q: ProjectionQuery, init?: RequestInit): Promise<PlanProjection> {
+  const params = new URLSearchParams();
+  for (const id of q.itemIds) params.append("itemId", id);
+  if (q.bucket) params.set("bucket", q.bucket);
+  if (q.horizonDays) params.set("horizonDays", String(q.horizonDays));
+  if (q.unitCost) params.set("unitCost", q.unitCost);
+  if (q.currency) params.set("currency", q.currency);
+  return request(`/plans/${encodeURIComponent(planCode)}/projection?${params.toString()}`, PlanProjection, init);
+}
+
 export async function getPlannedOrder(id: string, init?: RequestInit): Promise<PlannedOrder> {
   return request(`/planned-orders/${encodeURIComponent(id)}`, PlannedOrder, init);
 }

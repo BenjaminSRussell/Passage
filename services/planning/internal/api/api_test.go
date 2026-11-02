@@ -25,12 +25,13 @@ const (
 // fakeStore keeps runs in memory and honours the Idempotency-Key contract. Its
 // maintenance and forecast methods are in maintain_test.go.
 type fakeStore struct {
-	runs    map[string]store.Version
-	inputs  map[string]string
-	last    store.RunRequest
-	runErr  error
-	pingErr error
-	orderID string
+	runs       map[string]store.Version
+	inputs     map[string]string
+	last       store.RunRequest
+	runErr     error
+	pingErr    error
+	lastWindow int
+	orderID    string
 
 	// One planned order for the maintenance tests; version 0 reads as 1.
 	orderVersion int
