@@ -16,6 +16,8 @@ channels:
   passage.party.customer:
     address: passage.party.customer
     messages:
+      created:
+        $ref: '#/components/messages/customerCreated'
       updated:
         $ref: '#/components/messages/customerUpdated'
   passage.party.change:
@@ -46,6 +48,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.party.protectedfields' }
     messages: [{ $ref: '#/channels/passage.party.protectedfields/messages/updated' }]
+  onCustomerCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.customer' }
+    messages: [{ $ref: '#/channels/passage.party.customer/messages/created' }]
   onCustomerUpdated:
     action: send
     channel: { $ref: '#/channels/passage.party.customer' }
@@ -122,6 +128,23 @@ components:
                 toId: { type: string, format: uuid }
           mergedAt: { type: string, format: date-time }
       x-passage-type: dev.passage.party.party.merged.v1
+    customerCreated:
+      name: created
+      title: Customer role created
+      description: Emitted in the transaction that adds the customer role to a party, by POST /v1/party/parties/{id}/customer (people and the migration loader alike). An idempotent replay emits nothing.
+      payload:
+        type: object
+        required: [customer_id, party_id, legal_entity_id, account_number, customer_group_id, currency_code, credit_limit, blocked]
+        properties:
+          customer_id: { type: string, format: uuid }
+          party_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          account_number: { type: string }
+          customer_group_id: { type: string, format: uuid }
+          currency_code: { type: string }
+          credit_limit: { type: string, nullable: true, description: "Decimal with at most 2 places; null when none was set." }
+          blocked: { type: string, enum: [none, invoice, all] }
+      x-passage-type: dev.passage.party.customer.created.v1
     customerUpdated:
       name: updated
       title: Customer updated

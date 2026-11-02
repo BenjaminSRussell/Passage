@@ -37,7 +37,8 @@ paths:
     post:
       operationId: createParty
       x-passage-duty: party.write
-      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1. The caller must carry exactly one legal entity (X-Passage-Legal-Entity), because the party number is allocated for that entity; a caller with none or several gets 422 PTY-LEGAL-ENTITY-REQUIRED.
+      x-passage-duty-alternatives: [party.import.write]
+      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1. The optional body field `id` keeps a legacy-stable party id and needs duty party.import.write (403 AUTH-0003 without it; 409 PTY-PARTY-ID-TAKEN when the id exists). The caller must carry exactly one legal entity (X-Passage-Legal-Entity), because the party number is allocated for that entity; a caller with none or several gets 422 PTY-LEGAL-ENTITY-REQUIRED. A caller holding only party.import.write (no party.read or party.write) gets a PartyWriteReceipt (id, partyNumber, partyType, status, version) instead of the party, because that duty opens no read route.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -50,12 +51,15 @@ paths:
             schema: { $ref: '#/components/schemas/CreateParty' }
       responses:
         '201':
-          description: Created, or the original party on an idempotent replay.
+          description: Created, or the original party on an idempotent replay; a PartyWriteReceipt for an import-only caller.
           headers:
             ETag: { description: 'The version, quoted.', schema: { type: string } }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Party' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Party' }
+                  - { $ref: '#/components/schemas/PartyWriteReceipt' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -85,7 +89,8 @@ paths:
     patch:
       operationId: updateParty
       x-passage-duty: party.write
-      description: Optimistic update. A PATCH that changes nothing returns 200 with the same version and emits no event. Emits dev.passage.party.party.updated.v1 otherwise; dob and gender are never named in its changed_fields.
+      x-passage-duty-alternatives: [party.import.write]
+      description: Optimistic update. A PATCH that changes nothing returns 200 with the same version and emits no event. Emits dev.passage.party.party.updated.v1 otherwise; dob and gender are never named in its changed_fields. A caller holding only party.import.write (no party.read or party.write) gets a PartyWriteReceipt (id, partyNumber, partyType, status, version) instead of the party, because that duty opens no read route.
       parameters:
         - name: If-Match
           in: header
@@ -99,12 +104,15 @@ paths:
             schema: { $ref: '#/components/schemas/PatchParty' }
       responses:
         '200':
-          description: The updated party.
+          description: The updated party; a PartyWriteReceipt for an import-only caller.
           headers:
             ETag: { description: 'The version, quoted.', schema: { type: string } }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Party' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Party' }
+                  - { $ref: '#/components/schemas/PartyWriteReceipt' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -119,14 +127,49 @@ paths:
     post:
       operationId: createVendorRole
       x-passage-duty: party.write
-      description: Adds the vendor role to a party in the caller's single legal entity. 409 PTY-VENDOR-EXISTS when the party already has one there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity.
+      x-passage-duty-alternatives: [party.import.write]
+      description: Adds the vendor role to a party in the caller's single legal entity. A replay with the same Idempotency-Key and body (for the same party and legal entity) returns the original role; the same key with another body is 409 idempotency_key_reuse. 409 PTY-VENDOR-EXISTS when the party already has one there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Makes a retry return the original role.
+          schema: { type: string }
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/NewVendor' }
       responses:
-        '201': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
+        '201': { description: 'The vendor role, or the original on an idempotent replay.', content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties/{id}/customer:
+    parameters:
+      - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
+    post:
+      operationId: createCustomerRole
+      summary: Add the customer role to a party in the caller's legal entity.
+      x-passage-duty: party.write
+      x-passage-duty-alternatives: [party.import.write]
+      description: Adds the customer role to a party in the caller's single legal entity, with its group, payment term, posting profile, currency and optional credit fields. A replay with the same Idempotency-Key and body returns the original role and emits nothing; the same key with another body is 409 idempotency_key_reuse. 409 PTY-CUSTOMER-EXISTS when the party already has a customer role there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-CUSTOMER-INVALID for a bad field, an unknown payment term, or a posting profile outside the legal entity; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity. The Idempotency-Key is scoped to the party and the legal entity. Initial creditLimit (FR-7.10) - a person (party.write) may set a positive limit only where credit_limit is not protected in the legal entity, under the same 24-hour rule as the credit-limit route, otherwise 422 PTY-CUSTOMER-INVALID on creditLimit (create without it, then use POST /v1/party/customers/{id}/credit-limit); the migration loader (party.import.write) loads the legacy limit as given, and the limit is carried on customer.created.v1. customerGroupId, deliveryTermId and deliveryModeId are not checked against a master yet (no tables). Emits dev.passage.party.customer.created.v1.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Makes a retry return the original role.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewCustomer' }
+      responses:
+        '201': { description: 'The customer role, or the original on an idempotent replay.', content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -170,7 +213,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/NewBankAccount' }
       responses:
-        '201': { description: The account, masked., content: { application/json: { schema: { $ref: '#/components/schemas/BankAccount' } } } }
+        '201': { description: 'The account, masked.', content: { application/json: { schema: { $ref: '#/components/schemas/BankAccount' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PTY-VENDOR-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -342,7 +385,7 @@ paths:
       x-passage-duty: public
       responses:
         '200': { description: Service is ready; the database answered a ping. }
-        '503': { description: The database did not answer a ping within 500 ms. Body is {"status":"unavailable"}. }
+        '503': { description: 'The database did not answer a ping within 500 ms. Body is {"status":"unavailable"}.' }
   /metrics:
     get:
       operationId: metrics
@@ -365,6 +408,55 @@ components:
         vendorGroupId: { type: string, format: uuid }
         paymentTermId: { type: string, format: uuid, nullable: true }
         currencyCode: { type: string, minLength: 3, maxLength: 3 }
+    NewCustomer:
+      type: object
+      additionalProperties: false
+      required: [accountNumber, customerGroupId, paymentTermId, postingProfileId, currencyCode]
+      properties:
+        accountNumber: { type: string, maxLength: 20 }
+        customerGroupId: { type: string, format: uuid }
+        paymentTermId: { type: string, format: uuid }
+        deliveryTermId: { type: string, format: uuid, nullable: true }
+        deliveryModeId: { type: string, format: uuid, nullable: true }
+        postingProfileId: { type: string, format: uuid, description: "A posting profile of the caller's legal entity." }
+        invoiceAccountPartyId: { type: string, format: uuid, nullable: true, description: "The party invoiced instead of this one." }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        creditLimit: { type: string, nullable: true, description: "Decimal with at most 2 places, never a float." }
+        creditCurrency: { type: string, minLength: 3, maxLength: 3, nullable: true, description: "Defaults to currencyCode when creditLimit is set." }
+        creditRating: { type: string, maxLength: 20, nullable: true }
+        creditHold: { type: boolean, default: false }
+        blocked: { type: string, enum: [none, invoice, all], default: none }
+    PartyWriteReceipt:
+      type: object
+      description: What an import-only caller gets back from a party write; no names or personal data.
+      required: [id, partyNumber, partyType, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        partyNumber: { type: string }
+        partyType: { type: string, enum: [organization, person] }
+        status: { type: string }
+        version: { type: integer }
+    Customer:
+      type: object
+      required: [id, partyId, legalEntityId, accountNumber, customerGroupId, paymentTermId, postingProfileId, currencyCode, creditHold, blocked, version]
+      properties:
+        id: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        accountNumber: { type: string }
+        customerGroupId: { type: string, format: uuid }
+        paymentTermId: { type: string, format: uuid }
+        deliveryTermId: { type: string, format: uuid }
+        deliveryModeId: { type: string, format: uuid }
+        postingProfileId: { type: string, format: uuid }
+        invoiceAccountPartyId: { type: string, format: uuid }
+        currencyCode: { type: string }
+        creditLimit: { type: string }
+        creditCurrency: { type: string }
+        creditRating: { type: string }
+        creditHold: { type: boolean }
+        blocked: { type: string, enum: [none, invoice, all] }
+        version: { type: integer }
     Vendor:
       type: object
       required: [id, partyId, legalEntityId, accountNumber, vendorGroupId, currencyCode, blocked, version]
@@ -441,6 +533,7 @@ components:
           required: [partyType]
           properties:
             partyType: { type: string, enum: [organization, person] }
+            id: { type: string, format: uuid, description: 'Optional stable id for imports; needs duty party.import.write.' }
       unevaluatedProperties: false
       description: An organization requires legalName; a person requires givenName and familyName.
     PatchParty:

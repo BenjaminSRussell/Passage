@@ -380,3 +380,36 @@ func TestVendor_CreateWaitsForConcurrentMergeAndThenRefuses(t *testing.T) {
 		t.Errorf("vendor roles on the merged party = %s, want 0", got)
 	}
 }
+
+func TestVendor_IdempotentReplayAndKeyReuse(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	partyID, err := insertParty(principalContext(1, ""), app, testkit.TenantID(1), "P-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := asUser(1, legalEntityA, "service:migration-loader")
+	in := store.NewVendorRole{In: newVendor(ids.New()), Key: "row-9", Hash: "h1"}
+	first, created, err := s.CreateVendorRole(loader, partyID, in)
+	if err != nil || !created {
+		t.Fatalf("first: %v %v", created, err)
+	}
+	again, created, err := s.CreateVendorRole(loader, partyID, in)
+	if err != nil || created || again != first {
+		t.Fatalf("replay = %+v created=%v err=%v, want %+v", again, created, err, first)
+	}
+	changed := in
+	changed.Hash = "h2"
+	if _, _, err := s.CreateVendorRole(loader, partyID, changed); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("same key other body: %v", err)
+	}
+	// Without a key, a retry is still a second create and conflicts.
+	if _, _, err := s.CreateVendorRole(loader, partyID, store.NewVendorRole{In: in.In}); problemCode(t, err) != store.CodeVendorExists {
+		t.Fatalf("unkeyed retry: %v", err)
+	}
+	// The same key in another legal entity is another request.
+	other, created, err := s.CreateVendorRole(asUser(1, legalEntityB, "service:migration-loader"), partyID, in)
+	if err != nil || !created || other.ID == first.ID || other.LegalEntityID != legalEntityB {
+		t.Fatalf("same key in legal entity B = %+v created=%v err=%v", other, created, err)
+	}
+}

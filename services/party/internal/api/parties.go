@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -26,6 +27,8 @@ const (
 )
 
 type createRequest struct {
+	// ID lets the migration loader keep a legacy-stable id; only party.import.write may set it.
+	ID        string `json:"id,omitempty"`
 	PartyType string `json:"partyType"`
 	domain.PartyFields
 }
@@ -53,6 +56,20 @@ func (a *API) createParty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.PartyFields = req.PartyFields.Clean()
+	if req.ID != "" {
+		caller, _ := tenant.FromContext(r.Context())
+		if !caller.HasDuty(dutyImport) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a caller-supplied id needs duty "+dutyImport))
+			return
+		}
+		id, err := uuid.Parse(req.ID)
+		if err != nil || id == uuid.Nil || id.String() != req.ID {
+			p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeInvalid, "party failed validation")
+			p.Errors = map[string]string{"id": "must be a lowercase UUID"}
+			httpx.Fail(w, r, p)
+			return
+		}
+	}
 	if errs := domain.ValidateParty(req.PartyType, req.PartyFields, true); len(errs) > 0 {
 		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeInvalid, "party failed validation")
 		p.Errors = errs
@@ -65,7 +82,7 @@ func (a *API) createParty(w http.ResponseWriter, r *http.Request) {
 		numberingKey = ids.New()
 	}
 	party, created, err := a.parties.CreateParty(r.Context(), store.NewParty{
-		PartyType: req.PartyType, Fields: req.PartyFields, Key: key, Hash: domain.RequestHash(req),
+		ID: req.ID, PartyType: req.PartyType, Fields: req.PartyFields, Key: key, Hash: domain.RequestHash(req),
 	}, func(ctx context.Context) (string, error) { return a.sequence.Next(ctx, partySequence, numberingKey) })
 	if err != nil {
 		failParty(w, r, err)
@@ -127,10 +144,26 @@ func requestedVersion(r *http.Request, body *int) (int, bool) {
 	return 0, false
 }
 
+// writeReceipt is what a write-only importer gets back: enough to chain its
+// next call (id, version), none of the party's names or personal data.
+type writeReceipt struct {
+	ID          string `json:"id"`
+	PartyNumber string `json:"partyNumber"`
+	PartyType   string `json:"partyType"`
+	Status      string `json:"status"`
+	Version     int    `json:"version"`
+}
+
 func respond(w http.ResponseWriter, r *http.Request, status int, res partyResponse) {
 	caller, _ := tenant.FromContext(r.Context())
-	res.DOB = domain.MaskDOB(res.DOB, caller.HasDuty(dutyPII))
 	w.Header().Set("ETag", `"`+strconv.Itoa(res.Version)+`"`)
+	if !caller.HasDuty(dutyRead) && !caller.HasDuty(dutyWrite) {
+		// party.import.write opens no read route, so a create or PATCH (even an
+		// empty one) must not hand the party record back to the loader.
+		httpx.JSON(w, status, writeReceipt{ID: res.ID, PartyNumber: res.PartyNumber, PartyType: res.PartyType, Status: res.Status, Version: res.Version})
+		return
+	}
+	res.DOB = domain.MaskDOB(res.DOB, caller.HasDuty(dutyPII))
 	httpx.JSON(w, status, res)
 }
 

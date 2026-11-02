@@ -24,6 +24,7 @@ const (
 	CodeVersionConflict  = "PTY-VERSION-CONFLICT"
 	CodeStatusTransition = "PTY-STATUS-TRANSITION"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
+	CodePartyIDTaken     = "PTY-PARTY-ID-TAKEN"
 	maxMergeHops         = 5
 	uniqueViolation      = "23505"
 	partyColumns         = `id::text, party_number, party_type, name, search_name, status, merged_into_id::text, org_legal_name, org_trade_name, org_registration_number, org_industry_code, person_given_name, person_middle_name, person_family_name, person_prefix, person_suffix, to_char(person_dob, 'YYYY-MM-DD'), person_gender, language_code, time_zone, owner_user_id::text, owner_team_id::text, version, created_at, updated_at`
@@ -36,6 +37,7 @@ const (
 )
 
 type NewParty struct {
+	ID        string // optional caller-supplied id (import only)
 	PartyType string
 	Fields    domain.PartyFields
 	Key       string
@@ -84,9 +86,16 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
 }
 
+func partyIDTaken() error {
+	return httpx.NewProblem(http.StatusConflict, CodePartyIDTaken, "a party with this id already exists")
+}
+
 func (s *Postgres) CreateParty(ctx context.Context, in NewParty, next func(context.Context) (string, error)) (domain.Party, bool, error) {
 	for attempt := 0; ; attempt++ {
 		p, created, err := s.createOnce(ctx, in, next)
+		if err != nil && isUniqueViolation(err) && in.ID != "" && constraintOf(err) == "party_pkey" {
+			return p, created, partyIDTaken()
+		}
 		if err != nil && in.Key != "" && attempt == 0 && isUniqueViolation(err) {
 			continue
 		}
@@ -115,13 +124,25 @@ func (s *Postgres) createOnce(ctx context.Context, in NewParty, next func(contex
 				return err
 			}
 		}
+		partyID := in.ID
+		if partyID == "" {
+			partyID = ids.New()
+		} else {
+			var taken bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from party where tenant_id = $1 and id = $2)`, caller.TenantID, partyID).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return partyIDTaken()
+			}
+		}
 		number, err := next(ctx)
 		if err != nil {
 			return err
 		}
 		draft := domain.Party{Name: domain.DisplayName(in.PartyType, in.Fields), PartyFields: in.Fields}
 		draft.SearchName = domain.Normalize(draft.Name)
-		args := append([]any{caller.TenantID, ids.New(), number, in.PartyType}, attributes(draft)...)
+		args := append([]any{caller.TenantID, partyID, number, in.PartyType}, attributes(draft)...)
 		party, err = scanParty(tx.QueryRow(ctx, insertPartySQL, append(args, key)...))
 		if err != nil {
 			return err

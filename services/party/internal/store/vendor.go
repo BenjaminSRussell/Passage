@@ -33,10 +33,21 @@ const (
 	vendorColumns       = `id::text, party_id::text, legal_entity_id::text, account_number, vendor_group_id::text, payment_term_id::text, currency_code, blocked, version`
 	bankColumns         = `id::text, vendor_id::text, account_holder, bank_country, currency_code, account_last4`
 	foreignKeyViolation = "23503"
+	vendorKeyPrefix     = "vendor-role:"
 )
 
+// NewVendorRole is a vendor role to add; Key and Hash carry the optional
+// Idempotency-Key and the hash of the request body.
+type NewVendorRole struct {
+	In   domain.NewVendor
+	Key  string
+	Hash string
+}
+
 type VendorStore interface {
-	CreateVendor(ctx context.Context, partyID string, in domain.NewVendor) (domain.Vendor, error)
+	// CreateVendorRole adds the vendor role to partyID in the caller's single
+	// legal entity. The bool is false for an idempotent replay.
+	CreateVendorRole(ctx context.Context, partyID string, in NewVendorRole) (domain.Vendor, bool, error)
 	GetVendor(ctx context.Context, vendorID string) (domain.Vendor, error)
 	ListPartyVendors(ctx context.Context, partyID string) ([]domain.Vendor, error)
 	AddBankAccount(ctx context.Context, vendorID string, in domain.NewBankAccount) (domain.BankAccount, error)
@@ -61,18 +72,59 @@ func scanVendor(row pgx.Row) (domain.Vendor, error) {
 	return v, err
 }
 
+// CreateVendor adds a vendor role without an Idempotency-Key.
 func (s *Postgres) CreateVendor(ctx context.Context, partyID string, in domain.NewVendor) (domain.Vendor, error) {
+	v, _, err := s.CreateVendorRole(ctx, partyID, NewVendorRole{In: in})
+	return v, err
+}
+
+func (s *Postgres) CreateVendorRole(ctx context.Context, partyID string, in NewVendorRole) (domain.Vendor, bool, error) {
+	v, created, err := s.createVendorOnce(ctx, partyID, in)
+	if err != nil && in.Key != "" && isUniqueViolation(err) {
+		// A concurrent request with the same key may have just committed: the
+		// second attempt then finds its key and replays it.
+		v, created, err = s.createVendorOnce(ctx, partyID, in)
+	}
+	switch {
+	case isUniqueViolation(err):
+		return domain.Vendor{}, false, httpx.NewProblem(http.StatusConflict, CodeVendorExists, "the party already has a vendor role in this legal entity, or the account number is taken")
+	case isForeignKeyViolation(err):
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeVendorInvalid, "vendor failed validation")
+		p.Errors = map[string]string{"paymentTermId": "does not exist"}
+		return domain.Vendor{}, false, p
+	}
+	return v, created, err
+}
+
+func (s *Postgres) createVendorOnce(ctx context.Context, partyID string, in NewVendorRole) (domain.Vendor, bool, error) {
 	caller, _ := tenant.FromContext(ctx)
 	scopes := tenant.LegalEntityScopeList(caller)
 	if len(scopes) != 1 {
-		return domain.Vendor{}, httpx.NewProblem(http.StatusUnprocessableEntity, numbering.CodeEntityRequired, "a vendor role belongs to exactly one legal entity; the caller must carry one")
+		return domain.Vendor{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, numbering.CodeEntityRequired, "a vendor role belongs to exactly one legal entity; the caller must carry one")
 	}
 	id, err := canonicalID(partyID)
 	if err != nil {
-		return domain.Vendor{}, ErrNotFound
+		return domain.Vendor{}, false, ErrNotFound
 	}
-	var v domain.Vendor
+	v, created := domain.Vendor{}, false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var key *string
+		if in.Key != "" {
+			k := vendorKeyPrefix + scopes[0] + ":" + id + ":" + in.Key
+			key = &k
+			var storedHash string
+			err := tx.QueryRow(ctx, `select request_hash from idempotency_keys where tenant_id = $1 and key = $2`, caller.TenantID, k).Scan(&storedHash)
+			if err == nil {
+				if storedHash != in.Hash {
+					return httpx.NewProblem(http.StatusConflict, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
+				}
+				v, err = scanVendor(tx.QueryRow(ctx, `select `+vendorColumns+` from vendor_role where tenant_id = $1 and idempotency_key = $2`, caller.TenantID, k))
+				return err
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		var status string
 		if err := tx.QueryRow(ctx, `select status from party where tenant_id = $1 and id = $2 for share`, caller.TenantID, id).Scan(&status); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -83,20 +135,21 @@ func (s *Postgres) CreateVendor(ctx context.Context, partyID string, in domain.N
 		if status == "merged" {
 			return httpx.NewProblem(http.StatusConflict, CodePartyMerged, "party was merged; add the vendor role to the surviving party")
 		}
-		v, err = scanVendor(tx.QueryRow(ctx, `insert into vendor_role (tenant_id, id, party_id, legal_entity_id, account_number, vendor_group_id, payment_term_id, currency_code)
-			values ($1, $2, $3, $4, $5, $6, $7::text::uuid, $8) returning `+vendorColumns,
-			caller.TenantID, ids.New(), id, scopes[0], in.AccountNumber, in.VendorGroupID, in.PaymentTermID, in.CurrencyCode))
-		return err
+		v, err = scanVendor(tx.QueryRow(ctx, `insert into vendor_role (tenant_id, id, party_id, legal_entity_id, account_number, vendor_group_id, payment_term_id, currency_code, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7::text::uuid, $8, $9) returning `+vendorColumns,
+			caller.TenantID, ids.New(), id, scopes[0], in.In.AccountNumber, in.In.VendorGroupID, in.In.PaymentTermID, in.In.CurrencyCode, key))
+		if err != nil {
+			return err
+		}
+		if key != nil {
+			if _, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status) values ($1, $2, $3, 201)`, caller.TenantID, *key, in.Hash); err != nil {
+				return err
+			}
+		}
+		created = true
+		return nil
 	})
-	switch {
-	case isUniqueViolation(err):
-		return domain.Vendor{}, httpx.NewProblem(http.StatusConflict, CodeVendorExists, "the party already has a vendor role in this legal entity, or the account number is taken")
-	case isForeignKeyViolation(err):
-		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeVendorInvalid, "vendor failed validation")
-		p.Errors = map[string]string{"paymentTermId": "does not exist"}
-		return domain.Vendor{}, p
-	}
-	return v, err
+	return v, created, err
 }
 
 func (s *Postgres) GetVendor(ctx context.Context, vendorID string) (domain.Vendor, error) {

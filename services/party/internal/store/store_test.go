@@ -107,8 +107,8 @@ func TestMigrate_AppliesTwice(t *testing.T) {
 		}
 	}
 	var applied int
-	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != 9 {
-		t.Fatalf("schema_migrations rows = %d, %v; want 9", applied, err)
+	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != 10 {
+		t.Fatalf("schema_migrations rows = %d, %v; want 10", applied, err)
 	}
 }
 

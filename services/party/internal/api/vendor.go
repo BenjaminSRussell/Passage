@@ -25,7 +25,7 @@ func (a *API) WithVendors(vendors store.VendorStore) *API {
 }
 
 func (a *API) registerVendors(r chi.Router) {
-	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/parties/{id}/vendor", a.createVendor)
+	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/vendor", a.createVendor)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}/vendors", a.listPartyVendors)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}", a.getVendor)
 	r.With(authz.RequireDuty(dutyBankWrite)).Post("/v1/party/vendors/{id}/bank-accounts", a.addBankAccount)
@@ -63,12 +63,16 @@ func (a *API) createVendor(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
-	vendor, err := a.vendors.CreateVendor(r.Context(), chi.URLParam(r, "id"), req)
+	vendor, created, err := a.vendors.CreateVendorRole(r.Context(), chi.URLParam(r, "id"), store.NewVendorRole{
+		In: req, Key: r.Header.Get(idempotencyKeyHeader), Hash: domain.RequestHash(req),
+	})
 	if err != nil {
 		failParty(w, r, err)
 		return
 	}
-	a.vendorsCreated.Add(1)
+	if created {
+		a.vendorsCreated.Add(1)
+	}
 	httpx.JSON(w, http.StatusCreated, vendor)
 }
 

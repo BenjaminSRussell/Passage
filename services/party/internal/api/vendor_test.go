@@ -17,14 +17,17 @@ const vendorGroup = "00000000-0000-0000-0000-0000000000c1"
 type fakeVendors struct {
 	created domain.NewVendor
 	partyID string
+	key     string
+	hash    string
 	banked  domain.NewBankAccount
 	reveal  bool
 	err     error
 }
 
-func (f *fakeVendors) CreateVendor(_ context.Context, partyID string, in domain.NewVendor) (domain.Vendor, error) {
-	f.partyID, f.created = partyID, in
-	return domain.Vendor{ID: knownID, PartyID: partyID, VendorGroupID: in.VendorGroupID, AccountNumber: in.AccountNumber, CurrencyCode: in.CurrencyCode, Blocked: "none", Version: 1}, f.err
+func (f *fakeVendors) CreateVendorRole(_ context.Context, partyID string, role store.NewVendorRole) (domain.Vendor, bool, error) {
+	in := role.In
+	f.partyID, f.created, f.key, f.hash = partyID, in, role.Key, role.Hash
+	return domain.Vendor{ID: knownID, PartyID: partyID, VendorGroupID: in.VendorGroupID, AccountNumber: in.AccountNumber, CurrencyCode: in.CurrencyCode, Blocked: "none", Version: 1}, f.err == nil, f.err
 }
 
 func (f *fakeVendors) GetVendor(_ context.Context, vendorID string) (domain.Vendor, error) {
