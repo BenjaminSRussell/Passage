@@ -14,6 +14,10 @@ schedules, and reports the deferred revenue roll-forward (FR-29.7 to FR-29.9).
   one contract, the obligation-method filter and cursor pagination on the
   contracts list, and the screens for them.
 
+- **Slice 5 (AC-29.3)**: recognized revenue is posted to the general ledger as
+  Dr 2400 / Cr 4000 through its journal API with the service token, and the
+  roll-forward is reconciled to the ledger's 2400 balance.
+
 What is still missing is listed in `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -27,6 +31,7 @@ internal/events/        event types and payloads
 migrations/             0001_revrec_init.sql: revenue_contract, performance_obligation, revenue_schedule, recognition_run, outbox
                         0002_ratable_basis.sql: revenue_contract.ratable_basis (DAILY | MONTHLY)
                         0004_outbox_and_child_scope.sql: outbox tenant RLS and legal-entity scope inherited by child rows
+                        0006_journal_posting.sql: journal_posting (one ledger entry per entity, currency and month)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for contract.allocated and schedule.recognized
 charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admin port, ServiceMonitor toggle)
@@ -45,6 +50,8 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 | GET | `/v1/revrec/recognition-runs` | `revrec.view` | latest period first |
 | GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, adjustments, closing |
 | GET | `/v1/revrec/roll-forward?contractId=&period=YYYY-MM` | `revrec.view` | the same for one contract, in its currency (drill-down); 404 when unknown or out of scope |
+| POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, through?, retryRejected?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default and upper bound the last completed month end) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end, to the ledger configured for the entity in `REVREC_LEDGER_IDS` (never the request); a pending post is retried with the same ledger idempotency key; a post the ledger refuses with a 4xx is marked rejected, its lines released, and listed under `rejected` while the other postings continue; 503 `REV-0200` without `LEDGER_URL`, 422 `REV-0202` for an entity with no configured ledger, 502 `REV-0201` when the ledger does not answer |
+| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period; `difference` and `reconciled` |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
 without the duty). A principal scoped to one legal entity (`X-Passage-Legal-Entity`)
@@ -102,7 +109,39 @@ contracts and runs from its reads.
 | `dev.passage.revrec.schedule.recognized.v1` | milestone satisfied; each line of a recognition run |
 
 Both are written to the outbox in the same transaction and keyed by contract id.
-`journal_posting_id` is null until the ledger posts Dr 2400 / Cr 4000 (wave 11).
+`revenue_schedule.journal_posting_id` is set when `POST /v1/revrec/journal-postings`
+claims a recognized line for a `journal_posting` row; the row keeps the ledger entry
+id once the ledger answers.
+
+## Ledger
+
+`LEDGER_URL` (and `LEDGER_TIMEOUT`) with the service signing key
+(`PASSAGE_SERVICE_NAME=revrec`, `PASSAGE_SERVICE_SIGNING_KEY[_FILE]`) enable the
+posting and the reconciliation through `platform/ledgerclient`; the ledger must trust
+revrec's public key (`PASSAGE_SERVICE_PUBLIC_KEYS`). The service holds only
+`ledger.entry.post` and `ledger.balance.read` (`service_grants`). A line is claimed
+for a posting in the transaction that creates the posting row, so no line is posted
+twice; an unanswered post leaves the posting pending for the next call, a post the
+ledger refuses for good is marked rejected and its lines are released with
+`rejected_posting_id`, then skipped until a request sets `retryRejected`. `REVREC_LEDGER_IDS`
+(`<legalEntityId>=<ledgerId>,...`, chart value `ledgerIds`) names the ledger of each entity and
+is required when `LEDGER_URL` is set. A pending posting on another ledger than the configured
+one is logged and listed under `otherLedger`, never re-targeted. Operator procedure for
+those: if the mapping changed by mistake, restore it and call the endpoint to drain them.
+If the move to the new ledger is intended, first confirm in the old ledger that no entry
+with idempotency key `revrec-posting-<id>` exists, then, as the schema owner in one
+transaction, run `update journal_posting set rejected_code = 'OPERATOR_RELEASED' where id = '<id>' and entry_id is null`
+and `update revenue_schedule set journal_posting_id = null, rejected_posting_id = '<id>' where journal_posting_id = '<id>'`,
+and post again with `retryRejected` so the lines are claimed for the configured ledger.
+When a ledger acceptance arrives after its posting was rejected and its lines were
+already retried into a new pending posting, completing it supersedes that new posting
+(`rejected_code = 'SUPERSEDED'`, its other lines released for retry) and gives the
+lines back to the accepted one; if the new posting was already accepted by the ledger the
+lines are in the ledger twice, which is logged at error level with both posting ids
+for a manual reversal. The response echoes the effective `through` date.
+The reconciliation compares the cumulative recognized revenue of the roll-forward
+with the ledger's 2400 debits: the credit side of 2400 is the invoice's posting
+(billing), not revrec's.
 
 ## Run
 
@@ -124,6 +163,10 @@ and readiness. The store tests (Postgres, non-superuser role so RLS applies)
 reproduce AC-29.4 end to end, April's carry-forward, contract completion, the
 outbox payloads, tenant and legal-entity isolation, the duplicate-key race, keyset
 pages, the method filter, child-row scope and rejected cross-tenant outbox writes.
+`internal/api/postings_test.go` runs recognition, the journal postings and the
+reconciliation against Postgres with the `platform/ledgerclient` fake as the ledger: the
+entry is Dr 2400 / Cr 4000, a refused post is retried without double posting, and the
+reconciliation shows a difference until the ledger holds the entries.
 The `asc606-40` fixture (`internal/domain/testdata/asc606-40.json`, regenerated by
 the exact rational reference `gen_asc606_40.py`, which shares no code with the
 engine) holds 40 bundle scenarios. `TestASC606Fixture40_AllocateAndSchedule` checks
@@ -150,6 +193,9 @@ duties in step.
 | `REV-0005` | 422 | Only a MILESTONE obligation can be satisfied |
 | `REV-0006` | 422 | Milestone satisfied before the contract date |
 | `REV-0007` | 422 | Recognition run for a period that has not ended |
+| `REV-0200` | 503 | The general ledger is not configured (`LEDGER_URL` unset) |
+| `REV-0201` | 502 | The general ledger did not answer, refused a balance read, or reported another currency |
+| `REV-0202` | 422 | The legal entity has no ledger in `REVREC_LEDGER_IDS` |
 | `REV-0100` | 404 | Contract or obligation not found |
 | `REV-0103` | 412 | If-Match names a contract version that is no longer current |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different body |

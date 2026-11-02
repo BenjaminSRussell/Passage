@@ -20,6 +20,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/domain"
 )
@@ -45,13 +46,17 @@ var (
 
 // API holds the dependencies of the handlers and their counters.
 type API struct {
-	store Store
-	now   func() time.Time
+	store     Store
+	now       func() time.Time
+	ledger    ledgerclient.Ledger
+	postings  PostingStore
+	ledgerIDs map[string]string
 
 	previews            atomic.Int64
 	contractsCreated    atomic.Int64
 	milestonesSatisfied atomic.Int64
 	linesRecognized     atomic.Int64
+	journalPostings     atomic.Int64
 }
 
 // New returns the handlers backed by s. The preview never touches the store.
@@ -68,6 +73,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/recognition-runs", a.runRecognition)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-runs", a.listRuns)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/roll-forward", a.rollForward)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/journal-postings", a.postJournal)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/gl-reconciliation", a.glReconciliation)
 }
 
 // Metrics serves the counters in the Prometheus text format on the admin port.
@@ -81,6 +88,7 @@ func (a *API) Metrics() http.Handler {
 		counter("revrec_contracts_created_total", "Revenue contracts created; idempotent replays are not counted.", a.contractsCreated.Load())
 		counter("revrec_milestones_satisfied_total", "Milestone obligations satisfied; replays are not counted.", a.milestonesSatisfied.Load())
 		counter("revrec_schedule_lines_recognized_total", "Ratable schedule lines recognized by recognition runs.", a.linesRecognized.Load())
+		counter("revrec_journal_postings_total", "Ledger entries (Dr 2400, Cr 4000) posted for recognized revenue.", a.journalPostings.Load())
 	})
 }
 

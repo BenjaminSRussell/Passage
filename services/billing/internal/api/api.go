@@ -35,17 +35,20 @@ import (
 )
 
 const (
-	idempotencyKey   = "Idempotency-Key"
-	validationDetail = "request failed validation"
-	dateLayout       = "2006-01-02"
-	maxLinesCeiling  = 10000
-	readyTimeout     = 500 * time.Millisecond
-	defaultListLimit = 100
-	maxListLimit     = 200
-	maxAccountLength = 20
-	maxReasonLength  = 200
-	maxInstallments  = 24
-	maxOffsetDays    = 365
+	idempotencyKey = "Idempotency-Key"
+
+	subscriptionKeyPrefix = "subscription-"
+	idempotencyKeyDetail  = `Idempotency-Key header is required (1 to 255 characters, not starting with "subscription-")`
+	validationDetail      = "request failed validation"
+	dateLayout            = "2006-01-02"
+	maxLinesCeiling       = 10000
+	readyTimeout          = 500 * time.Millisecond
+	defaultListLimit      = 100
+	maxListLimit          = 200
+	maxAccountLength      = 20
+	maxReasonLength       = 200
+	maxInstallments       = 24
+	maxOffsetDays         = 365
 	// Duties (§5.29.17): InvoiceView, InvoiceMaintain, InvoicePost, CreditNotePost.
 	dutyView       = "billing.invoice.view"
 	dutyMaintain   = "billing.invoice.maintain"
@@ -83,10 +86,11 @@ type Store interface {
 
 // API holds the dependencies of the handlers and their counters.
 type API struct {
-	store    Store
-	tax      TaxEngine
-	maxLines int
-	now      func() time.Time
+	store         Store
+	subscriptions SubscriptionStore
+	tax           TaxEngine
+	maxLines      int
+	now           func() time.Time
 
 	proposalsCreated   atomic.Int64
 	invoicesPosted     atomic.Int64
@@ -94,6 +98,9 @@ type API struct {
 	creditNotesCreated atomic.Int64
 	creditNotesPosted  atomic.Int64
 	shipmentProposals  atomic.Int64
+
+	subscriptionsCreated atomic.Int64
+	subscriptionInvoices atomic.Int64
 }
 
 // New returns the handlers. maxLines bounds a proposal (BILLING_MAX_LINES).
@@ -112,6 +119,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions", a.createSubscription)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/subscriptions/{id}", a.getSubscription)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:change-plan", a.changePlan)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:cancel", a.cancelSubscription)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:bill", a.billSubscription)
 }
 
 // Metrics serves the counters in the Prometheus text format on the admin port.
@@ -124,6 +136,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP billing_credit_notes_created_total Credit note proposals created; idempotent replays are not counted.\n# TYPE billing_credit_notes_created_total counter\nbilling_credit_notes_created_total %d\n", a.creditNotesCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_credit_notes_posted_total Credit notes posted with a number.\n# TYPE billing_credit_notes_posted_total counter\nbilling_credit_notes_posted_total %d\n", a.creditNotesPosted.Load())
 		fmt.Fprintf(w, "# HELP billing_shipment_proposals_created_total Shipment and consolidated invoice proposals created from packing slips; replays are not counted.\n# TYPE billing_shipment_proposals_created_total counter\nbilling_shipment_proposals_created_total %d\n", a.shipmentProposals.Load())
+		fmt.Fprintf(w, "# HELP billing_subscriptions_created_total Subscriptions created; idempotent replays are not counted.\n# TYPE billing_subscriptions_created_total counter\nbilling_subscriptions_created_total %d\n", a.subscriptionsCreated.Load())
+		fmt.Fprintf(w, "# HELP billing_subscription_invoices_created_total Prorated subscription invoice proposals created; replays are not counted.\n# TYPE billing_subscription_invoices_created_total counter\nbilling_subscription_invoices_created_total %d\n", a.subscriptionInvoices.Load())
 	})
 }
 
@@ -286,10 +300,14 @@ func toDTO(inv store.Invoice) invoiceDTO {
 
 func fixed(v decimal.Decimal, exp int32) string { return v.StringFixed(exp) }
 
+func invalidIdempotencyKey(key string) bool {
+	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix)
+}
+
 func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	key := r.Header.Get(idempotencyKey)
-	if key == "" || len(key) > 255 {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "Idempotency-Key header is required (1 to 255 characters)"))
+	if invalidIdempotencyKey(key) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", idempotencyKeyDetail))
 		return
 	}
 	var req proposalRequest

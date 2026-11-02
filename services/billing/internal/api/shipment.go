@@ -88,8 +88,8 @@ func batchDTO(invs []store.Invoice) proposalBatchDTO {
 // 409 BIL-0104 (BR-29.5).
 func (a *API) createShipmentProposals(w http.ResponseWriter, r *http.Request) {
 	key := r.Header.Get(idempotencyKey)
-	if key == "" || len(key) > 255 {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "Idempotency-Key header is required (1 to 255 characters)"))
+	if invalidIdempotencyKey(key) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", idempotencyKeyDetail))
 		return
 	}
 	var req shipmentProposalRequest

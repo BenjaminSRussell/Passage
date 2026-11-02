@@ -42,8 +42,8 @@ type creditNoteRequest struct {
 // remaining creditable amount under the original's row lock.
 func (a *API) createCreditNote(w http.ResponseWriter, r *http.Request) {
 	key := r.Header.Get(idempotencyKey)
-	if key == "" || len(key) > 255 {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "Idempotency-Key header is required (1 to 255 characters)"))
+	if invalidIdempotencyKey(key) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", idempotencyKeyDetail))
 		return
 	}
 	var req creditNoteRequest

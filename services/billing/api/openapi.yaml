@@ -414,6 +414,129 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/billing/subscriptions:
+    post:
+      operationId: createSubscription
+      summary: Start a subscription (FR-29.10).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        A plan price per billing period of 1, 3, 6 or 12 months from a start date.
+        A retry with the same Idempotency-Key and body returns the subscription
+        (200, Idempotent-Replayed). 503 BIL-0109 when subscriptions are not available in the deployment.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubscriptionRequest" }
+      responses:
+        "200": { description: The subscription created by the same key., content: { application/json: { schema: { $ref: "#/components/schemas/Subscription" } } } }
+        "201": { description: The subscription., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Subscription" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions/{id}:
+    get:
+      operationId: getSubscription
+      summary: Read a subscription with its plan terms and the end of the last invoiced period.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200": { description: The subscription., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Subscription" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions/{id}:change-plan:
+    post:
+      operationId: changeSubscriptionPlan
+      summary: Move a subscription to another plan price from a date.
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        The change must take effect after the current plan began and after the
+        last invoiced period (422 BIL-0107); a cancelled subscription refuses it
+        (422 BIL-0108). A period that spans the change is billed as one line per plan.
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - { name: If-Match, in: header, required: false, description: "The ETag (version) the caller reviewed; a stale value returns 412 BIL-0103.", schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanChangeRequest" }
+      responses:
+        "200": { description: The subscription with the new term., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Subscription" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions/{id}:cancel:
+    post:
+      operationId: cancelSubscription
+      summary: Cancel a subscription; service ends on the last service day.
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        The last service day must not be before the current plan began nor before
+        the end of the last invoiced period (422 BIL-0107). Cancelling twice is
+        refused (422 BIL-0108).
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - { name: If-Match, in: header, required: false, description: "The ETag (version) the caller reviewed; a stale value returns 412 BIL-0103.", schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelRequest" }
+      responses:
+        "200": { description: The cancelled subscription., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Subscription" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions/{id}:bill:
+    post:
+      operationId: billSubscription
+      summary: Invoice one billing period of a subscription, prorated by calendar days (BR-29.8).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        periodFrom is the first of a month; the period runs periodMonths months.
+        Each plan term served in the period becomes one line, its price times the
+        days served over the days in the period, rounded half-even to the
+        currency's minor unit. Tax is quoted as for any invoice (503 BIL-0001
+        when the tax engine is down) and the SUBSCRIPTION proposal posts through
+        /v1/billing/invoices/{id}:post. The period is the idempotency key: a
+        repeat returns the same invoice (200, Idempotent-Replayed) and an
+        overlapping period is refused (409 BIL-0106). A period with nothing to
+        bill is refused (422 BIL-0105); no zero invoice is issued.
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BillRequest" }
+      responses:
+        "200": { description: The invoice already issued for the period., content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } } }
+        "201": { description: The prorated invoice proposal., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     IdempotencyKey:
@@ -440,6 +563,70 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    SubscriptionRequest:
+      type: object
+      required: [legalEntityId, customerId, invoiceAccountId, currency, planCode, price, periodMonths, startDate, revenueAccount, taxCode, paymentTermDays]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        invoiceAccountId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        planCode: { type: string, maxLength: 50 }
+        price: { type: string, description: "Price of one billing period; positive, up to 6 fraction digits." }
+        periodMonths: { type: integer, enum: [1, 3, 6, 12] }
+        startDate: { type: string, format: date }
+        revenueAccount: { type: string, maxLength: 20 }
+        taxCode: { type: string, maxLength: 20 }
+        paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
+    PlanChangeRequest:
+      type: object
+      required: [planCode, price, effectiveFrom]
+      additionalProperties: false
+      properties:
+        planCode: { type: string, maxLength: 50 }
+        price: { type: string }
+        effectiveFrom: { type: string, format: date }
+    CancelRequest:
+      type: object
+      required: [lastServiceDay]
+      additionalProperties: false
+      properties:
+        lastServiceDay: { type: string, format: date }
+    BillRequest:
+      type: object
+      required: [periodFrom]
+      additionalProperties: false
+      properties:
+        periodFrom: { type: string, format: date, description: "The first of a month; after the first invoiced period it must start the day after the latest invoiced period ends or end the day before the earliest one starts (400 COM-0001 otherwise)." }
+        invoiceDate: { type: string, format: date, description: "Defaults to periodFrom." }
+    Subscription:
+      type: object
+      required: [id, legalEntityId, customerId, invoiceAccountId, currency, periodMonths, startDate, status, revenueAccount, taxCode, paymentTermDays, terms, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        invoiceAccountId: { type: string, format: uuid }
+        currency: { type: string }
+        periodMonths: { type: integer }
+        startDate: { type: string, format: date }
+        lastServiceDay: { type: string, format: date }
+        status: { type: string, enum: [ACTIVE, CANCELLED] }
+        revenueAccount: { type: string }
+        taxCode: { type: string }
+        paymentTermDays: { type: integer }
+        billedThrough: { type: string, format: date, description: "End of the last invoiced period." }
+        terms:
+          type: array
+          items:
+            type: object
+            required: [planCode, price, effectiveFrom]
+            properties:
+              planCode: { type: string }
+              price: { type: string }
+              effectiveFrom: { type: string, format: date }
+        version: { type: integer }
     FreeTextInvoiceRequest:
       type: object
       required: [legalEntityId, customerId, invoiceAccountId, currency, invoiceDate, paymentTermDays, lines]
