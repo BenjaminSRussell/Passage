@@ -7,6 +7,7 @@ const (
 	CodeActivationLedger  = "CST-0721"
 	CodeOnHandUnavailable = "CST-0722"
 	CodeReversalTarget    = "CST-0723"
+	CodePostingAccounts   = "CST-0724"
 )
 
 // RollLockKey names the advisory lock a running roll of a version holds and an

@@ -555,32 +555,82 @@ paths:
   /v1/product-costing/versions/{id}/activate:
     post:
       operationId: activateStoredCostingVersion
-      summary: Move a stored Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Sets activatedAt; no pending prices are stored yet, so nothing is revalued or posted
+      summary: Activate a stored Open or Blocked version (BR-39.2), segregated from CostingMaintain. A bare {version} only moves the status. With lines, dryRun or reversesActivationId it revalues the on-hand, posts the revaluation journal to the ledger accounts configured for the version's legal entity and activates in one transaction (FR-39.6)
       x-passage-duty: CostingActivate
       parameters:
         - $ref: "#/components/parameters/VersionId"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required unless dryRun; replays the stored activation
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StoredActivationRequest" }
+      responses:
+        "200":
+          description: The version, now Active (bare request); or the preview (dryRun); or the version with its activation and journal entry id
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/StoredCostingVersion"
+                  - $ref: "#/components/schemas/StoredActivationResult"
+        "400": { $ref: "#/components/responses/Problem", description: "Unknown fields are refused, including inventoryAccount and costChangeAccount: the ledger accounts are configuration, never request data" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0717" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read, CST-0710 a roll holds the version" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0723 reversal target, CST-0724 no posting accounts configured for the legal entity" }
+        "502": { $ref: "#/components/responses/Problem", description: "CST-0721 the ledger did not accept the journal (nothing is activated), CST-0722 the on-hand could not be read" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-0721 no ledger configured, or the store is unavailable" }
+  /v1/product-costing/posting-accounts/{legalEntityId}:
+    get:
+      operationId: getPostingAccounts
+      summary: The ledger accounts a legal entity's activation journals post to
+      x-passage-duty: CostingView
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityId"
+      responses:
+        "200":
+          description: The configured accounts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingAccounts" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem", description: "CST-0718 legal entity outside the caller's scope" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0724 none configured" }
+        "503": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putPostingAccounts
+      summary: Set the ledger accounts a legal entity's activation journals post to (CostingMaintain); activation takes the accounts from here, never from its request
+      x-passage-duty: CostingMaintain
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [version]
+              required: [inventoryAccount, costChangeAccount]
               additionalProperties: false
               properties:
-                version: { type: integer, minimum: 1 }
+                inventoryAccount: { type: string, minLength: 1, maxLength: 64 }
+                costChangeAccount: { type: string, minLength: 1, maxLength: 64, description: Must differ from inventoryAccount }
       responses:
         "200":
-          description: The version, now Active
+          description: The stored accounts
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/StoredCostingVersion" }
+              schema: { $ref: "#/components/schemas/PostingAccounts" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem", description: "CST-0717" }
-        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked" }
+        "403": { $ref: "#/components/responses/Problem", description: "CST-0718 legal entity outside the caller's scope" }
+        "404": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
@@ -595,6 +645,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    LegalEntityId:
+      name: legalEntityId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   headers:
     IdempotentReplayed:
       description: "true when the response is the stored answer to an earlier request with this Idempotency-Key"
@@ -606,6 +661,61 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    PostingAccounts:
+      type: object
+      required: [legalEntityId, inventoryAccount, costChangeAccount, updatedBy, updatedAt]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        inventoryAccount: { type: string }
+        costChangeAccount: { type: string }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    StoredActivationRequest:
+      type: object
+      required: [version]
+      additionalProperties: false
+      properties:
+        version: { type: integer, minimum: 1 }
+        dryRun: { type: boolean }
+        reversesActivationId: { type: string, format: uuid, description: Reverses this earlier activation of the version; takes its lines from it }
+        ledgerId: { type: string, format: uuid, description: Required unless dryRun }
+        postingDate: { type: string, format: date, description: Defaults to today (UTC); before today the on-hand is read as of that date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        newStandardForOpenOrders: { type: boolean }
+        lines:
+          type: array
+          maxItems: 50000
+          items:
+            type: object
+            required: [itemId, siteId, oldStd, newStd]
+            additionalProperties: false
+            properties:
+              itemId: { type: string }
+              siteId: { type: string }
+              oldStd: { type: string }
+              newStd: { type: string }
+              qty: { type: string, description: Required only while no inventory service is configured; otherwise read from the on-hand and must be omitted }
+    StoredActivationResult:
+      type: object
+      required: [version, activation]
+      properties:
+        version: { $ref: "#/components/schemas/StoredCostingVersion" }
+        activation:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            costingVersionId: { type: string, format: uuid }
+            legalEntityId: { type: string, format: uuid }
+            reversesActivationId: { type: string, format: uuid }
+            ledgerId: { type: string, format: uuid }
+            postingDate: { type: string, format: date }
+            currency: { type: string }
+            itemCount: { type: integer }
+            total: { type: string }
+            journalEntryId: { type: string }
+            newStandardForOpenOrders: { type: boolean }
+            activatedBy: { type: string }
+            createdAt: { type: string, format: date-time }
     CostComponentInput:
       type: object
       required: [code, name, costGroupType]

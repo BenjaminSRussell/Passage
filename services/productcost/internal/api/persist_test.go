@@ -30,6 +30,10 @@ type fakeStore struct {
 	expected, calls int
 	replayed        bool
 	err             error
+	accountsErr     error
+	accounts        store.PostingAccounts
+	activation      *store.ActivationInput
+	runPost         bool
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -82,9 +86,26 @@ func (f *fakeStore) GetActivation(context.Context, string) (store.Activation, er
 	return store.Activation{}, f.err
 }
 
-func (f *fakeStore) ActivateVersion(context.Context, store.ActivationInput) (store.ActivationResult, bool, error) {
+func (f *fakeStore) ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error) {
 	f.calls++
+	f.activation = &in
+	if f.err == nil && f.runPost {
+		if _, err := in.Post(ctx, someID); err != nil {
+			return store.ActivationResult{}, false, err
+		}
+	}
 	return store.ActivationResult{}, false, f.err
+}
+
+func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
+	f.calls++
+	return f.accounts, f.accountsErr
+}
+
+func (f *fakeStore) SetPostingAccounts(_ context.Context, in store.PostingAccounts) (store.PostingAccounts, error) {
+	f.calls++
+	f.accounts = in
+	return in, f.err
 }
 
 func storedRouter(f *fakeStore) http.Handler {

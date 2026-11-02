@@ -42,6 +42,8 @@ type Store interface {
 	TransitionVersion(ctx context.Context, id string, expected int, action string) (store.Version, error)
 	GetActivation(ctx context.Context, id string) (store.Activation, error)
 	ActivateVersion(ctx context.Context, in store.ActivationInput) (store.ActivationResult, bool, error)
+	GetPostingAccounts(ctx context.Context, legalEntityID string) (store.PostingAccounts, error)
+	SetPostingAccounts(ctx context.Context, in store.PostingAccounts) (store.PostingAccounts, error)
 }
 
 // WithStore attaches the repository. Without one the stored routes answer 503.
@@ -335,8 +337,6 @@ type storedActivateRequest struct {
 	LedgerID                 string           `json:"ledgerId"`
 	PostingDate              string           `json:"postingDate"`
 	Currency                 string           `json:"currency"`
-	InventoryAccount         string           `json:"inventoryAccount"`
-	CostChangeAccount        string           `json:"costChangeAccount"`
 	NewStandardForOpenOrders bool             `json:"newStandardForOpenOrders"`
 	Lines                    []activationLine `json:"lines"`
 }

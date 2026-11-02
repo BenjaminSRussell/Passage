@@ -81,12 +81,6 @@ func (a *API) validateActivation(r *http.Request, req storedActivateRequest, v s
 		if !ids.Valid(req.LedgerID) {
 			fields["ledgerId"] = "must be a UUID"
 		}
-		if req.InventoryAccount == "" {
-			fields["inventoryAccount"] = "is required"
-		}
-		if req.CostChangeAccount == "" {
-			fields["costChangeAccount"] = "is required"
-		}
 		idempotencyKey(r, fields)
 	}
 	seen := map[[2]string]bool{}
@@ -176,8 +170,8 @@ func (a *API) activationLines(ctx context.Context, req storedActivateRequest, v 
 	return base, nil
 }
 
-func ledgerEntry(req storedActivateRequest, v store.Version, preview domain.RevalPreview, activationID string) ledgerclient.Entry {
-	accounts := map[string]string{domain.AccountInventory: req.InventoryAccount, domain.AccountCostChangeVar: req.CostChangeAccount}
+func ledgerEntry(req storedActivateRequest, v store.Version, preview domain.RevalPreview, activationID string, pa store.PostingAccounts) ledgerclient.Entry {
+	accounts := map[string]string{domain.AccountInventory: pa.InventoryAccount, domain.AccountCostChangeVar: pa.CostChangeAccount}
 	e := ledgerclient.Entry{LegalEntityID: v.LegalEntityID, LedgerID: req.LedgerID, DocumentID: activationID, PostingDate: req.PostingDate,
 		Currency: req.Currency, IdempotencyKey: "productcost.activation:" + v.ID + ":" + strconv.Itoa(*req.Version), SourceType: activationSourceType}
 	for _, jl := range preview.Journal {
@@ -235,12 +229,19 @@ func (a *API) activateWithRevaluation(w http.ResponseWriter, r *http.Request, id
 		httpx.Fail(w, r, activationProblem(http.StatusServiceUnavailable, domain.CodeActivationLedger, "the general ledger is not configured for this service"))
 		return
 	}
+	var accounts store.PostingAccounts
+	if !preview.Total.IsZero() {
+		if accounts, err = a.store.GetPostingAccounts(r.Context(), v.LegalEntityID); err != nil {
+			storeFailure(w, r, err)
+			return
+		}
+	}
 	res, replayed, err := a.store.ActivateVersion(r.Context(), store.ActivationInput{
 		VersionID: id, Expected: *req.Version, Key: strings.TrimSpace(r.Header.Get(headerIdempotencyKey)), Fingerprint: fingerprint,
 		ReversesID: req.ReversesActivationID, LedgerID: req.LedgerID, PostingDate: req.PostingDate, Currency: req.Currency,
 		NewStandardForOpenOrders: req.NewStandardForOpenOrders, Preview: preview,
 		Post: func(ctx context.Context, activationID string) (string, error) {
-			journalID, err := a.ledger.Post(ctx, ledgerEntry(req, v, preview, activationID))
+			journalID, err := a.ledger.Post(ctx, ledgerEntry(req, v, preview, activationID, accounts))
 			if err != nil {
 				a.activationPostFailures.Add(1)
 				slog.ErrorContext(ctx, "activation journal not posted", "versionId", id, "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", middleware.GetReqID(ctx))

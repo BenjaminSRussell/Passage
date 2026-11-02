@@ -842,6 +842,7 @@
     "CostingMaintain": {"permissions": [
       {"resource": "/v1/product-costing/cost-components", "methods": ["POST"]},
       {"resource": "/v1/product-costing/cost-groups", "methods": ["POST"]},
+      {"resource": "/v1/product-costing/posting-accounts/*", "methods": ["PUT"]},
       {"resource": "/v1/product-costing/versions", "methods": ["POST"]},
       {"resource": "/v1/product-costing/versions/*/transition", "methods": ["POST"]},
       {"resource": "/v1/product-costing/versions:transition", "methods": ["POST"]}
@@ -851,6 +852,7 @@
       {"resource": "/v1/product-costing/comparisons", "methods": ["POST"]},
       {"resource": "/v1/product-costing/cost-components", "methods": ["GET"]},
       {"resource": "/v1/product-costing/cost-groups", "methods": ["GET"]},
+      {"resource": "/v1/product-costing/posting-accounts/*", "methods": ["GET"]},
       {"resource": "/v1/product-costing/reconciliations", "methods": ["POST"]},
       {"resource": "/v1/product-costing/versions", "methods": ["GET"]},
       {"resource": "/v1/product-costing/versions/*", "methods": ["GET"]}

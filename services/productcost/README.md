@@ -99,8 +99,8 @@ subtotals named in `refs`). See slice 3 below.
 | `POST /v1/product-costing/variances/compute` | `CostingSystem` |
 | `POST /v1/product-costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
 | `POST /v1/product-costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
-| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}` | `CostingView` |
-| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition` | `CostingMaintain` |
+| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}`, `/posting-accounts/{legalEntityId}` | `CostingView` |
+| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition`; `PUT /v1/product-costing/posting-accounts/{legalEntityId}` | `CostingMaintain` |
 | `POST /v1/product-costing/versions/{id}/activate` | `CostingActivate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
@@ -245,9 +245,21 @@ same transaction (see `events/asyncapi.yaml`).
   blocks, unblocks or closes (CostingMaintain); `POST /v1/product-costing/versions/{id}/activate` with
   `{version}` activates (CostingActivate, segregated). `version` is the counter the caller read;
   a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
-  (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. No pending prices are stored yet,
-  so activating a version revalues and posts nothing (D6). Event
+  (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. Event
   `dev.passage.costing.version.transitioned.v1` with the action and both statuses.
+- **Activation with revaluation** (FR-39.6, D6): a body with `lines`, `dryRun` or
+  `reversesActivationId` (plus `currency`, `postingDate`, `ledgerId`, and the `Idempotency-Key`
+  header unless `dryRun`) revalues the on-hand of the lines, and without `dryRun` posts the
+  journal to the ledger and activates the version in one transaction. A journal the ledger
+  refuses fails the call (`CST-0721`, 502) and leaves the version, the activation and the
+  key untouched, so the same key can be retried. A reversal is a new activation back to the
+  earlier standard (`CST-0723`). The ledger accounts are stored configuration per legal entity,
+  `PUT /v1/product-costing/posting-accounts/{legalEntityId}` with `{inventoryAccount,
+  costChangeAccount}` (CostingMaintain, legal-entity scope; the two must differ). The request
+  cannot carry accounts: `inventoryAccount` and `costChangeAccount` are unknown fields (400).
+  Productcost holds `ledger.entry.post`, so letting a caller choose the account would let
+  CostingActivate post to any account. An activation with a non-zero revaluation and no
+  configured accounts is `CST-0724` (422). Event `dev.passage.costing.standardcost.activated.v1`.
 - The slice-3 stateless routes (`/versions:transition`, `/versions:activate`) still serve
   callers that carry a version themselves.
 - Without a store (no database) the stored routes answer `CST-0799` (503).
@@ -321,6 +333,10 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0715 | 422 | version transition not allowed from the current status (new code) |
 | CST-0716 | 422 | `SpecifiedVersion` fallback without a fallback version, or pointing to itself (new code) |
 | CST-0720 | 422 | variance identity failed for the order (residual above the rounding bound) |
+| CST-0721 | 502 / 503 | the ledger did not accept the revaluation journal (nothing activated), or no ledger is configured |
+| CST-0722 | 502 | the inventory on-hand could not be read |
+| CST-0723 | 404 / 422 | reversal target missing, of another version, or already reversed |
+| CST-0724 | 422 / 404 | no posting accounts configured for the legal entity |
 | CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
 | CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |
 | CST-0733 | diagnostic | open in-transit transfers (error with `InTransit`; new code) |
