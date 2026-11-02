@@ -471,11 +471,11 @@ paths:
         (all of them, or those with the given subjectRef) by overwriting the sealed name, address, tax id, email and bank
         account and setting erased_at; the row stays because posted invoices reference it. A payee is erased only when
         84 months (7 years, owner decision for AP and payee records) have passed since its last activity, the later of its
-        creation and its latest invoice, and when the compliance service reports no active legal hold covering the payee
+        creation and its latest invoice, and the payee's country has no longer statutory floor (DE and FR, 10 years, are
+        skipped and counted as retained until the local rules land, LOC-0502), and when the compliance service reports no active legal hold covering the payee
         (data class AP_PAYEE, the payee id as recordRef, its subjectRef). A payee inside retention or under a hold is
-        kept and counted; a hold check that cannot be answered stops the run before anything changes (500), and with no
-        COMPLIANCE_URL the route answers 503 RCV-HLD-001. A run handles up to 200 payees; more is true when a further run
-        is needed. The same path runs from the dev.passage.privacy.erasure.requested.v1 consumer. Repeating a run is safe.
+        kept and counted; each hold check runs immediately before that payee's own erasure, and a hold check that cannot be answered stops the run (500; payees already erased stay erased and a repeat continues), and with no
+        COMPLIANCE_URL the route answers 503 RCV-HLD-001. A run pages through every payee of the entity by (created_at, id) cursor. The same path runs from the dev.passage.privacy.erasure.requested.v1 consumer. Repeating a run is safe.
       requestBody:
         required: true
         content:
@@ -494,12 +494,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [erased, retained, held, more]
+                required: [erased, retained, held]
                 properties:
                   erased: { type: integer }
                   retained: { type: integer }
                   held: { type: integer }
-                  more: { type: boolean }
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001, COM-0002' }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }

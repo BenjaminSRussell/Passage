@@ -2,13 +2,24 @@ package domain
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"time"
 )
 
 const (
 	PayeeDataClass       = "AP_PAYEE"
 	PayeeRetentionMonths = 84
 )
+
+var statutoryFloorMonths = map[string]int{"DE": 120, "FR": 120}
+
+func PayeeRetentionEnd(country string, lastActivity time.Time) (time.Time, bool) {
+	if statutoryFloorMonths[strings.ToUpper(strings.TrimSpace(country))] > PayeeRetentionMonths {
+		return time.Time{}, false
+	}
+	return lastActivity.UTC().AddDate(0, PayeeRetentionMonths, 0), true
+}
 
 type HoldQuery struct {
 	LegalEntityID string

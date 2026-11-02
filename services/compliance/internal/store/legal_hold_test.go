@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,5 +229,42 @@ func TestLegalHold_AppRoleCannotDeleteHoldsOrCommands(t *testing.T) {
 		if err == nil {
 			t.Errorf("passage_app deleted from %s", table)
 		}
+	}
+}
+
+func TestLockLegalEntity_CaseInsensitiveAndPlaceHoldStoresCanonicalId(t *testing.T) {
+	s, _ := migrated(t)
+	tenantID, le := ids.New(), ids.New()
+	upper := strings.ToUpper(le)
+	ctx := asEntity(tenantID, le, ids.New())
+
+	held, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(ctx)
+	if err := lockLegalEntity(ctx, held, tenantID, le); err != nil {
+		t.Fatal(err)
+	}
+	waiter, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waiter.Rollback(ctx)
+	short, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	if err := lockLegalEntity(short, waiter, tenantID, upper); err == nil {
+		t.Fatal("an upper-case id must take the same lock as the canonical id")
+	}
+
+	held.Rollback(ctx)
+	waiter.Rollback(ctx)
+	h, err := s.PlaceHold(ctx, holdInput(upper, "party:42", "", ""), "k-upper", t0)
+	if err != nil || h.LegalEntityID != le {
+		t.Fatalf("hold %+v %v", h, err)
+	}
+	got, err := s.CheckHolds(ctx, domain.HoldScope{LegalEntityID: le, SubjectRef: "party:42"})
+	if err != nil || len(got.HoldIDs) != 1 {
+		t.Fatalf("check %+v %v", got, err)
 	}
 }

@@ -116,7 +116,15 @@ func nullable(s string) *string {
 	return &s
 }
 
+func canonicalEntity(id string) string {
+	if c, ok := ids.Canonical(id); ok {
+		return c
+	}
+	return id
+}
+
 func lockLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) error {
+	legalEntityID = canonicalEntity(legalEntityID)
 	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+legalEntityID)
 	return err
 }
@@ -149,6 +157,7 @@ func (s *Postgres) PlaceHold(ctx context.Context, in HoldInput, key string, now 
 		return Hold{}, err
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
+	in.LegalEntityID = canonicalEntity(in.LegalEntityID)
 	in.SubjectRef, in.RecordRef = strings.TrimSpace(in.SubjectRef), strings.TrimSpace(in.RecordRef)
 	if err := in.ValidHold(); err != nil {
 		return Hold{}, err
@@ -319,6 +328,7 @@ func (s *Postgres) RequestErasure(ctx context.Context, in ErasureInput, key stri
 	if err != nil {
 		return ErasureCommand{}, err
 	}
+	in.LegalEntityID = canonicalEntity(in.LegalEntityID)
 	in.SubjectRef = strings.TrimSpace(in.SubjectRef)
 	if in.DataClasses == nil {
 		in.DataClasses = []string{}

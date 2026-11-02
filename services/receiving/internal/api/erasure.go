@@ -62,7 +62,7 @@ func (a *API) erasePayees(ctx context.Context, legalEntityID, subjectRef, erasur
 	a.payeesErased.Add(int64(res.Erased))
 	a.payeesRetained.Add(int64(res.Retained))
 	a.payeesHeld.Add(int64(res.Held))
-	slog.InfoContext(ctx, "one-time payee erasure run", "erased", res.Erased, "retained", res.Retained, "held", res.Held, "more", res.More,
+	slog.InfoContext(ctx, "one-time payee erasure run", "erased", res.Erased, "retained", res.Retained, "held", res.Held,
 		"legalEntityId", legalEntityID, "erasureId", erasureID, "actor", actor, "correlationId", middleware.GetReqID(ctx))
 	return res, nil
 }

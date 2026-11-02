@@ -13,3 +13,15 @@ CREATE INDEX IF NOT EXISTS receiving_one_time_payee_subject_ix
 
 GRANT UPDATE (name_sealed, address_sealed, tax_id_sealed, email_sealed, bank_sealed, erased_at, erasure_id)
   ON receiving_one_time_payee TO passage_app;
+
+CREATE OR REPLACE FUNCTION receiving_one_time_payee_erased_at_once() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.erased_at IS NOT NULL AND NEW.erased_at IS DISTINCT FROM OLD.erased_at THEN
+    RAISE EXCEPTION 'erased_at is write-once' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS receiving_one_time_payee_erased_at_once ON receiving_one_time_payee;
+CREATE TRIGGER receiving_one_time_payee_erased_at_once BEFORE UPDATE ON receiving_one_time_payee
+  FOR EACH ROW EXECUTE FUNCTION receiving_one_time_payee_erased_at_once();

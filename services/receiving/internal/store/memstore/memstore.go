@@ -818,7 +818,7 @@ func (s *Store) CreateOneTimePayee(ctx context.Context, in store.OneTimePayee) (
 	return out, err
 }
 
-func (s *Store) PayeeCandidates(ctx context.Context, legalEntityID, subjectRef string, limit int) (out []store.PayeeCandidate, err error) {
+func (s *Store) PayeeCandidates(ctx context.Context, legalEntityID, subjectRef string, after store.PayeeCursor, limit int) (out []store.PayeeCandidate, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
 		principal, _ := tenant.FromContext(ctx)
 		for _, p := range t.payees {

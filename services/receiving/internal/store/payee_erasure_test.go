@@ -21,13 +21,18 @@ func payeeID(n int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012d",
 
 func seedPayee(t *testing.T, db settlementDB, p tenant.Principal, n int, subject string, createdAt time.Time) string {
 	t.Helper()
+	return seedPayeeIn(t, db, p, n, subject, "GB", createdAt)
+}
+
+func seedPayeeIn(t *testing.T, db settlementDB, p tenant.Principal, n int, subject, country string, createdAt time.Time) string {
+	t.Helper()
 	id := payeeID(n)
 	var subjectArg any
 	if subject != "" {
 		subjectArg = subject
 	}
 	if err := db.run(p, `insert into receiving_one_time_payee (tenant_id, id, legal_entity_id, country, name_sealed, address_sealed, tax_id_sealed, email_sealed, bank_sealed, created_by, created_at, subject_ref)
-		values ($1, $2, $3, 'DE', '\x0102', '\x0304', '\x05', '\x06', '\x07', 'alice', $4, $5)`, p.TenantID, id, p.LegalEntityID, createdAt, subjectArg); err != nil {
+		values ($1, $2, $3, $6, '\x0102', '\x0304', '\x05', '\x06', '\x07', 'alice', $4, $5)`, p.TenantID, id, p.LegalEntityID, createdAt, subjectArg, country); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -135,5 +140,83 @@ func TestErasePayees_HoldCheckFailureChangesNothingAndOtherEntitiesAreUntouched(
 	}
 	if err := db.run(db.one, `update receiving_one_time_payee set country = 'FR'`); err == nil {
 		t.Fatal("erasure must not make the other payee columns writable")
+	}
+}
+
+func TestErasePayees_StatutoryFloorCountriesAreKept(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	old := erasureNow.AddDate(-11, 0, 0)
+	de := seedPayeeIn(t, db, db.one, 1, "", "DE", old)
+	fr := seedPayeeIn(t, db, db.one, 2, "", "FR", old)
+	gb := seedPayeeIn(t, db, db.one, 3, "", "GB", old)
+	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Retained: 2}) {
+		t.Fatalf("result %+v %v", res, err)
+	}
+	if readPayee(t, db, db.one, de).erasedAt != nil || readPayee(t, db, db.one, fr).erasedAt != nil || readPayee(t, db, db.one, gb).erasedAt == nil {
+		t.Fatal("DE and FR payees must be kept; GB erased")
+	}
+}
+
+func TestErasePayees_RetainedPayeesDoNotStarveLaterExpiredOnes(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	recent := erasureNow.AddDate(-1, 0, 0)
+	if err := db.run(db.one, `insert into receiving_one_time_payee (tenant_id, id, legal_entity_id, country, name_sealed, address_sealed, created_by, created_at)
+		select $1, ('00000000-0000-4000-8000-' || lpad((10000 + g)::text, 12, '0'))::uuid, $2, 'GB', '\x01', '\x02', 'alice', $3::timestamptz + g * interval '1 second'
+		from generate_series(1, $4::int) g`, db.one.TenantID, db.one.LegalEntityID, recent, store.ErasureBatch+50); err != nil {
+		t.Fatal(err)
+	}
+	expired := seedPayee(t, db, db.one, 1, "", erasureNow.AddDate(-9, 0, 0))
+	seedPayee(t, db, db.one, 2, "", recent.Add(24*time.Hour))
+	res, err := store.ErasePayees(ctx, st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	if err != nil || res.Erased != 1 || res.Retained != store.ErasureBatch+51 {
+		t.Fatalf("result %+v %v", res, err)
+	}
+	if readPayee(t, db, db.one, expired).erasedAt == nil {
+		t.Fatal("expired payee not erased")
+	}
+}
+
+type holdAfterFirstErase struct {
+	*store.Postgres
+	holds *domain.FakeLegalHolds
+	next  string
+}
+
+func (h holdAfterFirstErase) MarkPayeesErased(ctx context.Context, le string, ids []string, erasureID string, now time.Time) (int, error) {
+	n, err := h.Postgres.MarkPayeesErased(ctx, le, ids, erasureID, now)
+	h.holds.ByRecord[h.next] = []string{"hold-late"}
+	return n, err
+}
+
+func TestErasePayees_HoldPlacedDuringTheRunProtectsLaterPayees(t *testing.T) {
+	db := seedInvoice(t)
+	ctx := tenant.With(context.Background(), db.one)
+	old := erasureNow.AddDate(-8, 0, 0)
+	first := seedPayee(t, db, db.one, 1, "", old)
+	second := seedPayee(t, db, db.one, 2, "", old.Add(time.Hour))
+	holds := &domain.FakeLegalHolds{ByRecord: map[string][]string{}}
+	res, err := store.ErasePayees(ctx, holdAfterFirstErase{store.New(db.pool), holds, second}, holds, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow})
+	if err != nil || res != (store.ErasePayeesResult{Erased: 1, Held: 1}) {
+		t.Fatalf("result %+v %v", res, err)
+	}
+	if readPayee(t, db, db.one, first).erasedAt == nil || readPayee(t, db, db.one, second).erasedAt != nil {
+		t.Fatal("the hold placed after the first erasure must protect the second payee")
+	}
+}
+
+func TestErasedAtIsWriteOnce(t *testing.T) {
+	db := seedInvoice(t)
+	id := seedPayee(t, db, db.one, 1, "", erasureNow.AddDate(-8, 0, 0))
+	st := store.New(db.pool)
+	if _, err := store.ErasePayees(tenant.With(context.Background(), db.one), st, &domain.FakeLegalHolds{}, store.ErasePayeesInput{LegalEntityID: db.one.LegalEntityID, Now: erasureNow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.run(db.one, `update receiving_one_time_payee set erased_at = null where id = $1`, id); err == nil {
+		t.Fatal("erased_at must not be clearable")
 	}
 }
