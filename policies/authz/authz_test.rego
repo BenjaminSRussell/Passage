@@ -761,3 +761,147 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
 }
+
+principal_allowed(name, method, resource) if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": sprintf("service:%s", [name])},
+		"action": method,
+		"resource": resource,
+	}
+		with data.assignments as {"tenant-a": {sprintf("service:%s", [name]): data.service_principals[name]}}
+	result.allow
+}
+
+test_migration_service_grant_reaches_only_the_import_write_routes if {
+	data.service_grants.migration == {"party": ["party.import.write"], "product": ["product.import.write"]}
+	data.duties["party.import.write"].service_only
+	data.duties["product.import.write"].service_only
+	allowed("party.import.write", "POST", "/v1/party/parties")
+	allowed("party.import.write", "PATCH", "/v1/party/parties/p1")
+	allowed("party.import.write", "POST", "/v1/party/parties/p1/vendor")
+	allowed("party.import.write", "POST", "/v1/party/parties/p1/customer")
+	not allowed("party.import.write", "GET", "/v1/party/parties/p1")
+	not allowed("party.import.write", "GET", "/v1/party/parties/p1/pii")
+	not allowed("party.import.write", "DELETE", "/v1/party/parties/p1")
+	not allowed("party.import.write", "PUT", "/v1/party/parties/p1")
+	not allowed("party.import.write", "PATCH", "/v1/party/parties/p1/vendor")
+	not allowed("party.import.write", "POST", "/v1/party/parties/p1:merge")
+	not allowed("party.import.write", "POST", "/v1/party/tax-registrations:validate")
+	not allowed("party.import.write", "POST", "/v1/party/customers/c1/credit-limit")
+	not allowed("party.import.write", "POST", "/v1/party/vendors/v1/bank-accounts")
+	not allowed("party.import.write", "GET", "/v1/party/vendors/v1/bank-accounts")
+	not allowed("party.import.write", "POST", "/v1/product/products")
+	allowed("product.import.write", "POST", "/v1/product/products")
+	allowed("product.import.write", "PATCH", "/v1/product/products/p1")
+	allowed("product.import.write", "POST", "/v1/product/releases")
+	not allowed("product.import.write", "GET", "/v1/product/products")
+	not allowed("product.import.write", "GET", "/v1/product/products/p1")
+	not allowed("product.import.write", "DELETE", "/v1/product/products/p1")
+	not allowed("product.import.write", "POST", "/v1/product/products/p1/variants:explode")
+	not allowed("product.import.write", "PATCH", "/v1/product/released-products/r1")
+	not allowed("product.import.write", "POST", "/v1/product/jobs/group-change")
+	not allowed("product.import.write", "POST", "/v1/product/gtins")
+	not allowed("product.import.write", "POST", "/v1/party/parties")
+	every _, duties in data.service_grants.migration {
+		every duty in duties {
+			not allowed(duty, "POST", "/v1/ledger/journal-entries")
+			not allowed(duty, "POST", "/v1/sales/orders")
+			not allowed(duty, "POST", "/v1/inventory/journals")
+		}
+	}
+}
+
+test_migration_loader_principal_holds_only_the_import_duties if {
+	data.service_principals["migration-loader"] == ["party.import.write", "product.import.write"]
+	principal_allowed("migration-loader", "POST", "/v1/party/parties")
+	principal_allowed("migration-loader", "PATCH", "/v1/party/parties/p1")
+	principal_allowed("migration-loader", "POST", "/v1/product/products")
+	principal_allowed("migration-loader", "POST", "/v1/product/releases")
+	not principal_allowed("migration-loader", "GET", "/v1/party/parties/p1/pii")
+	not principal_allowed("migration-loader", "DELETE", "/v1/party/parties/p1")
+	not principal_allowed("migration-loader", "POST", "/v1/ledger/journal-entries")
+	not principal_allowed("migration-loader", "GET", "/v1/ledger/balances")
+	not principal_allowed("migration-loader", "POST", "/v1/sales/orders")
+	not principal_allowed("migration-loader", "GET", "/v1/sales/orders/o1")
+	not principal_allowed("migration-loader", "POST", "/v1/payables/payment-proposals")
+}
+
+test_shopfloor_edge_duties_open_only_their_routes if {
+	not data.duties["shopfloor.edge.connect"].service_only
+	allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes")
+	allowed("shopfloor.edge.configure", "PUT", "/v1/shopfloor/edge-nodes/n1")
+	allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes/n1/config-versions")
+	not allowed("shopfloor.edge.configure", "GET", "/v1/shopfloor/edge-nodes/n1/config")
+	not allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes/n1:heartbeat")
+	not allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/machines")
+	allowed("shopfloor.edge.connect", "GET", "/v1/shopfloor/edge-nodes/n1/config")
+	allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/n1:heartbeat")
+	not allowed("shopfloor.edge.connect", "GET", "/v1/shopfloor/edge-nodes")
+	not allowed("shopfloor.edge.connect", "GET", "/v1/shopfloor/edge-nodes/n1")
+	not allowed("shopfloor.edge.connect", "PUT", "/v1/shopfloor/edge-nodes/n1")
+	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/n1/config-versions")
+	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/machine-events")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/n1")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/n1/config-versions")
+	not allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/n1/config")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/edge-nodes")
+	not allowed("shopfloor.setup.maintain", "POST", "/v1/shopfloor/edge-nodes")
+	not allowed("shopfloor.setup.maintain", "POST", "/v1/shopfloor/edge-nodes/n1/config-versions")
+}
+
+test_procurement_charge_routes_split_maintain_and_inquire if {
+	every path in ["/v1/procurement/charge-codes", "/v1/procurement/auto-charges"] {
+		allowed("ProcurementPolicyMaintain", "POST", path)
+		allowed("ProcurementPolicyMaintain", "GET", path)
+		allowed("PurchaseOrderInquire", "GET", path)
+		not allowed("PurchaseOrderInquire", "POST", path)
+		not allowed("PurchaseOrderMaintain", "POST", path)
+		allowed("ProcurementPolicyMaintain", "PUT", sprintf("%s/c1", [path]))
+		allowed("ProcurementPolicyMaintain", "GET", sprintf("%s/c1", [path]))
+		allowed("PurchaseOrderInquire", "GET", sprintf("%s/c1", [path]))
+		not allowed("PurchaseOrderInquire", "PUT", sprintf("%s/c1", [path]))
+		not allowed("ProcurementPolicyMaintain", "DELETE", sprintf("%s/c1", [path]))
+		not allowed("ProcurementPolicyMaintain", "PATCH", sprintf("%s/c1", [path]))
+	}
+}
+
+test_hub_duties_split_subscription_writes_from_delivery_reads if {
+	allowed("hub.subscription.write", "POST", "/v1/hub/subscriptions")
+	allowed("hub.subscription.write", "PATCH", "/v1/hub/subscriptions/s1")
+	allowed("hub.subscription.write", "DELETE", "/v1/hub/subscriptions/s1")
+	allowed("hub.subscription.write", "POST", "/v1/hub/subscriptions/s1:resume")
+	allowed("hub.subscription.write", "POST", "/v1/hub/subscriptions/s1:replay")
+	not allowed("hub.subscription.write", "GET", "/v1/hub/subscriptions")
+	not allowed("hub.subscription.write", "GET", "/v1/hub/deliveries")
+	not allowed("hub.subscription.write", "POST", "/v1/hub/subscriptions/s1:purge")
+	allowed("hub.delivery.read", "GET", "/v1/hub/subscriptions")
+	allowed("hub.delivery.read", "GET", "/v1/hub/subscriptions/s1")
+	allowed("hub.delivery.read", "GET", "/v1/hub/deliveries")
+	allowed("hub.delivery.read", "GET", "/v1/hub/dead-letters")
+	not allowed("hub.delivery.read", "POST", "/v1/hub/subscriptions")
+	not allowed("hub.delivery.read", "PATCH", "/v1/hub/subscriptions/s1")
+	not allowed("hub.delivery.read", "POST", "/v1/hub/subscriptions/s1:replay")
+	not allowed("hub.delivery.read", "GET", "/v1/hub/subscriptions/s1:replay")
+}
+
+test_drop_ship_routes_follow_release_view_and_vendor_confirm if {
+	allowed("WarehouseRelease", "POST", "/v1/fulfillment/drop-ships")
+	allowed("WarehouseRelease", "POST", "/v1/fulfillment/drop-ships/d1:cancel")
+	not allowed("WarehouseRelease", "POST", "/v1/fulfillment/drop-ships/d1:confirm")
+	allowed("PurchaseOrderConfirm", "POST", "/v1/fulfillment/drop-ships/d1:confirm")
+	not allowed("PurchaseOrderConfirm", "POST", "/v1/fulfillment/drop-ships")
+	not allowed("PurchaseOrderConfirm", "POST", "/v1/fulfillment/drop-ships/d1:cancel")
+	allowed("WarehouseView", "GET", "/v1/fulfillment/drop-ships")
+	allowed("WarehouseView", "GET", "/v1/fulfillment/drop-ships/d1")
+	not allowed("WarehouseView", "POST", "/v1/fulfillment/drop-ships")
+	not allowed("WarehouseView", "POST", "/v1/fulfillment/drop-ships/d1:confirm")
+}
+
+test_pricing_parameters_read_with_view_and_change_with_admin if {
+	allowed("pricing.view", "GET", "/v1/pricing/parameters")
+	not allowed("pricing.view", "PUT", "/v1/pricing/parameters")
+	allowed("pricing.admin", "PUT", "/v1/pricing/parameters")
+	not allowed("pricing.admin", "GET", "/v1/pricing/parameters")
+	not allowed("pricing.admin", "POST", "/v1/pricing/parameters")
+}

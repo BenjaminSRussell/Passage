@@ -18,6 +18,7 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // duties listed. policies/authz/data.json "service_principals" mirrors it and a
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
+	"migration-loader":        {"party.import.write", "product.import.write"},
 	"receiving-ers":           {"VendorInvoicePost"},
 	"scheduling-downtime":     {"scheduling.downtime.apply"},
 	"scheduling-order-import": {"scheduling.order.import"},

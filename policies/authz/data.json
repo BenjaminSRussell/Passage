@@ -217,6 +217,18 @@
       {"resource": "/v1/reporting/audit-trail", "methods": ["GET"]},
       {"resource": "/v1/reporting/audit-trail:export", "methods": ["GET"]}
     ]},
+    "hub.subscription.write": {"permissions": [
+      {"resource": "/v1/hub/subscriptions", "methods": ["POST"]},
+      {"resource": "/v1/hub/subscriptions/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/hub/subscriptions/*:resume", "methods": ["POST"]},
+      {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]}
+    ]},
+    "hub.delivery.read": {"permissions": [
+      {"resource": "/v1/hub/subscriptions", "methods": ["GET"]},
+      {"resource": "/v1/hub/subscriptions/*", "methods": ["GET"]},
+      {"resource": "/v1/hub/deliveries", "methods": ["GET"]},
+      {"resource": "/v1/hub/dead-letters", "methods": ["GET"]}
+    ]},
     "inventory.read": {"permissions": [
       {"resource": "/v1/inventory/onhand", "methods": ["GET"]},
       {"resource": "/v1/inventory/journals", "methods": ["GET"]},
@@ -384,13 +396,18 @@
       {"resource": "/v1/procurement/signing-limit-requests", "methods": ["GET"]},
       {"resource": "/v1/procurement/signing-limit-requests/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/signing-limits", "methods": ["GET"]},
-      {"resource": "/v1/procurement/signing-limits/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/signing-limits/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/charge-codes", "methods": ["GET"]},
+      {"resource": "/v1/procurement/charge-codes/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/auto-charges", "methods": ["GET"]},
+      {"resource": "/v1/procurement/auto-charges/*", "methods": ["GET"]}
     ]},
     "PurchaseOrderConfirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:confirm", "methods": ["POST"]},
-      {"resource": "/v1/procurement/purchase-orders:reprice", "methods": ["POST"]}
+      {"resource": "/v1/procurement/purchase-orders:reprice", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/drop-ships/*:confirm", "methods": ["POST"]}
     ]},
     "TradeAgreementMaintain": {"permissions": [
       {"resource": "/v1/procurement/trade-agreements", "methods": ["GET", "POST"]},
@@ -533,6 +550,12 @@
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]}
+    ]},
+    "party.import.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/parties", "methods": ["POST"]},
+      {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
+      {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
+      {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
@@ -1158,7 +1181,11 @@
     "ProcurementPolicyMaintain": {"permissions": [
       {"resource": "/v1/procurement/purchasing-policies/*", "methods": ["PUT"]},
       {"resource": "/v1/procurement/purchasing-policies", "methods": ["GET"]},
-      {"resource": "/v1/procurement/purchasing-policies/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/purchasing-policies/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/charge-codes", "methods": ["GET", "POST"]},
+      {"resource": "/v1/procurement/charge-codes/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/procurement/auto-charges", "methods": ["GET", "POST"]},
+      {"resource": "/v1/procurement/auto-charges/*", "methods": ["GET", "PUT"]}
     ]},
     "ProjBillingMaintain": {"permissions": [
       {"resource": "/v1/projects/invoice-proposals", "methods": ["POST"]},
@@ -1447,7 +1474,9 @@
       {"resource": "/v1/fulfillment/waves:preview", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/legal-entity-settings/*", "methods": ["PUT"]},
       {"resource": "/v1/fulfillment/warehouse-settings/*", "methods": ["PUT"]},
-      {"resource": "/v1/fulfillment/shipments/*:backorder-remainder", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/shipments/*:backorder-remainder", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/drop-ships", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/drop-ships/*:cancel", "methods": ["POST"]}
     ]},
     "WarehouseShip": {"permissions": [{"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]}]},
     "WarehouseView": {"permissions": [
@@ -1470,7 +1499,9 @@
       {"resource": "/v1/fulfillment/legal-entity-settings", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/legal-entity-settings/*", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/warehouse-settings", "methods": ["GET"]},
-      {"resource": "/v1/fulfillment/warehouse-settings/*", "methods": ["GET"]}
+      {"resource": "/v1/fulfillment/warehouse-settings/*", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/drop-ships", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/drop-ships/*", "methods": ["GET"]}
     ]},
     "audit.read": {"permissions": [
       {"resource": "/v1/audit/alerts", "methods": ["GET"]},
@@ -1975,7 +2006,8 @@
     "pricing.admin": {"permissions": [
       {"resource": "/v1/pricing/procedures", "methods": ["POST"]},
       {"resource": "/v1/pricing/procedures/*:activate", "methods": ["POST"]},
-      {"resource": "/v1/pricing/procedures/*:revise", "methods": ["POST"]}
+      {"resource": "/v1/pricing/procedures/*:revise", "methods": ["POST"]},
+      {"resource": "/v1/pricing/parameters", "methods": ["PUT"]}
     ]},
     "pricing.commission.maintain": {"permissions": [
       {"resource": "/v1/pricing/commission/postings", "methods": ["POST"]},
@@ -2043,6 +2075,7 @@
       {"resource": "/v1/pricing/rebates/vendor-claims/*", "methods": ["GET"]}
     ]},
     "pricing.view": {"permissions": [
+      {"resource": "/v1/pricing/parameters", "methods": ["GET"]},
       {"resource": "/v1/pricing/campaigns", "methods": ["GET"]},
       {"resource": "/v1/pricing/campaigns/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/commodity/bases", "methods": ["GET"]},
@@ -2083,6 +2116,11 @@
       {"resource": "/v1/product/released-products/*/process-policy", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/site-defaults/*", "methods": ["GET"]},
       {"resource": "/v1/product/uom/convert", "methods": ["GET"]}
+    ]},
+    "product.import.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/product/products", "methods": ["POST"]},
+      {"resource": "/v1/product/products/*", "methods": ["PATCH"]},
+      {"resource": "/v1/product/releases", "methods": ["POST"]}
     ]},
     "product.release": {"permissions": [{"resource": "/v1/product/releases", "methods": ["POST"]}]},
     "product.released.write": {"permissions": [
@@ -2407,6 +2445,15 @@
       {"resource": "/v1/scheduling/networks/*", "methods": ["PATCH"]}
     ]},
     "shopfloor.check.override": {"flag": true, "permissions": []},
+    "shopfloor.edge.configure": {"permissions": [
+      {"resource": "/v1/shopfloor/edge-nodes", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]}
+    ]},
+    "shopfloor.edge.connect": {"permissions": [
+      {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]}
+    ]},
     "shopfloor.job.schedule": {"permissions": [{"resource": "/v1/shopfloor/jobs", "methods": ["POST"]}]},
     "shopfloor.kiosk.login": {"permissions": [{"resource": "/v1/shopfloor/sessions:badge", "methods": ["POST"]}]},
     "shopfloor.machine.ingest": {"service_only": true, "permissions": [{"resource": "/v1/shopfloor/machine-events", "methods": ["POST"]}]},
@@ -2455,6 +2502,9 @@
       {"resource": "/v1/shopfloor/auto-clock-outs", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/clocked-in", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/downtimes", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/machines", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/oee", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/pay-agreements", "methods": ["GET"]},
@@ -2603,9 +2653,14 @@
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"]
+    },
+    "migration": {
+      "party": ["party.import.write"],
+      "product": ["product.import.write"]
     }
   },
   "service_principals": {
+    "migration-loader": ["party.import.write", "product.import.write"],
     "receiving-ers": ["VendorInvoicePost"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"]
